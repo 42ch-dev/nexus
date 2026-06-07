@@ -593,3 +593,62 @@ async fn t7a_bis_chapters_bounds_accepted() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// T7f: PATCH only updates fields the user explicitly changed (F4 — fixes W-2-qc2)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn t7f_partial_reinit_only_updates_listed_fields() {
+    // Spec §5.4.4: re-init with only `world_id` changed must not overwrite
+    // `work_ref` or `total_planned_chapters`.
+    let (pool, dir) = fresh_pool().await;
+    insert_test_work(&pool, "wrk_t7f").await;
+    let works_root = dir.path().join("Works");
+    let cap = make_cap(pool.clone(), &works_root);
+
+    // Initial bootstrap: all fields PATCHed.
+    let initial = scaffold_input("wrk_t7f", "original-ref", "Original Title", None, 5);
+    cap.run(initial).await.expect("initial bootstrap");
+
+    let after_initial = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_t7f")
+        .await
+        .expect("get work")
+        .expect("work");
+    assert_eq!(after_initial.work_ref.as_deref(), Some("original-ref"));
+    assert_eq!(after_initial.total_planned_chapters, Some(5));
+    assert!(after_initial.world_id.is_none());
+
+    // Partial re-init: only world_id changed. Use a DIFFERENT work_ref and
+    // chapter count in the input to verify they are NOT applied to the DB.
+    let mut partial = scaffold_input(
+        "wrk_t7f",
+        "original-ref", // FS path must match (idempotent re-render); keep same
+        "Other Title",
+        Some("wld_new_xyz"),
+        99, // intentionally different from initial 5
+    );
+    partial["fields_changed"] = serde_json::json!(["world_id"]);
+
+    cap.run(partial).await.expect("partial re-init");
+
+    let after_partial = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_t7f")
+        .await
+        .expect("get work")
+        .expect("work");
+    assert_eq!(
+        after_partial.work_ref.as_deref(),
+        Some("original-ref"),
+        "F4: work_ref must NOT be overwritten on partial re-init"
+    );
+    assert_eq!(
+        after_partial.total_planned_chapters,
+        Some(5),
+        "F4: total_planned_chapters must NOT be overwritten on partial re-init"
+    );
+    assert_eq!(
+        after_partial.world_id.as_deref(),
+        Some("wld_new_xyz"),
+        "F4: world_id MUST be updated when listed in fields_changed"
+    );
+}
+

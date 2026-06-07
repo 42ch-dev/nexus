@@ -33,6 +33,17 @@ struct ScaffoldInput {
     world_id: Option<String>,
     /// Total number of chapters planned.
     total_planned_chapters: i32,
+    /// F4 (W-2-qc2): explicit list of `works` columns the user supplied
+    /// in this grill-me session. When `None`, all fields are PATCHed
+    /// (initial bootstrap). When `Some`, only the listed columns are
+    /// updated on re-init — matches spec §5.4.4 "PATCH only updates
+    /// fields the user explicitly changed in this grill-me session."
+    ///
+    /// Accepted values: any subset of
+    /// `["work_profile", "work_ref", "title", "world_id", "total_planned_chapters"]`.
+    /// Unknown values are ignored (forward-compat).
+    #[serde(default)]
+    fields_changed: Option<Vec<String>>,
 }
 
 /// Capability output.
@@ -155,6 +166,7 @@ impl Capability for NovelProjectScaffold {
             title: inp.title,
             world_id: inp.world_id,
             total_planned_chapters: inp.total_planned_chapters,
+            fields_changed: inp.fields_changed,
         };
         let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
 
@@ -268,13 +280,48 @@ impl Capability for NovelProjectScaffold {
 
         // ── T4: PATCH works table ──────────────────────────────────────
         if let Some(pool) = &self.pool {
+            // F4 (W-2-qc2): when `fields_changed` is provided, PATCH only
+            // those columns (re-init). When absent, PATCH all (initial
+            // bootstrap). The `current_chapter = 0` reset is part of the
+            // initial bootstrap shape and is suppressed on partial re-init.
+            let changed: Option<std::collections::HashSet<&str>> = inp.fields_changed.as_ref().map(
+                |v| v.iter().map(String::as_str).collect::<std::collections::HashSet<_>>(),
+            );
+            let want = |field: &str| changed.as_ref().is_none_or(|set| set.contains(field));
+
             let patch = works::WorkPatch {
-                work_profile: Some(Some("novel".to_string())),
-                work_ref: Some(Some(inp.work_ref.clone())),
-                total_planned_chapters: Some(Some(inp.total_planned_chapters)),
-                current_chapter: Some(0),
-                world_id: Some(inp.world_id.clone()),
-                title: None,
+                // work_profile is set on every init invocation (it is the
+                // primary marker that this Work is a novel); not user-toggled.
+                work_profile: if changed.is_none() {
+                    Some(Some("novel".to_string()))
+                } else {
+                    None
+                },
+                work_ref: if want("work_ref") {
+                    Some(Some(inp.work_ref.clone()))
+                } else {
+                    None
+                },
+                total_planned_chapters: if want("total_planned_chapters") {
+                    Some(Some(inp.total_planned_chapters))
+                } else {
+                    None
+                },
+                // current_chapter is reset only on initial bootstrap.
+                current_chapter: if changed.is_none() { Some(0) } else { None },
+                world_id: if want("world_id") {
+                    Some(inp.world_id.clone())
+                } else {
+                    None
+                },
+                title: if want("title") && changed.is_some() {
+                    // Only PATCH title on partial re-init when caller
+                    // explicitly listed it. On initial bootstrap, title
+                    // was set during create-Work and we do not overwrite.
+                    Some(inp.title.clone())
+                } else {
+                    None
+                },
                 long_term_goal: None,
                 creative_brief: None,
                 intake_status: None,
@@ -291,6 +338,7 @@ impl Capability for NovelProjectScaffold {
                 .map_err(|e| CapabilityError::Internal(format!("patch_work: {e}")))?;
             info!(
                 work_id = %inp.work_id,
+                partial = %changed.is_some(),
                 "novel.project_scaffold: works patched"
             );
         }
