@@ -1,28 +1,49 @@
 # Input variables (passed via core_context when starting a schedule):
-#   story_ref: Story reference identifier used as directory name (e.g., "my-first-novel").
+#   work_id:   Work entity ID (wrk_...).
+#   work_ref:  Human-readable short reference used as directory name (e.g., "my-first-novel").
 #   topic:     Novel topic or description (e.g., "A sci-fi thriller about AI consciousness").
 #   vibe:      Writing style (default: "literary").
 #
-#   Launch: nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed "<topic>"
+#   Launch: nexus42 creator run stage advance --stage produce
+#   Requires: novel-project-init completed (gated by §5.3.2).
 
 preset:
   id: novel-writing
-  version: 2  # Bumped for multi-agent roles addition
+  version: 3  # Bumped for V1.36 chapter-scoped pipeline (P3)
   kind: creator
-  description: "A multi-phase novel writing workflow: gather inspiration, brainstorm, outline, and draft"
+  description: "Single-chapter outline → draft → finalize pipeline (ch01 MVP); gated by llm_judge 五问 quality check"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
     - judge.llm
+    - novel.chapter_transition
   run_intents:
-    - work_init
     - work_continue
-  initial: gathering
+  initial: outline_chapter
   terminal: done
+  world_binding:
+    mode: optional  # V1.36 ships optional; worldless Works not blocked per §5.3.4
+
+# Preset gates (per spec §5.3.2) — enforced at enqueue time.
+gates:
+  - kind: work_field
+    field: work_profile
+    op: equals
+    value: novel
+  - kind: work_field
+    field: work_ref
+    op: required
+  - kind: filesystem
+    path: "Works/{{work_ref}}/"
+    must_exist: true
+  - kind: filesystem
+    path: "Works/{{work_ref}}/Outlines/"
+    must_exist: true
+  - kind: filesystem
+    path: "Works/{{work_ref}}/Stories/"
+    must_exist: true
 
 # Multi-agent role definitions (WS-E §7)
-# Each role defines recommended skills and a system prompt.
-# Skills injected into each role's ACP session for this preset.
 roles:
   - id: writer
     description: "Primary content writer for drafting narrative text"
@@ -37,89 +58,64 @@ roles:
       - "novel-writing-assistant"
 
 states:
-  - id: gathering
-    description: "Collect inspiration and research directions"
+  - id: outline_chapter
+    description: "Write chapter outline for ch01 (uses chapter-outline.md template)"
     enter:
       - kind: capability
         name: creator.inject_prompt
         args:
-          prompt_file: prompts/gathering.md
+          prompt_file: prompts/outline-chapter.md
           vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
             topic: "{{preset.input.topic}}"
-    exit_when:
-      kind: llm_judge
-      template_file: prompts/gathering-exit.md
-      judge_capability: judge.llm
-      min_interval: "PT6H"
-    next: brainstorming
-
-  - id: brainstorming
-    description: "Run diverge-cluster-select brainstorm on the topic"
-    enter:
-      - kind: inner_graph
-        name: brainstorm_graph
-    exit_when:
-      kind: graph_complete
-    next: outlining
-
-  - id: outlining
-    description: "Generate a structured outline for the novel"
-    enter:
-      - kind: capability
-        name: creator.inject_prompt
-        args:
-          prompt_file: prompts/outlining.md
+            vibe: "{{preset.input.vibe}}"
+            chapter: 1
     exit_when:
       kind: manual
-    next: drafting
-    context_update:
-      op:
-        kind: append
-      template_file: prompts/outlining-ctx-update.md
+    next: draft_chapter
 
-  - id: drafting
-    description: "Draft the novel via intro + body pipeline"
+  - id: draft_chapter
+    description: "Draft ch01 body (uses chapter-body.md template; frontmatter status: draft)"
     enter:
-      - kind: inner_graph
-        name: drafting_graph
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/draft-chapter.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            topic: "{{preset.input.topic}}"
+            vibe: "{{preset.input.vibe}}"
+            chapter: 1
+      # Advance current_chapter after draft enters
+      - kind: capability
+        name: novel.chapter_transition
+        args:
+          work_id: "{{preset.input.work_id}}"
+          chapter: 1
+          from_status: "outlined"
+          to_status: "draft"
     exit_when:
-      kind: graph_complete
+      kind: manual
+    next: finalize
+
+  - id: finalize
+    description: "Five-question quality gate; GO flips chapter to finalized; NOGO returns WaitForInput"
+    enter:
+      - kind: capability
+        name: novel.chapter_transition
+        args:
+          work_id: "{{preset.input.work_id}}"
+          chapter: 1
+          from_status: "draft"
+          to_status: "finalized"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT6H"
     next: done
 
   - id: done
     terminal: true
-
-inner_graphs:
-  brainstorm_graph:
-    nodes:
-      - id: diverge
-        kind: acp_prompt
-        agent: writer
-        template_file: prompts/brainstorm-diverge.md
-        tool_policy: auto_grant_read_only
-      - id: cluster
-        kind: acp_prompt
-        agent: writer
-        depends_on: [diverge]
-        template_file: prompts/brainstorm-cluster.md
-      - id: select
-        kind: acp_prompt
-        agent: reviewer
-        depends_on: [cluster]
-        template_file: prompts/brainstorm-select.md
-    output_binding: select.text
-
-  drafting_graph:
-    nodes:
-      - id: draft_intro
-        kind: acp_prompt
-        agent: writer
-        template_file: prompts/draft-intro.md
-        tool_policy: auto_grant_read_only
-      - id: draft_body
-        kind: acp_prompt
-        agent: writer
-        depends_on: [draft_intro]
-        template_file: prompts/draft-body.md
-        tool_policy: auto_grant_read_only
-    output_binding: draft_body.text
