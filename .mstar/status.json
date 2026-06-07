@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-08T20:45:00+08:00",
+  "updated_at": "2026-06-08T22:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-07-v1.37-harness-docs-prepare",
@@ -171,7 +171,7 @@
     },
     {
       "id": "2026-06-07-v1.37-novel-quality-loop-roadmap",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-07-v1.37-novel-quality-loop-roadmap.md",
       "working_branch": "feature/v1.37-novel-quality-loop-roadmap",
       "merge_target": "iteration/v1.37",
@@ -187,6 +187,19 @@
           "DF-65",
           "DF-66",
           "DF-67"
+        ],
+        "updated_at": "2026-06-08T22:00:00+08:00",
+        "status_transition": "Todo → InProgress → InReview on 2026-06-08 after T1–T8 spec/tracker amendments",
+        "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, embedded preset, prompt template, daemon scheduled task, CLI subcommand, rules writer, or platform behavior in P3",
+        "spec_amendment": ".mstar/knowledge/specs/novel-workflow-profile.md §5.5",
+        "shipped": [
+          "Findings lifecycle + severity mapping + future local DB schema sketch documented (DF-64)",
+          "Reference executor mapping documented: write→novel-writing, brainstorm→future novel-brainstorm, none→manual/no preset, master→future novel-review-master",
+          "96h master-decision timeout mapped to local DB + daemon scheduled lifecycle task + creator run status banner; opt-in auto-escalation only (DF-67)",
+          "Three-layer rules architecture documented with SOUL / World KB boundaries (DF-65)",
+          "Logs/brainstorm|write|review|publish roadmap structure documented; Logs/** sync exclusion reaffirmed (DF-66)",
+          "reflection-loop → findings / rule-suggestion integration documented as future implementation",
+          "Deferred tracker updated for DF-64, DF-65, DF-66, DF-67 with V1.37 P3 roadmap-only dispositions"
         ]
       }
     }
