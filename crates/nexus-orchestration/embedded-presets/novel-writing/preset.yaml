@@ -23,25 +23,34 @@ preset:
   terminal: done
   world_binding:
     mode: optional  # V1.36 ships optional; worldless Works not blocked per §5.3.4
-
-# Preset gates (per spec §5.3.2) — enforced at enqueue time.
-gates:
-  - kind: work_field
-    field: work_profile
-    op: equals
-    value: novel
-  - kind: work_field
-    field: work_ref
-    op: required
-  - kind: filesystem
-    path: "Works/{{work_ref}}/"
-    must_exist: true
-  - kind: filesystem
-    path: "Works/{{work_ref}}/Outlines/"
-    must_exist: true
-  - kind: filesystem
-    path: "Works/{{work_ref}}/Stories/"
-    must_exist: true
+  # Preset gates (per spec §5.3.2) — enforced at enqueue time.
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+    - kind: work_field
+      field: intake_status
+      op: equals
+      value: complete
+    - kind: filesystem
+      path: "Works/{{work_ref}}/"
+      must_exist: true
+    - kind: filesystem
+      path: "Works/{{work_ref}}/Outlines/"
+      must_exist: true
+    - kind: filesystem
+      path: "Works/{{work_ref}}/Stories/"
+      must_exist: true
+    # world_id gate intentionally omitted — V1.37 world_binding.mode = optional
+    # (spec §5.3.4: worldless Works not blocked). Add when mode defaults to required.
+    - kind: previous_preset
+      preset: novel-project-init
+      status: complete
+      scope: work
 
 # Multi-agent role definitions (WS-E §7)
 roles:

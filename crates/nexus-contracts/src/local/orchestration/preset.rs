@@ -89,6 +89,13 @@ pub struct PresetHeader {
     /// Controls how `core_context` v0 is seeded when a schedule is created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_action: Option<InitialAction>,
+    /// Preset gates evaluated at enqueue time (V1.37 §7.9).
+    ///
+    /// Each gate declares a precondition that must pass before the preset
+    /// is scheduled for execution. Gates are validated at load time and
+    /// evaluated at enqueue time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gates: Vec<crate::local::orchestration::preset_gate::Gate>,
 }
 
 /// Preset kind discriminator.
@@ -915,6 +922,7 @@ roles:
                 homepage: None,
                 license: None,
                 initial_action: None,
+                gates: vec![],
             },
             states: vec![
                 StateDefinition {

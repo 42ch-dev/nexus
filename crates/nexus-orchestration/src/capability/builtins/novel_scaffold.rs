@@ -253,17 +253,13 @@ impl Capability for NovelProjectScaffold {
         // creating FS scaffold or PATCHing the works row. Worldless
         // (None) is the documented branch and skipped here.
         if let (Some(world_id), Some(pool)) = (inp.world_id.as_deref(), self.pool.as_ref()) {
-            // SAFETY: SELECT against narrative_worlds — runtime query; the
-            // typed module DF-63 lands in V1.37+. See R-V133P1-09 for the
-            // workspace-wide runtime->compile-time conversion follow-up.
-            let exists: Option<(i64,)> =
-                sqlx::query_as("SELECT 1 FROM narrative_worlds WHERE world_id = ?")
-                    .bind(world_id)
-                    .fetch_optional(pool)
-                    .await
-                    .map_err(|e| {
-                        CapabilityError::Internal(format!("world_id existence check: {e}"))
-                    })?;
+            let exists: Option<String> = sqlx::query_scalar!(
+                r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ?"#,
+                world_id,
+            )
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("world_id existence check: {e}")))?;
             if exists.is_none() {
                 return Err(CapabilityError::InputInvalid(format!(
                     "world_id {world_id:?} not found in narrative_worlds (worldless requires null)"
@@ -367,40 +363,28 @@ impl Capability for NovelProjectScaffold {
             txn.dirs_created.push(logs);
         }
 
-        // ── T3: seed work_chapters rows ────────────────────────────────
-        // Note (F2 follow-up): T3 + T4 each run their own internal sqlx
-        // transaction (single-stmt for patch_work; multi-stmt inside
-        // seed_chapters). Wrapping both in one cross-call DB transaction
-        // requires tx-aware variants of `seed_chapters`/`patch_work` in
-        // `nexus-local-db` and is tracked under R-V133P1-09. If T3 or
-        // T4 fails, the ScaffoldTransaction rolls back FS state; any
-        // rows produced by an earlier T3 will remain. For V1.36
-        // single-user pre-1.0 this is acceptable — re-init is row-level
-        // idempotent (work_chapters seeding ignores existing rows via
-        // INSERT OR IGNORE, and patch_work is itself a single UPDATE).
+        // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
+        // V1.37 (R-V136P1-02): T3 + T4 now run inside a single DB
+        // transaction. If either step fails, both roll back atomically.
+        // The FS-side ScaffoldTransaction still handles filesystem rollback
+        // independently (FS and DB rollback are separate concerns).
         let chapters_seeded = if let Some(pool) = &self.pool {
             let now = chrono::Utc::now().to_rfc3339();
-            work_chapters::seed_chapters(
-                pool,
+            let mut tx = pool
+                .begin()
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("begin transaction: {e}")))?;
+
+            work_chapters::seed_chapters_tx(
+                &mut tx,
                 &inp.work_id,
                 &inp.work_ref,
                 inp.total_planned_chapters,
                 &now,
             )
             .await
-            .map_err(|e| CapabilityError::Internal(format!("seed_chapters: {e}")))?;
-            usize::try_from(inp.total_planned_chapters).unwrap_or(0)
-        } else {
-            0
-        };
-        info!(
-            work_id = %inp.work_id,
-            chapters_seeded,
-            "novel.project_scaffold: chapters seeded"
-        );
+            .map_err(|e| CapabilityError::Internal(format!("seed_chapters_tx: {e}")))?;
 
-        // ── T4: PATCH works table ──────────────────────────────────────
-        if let Some(pool) = &self.pool {
             // F4 (W-2-qc2): when `fields_changed` is provided, PATCH only
             // those columns (re-init). When absent, PATCH all (initial
             // bootstrap). The `current_chapter = 0` reset is part of the
@@ -414,8 +398,6 @@ impl Capability for NovelProjectScaffold {
             let want = |field: &str| changed.as_ref().is_none_or(|set| set.contains(field));
 
             let patch = works::WorkPatch {
-                // work_profile is set on every init invocation (it is the
-                // primary marker that this Work is a novel); not user-toggled.
                 work_profile: if changed.is_none() {
                     Some(Some("novel".to_string()))
                 } else {
@@ -431,7 +413,6 @@ impl Capability for NovelProjectScaffold {
                 } else {
                     None
                 },
-                // current_chapter is reset only on initial bootstrap.
                 current_chapter: if changed.is_none() { Some(0) } else { None },
                 world_id: if want("world_id") {
                     Some(inp.world_id.clone())
@@ -439,9 +420,6 @@ impl Capability for NovelProjectScaffold {
                     None
                 },
                 title: if want("title") && changed.is_some() {
-                    // Only PATCH title on partial re-init when caller
-                    // explicitly listed it. On initial bootstrap, title
-                    // was set during create-Work and we do not overwrite.
                     Some(inp.title.clone())
                 } else {
                     None
@@ -456,16 +434,24 @@ impl Capability for NovelProjectScaffold {
                 current_stage: None,
                 stage_status: None,
             };
-            let now = chrono::Utc::now().to_rfc3339();
-            works::patch_work(pool, &inp.creator_id, &inp.work_id, &patch, &now)
+            works::patch_work_tx(&mut tx, &inp.creator_id, &inp.work_id, &patch, &now)
                 .await
-                .map_err(|e| CapabilityError::Internal(format!("patch_work: {e}")))?;
-            info!(
-                work_id = %inp.work_id,
-                partial = %changed.is_some(),
-                "novel.project_scaffold: works patched"
-            );
-        }
+                .map_err(|e| CapabilityError::Internal(format!("patch_work_tx: {e}")))?;
+
+            // Both seed + patch succeeded — commit the transaction.
+            tx.commit()
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("commit transaction: {e}")))?;
+
+            usize::try_from(inp.total_planned_chapters).unwrap_or(0)
+        } else {
+            0
+        };
+        info!(
+            work_id = %inp.work_id,
+            chapters_seeded,
+            "novel.project_scaffold: chapters seeded + works patched (atomic)"
+        );
 
         // ── F2: scaffold succeeded — project the txn-owned paths into
         //        the output shape, then commit to suppress Drop rollback.
