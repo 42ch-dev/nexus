@@ -198,13 +198,13 @@
     "last_integration_branch": "iteration/v1.36",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.36",
-    "latest_shipped_at": "2026-06-07T20:55:00+08:00",
+    "latest_shipped_iteration": "v1.37",
+    "latest_shipped_at": "2026-06-08T22:30:00+08:00",
     "latest_active_iteration": "v1.37",
     "latest_active_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-08T14:30:00+08:00",
+      "updated_at": "2026-06-08T22:30:00+08:00",
       "total_open": 31,
       "by_severity": {
         "critical": 0,
