@@ -7,6 +7,7 @@
 | **Status** | Active — normative SSOT for entity scope hierarchy, uniqueness, and crate ownership |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
+| **Last updated** | 2026-06-08 — V1.37 P2 World KB narrative taxonomy roadmap |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
@@ -140,6 +141,39 @@ explicitly declares uniqueness.
 - KeyBlocks and SourceAnchors belong to the World/narrative graph.
 - KB graph insertion/query is a `World` concern and is coordinated with `nexus-narrative`.
 - `nexus-kb` MUST NOT be treated as generic Creator knowledge or User knowledge.
+
+#### 5.1.1 Narrative World KB item taxonomy (V1.37 P2 roadmap)
+
+The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body_json`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2). V1.37 P2 does **not** introduce a new schema migration, but future novel drafting implementations MUST use the following category vocabulary for `block_type` (or an equivalent typed enum generated from this vocabulary) so prompt context, `world_refs`, and `kb-extract` agree on item ids.
+
+Minimum common fields for every World KB item:
+
+```json
+{
+  "id": "char_lin_xia",
+  "category": "character",
+  "name": "Lin Xia",
+  "aliases": ["Xia"],
+  "summary": "One-line prompt descriptor",
+  "status": "provisional | confirmed | deprecated | merged | deleted",
+  "source_anchors": ["kb_source_anchors[...]"],
+  "updated_at": "ISO-8601 timestamp"
+}
+```
+
+Category-specific minimum viable fields:
+
+| Category (`block_type`) | Narrative use | Expected schema fields | Minimum viable `body_json` for V1.37+ implementation |
+| --- | --- | --- | --- |
+| `foundation` | World-level axioms and cross-volume invariants such as cosmology, physics, genre promises, and non-negotiable canon. | `id`, `name`, `summary`, `axioms`, `invariants`, `scope`, `source_anchors` | `{ id, category: "foundation", name, summary, axioms: [string], invariants: [string] }` |
+| `background` | Historical context, prior ages, legends, wars, disasters, and other world-history context. | `id`, `name`, `summary`, `time_range`, `events`, `source_anchors` | `{ id, category: "background", name, summary, events: [string] }` |
+| `character` | Named characters with prompt-safe identity, traits, relationships, and arc state. | `id`, `name`, `aliases`, `traits`, `arcs`, `relationships`, `first_seen`, `source_anchors` | `{ id, category: "character", name, aliases: [string], traits: [string], arcs: [string] }` |
+| `location` | Physical or virtual places that can appear in scenes. | `id`, `name`, `aliases`, `description`, `parent_location_id`, `sensory_details`, `source_anchors` | `{ id, category: "location", name, aliases: [string], description }` |
+| `society` | Factions, cultures, institutions, political entities, religions, and social groups. | `id`, `name`, `aliases`, `type`, `members`, `values`, `conflicts`, `source_anchors` | `{ id, category: "society", name, type, values: [string] }` |
+| `rules` | Codified magic, technology, legal, tactical, or metaphysical constraints that should not drift. | `id`, `name`, `summary`, `constraints`, `costs`, `exceptions`, `source_anchors` | `{ id, category: "rules", name, summary, constraints: [string] }` |
+| `economy` | Trade, currency, resource flows, scarcity, labor systems, and material incentives. | `id`, `name`, `summary`, `resources`, `currency`, `trade_routes`, `constraints`, `source_anchors` | `{ id, category: "economy", name, summary, resources: [string] }` |
+
+`id` values are stable World KB item ids and are the only valid values for novel chapter `world_refs` when a Work is World-bound. Category names are lowercase and case-sensitive. Future migrations may normalize the category enum into generated contracts, but they MUST preserve this vocabulary or explicitly supersede it in this spec.
 
 ### 5.2 `nexus-knowledge` — User-scoped global knowledge
 

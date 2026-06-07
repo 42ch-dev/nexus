@@ -1,6 +1,6 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 P1 multi-chapter roadmap extension added 2026-06-08
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 P1 multi-chapter roadmap extension and V1.37 P2 World KB roadmap extension added 2026-06-08
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
 **Last updated**: 2026-06-08
@@ -114,6 +114,96 @@ Therefore:
   - **Worldless Work** (`world_id == NULL`): no cross-Work continuity. `README.md` may include a brief inline world setting note (1–2 paragraphs) for LLM context. Character names in the body are pure-prose; no KB.
 - **`novel-project-init` asks the binding question** (grill-me). Three options: bind to existing `world_id` (user picks from list) / create new World (calls `creator world create --name "..." --kind narrative`, which is a **future** CLI command; V1.36 may prompt for the world metadata inline and pass to a future API) / stay worldless (default).
 - **Work → World KB promotion** is the **long-term** path: as chapters finalize, `kb-extract` preset (existing, per [creator-workflow.md](creator-workflow.md) `persist` stage) can extract entities / events / rules from chapter body into World KB items. V1.36 documents this path; enforcement is V1.37+.
+
+### 3.5.1 World KB continuity roadmap (V1.37 P2 extension)
+
+**Scope of this extension**: V1.37 P2 is **roadmap-only**. It locks the contract for World KB continuity but does not claim a CLI, Local API, schema migration, prompt runtime, validator, or `kb-extract` implementation. The current V1.37 `novel-writing` `world_binding` mode remains `optional`; worldless Works continue to run without a World context block.
+
+#### 3.5.1.1 World creation path for `novel-project-init`
+
+Future CLI contract:
+
+```text
+nexus42 creator world create --name "Neon River" --kind narrative --description "Solarpunk noir city-world"
+→ world_id: wld_<uuid>
+```
+
+The init grill-me "create new World" path composes with P0 `AddScheduleRequest.input` wiring as follows:
+
+1. `novel-project-init` records the user's choice as `preset.input.create_world = true` plus `world.name`, `world.kind = narrative`, and optional `world.description`.
+2. The daemon invokes a future `world create` capability owned by `nexus-narrative`/`nexus-kb`, equivalent to the CLI contract above.
+3. The returned `world_id` is bound to the Work and PATCHed via the same atomic scaffold transaction as `work_ref`, `total_planned_chapters`, and `work_chapters` seeding (§5.4.3–§5.4.4).
+4. If world creation fails, the scaffold transaction fails closed: no partial `Works/<work_ref>/` tree, no duplicated `work_chapters`, and no `works.world_id` mutation.
+
+This is V1.37+ implementation scope; P2 only defines the contract.
+
+#### 3.5.1.2 `world_id` validation
+
+When a novel Work is created or its `world_id` is PATCHed, `world_id` MUST either be `NULL` (worldless Work) or reference an existing World visible under the active `creator_id` + `workspace_slug` context. Missing Worlds return a structured `preset_gates_failed`-style error with remediation:
+
+```text
+error: preset_gates_failed
+  preset: novel-project-init
+  failed_gates:
+    - work_field: world_id must reference an existing World (actual: wld_missing)
+        ↳ Create the World first via `nexus42 creator world create --name "..." --kind narrative` or pick an existing one.
+```
+
+The P0 gate evaluator already supports the `world_id` gate for `novel-writing`; the preset-level toggle remains `world_binding: optional` for V1.37 (§5.3.4). Future iterations may tighten the toggle to `required`, but must preserve explicit worldless behavior until that change ships with migration/remediation guidance.
+
+#### 3.5.1.3 Prompt-time World context block
+
+For a World-bound Work (`world_id != NULL`), before each outline and draft prompt the orchestration engine injects a **World context block** sourced from a future `creator kb query world <world_id>` capability or equivalent `nexus-kb` query API. The block is a compact, prompt-safe object; it is not a replacement for full World KB retrieval.
+
+Minimum YAML shape:
+
+```yaml
+world_id: wld_123
+world_name: "Neon River"
+current_timeline: "chapter 3: after the river-market fire"
+characters_in_chapter:
+  - id: char_lin_xia
+    name: "Lin Xia"
+    descriptor: "ex-cartographer hiding a forbidden river map"
+locations_referenced:
+  - id: loc_neon_city
+    name: "Neon City"
+    descriptor: "tiered canal metropolis"
+active_rules:
+  - id: rule_magic_cost
+    name: "Memory-for-light exchange"
+    descriptor: "large spells erase recent autobiographical memory"
+```
+
+`characters_in_chapter` and `locations_referenced` are selected from `world_refs` when available, then from outline/body heuristics if needed. `active_rules` includes high-priority `foundation` and `rules` category items that constrain the scene. For worldless Works (`world_id == NULL`), the block is omitted and prompts use only `Works/<work_ref>/README.md` setting notes, preserving V1.36 behavior.
+
+#### 3.5.1.4 `world_refs` validation
+
+For World-bound Works, each chapter frontmatter `world_refs` entry MUST be a valid World KB item id under `work.world_id`.
+
+Canonicalization rules:
+
+1. Trim leading/trailing whitespace before validation.
+2. Treat ids as **case-sensitive**.
+3. Reject duplicates after trimming.
+4. Preserve author order for prompt relevance.
+
+Validation timing:
+
+- **Outline time**: invalid ids produce warnings and remediation hints, because outlines may introduce provisional entities that have not yet been promoted.
+- **Finalize time** (or transition to `finalized`): invalid ids are errors and block the transition unless the user explicitly overrides with an audit reason.
+
+For worldless Works, `world_refs` is allowed but unused; it may be absent, `NULL`, or an empty array. If present on a worldless Work, implementations should warn but not fail.
+
+#### 3.5.1.5 Chapter → World KB extraction and promotion
+
+The `creator-workflow.md` `persist` stage already maps Work → World KB to `creator kb queue-extract` + `kb-extract`. For novel Works, the extraction target is the Work's `world_id` when set:
+
+- **World-bound Work**: `kb-extract` reads finalized chapter body + outline/event/foreshadowing indexes, extracts entities, events, rules, locations, and relationships, then creates or updates World KB items under `work.world_id` with SourceAnchors back to the chapter path and, where available, the timeline event.
+- **Worldless Work**: extraction is skipped or remains local Work scope; it MUST NOT silently create a new World or promote content into an arbitrary World.
+- **Explicit promotion**: rows in `Outlines/event-index.md` and `Outlines/foreshadowing.md` may be promoted to World KB items only when the Work is World-bound and the agent/user marks the promotion explicitly (e.g. "promote E012 as background" or "promote F007 as rule").
+
+Future implementation acceptance must include tests for valid/invalid `world_id`, prompt block presence/absence for World-bound vs worldless Works, `world_refs` warning/error timing, and `kb-extract` target selection.
 
 **Anti-patterns** explicitly rejected:
 
@@ -680,7 +770,14 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
   - `work_chapters` PK migration deferred: V1.37 keeps `(work_id, chapter)` and reserves `(work_id, volume, chapter)` unique index for post-V1.37 multi-volume support (§4.5.4).
   - `Outlines/volume-outline.md` minimum structure and `world_refs` placement documented (§4.5.5).
   - Multi-chapter `creator run status` output made testable (§8.1).
+- **V1.37 P2 World KB roadmap deltas** (recorded 2026-06-08):
+  - **Roadmap-only** decision recorded (§3.5.1): no CLI/API/schema/prompt runtime/validator/`kb-extract` implementation claimed in P2.
+  - Future `creator world create --name ... --kind narrative --description ...` contract defined for the init "create new World" path (§3.5.1.1).
+  - `world_id` existence validation, `world_binding: optional` V1.37 posture, and `preset_gates_failed` remediation documented (§3.5.1.2).
+  - Prompt-time World context block shape documented for World-bound Works, with worldless Works preserving README-only context (§3.5.1.3).
+  - `world_refs` canonicalization and warning/error timing documented (§3.5.1.4).
+  - Chapter → World KB extraction and explicit event/foreshadowing promotion path documented (§3.5.1.5).
 
 ---
 
-*Shipped V1.36 baseline with V1.37 P1 roadmap extension. Implement V1.37 multi-chapter behavior only via a future locked implementation plan.*
+*Shipped V1.36 baseline with V1.37 P1/P2 roadmap extensions. Implement V1.37 multi-chapter or World KB continuity behavior only via a future locked implementation plan.*
