@@ -1,6 +1,6 @@
 # Creator Workflow — Normative Specification
 
-**Status**: Shipped (V1.34 — 2026-06-05)  
+**Status**: Shipped (V1.34 — 2026-06-05; chain default true behavior extended in V1.35 P4 partial)  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
 **Scope**: Staged creator journey on **Work** (`intake → research → produce → review → persist`), built on shipped `creator run` + `run_intents`  

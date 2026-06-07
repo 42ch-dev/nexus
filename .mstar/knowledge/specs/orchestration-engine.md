@@ -1,6 +1,6 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Active — orchestration engine SSOT (`nexus-orchestration`, preset loader, worker IPC, capability registry). Primary wave-0 spec for V1.4; still cited by ongoing schedule/cron/multi-agent work.  
+**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). Continues to evolve: V1.31 agentic patterns + V1.32 quality gate landed; FL-D (DF-29/31/56) and DF-53 full auto-chain remain in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
 **Document class**: Master  
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17
