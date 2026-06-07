@@ -34,6 +34,8 @@ pub enum LocalDbError {
     Migrate(sqlx::migrate::MigrateError),
     /// A database constraint was violated (e.g., TOCTOU race detected)
     ConstraintViolation { table: String, constraint: String },
+    /// Path escapes its expected parent directory (defense-in-depth)
+    PathEscape { path: String, prefix: String },
 }
 
 impl fmt::Display for LocalDbError {
@@ -86,6 +88,12 @@ impl fmt::Display for LocalDbError {
             }
             Self::ConstraintViolation { table, constraint } => {
                 write!(f, "constraint violation on '{table}': {constraint}")
+            }
+            Self::PathEscape { path, prefix } => {
+                write!(
+                    f,
+                    "path '{path}' escapes expected prefix '{prefix}' — possible path traversal"
+                )
             }
         }
     }

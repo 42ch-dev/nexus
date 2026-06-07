@@ -293,6 +293,41 @@ pub struct ReconcileReport {
     pub preserved: u32,
 }
 
+/// Verify that `stories_dir` does not escape the expected
+/// `Works/<work_ref>/` subtree via path traversal. Returns `Ok(())` if the
+/// path is safe, `Err(LocalDbError::PathEscape)` otherwise.
+#[allow(clippy::missing_errors_doc)]
+fn verify_stories_dir_in_workspace(
+    stories_dir: &std::path::Path,
+    workspace_root: &std::path::Path,
+    work_ref: &str,
+) -> Result<(), LocalDbError> {
+    if !stories_dir.exists() {
+        return Ok(());
+    }
+    let canonical = stories_dir.canonicalize().map_err(|e| LocalDbError::Io {
+        path: stories_dir.to_string_lossy().to_string(),
+        source: e,
+    })?;
+    let expected_prefix = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf())
+        .join("Works")
+        .join(work_ref);
+    // Check the parent (Stories → Work root) so symlinks under Stories/ are
+    // still allowed but the Stories dir itself must live inside the Work root.
+    let stories_parent = canonical.parent().unwrap_or(&canonical);
+    let prefix_str = expected_prefix.to_string_lossy();
+    let parent_str = stories_parent.to_string_lossy();
+    if !parent_str.starts_with(prefix_str.as_ref()) {
+        return Err(LocalDbError::PathEscape {
+            path: parent_str.to_string(),
+            prefix: prefix_str.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Reconcile `work_chapters` rows from the filesystem.
 ///
 /// Walks `Works/<work_ref>/Stories/`, parses each `.md` file's frontmatter
@@ -302,7 +337,9 @@ pub struct ReconcileReport {
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if any database operation fails.
+/// Returns `LocalDbError` if any database or I/O operation fails.
+/// Returns `LocalDbError::PathEscape` if `work_ref` would cause the resolved
+/// path to escape the `Works/<work_ref>/` subtree.
 pub async fn reconcile_from_filesystem(
     pool: &SqlitePool,
     work_id: &str,
@@ -311,6 +348,11 @@ pub async fn reconcile_from_filesystem(
     now: &str,
 ) -> Result<ReconcileReport, LocalDbError> {
     let stories_dir = workspace_root.join("Works").join(work_ref).join("Stories");
+
+    // Defense in depth: canonicalize and verify the resolved path stays
+    // within the expected Works/<work_ref>/ subtree.  This prevents path
+    // traversal even if a caller forgets to validate `work_ref`.
+    verify_stories_dir_in_workspace(&stories_dir, workspace_root, work_ref)?;
 
     if !stories_dir.is_dir() {
         return Ok(ReconcileReport {

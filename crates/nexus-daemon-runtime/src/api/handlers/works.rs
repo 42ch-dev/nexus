@@ -670,6 +670,18 @@ pub async fn reconcile_chapters(
                 .to_string(),
         })?;
 
+    // Defense in depth: validate work_ref slug before passing to filesystem
+    // layer. Matches the same policy as
+    // `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
+    if !is_valid_work_ref(work_ref) {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_WORK_REF".to_string(),
+            message: format!(
+                "work_ref '{work_ref}' is not a valid slug (expected [a-z0-9][a-z0-9-]{{0,63}})"
+            ),
+        });
+    }
+
     // Resolve workspace root from state
     let workspace_path_str = state.workspace_path().unwrap_or_default();
     let workspace_root = std::path::Path::new(&workspace_path_str);
@@ -689,4 +701,25 @@ pub async fn reconcile_chapters(
     })?;
 
     Ok((StatusCode::OK, Json(report)))
+}
+
+/// Validate that `work_ref` is a safe slug: `[a-z0-9][a-z0-9-]{0,63}`.
+///
+/// This mirrors the policy enforced by
+/// `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
+/// Duplicated here because the sanitize module is private to `nexus-orchestration`.
+fn is_valid_work_ref(s: &str) -> bool {
+    if s.is_empty() || s.len() > 64 {
+        return false;
+    }
+    if s.contains("..") || s.contains('/') || s.contains('\\') || s.contains('\0') {
+        return false;
+    }
+    let mut chars = s.chars();
+    let first = chars.next().expect("non-empty checked above");
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
