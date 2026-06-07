@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-07-v1.37-novel-foundation-first"
-verdict: "Request Changes"
-generated_at: "2026-06-07T18:13:04Z"
+verdict: "Approve"
+generated_at: "2026-06-08T02:38:07+08:00"
 ---
 
 # Code Review Report
@@ -118,3 +118,53 @@ Re-review after fix commit `7d7f3d0b`. Targeted scope: F-001..F-004 + S-001..S-0
 - `rg -n "sqlx::query[^!]" crates/nexus-daemon-runtime/src/ crates/nexus-orchestration/src/ crates/nexus-local-db/src/` evidence: remaining targeted runtime static SQL includes `crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs:165`, `:238`, `:332`, `:430`, `:1325`; `crates/nexus-local-db/src/force_gates_audit.rs:36`, `:64`, `:90`; and `crates/nexus-orchestration/src/capability/builtins/novel_scaffold.rs:260`. Dynamic builders/DDL/PRAGMA occurrences remain elsewhere and were not treated as this finding's blocker.
 
 **Updated Verdict**: Request Changes
+
+## Revalidation #2 (2026-06-08)
+
+Re-review after F-002 fix commit `cbd8f16e`. Targeted scope: F-002 only.
+
+### F-002 status
+
+**F-002 (sqlx compile-time macros)**: RESOLVED — the nine previously cited static SQL sites are now compile-time checked macros, misleading `// SAFETY:` comments were removed from those converted static queries, and `.sqlx/` now includes eight new prepared-query metadata files in the branch diff (`git diff bac47081..HEAD -- .sqlx`). The broader runtime-query inventory still contains pre-existing legacy/runtime SQL outside this targeted F-002 fix range; no remaining runtime SQL from the cited F-002 locations or `cbd8f16e` diff is left unconverted.
+
+- `schedules.rs:165` — `query_scalar!` ✅
+- `schedules.rs:238` — `query!` ✅
+- `schedules.rs:332` — `query_as!` ✅
+- `schedules.rs:430` — `query!` ✅
+- `schedules.rs:1325` — `query_scalar!` ✅
+- `force_gates_audit.rs:36` — `query!` ✅
+- `force_gates_audit.rs:64` — `query_as!` ✅
+- `force_gates_audit.rs:90` — `query!` ✅
+- `novel_scaffold.rs:260` — `query_scalar!` ✅
+
+Spot checks:
+
+- `WorkSnapshotRow` is a named `#[derive(sqlx::FromRow)]` struct used by `sqlx::query_as!(WorkSnapshotRow, ...)`; nullable `works` columns map to `Option<String>`/`Option<i64>` as expected.
+- `ForceGatesAuditRow` remains `#[derive(Debug, Clone, sqlx::FromRow)]`; `forced` is decoded as `bool` through `forced as "forced!"` in the `query_as!` SELECT, matching SQLite BOOLEAN storage without the previous runtime-only workaround.
+- The previous static-query `// SAFETY:` cover comments in the changed F-002 sites were removed; no changed line uses a “dynamic SQL” safety comment for static SQL.
+
+F-001, F-003, and F-004 remain RESOLVED from the prior revalidation. No regression was found in this targeted pass.
+
+### Remaining runtime `sqlx::query` inventory
+
+Required command output note: `rg -n "sqlx::query[^!]" crates/nexus-orchestration/src/ crates/nexus-daemon-runtime/src/ crates/nexus-local-db/src/` is syntactically broad and matches compile-time macro calls such as `query_as!` / `query_scalar!` because the next character after `query` is `_`, not `!`. I therefore used it as the assignment-required scan and additionally spot-checked actual runtime calls with `rg -n "sqlx::query(?:_as|_scalar)?(?:::<[^>]+>)?\\s*\\(" ...` to separate macro false positives from runtime inventory.
+
+Targeted F-002 changed-set inventory (`git diff bac47081..HEAD -G"sqlx::query" -- crates/...`): all changed static SQL sites are converted to macros; no runtime `sqlx::query*(` remains in the F-002 diff.
+
+Remaining actual runtime-call inventory in the three directories is legacy/non-targeted and falls into these buckets:
+
+- DDL / schema bootstrap / test setup: `force_gates_audit.rs:129`, `db/schema.rs:45/98/106/122/131/150/159/177/186`, `test_utils.rs:108/136/167/213`, plus migration/schema helper setup calls.
+- PRAGMA: `nexus-local-db/src/lib.rs:173/177`, `nexus-daemon-runtime/src/db/pool.rs:155/159`, `db/schema.rs:206/213`.
+- Dynamic SQL builders with runtime-composed SQL or existing SAFETY/module-level justification: `prompt_injection.rs:138/170/233`, `kb_store.rs:263`, `knowledge_store.rs:91/116/172/191/270`, `reference_source.rs:240`, `works.rs:394/491/531/628/788/884/1043`, `schedules.rs:633/670/695/839/896`, `sync_module.rs:236`, `schedule/supervisor.rs:363/566/625/1385/1437/1685/1713`, and similar dynamic filter/binder paths.
+- Pre-existing static runtime SQL outside the targeted F-002 fix range remains visible in the inventory (for example, legacy local-db `works.rs`, `work_chapters.rs`, `memory_fragment.rs`, `narrative_write.rs`, and schedule-supervisor helper/test paths). These are not introduced or modified by `cbd8f16e`; this re-review did not expand scope into a workspace-wide legacy SQL migration.
+
+### New evidence
+
+- `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus`; `git rev-parse --abbrev-ref HEAD` → `feature/v1.37-novel-foundation-first`; `git log -1 --format='%H %s'` → `cbd8f16e2bc99c72981c311e1f2d2eed1367d6a4 fix(v1.37-p0): convert static SQL to compile-time macros (QC1 F-002)`.
+- `git diff bac47081..HEAD --stat` → 11 files changed, 290 insertions, 92 deletions, including eight new `.sqlx/query-*.json` files and conversions in `schedules.rs`, `force_gates_audit.rs`, and `novel_scaffold.rs`.
+- `rg -n "sqlx::query[^!]" ...` output: still emits macro false positives and legacy runtime-query lines; the nine cited F-002 locations now show macro forms (`query_scalar!`, `query!`, `query_as!`) rather than runtime calls.
+- `cargo +nightly fmt --all -- --check` output: passed; command emitted no formatter diff.
+- `cargo clippy -p nexus-orchestration -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -- -D warnings` output: `Finished dev profile [unoptimized + debuginfo] target(s) in 0.23s`.
+- `cargo test -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus42` output: rerun passed. Summary includes `nexus42` lib `608 passed; 0 failed`, `nexus42` integration suites passed, and doc-tests passed/ignored as expected: `nexus_daemon_runtime` doc-tests `1 passed; 0 failed; 1 ignored`, `nexus_local_db` doc-tests `2 passed; 0 failed`, `nexus_orchestration` doc-tests `0 failed; 3 ignored`, `nexus42` doc-tests `1 passed; 0 failed; 1 ignored`. An immediately prior run had one nondeterministic env-var unit-test failure in `summary_config_from_env_override`; it passed on rerun under the same requested command, and all doc-tests completed successfully.
+
+**Updated Verdict**: Approve
