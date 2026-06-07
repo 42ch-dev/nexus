@@ -128,6 +128,26 @@ fn load_template(name: &str) -> Option<String> {
 ///
 /// This capability is stateless; it receives all context via input and operates
 /// on the filesystem + DB pool provided by the daemon runtime.
+///
+/// # Concurrency note (V1.36, pre-1.0 single-user)
+///
+/// This capability runs in the single-user daemon process. We assume:
+/// 1. Only one `novel.project_scaffold` invocation per `(creator_id, work_id)`
+///    is in flight at any time. Two concurrent invocations against the same
+///    Work would race on the FS scaffold (idempotent at the file level but
+///    the [`ScaffoldTransaction`] rollback semantics assume sole ownership of
+///    the in-flight paths) and on `work_chapters` seeding (UPSERT-safe but
+///    interleaving would log false-positive duplicates).
+/// 2. No external process is mutating `Works/<work_ref>/` while this runs.
+/// 3. The `narrative_worlds` row referenced by `world_id` (if any) is not
+///    deleted between the F5 existence check and the F4 PATCH. With a single
+///    writer, this TOCTOU window is non-exploitable.
+///
+/// When we move to multi-user / multi-process (post-V1.5), this capability
+/// must be guarded by a per-Work advisory lock (e.g. SQLite
+/// `INSERT INTO scaffold_locks` with an idempotency token, or a daemon-level
+/// `Mutex<HashMap<WorkId, Arc<Mutex<()>>>>`). The atomicity work is tracked
+/// alongside R-V133P1-09.
 pub struct NovelProjectScaffold {
     pool: Option<sqlx::SqlitePool>,
     works_root: PathBuf,
@@ -192,6 +212,22 @@ impl Capability for NovelProjectScaffold {
         let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
             CapabilityError::InputInvalid(format!("novel.project_scaffold input: {e}"))
         })?;
+
+        // F8 (W-4): structured lifecycle logging for novel.project_scaffold.
+        info!(
+            work_id = %inp.work_id,
+            work_ref = %inp.work_ref,
+            total_planned_chapters = inp.total_planned_chapters,
+            world_id = ?inp.world_id,
+            partial = %inp.fields_changed.is_some(),
+            "novel.project_scaffold: start"
+        );
+        if self.pool.is_none() {
+            tracing::warn!(
+                work_id = %inp.work_id,
+                "novel.project_scaffold: no DB pool bound — running FS-only (test/dry-run mode)"
+            );
+        }
 
         // ── F1 — sanitize untrusted grill-me values (C-1, C-4, W-2) ────
         // Reject path-traversal, separators, uppercase, oversize, control
@@ -445,6 +481,16 @@ impl Capability for NovelProjectScaffold {
             })
             .collect();
         txn.commit();
+
+        // F8 (W-4): success — DB+FS committed.
+        info!(
+            work_id = %inp.work_id,
+            work_ref = %inp.work_ref,
+            files_created = files_created.len(),
+            dirs_created = dirs_created.len(),
+            chapters_seeded,
+            "novel.project_scaffold: commit ok"
+        );
 
         let output = ScaffoldOutput {
             scaffold_root: root.to_string_lossy().to_string(),
