@@ -116,6 +116,7 @@ pub async fn enqueue_prompt_injection(
 
 /// Claim the next queued prompt injections for a creator/session.
 ///
+/// TD-V131-01: Wrapped in a transaction so SELECT + UPDATE are atomic.
 /// Selects queued rows ordered by `priority DESC, created_at ASC`,
 /// then updates them to `claimed` status. Returns the claimed rows.
 ///
@@ -129,6 +130,8 @@ pub async fn claim_prompt_injections(
     limit: i64,
     now: i64,
 ) -> Result<Vec<PromptInjectionRow>, LocalDbError> {
+    let mut tx = pool.begin().await?;
+
     // SAFETY: `creator_id`/`session_id` are application-generated strings.
     // Dynamic SQL is required to pass `LIMIT` as a parameter because
     // sqlx compile-time checking does not support parameterized LIMIT.
@@ -144,7 +147,7 @@ pub async fn claim_prompt_injections(
     .bind(creator_id)
     .bind(session_id)
     .bind(limit)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
 
     let ids: Vec<String> = rows
@@ -152,10 +155,11 @@ pub async fn claim_prompt_injections(
         .map(|r| r.get::<String, _>("injection_id"))
         .collect();
     if ids.is_empty() {
+        tx.rollback().await?;
         return Ok(Vec::new());
     }
 
-    // Update status to claimed
+    // Update status to claimed within the same transaction.
     let placeholders: Vec<String> = (2..=ids.len() + 1).map(|i| format!("?{i}")).collect();
     let sql = format!(
         "UPDATE creator_prompt_injections
@@ -167,7 +171,9 @@ pub async fn claim_prompt_injections(
     for id in &ids {
         query = query.bind(id);
     }
-    query.execute(pool).await?;
+    query.execute(&mut *tx).await?;
+
+    tx.commit().await?;
 
     Ok(rows
         .into_iter()
@@ -191,7 +197,9 @@ pub async fn claim_prompt_injections(
 
 /// Mark claimed prompt injections as consumed.
 ///
-/// Sets `status = 'consumed'` and `consumed_at = now` for the given injection IDs.
+/// TD-V131-03: Processes in batches of `BATCH_LIMIT` (100) to avoid
+/// unbounded IN clauses. Sets `status = 'consumed'` and `consumed_at = now`
+/// for the given injection IDs. Returns total rows affected.
 ///
 /// # Errors
 ///
@@ -201,29 +209,36 @@ pub async fn mark_prompt_injections_consumed(
     injection_ids: &[String],
     now: i64,
 ) -> Result<u64, LocalDbError> {
+    /// Maximum number of IDs per batched UPDATE statement.
+    const BATCH_LIMIT: usize = 100;
+
     if injection_ids.is_empty() {
         return Ok(0);
     }
 
-    // SAFETY: `injection_ids` are application-generated ULIDs, not user input.
-    // Dynamic SQL is required because sqlx compile-time checking cannot handle
-    // variable-length IN clauses. Parameterized placeholders prevent injection.
-    let placeholders: Vec<String> = (1..=injection_ids.len())
-        .map(|i| format!("?{}", i + 1))
-        .collect();
-    let sql = format!(
-        "UPDATE creator_prompt_injections
-         SET status = 'consumed', consumed_at = ?
-         WHERE injection_id IN ({}) AND status = 'claimed'",
-        placeholders.join(", ")
-    );
+    let mut total_affected: u64 = 0;
 
-    let mut query = sqlx::query(&sql).bind(now);
-    for id in injection_ids {
-        query = query.bind(id);
+    for chunk in injection_ids.chunks(BATCH_LIMIT) {
+        // SAFETY: `injection_ids` are application-generated ULIDs, not user input.
+        // Dynamic SQL is required because sqlx compile-time checking cannot handle
+        // variable-length IN clauses. Parameterized placeholders prevent injection.
+        let placeholders: Vec<String> = (1..=chunk.len()).map(|i| format!("?{}", i + 1)).collect();
+        let sql = format!(
+            "UPDATE creator_prompt_injections
+             SET status = 'consumed', consumed_at = ?
+             WHERE injection_id IN ({}) AND status = 'claimed'",
+            placeholders.join(", ")
+        );
+
+        let mut query = sqlx::query(&sql).bind(now);
+        for id in chunk {
+            query = query.bind(id);
+        }
+        let result = query.execute(pool).await?;
+        total_affected += result.rows_affected();
     }
-    let result = query.execute(pool).await?;
-    Ok(result.rows_affected())
+
+    Ok(total_affected)
 }
 
 #[cfg(test)]

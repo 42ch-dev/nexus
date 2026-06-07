@@ -1,4 +1,8 @@
-//! `creator knowledge` subcommand — add, list, search user-scoped knowledge entries.
+//! `creator knowledge` subcommand — User-scoped global knowledge entries.
+//!
+//! Manages unstructured knowledge entries scoped to the User (not Creator).
+//! For Work-scope file index or World narrative KB key blocks, use `creator kb`.
+//! See entity-scope-model §5.3–5.4 for the three KB namespaces.
 //!
 //! Product write path for User knowledge. Writes go through
 //! `nexus_local_db::SqliteKnowledgeStore` which implements
@@ -14,10 +18,13 @@ use nexus_knowledge::{KnowledgeEntry, KnowledgeQuery, KnowledgeStore, KnowledgeT
 /// Default user ID for local CLI usage (until platform usr_* mapping).
 const DEFAULT_USER_ID: &str = "user_default";
 
-/// Knowledge subcommands.
+/// Knowledge subcommands (User-scoped global knowledge; NOT Work-scope or World KB).
+///
+/// For Work-scope file index, use `creator kb`.
+/// For World narrative key blocks, use `creator kb --scope world`.
 #[derive(Debug, Subcommand)]
 pub enum KnowledgeCommand {
-    /// Add a new knowledge entry
+    /// Add a new User-scoped knowledge entry
     Add {
         /// Content text for the knowledge entry
         content: String,

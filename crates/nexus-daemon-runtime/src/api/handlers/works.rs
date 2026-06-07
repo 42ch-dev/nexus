@@ -333,6 +333,14 @@ async fn patch_work_stage(
 
     let target_status = req.stage_status.as_deref().unwrap_or(&current.stage_status);
 
+    // R-CURSOR-PR42-03: Validate stage_status transitions to terminal states
+    // even when no explicit current_stage change is provided. Without this,
+    // PATCH {"stage_status":"complete"} bypasses all FL-E gates.
+    if req.stage_status.is_some() && req.current_stage.is_none() {
+        let force = req.force.unwrap_or(false);
+        check_stage_status_transition(&current.stage_status, target_status, force)?;
+    }
+
     // Apply non-stage fields first if present
     let has_non_stage = req.title.is_some()
         || req.long_term_goal.is_some()
@@ -490,6 +498,44 @@ pub async fn append_inspiration(
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+/// Validate `stage_status` transitions to terminal states (R-CURSOR-PR42-03).
+///
+/// Rejects direct status promotion to `complete`/`skipped` without an explicit
+/// stage change unless `force` is true. This prevents PATCH requests with only
+/// `{"stage_status":"complete"}` from bypassing all FL-E gate validation.
+///
+/// Allowed transitions without force:
+/// - `pending` → `active` (schedule starts the stage)
+/// - `active` → `pending` (schedule reset)
+///
+/// Blocked transitions without force:
+/// - `pending` → `complete` or `skipped` (must go through gate or force)
+/// - `active` → `complete` or `skipped` (schedule completion or force)
+fn check_stage_status_transition(
+    current_status: &str,
+    target_status: &str,
+    force: bool,
+) -> Result<(), NexusApiError> {
+    // Terminal status values that require gate validation or explicit force.
+    const TERMINAL_STATUSES: &[&str] = &["complete", "skipped"];
+
+    if force {
+        return Ok(());
+    }
+
+    if TERMINAL_STATUSES.contains(&target_status) && !TERMINAL_STATUSES.contains(&current_status) {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_STATUS_TRANSITION".to_string(),
+            message: format!(
+                "Cannot set stage_status to '{target_status}' without an explicit stage advance. \
+                 Use PATCH with current_stage to advance through FL-E gates, or set force=true to override."
+            ),
+        });
+    }
+
+    Ok(())
+}
 
 /// Read active `creator_id` from CLI config.
 pub fn read_active_creator_id(nexus_home: &std::path::Path) -> Option<String> {
