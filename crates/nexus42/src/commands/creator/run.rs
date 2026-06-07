@@ -93,6 +93,14 @@ pub enum RunCommand {
         #[command(subcommand)]
         command: StageCommand,
     },
+    /// Rebuild work_chapters from filesystem (V1.36 §4.1.2, §8)
+    ReconcileChapters {
+        /// Work ID (wrk_...) to reconcile
+        work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 /// FL-E stage subcommands (V1.34 cli-spec §6.2E).
@@ -517,6 +525,23 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             }
         }
         RunCommand::Stage { command } => handle_stage(command, config, &client).await?,
+        RunCommand::ReconcileChapters { work_id, json } => {
+            let report: serde_json::Value = client
+                .post(&format!("/v1/local/works/{work_id}/reconcile-chapters"), &serde_json::json!({}))
+                .await?;
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                let created = report.get("created").and_then(|v| v.as_u64()).unwrap_or(0);
+                let updated = report.get("updated").and_then(|v| v.as_u64()).unwrap_or(0);
+                let preserved = report.get("preserved").and_then(|v| v.as_u64()).unwrap_or(0);
+                println!("Reconcile complete for Work {work_id}:");
+                println!("  Created:   {created}");
+                println!("  Updated:   {updated}");
+                println!("  Preserved: {preserved}");
+            }
+        }
     }
 
     Ok(())
