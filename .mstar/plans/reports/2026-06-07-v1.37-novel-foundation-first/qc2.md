@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-07-v1.37-novel-foundation-first"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-08"
 ---
 
@@ -104,3 +104,38 @@ generated_at: "2026-06-08"
 | 🟢 Suggestion | 7 |
 
 **Verdict**: Request Changes
+
+## Revalidation (2026-06-08)
+
+Re-review after fix commit `7d7f3d0b`. Targeted scope: C-1, C-2, W-1..W-5 + W-6 (reserved keys) + suggestions. Working branch and Review cwd verified via `git rev-parse`; diff basis `88bb0e05..HEAD` (fix wave) inspected; required gates re-run.
+
+### Status by prior finding
+
+- **C-1 (path safety canonicalize)**: RESOLVED — `canonicalize_within` added to `PresetInput` (uses `std::fs::canonicalize` + `starts_with` on canonical root); called for every `Gate::Filesystem` in `evaluate_gates` before `exists()`. New test `filesystem_path_traversal_rejected_by_canonicalize` creates real symlink `Works/escape -> /tmp/outside` and asserts `evaluate_gates` returns PathSafety "escapes workspace root". (Unix path; non-Unix falls to missing-path as before.) `git diff 88bb0e05..HEAD -- crates/nexus-orchestration/src/preset_gates.rs` confirms.
+- **C-2 (gate eval + insert atomic)**: RESOLVED — `add_schedule` now does `let mut tx = pool.begin()...` for the gated (non-force) path: work snapshot query + gate eval + schedule INSERT + commit all inside tx (C-2). Force-gates path also uses tx for audit + schedule insert (W-7). `seed_core_context` factored out. No more split-phase eval-then-insert. Diff and handler source confirm tx scope.
+- **W-1 (reason cap/sanitize)**: RESOLVED — Server (`schedules.rs`): `sanitize_reason` (ANSI regex strip + control filter except \n), `MAX_REASON_LEN=512`, early BAD_REQUEST reject (empty / too long / dirty) before any DB write or log, for `force_gates` reason. CLI (`run.rs`): identical 512 cap + `\x1b`/control check in both `handle_run` (--reason) and `handle_stage` (--gate-reason) before request construction. Tests `force_gates_with_ansi_in_reason_rejected`, `force_gates_with_long_reason_rejected` pass.
+- **W-2 (reserved input keys)**: RESOLVED — `RESERVED_INPUT_KEYS: &[&str] = &["creator_id", "workspace_slug", "core_context", "preset"]`; early in `add_schedule`, if `body.input.as_object()` contains any, returns 400 with message listing reserved set. (Explicit comment: `work_id` is intentionally allowed/extracted for gate use, not blindly merged.) Matches assignment "free-form AddScheduleRequest.input reserved-key policy".
+- **W-3 (audit INSERT dedup)**: RESOLVED — Handler now calls typed `nexus_local_db::insert_force_gates_audit(&mut tx, &audit_params)` (inside the tx for force path). Helper updated to accept `&mut sqlx::SqliteConnection` (tx-friendly); no more raw `sqlx::query("INSERT INTO force_gates_audit...")` in schedules.rs for the audit row. (Schedule INSERT remains direct SQL inside tx, per pattern.)
+- **W-4 (fmt)**: RESOLVED — `cargo +nightly fmt --all -- --check` (run from repo root) produced zero output (clean). Clippy on the four crates also clean (`-D warnings`).
+- **W-5 (previous_preset LIKE)**: RESOLVED — New migration `202606080002_creator_schedules_work_id.sql` adds `work_id TEXT` + `CREATE INDEX idx_creator_schedules_preset_status_work ON creator_schedules(preset_id, status, work_id)`. `DbPreviousPresetLookup::find_previous_preset_completion` now does exact `WHERE preset_id = ? AND status = 'completed' AND work_id = ?` (bind &work_id) with comment "C-4 fix: use indexed work_id column instead of LIKE on label". LIKE fallback note in migration for pre-migration rows.
+
+### New findings (if any)
+
+None (no new Criticals or mandatory Warnings introduced in the fix wave). The large schedules.rs refactor (tx + early rejects + helper call + lookup change) is surgical around the prior findings; no obvious new races, injection surfaces, or unindexed paths added. One pre-existing pattern (runtime query for the schedule INSERT itself inside tx) remains, but is inside the atomic boundary and matches the crate's documented SAFETY style.
+
+### New evidence
+
+- `cargo test -p nexus-daemon-runtime --test fl_e_schedule_api`: 10/10 passed (new hygiene tests + prior gate/schedule tests; confirms atomic paths and reason validation exercised).
+- `git diff 88bb0e05..HEAD --stat`: 12 files, focused on the 4 crates + 2 new migrations + test updates + status.
+- Symlink test, tx blocks, sanitize fn, RESERVED_KEYS const, helper call site, work_id index + equality query, fmt clean — all directly visible in the three targeted diffs.
+- No changes to business logic outside the QC2 scope (e.g. no new preset gate kinds, no CLI flag changes beyond hygiene).
+
+**Updated Verdict**: Approve
+
+### Suggestions from wave 1 (re-checked)
+
+- Symlink test: now present (C-1 test added).
+- Atomic tx: now present (C-2 + force path).
+- Helper usage: now present (W-3).
+- Prune helper: exists in force_gates_audit.rs (added in wave).
+- Other suggestions (remediation strings, query! preference, dedicated helper, input doc) remain open but non-blocking per original classification.
