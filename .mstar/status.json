@@ -129,7 +129,7 @@
     },
     {
       "id": "2026-06-07-v1.37-novel-world-kb-roadmap",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-07-v1.37-novel-world-kb-roadmap.md",
       "working_branch": "feature/v1.37-novel-world-kb-roadmap",
       "merge_target": "iteration/v1.37",
@@ -150,12 +150,23 @@
           "DF-63"
         ],
         "updated_at": "2026-06-08T20:45:00+08:00",
-        "status_transition": "Todo → InProgress → InReview on 2026-06-08 after T1–T9 spec/tracker amendments",
+        "done_at": "2026-06-08T21:00:00+08:00",
+        "qc": "single qc-specialist review (docs-only) Approve — 5/5 ACs, no V1.36/P0/P1 contradiction",
+        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
+        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-08 after T1–T9 spec/tracker amendments + single QC review",
         "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, preset YAML, CLI implementation, prompt runtime, validator, or kb-extract binding in P2",
         "spec_amendments": [
           ".mstar/knowledge/specs/entity-scope-model.md §5.1.1",
           ".mstar/knowledge/specs/novel-workflow-profile.md §3.5.1"
-        ]
+        ],
+        "shipped": [
+          "entity-scope-model.md: extended §5.4 with narrative World KB item taxonomy (foundation, background, character, location, society, rules, economy) + minimum-viable schemas",
+          "novel-workflow-profile.md §3.5 extension: world_id validation contract, prompt-time World context block format (YAML/JSON), world_refs validation rules, Chapter → World KB extraction path via kb-extract/persist stage",
+          "creator world create CLI command contract (T3) — future implementation, contract-only in V1.37 P2",
+          "Deferred tracker: DF-63 disposition updated to 'V1.37 P2 roadmap-only; implementation deferred to V1.37+' with 5 work items enumerated",
+          "Plan markdown: status updated to Done with roadmap-only scope decision recorded"
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-07-v1.37-novel-world-kb-roadmap/qc1.md (Approve)"
       }
     },
     {
