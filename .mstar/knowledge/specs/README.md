@@ -99,6 +99,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34) |
+| [novel-workflow-profile.md](novel-workflow-profile.md) | Draft overlay | Draft (V1.36) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration
@@ -142,7 +143,8 @@ When specs disagree, higher row wins:
 | Top-level CLI groups | cli-spec §6.0B | cli-command-ia (Shipped V1.35 supplement) |
 | First-run / local vs platform | cli-spec §7 | creator-centric-entry-model (Shipped V1.35 supplement), compass audit appendix |
 | Work / `creator run` | work-experience-model | cli-spec §6.2, orchestration run_intents |
-| Creator workflow stages / chain | creator-workflow | work-experience-model |
+| Novel profile / `Works/<work_ref>/` layout | novel-workflow-profile | work-experience-model, novel-writing-sync-contract, cli-spec §13.1 |
+| Creator workflow stages / chain | creator-workflow | work-experience-model, novel-workflow-profile (produce) |
 | Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
 | Schedule / core_context | creator-schedule-and-core-context | orchestration-engine sessions |
 | Conditional routing | preset-conditional-routing | orchestration-engine §7.5 stub |

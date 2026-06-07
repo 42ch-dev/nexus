@@ -673,7 +673,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 约束：
 
-- 只允许操作工作区白名单路径；**默认**正文树根为 **`Stories/<StoryRef>/`**（章节文件如 **`<chapter-id>.md`**）；**`StoryRef`** 与 **`world_id`** 的映射以 **preset + 本地 DB / workspace 配置** 为准，不得仅靠目录名推断
+- 只允许操作工作区白名单路径；**默认**正文树根为 **`Works/<work_ref>/Stories/`**（章节文件如 **`ch<nn>-<slug>.md`**）；**`work_ref`** 与 **`work_id`** 的映射以 **preset + 本地 DB `works` 表** 为准，不得仅靠目录名推断（见 [novel-workflow-profile.md](./novel-workflow-profile.md)）
 - **研究型产出**默认在 **`{$workspace_dir}/.nexus42/references/<run-id>/`**（见 §6.6B）；历史布局 **`References/<creator_ref>/`** 仅作为兼容叙述，**不再**由 `init` 默认创建
 - **`research.*`**（若暴露为 ACP 工具名）与 **`ReferenceSource`** 索引合同仍与 `manuscript.*` 分离，防止越权读写任意文件
 - 当 `output_manuscript=false` 时，`manuscript.write` 不作为默认创作路径，但能力本身仍存在；平台托管与本地 Agent 的能力面保持一致
@@ -736,14 +736,21 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 `<workspace>` **默认不**包含固定业务子树；首次 `init` 只登记创作根与配置，**不**默认创建 `Stories/`、`References/`。用户可见目录由 **preset 产物策略** 在运行中创建。
 
-**`novel-writing` 预设（示例）** — 默认小说正文布局：
+**`novel-writing` 预设（V1.36 normative）** — 小说正文布局见 [novel-workflow-profile.md](./novel-workflow-profile.md)：
 
 ```text
 <workspace>/
-  Stories/
-    <StoryRef>/
-      <chapter-id>.md
-      ...
+  Works/
+    <work_ref>/
+      README.md
+      work-status.md
+      Outlines/
+        chapters/
+          ch01-outline.md
+      Stories/
+        ch01-<slug>.md
+        ...
+      Worldbuilding/         # 可选
   .nexus42/
     references/
       <run-id>/
@@ -753,8 +760,11 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 职责（示例 preset；具体以加载的 preset 为准）：
 
-- **`Stories/<StoryRef>/`**
-  - 小说/章节等**正文**主存；**`StoryRef`** 与 **`world_id`** 的绑定以 **本地 DB / workspace 配置 + preset** 为准，**不得**仅靠目录名推断。
+- **`Works/<work_ref>/Stories/`**
+  - 小说章节**正文**主存（sync 扫描根）；**`work_ref`** 与 **`work_id`** 以 **本地 DB `works` 表 + preset** 为准，**不得**仅靠目录名推断。
+- **`Works/<work_ref>/Outlines/`**、**`work-status.md`**、**`README.md`**
+  - 规划与状态元数据；**不得**被 sync 模块当作章节正文。
+- **已废弃（pre-1.0 移除）**：工作区根 **`Stories/<StoryRef>/`** — 无兼容 shim。
 - **`.nexus42/references/<run-id>/`**
   - **研究 / 采风型**机读产出默认位置；`report.md` + 可选 `artifacts/`；与 **`ReferenceSource`** 索引合同衔接。
 - **`{$workspace_dir}/.agents/skills/`**
@@ -768,8 +778,8 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 **Accepted inputs**：
 
-- Preset metadata：`preset_id=novel-writing`、版本、`workspace_slug`、`world_id`、`creator_id`、`StoryRef` ↔ `world_id` 绑定（来自本地 DB / workspace config，而非仅目录名）。
-- 正文产物：`Stories/<StoryRef>/<chapter-id>.md` 及 manifest / phase metadata（映射到 existing bundle fields such as `manuscript_phase`, source anchors, canonical hashes）。
+- Preset metadata：`preset_id=novel-writing`、版本、`workspace_slug`、`world_id`、`creator_id`、`work_id`、`work_ref`、`work_profile: novel`（来自本地 DB `works` 表，而非仅目录名）。
+- 正文产物：`Works/<work_ref>/Stories/<chapter-id>.md` 及 manifest / phase metadata（映射到 existing bundle fields such as `manuscript_phase`, source anchors, canonical hashes）。详见 [novel-writing-sync-contract.md](./novel-writing-sync-contract.md)。
 - 研究产物：`.nexus42/references/<run-id>/report.md` 与可选 `artifacts/`，只把合同允许的摘要、引用锚点、`ReferenceSource` / `MemoryItem` 摘录纳入结构化 sync。
 - Session hints：ACP `recommended_skills[]` 解析结果与 agent session metadata（仅作为审计 / 可复现上下文，不作为全文上传许可）。
 
@@ -777,7 +787,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 - Default `sync push` 输出既有 **Bundle / Delta**：world/key-block/timeline/reference/manuscript metadata、source anchors、idempotency key、canonical hash、audit command metadata。
 - Local packaging 可生成 preset manifest / staging records，但这些是本地实现细节；跨平台 wire 仍引用 `cli-spec` §15、`shared/domain/data-model-v1.md` 与 schema codegen 生成合同。
-- `sync pull` 只回填平台结构化状态与冲突 / cursor；不得把平台内容静默覆盖到 `Stories/<StoryRef>/` 正文。
+- `sync pull` 只回填平台结构化状态与冲突 / cursor；不得把平台内容静默覆盖到 `Works/<work_ref>/Stories/` 正文。
 
 **Publish boundary**：
 
@@ -802,14 +812,15 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 ### 13.1A 服务端沙箱（平台托管 Creator）
 
-- 平台托管 Creator 若开启 `output_manuscript=true`，其正文工作区应与 **同一 preset** 下的本地用户工作区 **同构**（默认示例与 §13.1 一致：`Stories/<StoryRef>/…` + 按需的 `.nexus42/references/…`）。
+- 平台托管 Creator 若开启 `output_manuscript=true`，其正文工作区应与 **同一 preset** 下的本地用户工作区 **同构**（默认示例与 §13.1 一致：`Works/<work_ref>/Stories/…` + 按需的 `.nexus42/references/…`）。
 
 ```text
 <sandbox_root>/
-  Stories/
-    <StoryRef>/
-      <chapter-id>.md
-      ...
+  Works/
+    <work_ref>/
+      Stories/
+        <chapter-id>.md
+        ...
   .nexus42/
     references/
       <run-id>/
@@ -818,7 +829,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 ```
 
 - 差异仅在**物理位置**：本地路径位于用户设备；平台路径位于服务端沙箱。
-- 关闭 `output_manuscript` 时，可不创建 `Stories/<StoryRef>/` 正文文件，但仍要允许 `StoryManifest.summary_text`、World KB、Timeline 正常生成。
+- 关闭 `output_manuscript` 时，可不创建 `Works/<work_ref>/Stories/` 正文文件，但仍要允许 `StoryManifest.summary_text`、World KB、Timeline 正常生成。
 
 ### 13.2 系统目录（`$HOME/.nexus42/`）
 

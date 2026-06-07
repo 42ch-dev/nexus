@@ -7,6 +7,7 @@
 **Coordinates with**:
 
 - [work-experience-model.md](work-experience-model.md) — Work entity, intake, run_intents
+- [novel-workflow-profile.md](novel-workflow-profile.md) — novel `produce` artifacts and completion (Draft V1.36)
 - [cli-spec.md](cli-spec.md) — `creator run` and `creator run stage`
 - [orchestration-engine.md](orchestration-engine.md) — presets, schedules, capabilities
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — Agent-initiated context/tools (parallel channel)
@@ -100,7 +101,7 @@ creator run status <work_id>    # includes current_stage + stage_status
 | --- | --- | --- |
 | `intake` | `creative-brief-intake` | Shipped V1.33 |
 | `research` | `research` | May append references to Work context |
-| `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log` |
+| `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log`; novel profile writes to `Works/<work_ref>/` per [novel-workflow-profile.md](novel-workflow-profile.md) |
 | `review` | `reflection-loop` | `llm_judge` gates per orchestration-engine |
 | `persist` | `kb-extract` (via queue) + CLI memory review | No dedicated persist-only preset required |
 
@@ -146,6 +147,8 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 | Agent tools vs presets | Agent may read/patch Work via `nexus.work.*`; production presets still run via orchestration |
 | Conditional routing | **Not** used for stage selection (DF-56) |
 | `--auto-chain` | Deferred DF-53; explicit `stage advance` required (intake → produce chain defaults true since V1.35 P4) |
+| Novel project init | Separate preset `novel-project-init` (DF-58); **not** part of `novel-writing` auto-chain |
+| Novel completion | Work `status == completed` stops further `novel-writing`; no auto new-project switch (DF-59) |
 | Platform cloud assemble | Not part of this workflow; see agent-nexus-tool-bridge `policy_blocked` |
 
 ---

@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.36 Active** · Latest shipped: **V1.35** · Latest active compass: TBD · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-47 carry-forward + DF-53 partial shipment** → Done · V1.36 focus: **DF-47 production caller + remaining V1.33/V1.30/V1.31 backlog** · Open FL-D deferrals: **DF-29, DF-31, DF-56** (exploration: [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md)) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 28, `critical`: 0)
+**Quick status**: **V1.36 Active** · Latest shipped: **V1.35** · Latest active compass: [v1.36-pending-delivery-compass.md](../iterations/v1.36-pending-delivery-compass.md) · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-53 partial shipment** → Done · V1.36 focus: **novel-writing正文产出 UX** (`work_profile: novel`, `Works/<work_ref>/` layout, init preset, chapter pipeline, completion stop) · DF-47 **conditional** (not V1.36 P0) · Open FL-D deferrals: **DF-29, DF-31, DF-56** · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 28, `critical`: 0)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-07 (V1.35 Shipped; 6 critical residuals closed; DF-47/DF-53 still OPEN — DF-47 → V1.36 P0)
+**Last updated**: 2026-06-07 (V1.36 harness docs prepare; novel UX north star locked; DF-47 conditional; DF-57/58/59 registered)
 
 ---
 
@@ -71,7 +71,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
-| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.36 P0** | M | V1.34→V1.35→V1.36 | V1.34 P4 shipped adapter (`HostToolExecutor::execute` + `dispatch_from_worker`); V1.35 P0 closed deferred carry-forward: **production caller wiring OPEN** — requires IPC-layer changes across 3+ crates (non-surgical for V1.35 P0); V1.36 P0 target |
+| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **Conditional (V1.36+)** | M | V1.34→V1.35→V1.36 | V1.34 P4 shipped adapter; V1.35 P0 deferred carry-forward: **production caller wiring OPEN**. V1.36 compass revises: **not P0** unless novel-writing UX is blocked (e.g. agent must patch Work files during drafting). Default: backlog after P3 |
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
@@ -81,6 +81,9 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
 | DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing.md](specs/preset-conditional-routing.md). |
+| DF-57 | `Works/<work_ref>/` artifact layout + sync scan migration | V1.36 prepare | **V1.36 P2** | M | V1.36 | Pre-1.0: no legacy `Stories/<story_ref>/` shims. Spec: [novel-workflow-profile.md](specs/novel-workflow-profile.md) §3; plan `2026-06-07-v1.36-novel-artifact-layout-and-templates` |
+| DF-58 | Interactive novel project init preset (`novel-project-init`) | V1.36 prepare | **V1.36 P1** | M | V1.36 | Separate grill-me preset; not embedded in `novel-writing` auto-chain. Plan `2026-06-07-v1.36-novel-project-init-preset` |
+| DF-59 | Platform publish integration for novel正文 | V1.36 prepare | **Backlog** | L | V1.36 | Explicit OUT of V1.36 short-term scope; user may publish manually. See compass §1.2 non-goals |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -117,7 +120,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | V1.33 llm_judge (P3) | 2 | `2026-06-04-v1.33-llm-judge-runtime-fix` (V1.35 P0 closed 2 critical: R-V133P3-01, R-V133P3-02; remaining 2 medium: R-V133P3-03/04) |
 | V1.33 memory review (P4) | 3 | `2026-06-04-v1.33-memory-review-closed-loop` (V1.35 P0 closed 4 critical: R-V133P4-01, R-V133P4-02, R-V133P4-03, R-V133P4-07; remaining 3 medium: R-V133P4-04, R-V133P4-05, R-V133P4-06) |
 | V1.34 FL-E stages (P1) | 5 | `2026-06-04-v1.34-fl-e-run-intents-and-stages` (R-FL-E-DDL/DEAD/LIST/FNAME/ENDP, all low; not P0) |
-| V1.34 agent tool (P4) | 1 | `2026-06-04-v1.34-agent-tool-implementation` (DF-47 production caller wiring → V1.36 P0) |
+| V1.34 agent tool (P4) | 1 | `2026-06-04-v1.34-agent-tool-implementation` (DF-47 production caller wiring → conditional V1.36+) |
 | **Total** | **28** | See `metadata.tech_debt_summary.total_open` (after V1.35 P0) |
 
 **Closed / historical residuals**
@@ -149,7 +152,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 **Latest active iteration**
 
-- **V1.36** (Active 2026-06-07): focus TBD — DF-47 production caller wiring carry-forward; remaining V1.30/V1.31 backlog (TD-V130-04/07/08/09/10/11, TD-V131-02/05/06/07/08); V1.33 P1/P3/P4 medium residuals; V1.34 R-FL-E-* cleanup; cli-spec.md §6.0B merge follow-up
+- **V1.36** (Active 2026-06-07): [v1.36-pending-delivery-compass.md](../iterations/v1.36-pending-delivery-compass.md) — **novel-writing正文产出 UX** (P0 spec lock → P1 init preset → P2 layout/templates → P3 chapter pipeline → P4 completion/hygiene); DF-47 conditional; DF-57/58 in-scope; DF-59 publish OUT; opportunistic V1.30/31 residual sweep
 - **V1.35** (Shipped 2026-06-07): [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) — CLI IA (5 groups; sync→platform), creator hub polish, critical residual P0 (6 criticals + R-CURSOR-PR42-03 + 5 backlog), FL-E UX polish (chain default true); 5 implement plans P0/P2/P3/P4/P5 + prepare P-1 + P1 docs all Done; DF-47 → V1.36 P0
 - **V1.34** (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E + Agent tools; DF-47 carried forward to V1.35 P0 (now V1.36 P0)
 
