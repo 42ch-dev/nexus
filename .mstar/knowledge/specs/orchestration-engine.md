@@ -694,7 +694,7 @@ The binary includes embedded presets under `crates/nexus-orchestration/embedded-
 | `soul-experience-refresh` | SOUL Experience (deterministic) | aggregate → done | `soul.experience.aggregate` |
 | `reflection-loop` | Reflection demonstrator | draft → revise → summarize → done | `acp.prompt`, `judge.llm`, `context.summarize` |
 | `memory-augmented` | Memory demonstrator | recall → generate → persist → done | `creator.*`, `judge.rule` |
-| `creative-brief-intake` | **V1.33 planned** — grill-me intake | TBD in P2 plan | `acp.prompt` |
+| `creative-brief-intake` | **V1.33 Shipped** (`2026-06-04-v1.33-creative-brief-intake-preset` P2 plan) — grill-me intake preset | intake → done | `acp.prompt` |
 
 All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5).
 
