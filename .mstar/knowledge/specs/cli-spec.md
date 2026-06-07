@@ -2,7 +2,7 @@
 
 **Status**: Normative  
 **Document class**: Master  
-**Draft overlays (until P5 merge):** [cli-command-ia.md](cli-command-ia.md) (§6 IA), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
+**V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
 
 ## 0. 文档定位
 

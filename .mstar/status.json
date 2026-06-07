@@ -237,7 +237,7 @@
           "V1.35 latest_shipped_iteration",
           "cli-command-ia.md status Draft → Shipped",
           "iterations/README.md V1.35 row Active → Shipped",
-          "deferred-features tracker DF-47 → V1.36, DF-53 partial closed"
+          "deferred-features tracker DF-47 → V1.36; DF-53 partial shipped, full auto-chain remains open"
         ],
         "open_residuals": 28,
         "critical_residuals": 0

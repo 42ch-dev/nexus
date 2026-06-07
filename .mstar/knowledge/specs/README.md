@@ -83,7 +83,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [cli-command-ia.md](cli-command-ia.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 | [creator-centric-entry-model.md](creator-centric-entry-model.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 
-**Read order:** IA overlay → entry overlay → CLI Master (flags/subcommands).
+**Read order:** CLI Master (§6–§7) → shipped IA supplement → shipped entry-model supplement.
 
 ### Orchestration and presets
 
@@ -128,8 +128,8 @@ When specs disagree, higher row wins:
 1. Repo root **AGENTS.md**
 2. Architecture Masters (crate graph, entity scope)
 3. Active **iteration compass** (delivery batching only)
-4. **Draft overlay** over legacy section of same-domain Master until P5 merge
-5. Domain **Master**
+4. Domain **Master**
+5. Shipped supplement / retained overlay for rationale and acceptance details after Master merge
 6. **Feature line** spec
 7. **Exploration** (non-binding)
 
@@ -139,8 +139,8 @@ When specs disagree, higher row wins:
 
 | Topic | Primary SSOT | Secondary |
 | --- | --- | --- |
-| Top-level CLI groups | cli-command-ia (Draft) | cli-spec §6 until P5 merge |
-| First-run / local vs platform | creator-centric-entry-model (Draft) + cli-spec §7 | Compass audit appendix |
+| Top-level CLI groups | cli-spec §6.0B | cli-command-ia (Shipped V1.35 supplement) |
+| First-run / local vs platform | cli-spec §7 | creator-centric-entry-model (Shipped V1.35 supplement), compass audit appendix |
 | Work / `creator run` | work-experience-model | cli-spec §6.2, orchestration run_intents |
 | Creator workflow stages / chain | creator-workflow | work-experience-model |
 | Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
@@ -156,7 +156,7 @@ When specs disagree, higher row wins:
 
 | Trigger | Required action |
 | --- | --- |
-| **V1.35 P5** (or iteration close) | Merge cli-command-ia + creator-centric-entry-model into cli-spec; archive overlays |
+| **Post-V1.35 CLI changes** | Update cli-spec §6–§7 first; update shipped supplements only when rationale, acceptance, or migration history changes |
 | **FL-D compass locks implement** | Promote preset-conditional-routing; update orchestration-engine §7.5 |
 | **ACP spec hygiene plan** | Evaluate merging skills-export-compatibility into acp-client-tech-spec appendix |
 | **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract |

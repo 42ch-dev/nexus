@@ -4,7 +4,7 @@
 **Document class**: Master (V1.35 lock effective)  
 **Created**: 2026-06-06  
 **Shipped**: 2026-06-07 (V1.35 P5 spec-tracker-hygiene)  
-**Merge target**: cli-spec.md §7
+**Merged into**: [cli-spec.md](cli-spec.md) §7 in V1.35 P5; retained as shipped entry-model supplement
 **Scope**: Product-level rules for **when** users enter via `creator` vs `platform` vs `system`  
 **Coordinates with**:
 
@@ -96,4 +96,4 @@ Creator commands **must not** silently require User token when local-only policy
 
 ---
 
-*Supplement to cli-command-ia.md for V1.35. Implementation tracked by plans P2–P4.*
+*Shipped supplement to cli-command-ia.md for V1.35. Implementation tracked by plans P2–P4 and P5 hygiene.*

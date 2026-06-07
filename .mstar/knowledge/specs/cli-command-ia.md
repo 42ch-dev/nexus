@@ -4,8 +4,8 @@
 **Document class**: Master (V1.35 lock effective)  
 **Created**: 2026-06-06  
 **Shipped**: 2026-06-07 (V1.35 P5 spec-tracker-hygiene)  
-**Supersedes**: [cli-spec.md](cli-spec.md) §6.0B (six-group lock) — V1.35 P5 merges IA into CLI Master  
-**Merge target**: cli-spec.md §6.0B (merged in V1.35 P5)  
+**Supersedes**: pre-V1.35 [cli-spec.md](cli-spec.md) §6.0B six-group lock
+**Merged into**: [cli-spec.md](cli-spec.md) §6.0B in V1.35 P5; retained as shipped IA rationale and acceptance supplement
 **Scope**: Top-level `nexus42` command groups, deprecation rules, creator-centric entry  
 **Coordinates with**:
 
@@ -163,4 +163,4 @@ Local-first must reach `creator run start` in ≤7 commands (see creator-centric
 
 ---
 
-*Draft for V1.35. Implementation: plans P1 (docs), P2 (sync migration), P3 (creator hub).*
+*Shipped in V1.35. Implementation: plans P1 (docs), P2 (sync migration), P3 (creator hub), P5 (spec/tracker hygiene).*
