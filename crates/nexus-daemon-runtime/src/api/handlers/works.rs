@@ -194,6 +194,10 @@ pub async fn create_work(
         updated_at: now.clone(),
         current_stage: "intake".to_string(),
         stage_status: "pending".to_string(),
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: 0,
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -364,6 +368,10 @@ async fn patch_work_stage(
             schedule_ids: None,
             current_stage: None,
             stage_status: None,
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: None,
         };
         works::patch_work(state.pool(), creator_id, work_id, &non_stage_patch, now)
             .await
@@ -439,6 +447,10 @@ pub async fn patch_work(
         schedule_ids: None,
         current_stage: None,
         stage_status: None,
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: None,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)

@@ -70,6 +70,26 @@ pub async fn add_schedule(
 ) -> Result<(StatusCode, Json<AddScheduleResponse>), (StatusCode, String)> {
     let supervisor = require_supervisor(&state)?;
 
+    // F7 (V1.36 P1, R-V136P1-01): warn when an init preset arrives without a
+    // populated input context. AddScheduleRequest currently has no `input` map,
+    // so init presets (`novel-project-init`, etc.) cannot receive grill-me
+    // output (`work_ref` / `total_planned_chapters` / `world_id`) from the CLI.
+    // The init preset's committing state will execute with empty
+    // `preset.input.*` until the wire change lands. Tracked as R-V136P1-01.
+    if body.preset_id.ends_with("-init") || body.preset_id == "novel-project-init" {
+        let has_seed = body.seed.as_deref().is_some_and(|s| !s.trim().is_empty());
+        if !has_seed {
+            tracing::warn!(
+                target: "orchestration.schedule",
+                preset_id = %body.preset_id,
+                creator_id = %body.creator_id,
+                "init preset scheduled without populated input context \
+                 (R-V136P1-01: preset.input.* will be empty until \
+                 AddScheduleRequest gains an `input` field)"
+            );
+        }
+    }
+
     // Generate a schedule ID (simple timestamp-based for pre-1.0)
     let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
 

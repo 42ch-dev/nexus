@@ -27,9 +27,13 @@ pub enum RunCommand {
         /// Optional title for the work
         #[arg(long)]
         title: Option<String>,
-        /// Optional world binding
+        /// Optional world binding (V1.36 §3.5; passes through to Work)
         #[arg(long)]
         world_id: Option<String>,
+        /// Run an init preset before production (V1.36 §5.4)
+        /// Accepts: novel-project-init
+        #[arg(long)]
+        init_preset: Option<String>,
         /// Skip the creative brief intake and start the production preset directly
         #[arg(long, default_value_t = false)]
         skip_intake: bool,
@@ -40,6 +44,13 @@ pub enum RunCommand {
         /// daemon `on_complete` auto-chain is a future enhancement (DF-53 partial).
         #[arg(long, default_value_t = true, value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
         chain_novel_writing: bool,
+        /// Force gate bypass with audit reason (V1.36 §5.3.5)
+        /// Requires --reason to be set alongside
+        #[arg(long, default_value_t = false)]
+        force_gates: bool,
+        /// Audit reason for --force-gates (required when --force-gates is set)
+        #[arg(long)]
+        reason: Option<String>,
         /// Idempotency key (UUID); repeat calls with same key return same `work_id`
         #[arg(long)]
         client_request_id: Option<String>,
@@ -127,11 +138,44 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             preset,
             title,
             world_id,
+            init_preset,
             skip_intake,
             chain_novel_writing,
+            force_gates,
+            reason,
             client_request_id,
             json,
         } => {
+            // Validate --force-gates requires --reason
+            if force_gates && reason.is_none() {
+                return Err(crate::errors::CliError::Config(
+                    "--force-gates requires --reason \"<text>\" (audit-logged)".to_string(),
+                ));
+            }
+
+            // F7 (W-001 partial fix, R-V136P1-01): resolve active creator once and
+            // populate AddScheduleRequest.creator_id for every schedule we create
+            // below. The previous code passed `String::new()`, which left the
+            // creator_id empty in the daemon-side Schedule row and broke
+            // downstream lookups (e.g. fl_e.audit logs and per-creator schedule
+            // queries).
+            //
+            // GAP DEFERRED (R-V136P1-01): the `--init-preset` flow still does not
+            // thread the grill-me output (work_ref / total_planned_chapters /
+            // world_id) into `preset.input.*`. AddScheduleRequest currently has no
+            // `input: HashMap<String, serde_json::Value>` field; adding one
+            // requires a wire-contract change + `pnpm run codegen` + daemon
+            // handler + scheduler input-routing. That is out of V1.36 P1 scope and
+            // tracked as R-V136P1-01 in `.mstar/status.json`. The init preset's
+            // committing state will hit `preset.input.*` with empty values at
+            // runtime until that lands; the daemon logs a warn! trace on every
+            // such schedule (see `crates/nexus-daemon-runtime/src/api/handlers/
+            // orchestration/schedules.rs`).
+            let resolved_creator_id = config
+                .active_creator_id
+                .clone()
+                .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
             let work_title = title.unwrap_or_else(|| {
                 let max_len = idea.chars().take(60).collect::<String>();
                 if idea.len() > max_len.len() {
@@ -141,7 +185,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             });
 
-            let body = serde_json::json!({
+            let mut body = serde_json::json!({
                 "title": work_title,
                 "long_term_goal": "Complete creative work",
                 "initial_idea": idea,
@@ -149,6 +193,28 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 "world_id": world_id,
                 "client_request_id": client_request_id,
             });
+
+            // V1.36: pass init_preset through to the Work/schedule payload
+            if let Some(ref ip) = init_preset {
+                if let Some(o) = body.as_object_mut() {
+                    o.insert(
+                        "init_preset".to_string(),
+                        serde_json::Value::String(ip.clone()),
+                    );
+                }
+            }
+
+            // V1.36: pass force_gates + reason through
+            if force_gates {
+                if let Some(o) = body.as_object_mut() {
+                    o.insert("force_gates".to_string(), serde_json::Value::Bool(true));
+                    o.insert(
+                        "force_gates_reason".to_string(),
+                        serde_json::Value::String(reason.unwrap_or_default()),
+                    );
+                }
+            }
+
             // Remove null fields
             let body = body
                 .as_object()
@@ -171,11 +237,43 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 .unwrap_or("?")
                 .to_string();
 
+            // V1.36: Schedule init preset if requested (before intake)
+            let mut init_schedule_id: Option<String> = None;
+            if let Some(ref ip) = init_preset {
+                let init_request = AddScheduleRequest {
+                    creator_id: resolved_creator_id.clone(),
+                    preset_id: ip.clone(),
+                    seed: Some(idea.clone()),
+                    label: None,
+                    depends_on: None,
+                    concurrency: None,
+                    scheduled_at: None,
+                };
+
+                match client
+                    .post::<serde_json::Value, _>(
+                        "/v1/local/orchestration/schedules",
+                        &init_request,
+                    )
+                    .await
+                {
+                    Ok(sched_resp) => {
+                        init_schedule_id = sched_resp
+                            .get("schedule_id")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: failed to schedule init preset: {e}");
+                    }
+                }
+            }
+
             // Schedule intake preset if not skipped
             let mut schedule_id: Option<String> = None;
             if !skip_intake {
                 let intake_request = AddScheduleRequest {
-                    creator_id: String::new(),
+                    creator_id: resolved_creator_id.clone(),
                     preset_id: "creative-brief-intake".to_string(),
                     seed: Some(idea.clone()),
                     label: None,
@@ -222,7 +320,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 // Intake skipped → schedule novel-writing directly.
                 let production_preset = preset.as_deref().unwrap_or("novel-writing");
                 let novel_request = AddScheduleRequest {
-                    creator_id: String::new(),
+                    creator_id: resolved_creator_id.clone(),
                     preset_id: production_preset.to_string(),
                     seed: Some(idea.clone()),
                     label: None,
@@ -252,6 +350,14 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 
             if json {
                 let mut output = resp;
+                if let Some(iid) = &init_schedule_id {
+                    output.as_object_mut().map(|o| {
+                        o.insert(
+                            "init_schedule_id".to_string(),
+                            serde_json::Value::String(iid.clone()),
+                        )
+                    });
+                }
                 if let Some(sid) = &schedule_id {
                     output.as_object_mut().map(|o| {
                         o.insert(
@@ -272,6 +378,13 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             } else {
                 let status = resp.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                 println!("Work created: {work_id} (status: {status})");
+                if let Some(iid) = &init_schedule_id {
+                    println!("Init preset scheduled: {iid} (preset: {init_preset:?})");
+                    println!();
+                    println!(
+                        "The init preset will bootstrap your Work's scaffold via ACP conversation."
+                    );
+                }
                 if let Some(sid) = &schedule_id {
                     println!("Intake scheduled: {sid} (preset: creative-brief-intake)");
                     println!();

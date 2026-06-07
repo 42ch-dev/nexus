@@ -1268,6 +1268,10 @@ mod tests {
                 updated_at: "2026-06-04T00:00:00Z".to_string(),
                 current_stage: "intake".to_string(),
                 stage_status: "pending".to_string(),
+                work_profile: None,
+                work_ref: None,
+                total_planned_chapters: None,
+                current_chapter: 0,
             },
         )
         .await
