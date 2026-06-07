@@ -11,7 +11,7 @@ This directory contains embedded presets compiled into the `nexus42` binary at b
 | `creative-brief-intake` | Grill-me intake | clarifying → synthesizing → persisting → done | Multi-turn ACP clarification to produce a structured creative brief |
 | `kb-extract` | Knowledge extraction | loading → extracting → done | Extract structured KeyBlocks from work-scope KB entries |
 | `memory-augmented` | Memory recall + persist | recall → generate → persist → done | Recall memories, generate content, persist as new memory |
-| `novel-writing` | Multi-phase writing | gathering → brainstorming → outlining → drafting → done | Multi-agent novel writing with roles (writer, reviewer) |
+| `novel-writing` | Chapter-scoped pipeline | outline_chapter → draft_chapter → finalize → done | Single-chapter outline→draft→finalize with llm_judge 五问 gate (V1.36) |
 | `reflection-loop` | Self-reflection | draft → revise → summarize → done | Generate, critique, revise, and summarize with LLM judge |
 | `research` | Research workflow | scanning → extracting → synthesizing → done | Scan references, extract content, produce structured reports |
 | `soul-experience-refresh` | SOUL maintenance | aggregate → done | Aggregate long-term memories into SOUL Experience section |
@@ -44,7 +44,7 @@ nexus42 creator soul refresh-experience
 
 ## Intake → Production Chaining
 
-The `creative-brief-intake` preset is designed to be chained with `novel-writing`:
+The `creative-brief-intake` preset is designed to be chained with `novel-project-init` and `novel-writing`:
 
 ```bash
 # Via creator run (recommended — chains intake automatically):
@@ -52,11 +52,27 @@ nexus42 creator run start --idea "A sci-fi thriller about AI consciousness"
 
 # Manual chaining:
 nexus42 daemon schedule add --preset creative-brief-intake --creator <creator-id> --seed "<idea>"
-# After intake completes, start production:
-nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed "<topic from brief>"
+# After intake completes, initialize the novel scaffold:
+nexus42 daemon schedule add --preset novel-project-init --creator <creator-id> --seed "<topic from brief>"
+# After scaffold completes, start production:
+nexus42 daemon schedule add --preset novel-writing --creator <creator-id> --seed "<topic>"
 ```
 
-When `creative-brief-intake` completes, it writes a validated `creative_brief` JSON to the Work entity. The `novel-writing` gathering prompt receives `{{preset.input.*}}` vars derived from the brief (genre, tone, audience, themes, hooks).
+### Novel Project Init → Novel Writing (P1 → P3)
+
+The `novel-writing` preset requires the `novel-project-init` preset to have completed first (enforced by §5.3.2 gates). The init preset:
+
+1. Runs an interactive grill-me to collect `work_ref`, `total_planned_chapters`, and World binding
+2. Creates the `Works/<work_ref>/` directory tree with templates
+3. Seeds `work_chapters` rows in `state.db`
+
+Then `novel-writing` drives the chapter pipeline:
+
+1. **`outline_chapter`** — writes `Works/<work_ref>/Outlines/chapters/ch01-outline.md` (with required F### foreshadowing section)
+2. **`draft_chapter`** — writes `Works/<work_ref>/Stories/ch01-<slug>.md` (frontmatter `status: draft`); advances `current_chapter`
+3. **`finalize`** — `llm_judge` 五问 quality gate; GO flips `status: finalized` in both DB and frontmatter; NOGO → WaitForInput
+
+See `.mstar/knowledge/specs/novel-workflow-profile.md` §3 (layout), §4.1 (work_chapters), §5.1 (五问 gate).
 
 ## Validation
 

@@ -784,6 +784,39 @@ fn v133_creator_run_continue_requires_note() {
     );
 }
 
+/// V1.36 P1 (F7, R-V136P1-01): Verify `creator run start --help` exposes
+/// `--init-preset` and `--world-id`. The CLI flags must remain visible so
+/// users can opt into the novel-project-init flow.
+#[test]
+fn v136_creator_run_start_has_init_preset_flag() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--init-preset"),
+        "V1.36 creator run start: must have --init-preset flag"
+    );
+    assert!(
+        help_text.contains("--world-id"),
+        "V1.36 creator run start: must have --world-id flag"
+    );
+    assert!(
+        help_text.contains("--force-gates"),
+        "V1.36 creator run start: must have --force-gates flag"
+    );
+    assert!(
+        help_text.contains("--reason"),
+        "V1.36 creator run start: must have --reason flag"
+    );
+}
+
 /// Verify `system preset --help` shows list and validate subcommands.
 #[test]
 fn v133_system_preset_subcommands() {
@@ -1153,5 +1186,28 @@ fn v135_chain_novel_writing_opt_out_syntax_accepted() {
     assert!(
         !stderr.contains("unexpected value 'true'"),
         "V1.35 P4: --chain-novel-writing=true must be accepted by clap (got: {stderr})"
+    );
+}
+
+/// V1.36 P4 (T3): `creator run start --help` mentions auto-completion semantics.
+#[test]
+fn v136_start_help_mentions_auto_completion() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("auto-promotes"),
+        "V1.36 P4: creator run start --help must mention 'auto-promotes' completion semantics"
+    );
+    assert!(
+        help_text.contains("completed"),
+        "V1.36 P4: creator run start --help must reference 'completed' Work status"
     );
 }

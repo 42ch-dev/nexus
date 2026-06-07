@@ -31,6 +31,16 @@ Evaluate content across these dimensions:
 - Detail integration
 - Atmospheric coherence
 
+### 五问质量检验 (Five-Question Quality Gate)
+
+When evaluating a chapter for finalization, apply the five-question check:
+
+1. **开场三行**: Do the first three lines establish character, location, and conflict?
+2. **冲突回响**: Is the central conflict consistent with the chapter outline?
+3. **伏笔回收**: Are all F### foreshadowing items from the outline addressed in the body?
+4. **新视角**: Is there a new character perspective or relationship change?
+5. **结尾钩子**: Does the chapter end with a hook for the next chapter?
+
 ## Feedback Guidelines
 
 When providing feedback:
@@ -40,12 +50,16 @@ When providing feedback:
 - Reference specific text passages when identifying issues
 - Respect genre conventions while encouraging innovation
 
-## Reading Story Content
+## Reading Novel Content (V1.36)
 
-Story chapters are located at `Stories/<story_ref>/*.md` in the workspace.
-- The outline is at `Stories/<story_ref>/outline.md`
-- Each chapter follows the naming pattern `Stories/<story_ref>/ch<nn>-<descriptive-name>.md`
-- Read all relevant chapters before providing feedback
+Novel content is located under `Works/<work_ref>/` in the workspace:
+
+- Chapter outlines: `Works/<work_ref>/Outlines/chapters/ch<nn>-outline.md`
+- Chapter body: `Works/<work_ref>/Stories/ch<nn>-<slug>.md`
+- Foreshadowing index: `Works/<work_ref>/Outlines/foreshadowing.md`
+- The `work_ref` is provided via `{{preset.input.work_ref}}`
+
+Read all relevant chapters and outlines before providing feedback.
 
 ## Constraints
 

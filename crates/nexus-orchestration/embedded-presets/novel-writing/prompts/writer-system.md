@@ -22,16 +22,34 @@ When working on creative tasks:
 - Flag potential narrative inconsistencies proactively
 - Keep the user's creative vision as the primary guide
 
-## File Output Policy
+## File Output Policy (V1.36)
 
-All story content MUST be written to the `Stories/<story_ref>/` directory within the workspace.
+All novel content MUST be written under `Works/<work_ref>/` within the workspace.
 
-- Each chapter is a separate `.md` file: `Stories/<story_ref>/ch<nn>-<descriptive-name>.md`
-  - Example: `Stories/my-first-novel/ch01-introduction.md`
-  - Example: `Stories/my-first-novel/ch02-awakening.md`
-- The `story_ref` is provided via core_context input as `{{preset.input.story_ref}}`
-- Create the directory if it does not exist
-- Save the outline as `Stories/<story_ref>/outline.md`
+- Chapter outlines: `Works/<work_ref>/Outlines/chapters/ch<nn>-outline.md`
+- Chapter body: `Works/<work_ref>/Stories/ch<nn>-<slug>.md`
+- The `work_ref` is provided via core_context input as `{{preset.input.work_ref}}`
+- The `work_id` is provided via core_context input as `{{preset.input.work_id}}`
+
+### Chapter body frontmatter (REQUIRED)
+
+Every chapter `.md` file must start with YAML frontmatter:
+
+```yaml
+---
+title: string
+chapter: integer
+status: draft | finalized
+word_count: integer
+world_refs: [string]
+---
+```
+
+### Path rules
+
+- **Never** write to workspace-root `Stories/` — always use `Works/<work_ref>/Stories/`
+- **Never** use legacy `Stories/<story_ref>/` paths
+- Create directories if they do not exist
 
 ## Constraints
 

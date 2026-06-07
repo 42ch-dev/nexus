@@ -238,7 +238,7 @@ fn memory_routes() -> Router<WorkspaceState> {
         )
 }
 
-/// Works routes — Work CRUD + inspiration (V1.33 §7.2).
+/// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).
 fn works_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
@@ -252,6 +252,10 @@ fn works_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/local/works/{work_id}/inspiration",
             post(handlers::works::append_inspiration),
+        )
+        .route(
+            "/v1/local/works/{work_id}/reconcile-chapters",
+            post(handlers::works::reconcile_chapters),
         )
 }
 /// Create the Local API router

@@ -141,6 +141,14 @@ impl CapabilityRegistry {
             Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::new()),
             Box::new(builtins::SoulExperienceAggregate),
+            // F6 (C-001): register novel.project_scaffold in the
+            // pool-less registry so embedded preset validation can
+            // resolve it. The pool-bound variant is registered via
+            // [`with_builtins_and_pool`] for runtime use.
+            Box::new(builtins::NovelProjectScaffold::new()),
+            // P3 (T3): register novel.chapter_transition for chapter
+            // status transitions (DB + frontmatter).
+            Box::new(builtins::NovelChapterTransition::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -182,8 +190,10 @@ impl CapabilityRegistry {
             Box::new(builtins::AcpSessionLoad),
             Box::new(builtins::JudgeLlm::new()),
             Box::new(builtins::ContextSummarize::new()),
-            Box::new(builtins::KbExtractWork::with_pool(pool)),
+            Box::new(builtins::KbExtractWork::with_pool(pool.clone())),
             Box::new(builtins::SoulExperienceAggregate),
+            Box::new(builtins::NovelProjectScaffold::with_pool(pool.clone())),
+            Box::new(builtins::NovelChapterTransition::with_pool(pool)),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -274,6 +284,20 @@ impl CapabilityRegistry {
             Box::new(context_summarize),
             Box::new(kb),
             Box::new(builtins::SoulExperienceAggregate),
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::NovelProjectScaffold::new, |pool| {
+                        builtins::NovelProjectScaffold::with_pool(pool.clone())
+                    }),
+            ),
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::NovelChapterTransition::new, |pool| {
+                        builtins::NovelChapterTransition::with_pool(pool.clone())
+                    }),
+            ),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -338,9 +362,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_eighteen_builtins() {
+    fn registry_has_twenty_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 18);
+        assert_eq!(reg.len(), 20);
     }
 
     #[test]
@@ -365,6 +389,8 @@ mod tests {
             "context.summarize",
             "kb.extract_work",
             "soul.experience.aggregate",
+            "novel.project_scaffold",
+            "novel.chapter_transition",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -383,7 +409,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 18);
+        assert_eq!(names.len(), 20);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -391,5 +417,7 @@ mod tests {
         assert!(names.contains(&"context.summarize"));
         assert!(names.contains(&"kb.extract_work"));
         assert!(names.contains(&"soul.experience.aggregate"));
+        assert!(names.contains(&"novel.project_scaffold"));
+        assert!(names.contains(&"novel.chapter_transition"));
     }
 }

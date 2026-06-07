@@ -229,43 +229,19 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 2); // WS-E T6: bumped for multi-agent roles
+        assert_eq!(loaded.version, 4); // P4 fix wave: finalize split into finalize + finalize_commit
 
-        // Must have both inner graphs.
+        // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
-            loaded.inner_graphs.contains_key("brainstorm_graph"),
-            "expected brainstorm_graph inner graph"
-        );
-        assert!(
-            loaded.inner_graphs.contains_key("drafting_graph"),
-            "expected drafting_graph inner graph"
+            loaded.inner_graphs.is_empty(),
+            "P3 novel-writing should not have inner graphs"
         );
 
-        // Verify inner graph structure.
-        let brainstorm = &loaded.inner_graphs["brainstorm_graph"];
-        assert!(brainstorm.get_task("diverge").is_some());
-        assert!(brainstorm.get_task("cluster").is_some());
-        assert!(brainstorm.get_task("select").is_some());
-
-        let drafting = &loaded.inner_graphs["drafting_graph"];
-        assert!(drafting.get_task("draft_intro").is_some());
-        assert!(drafting.get_task("draft_body").is_some());
-
-        // Verify output bindings.
-        assert_eq!(
-            loaded.output_bindings.get("brainstorm_graph").unwrap(),
-            "select.text"
-        );
-        assert_eq!(
-            loaded.output_bindings.get("drafting_graph").unwrap(),
-            "draft_body.text"
-        );
-
-        // Verify outer graph has 5 states.
-        assert!(loaded.outer_graph.get_task("gathering").is_some());
-        assert!(loaded.outer_graph.get_task("brainstorming").is_some());
-        assert!(loaded.outer_graph.get_task("outlining").is_some());
-        assert!(loaded.outer_graph.get_task("drafting").is_some());
+        // Verify outer graph has 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
+        assert!(loaded.outer_graph.get_task("outline_chapter").is_some());
+        assert!(loaded.outer_graph.get_task("draft_chapter").is_some());
+        assert!(loaded.outer_graph.get_task("finalize").is_some());
+        assert!(loaded.outer_graph.get_task("finalize_commit").is_some());
         assert!(loaded.outer_graph.get_task("done").is_some());
 
         // Verify source hash is non-trivial.
@@ -297,7 +273,7 @@ mod tests {
         let caps = CapabilityRegistry::with_builtins();
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
-        // Check manifest states.
+        // P4 fix wave: 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
         assert_eq!(loaded.manifest.states.len(), 5);
 
         // Verify state IDs.
@@ -307,25 +283,42 @@ mod tests {
             .iter()
             .map(|s| s.id.as_str())
             .collect();
-        assert!(state_ids.contains(&"gathering"));
-        assert!(state_ids.contains(&"brainstorming"));
-        assert!(state_ids.contains(&"outlining"));
-        assert!(state_ids.contains(&"drafting"));
+        assert!(state_ids.contains(&"outline_chapter"));
+        assert!(state_ids.contains(&"draft_chapter"));
+        assert!(state_ids.contains(&"finalize"));
+        assert!(state_ids.contains(&"finalize_commit"));
         assert!(state_ids.contains(&"done"));
 
-        // Verify gathering uses llm_judge exit.
-        assert_eq!(loaded.manifest.states[0].id, "gathering");
-        match &loaded.manifest.states[0].exit_when {
+        // Verify finalize uses llm_judge exit (P3 T7: 五问 quality gate).
+        let finalize = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "finalize")
+            .expect("finalize state should exist");
+        // P4 fix wave: finalize has NO enter actions.
+        assert!(
+            finalize.enter.is_empty(),
+            "finalize should have no enter actions (deferred to finalize_commit)"
+        );
+        match &finalize.exit_when {
             Some(manifest::ExitWhen::LlmJudge {
                 template_file,
                 judge_capability,
                 min_interval,
             }) => {
-                assert_eq!(template_file.as_deref(), Some("prompts/gathering-exit.md"));
+                assert_eq!(template_file.as_deref(), Some("prompts/finalize-exit.md"));
                 assert_eq!(judge_capability.as_deref(), Some("judge.llm"));
                 assert_eq!(min_interval.as_deref(), Some("PT6H"));
             }
-            other => panic!("expected llm_judge exit_when, got: {other:?}"),
+            other => panic!("expected llm_judge exit_when for finalize, got: {other:?}"),
+        }
+        // P4 fix wave: finalize transitions to finalize_commit, not done.
+        match &finalize.next {
+            Some(manifest::NextTarget::Linear(target)) => {
+                assert_eq!(target, "finalize_commit");
+            }
+            other => panic!("finalize next should be Linear(finalize_commit), got: {other:?}"),
         }
 
         // Verify done is terminal.
@@ -339,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn novel_writing_has_nine_prompt_references() {
+    fn novel_writing_has_correct_prompt_references() {
         let caps = CapabilityRegistry::with_builtins();
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
@@ -376,23 +369,31 @@ mod tests {
             }
         }
 
+        // P3: 2 prompt files from enter actions (outline-chapter.md, draft-chapter.md).
+        // No context_update hooks or inner graphs in P3 preset.
         assert_eq!(
             prompt_files.len(),
-            8,
-            "expected 8 prompt template references in enter + context_update + inner_graphs"
+            2,
+            "expected 2 prompt template references in enter actions: {prompt_files:?}"
+        );
+        assert!(
+            prompt_files.iter().any(|f| f.contains("outline-chapter")),
+            "expected outline-chapter.md reference"
+        );
+        assert!(
+            prompt_files.iter().any(|f| f.contains("draft-chapter")),
+            "expected draft-chapter.md reference"
         );
 
-        // Verify the embedded directory has all 11 prompt files (includes
-        // gathering-exit.md which is referenced from exit_when, not enter,
-        // outlining-ctx-update.md from the context_update hook, and
-        // writer-system.md / reviewer-system.md from the roles section).
+        // Verify the embedded directory has prompt files (including new P3 files
+        // and legacy files kept for backward compat).
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-writing/prompts")
             .expect("novel-writing/prompts dir should exist");
-        assert_eq!(
-            prompts_dir.files().count(),
-            11,
-            "expected 11 embedded prompt files"
+        let prompt_count = prompts_dir.files().count();
+        assert!(
+            prompt_count >= 14,
+            "expected at least 14 embedded prompt files (11 legacy + 3 new P3), got {prompt_count}"
         );
     }
 
