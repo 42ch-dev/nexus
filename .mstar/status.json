@@ -631,6 +631,39 @@
             "owner": "@fullstack-dev",
             "target_date": "V1.37+ (re-open per §3.6.1)",
             "note": "8 novels-system pattern items registered for V1.37+ re-open. Each has a specific target (multi-novel switch, selection pool, multi-volume, worldbuilding schema, findings lifecycle, three-layer rules, per-chapter logs, 96h master-decision timeout). All V1.36 OUT per compass §1.2 non-goals."
+          },
+          {
+            "id": "R-V136P4-02",
+            "title": "reconcile_chapters path-traversal hardening (Cursor Finding 1, closed in fix wave)",
+            "severity": "medium",
+            "source": "Cursor security review (cursor[bot] PR #46 review 4445141566 / comment 3369398496) 2026-06-07T13:09:04Z",
+            "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (reconcile_chapters handler) + crates/nexus-local-db/src/work_chapters.rs (reconcile_from_filesystem)",
+            "decision": "defer",
+            "owner": "@fullstack-dev",
+            "target_date": "**Closed in PR #46 fix wave** (commit e40a79d, 2026-06-07T13:55 CST)",
+            "note": "Closed by defense in depth: (1) handler validates PATCHed work_ref slug against ^[a-z0-9][a-z0-9-]{0,63}$ before joining paths; returns BadRequest on invalid; (2) reconcile_from_filesystem canonicalizes the resolved stories_dir + verifies it stays under the canonicalized <workspace_root>/Works/<work_ref>/ prefix; returns error on escape. Theoretical exploit closed. PR review thread resolved (PRRT_kwDOR6V-K86HqDti)."
+          },
+          {
+            "id": "R-V136P4-03",
+            "title": "novel-writing finalize state llm_judge quality gate bypass (Cursor Finding 2, closed in fix wave)",
+            "severity": "medium",
+            "source": "Cursor security review (cursor[bot] PR #46 review 4445141566 / comment 3369398497) 2026-06-07T13:09:04Z",
+            "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/preset.yaml (finalize state)",
+            "decision": "defer",
+            "owner": "@fullstack-dev",
+            "target_date": "**Closed in PR #46 fix wave** (commit 35e989d, 2026-06-07T13:55 CST)",
+            "note": "Closed by reestructuring the finalize state: removed the chapter_transition enter action (which prematurely flipped draft→finalized before the llm_judge ran). Added a new finalize_commit state that runs the actual transition only after the judge approves. State graph: outline_chapter → draft_chapter → finalize (judge-only) → finalize_commit (transition) → done. Preset version 3→4. All 6 affected tests updated. Quality gate no longer bypassable. PR review thread resolved (PRRT_kwDOR6V-K86HqDtj)."
+          },
+          {
+            "id": "R-V136P4-04",
+            "title": "capability_registry test count drift (P3 novel.chapter_transition not counted; closed in fix wave)",
+            "severity": "low",
+            "source": "PR #46 CI run 27093446735 (Rust tests FAIL) 2026-06-07T13:11:22Z",
+            "scope": "crates/nexus-orchestration/tests/capability_registry.rs (registry_has_nineteen_builtins)",
+            "decision": "defer",
+            "owner": "@fullstack-dev",
+            "target_date": "**Closed in PR #46 fix wave** (commit d6b8920, 2026-06-07T13:55 CST)",
+            "note": "Closed by renaming test registry_has_nineteen_builtins → registry_has_twenty_builtins; updating assertion left 19 → 20; updating comment to reflect P1 (18→19) + P3 (19→20) additions with hint. CI re-ran and passed (all 9 checks green)."
           }
         ]
       }
