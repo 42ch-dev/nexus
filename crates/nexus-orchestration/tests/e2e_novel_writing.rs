@@ -312,11 +312,11 @@ fn e2e_novel_writing_has_four_states() {
     let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
-    // P3: 4 states (outline_chapter, draft_chapter, finalize, done).
+    // P4 fix wave: 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
     assert_eq!(
         loaded.manifest.states.len(),
-        4,
-        "novel-writing should have 4 states (P3 chapter-scoped)"
+        5,
+        "novel-writing should have 5 states (finalize split into finalize + finalize_commit)"
     );
 
     let state_ids: Vec<&str> = loaded
@@ -327,7 +327,13 @@ fn e2e_novel_writing_has_four_states() {
         .collect();
     assert_eq!(
         state_ids,
-        vec!["outline_chapter", "draft_chapter", "finalize", "done"]
+        vec![
+            "outline_chapter",
+            "draft_chapter",
+            "finalize",
+            "finalize_commit",
+            "done"
+        ]
     );
 }
 
@@ -374,6 +380,13 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         .find(|s| s.id == "finalize")
         .expect("finalize state should exist");
 
+    // P4 fix wave: finalize has NO enter actions — the chapter_transition
+    // capability is deferred to finalize_commit.
+    assert!(
+        finalize.enter.is_empty(),
+        "finalize should have no enter actions (chapter transition deferred to finalize_commit)"
+    );
+
     // Verify it has llm_judge exit_when.
     match &finalize.exit_when {
         Some(nexus_orchestration::preset::manifest::ExitWhen::LlmJudge {
@@ -400,12 +413,43 @@ fn novel_writing_judge_quality_gate_on_finalize() {
         other => panic!("finalize should have llm_judge exit_when, got: {other:?}"),
     }
 
-    // Verify finalize's next state is done.
+    // Verify finalize's next state is finalize_commit (not done).
     match &finalize.next {
         Some(nexus_orchestration::preset::manifest::NextTarget::Linear(target)) => {
-            assert_eq!(target, "done", "finalize should transition to done");
+            assert_eq!(
+                target, "finalize_commit",
+                "finalize should transition to finalize_commit"
+            );
         }
-        other => panic!("finalize next should be Linear(done), got: {other:?}"),
+        other => panic!("finalize next should be Linear(finalize_commit), got: {other:?}"),
+    }
+
+    // Verify finalize_commit has the chapter_transition enter action and next is done.
+    let finalize_commit = loaded
+        .manifest
+        .states
+        .iter()
+        .find(|s| s.id == "finalize_commit")
+        .expect("finalize_commit state should exist");
+    assert_eq!(
+        finalize_commit.enter.len(),
+        1,
+        "finalize_commit should have exactly one enter action"
+    );
+    match &finalize_commit.enter[0] {
+        nexus_orchestration::preset::manifest::EnterAction::Capability { name, .. } => {
+            assert_eq!(
+                name, &"novel.chapter_transition",
+                "finalize_commit enter should be novel.chapter_transition"
+            );
+        }
+        other => panic!("finalize_commit enter should be Capability, got: {other:?}"),
+    }
+    match &finalize_commit.next {
+        Some(nexus_orchestration::preset::manifest::NextTarget::Linear(target)) => {
+            assert_eq!(target, "done", "finalize_commit should transition to done");
+        }
+        other => panic!("finalize_commit next should be Linear(done), got: {other:?}"),
     }
 }
 

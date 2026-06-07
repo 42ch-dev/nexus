@@ -229,7 +229,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 3); // P3: bumped for chapter-scoped pipeline
+        assert_eq!(loaded.version, 4); // P4 fix wave: finalize split into finalize + finalize_commit
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
@@ -237,10 +237,11 @@ mod tests {
             "P3 novel-writing should not have inner graphs"
         );
 
-        // Verify outer graph has 4 states (outline_chapter, draft_chapter, finalize, done).
+        // Verify outer graph has 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
         assert!(loaded.outer_graph.get_task("outline_chapter").is_some());
         assert!(loaded.outer_graph.get_task("draft_chapter").is_some());
         assert!(loaded.outer_graph.get_task("finalize").is_some());
+        assert!(loaded.outer_graph.get_task("finalize_commit").is_some());
         assert!(loaded.outer_graph.get_task("done").is_some());
 
         // Verify source hash is non-trivial.
@@ -272,8 +273,8 @@ mod tests {
         let caps = CapabilityRegistry::with_builtins();
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
-        // P3: 4 states (outline_chapter, draft_chapter, finalize, done).
-        assert_eq!(loaded.manifest.states.len(), 4);
+        // P4 fix wave: 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
+        assert_eq!(loaded.manifest.states.len(), 5);
 
         // Verify state IDs.
         let state_ids: Vec<&str> = loaded
@@ -285,6 +286,7 @@ mod tests {
         assert!(state_ids.contains(&"outline_chapter"));
         assert!(state_ids.contains(&"draft_chapter"));
         assert!(state_ids.contains(&"finalize"));
+        assert!(state_ids.contains(&"finalize_commit"));
         assert!(state_ids.contains(&"done"));
 
         // Verify finalize uses llm_judge exit (P3 T7: 五问 quality gate).
@@ -294,6 +296,11 @@ mod tests {
             .iter()
             .find(|s| s.id == "finalize")
             .expect("finalize state should exist");
+        // P4 fix wave: finalize has NO enter actions.
+        assert!(
+            finalize.enter.is_empty(),
+            "finalize should have no enter actions (deferred to finalize_commit)"
+        );
         match &finalize.exit_when {
             Some(manifest::ExitWhen::LlmJudge {
                 template_file,
@@ -305,6 +312,13 @@ mod tests {
                 assert_eq!(min_interval.as_deref(), Some("PT6H"));
             }
             other => panic!("expected llm_judge exit_when for finalize, got: {other:?}"),
+        }
+        // P4 fix wave: finalize transitions to finalize_commit, not done.
+        match &finalize.next {
+            Some(manifest::NextTarget::Linear(target)) => {
+                assert_eq!(target, "finalize_commit");
+            }
+            other => panic!("finalize next should be Linear(finalize_commit), got: {other:?}"),
         }
 
         // Verify done is terminal.

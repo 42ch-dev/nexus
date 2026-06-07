@@ -9,7 +9,7 @@
 
 preset:
   id: novel-writing
-  version: 3  # Bumped for V1.36 chapter-scoped pipeline (P3)
+  version: 4  # Bumped for V1.36 finalize state restructure (P4 fix wave)
   kind: creator
   description: "Single-chapter outline → draft → finalize pipeline (ch01 MVP); gated by llm_judge 五问 quality check"
   requires_capabilities:
@@ -101,7 +101,16 @@ states:
     next: finalize
 
   - id: finalize
-    description: "Five-question quality gate; GO flips chapter to finalized; NOGO returns WaitForInput"
+    description: "Run llm_judge 五問 quality gate on the draft; NOGO returns WaitForInput (no state mutation in enter)"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT6H"
+    next: finalize_commit
+
+  - id: finalize_commit
+    description: "Chapter 五問 gate passed; flip work_chapters row + frontmatter to finalized"
     enter:
       - kind: capability
         name: novel.chapter_transition
@@ -110,11 +119,6 @@ states:
           chapter: 1
           from_status: "draft"
           to_status: "finalized"
-    exit_when:
-      kind: llm_judge
-      template_file: prompts/finalize-exit.md
-      judge_capability: judge.llm
-      min_interval: "PT6H"
     next: done
 
   - id: done
