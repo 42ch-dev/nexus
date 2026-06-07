@@ -8,10 +8,7 @@ use std::path::{Path, PathBuf};
 
 /// Create a temp workspace with Works/<work_ref>/Stories/ structure.
 fn create_work_stories(workspace: &Path, work_ref: &str) -> PathBuf {
-    let stories = workspace
-        .join("Works")
-        .join(work_ref)
-        .join("Stories");
+    let stories = workspace.join("Works").join(work_ref).join("Stories");
     fs::create_dir_all(&stories).expect("create Stories dir");
     stories
 }

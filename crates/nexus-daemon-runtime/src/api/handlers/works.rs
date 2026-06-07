@@ -585,7 +585,13 @@ pub fn read_active_workspace_slug(
 pub async fn reconcile_chapters(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
-) -> Result<(StatusCode, Json<nexus_local_db::work_chapters::ReconcileReport>), NexusApiError> {
+) -> Result<
+    (
+        StatusCode,
+        Json<nexus_local_db::work_chapters::ReconcileReport>,
+    ),
+    NexusApiError,
+> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let pool = state.pool();
@@ -597,9 +603,7 @@ pub async fn reconcile_chapters(
             code: "DATABASE_ERROR".to_string(),
             message: format!("get_work failed: {e}"),
         })?
-        .ok_or(NexusApiError::NotFound(format!(
-            "Work '{work_id}' not found"
-        )))?;
+        .ok_or_else(|| NexusApiError::NotFound(format!("Work '{work_id}' not found")))?;
 
     let work_ref = work
         .story_ref

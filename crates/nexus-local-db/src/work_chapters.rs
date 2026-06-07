@@ -139,6 +139,27 @@ pub async fn count_chapters(pool: &SqlitePool, work_id: &str) -> Result<u32, Loc
     Ok(u32::try_from(count).unwrap_or(0))
 }
 
+/// Parameters for inserting a single chapter row.
+#[derive(Debug)]
+pub struct InsertChapterParams<'a> {
+    /// Owning Work ID.
+    pub work_id: &'a str,
+    /// Chapter number.
+    pub chapter: i32,
+    /// Volume number (nullable; V1.36 single-volume leaves NULL).
+    pub volume: Option<i32>,
+    /// Filename slug.
+    pub slug: Option<&'a str>,
+    /// Planned word count (default 4000).
+    pub planned_word_count: i32,
+    /// Relative path to outline file.
+    pub outline_path: Option<&'a str>,
+    /// Relative path to chapter body file.
+    pub body_path: Option<&'a str>,
+    /// ISO 8601 timestamp.
+    pub now: &'a str,
+}
+
 /// Insert a single chapter row.
 ///
 /// # Errors
@@ -146,14 +167,7 @@ pub async fn count_chapters(pool: &SqlitePool, work_id: &str) -> Result<u32, Loc
 /// Returns `LocalDbError` if the database query fails (e.g. PK conflict).
 pub async fn insert_chapter(
     pool: &SqlitePool,
-    work_id: &str,
-    chapter: i32,
-    volume: Option<i32>,
-    slug: Option<&str>,
-    planned_word_count: i32,
-    outline_path: Option<&str>,
-    body_path: Option<&str>,
-    now: &str,
+    params: &InsertChapterParams<'_>,
 ) -> Result<(), LocalDbError> {
     // SAFETY: INSERT against work_chapters — runtime query.
     sqlx::query(
@@ -162,21 +176,21 @@ pub async fn insert_chapter(
           status, outline_path, body_path, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, NULL, 'not_started', ?, ?, ?, ?)",
     )
-    .bind(work_id)
-    .bind(chapter)
-    .bind(volume)
-    .bind(slug)
-    .bind(planned_word_count)
-    .bind(outline_path)
-    .bind(body_path)
-    .bind(now)
-    .bind(now)
+    .bind(params.work_id)
+    .bind(params.chapter)
+    .bind(params.volume)
+    .bind(params.slug)
+    .bind(params.planned_word_count)
+    .bind(params.outline_path)
+    .bind(params.body_path)
+    .bind(params.now)
+    .bind(params.now)
     .execute(pool)
     .await?;
     Ok(())
 }
 
-/// Get a single chapter row by work_id and chapter number.
+/// Get a single chapter row by `work_id` and chapter number.
 ///
 /// # Errors
 ///
@@ -240,7 +254,7 @@ pub async fn update_status(
     Ok(())
 }
 
-/// Update a chapter's outline_path and body_path.
+/// Update a chapter's `outline_path` and `body_path`.
 ///
 /// # Errors
 ///
@@ -332,22 +346,17 @@ pub async fn reconcile_from_filesystem(
         }
 
         // Parse chapter number from filename
-        let ch_num = parse_chapter_from_filename(&fname);
-        let ch_num = match ch_num {
-            Some(n) => n,
-            None => continue,
+        let Some(ch_num) = parse_chapter_from_filename(&fname) else {
+            continue;
         };
 
         // Parse frontmatter for status and word_count
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(_) => continue,
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
         };
         let fm = parse_frontmatter(&content);
         let fm_status = fm.get("status").cloned();
-        let fm_word_count: Option<i32> = fm
-            .get("word_count")
-            .and_then(|v| v.parse().ok());
+        let fm_word_count: Option<i32> = fm.get("word_count").and_then(|v| v.parse().ok());
 
         // Check if row exists
         let existing = get_chapter(pool, work_id, ch_num).await?;
@@ -358,14 +367,16 @@ pub async fn reconcile_from_filesystem(
                 let body_path = format!("Works/{work_ref}/Stories/{fname}");
                 insert_chapter(
                     pool,
-                    work_id,
-                    ch_num,
-                    None,
-                    None,
-                    4000,
-                    None,
-                    Some(&body_path),
-                    now,
+                    &InsertChapterParams {
+                        work_id,
+                        chapter: ch_num,
+                        volume: None,
+                        slug: None,
+                        planned_word_count: 4000,
+                        outline_path: None,
+                        body_path: Some(&body_path),
+                        now,
+                    },
                 )
                 .await?;
                 created += 1;
@@ -410,7 +421,7 @@ fn parse_chapter_from_filename(filename: &str) -> Option<i32> {
 }
 
 /// Minimal YAML frontmatter parser (key: value pairs only).
-/// Returns a HashMap of key-value pairs from between `---` delimiters.
+/// Returns a `HashMap` of key-value pairs from between `---` delimiters.
 fn parse_frontmatter(content: &str) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     let mut in_frontmatter = false;
@@ -430,7 +441,11 @@ fn parse_frontmatter(content: &str) -> std::collections::HashMap<String, String>
         if in_frontmatter {
             if let Some((key, value)) = trimmed.split_once(':') {
                 let key = key.trim().to_string();
-                let value = value.trim().trim_matches('"').trim_matches('\'').to_string();
+                let value = value
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
                 map.insert(key, value);
             }
         }
@@ -554,14 +569,16 @@ mod tests {
 
         insert_chapter(
             &pool,
-            "wrk_crud_001",
-            1,
-            None,
-            Some("introduction"),
-            5000,
-            Some("Works/my-novel/Outlines/chapters/ch01-outline.md"),
-            Some("Works/my-novel/Stories/ch01-introduction.md"),
-            "2026-06-07T10:00:00Z",
+            &InsertChapterParams {
+                work_id: "wrk_crud_001",
+                chapter: 1,
+                volume: None,
+                slug: Some("introduction"),
+                planned_word_count: 5000,
+                outline_path: Some("Works/my-novel/Outlines/chapters/ch01-outline.md"),
+                body_path: Some("Works/my-novel/Stories/ch01-introduction.md"),
+                now: "2026-06-07T10:00:00Z",
+            },
         )
         .await
         .unwrap();
@@ -686,9 +703,15 @@ mod tests {
         insert_test_work(&pool, "wrk_recon_002").await;
 
         // Pre-seed 3 chapters
-        seed_chapters(&pool, "wrk_recon_002", "my-novel", 3, "2026-06-07T10:00:00Z")
-            .await
-            .unwrap();
+        seed_chapters(
+            &pool,
+            "wrk_recon_002",
+            "my-novel",
+            3,
+            "2026-06-07T10:00:00Z",
+        )
+        .await
+        .unwrap();
 
         // Create workspace with 1 changed frontmatter
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");

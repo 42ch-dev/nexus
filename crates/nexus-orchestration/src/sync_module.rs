@@ -27,7 +27,9 @@ pub fn works_dir(workspace_dir: &Path, work_ref: &str) -> PathBuf {
 /// Returns `Works/<work_ref>/Stories/<filename>` under the workspace root.
 #[must_use]
 pub fn chapter_body_path(workspace_dir: &Path, work_ref: &str, filename: &str) -> PathBuf {
-    works_dir(workspace_dir, work_ref).join("Stories").join(filename)
+    works_dir(workspace_dir, work_ref)
+        .join("Stories")
+        .join(filename)
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +231,7 @@ pub async fn build_story_bundle_with_db(
     let mut bundle = build_story_bundle(world_id, work_id, work, workspace_dir)?;
 
     if let Some(pool) = db_pool {
+        use sqlx::Row;
         // SAFETY: SELECT against work_chapters — runtime query.
         let rows = sqlx::query(
             "SELECT chapter, status, actual_word_count FROM work_chapters WHERE work_id = ?",
@@ -238,7 +241,6 @@ pub async fn build_story_bundle_with_db(
         .await
         .ok()?;
 
-        use sqlx::Row;
         let mut meta_map = std::collections::HashMap::new();
         for row in &rows {
             let chapter: i32 = row.get("chapter");
