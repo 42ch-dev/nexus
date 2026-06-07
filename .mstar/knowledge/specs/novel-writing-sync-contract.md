@@ -19,7 +19,8 @@ The sync module scans the workspace for novel-writing artifacts when `work_profi
 
 - Only `.md` files **directly under** `Works/<work_ref>/Stories/` are sync chapter candidates
 - Hidden files (starting with `.`) are skipped
-- `README.md`, `work-status.md`, `Outlines/**`, `Worldbuilding/**`, `Logs/**` are **never** chapter candidates
+- `README.md`, `Outlines/**`, `Logs/**` are **never** chapter candidates. Per-chapter metadata is derived from the **`work_chapters` table** in `state.db` (per [novel-workflow-profile.md §4.1](./novel-workflow-profile.md)); the legacy `work-status.md` file is removed in V1.36.
+- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](./entity-scope-model.md) + [novel-workflow-profile.md §3.5](./novel-workflow-profile.md))
 - Workspace-root `Stories/<story_ref>/` is **not** scanned (legacy; removed pre-1.0)
 - Each `work_ref` directory under `Works/` represents one novel Work's artifact tree
 

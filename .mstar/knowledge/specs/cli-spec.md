@@ -743,14 +743,15 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
   Works/
     <work_ref>/
       README.md
-      work-status.md
       Outlines/
+        volume-outline.md       # 可选 V1.36
         chapters/
           ch01-outline.md
+        foreshadowing.md        # V1.36 空模板（F### rows）
+        event-index.md          # V1.36 空模板（E### rows）
       Stories/
         ch01-<slug>.md
         ...
-      Worldbuilding/         # 可选
   .nexus42/
     references/
       <run-id>/
@@ -762,8 +763,10 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 - **`Works/<work_ref>/Stories/`**
   - 小说章节**正文**主存（sync 扫描根）；**`work_ref`** 与 **`work_id`** 以 **本地 DB `works` 表 + preset** 为准，**不得**仅靠目录名推断。
-- **`Works/<work_ref>/Outlines/`**、**`work-status.md`**、**`README.md`**
-  - 规划与状态元数据；**不得**被 sync 模块当作章节正文。
+- **章节状态真源**在本地 DB `state.db` 的 **`work_chapters` 表**（见 [novel-workflow-profile.md §4.1](./novel-workflow-profile.md)）。`work-status.md` 文件在 V1.36 **已移除**。
+- **`Works/<work_ref>/Outlines/`**、**`README.md`**
+  - 规划与人类概要元数据；**不得**被 sync 模块当作章节正文。
+- **世界设定内容**跨作品（Work）共享，归 **World KB**（见 [entity-scope-model.md §5.4](./entity-scope-model.md)）。`Works/<work_ref>/Worldbuilding/` 子树在 V1.36 **已移除**；通过 `work.world_id` 绑定到 World。
 - **已废弃（pre-1.0 移除）**：工作区根 **`Stories/<StoryRef>/`** — 无兼容 shim。
 - **`.nexus42/references/<run-id>/`**
   - **研究 / 采风型**机读产出默认位置；`report.md` + 可选 `artifacts/`；与 **`ReferenceSource`** 索引合同衔接。

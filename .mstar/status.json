@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-07T18:30:00+08:00",
+  "updated_at": "2026-06-07T19:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-creative-brief-intake-preset",
@@ -271,21 +271,20 @@
         ],
         "description": "P0 — novel profile spec lock + spec cross-links",
         "spec_gaps_v1_36": {
-          "expanded_at": "2026-06-07T18:30:00+08:00",
-          "expansion_source": "novels-system V1.36 baseline distill (deferred-features-cross-version-tracker.md §3.6.1)",
+          "expanded_at": "2026-06-07T19:00:00+08:00",
+          "expansion_source": "V1.36 architecture refactor (round 2: World KB cross-Work + work_chapters SSOT)",
           "new_tasks": [
-            "T8",
-            "T9",
-            "T10",
-            "T11"
+            "T12",
+            "T13"
           ],
-          "new_task_summary": "T8: layout §3.1/§3.2 add Outlines/foreshadowing.md + Outlines/event-index.md empty stubs; T9: work-status.md 6-col chapter table; T10: chapter frontmatter volume: integer; T11: §5 llm_judge quality gate on finalize state",
+          "new_task_summary": "T12: replace §4.1 with work_chapters table DDL (state.db SSOT for chapter state); remove work-status.md file; document truth model; T13: remove per-Work Worldbuilding/ subtree; add §3.5 World integration (cross-Work content lives in World KB; world_id binding; novel-project-init grill-me; --world-id CLI; world_refs advisory frontmatter); update §2.1/§5/§8",
           "downstream_plan_changes": {
-            "2026-06-07-v1.36-novel-artifact-layout-and-templates": "T7-T10 added (foreshadowing.md + event-index.md empty templates; work-status.md 6-col; chapter body volume field)",
-            "2026-06-07-v1.36-novel-chapter-drafting-pipeline": "T7-T9 added (llm_judge exit_when on finalize; 五问 prompt; F### required in outline)"
+            "2026-06-07-v1.36-novel-artifact-layout-and-templates": "T3 updated (work-status.md template not shipped); T9 updated (chapter body template gets world_refs); T10-T13 added (work_chapters DDL migration + works.world_id FK + init preset seeding + sync module rewrite + reconcile command)",
+            "2026-06-07-v1.36-novel-project-init-preset": "T1 grill-me adds World binding question (existing/new/worldless); updates per novel-workflow-profile §3.5"
           },
           "acceptance_added": "rg 5 lines (foreshadowing.md / event-index.md / 实际字数 / volume: integer / llm_judge)",
-          "rationale": "V1.36 PM distill vs novels-system production reference; user approved 4 of 4 recommended gap-fills on 2026-06-07"
+          "rationale": "User feedback 2026-06-07: Worldbuilding is cross-Work (World KB is canonical, not per-Work); work-status.md duplicates state (work_chapters table is the SSOT). user approved work_chapters (not work_status) as table name.",
+          "round": 2
         }
       }
     },
@@ -301,7 +300,13 @@
         "depends_on": [
           "2026-06-07-v1.36-novel-spec-and-compass"
         ],
-        "description": "P1 — interactive novel project init preset (grill-me)"
+        "description": "P1 — interactive novel project init preset (grill-me)",
+        "spec_gaps_v1_36": {
+          "round": 2,
+          "expanded_at": "2026-06-07T19:00:00+08:00",
+          "expansion_source": "V1.36 architecture refactor (round 2: World binding in init grill-me)",
+          "new_requirements": "T1 grill-me now asks World binding question: existing world_id / create new World / worldless (default). On success: scaffold Works/<work_ref>/ dirs + seed work_chapters rows 1..N; set work.world_id (if bound). See novel-workflow-profile §3.5/§5"
+        }
       }
     },
     {
@@ -319,15 +324,16 @@
         ],
         "description": "P2 — Works/<work_ref>/ scaffold, templates, sync scan migration",
         "spec_gaps_v1_36": {
-          "expanded_at": "2026-06-07T18:30:00+08:00",
-          "expansion_source": "novels-system V1.36 baseline distill (deferred-features-cross-version-tracker.md §3.6.1)",
+          "expanded_at": "2026-06-07T19:00:00+08:00",
+          "expansion_source": "V1.36 architecture refactor (round 2: work_chapters DB SSOT + World binding CLI)",
           "new_tasks": [
-            "T7",
-            "T8",
-            "T9",
-            "T10"
+            "T10 (rewritten)",
+            "T11 (new)",
+            "T12 (new)",
+            "T13 (new)"
           ],
-          "new_task_summary": "T7: Outlines/foreshadowing.md empty template; T8: Outlines/event-index.md empty template; T9: work-status.md 6-col template + auto-fill actual/progress; T10: chapter body volume field template"
+          "new_task_summary": "T3 updated (work-status.md template NOT shipped; work_chapters replaces it); T9 updated (chapter body template gets world_refs field); T10 = work_chapters SQL migration + nexus-local-db typed module; T11 = novel-project-init grill-me World binding question + --world-id CLI + work_chapters seed rows; T12 = novel-writing transition writes both work_chapters row + chapter frontmatter (truth model); T13 = sync module derives per-chapter metadata from work_chapters table",
+          "round": 2
         }
       }
     },
