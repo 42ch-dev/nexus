@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.36 plan per Profile B. Moved from status.json on V1.37 iteration open (harness docs prepare).",
+  "plan_id": "2026-06-07-v1.36-novel-chapter-drafting-pipeline",
+  "title": "V1.36 P3 — single-chapter outline → draft → final pipeline",
+  "done_at": "2026-06-07T20:36:00+08:00",
+  "archived_at": "2026-06-07T23:58:01+08:00",
+  "plan_file": ".mstar/plans/2026-06-07-v1.36-novel-chapter-drafting-pipeline.md",
+  "archived_record": ".mstar/archived/plans/2026-06-07-v1.36-novel-chapter-drafting-pipeline.json",
+  "snapshot": {
+    "id": "2026-06-07-v1.36-novel-chapter-drafting-pipeline",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-07-v1.36-novel-chapter-drafting-pipeline.md",
+    "working_branch": "feature/v1.36-novel-chapter-drafting-pipeline",
+    "merge_target": "iteration/v1.36",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "depends_on": [
+        "2026-06-07-v1.36-novel-artifact-layout-and-templates"
+      ],
+      "description": "P3 — single-chapter outline → draft → final正文 pipeline (closes R-V136P2-03)",
+      "worktree": ".worktrees/v1.36-p3-pipeline",
+      "done_at": "2026-06-07T20:36:00+08:00",
+      "in_progress_at": "2026-06-07T20:12:00+08:00",
+      "unblocked_at": "2026-06-07T20:10:00+08:00",
+      "unblocked_by": "2026-06-07-v1.36-novel-artifact-layout-and-templates (P2 Done)",
+      "merge_commits": [
+        "9a8f980 (T1 preset chapter-scoped state graph)",
+        "993a807 (T2+T9 prompts + finalize-exit.md 五问)",
+        "511c417 (T3+T4 novel.chapter_transition capability + work_chapters sync)",
+        "b975e5c (T5+T7 e2e test + llm_judge gate assertion)",
+        "19340cc (T6 README update)",
+        "7201ee4 (PM-validate consolidated)"
+      ],
+      "qc": "skipped — PM-validate direct path (analogous to V1.35 P4 + V1.36 P1/P2 PM-override). No QC tri-review dispatched; PM read commits + ran verification suite (clippy clean, fmt clean, 459+ tests pass).",
+      "qa": "PM-validated (clippy clean, fmt clean, 459+ tests pass; 2 new residuals tracked; R-V136P2-03 closed).",
+      "shipped": [
+        "novel-writing preset YAML: 4-state chapter-scoped graph (outline_chapter → draft_chapter → finalize → done) with §5.3.2 gates and world_binding: optional",
+        "3 new prompts: outline-chapter.md, draft-chapter.md, finalize-exit.md (五问 quality check: opening three lines / conflict resonance / twist recall / new perspective / ending hook)",
+        "novel.chapter_transition capability: state guards + atomic work_chapters row + frontmatter status flip + actual_word_count sync + current_chapter advance + tracing structured logs + --force override with audit log",
+        "chapter-outline.md template: required ## Foreshadowing Touched (F###) section + table format",
+        "E2e test: produce stage → ch01 outline + draft + finalized files (mocked judge.llm)",
+        "Embedded-presets README update for V1.36 chapter-scoped pipeline",
+        "Closed R-V136P2-03 (T7 finalize gate ships the data-side quality gate)"
+      ],
+      "open_residuals": 2,
+      "closed_residuals": 1,
+      "residual_findings": [
+        {
+          "id": "R-V136P3-01",
+          "title": "novel-writing legacy prompt files (gathering/brainstorm/outlining/draft-intro/draft-body) preserved on disk; unreferenced by V1.36 preset",
+          "severity": "low",
+          "source": "P3 PM-validate 2026-06-07T20:36:00+08:00",
+          "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/{gathering,brainstorm-cluster,brainstorm-diverge,brainstorm-select,draft-intro,draft-body,outlining,outlining-ctx-update,gathering-exit}.md",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target_date": "V1.36 P5 (hygiene) or V1.37",
+          "note": "Preserved for backward compat; the new chapter-scoped preset does not reference them. Move to _legacy/ subdir or delete in a future hygiene pass."
+        },
+        {
+          "id": "R-V136P3-02",
+          "title": "Runtime gate evaluation logic for preset.gates: field not yet wired in engine",
+          "severity": "low",
+          "source": "P3 PM-validate 2026-06-07T20:36:00+08:00",
+          "scope": "crates/nexus-orchestration/src/preset/ (engine-side; orchestration-engine.md §7.9)",
+          "decision": "defer",
+          "owner": "@fullstack-dev",
+          "target_date": "V1.37",
+          "note": "P3 ships preset-side declaration of gates: per §5.3.2 (work_field + filesystem + previous_preset). The engine-side evaluation logic (when gates fail, enqueue vs reject; when --force-gates is set) is its own engine concern; tracked separately from preset authoring."
+        }
+      ],
+      "closed_residual_refs": [
+        "R-V136P2-03 (T7 finalize-exit.md + llm_judge 五问 gate wired in P3 commit b975e5c)"
+      ],
+      "spec_gaps_v1_36": {
+        "expanded_at": "2026-06-07T18:30:00+08:00",
+        "expansion_source": "novels-system V1.36 baseline distill (deferred-features-cross-version-tracker.md §3.6.1)",
+        "new_tasks": [
+          "T7",
+          "T8",
+          "T9"
+        ],
+        "new_task_summary": "T7: llm_judge exit_when on finalize with 五问 prompt; T8: finalize prompt enforces GO-only state transition + audit log on NOGO override; T9: chapter outline requires F### entry per foreshadowing item touched"
+      }
+    }
+  },
+  "qc": "skipped — PM-validate direct path (analogous to V1.35 P4 + V1.36 P1/P2 PM-override). No QC tri-review dispatched; PM read commits + ran verification suite (clippy clean, fmt clean, 459+ tests pass).",
+  "qa": "PM-validated (clippy clean, fmt clean, 459+ tests pass; 2 new residuals tracked; R-V136P2-03 closed).",
+  "residual_count": 2,
+  "merge_commits": [
+    "9a8f980 (T1 preset chapter-scoped state graph)",
+    "993a807 (T2+T9 prompts + finalize-exit.md 五问)",
+    "511c417 (T3+T4 novel.chapter_transition capability + work_chapters sync)",
+    "b975e5c (T5+T7 e2e test + llm_judge gate assertion)",
+    "19340cc (T6 README update)",
+    "7201ee4 (PM-validate consolidated)"
+  ],
+  "notes": "P3 — single-chapter outline → draft → final正文 pipeline (closes R-V136P2-03)",
+  "residual_open": [
+    "R-V136P3-01 (low)",
+    "R-V136P3-02 (low)"
+  ],
+  "residual_closed": [
+    "R-V136P2-03 (T7 finalize-exit.md + llm_judge 五问 gate wired in P3 commit b975e5c)"
+  ]
+}
