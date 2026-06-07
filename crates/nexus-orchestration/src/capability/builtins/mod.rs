@@ -12,6 +12,7 @@ mod judge_llm;
 mod judge_rule;
 mod kb_extract_work;
 mod novel_scaffold;
+mod novel_scaffold_sanitize;
 mod outbox;
 pub mod registry;
 mod soul_experience_aggregate;

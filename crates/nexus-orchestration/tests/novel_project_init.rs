@@ -498,3 +498,98 @@ fn t7e_stage_advance_produce_passes_when_intake_complete() {
         "produce stage must resolve to novel-writing preset"
     );
 }
+
+// ---------------------------------------------------------------------------
+// T7a-bis: Input sanitization (F1 — fixes C-1, C-4, W-2)
+// ---------------------------------------------------------------------------
+//
+// Verifies that the scaffold capability rejects untrusted grill-me values
+// that would break filesystem path semantics (path traversal, separators,
+// uppercase, oversize) or exceed the documented chapter-count range.
+
+async fn run_invalid_input(input: serde_json::Value) -> Result<serde_json::Value, String> {
+    let (pool, dir) = fresh_pool().await;
+    insert_test_work(&pool, "wrk_t7abis").await;
+    let works_root = dir.path().join("Works");
+    let cap = make_cap(pool.clone(), &works_root);
+    cap.run(input).await.map_err(|e| e.to_string())
+}
+
+#[tokio::test]
+async fn t7a_bis_rejects_dotdot_work_ref() {
+    let input = scaffold_input("wrk_t7abis", "..", "Bad", None, 1);
+    let err = run_invalid_input(input).await.unwrap_err();
+    assert!(
+        err.contains("invalid input") || err.contains("path-traversal") || err.contains("work_ref"),
+        "C-1: dotdot work_ref must be rejected, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn t7a_bis_rejects_slash_work_ref() {
+    let input = scaffold_input("wrk_t7abis", "foo/bar", "Bad", None, 1);
+    let err = run_invalid_input(input).await.unwrap_err();
+    assert!(err.contains("invalid input"), "C-1: slash rejected: {err}");
+}
+
+#[tokio::test]
+async fn t7a_bis_rejects_empty_work_ref() {
+    let input = scaffold_input("wrk_t7abis", "", "Bad", None, 1);
+    let err = run_invalid_input(input).await.unwrap_err();
+    assert!(err.contains("invalid input"), "C-1: empty rejected: {err}");
+}
+
+#[tokio::test]
+async fn t7a_bis_rejects_uppercase_work_ref() {
+    let input = scaffold_input("wrk_t7abis", "MyNovel", "Bad", None, 1);
+    let err = run_invalid_input(input).await.unwrap_err();
+    assert!(
+        err.contains("lowercase") || err.contains("invalid"),
+        "C-4: uppercase rejected: {err}"
+    );
+}
+
+#[tokio::test]
+async fn t7a_bis_rejects_oversize_work_ref() {
+    let big = "a".repeat(65);
+    let input = scaffold_input("wrk_t7abis", &big, "Bad", None, 1);
+    let err = run_invalid_input(input).await.unwrap_err();
+    assert!(err.contains("invalid input"), "C-1: oversize rejected: {err}");
+}
+
+#[tokio::test]
+async fn t7a_bis_chapters_zero_rejected() {
+    let input = scaffold_input("wrk_t7abis", "ok", "Bad", None, 0);
+    let err = run_invalid_input(input).await.unwrap_err();
+    assert!(
+        err.contains("total_planned_chapters"),
+        "W-2: 0 chapters rejected: {err}"
+    );
+}
+
+#[tokio::test]
+async fn t7a_bis_chapters_over_max_rejected() {
+    let input = scaffold_input("wrk_t7abis", "ok", "Bad", None, 101);
+    let err = run_invalid_input(input).await.unwrap_err();
+    assert!(
+        err.contains("total_planned_chapters"),
+        "W-2: 101 chapters rejected: {err}"
+    );
+}
+
+#[tokio::test]
+async fn t7a_bis_chapters_bounds_accepted() {
+    // boundary check: 1 and 100 must be accepted
+    for n in [1, 100] {
+        let (pool, dir) = fresh_pool().await;
+        let wid = format!("wrk_bnd_{n}");
+        insert_test_work(&pool, &wid).await;
+        let works_root = dir.path().join("Works");
+        let cap = make_cap(pool.clone(), &works_root);
+        let input = scaffold_input(&wid, "bounded-ok", "OK", None, n);
+        cap.run(input).await.unwrap_or_else(|e| {
+            panic!("W-2: {n} chapters must be accepted, got error: {e}");
+        });
+    }
+}
+

@@ -4,6 +4,7 @@
 //! the `novel-project-init` embedded preset, seeds `work_chapters` rows,
 //! and updates the `works` table — all atomically per V1.36 §5.4.
 
+use super::novel_scaffold_sanitize::{validate_total_chapters, validate_work_ref};
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_local_db::{work_chapters, works};
@@ -139,6 +140,23 @@ impl Capability for NovelProjectScaffold {
         let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
             CapabilityError::InputInvalid(format!("novel.project_scaffold input: {e}"))
         })?;
+
+        // ── F1 — sanitize untrusted grill-me values (C-1, C-4, W-2) ────
+        // Reject path-traversal, separators, uppercase, oversize, control
+        // characters; bound chapter count to 1..=100 (matches prompt range).
+        let work_ref = validate_work_ref(&inp.work_ref)?;
+        let total_chapters_bounded = validate_total_chapters(inp.total_planned_chapters)?;
+        // Re-bind to the validated values so downstream code cannot accidentally
+        // use the raw input fields.
+        let inp = ScaffoldInput {
+            creator_id: inp.creator_id,
+            work_id: inp.work_id,
+            work_ref,
+            title: inp.title,
+            world_id: inp.world_id,
+            total_planned_chapters: inp.total_planned_chapters,
+        };
+        let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
 
         let root = self.works_root.join(&inp.work_ref);
 
