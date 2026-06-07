@@ -3,8 +3,9 @@ report_kind: qc_review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-07-v1.36-novel-project-init-preset
-verdict: Request Changes
-generated_at: 2026-06-07T19:15:00Z
+verdict: Approve
+generated_at: 2026-06-07T20:45:00Z
+revalidated_at: 2026-06-07T20:45:00Z
 ---
 
 # Code Review Report
@@ -99,5 +100,59 @@ W-4 (logging gap) and S-1/S-2 are non-blocking but should be addressed in the fi
 
 **Real commit hash**: 2a97858
 
-## Next dispatch
-Targeted re-review expected after W-1, W-2, W-3 fixes. PM should assign reviewer #3 (this seat) for re-validation of performance/reliability fixes.
+## Revalidation
+
+**Re-review date**: 2026-06-07T20:45:00Z  
+**Fix wave tip**: `a8060f4` on `feature/v1.36-novel-project-init-preset`  
+**Re-review scope**: W-1, W-2, W-3, W-4 (S-1, S-2 deferred per PM dispatch)
+
+### W-1 — Template engine divergence → **RESOLVED**
+- **Fix commit**: `3089581` (`fix(init): F3 use handlebars-rust for template rendering`)
+- **Evidence**: `SCAFFOLD_HANDLEBARS` (`std::sync::OnceLock<handlebars::Handlebars<'static>>`) replaces the naive `String::replace` renderer. `no_escape` preserves Markdown special characters; `set_strict_mode(true)` fails fast on unbound placeholders. `render_template` signature changed from `String` to `Result<String, CapabilityError>`, with all four call sites updated to propagate via `?`.
+- **Tests**: `render_template_strict_mode_rejects_unbound_var` and `render_template_preserves_special_chars_no_html_escape` added in `novel_scaffold.rs` lib tests. Both pass.
+- **Disposition**: Closed.
+
+### W-2 — Unbounded `total_planned_chapters` → **RESOLVED**
+- **Fix commit**: `81ab79a` (`fix(init): F1 sanitize work_ref + slug + total_planned_chapters`)
+- **Evidence**: New `novel_scaffold_sanitize.rs` module introduces `validate_total_chapters(n: i32) -> Result<u32, ScaffoldError>` enforcing `1..=100` bound (matches prompt-advertised range). Applied at scaffold capability entry point before any FS path join or DB write.
+- **Tests**: Integration tests `t7a_bis_chapters_zero_rejected`, `t7a_bis_chapters_over_max_rejected`, and `t7a_bis_chapters_bounds_accepted` verify boundary rejection (0, 101) and acceptance (1, 100). All pass.
+- **Disposition**: Closed.
+
+### W-3 — No filesystem rollback on partial failure → **RESOLVED**
+- **Fix commit**: `ec4032b` (`fix(init): F2 atomic scaffold transaction (FS rollback)`)
+- **Evidence**: `ScaffoldTransaction` struct registers all FS writes (`files_created: Vec<PathBuf>`, `dirs_created: Vec<PathBuf>`). `Drop` impl removes files (best-effort) and dirs in reverse order. `create_dir_all_idem` and `write_file_idem` return `Result<bool>` to distinguish fresh creations from pre-existing entries (pre-existing entries are NOT removed on rollback). `commit()` flips a flag suppressing rollback on success, called only after T3 (seed_chapters) AND T4 (patch_work) both return `Ok`.
+- **Note**: Cross-call DB atomicity (single sqlx transaction wrapping T3 + T4) is acknowledged as a follow-up under `R-V133P1-09`; current implementation uses per-call internal transactions with idempotent semantics (INSERT OR IGNORE, single UPDATE), which is acceptable for V1.36 single-user pre-1.0.
+- **Tests**: `t7g_db_failure_rolls_back_filesystem_scaffold` passes — FK violation in T3 triggers FS rollback, `Works/<work_ref>/` subtree is removed.
+- **Disposition**: Closed.
+
+### W-4 — Logging gap → **RESOLVED**
+- **Fix commit**: `9ecd52f` (`fix(init): F8 structured logging + F9 concurrency note`)
+- **Evidence**: 
+  - `info!("novel.project_scaffold: start", work_id, work_ref, total_planned_chapters, world_id, partial)` at capability entry.
+  - `info!("novel.project_scaffold: chapters seeded", work_id, chapters_seeded)` after T3.
+  - `info!("novel.project_scaffold: works patched", work_id, partial)` after T4.
+  - `info!("novel.project_scaffold: commit ok", work_id, work_ref, files_created, dirs_created, chapters_seeded)` at success boundary.
+  - `tracing::warn!(work_id, "novel.project_scaffold: no DB pool bound — running FS-only (test/dry-run mode)")` when `pool` is `None`.
+  - `tracing::warn!(path, "scaffold rollback: remove file failed")` and `tracing::warn!(path, "scaffold rollback: remove dir failed")` in `ScaffoldTransaction::Drop`.
+- **Disposition**: Closed.
+
+### S-1 / S-2 (Deferred)
+- **S-1** (Template cache for embedded presets) and **S-2** (CLI arg upper bound) are NOT addressed in this fix wave, per PM dispatch. Acceptable — do not block approval.
+
+### Static checks
+- `cargo +nightly clippy -p nexus-orchestration -p nexus42 -p nexus-local-db -- -D warnings`: **Clean** (0 warnings).
+- `cargo test -p nexus-orchestration --test novel_project_init`: **19 passed, 0 failed** in 0.41s (well under 1s aggregate threshold).
+
+### Updated Summary
+
+| Severity | Initial | Post-Fix | Status |
+|----------|---------|----------|--------|
+| 🔴 Critical | 0 | 0 | — |
+| 🟡 Warning | 4 | 0 | All resolved |
+| 🟢 Suggestion | 2 | 2 | Deferred |
+
+**Verdict**: Approve
+
+All 4 Warnings raised by reviewer #3 are verified closed. No new Critical or Warning findings. S-1 and S-2 remain deferred per PM dispatch. Branch is clean (clippy passes, all 19 integration tests pass). Ready for PM consolidation and QA.
+
+**Real commit hash (re-review tip)**: a8060f4
