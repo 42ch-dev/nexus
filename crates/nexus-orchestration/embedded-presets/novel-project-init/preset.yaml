@@ -8,8 +8,14 @@
 # novel-workflow-profile.md §5.4, seeds work_chapters rows, PATCHes works.
 #
 # Input variables (passed via core_context / preset.input):
-#   work_id:     Work entity ID being initialized (required)
-#   initial_idea: Raw user idea text (required)
+#   work_id:                 Work entity ID being initialized (required)
+#   creator_id:              Creator owning the Work (required)
+#   initial_idea:            Raw user idea text (required)
+#   work_ref:                Slug pre-derived by CLI from --idea / args (required for committing)
+#   title:                   Working title pre-collected via CLI / grill-me (required)
+#   total_planned_chapters:  Integer 1..=100 (required)
+#   world_id:                Optional world binding (string or null)
+#   fields_changed:          Optional array of field names for partial re-init
 #
 # This preset is one-shot (work_init only); it does NOT auto-chain into
 # novel-writing. The downstream gate (§5.3.2) enforces the manual step.
@@ -22,6 +28,7 @@ preset:
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
+    - novel.project_scaffold
   run_intents:
     - work_init
   initial: init_intro
@@ -61,6 +68,27 @@ states:
         name: summary_graph
     exit_when:
       kind: graph_complete
+    next: committing
+
+  # F6 (C-001): terminal scaffold step. Wires preset.input → capability
+  # input per spec §5.4.4. The CLI `--init-preset` flow (F7 / W-001)
+  # pre-populates work_ref/title/total_planned_chapters/world_id into
+  # preset.input from the grill-me transcript before this state runs.
+  - id: committing
+    description: "Invoke novel.project_scaffold to materialize the Work scaffold"
+    enter:
+      - kind: capability
+        name: novel.project_scaffold
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          work_id: "{{preset.input.work_id}}"
+          work_ref: "{{preset.input.work_ref}}"
+          title: "{{preset.input.title}}"
+          total_planned_chapters: "{{preset.input.total_planned_chapters}}"
+          world_id: "{{preset.input.world_id}}"
+          fields_changed: "{{preset.input.fields_changed}}"
+    exit_when:
+      kind: rule
     next: done
 
   - id: done

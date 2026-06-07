@@ -141,6 +141,11 @@ impl CapabilityRegistry {
             Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::new()),
             Box::new(builtins::SoulExperienceAggregate),
+            // F6 (C-001): register novel.project_scaffold in the
+            // pool-less registry so embedded preset validation can
+            // resolve it. The pool-bound variant is registered via
+            // [`with_builtins_and_pool`] for runtime use.
+            Box::new(builtins::NovelProjectScaffold::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
