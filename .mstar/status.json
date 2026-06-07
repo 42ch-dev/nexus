@@ -25,7 +25,7 @@
     },
     {
       "id": "2026-06-07-v1.37-novel-foundation-first",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-07-v1.37-novel-foundation-first.md",
       "working_branch": "feature/v1.37-novel-foundation-first",
       "merge_target": "iteration/v1.37",
@@ -42,11 +42,39 @@
           "R-V136P3-02"
         ],
         "updated_at": "2026-06-08T18:00:00+08:00",
+        "done_at": "2026-06-08T18:30:00+08:00",
+        "qc": "QC1 + QC2 + QC3 Approve (initial: Request Changes; targeted re-review after fix wave + F-002 fix all cleared)",
+        "qa": "qa-engineer Approve — 6/6 ACs verified, 981 tests pass, all CI gates clean",
+        "shipped": [
+          "AddScheduleRequest.input map wired from CLI grill-me through daemon to preset.input.* (R-V136P1-01)",
+          "Generic gate_evaluator (work_field | filesystem | previous_preset) with structured preset_gates_failed error per orchestration-engine.md §7.9.2 (R-V136P1-02)",
+          "novel_scaffold seed_chapters + patch_work wrapped in single DB transaction (R-V136P3-02)",
+          "--force-gates / --gate-reason CLI flags with append-only force_gates_audit table; ANSI-strip, 512-char cap, NFC normalize",
+          "Reserved input keys policy in add_schedule (work_id, creator_id, etc.)",
+          "gated presets without work_id return 422 preset_gates_failed (no silent bypass)",
+          "embedded-presets/novel-writing/preset.yaml gates moved under preset: with full §5.3.2 gate set",
+          "patch_work_tx returns Result<bool> (no dirty write on idempotent re-runs)",
+          "creator_schedules.work_id column + composite index; previous_preset gate uses equality not LIKE",
+          "force_gates_audit(creator_id, forced_at DESC) index",
+          "R-V137P0-01 residual registered (serde strict-mode for misplaced YAML keys)",
+          "12 new integration/unit tests covering gate success + failure paths, force-gates audit, reason sanitization, scaffold atomicity"
+        ],
         "closed_residuals": [
           "R-V136P1-01 (resolved — AddScheduleRequest.input wired, daemon handler routes input to preset.input.*)",
           "R-V136P1-02 (resolved — preset gate evaluator with work_field/filesystem/previous_preset strategies)",
           "R-V136P3-02 (resolved — novel scaffold seed_chapters + patch_work in single DB transaction)"
-        ]
+        ],
+        "commits": [
+          "73b9cb85 feat(v1.37-p0): novel foundation-first UX hardening",
+          "7d7f3d0b fix(v1.37-p0): resolve QC1/2/3 Request Changes findings",
+          "cbd8f16e fix(v1.37-p0): convert static SQL to compile-time macros (QC1 F-002)"
+        ],
+        "qc_reports": [
+          ".mstar/plans/reports/2026-06-07-v1.37-novel-foundation-first/qc1.md (Approve)",
+          ".mstar/plans/reports/2026-06-07-v1.37-novel-foundation-first/qc2.md (Approve)",
+          ".mstar/plans/reports/2026-06-07-v1.37-novel-foundation-first/qc3.md (Approve)"
+        ],
+        "qa_report": ".mstar/plans/reports/2026-06-07-v1.37-novel-foundation-first/qa.md (Approve, 6/6 ACs)"
       }
     },
     {
