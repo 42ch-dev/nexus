@@ -63,13 +63,54 @@ struct ScaffoldOutput {
 // Template rendering helpers
 // ---------------------------------------------------------------------------
 
-/// Minimal mustache-like template renderer for `{{key}}` placeholders.
-fn render_template(template: &str, vars: &[(&str, &str)]) -> String {
-    let mut result = template.to_string();
-    for (key, value) in vars {
-        result = result.replace(&format!("{{{{{key}}}}}"), value);
+/// Lazily-initialized handlebars registry for novel scaffold templates.
+///
+/// F3 (W-1): replaces the previous naive `String::replace` renderer with
+/// `handlebars-rust` to (a) support the broader `{{var}}` / `{{nested.path}}`
+/// surface our templates already use syntactically, (b) gain strict-mode
+/// errors when a placeholder is misspelled or unbound (silent literal
+/// `{{...}}` would leak into the generated Markdown), and (c) align with
+/// the renderer used by `tasks::render_strict_template` for capability
+/// arg rendering.
+///
+/// `no_escape` preserves plain-text fidelity (no HTML entity encoding of
+/// `&`, `<`, `>`) — these files are Markdown, not HTML.
+static SCAFFOLD_HANDLEBARS: std::sync::OnceLock<handlebars::Handlebars<'static>> =
+    std::sync::OnceLock::new();
+
+fn scaffold_handlebars() -> &'static handlebars::Handlebars<'static> {
+    SCAFFOLD_HANDLEBARS.get_or_init(|| {
+        let mut reg = handlebars::Handlebars::new();
+        reg.register_escape_fn(handlebars::no_escape);
+        reg.set_strict_mode(true);
+        reg
+    })
+}
+
+/// Render a novel-scaffold template using handlebars-rust in strict mode.
+///
+/// `vars` is a flat list of `(key, value)` pairs converted into a JSON
+/// object for rendering. Strict mode causes any unbound `{{key}}` in the
+/// template to fail rather than silently render empty, which surfaces
+/// template-vs-callsite drift at scaffold time instead of at the writer's
+/// desk.
+///
+/// # Errors
+///
+/// Returns `CapabilityError::Internal` if the template syntax is invalid
+/// or references an unbound variable. Templates ship with the binary, so
+/// a render failure here is a build-time author error, not a user error.
+fn render_template(
+    template: &str,
+    vars: &[(&str, &str)],
+) -> Result<String, CapabilityError> {
+    let mut payload = serde_json::Map::with_capacity(vars.len());
+    for (k, v) in vars {
+        payload.insert((*k).to_string(), serde_json::Value::String((*v).to_string()));
     }
-    result
+    scaffold_handlebars()
+        .render_template(template, &serde_json::Value::Object(payload))
+        .map_err(|e| CapabilityError::Internal(format!("template render: {e}")))
 }
 
 /// Read a template from the embedded preset directory.
@@ -221,7 +262,7 @@ impl Capability for NovelProjectScaffold {
                     ("description", &description),
                     ("total_planned_chapters", &total),
                 ],
-            );
+            )?;
             write_file_idem(&root.join("README.md"), &rendered, &mut files_created)?;
         }
 
@@ -244,7 +285,7 @@ impl Capability for NovelProjectScaffold {
                     ("title", &inp.title),
                     ("total_planned_chapters", &total),
                 ],
-            );
+            )?;
             write_file_idem(
                 &outlines.join("volume-outline.md"),
                 &rendered,
@@ -254,7 +295,7 @@ impl Capability for NovelProjectScaffold {
 
         // T2f: foreshadowing.md
         if let Some(tmpl) = load_template("foreshadowing.md") {
-            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)]);
+            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
                 &outlines.join("foreshadowing.md"),
                 &rendered,
@@ -264,7 +305,7 @@ impl Capability for NovelProjectScaffold {
 
         // T2g: event-index.md
         if let Some(tmpl) = load_template("event-index.md") {
-            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)]);
+            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
             write_file_idem(
                 &outlines.join("event-index.md"),
                 &rendered,
@@ -419,15 +460,38 @@ mod tests {
     #[test]
     fn render_template_replaces_placeholders() {
         let tmpl = "Title: {{title}}, Ref: {{work_ref}}";
-        let rendered = render_template(tmpl, &[("title", "My Novel"), ("work_ref", "my-novel")]);
+        let rendered = render_template(tmpl, &[("title", "My Novel"), ("work_ref", "my-novel")])
+            .expect("flat render");
         assert_eq!(rendered, "Title: My Novel, Ref: my-novel");
     }
 
     #[test]
     fn render_template_no_match_is_noop() {
         let tmpl = "No placeholders here";
-        let rendered = render_template(tmpl, &[("title", "My Novel")]);
+        let rendered = render_template(tmpl, &[("title", "My Novel")]).expect("noop render");
         assert_eq!(rendered, "No placeholders here");
+    }
+
+    #[test]
+    fn render_template_strict_mode_rejects_unbound_var() {
+        // F3 (W-1): strict mode catches misspelled / unbound placeholders
+        // instead of silently producing literal "{{...}}" in the output.
+        let tmpl = "Hello {{name}}, Ref: {{work_ref}}";
+        let err = render_template(tmpl, &[("work_ref", "abc")]).expect_err("must error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("template render"),
+            "expected template render error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn render_template_preserves_special_chars_no_html_escape() {
+        // F3 (W-1): no_escape mode preserves &, <, > as-is for Markdown.
+        let tmpl = "{{body}}";
+        let rendered = render_template(tmpl, &[("body", "A & B < C > D")])
+            .expect("no-escape render");
+        assert_eq!(rendered, "A & B < C > D");
     }
 
     #[tokio::test]
