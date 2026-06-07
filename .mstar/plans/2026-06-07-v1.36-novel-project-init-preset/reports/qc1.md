@@ -4,7 +4,8 @@ reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-07-v1.36-novel-project-init-preset"
 verdict: "Request Changes"
-generated_at: "2026-06-07T09:59:43Z"
+generated_at: "2026-06-07T10:53:56Z"
+revalidated_at: "2026-06-07T10:53:56Z"
 ---
 
 # Code Review Report
@@ -85,3 +86,39 @@ generated_at: "2026-06-07T09:59:43Z"
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+Targeted re-review for QC Reviewer #1 findings only, against post-fix tip `a8060f4` on `feature/v1.36-novel-project-init-preset` with diff basis `merge-base: iteration/v1.36` (commit `1856258`) + `tip: feature/v1.36-novel-project-init-preset` (commit `a8060f4`).
+
+### Rechecked Evidence
+
+- Checkout alignment:
+  - `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.36-p1-init`
+  - `git branch --show-current` → `feature/v1.36-novel-project-init-preset`
+  - `git log --oneline iteration/v1.36..HEAD | head -15` confirmed post-fix tip `a8060f4` and fix commits F6 `7dea65a`, F2 `ec4032b`, F7 `6d95c9a`.
+- F6 (`7dea65a`) reviewed with `git show 7dea65a --stat` and `git show 7dea65a -- crates/nexus-orchestration/embedded-presets/novel-project-init/preset.yaml`.
+- F2 (`ec4032b`) reviewed with `git show ec4032b --stat` and source/test diff reads for `novel_scaffold.rs` and `novel_project_init.rs`.
+- F7 (`6d95c9a`) reviewed with `git show 6d95c9a --stat` and source/test/status diffs for `run.rs`, daemon schedule handler, CLI command-surface test, and `.mstar/status.json`.
+- Residual check: `rg 'R-V136P1-01' .mstar/status.json` found the registered residual.
+- Validation:
+  - `cargo +nightly clippy -p nexus-orchestration -p nexus42 -p nexus-local-db -- -D warnings` → passed.
+  - `cargo test -p nexus-orchestration --test novel_project_init` → passed, 19 tests.
+
+### Finding Disposition
+
+- **C-001 — Closed.** F6 adds `novel.project_scaffold` to `preset.requires_capabilities` and inserts a `committing` state before `done` with `enter: kind: capability`, `name: novel.project_scaffold`. The args include `creator_id`, `work_id`, `work_ref`, `title`, `world_id`, `total_planned_chapters`, and `fields_changed`, satisfying the architectural requirement that the preset actually invokes the scaffold capability before terminal completion.
+
+- **C-002 — Partial / Not closed.** F2 implements an FS-side `ScaffoldTransaction` rollback guard and adds `t7g_db_failure_rolls_back_filesystem_scaffold`, which is a useful improvement and does verify partial filesystem cleanup on a `seed_chapters` FK failure. However, the original critical required coordinating filesystem writes with **a single DB transaction for chapter seed + work patch** (or equivalent full atomic protocol). The F2 implementation explicitly documents that T3 and T4 still run their own internal transactions and that rows produced by T3 may remain if T4 fails. The new test does **not** assert sentinel preservation plus no orphan `work_chapters` row; it only forces T3 to fail before any rows can be seeded and asserts filesystem rollback. Therefore the cross-store / DB atomicity portion of C-002 remains unresolved.
+
+- **W-001 — Acceptable partial closure with residual.** F7 fixes the empty `creator_id` bug by resolving `config.active_creator_id` into `resolved_creator_id` and using it for init, intake, and chained schedule requests. It adds a daemon `tracing::warn!` for `*-init` schedules without populated input context, includes a `run.rs` comment block cross-linking `R-V136P1-01`, and adds `v136_creator_run_start_has_init_preset_flag`. The remaining full `preset.input.*` wire plumbing is correctly registered as open residual `R-V136P1-01` in `.mstar/status.json`, so W-001 is acceptable under the PM's Option C rule.
+
+### Revalidation Summary
+
+| Finding | Status | Blocking? |
+|---------|--------|-----------|
+| C-001 | Closed | No |
+| C-002 | Partial / Not closed | Yes |
+| W-001 | Acceptable partial closure with residual | No |
+
+**Revalidation Verdict**: Request Changes — C-002 remains partially unresolved because the fix wave does not implement a single DB transaction for T3 + T4 (nor an equivalent full atomic DB protocol), and the targeted atomicity test does not prove no orphan `work_chapters` rows after a post-seed failure.
