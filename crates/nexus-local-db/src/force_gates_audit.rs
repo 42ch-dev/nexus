@@ -32,18 +32,17 @@ pub async fn insert_force_gates_audit(
     conn: &mut sqlx::SqliteConnection,
     params: &ForceGatesAuditParams,
 ) -> Result<(), LocalDbError> {
-    // SAFETY: DML — compile-time macro requires DATABASE_URL at build time.
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO force_gates_audit \
          (audit_id, preset_id, work_id, creator_id, forced, reason, forced_at) \
          VALUES (?, ?, ?, ?, TRUE, ?, ?)",
+        params.audit_id,
+        params.preset_id,
+        params.work_id,
+        params.creator_id,
+        params.reason,
+        params.forced_at,
     )
-    .bind(&params.audit_id)
-    .bind(&params.preset_id)
-    .bind(&params.work_id)
-    .bind(&params.creator_id)
-    .bind(&params.reason)
-    .bind(&params.forced_at)
     .execute(conn)
     .await?;
     Ok(())
@@ -58,16 +57,15 @@ pub async fn list_force_gates_audit(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
 ) -> Result<Vec<ForceGatesAuditRow>, LocalDbError> {
-    // SAFETY: runtime `sqlx::query_as` — SQLite BOOLEAN stored as i64;
-    // sqlx maps INTEGER NOT NULL columns to i64 at compile-time but FromRow
-    // with `bool` works at runtime via sqlx's automatic coercion.
-    let rows = sqlx::query_as::<_, ForceGatesAuditRow>(
-        "SELECT audit_id, preset_id, work_id, creator_id, forced, reason, forced_at
-         FROM force_gates_audit
-         WHERE creator_id = ?
+    let rows = sqlx::query_as!(
+        ForceGatesAuditRow,
+        "SELECT audit_id as \"audit_id!\", preset_id, work_id, creator_id, \
+         forced as \"forced!\", reason, forced_at \
+         FROM force_gates_audit \
+         WHERE creator_id = ? \
          ORDER BY forced_at DESC",
+        creator_id,
     )
-    .bind(creator_id)
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -85,12 +83,12 @@ pub async fn prune_force_gates_audit_before(
     before_ts: i64,
 ) -> Result<u64, LocalDbError> {
     let before_str = before_ts.to_string();
-    // SAFETY: DML with simple bound parameter; compile-time macro requires
-    // DATABASE_URL at build time which is not always available.
-    let result = sqlx::query("DELETE FROM force_gates_audit WHERE forced_at < ?")
-        .bind(&before_str)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query!(
+        "DELETE FROM force_gates_audit WHERE forced_at < ?",
+        before_str,
+    )
+    .execute(pool)
+    .await?;
     Ok(result.rows_affected())
 }
 

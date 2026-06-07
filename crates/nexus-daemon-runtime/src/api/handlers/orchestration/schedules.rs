@@ -162,11 +162,11 @@ pub async fn add_schedule(
     // V1.36 P4 (T2): novel-completion guard per novel-workflow-profile §5.2.
     if body.preset_id == "novel-writing" {
         let pool = state.pool();
-        let completed_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM works \
+        let completed_count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM works \
              WHERE creator_id = ? AND work_profile = 'novel' AND status = 'completed'",
+            body.creator_id,
         )
-        .bind(&body.creator_id)
         .fetch_one(pool)
         .await
         .map_err(|e| {
@@ -234,21 +234,20 @@ pub async fn add_schedule(
         // Insert schedule row inside the same transaction.
         let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
         let now_ts = chrono::Utc::now().timestamp();
-        // SAFETY: DML inside transaction — direct INSERT for force-gates path.
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO creator_schedules \
              (schedule_id, creator_id, preset_id, preset_version, status, \
               concurrency_kind, current_core_context_version, label, \
               created_at, updated_at, work_id) \
              VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+            schedule_id,
+            body.creator_id,
+            body.preset_id,
+            body.label,
+            now_ts,
+            now_ts,
+            work_id,
         )
-        .bind(&schedule_id)
-        .bind(&body.creator_id)
-        .bind(&body.preset_id)
-        .bind(&body.label)
-        .bind(now_ts)
-        .bind(now_ts)
-        .bind(&work_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| {
@@ -328,14 +327,14 @@ pub async fn add_schedule(
                     )
                 })?;
 
-                // SAFETY: runtime query inside transaction.
-                let work_row: Option<WorkRow> = sqlx::query_as(
+                let work_row: Option<WorkSnapshotRow> = sqlx::query_as!(
+                    WorkSnapshotRow,
                     "SELECT work_profile, work_ref, workspace_slug, intake_status, \
                      world_id, status, current_stage, total_planned_chapters \
                      FROM works WHERE work_id = ? AND creator_id = ?",
+                    work_id,
+                    body.creator_id,
                 )
-                .bind(work_id)
-                .bind(&body.creator_id)
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(|e| {
@@ -345,29 +344,19 @@ pub async fn add_schedule(
                     )
                 })?;
 
-                if let Some((
-                    work_profile,
-                    work_ref,
-                    workspace_slug,
-                    intake_status,
-                    world_id,
-                    status,
-                    current_stage,
-                    total_planned_chapters,
-                )) = work_row
-                {
+                if let Some(row) = work_row {
                     let work_snapshot = nexus_orchestration::preset_gates::WorkSnapshot {
                         work_id: work_id.to_string(),
                         creator_id: body.creator_id.clone(),
-                        work_profile,
-                        work_ref,
-                        workspace_slug,
-                        intake_status,
-                        world_id,
-                        status,
-                        current_stage,
+                        work_profile: row.work_profile,
+                        work_ref: row.work_ref,
+                        workspace_slug: row.workspace_slug,
+                        intake_status: row.intake_status,
+                        world_id: row.world_id,
+                        status: row.status,
+                        current_stage: row.current_stage,
                         title: None,
-                        total_planned_chapters,
+                        total_planned_chapters: row.total_planned_chapters,
                     };
 
                     let mut vars = std::collections::HashMap::new();
@@ -426,21 +415,20 @@ pub async fn add_schedule(
                     let schedule_id =
                         format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
                     let now_ts = chrono::Utc::now().timestamp();
-                    // SAFETY: DML inside transaction — C-2 atomicity.
-                    sqlx::query(
+                    sqlx::query!(
                         "INSERT INTO creator_schedules \
                          (schedule_id, creator_id, preset_id, preset_version, status, \
                           concurrency_kind, current_core_context_version, label, \
                           created_at, updated_at, work_id) \
                          VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+                        schedule_id,
+                        body.creator_id,
+                        body.preset_id,
+                        body.label,
+                        now_ts,
+                        now_ts,
+                        work_id,
                     )
-                    .bind(&schedule_id)
-                    .bind(&body.creator_id)
-                    .bind(&body.preset_id)
-                    .bind(&body.label)
-                    .bind(now_ts)
-                    .bind(now_ts)
-                    .bind(work_id)
                     .execute(&mut *tx)
                     .await
                     .map_err(|e| {
@@ -1321,14 +1309,13 @@ impl PreviousPresetLookup for DbPreviousPresetLookup {
         let work_id = work_id.to_string();
         Box::pin(async move {
             // C-4 fix: use indexed work_id column instead of LIKE on label.
-            // SAFETY: runtime `sqlx::query_scalar` — pool from Arc clone.
-            let count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM creator_schedules
+            let count: i64 = sqlx::query_scalar!(
+                "SELECT COUNT(*) AS \"count!\" FROM creator_schedules
                  WHERE preset_id = ? AND status = 'completed'
                  AND work_id = ?",
+                preset_id,
+                work_id,
             )
-            .bind(&preset_id)
-            .bind(&work_id)
             .fetch_one(&*pool)
             .await
             .map_err(|e| GateEvalError::Database(e.to_string()))?;
@@ -1346,16 +1333,19 @@ impl PreviousPresetLookup for DbPreviousPresetLookup {
 // ---------------------------------------------------------------------------
 
 /// Row type for the work-snapshot query inside gate evaluation.
-type WorkRow = (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<i64>,
-);
+/// Uses named struct for `sqlx::query_as!` compile-time verification.
+/// All fields are `Option<String>` to match `WorkSnapshot` directly.
+#[derive(sqlx::FromRow)]
+struct WorkSnapshotRow {
+    work_profile: Option<String>,
+    work_ref: Option<String>,
+    workspace_slug: Option<String>,
+    intake_status: Option<String>,
+    world_id: Option<String>,
+    status: Option<String>,
+    current_stage: Option<String>,
+    total_planned_chapters: Option<i64>,
+}
 
 #[derive(sqlx::FromRow)]
 struct ListRow {
