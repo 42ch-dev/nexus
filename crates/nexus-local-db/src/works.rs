@@ -707,12 +707,17 @@ pub async fn patch_work(
 /// Same logic as [`patch_work`] but uses a caller-provided transaction
 /// so the patch can be atomic with a prior `seed_chapters_tx` call.
 ///
+/// Returns `Ok(true)` if at least one column changed, `Ok(false)` if
+/// the patch was a no-op (all fields matched existing values).
+///
 /// Note: does NOT return the updated `WorkRecord` because reading back
 /// inside the same transaction is complex; callers can read after commit.
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the UPDATE fails.
+///
+/// rationale: mirrors existing dynamic partial-update binder; splitting harms readability
 #[allow(clippy::too_many_lines)]
 pub async fn patch_work_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -720,7 +725,7 @@ pub async fn patch_work_tx(
     work_id: &str,
     patch: &WorkPatch,
     now: &str,
-) -> Result<(), LocalDbError> {
+) -> Result<bool, LocalDbError> {
     let mut set_clauses = Vec::new();
 
     if patch.title.is_some() {
@@ -770,7 +775,7 @@ pub async fn patch_work_tx(
     }
 
     if set_clauses.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     set_clauses.push("updated_at = ?");
@@ -850,7 +855,7 @@ pub async fn patch_work_tx(
     query = query.bind(now).bind(work_id).bind(creator_id);
 
     query.execute(&mut **tx).await?;
-    Ok(())
+    Ok(true)
 }
 
 /// Append an inspiration entry to a Work (atomic via transaction).

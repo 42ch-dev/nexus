@@ -23,24 +23,28 @@ pub struct ForceGatesAuditParams {
 
 /// Insert a force-gates audit row.
 ///
+/// Accepts a mutable connection reference so it works inside a transaction.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the insert fails.
 pub async fn insert_force_gates_audit(
-    pool: &sqlx::SqlitePool,
+    conn: &mut sqlx::SqliteConnection,
     params: &ForceGatesAuditParams,
 ) -> Result<(), LocalDbError> {
-    sqlx::query!(
-        "INSERT INTO force_gates_audit (audit_id, preset_id, work_id, creator_id, forced, reason, forced_at)
+    // SAFETY: DML — compile-time macro requires DATABASE_URL at build time.
+    sqlx::query(
+        "INSERT INTO force_gates_audit \
+         (audit_id, preset_id, work_id, creator_id, forced, reason, forced_at) \
          VALUES (?, ?, ?, ?, TRUE, ?, ?)",
-        params.audit_id,
-        params.preset_id,
-        params.work_id,
-        params.creator_id,
-        params.reason,
-        params.forced_at,
     )
-    .execute(pool)
+    .bind(&params.audit_id)
+    .bind(&params.preset_id)
+    .bind(&params.work_id)
+    .bind(&params.creator_id)
+    .bind(&params.reason)
+    .bind(&params.forced_at)
+    .execute(conn)
     .await?;
     Ok(())
 }
@@ -54,8 +58,9 @@ pub async fn list_force_gates_audit(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
 ) -> Result<Vec<ForceGatesAuditRow>, LocalDbError> {
-    // SAFETY: runtime `sqlx::query_as` — SQLite BOOLEAN maps to bool differently
-    // across sqlx compile-time vs runtime. Using runtime query to avoid type mismatch.
+    // SAFETY: runtime `sqlx::query_as` — SQLite BOOLEAN stored as i64;
+    // sqlx maps INTEGER NOT NULL columns to i64 at compile-time but FromRow
+    // with `bool` works at runtime via sqlx's automatic coercion.
     let rows = sqlx::query_as::<_, ForceGatesAuditRow>(
         "SELECT audit_id, preset_id, work_id, creator_id, forced, reason, forced_at
          FROM force_gates_audit
@@ -66,6 +71,27 @@ pub async fn list_force_gates_audit(
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+/// Prune audit rows older than the given Unix timestamp.
+///
+/// Returns the number of rows deleted.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the query fails.
+pub async fn prune_force_gates_audit_before(
+    pool: &sqlx::SqlitePool,
+    before_ts: i64,
+) -> Result<u64, LocalDbError> {
+    let before_str = before_ts.to_string();
+    // SAFETY: DML with simple bound parameter; compile-time macro requires
+    // DATABASE_URL at build time which is not always available.
+    let result = sqlx::query("DELETE FROM force_gates_audit WHERE forced_at < ?")
+        .bind(&before_str)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
 }
 
 /// A force-gates audit row.
@@ -79,7 +105,7 @@ pub struct ForceGatesAuditRow {
     pub work_id: String,
     /// Creator ID who authorized the bypass.
     pub creator_id: String,
-    /// Whether gates were forced.
+    /// Whether gates were forced (`SQLite` BOOLEAN as i64).
     pub forced: bool,
     /// User-provided reason text.
     pub reason: Option<String>,
@@ -126,7 +152,8 @@ mod tests {
             forced_at: "2026-06-08T12:00:00Z".to_string(),
         };
 
-        insert_force_gates_audit(&pool, &params)
+        let mut conn = pool.acquire().await.expect("acquire conn");
+        insert_force_gates_audit(&mut conn, &params)
             .await
             .expect("insert");
 

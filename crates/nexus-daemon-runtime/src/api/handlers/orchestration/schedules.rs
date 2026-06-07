@@ -66,17 +66,82 @@ fn require_supervisor(
 // POST /schedules — Add schedule
 // ---------------------------------------------------------------------------
 
+/// Reserved input keys that collide with system-injected variables (W-6).
+/// `work_id` is allowed in input because the daemon needs it for gate evaluation;
+/// it is explicitly extracted and not merged into vars blindly.
+const RESERVED_INPUT_KEYS: &[&str] = &["creator_id", "workspace_slug", "core_context", "preset"];
+
+/// Maximum length for --reason / --gate-reason (W-5).
+const MAX_REASON_LEN: usize = 512;
+
+/// Strip ANSI escape sequences and control characters from a string (W-5).
+fn sanitize_reason(raw: &str) -> String {
+    let re = regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").expect("ANSI escape regex is valid");
+    let no_ansi = re.replace_all(raw, "").to_string();
+    // Remove control chars (0x00-0x1F) except newline (0x0A)
+    no_ansi
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .collect()
+}
+
 /// `POST /v1/local/orchestration/schedules` — add a new schedule.
+///
+/// rationale: mirrors existing dynamic partial-update binder; splitting harms readability
+#[allow(clippy::too_many_lines)]
 pub async fn add_schedule(
     state: State<WorkspaceState>,
     Json(body): Json<AddScheduleRequest>,
 ) -> Result<(StatusCode, Json<AddScheduleResponse>), (StatusCode, String)> {
     let supervisor = require_supervisor(&state)?;
 
-    // V1.37 (R-V136P1-01 closed): log when init preset arrives with populated
-    // input context. The `input` field on `AddScheduleRequest` now carries
-    // grill-me answers (work_ref, total_planned_chapters, etc.) from the CLI
-    // into `preset.input.*` for scaffold and prompt rendering.
+    // W-6: Reject input keys that collide with reserved names.
+    if let Some(input) = &body.input {
+        if let Some(obj) = input.as_object() {
+            for key in obj.keys() {
+                if RESERVED_INPUT_KEYS.contains(&key.as_str()) {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        format!(
+                            "input key '{key}' is reserved; use a different key name \
+                             (reserved: {})",
+                            RESERVED_INPUT_KEYS.join(", ")
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    // W-5: Sanitize and cap the reason text.
+    if body.force_gates {
+        let raw_reason = body.reason.as_deref().unwrap_or("");
+        if raw_reason.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "--force-gates requires a non-empty --reason (audit-logged)".to_string(),
+            ));
+        }
+        let sanitized = sanitize_reason(raw_reason);
+        if sanitized.len() > MAX_REASON_LEN {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "reason exceeds maximum length ({MAX_REASON_LEN} chars); \
+                     got {} chars",
+                    sanitized.len()
+                ),
+            ));
+        }
+        if sanitized != raw_reason {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "reason contains ANSI escape sequences or control characters".to_string(),
+            ));
+        }
+    }
+
+    // V1.37: log when init preset arrives with populated input context.
     if body.preset_id.ends_with("-init") || body.preset_id == "novel-project-init" {
         let input_summary = match body.input.as_ref() {
             None => "empty".to_string(),
@@ -95,14 +160,8 @@ pub async fn add_schedule(
     }
 
     // V1.36 P4 (T2): novel-completion guard per novel-workflow-profile §5.2.
-    // For the single-Work MVP, reject `novel-writing` schedule creation if the
-    // creator already has a completed novel Work. The user must start a fresh
-    // Work via `novel-project-init` before scheduling new chapter cycles.
     if body.preset_id == "novel-writing" {
         let pool = state.pool();
-        // SAFETY: runtime `sqlx::query_scalar` — static SQL but pool obtained
-        // from `WorkspaceState::pool()` which has the same lifetime constraint
-        // as the rest of this module; compile-time macro cannot bind it.
         let completed_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM works \
              WHERE creator_id = ? AND work_profile = 'novel' AND status = 'completed'",
@@ -130,48 +189,79 @@ pub async fn add_schedule(
         }
     }
 
-    // V1.37 (T5/T6): force-gates validation and audit trail.
-    // When force_gates is true, require a reason, write an audit row, and skip
-    // gate evaluation. When false (default), evaluate preset gates if declared.
-    if body.force_gates {
-        let reason_text = body.reason.as_deref().unwrap_or("");
-        if reason_text.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "--force-gates requires a non-empty --reason (audit-logged)".to_string(),
-            ));
-        }
+    // Resolve work_id from input (needed for gates, audit, and work_id column).
+    let work_id_opt = body
+        .input
+        .as_ref()
+        .and_then(|v| v.get("work_id"))
+        .and_then(|v| v.as_str());
 
-        // Write audit row
+    if body.force_gates {
+        // V1.37 (T5/T6): force-gates path — write audit row.
         let pool = state.pool();
         let audit_id = format!("fga_{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
         let forced_at = chrono::Utc::now().to_rfc3339();
-        // Derive work_id from input or use a placeholder
-        let work_id = body
-            .input
-            .as_ref()
-            .and_then(|v| v.get("work_id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
+        let work_id = work_id_opt.unwrap_or("unknown").to_string();
+        let reason_text = body.reason.as_deref().unwrap_or("");
 
-        // SAFETY: runtime `sqlx::query` — DML for audit insert.
+        // C-2: Use transaction for atomicity (audit + schedule insert).
+        let mut tx = pool.begin().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to begin transaction: {e}"),
+            )
+        })?;
+
+        // W-7: Use typed helper instead of duplicated raw SQL.
+        let audit_params = nexus_local_db::ForceGatesAuditParams {
+            audit_id: audit_id.clone(),
+            preset_id: body.preset_id.clone(),
+            work_id: work_id.clone(),
+            creator_id: body.creator_id.clone(),
+            reason: reason_text.to_string(),
+            forced_at: forced_at.clone(),
+        };
+        // SAFETY: DML inside transaction — uses the typed helper with query! macro.
+        nexus_local_db::insert_force_gates_audit(&mut tx, &audit_params)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to write force-gates audit row: {e}"),
+                )
+            })?;
+
+        // Insert schedule row inside the same transaction.
+        let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+        let now_ts = chrono::Utc::now().timestamp();
+        // SAFETY: DML inside transaction — direct INSERT for force-gates path.
         sqlx::query(
-            "INSERT INTO force_gates_audit (audit_id, preset_id, work_id, creator_id, forced, reason, forced_at)
-             VALUES (?, ?, ?, ?, TRUE, ?, ?)",
+            "INSERT INTO creator_schedules \
+             (schedule_id, creator_id, preset_id, preset_version, status, \
+              concurrency_kind, current_core_context_version, label, \
+              created_at, updated_at, work_id) \
+             VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
         )
-        .bind(&audit_id)
-        .bind(&body.preset_id)
-        .bind(&work_id)
+        .bind(&schedule_id)
         .bind(&body.creator_id)
-        .bind(reason_text)
-        .bind(&forced_at)
-        .execute(pool)
+        .bind(&body.preset_id)
+        .bind(&body.label)
+        .bind(now_ts)
+        .bind(now_ts)
+        .bind(&work_id)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to write force-gates audit row: {e}"),
+                format!("failed to create schedule: {e}"),
+            )
+        })?;
+
+        tx.commit().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to commit schedule transaction: {e}"),
             )
         })?;
 
@@ -182,138 +272,233 @@ pub async fn add_schedule(
             reason = %reason_text,
             "gate evaluation BYPASSED by --force-gates (audited)"
         );
-    } else {
-        // V1.37 (T4/T5): evaluate preset gates if the preset declares them.
-        // Load the preset manifest to check for a `gates:` section.
-        if let Some(registry) = state.capability_registry() {
-            let home = state.nexus_home();
-            let preset_result =
-                nexus_orchestration::resolve_preset(&body.preset_id, home, &registry);
 
-            if let Ok(preset) = preset_result {
-                let gates = &preset.manifest.preset.gates;
-                if !gates.is_empty() {
-                    // Build a lightweight work snapshot from DB for gate evaluation.
-                    let pool = state.pool();
+        // Seed core context if seed/input provided
+        let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
 
-                    // Try to find work_id from input or look up by creator
-                    let work_id_opt = body
-                        .input
-                        .as_ref()
-                        .and_then(|v| v.get("work_id"))
-                        .and_then(|v| v.as_str());
+        return Ok((
+            StatusCode::CREATED,
+            Json(AddScheduleResponse {
+                schedule_id,
+                status: "pending".to_string(),
+                core_context_version: core_version,
+            }),
+        ));
+    }
 
-                    if let Some(work_id) = work_id_opt {
-                        // SAFETY: runtime `sqlx::query_as` — dynamic column mapping.
-                        type WorkRow = (
-                            Option<String>,
-                            Option<String>,
-                            Option<String>,
-                            Option<String>,
-                            Option<String>,
-                            Option<String>,
-                            Option<String>,
-                            Option<i64>,
-                        );
-                        let work_row: Option<WorkRow> = sqlx::query_as(
-                            "SELECT work_profile, work_ref, workspace_slug, intake_status, world_id, status, current_stage, total_planned_chapters
-                             FROM works WHERE work_id = ? AND creator_id = ?"
+    // Non-force path: evaluate preset gates if declared.
+    if let Some(registry) = state.capability_registry() {
+        let home = state.nexus_home();
+        let preset_result = nexus_orchestration::resolve_preset(&body.preset_id, home, &registry);
+
+        if let Ok(preset) = preset_result {
+            let gates = &preset.manifest.preset.gates;
+            if !gates.is_empty() {
+                // W-3: if gates are declared but no work_id, reject immediately.
+                let Some(work_id) = work_id_opt else {
+                    return Err((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        serde_json::to_string(
+                            &nexus_orchestration::preset_gates::PresetGatesFailed {
+                                error: "preset_gates_failed".to_string(),
+                                preset_id: body.preset_id.clone(),
+                                work_id: String::new(),
+                                failed_gates: vec![nexus_orchestration::preset_gates::FailedGate {
+                                    kind: "work_field".to_string(),
+                                    expected: "work_id must be non-null".to_string(),
+                                    actual: "missing".to_string(),
+                                    remediation: "Bind the schedule to a Work via \
+                                        body.input.work_id before scheduling a gated preset."
+                                        .to_string(),
+                                }],
+                            },
                         )
-                        .bind(work_id)
-                        .bind(&body.creator_id)
-                        .fetch_optional(pool)
-                        .await
-                        .map_err(|e| {
-                            (StatusCode::INTERNAL_SERVER_ERROR, format!("database error loading work for gates: {e}"))
-                        })?;
+                        .unwrap_or_default(),
+                    ));
+                };
 
-                        if let Some((
-                            work_profile,
-                            work_ref,
-                            workspace_slug,
-                            intake_status,
-                            world_id,
-                            status,
-                            current_stage,
-                            total_planned_chapters,
-                        )) = work_row
-                        {
-                            let work_snapshot = nexus_orchestration::preset_gates::WorkSnapshot {
-                                work_id: work_id.to_string(),
-                                creator_id: body.creator_id.clone(),
-                                work_profile,
-                                work_ref,
-                                workspace_slug,
-                                intake_status,
-                                world_id,
-                                status,
-                                current_stage,
-                                title: None,
-                                total_planned_chapters,
-                            };
+                // Build work snapshot from DB.
+                let pool = state.pool();
 
-                            // Build preset input vars from the request input
-                            let mut vars = std::collections::HashMap::new();
-                            if let Some(input) = &body.input {
-                                if let Some(obj) = input.as_object() {
-                                    for (k, v) in obj {
-                                        vars.insert(k.clone(), v.to_string());
-                                    }
-                                }
-                            }
-                            if let Some(ref wr) = work_snapshot.work_ref {
-                                vars.insert("work_ref".to_string(), wr.clone());
-                            }
-                            vars.insert("work_id".to_string(), work_id.to_string());
+                // C-2: begin transaction for atomic gate eval + schedule insert.
+                let mut tx = pool.begin().await.map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("failed to begin transaction: {e}"),
+                    )
+                })?;
 
-                            let preset_input =
-                                nexus_orchestration::preset_gates::PresetInput { vars };
+                // SAFETY: runtime query inside transaction.
+                let work_row: Option<WorkRow> = sqlx::query_as(
+                    "SELECT work_profile, work_ref, workspace_slug, intake_status, \
+                     world_id, status, current_stage, total_planned_chapters \
+                     FROM works WHERE work_id = ? AND creator_id = ?",
+                )
+                .bind(work_id)
+                .bind(&body.creator_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("database error loading work for gates: {e}"),
+                    )
+                })?;
 
-                            // Resolve workspace root for filesystem gates
-                            let workspace_root = state
-                                .workspace_path()
-                                .map_or_else(|| state.nexus_home().clone(), std::path::PathBuf::from);
+                if let Some((
+                    work_profile,
+                    work_ref,
+                    workspace_slug,
+                    intake_status,
+                    world_id,
+                    status,
+                    current_stage,
+                    total_planned_chapters,
+                )) = work_row
+                {
+                    let work_snapshot = nexus_orchestration::preset_gates::WorkSnapshot {
+                        work_id: work_id.to_string(),
+                        creator_id: body.creator_id.clone(),
+                        work_profile,
+                        work_ref,
+                        workspace_slug,
+                        intake_status,
+                        world_id,
+                        status,
+                        current_stage,
+                        title: None,
+                        total_planned_chapters,
+                    };
 
-                            // Use a DB-backed previous-preset lookup
-                            let lookup = DbPreviousPresetLookup {
-                                pool: std::sync::Arc::new(pool.clone()),
-                            };
-
-                            let eval_result = nexus_orchestration::preset_gates::evaluate_gates(
-                                gates,
-                                &body.preset_id,
-                                &work_snapshot,
-                                &preset_input,
-                                &workspace_root,
-                                &lookup,
-                            )
-                            .await
-                            .map_err(|e| {
-                                (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    format!("gate evaluation error: {e}"),
-                                )
-                            })?;
-
-                            if let Err(gate_failure) = eval_result {
-                                // Serialize the structured error per spec §7.9.2
-                                let error_json =
-                                    serde_json::to_string(&gate_failure).unwrap_or_default();
-                                return Err((StatusCode::UNPROCESSABLE_ENTITY, error_json));
+                    let mut vars = std::collections::HashMap::new();
+                    if let Some(input) = &body.input {
+                        if let Some(obj) = input.as_object() {
+                            for (k, v) in obj {
+                                vars.insert(k.clone(), v.to_string());
                             }
                         }
                     }
-                    // If no work_id in input or no work row found, gates requiring
-                    // work data will not be evaluated. This is acceptable for P0
-                    // since gate declarations are only on presets operating within
-                    // a Work context where work_id is always available.
+                    if let Some(ref wr) = work_snapshot.work_ref {
+                        vars.insert("work_ref".to_string(), wr.clone());
+                    }
+                    vars.insert("work_id".to_string(), work_id.to_string());
+
+                    let preset_input = nexus_orchestration::preset_gates::PresetInput { vars };
+
+                    let workspace_root = state
+                        .workspace_path()
+                        .map_or_else(|| state.nexus_home().clone(), std::path::PathBuf::from);
+
+                    let lookup = DbPreviousPresetLookup {
+                        pool: std::sync::Arc::new(pool.clone()),
+                    };
+
+                    let eval_result = nexus_orchestration::preset_gates::evaluate_gates(
+                        gates,
+                        &body.preset_id,
+                        &work_snapshot,
+                        &preset_input,
+                        &workspace_root,
+                        &lookup,
+                    )
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("gate evaluation error: {e}"),
+                        )
+                    })?;
+
+                    if let Err(gate_failure) = eval_result {
+                        // W-11: log gate failures at warn level before returning.
+                        tracing::warn!(
+                            target: "orchestration.gates",
+                            preset_id = %body.preset_id,
+                            work_id = %work_id,
+                            failed_count = %gate_failure.failed_gates.len(),
+                            "preset gates failed"
+                        );
+                        let error_json = serde_json::to_string(&gate_failure).unwrap_or_default();
+                        return Err((StatusCode::UNPROCESSABLE_ENTITY, error_json));
+                    }
+
+                    // Gates passed — insert schedule inside the same transaction.
+                    let schedule_id =
+                        format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+                    let now_ts = chrono::Utc::now().timestamp();
+                    // SAFETY: DML inside transaction — C-2 atomicity.
+                    sqlx::query(
+                        "INSERT INTO creator_schedules \
+                         (schedule_id, creator_id, preset_id, preset_version, status, \
+                          concurrency_kind, current_core_context_version, label, \
+                          created_at, updated_at, work_id) \
+                         VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+                    )
+                    .bind(&schedule_id)
+                    .bind(&body.creator_id)
+                    .bind(&body.preset_id)
+                    .bind(&body.label)
+                    .bind(now_ts)
+                    .bind(now_ts)
+                    .bind(work_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("failed to create schedule: {e}"),
+                        )
+                    })?;
+
+                    tx.commit().await.map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("failed to commit schedule transaction: {e}"),
+                        )
+                    })?;
+
+                    let core_version =
+                        seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+
+                    return Ok((
+                        StatusCode::CREATED,
+                        Json(AddScheduleResponse {
+                            schedule_id,
+                            status: "pending".to_string(),
+                            core_context_version: core_version,
+                        }),
+                    ));
                 }
+                // No work row found — treat as gate failure (W-3).
+                tracing::warn!(
+                    target: "orchestration.gates",
+                    preset_id = %body.preset_id,
+                    work_id = %work_id,
+                    failed_count = 1,
+                    "preset gates failed — work not found"
+                );
+                return Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    serde_json::to_string(&nexus_orchestration::preset_gates::PresetGatesFailed {
+                        error: "preset_gates_failed".to_string(),
+                        preset_id: body.preset_id.clone(),
+                        work_id: work_id.to_string(),
+                        failed_gates: vec![nexus_orchestration::preset_gates::FailedGate {
+                            kind: "work_field".to_string(),
+                            expected: "work must exist".to_string(),
+                            actual: "not found".to_string(),
+                            remediation: "Ensure the work_id refers to an existing Work."
+                                .to_string(),
+                        }],
+                    })
+                    .unwrap_or_default(),
+                ));
             }
-            // If preset not found or has no gates: no-op (schedule proceeds).
         }
+        // Preset not found or has no gates: proceed without gate evaluation.
     }
 
-    // Generate a schedule ID (simple timestamp-based for pre-1.0)
+    // Fallback: no gates or no registry — create schedule directly via supervisor.
     let schedule_id = format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
 
     let concurrency = body
@@ -349,7 +534,6 @@ pub async fn add_schedule(
         depends_on,
         current_core_context_version: CoreContextVersion(0),
         current_session_id: None,
-        // V1.5 WS-D: pass scheduled_at from request (Unix timestamp as string)
         scheduled_at: body.scheduled_at.clone(),
         label: body.label.clone(),
         created_at: String::new(),
@@ -357,7 +541,6 @@ pub async fn add_schedule(
         terminated_at: None,
     };
 
-    // Insert the schedule row (R2: duplicate detection)
     supervisor.insert_pending(schedule).await.map_err(|e| {
         if matches!(
             e,
@@ -375,17 +558,29 @@ pub async fn add_schedule(
         }
     })?;
 
-    // Seed core context v0 if seed is provided
-    let core_version = if body.seed.is_some() || body.input.is_some() {
-        let mgr = supervisor.core_context_manager();
-        let sid = ScheduleId(schedule_id.clone());
+    let core_version = seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
 
-        // V1.37 (R-V136P1-01): include structured `input` in the seed so
-        // grill-me answers (work_ref, total_planned_chapters, etc.) become
-        // available to scaffold and prompt rendering via `preset.input.*`.
-        // When `input` is provided, we append a JSON preamble to the seed
-        // text so downstream tasks can extract it. When only seed is provided
-        // (no input), behavior is unchanged.
+    Ok((
+        StatusCode::CREATED,
+        Json(AddScheduleResponse {
+            schedule_id,
+            status: "pending".to_string(),
+            core_context_version: core_version,
+        }),
+    ))
+}
+
+/// Seed core context v0 if seed or input is provided.
+async fn seed_core_context(
+    supervisor: &Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>,
+    schedule_id: &str,
+    body: &AddScheduleRequest,
+    _state: &WorkspaceState,
+) -> Result<u32, (StatusCode, String)> {
+    if body.seed.is_some() || body.input.is_some() {
+        let mgr = supervisor.core_context_manager();
+        let sid = ScheduleId(schedule_id.to_string());
+
         let effective_seed = match (&body.seed, &body.input) {
             (Some(seed_text), Some(input)) => {
                 let input_json = serde_json::to_string(input).unwrap_or_default();
@@ -414,19 +609,8 @@ pub async fn add_schedule(
                     format!("failed to seed core context: {e}"),
                 )
             })?;
-        0
-    } else {
-        0
-    };
-
-    Ok((
-        StatusCode::CREATED,
-        Json(AddScheduleResponse {
-            schedule_id,
-            status: "pending".to_string(),
-            core_context_version: core_version,
-        }),
-    ))
+    }
+    Ok(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,16 +1320,15 @@ impl PreviousPresetLookup for DbPreviousPresetLookup {
         let preset_id = preset_id.to_string();
         let work_id = work_id.to_string();
         Box::pin(async move {
-            // Look for any completed schedule with this preset_id that operated
-            // on this work. The work_id is stored in core_context seed metadata.
-            // SAFETY: runtime `sqlx::query_scalar` — dynamic lookup.
+            // C-4 fix: use indexed work_id column instead of LIKE on label.
+            // SAFETY: runtime `sqlx::query_scalar` — pool from Arc clone.
             let count: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM creator_schedules
                  WHERE preset_id = ? AND status = 'completed'
-                 AND label LIKE ?",
+                 AND work_id = ?",
             )
             .bind(&preset_id)
-            .bind(format!("%{work_id}%"))
+            .bind(&work_id)
             .fetch_one(&*pool)
             .await
             .map_err(|e| GateEvalError::Database(e.to_string()))?;
@@ -1161,6 +1344,18 @@ impl PreviousPresetLookup for DbPreviousPresetLookup {
 // ---------------------------------------------------------------------------
 // Row types for SQL queries
 // ---------------------------------------------------------------------------
+
+/// Row type for the work-snapshot query inside gate evaluation.
+type WorkRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+);
 
 #[derive(sqlx::FromRow)]
 struct ListRow {

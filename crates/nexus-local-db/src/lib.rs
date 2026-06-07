@@ -112,7 +112,8 @@ pub use work_chapters::{
 
 // Re-export force_gates_audit types
 pub use force_gates_audit::{
-    insert_force_gates_audit, list_force_gates_audit, ForceGatesAuditParams, ForceGatesAuditRow,
+    insert_force_gates_audit, list_force_gates_audit, prune_force_gates_audit_before,
+    ForceGatesAuditParams, ForceGatesAuditRow,
 };
 
 /// Runtime role for database initialization

@@ -171,6 +171,20 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     "--force-gates requires --reason \"<text>\" (audit-logged)".to_string(),
                 ));
             }
+            // W-5: Cap and sanitize reason
+            if let Some(ref r) = reason {
+                if r.len() > 512 {
+                    return Err(crate::errors::CliError::Config(format!(
+                        "--reason exceeds maximum length (512 chars); got {} chars",
+                        r.len()
+                    )));
+                }
+                if r.contains('\x1b') || r.chars().any(|c| c.is_control() && c != '\n') {
+                    return Err(crate::errors::CliError::Config(
+                        "--reason contains ANSI escape sequences or control characters".to_string(),
+                    ));
+                }
+            }
 
             // F7 (V1.36 P1, R-V136P1-01 resolved in V1.37): resolve active creator
             // once and populate AddScheduleRequest.creator_id for every schedule
@@ -642,6 +656,21 @@ async fn handle_stage(
                 return Err(crate::errors::CliError::Config(
                     "--force-gates requires --gate-reason \"<text>\" (audit-logged)".to_string(),
                 ));
+            }
+            // W-5: Cap and sanitize gate-reason
+            if let Some(ref r) = gate_reason {
+                if r.len() > 512 {
+                    return Err(crate::errors::CliError::Config(format!(
+                        "--gate-reason exceeds maximum length (512 chars); got {} chars",
+                        r.len()
+                    )));
+                }
+                if r.contains('\x1b') || r.chars().any(|c| c.is_control() && c != '\n') {
+                    return Err(crate::errors::CliError::Config(
+                        "--gate-reason contains ANSI escape sequences or control characters"
+                            .to_string(),
+                    ));
+                }
             }
             stage_advance(
                 &work_id,
