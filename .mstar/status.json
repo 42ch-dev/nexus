@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-07T22:00:00+08:00",
+  "updated_at": "2026-06-07T22:15:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-creative-brief-intake-preset",
@@ -676,8 +676,8 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.36",
-    "last_integration_branch": "feature/v1.34-creator-workflow-and-agent-tools",
+    "integration_branch": null,
+    "last_integration_branch": "iteration/v1.36",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.36",
