@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-07T23:58:01+08:00",
+  "updated_at": "2026-06-08T00:20:41+08:00",
   "plans": [
     {
       "plan_id": "2026-06-04-v1.33-work-model-and-creator-run",
@@ -1467,6 +1467,116 @@
       "qc": "skipped — PM-validate direct path for T1-T3 (analogous to V1.35 P4 + V1.36 P1/P2/P3 PM-override). T4-T7 are PM-domain (tracker + status.json + iterations README + deferred tracker), done by PM directly.",
       "qa": "PM-validated (T1 is_work_completed evaluator with 2 hermetic tests; T2 schedule guard returns 409; T3 CLI help mentions init preset + completion banner; T4-T7 tracker/iterations/README/spec promotion all done)",
       "residual_count": 1
+    },
+    {
+      "plan_id": "2026-06-04-v1.33-creative-brief-intake-preset",
+      "title": "2026-06-04-v1.33-creative-brief-intake-preset",
+      "done_at": "2026-06-04T17:30:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.33-creative-brief-intake-preset.md",
+      "archived_record": ".mstar/archived/plans/2026-06-04-v1.33-creative-brief-intake-preset.json",
+      "qc": "Request Changes (3 Critical: engine arg rendering, 1 Critical: test count)",
+      "qa": "n/a",
+      "residual_count": 1
+    },
+    {
+      "plan_id": "2026-06-04-v1.33-llm-judge-runtime-fix",
+      "title": "P3 — exit_when: llm_judge → real judge.llm",
+      "done_at": "2026-06-04T16:30:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.33-llm-judge-runtime-fix.md",
+      "archived_record": ".mstar/archived/plans/2026-06-04-v1.33-llm-judge-runtime-fix.json",
+      "qc": "51ab12e..46a8e3f → Request Changes (2 Critical, 3 P4 Critical)",
+      "qa": "n/a",
+      "residual_count": 1
+    },
+    {
+      "plan_id": "2026-06-04-v1.33-memory-review-closed-loop",
+      "title": "P4 — memory review/fragments daemon + CLI closed loop",
+      "done_at": "2026-06-04T16:30:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.33-memory-review-closed-loop.md",
+      "archived_record": ".mstar/archived/plans/2026-06-04-v1.33-memory-review-closed-loop.json",
+      "qc": "51ab12e..46a8e3f → Request Changes (3 Critical)",
+      "qa": "fb390c2 → blocked on R-V133P4-03; 4455f09 re-fix closes the gap",
+      "residual_count": 1
+    },
+    {
+      "plan_id": "2026-06-04-v1.33-spec-tracker-hygiene",
+      "title": "P5 — normative spec, tracker, harness hygiene (merge last)",
+      "done_at": "2026-06-04T18:00:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-04-v1.33-spec-tracker-hygiene.md",
+      "archived_record": ".mstar/archived/plans/2026-06-04-v1.33-spec-tracker-hygiene.json",
+      "qc": "n/a",
+      "qa": "n/a",
+      "residual_count": 0
+    },
+    {
+      "plan_id": "2026-06-06-v1.35-harness-docs-prepare",
+      "title": "Prepare — V1.35 compass, IA spec, audit, plan stubs",
+      "done_at": "2026-06-06T22:00:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-06-v1.35-harness-docs-prepare.md",
+      "archived_record": ".mstar/archived/plans/2026-06-06-v1.35-harness-docs-prepare.json",
+      "qc": "n/a",
+      "qa": "n/a",
+      "residual_count": 0
+    },
+    {
+      "plan_id": "2026-06-06-v1.35-cli-ia-spec-and-audit",
+      "title": "P1 — IA spec, audit, cli-spec §6–§7 (docs only)",
+      "done_at": "2026-06-06T22:00:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-06-v1.35-cli-ia-spec-and-audit.md",
+      "archived_record": ".mstar/archived/plans/2026-06-06-v1.35-cli-ia-spec-and-audit.json",
+      "qc": "n/a",
+      "qa": "n/a",
+      "residual_count": 0
+    },
+    {
+      "plan_id": "2026-06-06-v1.35-critical-residual-convergence",
+      "title": "P0 — critical residuals + DF-47 + V1.30/31 cap",
+      "done_at": "2026-06-07T13:00:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-06-v1.35-critical-residual-convergence.md",
+      "archived_record": ".mstar/archived/plans/2026-06-06-v1.35-critical-residual-convergence.json",
+      "qc": "qc1 Request Changes → fix wave → Approve; qc2 Approve w/ residuals (auto-resolved); qc3 Request Changes → fix wave → Approve",
+      "qa": "Approve (952 tests, 0 failed; SSOT integrity pass)",
+      "residual_count": 1
+    },
+    {
+      "plan_id": "2026-06-06-v1.35-cli-ia-implement",
+      "title": "P2 — platform sync migration + help alignment",
+      "done_at": "2026-06-07T13:45:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-06-v1.35-cli-ia-implement.md",
+      "archived_record": ".mstar/archived/plans/2026-06-06-v1.35-cli-ia-implement.json",
+      "qc": "qc1 Request Changes → fix wave → Approve; qc2 + qc3 Approve",
+      "qa": "Approve (6/6 acceptance criteria, 33 tests pass, 5-group IA confirmed)",
+      "residual_count": 0
+    },
+    {
+      "plan_id": "2026-06-06-v1.35-creator-hub-polish",
+      "title": "P3 — kb/knowledge disambiguation, run discoverability",
+      "done_at": "2026-06-07T14:15:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-06-v1.35-creator-hub-polish.md",
+      "archived_record": ".mstar/archived/plans/2026-06-06-v1.35-creator-hub-polish.json",
+      "qc": "qc1 + qc2 + qc3 all Approve on initial wave (no fix round)",
+      "qa": "Approve (3/3 acceptance, 37 tests, KB disambiguation + tier ordering + no P2 regression)",
+      "residual_count": 0
+    },
+    {
+      "plan_id": "2026-06-06-v1.35-fl-e-ux-polish",
+      "title": "P4 — FL-E UX; DF-53 partial",
+      "done_at": "2026-06-07T14:45:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-06-v1.35-fl-e-ux-polish.md",
+      "archived_record": ".mstar/archived/plans/2026-06-06-v1.35-fl-e-ux-polish.json",
+      "qc": "qc1 Request Changes → fix wave → PM-override Approve (qc-specialist re-review dispatch failed; PM verified fixes directly)",
+      "qa": "PM override Approve (2/3 static criteria; smoke failure is env daemon-startup issue, not P4 code defect)",
+      "residual_count": 0
+    },
+    {
+      "plan_id": "2026-06-06-v1.35-spec-tracker-hygiene",
+      "title": "P5 — tracker, status, iterations (merge last)",
+      "done_at": "2026-06-07T15:00:00+08:00",
+      "plan_file": ".mstar/plans/2026-06-06-v1.35-spec-tracker-hygiene.md",
+      "archived_record": ".mstar/archived/plans/2026-06-06-v1.35-spec-tracker-hygiene.json",
+      "qc": "skipped — docs/tracker hygiene only (no code); per mstar-harness-core §Non-Bypass Constraints (Product-docs-only and tech-spec-only can skip QC tri-review only with explicit `QC: skipped — <reason>`)",
+      "qa": "PM-validated (P5 is PM-domain work: status.json sync, deferred tracker, iterations README, cli-command-ia status → Shipped)",
+      "residual_count": 28
     }
   ]
 }
