@@ -362,6 +362,22 @@ Rules:
 
 **Shipped (V1.33 P1 + P2):** `creator run start / continue / list / status` are wired in `crates/nexus42/src/commands/creator/run.rs`. `creator run start --idea "..."` creates a Work (`work_id`), auto-schedules Creative Brief Intake, and chains novel-writing (or runs directly with `--chain-novel-writing --skip-intake`). Implementation tracked by plan `2026-06-04-v1.33-work-model-and-creator-run` (Done) + `2026-06-04-v1.33-creative-brief-intake-preset` (Done).
 
+**V1.36 flags (`creator run start` — novel project init):**
+
+| Flag | Purpose |
+| --- | --- |
+| `--init-preset <name>` | Run a `work_init` preset before primary preset chain. V1.36 supported value: `novel-project-init` (creates `Works/<work_ref>/` scaffold, seeds `work_chapters`, PATCHes `works`). See [novel-workflow-profile.md §5.4](./novel-workflow-profile.md). |
+| `--world-id <uuid>` | Bind the new Work to an existing World (cross-link [novel-workflow-profile.md §3.5](./novel-workflow-profile.md)). Omit or pass `none` for a worldless Work; future `creator world create` will replace the "create new" grill-me path. |
+| `--force-gates --reason "<text>"` | Bypass `run_intents` / preset admission gates (`orchestration-engine.md` §7.9). `--reason` is **required** when `--force-gates` is passed; the override is audited in `creator_prompt_injections` and surfaced in `creator run status`. |
+
+**V1.36 flags (`creator run stage advance`):**
+
+| Flag | Purpose |
+| --- | --- |
+| `--force --reason "<text>"` | Skip the prior-stage `complete` check (FL-E §6.2E). Audited; `--reason` required. V1.36 stub — full implementation tracked under V1.36 P5 (FL-E hardening). |
+
+
+
 ### 6.2E `nexus42 creator run stage` (FL-E — V1.34 target)
 
 Normative stage model: [creator-workflow.md](./creator-workflow.md).

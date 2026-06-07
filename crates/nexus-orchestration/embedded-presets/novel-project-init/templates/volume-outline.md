@@ -1,5 +1,7 @@
 # Volume Outline
 
+> Work reference: `{{work_ref}}`
+
 ## {{title}} — Volume 1
 
 *V1.36 single-volume placeholder. Multi-volume support is planned for V1.37+.*

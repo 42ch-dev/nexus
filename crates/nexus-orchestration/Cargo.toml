@@ -45,3 +45,9 @@ nix = { version = "0.29", features = ["signal"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Integration tests under tests/ need their own access to async runtime, DB pool
+# and serde helpers — these are also in [dependencies] but `tests/` are external crates.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+sqlx = { workspace = true }
+serde_json = { workspace = true }
+nexus-local-db = { path = "../nexus-local-db" }

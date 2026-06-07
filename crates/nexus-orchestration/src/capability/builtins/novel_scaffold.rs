@@ -98,6 +98,18 @@ impl NovelProjectScaffold {
             works_root: PathBuf::from("Works"),
         }
     }
+
+    /// Create an instance with a DB pool and a custom works root directory.
+    ///
+    /// Used by hermetic integration tests that need to place the scaffold
+    /// under a `tempfile::TempDir` rather than the real workspace.
+    #[must_use]
+    pub const fn new_with_root(pool: sqlx::SqlitePool, works_root: PathBuf) -> Self {
+        Self {
+            pool: Some(pool),
+            works_root,
+        }
+    }
 }
 
 impl Default for NovelProjectScaffold {
@@ -139,16 +151,21 @@ impl Capability for NovelProjectScaffold {
 
         // ── T2b: README.md ─────────────────────────────────────────────
         if let Some(tmpl) = load_template("README.md") {
-            let world_line = inp.world_id.as_ref().map_or_else(
-                || "none (worldless)".to_string(),
-                |id| format!("World: {id}"),
+            let world_section = inp.world_id.as_ref().map_or_else(
+                || "**Binding:** none (worldless)\n\nThis Work has no World binding. Inline world setting (if any) should be captured during the init grill-me and appended here.".to_string(),
+                |id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."),
             );
+            // Description placeholder — collected during grill-me; left empty in V1.36.
+            let description = format!("Long-term goal and initial creative direction for **{}** (work_ref: `{}`). Fill in as grill-me captures intent.", inp.title, inp.work_ref);
+            let total = inp.total_planned_chapters.to_string();
             let rendered = render_template(
                 &tmpl,
                 &[
                     ("work_ref", &inp.work_ref),
                     ("title", &inp.title),
-                    ("world_id_or_null", &world_line),
+                    ("world_section", &world_section),
+                    ("description", &description),
+                    ("total_planned_chapters", &total),
                 ],
             );
             write_file_idem(&root.join("README.md"), &rendered, &mut files_created)?;
@@ -165,7 +182,15 @@ impl Capability for NovelProjectScaffold {
 
         // T2e: volume-outline.md
         if let Some(tmpl) = load_template("volume-outline.md") {
-            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)]);
+            let total = inp.total_planned_chapters.to_string();
+            let rendered = render_template(
+                &tmpl,
+                &[
+                    ("work_ref", &inp.work_ref),
+                    ("title", &inp.title),
+                    ("total_planned_chapters", &total),
+                ],
+            );
             write_file_idem(
                 &outlines.join("volume-outline.md"),
                 &rendered,
