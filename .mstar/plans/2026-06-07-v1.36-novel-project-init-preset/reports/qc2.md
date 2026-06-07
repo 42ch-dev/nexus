@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-07-v1.36-novel-project-init-preset"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-07"
+revalidated_at: "2026-06-07"
 ---
 
 # Code Review Report
@@ -18,7 +19,7 @@ generated_at: "2026-06-07"
 
 ## Scope
 - plan_id: `2026-06-07-v1.36-novel-project-init-preset`
-- Review range / Diff basis: `merge-base: iteration/v1.36` (commit `1856258`) + `tip: feature/v1.36-novel-project-init-preset` (commit `2a97858`)
+- Review range / Diff basis: `merge-base: iteration/v1.36` (commit `1856258`) + `tip: feature/v1.36-novel-project-init-preset` (commit `a8060f4` — post-fix wave including F1–F9 + lint residual)
 - Working branch (verified): `feature/v1.36-novel-project-init-preset`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.36-p1-init`
 - Files reviewed: 30 (diff stat +1856/-120); focused on novel_scaffold.rs (423 LOC core), novel_project_init.rs (500-line hermetic tests), work_chapters.rs (246 LOC + SAFETY), 2 migrations, creator/run.rs wiring, works.rs (WorkPatch + novel columns), preset.yaml + 8 prompts + 4 templates, cli-spec.md update, daemon handlers (host_tool_executor + works), lib re-exports.
@@ -84,7 +85,31 @@ generated_at: "2026-06-07"
 
 **Next dispatch**: None (leaf QC role; handoff only via PM consolidated decision + targeted re-review if fixes land).
 
-## Completion Report v2
+## Revalidation
+
+**Re-review context (targeted, qc2 only)**: Post-fix wave on tip `a8060f4` (after F1 `81ab79a`, F2 `ec4032b`, F3 `3089581`, F4 `717f90c`, F5 `e5f13de`, F6 `7dea65a`, F7 `6d95c9a`, F8+F9 `9ecd52f`, + final lint chore). Verified cwd/branch/range on entry, `git show <fix>` for each assigned commit, full reads of `novel_scaffold_sanitize.rs` (180 LOC), key sections of `novel_scaffold.rs` (entry sanitization, F5 probe, ScaffoldTransaction + Drop, fields_changed PATCH logic, concurrency note), T7* tests in `novel_project_init.rs`, and `rg 'sqlx::query'` on the two local-db modules. Ran the exact gate commands. No source edits performed.
+
+**F1 verification (closes C-1, C-4, W-2)**: `git show 81ab79a --stat` + read of `novel_scaffold_sanitize.rs`. `validate_work_ref` / `validate_slug` enforce `^[a-z0-9][a-z0-9-]{0,63}$` (first char `[a-z0-9]`, then `[a-z0-9-]` up to total 64 chars, explicit `..` / `/` / `\` / `\0` / control / uppercase / leading `-` / non-kebab rejection; `validate_total_chapters` bounds `1..=100`). Applied at capability entry (`novel_scaffold.rs:235-247`) *before* any `join`, `format!` path, template render, or DB write; raw `inp` is re-bound to the validated copies so downstream cannot see unsanitized values. Unit tests + integration `t7a_bis_*` cover every rejection class (`..`, `/`, empty, uppercase, oversize, leading hyphen, control/NUL) and boundary acceptance (1/100 chapters). Matches spec §2.1/§5.4.1 and plan T2 acceptance. **Closed**.
+
+**F2 verification (closes C-2)**: `git show ec4032b --stat` + reads of `novel_scaffold.rs` (ScaffoldTransaction impl + Drop around lines 280+). New `ScaffoldTransaction { files_created, dirs_created, committed }` registers every *actual* creation (the `_idem` helpers now return `bool` "did I create this?"). `Drop` performs best-effort removal in reverse order (children before parents); only entries created by *this* invocation are eligible. `commit()` is called only after both T3 (`seed_chapters`) *and* T4 (`patch_work`) succeed. T7g test ("db failure rolls back filesystem scaffold") passes a work_id with no prior works row so seed_chapters FK violates, asserts (a) error mentions seed, (b) the `Works/<ref>/` tree created by this txn was removed by the guard. Cross-DB atomicity still per-call (see R-V133P1-09 note in the code); the FS rollback directly mitigates the "partial state on error" risk that made re-init unsafe. **Closed**.
+
+**F5 verification (closes C-3)**: `git show e5f13de --stat` + read of the probe block (`novel_scaffold.rs:255-269`). After F1 sanitize and *before* any FS side effect or T3/T4, when `world_id` is `Some(_)` and pool present: `sqlx::query_as("SELECT 1 FROM narrative_worlds WHERE world_id = ?")` (runtime query per R-V133P1-09; SAFETY comment present). Miss → `CapabilityError::InputInvalid("world_id ... not found in narrative_worlds ...")` with early return (no dirs, no seed, no PATCH, works.world_id stays NULL). T7d_bis test seeds the world row for happy paths, then exercises unknown ID and asserts exactly the three no-side-effect conditions. Worldless (`None`) path is explicitly bypassed (documented). Table name `narrative_worlds` matches the actual migration and narrative crate. **Closed**.
+
+**F4 verification (closes W-2)**: `git show 717f90c --stat` + logic read. `ScaffoldInput` now carries `fields_changed: Option<Vec<String>>`. `None` (initial bootstrap) → full novel-column PATCH + current_chapter=0 (preserves original T6 behavior). `Some(list)` → only the named columns are passed through to the patch; `work_profile` and `current_chapter` are never touched on re-init; `title` only when explicitly listed. Unknown names ignored (forward-compat). T7f test: bootstrap with work_ref + total=5, then re-init with `fields_changed=["world_id"]` only; asserts prior `work_ref`/`total_planned_chapters` are untouched while world_id is updated. Matches spec §5.4.4 "PATCH fields user did NOT change in this grill-me session". **Closed**.
+
+**F9 (bundled 9ecd52f) verification (closes W-1 for V1.36)**: Concurrency note added directly on `NovelProjectScaffold` (lines 132-150, immediately before the struct definition and run entry). Explicitly documents the single-user/single-process invariants: one in-flight invocation per (creator, work); no external mutation of `Works/<work_ref>/`; `narrative_worlds` row stable across the F5 check and F4 PATCH (TOCTOU non-exploitable with single writer). Future multi-process requires per-Work advisory lock (tracked with R-V133P1-09). F8 portion adds structured `tracing::info` (start, commit-ok with counts) + `tracing::warn` (pool=None test mode); rollback warnings already existed on the txn Drop. Acceptable for V1.36 scope per assignment. **Closed (documented)**.
+
+**W-3 (pre-existing residual) verification**: `rg 'sqlx::query' crates/nexus-local-db/src/work_chapters.rs crates/nexus-local-db/src/works.rs` returns only the pre-existing runtime query sites (the new scaffold path calls the established `seed_chapters` / `patch_work` entry points that already used them; F1–F9 introduced zero new raw `sqlx::query` call sites on these tables). Still exactly the scope of residual R-V133P1-09; not worsened. **Closed (scope unchanged)**.
+
+**Gate commands (post-fix tip)**:
+- `cargo +nightly clippy -p nexus-orchestration -p nexus42 -p nexus-local-db -- -D warnings` → clean (0 warnings, finished in 0.26s).
+- `cargo test -p nexus-orchestration --test novel_project_init` → 19/19 passed (all T7* including the new `t7a_bis_*` rejection battery, `t7d_bis` world-not-found no-side-effects, `t7f` partial-reinit, `t7g` atomic rollback).
+
+**New findings surfaced during re-review**: None.
+
+**Verdict (revalidation)**: All four original Criticals (C-1, C-2, C-3, C-4) are fully closed by the surgical fixes + hermetic tests that directly exercise the attack surfaces and rollback paths. W-2 closed by F4; W-1 acceptably documented for V1.36 single-user model; W-3 scope unchanged. No new Criticals or blocking issues introduced. Per mstar-review-qc verdict rules and the explicit re-review instructions in the assignment: **Approve**.
+
+## Completion Report v2 (initial wave — historical)
 
 **Agent**: qc-specialist-2
 **Task**: QC #2 security + correctness review for 2026-06-07-v1.36-novel-project-init-preset (V1.36 P1)
