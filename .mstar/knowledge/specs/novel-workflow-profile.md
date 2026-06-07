@@ -1,6 +1,6 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 P1 multi-chapter roadmap extension and V1.37 P2 World KB roadmap extension added 2026-06-08
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 P1 multi-chapter roadmap, V1.37 P2 World KB roadmap, and V1.37 P3 quality-loop roadmap extensions added 2026-06-08
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
 **Last updated**: 2026-06-08
@@ -73,7 +73,7 @@ On `works` table / Work API (additive):
         event-index.md          # empty stub V1.36 (E### rows; future V1.37+ scaffold)
       Stories/                  # novel正文 ONLY — sync chapter scan root
         ch<nn>-<slug>.md
-      Logs/                     # optional process logs (single-role V1.36; structure OUT)
+      Logs/                     # optional process logs (single-role V1.36; V1.37+ roadmap structure §5.5.5)
 ```
 
 ### 3.2 Directory rules
@@ -86,7 +86,7 @@ On `works` table / Work API (additive):
 | `Works/<work_ref>/Outlines/event-index.md` | **No** | Cross-chapter event index (E### rows) |
 | `Works/<work_ref>/Outlines/volume-outline.md` | **No** | Volume-level outline (optional V1.36) |
 | `Works/<work_ref>/Stories/*.md` | **Yes** | Chapter正文 (frontmatter `chapter`, `status`) |
-| `Works/<work_ref>/Logs/**` | **No** | Brainstorm/write/review logs (structure OUT V1.36) |
+| `Works/<work_ref>/Logs/**` | **No** | Brainstorm/write/review/publish process logs (V1.37+ roadmap §5.5.5); excluded from chapter sync |
 
 ### 3.3 Legacy prohibition
 
@@ -613,6 +613,145 @@ Re-running `novel-project-init` on a Work that already has the scaffold is **saf
 
 The grill-me offers an "overwrite templates" option for users who want to re-render the README/Outlines/ from latest embedded templates (useful after a toolchain update). V1.36 default is **preserve**; "overwrite" is the explicit user opt-in.
 
+### 5.5 Quality loop roadmap (V1.37 P3 extension)
+
+**Scope of this extension**: V1.37 P3 is **roadmap-only**. It records future contracts for findings, target executor mapping, master-decision escalation, rules, logs, and `reflection-loop` integration. It does **not** add a `findings` migration, new presets, daemon scheduled task, CLI subcommands, prompt templates, or file writers in V1.37 P3. The V1.36 `novel-writing` path and its `llm_judge` 五问 finalize gate (§5.1) remain the active quality gate.
+
+#### 5.5.1 Findings lifecycle and local DB sketch
+
+Future quality-loop implementation should store review outcomes in local `state.db`, not Redis. The initial lifecycle is intentionally small:
+
+```text
+open → resolved | wont_fix
+```
+
+The richer workflow `open → triaged → in_review → resolved | wont_fix | duplicate` remains a possible later extension, but V1.37 P3 selects the three-state model to keep the first migration and CLI surface narrow.
+
+Finding severities are author-facing and map to Morning Star machine residual severities as follows:
+
+| Finding severity | Meaning | `status.json` residual severity mapping |
+| --- | --- | --- |
+| `info` | Context, note, or non-actionable observation | `low` (or omit from residual tracking if no follow-up is needed) |
+| `minor` | Small craft/continuity issue; not blocking drafting | `medium` |
+| `major` | High-impact narrative, continuity, or user-visible quality problem | `high` |
+| `blocker` | Must resolve or explicitly waive before approval/publish | `critical` |
+
+Schema sketch for a future `nexus-local-db` migration:
+
+```sql
+CREATE TABLE findings (
+  finding_id TEXT PRIMARY KEY,
+  work_id TEXT,
+  chapter INTEGER,
+  kind TEXT NOT NULL,            -- e.g. 'continuity', 'craft', 'plot_hole', 'world_inconsistency'
+  severity TEXT NOT NULL,        -- 'info' | 'minor' | 'major' | 'blocker'
+  status TEXT NOT NULL,          -- 'open' | 'resolved' | 'wont_fix'
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (work_id) REFERENCES works(work_id) ON DELETE CASCADE
+);
+CREATE INDEX findings_by_work ON findings(work_id, status);
+CREATE INDEX findings_by_chapter ON findings(work_id, chapter, status);
+```
+
+`kind` is open vocabulary at the first roadmap level. Suggested minimum values are `continuity`, `craft`, `plot_hole`, and `world_inconsistency`. World-related findings reference World KB ids through the body or a future structured column, but the canonical world content remains World KB (§3.5; entity-scope-model.md §5.1).
+
+#### 5.5.2 Target executor mapping to Nexus presets and CLI surfaces
+
+The reference-system executor concepts map to Nexus presets and surfaces as follows:
+
+| Reference executor concept | Nexus preset / stage | CLI status surface | V1.37 P3 disposition |
+| --- | --- | --- | --- |
+| `write` | Existing `novel-writing` (`produce` stage) | `creator run status <work_id>` chapter progress and active schedule summary | Existing path remains; findings may later enrich prompt context, but no behavior change in P3 |
+| `brainstorm` | Future `novel-brainstorm` preset (FL-E `intake` or `research` analog) | Future `creator run brainstorm <work_id>` or `creator run stage advance --stage research --preset novel-brainstorm`; status shows open findings driving brainstorm prompts | Future implementation only |
+| `none` | No preset; user or reviewer acknowledges, resolves, or marks `wont_fix` | `creator run status <work_id>` lists the finding with `next_action: none` / manual decision | Future implementation only |
+| `master` | Future `novel-review-master` preset (FL-E `review` analog) | Future `creator run review-master <work_id>`; status shows master-decision banner and open findings requiring approval | Future implementation only |
+
+`novel-brainstorm` should turn open findings into ideation prompts without writing chapter正文 directly. `novel-review-master` should surface findings, relevant rules, and proposed actions to the user for final approval. Neither preset replaces `novel-writing`; they are auxiliary quality-loop surfaces layered around the single-role V1.36 path.
+
+#### 5.5.3 Master-decision timeout (96h) in local-first OSS terms
+
+The reference-system pattern escalates a finding if it remains `open` for 96 hours. Nexus OSS maps this to local persistence and daemon lifecycle instead of Redis, cron, or platform workers:
+
+1. A future `nexus-daemon-runtime` lifecycle/scheduler task runs every 24 hours while the daemon is healthy.
+2. It queries `findings` for rows where `status = 'open'` and `created_at < now - 96h`.
+3. It emits a structured log entry with `work_id`, `chapter`, `finding_id`, `age_hours`, and suggested command.
+4. `creator run status <work_id>` shows a banner such as:
+
+   ```text
+   Findings: 2 open, 1 older than 96h
+   Next action: run `nexus42 creator run review-master <work_id>` to make a master decision.
+   ```
+
+5. Automatic escalation is **user opt-in** through a future CLI flag or Work-level setting. By default, the daemon performs no auto-action; the user explicitly runs `creator run review-master <work_id>`.
+
+This keeps the OSS path local-first: local DB + daemon scheduled task + CLI status banner. It explicitly does not reintroduce Redis, external cron, platform queues, or platform workers.
+
+#### 5.5.4 Three-layer rules architecture
+
+Future quality-loop work uses three rules layers:
+
+| Layer | Location | Mutability | Purpose |
+| --- | --- | --- | --- |
+| Layer 1 — Shared writing craft rules | User override: `~/.nexus42/rules/writing-craft.md`; in-repo default: `crates/nexus-orchestration/embedded-rules/writing-craft.md` | Immutable per version; user override may pin/replace a version | Cross-Work craft guidance read by all `novel-writing` runs; includes prose quality, pacing, scene craft, and the 五问 gate rationale |
+| Layer 2 — Per-work novel rules | `Works/<work_ref>/Rules/novel-rules.md` | User-editable; reset/replaced by future `creator run rules reset <work_id>` | Per-Work style preferences: POV, tense, chapter length, allowed tone, banned motifs, target audience, stylistic constraints |
+| Layer 3 — Append-only rules history | `Works/<work_ref>/Rules/novel-rules-history.md` | Append-only; never deleted | Audit trail for every Layer 2 change with timestamp, reason, actor/source, and previous/new summary |
+
+Rules responsibilities are distinct from adjacent knowledge surfaces:
+
+- **SOUL**: creator identity, voice, experience, and memory. SOUL is not a rule file and should not receive per-Work style churn.
+- **World KB**: characters, locations, society, magic/physics/technology rules, timeline facts, and source anchors (§3.5; entity-scope-model.md §5.1). World KB describes fictional reality, not prose craft instructions.
+- **Shared writing craft rules**: how to write prose across Works (scene quality, pacing, clarity, consistency, 五问).
+- **Per-work novel rules**: how this Work should be written (POV, tense, chapter size, style preferences).
+
+If no `writing-craft-rules.md` exists, `novel-writing` continues to embed the 五问 prompt inline (§5.1). P3 found no existing `writing-craft-rules.md`; creating the embedded/user rule files is future implementation.
+
+#### 5.5.5 `Logs/` structure and write discipline
+
+V1.36 creates `Works/<work_ref>/Logs/` as an empty optional root (§5.4.1). V1.37+ quality-loop work may add the following subdirectories:
+
+```text
+Works/<work_ref>/Logs/
+  brainstorm/    # brainstorm session outputs: chats, sketches, alternatives
+  write/         # chapter drafting process logs and prompt/response summaries
+  review/        # review outputs, findings notes, master-decision context
+  publish/       # future publish process notes; out until platform publish ships
+```
+
+Write discipline:
+
+1. Logs are process evidence, not canonical chapter正文, not World KB, and not SOUL.
+2. Logs may be summarized into findings, rules, or KB items, but the summary/promotion must be explicit.
+3. `Logs/publish/` remains reserved until platform publish (DF-59) ships.
+4. Per §3.2 and §7, `Works/<work_ref>/Logs/**` is **not** scanned by the chapter sync module. Chapter sync remains scoped to `Works/<work_ref>/Stories/*.md` only.
+
+#### 5.5.6 `reflection-loop` feeding findings and rules updates
+
+`reflection-loop` is already the FL-E `review` stage preset and remains optional in V1.36 (§5.3.3; creator-workflow.md §3.1 and §4). Future integration should work as follows:
+
+1. The user runs `reflection-loop` on a draft or finalized chapter after `novel-writing` has produced content.
+2. The preset inspects chapter body, outline context, `llm_judge` output, relevant World KB context for World-bound Works, and active rules layers.
+3. It writes one or more rows to `findings` with `kind = 'craft'`, `kind = 'continuity'`, or another supported kind.
+4. `creator run status <work_id>` surfaces a **Findings** section summarizing open findings by severity and chapter.
+5. The user can resolve, mark `wont_fix`, or flag a finding as a **rule suggestion**.
+6. If accepted as a rule suggestion, the daemon updates `Works/<work_ref>/Rules/novel-rules.md` and appends an audit entry to `novel-rules-history.md` with timestamp + reason.
+
+This integration depends on the `findings` table and rules files existing, so it is future implementation scope.
+
+#### 5.5.7 V1.37 P3 scope decision
+
+V1.37 P3 remains roadmap-only. A quality-loop-lite implementation is deferred because the first useful slice spans five coupled work items:
+
+1. `findings` table migration and DAO/API surface (`nexus-local-db`, daemon handlers, CLI status rendering).
+2. Net-new `novel-brainstorm` and `novel-review-master` presets plus prompt templates.
+3. 96h master-decision daemon scheduled task and opt-in setting.
+4. Rules file readers/writers plus append-only history discipline.
+5. `Logs/` subdirectory write discipline and `reflection-loop` integration that depends on findings.
+
+These are larger than a safe docs-only P3 slice and depend on P0 foundation stability. Future plans may reopen a narrow first implementation, but must preserve the local-first path above and avoid Redis, cron, platform workers, and platform publish dependencies.
+
 ---
 
 ## 6. Completion semantics
@@ -777,7 +916,15 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
   - Prompt-time World context block shape documented for World-bound Works, with worldless Works preserving README-only context (§3.5.1.3).
   - `world_refs` canonicalization and warning/error timing documented (§3.5.1.4).
   - Chapter → World KB extraction and explicit event/foreshadowing promotion path documented (§3.5.1.5).
+- **V1.37 P3 quality-loop roadmap deltas** (recorded 2026-06-08):
+  - **Roadmap-only** decision recorded (§5.5): no findings migration, new presets, daemon scheduled task, CLI subcommands, prompt templates, or file writers claimed in P3.
+  - Findings lifecycle, severity mapping, and future `findings` table sketch documented (§5.5.1).
+  - Reference executor concepts mapped to Nexus presets / CLI surfaces (`novel-writing`, future `novel-brainstorm`, future `novel-review-master`) (§5.5.2).
+  - 96h master-decision timeout mapped to local DB + daemon scheduled task + `creator run status` banner with opt-in escalation (§5.5.3).
+  - Three-layer rules architecture and SOUL / World KB boundaries documented (§5.5.4).
+  - `Logs/brainstorm|write|review|publish` roadmap structure documented while reaffirming `Logs/**` sync exclusion (§5.5.5).
+  - `reflection-loop` → findings / rule-suggestion integration documented as future implementation (§5.5.6).
 
 ---
 
-*Shipped V1.36 baseline with V1.37 P1/P2 roadmap extensions. Implement V1.37 multi-chapter or World KB continuity behavior only via a future locked implementation plan.*
+*Shipped V1.36 baseline with V1.37 P1/P2/P3 roadmap extensions. Implement V1.37 multi-chapter, World KB continuity, or quality-loop behavior only via a future locked implementation plan.*
