@@ -80,8 +80,8 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | Document | Class | Status |
 | --- | --- | --- |
 | [cli-spec.md](cli-spec.md) | Master | Normative |
-| [cli-command-ia.md](cli-command-ia.md) | Draft overlay | Draft (V1.35) |
-| [creator-centric-entry-model.md](creator-centric-entry-model.md) | Draft overlay | Draft (V1.35) |
+| [cli-command-ia.md](cli-command-ia.md) | Master (Shipped V1.35) | Shipped (V1.35) |
+| [creator-centric-entry-model.md](creator-centric-entry-model.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 
 **Read order:** IA overlay → entry overlay → CLI Master (flags/subcommands).
 
