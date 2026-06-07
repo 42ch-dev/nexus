@@ -1,11 +1,11 @@
-//! End-to-end novel-writing preset test against mocked ACP worker.
+//! End-to-end novel-writing preset test.
 //!
-//! Covers all four outer states (gathering → brainstorming → outlining → drafting → done),
-//! inner graph execution, manual advance, and restart durability.
+//! Covers the V1.36 chapter-scoped pipeline (outline_chapter → draft_chapter →
+//! finalize → done), manual advance, restart durability, and the llm_judge
+//! 五問 quality gate.
 //!
-//! ## WS3 R2: Assertions strengthened
-//!
-//! Tests now assert meaningful outcomes rather than discarding results.
+//! P3 refactored: legacy 4-state flow (gathering → brainstorming → outlining → drafting)
+//! replaced by chapter-scoped 3-state flow (outline_chapter → draft_chapter → finalize).
 
 use std::sync::Arc;
 
@@ -49,7 +49,8 @@ async fn seed_novel_writing_preset_input(
     )
     .await;
     ctx.set("preset.input.vibe", "literary").await;
-    ctx.set("preset.input.story_ref", "e2e-test-story").await;
+    ctx.set("preset.input.work_ref", "e2e-test-novel").await;
+    ctx.set("preset.input.work_id", "wrk_e2e_test").await;
 }
 
 async fn start_novel_writing_session(
@@ -122,62 +123,43 @@ async fn e2e_novel_writing_traverses_all_outer_states() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: Inner graphs execute (brainstorming + drafting)
+// Test 2: Chapter-scoped pipeline executes states
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn e2e_inner_graphs_execute() {
+async fn e2e_chapter_scoped_pipeline_executes() {
     let (engine, loaded) = setup_engine();
 
     let session_id = start_novel_writing_session(&engine, &loaded).await;
 
-    let outcomes = run_until_wait_or_terminal(&engine, &session_id, 128).await;
+    let outcomes = run_until_wait_or_terminal(&engine, &session_id, 64).await;
 
-    // WS3 R2: Assert that we actually ran steps.
+    // P3: No inner graphs in the refactored preset; all states are outer states
+    // with capability-based enter actions.
     assert!(
         !outcomes.is_empty(),
         "should have executed at least one step"
     );
 
-    // Check that at least some inner graph nodes executed.
     let ctx = engine
         .get_context(&session_id)
         .await
         .expect("get_context should succeed");
 
-    let has_inner_output = ctx
-        .get::<String>("nodes.diverge.text")
-        .await
-        .is_some_and(|s| !s.is_empty())
-        || ctx
-            .get::<String>("nodes.cluster.text")
-            .await
-            .is_some_and(|s| !s.is_empty())
-        || ctx
-            .get::<String>("nodes.select.text")
-            .await
-            .is_some_and(|s| !s.is_empty());
-
-    // WS3 R2: Assert inner graph execution occurred (if state machine reached brainstorming).
-    // Note: The preset may stall at gathering if the judge doesn't pass; we only check
-    // that inner graph nodes were attempted if the session progressed beyond gathering.
-    let reached_brainstorming = ctx
-        .get::<String>("state.brainstorming.entered_at")
-        .await
-        .is_some();
-
-    if reached_brainstorming {
-        assert!(
-            has_inner_output,
-            "if brainstorming state was entered, inner graph nodes should have executed"
-        );
-    }
-
-    // WS3 R2: Assert that outcomes include meaningful step executions.
+    // Verify that the session ran at least one step (outline_chapter is the initial state).
     assert!(
         !outcomes.is_empty(),
-        "should have at least 1 step outcome (got {})",
-        outcomes.len()
+        "should have executed at least one step"
+    );
+
+    // Verify session is in a valid non-running state.
+    let status = engine
+        .get_status(&session_id)
+        .await
+        .expect("get_status should succeed");
+    assert!(
+        !matches!(status, nexus_orchestration::engine::SessionStatus::Running),
+        "session should not be running after steps"
     );
 }
 
@@ -325,15 +307,16 @@ fn core_context_template_is_rendered_into_prompt() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn e2e_novel_writing_has_five_states() {
+fn e2e_novel_writing_has_four_states() {
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
     let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
+    // P3: 4 states (outline_chapter, draft_chapter, finalize, done).
     assert_eq!(
         loaded.manifest.states.len(),
-        5,
-        "novel-writing should have 5 states"
+        4,
+        "novel-writing should have 4 states (P3 chapter-scoped)"
     );
 
     let state_ids: Vec<&str> = loaded
@@ -344,13 +327,7 @@ fn e2e_novel_writing_has_five_states() {
         .collect();
     assert_eq!(
         state_ids,
-        vec![
-            "gathering",
-            "brainstorming",
-            "outlining",
-            "drafting",
-            "done"
-        ]
+        vec!["outline_chapter", "draft_chapter", "finalize", "done"]
     );
 }
 
@@ -377,4 +354,105 @@ fn template_syntax_error_returns_deterministic_failure() {
         err.contains("template") || err.contains("syntax"),
         "error should explain template syntax failure, got: {err}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// P3 T7: llm_judge 五問 quality gate on finalize state
+// ---------------------------------------------------------------------------
+
+#[test]
+fn novel_writing_judge_quality_gate_on_finalize() {
+    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
+        .expect("novel-writing preset should load");
+
+    // Find the finalize state.
+    let finalize = loaded
+        .manifest
+        .states
+        .iter()
+        .find(|s| s.id == "finalize")
+        .expect("finalize state should exist");
+
+    // Verify it has llm_judge exit_when.
+    match &finalize.exit_when {
+        Some(nexus_orchestration::preset::manifest::ExitWhen::LlmJudge {
+            template_file,
+            judge_capability,
+            min_interval,
+        }) => {
+            assert_eq!(
+                template_file.as_deref(),
+                Some("prompts/finalize-exit.md"),
+                "finalize should use prompts/finalize-exit.md"
+            );
+            assert_eq!(
+                judge_capability.as_deref(),
+                Some("judge.llm"),
+                "finalize should use judge.llm capability"
+            );
+            assert_eq!(
+                min_interval.as_deref(),
+                Some("PT6H"),
+                "finalize should have PT6H min_interval"
+            );
+        }
+        other => panic!("finalize should have llm_judge exit_when, got: {other:?}"),
+    }
+
+    // Verify finalize's next state is done.
+    match &finalize.next {
+        Some(nexus_orchestration::preset::manifest::NextTarget::Linear(target)) => {
+            assert_eq!(target, "done", "finalize should transition to done");
+        }
+        other => panic!("finalize next should be Linear(done), got: {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P3 T7: finalize-exit.md prompt file referenced from finalize state
+// ---------------------------------------------------------------------------
+
+#[test]
+fn novel_writing_finalize_exit_prompt_referenced() {
+    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
+        .expect("novel-writing preset should load");
+
+    // The finalize state's exit_when references prompts/finalize-exit.md
+    let finalize = loaded
+        .manifest
+        .states
+        .iter()
+        .find(|s| s.id == "finalize")
+        .expect("finalize state should exist");
+
+    if let Some(nexus_orchestration::preset::manifest::ExitWhen::LlmJudge {
+        template_file, ..
+    }) = &finalize.exit_when
+    {
+        assert_eq!(
+            template_file.as_deref(),
+            Some("prompts/finalize-exit.md"),
+            "finalize should reference prompts/finalize-exit.md"
+        );
+    } else {
+        panic!("finalize should have llm_judge exit_when");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P3 T5: Verify novel.chapter_transition capability is registered
+// ---------------------------------------------------------------------------
+
+#[test]
+fn novel_chapter_transition_capability_registered() {
+    let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+    let cap = caps.get("novel.chapter_transition");
+    assert!(
+        cap.is_some(),
+        "novel.chapter_transition should be registered"
+    );
+    let cap = cap.unwrap();
+    assert_eq!(cap.name(), "novel.chapter_transition");
 }
