@@ -4,7 +4,7 @@ reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-07-v1.37-novel-foundation-first"
 verdict: "Request Changes"
-generated_at: "2026-06-07T17:29:05Z"
+generated_at: "2026-06-07T18:13:04Z"
 ---
 
 # Code Review Report
@@ -90,3 +90,31 @@ generated_at: "2026-06-07T17:29:05Z"
 | 🟢 Suggestion | 4 |
 
 **Verdict**: Request Changes
+
+## Revalidation (2026-06-08)
+
+Re-review after fix commit `7d7f3d0b`. Targeted scope: F-001..F-004 + S-001..S-004.
+
+### Status by prior finding
+
+- **F-001 (fmt)**: RESOLVED — `cargo +nightly fmt --all -- --check` completed cleanly (no formatter diff emitted).
+- **F-002 (sqlx macro)**: UNRESOLVED — the required scan still finds static runtime SQL in the cited paths, including `schedules.rs` lines 165/238/332/430/1325 and `force_gates_audit.rs` lines 36/64/90; these are not DDL/PRAGMA/dynamic-SQL exceptions under `crates/nexus-daemon-runtime/AGENTS.md`.
+- **F-003 (gated preset w/o work_id)**: RESOLVED — `add_schedule` now returns `422` with `preset_gates_failed` when a gated preset lacks `body.input.work_id`, and `gate_failure_returns_422_with_structured_body` passes for structured gate failure behavior.
+- **F-004 (novel-writing YAML gates)**: RESOLVED — `novel-writing/preset.yaml` now places `gates:` under `preset:` and includes the §5.3.2 gate set (`work_profile`, `work_ref`, `intake_status`, required directories, and `previous_preset: novel-project-init`); `world_id` is explicitly omitted while world binding remains optional. The new `R-V137P0-01` residual tracks strict validation for misplaced YAML keys.
+- **S-001 (extract schedule_admission)**: DEFERRED — no dedicated admission module was extracted; acceptable as follow-up maintainability work for this targeted fix round.
+- **S-002 (dedup audit INSERT)**: ADDRESSED — the handler now calls `nexus_local_db::insert_force_gates_audit`, removing the duplicate audit INSERT from `schedules.rs` (the helper's runtime SQL is covered by F-002).
+- **S-003 (machine-readable failed-gate)**: DEFERRED — no broader tagged failed-gate detail shape was added; acceptable future work.
+- **S-004 (lint suppression justification)**: ADDRESSED — new `too_many_lines` suppressions now include rationale comments near `add_schedule` and `patch_work_tx`.
+
+### New findings (if any)
+
+- None beyond the still-unresolved F-002 blocker. Note: the required aggregate `cargo test` command also failed during `nexus-daemon-runtime` doc-tests because sqlx query macros could not find `DATABASE_URL`/prepared cache entries, reinforcing that the sqlx/static-query gate is not ready for approval.
+
+### New evidence
+
+- `cargo +nightly fmt --all -- --check` output: passed; command emitted only `Finished dev profile ...` before the next gate.
+- `cargo clippy -p nexus-orchestration -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -- -D warnings` output: passed; the chained gate proceeded to `cargo test`.
+- `cargo test -p nexus-orchestration -p nexus-daemon-runtime -p nexus-local-db -p nexus42` summary: failed in `nexus-daemon-runtime` doc-tests with sqlx macro errors (`set DATABASE_URL to use query macros online, or run cargo sqlx prepare`) and `can't find crate for nexus_orchestration`; unit/integration test execution before doc-tests included `608 passed` for `nexus42` plus the other shown suites. Targeted confirmation `cargo test -p nexus-daemon-runtime --test fl_e_schedule_api gate_failure_returns_422_with_structured_body` passed (`1 passed; 0 failed`).
+- `rg -n "sqlx::query[^!]" crates/nexus-daemon-runtime/src/ crates/nexus-orchestration/src/ crates/nexus-local-db/src/` evidence: remaining targeted runtime static SQL includes `crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs:165`, `:238`, `:332`, `:430`, `:1325`; `crates/nexus-local-db/src/force_gates_audit.rs:36`, `:64`, `:90`; and `crates/nexus-orchestration/src/capability/builtins/novel_scaffold.rs:260`. Dynamic builders/DDL/PRAGMA occurrences remain elsewhere and were not treated as this finding's blocker.
+
+**Updated Verdict**: Request Changes
