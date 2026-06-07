@@ -21,6 +21,7 @@ pub mod pending_review;
 pub mod prompt_injection;
 pub mod reference_source;
 pub mod soul_meta;
+pub mod work_chapters;
 pub mod works;
 pub mod world_stories;
 
@@ -63,7 +64,7 @@ pub use memory_fragment::{
 // Re-export world_stories types
 pub use world_stories::{
     create_world_story, delete_world_story, generate_id as generate_world_story_id, get_by_id,
-    list_by_world, update_chapters, update_status, WorldStory,
+    list_by_world, update_chapters, update_status as update_world_story_status, WorldStory,
 };
 
 // Re-export narrative_write types
@@ -99,6 +100,13 @@ pub use works::{
     advance_work_stage_atomic, append_inspiration, count_works, create_work,
     find_work_by_client_request_id, get_work, has_active_fl_e_schedule, list_works, patch_work,
     record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
+};
+
+// Re-export work_chapters types
+pub use work_chapters::{
+    count_chapters, get_chapter, insert_chapter, is_work_completed, reconcile_from_filesystem,
+    seed_chapters, update_paths, update_status, InsertChapterParams, ReconcileReport,
+    WorkChapterRecord,
 };
 
 /// Runtime role for database initialization

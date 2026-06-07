@@ -62,6 +62,8 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~R4~~ | `SystemClock` DST safety not implemented | V1.7 | Low severity. Fixed in `nexus-orchestration`. |
 | ~~R7~~ | `schedule_guards` HashMap grows unbounded | V1.7 | Nit. Fixed in `nexus-orchestration`. |
 | ~~TD-10~~ | Device flow OAuth — production auth deferred; stub `verify_device_code` only | V1.10 | Low severity. Replaced by real Device Flow Login (WS-A). |
+| ~~DF-57~~ | `Works/<work_ref>/` artifact layout + sync scan migration | **V1.36 P2** (Shipped 2026-06-07) | Pre-1.0: no legacy `Stories/<story_ref>/` shims. Plan `2026-06-07-v1.36-novel-artifact-layout-and-templates`; `sync_module` rewritten to scan only `Works/<work_ref>/Stories/*.md`; per-chapter metadata derived from `work_chapters` table; 5 novel-writing templates (chapter-outline / chapter-body / volume-outline / foreshadowing / event-index). |
+| ~~DF-58 (V1.36)~~ | Interactive novel project init preset (`novel-project-init`) | **V1.36 P1** (Shipped 2026-06-07) | Separate grill-me preset; not embedded in `novel-writing` auto-chain. Plan `2026-06-07-v1.36-novel-project-init-preset`; 10 prompts (init-intro, init-title, init-genre, init-chapters, init-work-ref, init-world + 3 branches, init-summary) + 4 templates (README, foreshadowing, event-index, volume-outline); `novel.project_scaffold` capability with atomic FS+DB transaction (ScaffoldTransaction with Drop rollback) + sanitization (`validate_work_ref` / `validate_slug` / `validate_total_chapters` 1..=100) + world_id FK existence check. |
 
 ### Cancelled / Superseded
 
@@ -364,6 +366,23 @@ When a version ships, append new closed rows here and remove them from the activ
 | DF-09 | Keep (prioritize) | Must work with `~/.nexus42/presets/` (DF-17) |
 | DF-10 | Keep (worth doing) | Daemon lifecycle hardening |
 | DF-11 | Keep (worth doing) | Handlebars binding for CoreContext |
+
+---
+
+## 2) V1.x delivery snapshots
+
+### V1.36 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.36-novel-writing-ux-delivery-compass-v1.md](../iterations/v1.36-novel-writing-ux-delivery-compass-v1.md) |
+| Shipped at | 2026-06-07 |
+| Scope | **Novel-writing正文产出 UX** on generic Work (`work_profile: novel`); `Works/<work_ref>/` layout; `novel-project-init` grill-me init preset; `novel-writing` chapter pipeline (outline → draft → finalize with `llm_judge` 五问 quality gate); completion stop; pre-1.0 full migration, no legacy `Stories/<story_ref>/` shims |
+| Plans | `2026-06-07-v1.36-harness-docs-prepare` (Prepare, P-1), `2026-06-07-v1.36-novel-spec-and-compass` (P0), `2026-06-07-v1.36-novel-project-init-preset` (P1), `2026-06-07-v1.36-novel-artifact-layout-and-templates` (P2), `2026-06-07-v1.36-novel-chapter-drafting-pipeline` (P3), `2026-06-07-v1.36-novel-completion-and-chain-hygiene` (P4) |
+| Key changes | `novel-workflow-profile.md` Draft overlay Shipped (V1.36): `work_profile: novel` + `work_ref` extension; `work_chapters` DB SSOT (replaces `work-status.md`); `Works/<work_ref>/` layout (README + Outlines/ + Stories/ + Logs/); per-Work `Worldbuilding/` subtree removed (cross-Work worldbuilding lives in World KB); preset gates mechanism in `orchestration-engine.md §7.9` Master + novel-specific gates in `novel-workflow-profile §5.3` Draft overlay + `world_binding: required \| optional` toggle + scaffold protocol enumeration in §5.4; `novel-project-init` preset (10 prompts incl. World binding question + 4 templates + `novel.project_scaffold` capability with atomic FS+DB transaction + sanitization + FK checks); `sync_module` rewritten for `Works/<work_ref>/Stories/` scan + DB-enriched bundle; `creator run reconcile-chapters <work_id>` CLI + daemon endpoint; `novel-writing` 4-state chapter-scoped graph with `llm_judge` 五问 quality gate on `finalize` (`opening three lines / conflict resonance / twist recall / new perspective / ending hook`); `is_work_completed` evaluator + completion banner in `creator run status` + schedule guard rejecting `novel-writing` on completed Work; P1-P4 used PM-validate path (analogous to V1.35 P4) under time pressure (no QC tri-review for P2/P3; P1 had QC tri-review with PM-override w/ residuals) |
+| Closed DFs | DF-57 (V1.36 P2), DF-58 V1.36 (V1.36 P1) |
+| Open residuals at close | R-V136P1-01, R-V136P1-02, R-V136P2-01, R-V136P2-02, R-V136P2-03, R-V136P3-01, R-V136P3-02 — 7 new V1.36 residuals (all medium-or-low severity); DF-47 stays conditional; DF-53 partial again on top of V1.35 P4; DF-59 stays backlog |
+| Explicit deferrals | DF-29, DF-31, DF-47, DF-53, DF-56, DF-59, DF-60..DF-67 (novels-system pattern backlog for V1.37+) |
 
 
 ---

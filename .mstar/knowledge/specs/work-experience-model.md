@@ -11,6 +11,7 @@
 - [orchestration-engine.md](orchestration-engine.md) — presets, schedules, `llm_judge`, run_intents
 - [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) — schedule + core_context
 - [entity-scope-model.md](entity-scope-model.md) — Creator / World hierarchy
+- [novel-workflow-profile.md](novel-workflow-profile.md) — `work_profile: novel` extension (Draft V1.36)
 
 ---
 
@@ -60,7 +61,11 @@ Without Work, users must understand `daemon schedule`, preset IDs, seed strings,
 | `creative_brief` | object | after intake | Structured brief (schema §4) |
 | `intake_status` | enum | yes | `pending` \| `in_progress` \| `complete` \| `skipped` |
 | `world_id` | string | no | Bound narrative world when known |
-| `story_ref` | string | no | Preset/manuscript ref when allocated |
+| `story_ref` | string | no | Legacy preset/manuscript ref; **superseded for novel profile** by `work_ref` (V1.36) |
+| `work_profile` | enum | no | Creative kind: `novel` (V1.36+); future: `essay`, `script`, … — see [novel-workflow-profile.md](novel-workflow-profile.md) |
+| `work_ref` | string | no | Filesystem directory name under `Works/<work_ref>/` when `work_profile` is set |
+| `total_planned_chapters` | integer | no | Novel profile: planned chapter count (≥ 1) |
+| `current_chapter` | integer | no | Novel profile: last active chapter index |
 | `inspiration_log` | array | no | Append-only `{at, note}` supplements |
 | `primary_preset_id` | string | default `novel-writing` | Main production preset |
 | `schedule_ids` | string[] | no | Linked orchestration schedule ids |

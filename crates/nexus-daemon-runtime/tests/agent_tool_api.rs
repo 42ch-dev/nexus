@@ -68,6 +68,10 @@ async fn seed_work(state: &WorkspaceState) -> String {
         updated_at: now,
         current_stage: "research".to_string(),
         stage_status: "active".to_string(),
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: 0,
     };
     works::create_work_atomic(state.pool(), &record, None)
         .await

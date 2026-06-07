@@ -49,6 +49,14 @@ pub struct WorkApiDto {
     pub current_stage: String,
     /// Current FL-E stage status (V1.34).
     pub stage_status: String,
+    /// Work profile (V1.36 novel-workflow-profile §2.1).
+    pub work_profile: Option<String>,
+    /// Human slug for Works/ directory (V1.36 §2.1).
+    pub work_ref: Option<String>,
+    /// Total planned chapters (V1.36 §2.1).
+    pub total_planned_chapters: Option<i32>,
+    /// Current chapter index (V1.36 §2.1).
+    pub current_chapter: i32,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -80,6 +88,10 @@ impl From<WorkRecord> for WorkApiDto {
             updated_at: r.updated_at,
             current_stage: r.current_stage,
             stage_status: r.stage_status,
+            work_profile: r.work_profile,
+            work_ref: r.work_ref,
+            total_planned_chapters: r.total_planned_chapters,
+            current_chapter: r.current_chapter,
         }
     }
 }
@@ -194,6 +206,10 @@ pub async fn create_work(
         updated_at: now.clone(),
         current_stage: "intake".to_string(),
         stage_status: "pending".to_string(),
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: 0,
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -285,13 +301,57 @@ pub async fn get_work(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
-    let record = works::get_work(state.pool(), &creator_id, &work_id)
+    let mut record = works::get_work(state.pool(), &creator_id, &work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    // V1.36 P4 (T1): auto-promote works.status to 'completed' when all
+    // chapters are finalized per novel-workflow-profile §6.1.
+    if record.status != "completed" && record.work_profile.as_deref() == Some("novel") {
+        match nexus_local_db::work_chapters::is_work_completed(state.pool(), &work_id).await {
+            Ok(true) => {
+                let now = chrono::Utc::now().to_rfc3339();
+                let patch = WorkPatch {
+                    status: Some("completed".to_string()),
+                    ..Default::default()
+                };
+                match works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now).await {
+                    Ok(updated) => {
+                        tracing::info!(
+                            target: "novel.completion",
+                            work_id = %work_id,
+                            creator_id = %creator_id,
+                            work_ref = ?updated.work_ref,
+                            total_planned_chapters = ?updated.total_planned_chapters,
+                            "Auto-promoted work to 'completed' (all chapters finalized)"
+                        );
+                        record = updated;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "novel.completion",
+                            work_id = %work_id,
+                            error = %e,
+                            "Failed to auto-promote work to 'completed'"
+                        );
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(
+                    target: "novel.completion",
+                    work_id = %work_id,
+                    error = %e,
+                    "Failed to check work completion status"
+                );
+            }
+        }
+    }
 
     Ok(Json(WorkApiDto::from(record)))
 }
@@ -364,6 +424,10 @@ async fn patch_work_stage(
             schedule_ids: None,
             current_stage: None,
             stage_status: None,
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: None,
         };
         works::patch_work(state.pool(), creator_id, work_id, &non_stage_patch, now)
             .await
@@ -439,6 +503,10 @@ pub async fn patch_work(
         schedule_ids: None,
         current_stage: None,
         stage_status: None,
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: None,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
@@ -561,4 +629,97 @@ pub fn read_active_workspace_slug(
         .and_then(|v| v.get(creator_id))
         .and_then(|v| v.as_str())
         .map(std::string::ToString::to_string)
+}
+
+// ---------------------------------------------------------------------------
+// Reconcile chapters (V1.36 §4.1.2, §8)
+// ---------------------------------------------------------------------------
+
+/// Reconcile `work_chapters` from filesystem for a Work.
+///
+/// `POST /v1/local/works/{work_id}/reconcile-chapters`
+pub async fn reconcile_chapters(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<
+    (
+        StatusCode,
+        Json<nexus_local_db::work_chapters::ReconcileReport>,
+    ),
+    NexusApiError,
+> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let pool = state.pool();
+
+    // Get the Work record to find work_ref
+    let work = works::get_work(pool, &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("get_work failed: {e}"),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("Work '{work_id}' not found")))?;
+
+    let work_ref = work
+        .story_ref
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "PRECONDITION_FAILED".to_string(),
+            message: "`story_ref` (work_ref) not set on Work; run novel-project-init first"
+                .to_string(),
+        })?;
+
+    // Defense in depth: validate work_ref slug before passing to filesystem
+    // layer. Matches the same policy as
+    // `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
+    if !is_valid_work_ref(work_ref) {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_WORK_REF".to_string(),
+            message: format!(
+                "work_ref '{work_ref}' is not a valid slug (expected [a-z0-9][a-z0-9-]{{0,63}})"
+            ),
+        });
+    }
+
+    // Resolve workspace root from state
+    let workspace_path_str = state.workspace_path().unwrap_or_default();
+    let workspace_root = std::path::Path::new(&workspace_path_str);
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let report = nexus_local_db::work_chapters::reconcile_from_filesystem(
+        pool,
+        &work_id,
+        work_ref,
+        workspace_root,
+        &now,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("reconcile failed: {e}"),
+    })?;
+
+    Ok((StatusCode::OK, Json(report)))
+}
+
+/// Validate that `work_ref` is a safe slug: `[a-z0-9][a-z0-9-]{0,63}`.
+///
+/// This mirrors the policy enforced by
+/// `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
+/// Duplicated here because the sanitize module is private to `nexus-orchestration`.
+fn is_valid_work_ref(s: &str) -> bool {
+    if s.is_empty() || s.len() > 64 {
+        return false;
+    }
+    if s.contains("..") || s.contains('/') || s.contains('\\') || s.contains('\0') {
+        return false;
+    }
+    let mut chars = s.chars();
+    let first = chars.next().expect("non-empty checked above");
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
