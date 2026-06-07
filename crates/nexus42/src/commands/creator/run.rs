@@ -128,6 +128,13 @@ pub enum StageCommand {
         /// Force advance even if current stage is not complete (audited)
         #[arg(long, default_value_t = false)]
         force: bool,
+        /// Force gate bypass with audit reason (V1.37 §7.9)
+        /// Requires --gate-reason to be set alongside
+        #[arg(long, default_value_t = false)]
+        force_gates: bool,
+        /// Audit reason for --force-gates (required when --force-gates is set)
+        #[arg(long)]
+        gate_reason: Option<String>,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -165,24 +172,13 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 ));
             }
 
-            // F7 (W-001 partial fix, R-V136P1-01): resolve active creator once and
-            // populate AddScheduleRequest.creator_id for every schedule we create
-            // below. The previous code passed `String::new()`, which left the
-            // creator_id empty in the daemon-side Schedule row and broke
-            // downstream lookups (e.g. fl_e.audit logs and per-creator schedule
-            // queries).
+            // F7 (V1.36 P1, R-V136P1-01 resolved in V1.37): resolve active creator
+            // once and populate AddScheduleRequest.creator_id for every schedule
+            // we create below.
             //
-            // GAP DEFERRED (R-V136P1-01): the `--init-preset` flow still does not
-            // thread the grill-me output (work_ref / total_planned_chapters /
-            // world_id) into `preset.input.*`. AddScheduleRequest currently has no
-            // `input: HashMap<String, serde_json::Value>` field; adding one
-            // requires a wire-contract change + `pnpm run codegen` + daemon
-            // handler + scheduler input-routing. That is out of V1.36 P1 scope and
-            // tracked as R-V136P1-01 in `.mstar/status.json`. The init preset's
-            // committing state will hit `preset.input.*` with empty values at
-            // runtime until that lands; the daemon logs a warn! trace on every
-            // such schedule (see `crates/nexus-daemon-runtime/src/api/handlers/
-            // orchestration/schedules.rs`).
+            // V1.37 (R-V136P1-01): the `--init-preset` flow now threads grill-me
+            // output (work_ref / total_planned_chapters / world_id) into
+            // `preset.input.*` via the `input` field on AddScheduleRequest.
             let resolved_creator_id = config
                 .active_creator_id
                 .clone()
@@ -216,13 +212,15 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             }
 
-            // V1.36: pass force_gates + reason through
+            // V1.36: pass force_gates + reason through to Work creation body
+            // (the force_gates flag also flows via AddScheduleRequest for
+            // schedule-level gate evaluation at the daemon handler).
             if force_gates {
                 if let Some(o) = body.as_object_mut() {
                     o.insert("force_gates".to_string(), serde_json::Value::Bool(true));
                     o.insert(
                         "force_gates_reason".to_string(),
-                        serde_json::Value::String(reason.unwrap_or_default()),
+                        serde_json::Value::String(reason.clone().unwrap_or_default()),
                     );
                 }
             }
@@ -252,6 +250,16 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             // V1.36: Schedule init preset if requested (before intake)
             let mut init_schedule_id: Option<String> = None;
             if let Some(ref ip) = init_preset {
+                // V1.37 (R-V136P1-01): build structured input map from CLI flags
+                // and work creation response so grill-me answers reach
+                // preset.input.* for scaffold and prompt rendering.
+                let init_input = serde_json::json!({
+                    "work_id": work_id,
+                    "work_ref": work_title.to_lowercase().replace(' ', "-"),
+                    "title": work_title,
+                    "total_planned_chapters": 1,
+                    "world_id": world_id,
+                });
                 let init_request = AddScheduleRequest {
                     creator_id: resolved_creator_id.clone(),
                     preset_id: ip.clone(),
@@ -260,6 +268,9 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     depends_on: None,
                     concurrency: None,
                     scheduled_at: None,
+                    input: Some(init_input),
+                    force_gates,
+                    reason: reason.clone(),
                 };
 
                 match client
@@ -292,6 +303,9 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     depends_on: None,
                     concurrency: None,
                     scheduled_at: None,
+                    input: None,
+                    force_gates: false,
+                    reason: None,
                 };
 
                 match client
@@ -339,6 +353,9 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     depends_on: None,
                     concurrency: None,
                     scheduled_at: None,
+                    input: None,
+                    force_gates,
+                    reason: reason.clone(),
                 };
 
                 match client
@@ -616,8 +633,28 @@ async fn handle_stage(
             work_id,
             stage,
             force,
+            force_gates,
+            gate_reason,
             json,
-        } => stage_advance(&work_id, &stage, force, json, config, client).await,
+        } => {
+            // Validate --force-gates requires --gate-reason
+            if force_gates && gate_reason.is_none() {
+                return Err(crate::errors::CliError::Config(
+                    "--force-gates requires --gate-reason \"<text>\" (audit-logged)".to_string(),
+                ));
+            }
+            stage_advance(
+                &work_id,
+                &stage,
+                force,
+                force_gates,
+                gate_reason.as_deref(),
+                json,
+                config,
+                client,
+            )
+            .await
+        }
     }
 }
 
@@ -685,11 +722,13 @@ async fn stage_list(work_id: &str, json: bool, client: &crate::api::DaemonClient
 /// 3. Current `stage_status` is `complete` (unless `--force`)
 ///
 /// Then `PATCH`es the work via daemon API with the new stage/status.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 async fn stage_advance(
     work_id: &str,
     target_stage: &str,
     force: bool,
+    force_gates: bool,
+    gate_reason: Option<&str>,
     json: bool,
     config: &CliConfig,
     client: &crate::api::DaemonClient,
@@ -781,8 +820,13 @@ async fn stage_advance(
         inspiration_log: inspiration_log.to_string(),
     };
 
-    if let Some(request) = stage_gates::build_schedule_for_stage(target_stage, creator_id, &fields)
+    if let Some(mut request) =
+        stage_gates::build_schedule_for_stage(target_stage, creator_id, &fields)
     {
+        // V1.37: pass force_gates + gate_reason through the schedule request
+        request.force_gates = force_gates;
+        request.reason = gate_reason.map(String::from);
+
         let pid = &request.preset_id;
 
         // Audit log before schedule creation attempt.

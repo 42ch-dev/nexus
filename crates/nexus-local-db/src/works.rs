@@ -702,6 +702,157 @@ pub async fn patch_work(
         })
 }
 
+/// Patch a Work inside an existing transaction (V1.37 R-V136P1-02).
+///
+/// Same logic as [`patch_work`] but uses a caller-provided transaction
+/// so the patch can be atomic with a prior `seed_chapters_tx` call.
+///
+/// Note: does NOT return the updated `WorkRecord` because reading back
+/// inside the same transaction is complex; callers can read after commit.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the UPDATE fails.
+#[allow(clippy::too_many_lines)]
+pub async fn patch_work_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    creator_id: &str,
+    work_id: &str,
+    patch: &WorkPatch,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    let mut set_clauses = Vec::new();
+
+    if patch.title.is_some() {
+        set_clauses.push("title = ?");
+    }
+    if patch.long_term_goal.is_some() {
+        set_clauses.push("long_term_goal = ?");
+    }
+    if patch.creative_brief.is_some() {
+        set_clauses.push("creative_brief = ?");
+    }
+    if patch.intake_status.is_some() {
+        set_clauses.push("intake_status = ?");
+    }
+    if patch.status.is_some() {
+        set_clauses.push("status = ?");
+    }
+    if patch.world_id.is_some() {
+        set_clauses.push("world_id = ?");
+    }
+    if patch.story_ref.is_some() {
+        set_clauses.push("story_ref = ?");
+    }
+    if patch.primary_preset_id.is_some() {
+        set_clauses.push("primary_preset_id = ?");
+    }
+    if patch.schedule_ids.is_some() {
+        set_clauses.push("schedule_ids = ?");
+    }
+    if patch.current_stage.is_some() {
+        set_clauses.push("current_stage = ?");
+    }
+    if patch.stage_status.is_some() {
+        set_clauses.push("stage_status = ?");
+    }
+    if patch.work_profile.is_some() {
+        set_clauses.push("work_profile = ?");
+    }
+    if patch.work_ref.is_some() {
+        set_clauses.push("work_ref = ?");
+    }
+    if patch.total_planned_chapters.is_some() {
+        set_clauses.push("total_planned_chapters = ?");
+    }
+    if patch.current_chapter.is_some() {
+        set_clauses.push("current_chapter = ?");
+    }
+
+    if set_clauses.is_empty() {
+        return Ok(());
+    }
+
+    set_clauses.push("updated_at = ?");
+    let set_sql = set_clauses.join(", ");
+
+    // SAFETY: Dynamic SQL required for partial update.
+    // All values are bound parameters, not interpolated.
+    let sql = format!("UPDATE works SET {set_sql} WHERE work_id = ? AND creator_id = ?");
+
+    let mut query = sqlx::query(&sql);
+
+    // Bind parameters in the same order as set_clauses
+    if let Some(ref v) = patch.title {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = patch.long_term_goal {
+        query = query.bind(v);
+    }
+    if let Some(ref opt_val) = patch.creative_brief {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref v) = patch.intake_status {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = patch.status {
+        query = query.bind(v);
+    }
+    if let Some(ref opt_val) = patch.world_id {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.story_ref {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref v) = patch.primary_preset_id {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = patch.schedule_ids {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = patch.current_stage {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = patch.stage_status {
+        query = query.bind(v);
+    }
+    if let Some(ref opt_val) = patch.work_profile {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.work_ref {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.total_planned_chapters {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<i32>::None),
+        }
+    }
+    if let Some(ref v) = patch.current_chapter {
+        query = query.bind(v);
+    }
+
+    query = query.bind(now).bind(work_id).bind(creator_id);
+
+    query.execute(&mut **tx).await?;
+    Ok(())
+}
+
 /// Append an inspiration entry to a Work (atomic via transaction).
 ///
 /// Reads the current `inspiration_log`, appends the new entry in Rust,

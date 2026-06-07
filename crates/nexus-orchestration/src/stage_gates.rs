@@ -99,6 +99,9 @@ pub fn build_schedule_for_stage(
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: Some(preset_input),
+        force_gates: false,
+        reason: None,
     })
 }
 
