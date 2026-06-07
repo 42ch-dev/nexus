@@ -618,8 +618,8 @@
           "novel-workflow-profile.md Status: Draft (V1.36) → Shipped (V1.36)",
           "specs/README.md: novel-workflow-profile.md row Draft (V1.36) → Shipped (V1.36)"
         ],
-        "open_residuals": 0,
-        "closed_residuals": 0,
+        "open_residuals": 1,
+        "closed_residuals": 3,
         "residual_findings": [
           {
             "id": "R-V136P4-01",
