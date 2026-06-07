@@ -8,6 +8,41 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
+/// Column list for all SELECT queries on works.
+const WORKS_COLUMNS: &str = "\
+    work_id, creator_id, workspace_slug, status, title, long_term_goal, \
+    initial_idea, creative_brief, intake_status, world_id, story_ref, \
+    inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, \
+    current_stage, stage_status, work_profile, work_ref, total_planned_chapters, current_chapter";
+
+/// Map a sqlx row to WorkRecord.
+fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
+    WorkRecord {
+        work_id: r.get("work_id"),
+        creator_id: r.get("creator_id"),
+        workspace_slug: r.get("workspace_slug"),
+        status: r.get("status"),
+        title: r.get("title"),
+        long_term_goal: r.get("long_term_goal"),
+        initial_idea: r.get("initial_idea"),
+        creative_brief: r.get("creative_brief"),
+        intake_status: r.get("intake_status"),
+        world_id: r.get("world_id"),
+        story_ref: r.get("story_ref"),
+        inspiration_log: r.get("inspiration_log"),
+        primary_preset_id: r.get("primary_preset_id"),
+        schedule_ids: r.get("schedule_ids"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+        current_stage: r.get("current_stage"),
+        stage_status: r.get("stage_status"),
+        work_profile: r.get("work_profile"),
+        work_ref: r.get("work_ref"),
+        total_planned_chapters: r.get("total_planned_chapters"),
+        current_chapter: r.get("current_chapter"),
+    }
+}
+
 /// Work record — mirrors DB row.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkRecord {
@@ -47,6 +82,14 @@ pub struct WorkRecord {
     pub current_stage: String,
     /// Current stage status (V1.34 creator-workflow §3.2).
     pub stage_status: String,
+    /// Work profile (V1.36 novel-workflow-profile §2.1).
+    pub work_profile: Option<String>,
+    /// Human slug for Works/ directory (V1.36 §2.1).
+    pub work_ref: Option<String>,
+    /// Total planned chapters (V1.36 §2.1).
+    pub total_planned_chapters: Option<i32>,
+    /// Current chapter index (V1.36 §2.1).
+    pub current_chapter: i32,
 }
 
 /// Inspiration log entry — `{at, note}`.
@@ -96,6 +139,14 @@ pub struct WorkPatch {
     pub current_stage: Option<String>,
     /// New `stage_status` (V1.34 FL-E).
     pub stage_status: Option<String>,
+    /// New `work_profile` (V1.36 novel-workflow-profile §2.1).
+    pub work_profile: Option<Option<String>>,
+    /// New `work_ref` (V1.36 §2.1).
+    pub work_ref: Option<Option<String>>,
+    /// New `total_planned_chapters` (V1.36 §2.1).
+    pub total_planned_chapters: Option<Option<i32>>,
+    /// New `current_chapter` (V1.36 §2.1).
+    pub current_chapter: Option<i32>,
 }
 
 /// Create a new Work (simple, non-transactional).
@@ -112,8 +163,9 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     sqlx::query(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
-         primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
+         work_profile, work_ref, total_planned_chapters, current_chapter)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -133,6 +185,10 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     .bind(&record.updated_at)
     .bind(&record.current_stage)
     .bind(&record.stage_status)
+    .bind(&record.work_profile)
+    .bind(&record.work_ref)
+    .bind(&record.total_planned_chapters)
+    .bind(&record.current_chapter)
     .execute(pool)
     .await?;
     Ok(())
@@ -148,8 +204,9 @@ async fn insert_work_tx(
     sqlx::query(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
-         primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
+         work_profile, work_ref, total_planned_chapters, current_chapter)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -169,6 +226,10 @@ async fn insert_work_tx(
     .bind(&record.updated_at)
     .bind(&record.current_stage)
     .bind(&record.stage_status)
+    .bind(&record.work_profile)
+    .bind(&record.work_ref)
+    .bind(&record.total_planned_chapters)
+    .bind(&record.current_chapter)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -330,38 +391,15 @@ pub async fn get_work(
 ) -> Result<Option<WorkRecord>, LocalDbError> {
     // SAFETY: SELECT against works table — runtime query because the table
     // was added in the same migration cycle and sqlx prepare hasn't run yet.
-    let row = sqlx::query(
-        "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
-                initial_idea, creative_brief, intake_status, world_id, story_ref,
-                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
-                current_stage, stage_status
-         FROM works WHERE work_id = ? AND creator_id = ?",
-    )
+    let row = sqlx::query(&format!(
+        "SELECT {WORKS_COLUMNS} FROM works WHERE work_id = ? AND creator_id = ?"
+    ))
     .bind(work_id)
     .bind(creator_id)
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| WorkRecord {
-        work_id: r.get("work_id"),
-        creator_id: r.get("creator_id"),
-        workspace_slug: r.get("workspace_slug"),
-        status: r.get("status"),
-        title: r.get("title"),
-        long_term_goal: r.get("long_term_goal"),
-        initial_idea: r.get("initial_idea"),
-        creative_brief: r.get("creative_brief"),
-        intake_status: r.get("intake_status"),
-        world_id: r.get("world_id"),
-        story_ref: r.get("story_ref"),
-        inspiration_log: r.get("inspiration_log"),
-        primary_preset_id: r.get("primary_preset_id"),
-        schedule_ids: r.get("schedule_ids"),
-        created_at: r.get("created_at"),
-        updated_at: r.get("updated_at"),
-        current_stage: r.get("current_stage"),
-        stage_status: r.get("stage_status"),
-    }))
+    Ok(row.as_ref().map(row_to_work_record))
 }
 
 /// List Works for a creator with optional filters.
@@ -445,11 +483,7 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     // SAFETY: Dynamic SQL required for optional WHERE filters.
     // All user inputs are passed as bound parameters, not interpolated.
     let sql = format!(
-        "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
-                initial_idea, creative_brief, intake_status, world_id, story_ref,
-                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
-                current_stage, stage_status
-         FROM works WHERE {where_sql}
+        "SELECT {WORKS_COLUMNS} FROM works WHERE {where_sql}
          ORDER BY updated_at DESC
          LIMIT ? OFFSET ?"
     );
@@ -467,29 +501,7 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
 
     let rows = query.fetch_all(executor).await?;
 
-    Ok(rows
-        .iter()
-        .map(|row| WorkRecord {
-            work_id: row.get("work_id"),
-            creator_id: row.get("creator_id"),
-            workspace_slug: row.get("workspace_slug"),
-            status: row.get("status"),
-            title: row.get("title"),
-            long_term_goal: row.get("long_term_goal"),
-            initial_idea: row.get("initial_idea"),
-            creative_brief: row.get("creative_brief"),
-            intake_status: row.get("intake_status"),
-            world_id: row.get("world_id"),
-            story_ref: row.get("story_ref"),
-            inspiration_log: row.get("inspiration_log"),
-            primary_preset_id: row.get("primary_preset_id"),
-            schedule_ids: row.get("schedule_ids"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-            current_stage: row.get("current_stage"),
-            stage_status: row.get("stage_status"),
-        })
-        .collect())
+    Ok(rows.iter().map(row_to_work_record).collect())
 }
 
 async fn count_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
@@ -580,6 +592,18 @@ pub async fn patch_work(
     if patch.stage_status.is_some() {
         set_clauses.push("stage_status = ?");
     }
+    if patch.work_profile.is_some() {
+        set_clauses.push("work_profile = ?");
+    }
+    if patch.work_ref.is_some() {
+        set_clauses.push("work_ref = ?");
+    }
+    if patch.total_planned_chapters.is_some() {
+        set_clauses.push("total_planned_chapters = ?");
+    }
+    if patch.current_chapter.is_some() {
+        set_clauses.push("current_chapter = ?");
+    }
 
     if set_clauses.is_empty() {
         // Nothing to update — just return current record.
@@ -641,6 +665,27 @@ pub async fn patch_work(
     if let Some(ref v) = patch.stage_status {
         query = query.bind(v);
     }
+    if let Some(ref opt_val) = patch.work_profile {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.work_ref {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.total_planned_chapters {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<i32>::None),
+        }
+    }
+    if let Some(ref v) = patch.current_chapter {
+        query = query.bind(v);
+    }
 
     query = query.bind(now).bind(work_id).bind(creator_id);
 
@@ -676,39 +721,17 @@ pub async fn append_inspiration(
     // Read current inspiration_log inside tx
     // SAFETY: Dynamic SQL required for JSON manipulation via transaction.
     // All values are bound parameters.
-    let row = sqlx::query(
-        "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
-                initial_idea, creative_brief, intake_status, world_id, story_ref,
-                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
-                current_stage, stage_status
-         FROM works WHERE work_id = ? AND creator_id = ?",
-    )
+    let row = sqlx::query(&format!(
+        "SELECT {WORKS_COLUMNS} FROM works WHERE work_id = ? AND creator_id = ?"
+    ))
     .bind(work_id)
     .bind(creator_id)
     .fetch_optional(&mut *tx)
     .await?;
 
     let current = row
-        .map(|r| WorkRecord {
-            work_id: r.get("work_id"),
-            creator_id: r.get("creator_id"),
-            workspace_slug: r.get("workspace_slug"),
-            status: r.get("status"),
-            title: r.get("title"),
-            long_term_goal: r.get("long_term_goal"),
-            initial_idea: r.get("initial_idea"),
-            creative_brief: r.get("creative_brief"),
-            intake_status: r.get("intake_status"),
-            world_id: r.get("world_id"),
-            story_ref: r.get("story_ref"),
-            inspiration_log: r.get("inspiration_log"),
-            primary_preset_id: r.get("primary_preset_id"),
-            schedule_ids: r.get("schedule_ids"),
-            created_at: r.get("created_at"),
-            updated_at: r.get("updated_at"),
-            current_stage: r.get("current_stage"),
-            stage_status: r.get("stage_status"),
-        })
+        .as_ref()
+        .map(row_to_work_record)
         .ok_or_else(|| LocalDbError::MissingVersionKey {
             key: format!("works/{work_id}"),
         })?;
@@ -857,37 +880,15 @@ pub async fn advance_work_stage_atomic(
 
     // Step 1: SELECT current state inside transaction
     // SAFETY: SELECT against works table — runtime query.
-    let current: Option<WorkRecord> = sqlx::query(
-        "SELECT work_id, creator_id, workspace_slug, status, title, long_term_goal,
-                initial_idea, creative_brief, intake_status, world_id, story_ref,
-                inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at,
-                current_stage, stage_status
-         FROM works WHERE work_id = ? AND creator_id = ?",
-    )
+    let current: Option<WorkRecord> = sqlx::query(&format!(
+        "SELECT {WORKS_COLUMNS} FROM works WHERE work_id = ? AND creator_id = ?"
+    ))
     .bind(work_id)
     .bind(creator_id)
     .fetch_optional(&mut *tx)
     .await?
-    .map(|r| WorkRecord {
-        work_id: r.get("work_id"),
-        creator_id: r.get("creator_id"),
-        workspace_slug: r.get("workspace_slug"),
-        status: r.get("status"),
-        title: r.get("title"),
-        long_term_goal: r.get("long_term_goal"),
-        initial_idea: r.get("initial_idea"),
-        creative_brief: r.get("creative_brief"),
-        intake_status: r.get("intake_status"),
-        world_id: r.get("world_id"),
-        story_ref: r.get("story_ref"),
-        inspiration_log: r.get("inspiration_log"),
-        primary_preset_id: r.get("primary_preset_id"),
-        schedule_ids: r.get("schedule_ids"),
-        created_at: r.get("created_at"),
-        updated_at: r.get("updated_at"),
-        current_stage: r.get("current_stage"),
-        stage_status: r.get("stage_status"),
-    });
+    .as_ref()
+    .map(row_to_work_record);
 
     let current = current.ok_or_else(|| LocalDbError::MissingVersionKey {
         key: format!("works/{work_id}"),
@@ -969,6 +970,10 @@ mod tests {
             updated_at: "2026-06-04T10:00:00Z".to_string(),
             current_stage: "intake".to_string(),
             stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
         }
     }
 

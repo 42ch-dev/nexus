@@ -21,6 +21,7 @@ pub mod pending_review;
 pub mod prompt_injection;
 pub mod reference_source;
 pub mod soul_meta;
+pub mod work_chapters;
 pub mod works;
 pub mod world_stories;
 
@@ -99,6 +100,11 @@ pub use works::{
     advance_work_stage_atomic, append_inspiration, count_works, create_work,
     find_work_by_client_request_id, get_work, has_active_fl_e_schedule, list_works, patch_work,
     record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
+};
+
+// Re-export work_chapters types
+pub use work_chapters::{
+    count_chapters, list_chapters, seed_chapters, WorkChapterRecord,
 };
 
 /// Runtime role for database initialization
