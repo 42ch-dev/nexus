@@ -602,7 +602,7 @@
         "unblocked_by": "2026-06-07-v1.36-novel-chapter-drafting-pipeline (P3 Done)",
         "merge_commits": [
           "2436b9c (T1+T2+T3 is_work_completed + schedule guard + CLI help)",
-          "<PM_T4_T7_commit_hash> (T4 deferred tracker + shipped archive + iterations README rename + spec promotion + status.json ship metadata)"
+          "823f52d (T4-T7 PM-domain: deferred tracker + shipped archive + iterations README rename + spec promotion + status.json ship metadata)"
         ],
         "qc": "skipped — PM-validate direct path for T1-T3 (analogous to V1.35 P4 + V1.36 P1/P2/P3 PM-override). T4-T7 are PM-domain (tracker + status.json + iterations README + deferred tracker), done by PM directly.",
         "qa": "PM-validated (T1 is_work_completed evaluator with 2 hermetic tests; T2 schedule guard returns 409; T3 CLI help mentions init preset + completion banner; T4-T7 tracker/iterations/README/spec promotion all done)",
