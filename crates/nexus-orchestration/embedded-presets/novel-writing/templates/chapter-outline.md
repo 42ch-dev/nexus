@@ -30,13 +30,20 @@ work_ref: {{work_ref}}
 
 *(How does the protagonist's situation or understanding shift by chapter end?)*
 
----
+## Foreshadowing Touched (F###)
 
-## Foreshadowing Items (F###)
+**This section is REQUIRED.** For each foreshadowing item touched (buried or paid-off)
+in this chapter, list the F### id below. Reference `Outlines/foreshadowing.md` for
+existing F### ids. If the foreshadowing file does not exist or this is a new item,
+declare a new F### inline (e.g., `F001: <brief description>`) — the next outline
+pass will promote it to the index.
 
-| ID | Description | Planted | Paid off | Status |
-| --- | --- | --- | --- | --- |
-| | | | | |
+If no foreshadowing is touched in this chapter, write:
+"No foreshadowing items touched in this chapter."
+
+| ID | Description | Action (plant/pay-off) | Status |
+| --- | --- | --- | --- |
+| | | | |
 
 ---
 
