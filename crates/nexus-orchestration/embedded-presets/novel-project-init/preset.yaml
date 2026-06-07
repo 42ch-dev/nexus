@@ -1,0 +1,112 @@
+# Novel Project Init Preset — interactive grill-me for novel Work bootstrap
+#
+# Multi-turn ACP conversation that collects working title, genre/tone hooks,
+# total planned chapters, work_ref slug, and the World binding question
+# (existing world_id / create new World / worldless).
+#
+# On success: scaffold capability creates Works/<work_ref>/ tree per
+# novel-workflow-profile.md §5.4, seeds work_chapters rows, PATCHes works.
+#
+# Input variables (passed via core_context / preset.input):
+#   work_id:     Work entity ID being initialized (required)
+#   initial_idea: Raw user idea text (required)
+#
+# This preset is one-shot (work_init only); it does NOT auto-chain into
+# novel-writing. The downstream gate (§5.3.2) enforces the manual step.
+
+preset:
+  id: novel-project-init
+  version: 1
+  kind: creator
+  description: "Interactive grill-me: bootstrap a novel Work with scaffold, chapter plan, and World binding"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+  run_intents:
+    - work_init
+  initial: init_intro
+  terminal: done
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: in
+      value: [null, novel]
+    - kind: work_field
+      field: workspace_slug
+      op: required
+
+states:
+  - id: init_intro
+    description: "Greet the creator and ask for a working title"
+    enter:
+      - kind: inner_graph
+        name: intro_graph
+    exit_when:
+      kind: graph_complete
+    next: collecting_details
+
+  - id: collecting_details
+    description: "Multi-turn ACP conversation to collect genre, chapters, work_ref, and World binding"
+    enter:
+      - kind: inner_graph
+        name: details_graph
+    exit_when:
+      kind: graph_complete
+    next: summarizing
+
+  - id: summarizing
+    description: "Recap collected information and confirm before committing"
+    enter:
+      - kind: inner_graph
+        name: summary_graph
+    exit_when:
+      kind: graph_complete
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  intro_graph:
+    nodes:
+      - id: ask_working_title
+        kind: acp_prompt
+        template_file: prompts/init-intro.md
+        tool_policy: auto_grant_read_only
+    output_binding: ask_working_title.text
+
+  details_graph:
+    nodes:
+      - id: collect_title
+        kind: acp_prompt
+        template_file: prompts/init-title.md
+        tool_policy: auto_grant_read_only
+      - id: collect_genre
+        kind: acp_prompt
+        depends_on: [collect_title]
+        template_file: prompts/init-genre.md
+        tool_policy: auto_grant_read_only
+      - id: collect_chapters
+        kind: acp_prompt
+        depends_on: [collect_genre]
+        template_file: prompts/init-chapters.md
+        tool_policy: auto_grant_read_only
+      - id: collect_work_ref
+        kind: acp_prompt
+        depends_on: [collect_chapters]
+        template_file: prompts/init-work-ref.md
+        tool_policy: auto_grant_read_only
+      - id: collect_world
+        kind: acp_prompt
+        depends_on: [collect_work_ref]
+        template_file: prompts/init-world.md
+        tool_policy: auto_grant_read_only
+    output_binding: collect_world.text
+
+  summary_graph:
+    nodes:
+      - id: confirm_summary
+        kind: acp_prompt
+        template_file: prompts/init-summary.md
+        tool_policy: auto_grant_read_only
+    output_binding: confirm_summary.text
