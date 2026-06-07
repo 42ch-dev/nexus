@@ -1,8 +1,9 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07)  
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 P1 multi-chapter roadmap extension added 2026-06-08
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
+**Last updated**: 2026-06-08
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
@@ -13,7 +14,7 @@
 - [orchestration-engine.md](orchestration-engine.md) — `novel-writing` preset
 - [entity-scope-model.md](entity-scope-model.md) — World entity + World KB (`work_profile: novel` binds Work to World; world content is cross-Work, lives in World KB, NOT in per-Work `Worldbuilding/` subtree)
 
-**Iteration compass**: [v1.36-pending-delivery-compass.md](../../iterations/v1.36-pending-delivery-compass.md)
+**Iteration compass**: [v1.37-novel-writing-foundation-delivery-compass-v1.md](../../iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md) extends the shipped V1.36 baseline without changing the single-chapter behavior.
 
 ---
 
@@ -153,13 +154,13 @@ CREATE INDEX work_chapters_by_status ON work_chapters(status);
 
 **Naming rationale**: `work_chapters` (vs `work_status`): avoids confusion with `works.status` (Work-level enum already on `works` table); symmetric with `works`; clear scope (per-chapter state, not Work-level state).
 
-**V1.37+ extension**: PK becomes `(work_id, volume, chapter)` with `volume` defaulting to 0 for single-volume Works. DDL change in P0 of the V1.37+ iteration; V1.36 ships with `(work_id, chapter)` PK.
+**V1.37 P1 roadmap decision**: V1.37 does **not** migrate this primary key. The PK stays `(work_id, chapter)` for V1.37 single-volume Works; `volume` remains nullable and defaults to `NULL` for V1.36/V1.37 single-volume rows. A future V1.37+ multi-volume implementation may drop this PK and add a unique index on `(work_id, volume, chapter)` after it ships volume-aware migrations and backfill rules (§4.5.4).
 
 #### 4.1.2 Truth model (DB vs frontmatter)
 
 - **`work_chapters` is the queryable SSOT** for `creator run status`, completion evaluation (§6), and sync module (if it needs per-chapter metadata).
 - **Chapter .md frontmatter `status` is the human/LLM read-end**: the orchestration engine updates **both** on transition; the frontmatter flip is the visible "I'm now finalized" signal to the next prompt.
-- **Reconciliation**: on daemon startup, an optional `creator run reconcile-chapters <work_id>` walks `Works/<work_ref>/Stories/` and rebuilds `work_chapters` rows from filesystem (frontmatter is truth if file is newer; DB row is truth if DB is newer). For V1.36 this is a manual command, not an automatic job.
+- **Reconciliation**: on daemon startup, an optional `creator run reconcile-chapters <work_id>` walks `Works/<work_ref>/Stories/` and rebuilds `work_chapters` rows from filesystem for missing rows/files. For status disagreements, V1.37 narrows the rule: the DB row is the source of truth and the next run re-syncs chapter frontmatter via a single transition (§4.5.3). For V1.36 this is a manual command, not an automatic job.
 
 #### 4.1.3 `README.md` (human overview, no chapter state)
 
@@ -200,6 +201,98 @@ world_refs: [string]        # optional; list of World KB item ids referenced in 
 ### 4.4 Embedded preset templates
 
 V1.36 implement wave ships template stubs under `crates/nexus-orchestration/embedded-presets/novel-writing/templates/` (or documented equivalent). Prompts reference `Works/{{work_ref}}/…` variables.
+
+### 4.5 Multi-chapter and multi-volume semantics (V1.37 extension)
+
+**Scope of this extension**: V1.37 P1 is **roadmap-only**. It locks the semantics future implementers must follow, but it does not claim a code, schema, preset, or migration implementation in this plan. V1.36 single-chapter behavior is a strict subset: when `total_planned_chapters == 1`, chapter 1 is selected, drafted, finalized, and completes the Work exactly as in the shipped V1.36 MVP.
+
+#### 4.5.1 Chapter state machine
+
+The V1.37 multi-chapter roadmap keeps the V1.36 chapter status state machine:
+
+```text
+not_started → outlined → draft → finalized
+```
+
+`published` remains reserved for platform publish and is not set by OSS core. Each transition updates the `work_chapters` row first and then mirrors the visible status into the corresponding `Stories/ch<NN>-<slug>.md` frontmatter.
+
+#### 4.5.2 Chapter selection algorithm
+
+For a given `work_id`, `novel-writing` must choose a chapter from `work_chapters`, not from filename order alone. The selection contract is:
+
+```sql
+next_chapter(work_id):
+  SELECT chapter FROM work_chapters
+   WHERE work_id = ? AND status = 'not_started'
+   ORDER BY chapter ASC LIMIT 1
+  if no row: SELECT chapter FROM work_chapters
+              WHERE work_id = ? AND status = 'draft'
+              ORDER BY chapter ASC LIMIT 1
+  if no row: work is at novel-completion (§6.1)
+```
+
+**Resume behavior**: if a row exists with `status == 'draft'` and there are no earlier `not_started` rows, `novel-writing` resumes that draft row. It does **not** create a new chapter row and does **not** advance to a later chapter until this draft finalizes or the user explicitly reconciles/edits state.
+
+**Outlined rows**: `outlined` means the outline exists but正文 drafting has not started. The first implementation may either treat `outlined` as the selected `not_started` chapter's pre-draft state or add an explicit outline-resume branch, but it must not skip an `outlined` chapter in favor of a later chapter. If this algorithm is implemented literally with only `not_started` + `draft`, the outline step must transition `outlined` back into the same selected chapter before drafting.
+
+**Work-level invariant**: `works.current_chapter` is updated only on transition to `finalized`. Its value is the chapter number of the latest finalized row, not the chapter currently being outlined or drafted. During an in-progress draft of chapter N, `current_chapter` still points at the latest finalized chapter (often `N - 1`).
+
+#### 4.5.3 DB/frontmatter conflict resolution
+
+`work_chapters` is the queryable source of truth for chapter status. If a `work_chapters` row and filesystem frontmatter in `Stories/ch<NN>-<slug>.md` disagree on `status`, the DB row wins. The next `novel-writing` or `creator run reconcile-chapters <work_id>` pass must re-sync frontmatter through a single status transition so that prompt-visible state catches up without inventing an extra chapter transition.
+
+Missing filesystem hints are still surfaced to the user (see §8.1), but a missing or stale file does not authorize selecting a later DB row. Rebuilds must preserve the DB ordering and status semantics above.
+
+#### 4.5.4 Primary key and volume migration decision
+
+V1.37 keeps the `work_chapters` primary key as `(work_id, chapter)` and keeps `volume` nullable. This matches V1.36 single-volume Works and avoids a risky mid-iteration migration while P0 foundation gates and scaffold atomicity are stabilizing.
+
+Reserved post-V1.37 migration path:
+
+1. Backfill `volume = 1` or another explicit volume number for Works that opt into multi-volume behavior.
+2. Drop the `(work_id, chapter)` primary-key constraint.
+3. Add a unique index on `(work_id, volume, chapter)`.
+4. Preserve row data (`status`, `outline_path`, `body_path`, `actual_word_count`, timestamps) through an idempotent migration.
+
+Until that migration ships, V1.37 single-volume Works use unique chapter numbers across the entire Work. Multi-volume Works may be described in specs with `volume = 1, 2, 3, ...`, but implementation must not rely on duplicate `chapter` numbers across volumes while the old PK remains active.
+
+#### 4.5.5 Volume outline semantics
+
+When `volume != NULL`, the chapter must appear in `Outlines/volume-outline.md` under that volume's chapter range. The minimum V1.37+ multi-volume outline structure is:
+
+```yaml
+---
+work_id: <id>
+volumes:
+  - volume: 1
+    title: "First volume title"
+    chapter_range: [1, 12]
+  - volume: 2
+    title: "Second volume title"
+    chapter_range: [13, 24]
+---
+```
+
+The sync module (per [novel-writing-sync-contract.md](novel-writing-sync-contract.md)) does **not** validate `volume-outline.md` cross-references in V1.37. A post-roadmap V1.37+ implementation may enforce that every non-NULL `work_chapters.volume` row falls inside exactly one declared volume range.
+
+World continuity remains World-scoped: when `world_id != NULL` and a chapter references a World KB item, the reference lives in the chapter frontmatter `world_refs` field (§4.3), not in `Outlines/volume-outline.md`. `volume-outline.md` organizes chronology; it is not a World KB index.
+
+#### 4.5.6 Prompt and preset parameterization roadmap
+
+The V1.36 `novel-writing` preset and templates may still bind or imply `chapter: 1` in places. Future implementation must replace hard-coded chapter-1 bindings with a scheduler/gate-evaluator injected value such as `{{work_chapters.next_chapter}}` (or an equivalent preset input variable). The value must be derived from `next_chapter(work_id)` above after the P0 gates have passed (`intake_status == complete`, scaffold exists, `previous_preset: novel-project-init` complete).
+
+This keeps `novel-writing` a single preset that scales from chapter 1 to chapter N rather than creating separate per-chapter presets.
+
+#### 4.5.7 Future acceptance and migration tests
+
+A future implementation plan for this roadmap must include at least these tests:
+
+1. **Chapter selection**: a 3-chapter Work with rows at varied statuses; assert `next_chapter(work_id)` returns the lowest eligible row per §4.5.2.
+2. **`current_chapter` transitions**: `current_chapter` changes only when a row transitions to `finalized`, and it becomes the just-finalized chapter number.
+3. **Novel completion**: completion fires only when every row is `finalized`, `current_chapter >= total_planned_chapters`, and `intake_status == complete` (§6.1).
+4. **Resume behavior**: a new run against a Work with one `draft` row resumes that row and does not create a new row.
+5. **Reconciliation**: `creator run reconcile-chapters <work_id>` rebuilds missing `work_chapters` rows/files from `Works/<work_ref>/Stories/` while preserving DB-as-status-SSOT conflict resolution (§4.5.3).
+6. **Future multi-volume migration**: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data.
 
 ---
 
@@ -434,7 +527,7 @@ The grill-me offers an "overwrite templates" option for users who want to re-ren
 
 ## 6. Completion semantics
 
-### 6.1 Completion criteria (V1.36 MVP)
+### 6.1 Completion criteria (V1.36 MVP; V1.37 multi-chapter extension)
 
 A novel Work is **complete** when **all** hold:
 
@@ -442,13 +535,26 @@ A novel Work is **complete** when **all** hold:
 2. Every row in `work_chapters` for `chapter IN 1..total_planned_chapters` has `status == finalized`
 3. `works.intake_status == complete`
 
+For `total_planned_chapters > 1`, `works.current_chapter` is set to the just-finalized chapter number on each transition to `finalized` (§4.5.2). Completion therefore means:
+
+```text
+current_chapter >= total_planned_chapters
+AND all work_chapters rows for the Work are finalized
+AND intake_status == complete
+→ works.status = completed
+→ works.novel_completion_status = completed
+→ stop scheduling novel-writing for this Work
+```
+
+The V1.36 single-chapter case (`total_planned_chapters == 1`) is a strict subset of this rule: chapter 1 finalizes, `current_chapter` becomes `1`, all rows are finalized, and the Work completes.
+
 ### 6.2 Behavior on completion
 
 1. Set `works.status` → `completed` and `works.novel_completion_status` → `completed`
 2. **Stop** enqueueing new `novel-writing` schedules for this Work
 3. Emit user-visible message: Work is complete; start a **new** Work via init flow (no automatic switch)
 
-**Note**: V1.36 single-chapter MVP completion means `ch01` reached `finalized` after the `llm_judge` GO (§5.1). Multi-chapter completion semantics are intentionally V1.37+ scope. The V1.36 "completion" UX is therefore the **chapter-level** finish, not a novel-level finish; the compass calls this the "single-chapter MVP" boundary.
+**Note**: V1.36 single-chapter MVP completion means `ch01` reached `finalized` after the `llm_judge` GO (§5.1). V1.37 supersedes the chapter-1-only interpretation by extending the same rule across all seeded `work_chapters` rows; it does not change behavior for a one-chapter Work.
 
 ### 6.3 Explicit non-goals
 
@@ -484,6 +590,64 @@ Sync **must not** upload full正文 by default (cli-spec §5.3 unchanged).
 
 First-run path unchanged (≤7 steps per cli-spec §7.1); novel init preset may add optional step for greenfield novels. World-bound Works print a one-line `world: <name> (<world_id>)` in the run summary.
 
+### 8.1 Multi-chapter `creator run status` UX (V1.37 extension)
+
+`creator run status <work_id>` is the same command for single- and multi-chapter Works. The output format scales with the number of `work_chapters` rows and remains sourced from the DB SSOT.
+
+Minimum multi-chapter output:
+
+```text
+Work: wrk_abc123 — Cozy Mystery (novel)
+work_ref: cozy-mystery
+intake: complete
+progress: 2 / 3 chapters finalized
+current_chapter: 2
+total_planned_chapters: 3
+
+Chapters:
+  ch01  finalized   words: 4,210   path: Works/cozy-mystery/Stories/ch01-arrival.md
+  ch02  finalized   words: 3,980   path: Works/cozy-mystery/Stories/ch02-secret.md
+  ch03  not_started words: —       path: Works/cozy-mystery/Stories/ch03-reveal.md
+
+Next action: Chapter 3 is not started; run `creator run continue wrk_abc123` to begin.
+```
+
+Draft resume output:
+
+```text
+progress: 1 / 3 chapters finalized
+current_chapter: 1
+
+Chapters:
+  ch01  finalized   words: 4,210
+  ch02  draft       words: —
+  ch03  not_started words: —
+
+Next action: Chapter 2 is in draft; run `creator run continue wrk_abc123` to resume.
+```
+
+Completion output:
+
+```text
+progress: 3 / 3 chapters finalized
+current_chapter: 3
+status: completed
+novel_completion_status: completed
+
+Next action: All chapters finalized; novel Work is complete.
+```
+
+Blocked / missing file hint:
+
+```text
+warning: Chapter 3 file is missing on disk.
+  expected: Works/cozy-mystery/Stories/ch03-reveal.md
+  db_status: not_started
+  hint: run `creator run reconcile-chapters wrk_abc123` to rebuild from filesystem.
+```
+
+Each chapter row must show `not_started | outlined | draft | finalized` and `actual_word_count` when finalized. For a one-chapter Work, the same output shape may collapse to one row, but command semantics are identical.
+
 ---
 
 ## 9. Acceptance (spec-level)
@@ -500,7 +664,7 @@ First-run path unchanged (≤7 steps per cli-spec §7.1); novel init preset may 
 
 ## 10. Change control
 
-- **Authority**: Active V1.36 compass > this spec > generic Work spec for novel-specific rules.
+- **Authority**: Active V1.37 compass > V1.37 extension sections in this spec > shipped V1.36 baseline in this spec > generic Work spec for novel-specific rules. V1.37 delivery batching does not retroactively claim implementation until a plan ships.
 - **Promotion**: On iteration ship, Status → `Shipped (V1.36)`; merge overlay sections into work-experience-model §profile extension if appropriate.
 - **Reference distill**: Internal novels-system patterns informed §3.1/§4/§5; **§3.5 World integration** is a **Nexus-architectural choice** (cross-Work content belongs to World, not per-Work), explicitly **rejecting** the reference-system's per-Work `世界设定/` shape. No external repo paths in normative text.
 - **V1.36 architecture deltas vs earlier draft** (recorded 2026-06-07):
@@ -509,7 +673,14 @@ First-run path unchanged (≤7 steps per cli-spec §7.1); novel init preset may 
   - `world_id` becomes the cross-Work binding (§2.1, §3.5, §5, §8)
   - **Preset gates mechanism added** (orchestration-engine.md §7.9 Master + novel-specific gate values in this spec §5.3; new `world_binding: required | optional` toggle in §5.3.4). Replaces the implicit "novel-writing should already have scaffold" assumption with explicit enqueue-time enforcement.
   - **`novel-project-init` scaffold protocol enumerated** (§5.4): explicit file list, template sources, `work_chapters` row seeding, atomicity, idempotency, re-init handling. Replaces the high-level "mkdir scaffold + write template stubs" P1 T2 with a P1-implementer checklist.
+- **V1.37 P1 multi-chapter roadmap deltas** (recorded 2026-06-08):
+  - **Roadmap-only** decision recorded (§4.5): no code/schema/preset implementation claimed in P1.
+  - `next_chapter(work_id)` algorithm defined (§4.5.2): lowest `not_started`, then lowest `draft` resume, otherwise novel-completion.
+  - `works.current_chapter` clarified as latest finalized chapter only (§4.5.2, §6.1).
+  - `work_chapters` PK migration deferred: V1.37 keeps `(work_id, chapter)` and reserves `(work_id, volume, chapter)` unique index for post-V1.37 multi-volume support (§4.5.4).
+  - `Outlines/volume-outline.md` minimum structure and `world_refs` placement documented (§4.5.5).
+  - Multi-chapter `creator run status` output made testable (§8.1).
 
 ---
 
-*Draft V1.36 — implement via plans `2026-06-07-v1.36-novel-*`.*
+*Shipped V1.36 baseline with V1.37 P1 roadmap extension. Implement V1.37 multi-chapter behavior only via a future locked implementation plan.*

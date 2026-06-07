@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-08T14:30:00+08:00",
+  "updated_at": "2026-06-08T19:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-07-v1.37-harness-docs-prepare",
@@ -79,7 +79,7 @@
     },
     {
       "id": "2026-06-07-v1.37-novel-multi-chapter-chronology",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-07-v1.37-novel-multi-chapter-chronology.md",
       "working_branch": "feature/v1.37-novel-multi-chapter-chronology",
       "merge_target": "iteration/v1.37",
@@ -90,6 +90,9 @@
           "2026-06-07-v1.37-novel-foundation-first"
         ],
         "description": "P1 — multi-chapter and multi-volume chronology roadmap",
+        "updated_at": "2026-06-08T19:30:00+08:00",
+        "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, preset YAML, or CLI implementation in P1",
+        "spec_amendment": ".mstar/knowledge/specs/novel-workflow-profile.md §4.5 and §8.1",
         "deferred_features": [
           "DF-62"
         ]
