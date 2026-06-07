@@ -13,7 +13,7 @@ use crate::error::LocalDbError;
 pub struct WorkChapterRecord {
     /// Owning Work ID.
     pub work_id: String,
-    /// Chapter number (1..total_planned_chapters).
+    /// Chapter number (`1..total_planned_chapters`).
     pub chapter: i32,
     /// Volume number (nullable; V1.36 single-volume leaves NULL).
     pub volume: Option<i32>,
@@ -210,9 +210,15 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         insert_test_work(&pool, "wrk_seed_003").await;
 
-        seed_chapters(&pool, "wrk_seed_003", "cozy-mystery", 2, "2026-06-07T10:00:00Z")
-            .await
-            .unwrap();
+        seed_chapters(
+            &pool,
+            "wrk_seed_003",
+            "cozy-mystery",
+            2,
+            "2026-06-07T10:00:00Z",
+        )
+        .await
+        .unwrap();
 
         let chapters = list_chapters(&pool, "wrk_seed_003").await.unwrap();
         assert_eq!(

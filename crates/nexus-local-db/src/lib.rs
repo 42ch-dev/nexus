@@ -103,9 +103,7 @@ pub use works::{
 };
 
 // Re-export work_chapters types
-pub use work_chapters::{
-    count_chapters, list_chapters, seed_chapters, WorkChapterRecord,
-};
+pub use work_chapters::{count_chapters, list_chapters, seed_chapters, WorkChapterRecord};
 
 /// Runtime role for database initialization
 ///

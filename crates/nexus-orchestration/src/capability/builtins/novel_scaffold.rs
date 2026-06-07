@@ -2,7 +2,7 @@
 //!
 //! Creates the `Works/<work_ref>/` directory tree, renders templates from
 //! the `novel-project-init` embedded preset, seeds `work_chapters` rows,
-//! and PATCHes the `works` table — all atomically per V1.36 §5.4.
+//! and updates the `works` table — all atomically per V1.36 §5.4.
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
@@ -41,9 +41,9 @@ struct ScaffoldOutput {
     scaffold_root: String,
     /// Number of chapter rows seeded.
     chapters_seeded: usize,
-    /// Files created (relative paths from scaffold_root).
+    /// Files created (relative paths from `scaffold_root`).
     files_created: Vec<String>,
-    /// Directories created (relative paths from scaffold_root).
+    /// Directories created (relative paths from `scaffold_root`).
     dirs_created: Vec<String>,
 }
 
@@ -120,11 +120,13 @@ impl Capability for NovelProjectScaffold {
         r#"{"type":"object","properties":{"scaffold_root":{"type":"string"},"chapters_seeded":{"type":"integer"},"files_created":{"type":"array","items":{"type":"string"}},"dirs_created":{"type":"array","items":{"type":"string"}}},"required":["scaffold_root","chapters_seeded","files_created","dirs_created"],"additionalProperties":false}"#
     }
 
+    // SAFETY: The run method handles 9 file/dir operations + DB seed + DB patch.
+    // Line count is inherent to the multi-step scaffold protocol.
+    #[allow(clippy::too_many_lines)]
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let inp: ScaffoldInput = serde_json::from_value(input)
-            .map_err(|e| {
-                CapabilityError::InputInvalid(format!("novel.project_scaffold input: {e}"))
-            })?;
+        let inp: ScaffoldInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("novel.project_scaffold input: {e}"))
+        })?;
 
         let root = self.works_root.join(&inp.work_ref);
 
@@ -281,9 +283,8 @@ fn write_file_idem(
         info!(path = %path.display(), "write_file_idem: skip (exists)");
         return Ok(());
     }
-    std::fs::write(path, content).map_err(|e| {
-        CapabilityError::Internal(format!("write {}: {e}", path.display()))
-    })?;
+    std::fs::write(path, content)
+        .map_err(|e| CapabilityError::Internal(format!("write {}: {e}", path.display())))?;
     // Store relative name (parent dir / filename)
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         files_created.push(name.to_string());

@@ -150,8 +150,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             if force_gates && reason.is_none() {
                 return Err(crate::errors::CliError::Config(
                     "--force-gates requires --reason \"<text>\" (audit-logged)".to_string(),
-                )
-                .into());
+                ));
             }
 
             let work_title = title.unwrap_or_else(|| {
@@ -174,20 +173,23 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 
             // V1.36: pass init_preset through to the Work/schedule payload
             if let Some(ref ip) = init_preset {
-                body.as_object_mut().map(|o| {
-                    o.insert("init_preset".to_string(), serde_json::Value::String(ip.clone()));
-                });
+                if let Some(o) = body.as_object_mut() {
+                    o.insert(
+                        "init_preset".to_string(),
+                        serde_json::Value::String(ip.clone()),
+                    );
+                }
             }
 
             // V1.36: pass force_gates + reason through
             if force_gates {
-                body.as_object_mut().map(|o| {
+                if let Some(o) = body.as_object_mut() {
                     o.insert("force_gates".to_string(), serde_json::Value::Bool(true));
                     o.insert(
                         "force_gates_reason".to_string(),
                         serde_json::Value::String(reason.unwrap_or_default()),
                     );
-                });
+                }
             }
 
             // Remove null fields
@@ -356,7 +358,9 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 if let Some(iid) = &init_schedule_id {
                     println!("Init preset scheduled: {iid} (preset: {init_preset:?})");
                     println!();
-                    println!("The init preset will bootstrap your Work's scaffold via ACP conversation.");
+                    println!(
+                        "The init preset will bootstrap your Work's scaffold via ACP conversation."
+                    );
                 }
                 if let Some(sid) = &schedule_id {
                     println!("Intake scheduled: {sid} (preset: creative-brief-intake)");

@@ -15,7 +15,7 @@ const WORKS_COLUMNS: &str = "\
     inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, \
     current_stage, stage_status, work_profile, work_ref, total_planned_chapters, current_chapter";
 
-/// Map a sqlx row to WorkRecord.
+/// Map a sqlx row to [`WorkRecord`].
 fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
     WorkRecord {
         work_id: r.get("work_id"),
@@ -187,8 +187,8 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     .bind(&record.stage_status)
     .bind(&record.work_profile)
     .bind(&record.work_ref)
-    .bind(&record.total_planned_chapters)
-    .bind(&record.current_chapter)
+    .bind(record.total_planned_chapters)
+    .bind(record.current_chapter)
     .execute(pool)
     .await?;
     Ok(())
@@ -228,8 +228,8 @@ async fn insert_work_tx(
     .bind(&record.stage_status)
     .bind(&record.work_profile)
     .bind(&record.work_ref)
-    .bind(&record.total_planned_chapters)
-    .bind(&record.current_chapter)
+    .bind(record.total_planned_chapters)
+    .bind(record.current_chapter)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -550,6 +550,10 @@ async fn count_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails or no work is found.
+// SAFETY: Dynamic SQL builder with conditional SET clauses — splitting would
+// require duplicating the transaction logic. The line count is inherent to the
+// 22-column schema + 10 conditional set_clauses.
+#[allow(clippy::too_many_lines)]
 pub async fn patch_work(
     pool: &SqlitePool,
     creator_id: &str,
@@ -729,12 +733,12 @@ pub async fn append_inspiration(
     .fetch_optional(&mut *tx)
     .await?;
 
-    let current = row
-        .as_ref()
-        .map(row_to_work_record)
-        .ok_or_else(|| LocalDbError::MissingVersionKey {
-            key: format!("works/{work_id}"),
-        })?;
+    let current =
+        row.as_ref()
+            .map(row_to_work_record)
+            .ok_or_else(|| LocalDbError::MissingVersionKey {
+                key: format!("works/{work_id}"),
+            })?;
 
     // Append new entry in Rust
     let mut log: Vec<serde_json::Value> =
