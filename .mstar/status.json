@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-07T19:30:00+08:00",
+  "updated_at": "2026-06-07T20:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-creative-brief-intake-preset",
@@ -259,7 +259,7 @@
     },
     {
       "id": "2026-06-07-v1.36-novel-spec-and-compass",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-07-v1.36-novel-spec-and-compass.md",
       "working_branch": "feature/v1.36-novel-spec-and-compass",
       "merge_target": "iteration/v1.36",
@@ -269,7 +269,27 @@
         "depends_on": [
           "2026-06-07-v1.36-harness-docs-prepare"
         ],
-        "description": "P0 — novel profile spec lock + spec cross-links",
+        "description": "P0 — novel profile spec lock + spec cross-links + acceptance matrix",
+        "worktree": ".worktrees/v1.36-p0-spec",
+        "done_at": "2026-06-07T20:30:00+08:00",
+        "merge_commits": [
+          "5230abb (architect consistency review T1)",
+          "eecc66d (P0 merge into iteration/v1.36)"
+        ],
+        "qc": "skipped — docs/spec lock only (no code); per mstar-harness-core §Non-Bypass Constraints (Product-docs-only and tech-spec-only can skip QC tri-review only with explicit `QC: skipped — <reason>`)",
+        "qa": "PM-validated (all 16 acceptance items PASS per architect verification; cross-spec consistency confirmed across novel-workflow-profile / cli-spec §13.1 / novel-writing-sync-contract / work-experience-model / orchestration-engine §7.9; architect sign-off recorded in plan file at lines 94-120)",
+        "shipped": [
+          "novel-workflow-profile.md §3.1/§3.5/§4.1/§4.1.1/§4.3/§5/§5.3/§5.4 (full spec lock)",
+          "orchestration-engine.md §7.9 Master preset gates mechanism (first V1.36 Master change)",
+          "cli-spec.md §13.1 Works/<work_ref>/ layout + work_chapters SSOT + World KB cross-link",
+          "novel-writing-sync-contract.md Works/<work_ref>/Stories/ scan rules",
+          "work-experience-model.md work_profile + work_ref extension",
+          "creator-workflow.md produce stage novel profile paths + DF-53 note",
+          "specs/README.md novel-workflow-profile Draft (V1.36) index entry (confirmed correct; status flips to Shipped on P4 closeout)",
+          "Plan T1 Architect Review section appended to plan file"
+        ],
+        "open_residuals": 0,
+        "closed_residuals": 0,
         "spec_gaps_v1_36": {
           "expanded_at": "2026-06-07T19:30:00+08:00",
           "expansion_source": "V1.36 round 3: preset gates mechanism + scaffold protocol",
@@ -282,9 +302,11 @@
           },
           "acceptance_added": "rg 5 lines (foreshadowing.md / event-index.md / 实际字数 / volume: integer / llm_judge)",
           "rationale": "User feedback 2026-06-07: preset run-condition restrictions must be enforced; novel-project-init must implement the new V1.36 directory structure. User chose option (A): gates in Master + novel-specific in Draft overlay. Replaces implicit demo pain with explicit enqueue-time enforcement.",
-          "round": 3
+          "round": 3,
+          "p0_closed": "all 15 spec tasks T1-T15 closed; T1 architect consistency review committed; T6 specs/README.md confirmed correct; T2-T5 cross-link patches landed in prepare waves; T8-T15 spec edits landed in prepare waves"
         }
-      }
+      },
+      "updated_at": "2026-06-07T20:30:00+08:00"
     },
     {
       "id": "2026-06-07-v1.36-novel-project-init-preset",
