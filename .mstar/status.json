@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-07T20:55:00+08:00",
+  "updated_at": "2026-06-07T22:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-creative-brief-intake-preset",
@@ -686,8 +686,8 @@
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-07T20:55:00+08:00",
-      "total_open": 35,
+      "updated_at": "2026-06-07T22:00:00+08:00",
+      "total_open": 32,
       "by_severity": {
         "critical": 0,
         "high": 0,
