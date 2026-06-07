@@ -412,6 +412,51 @@ pub async fn reconcile_from_filesystem(
     })
 }
 
+/// Check whether a Work is completed per novel-workflow-profile §6.1.
+///
+/// Returns `true` if:
+/// - `works.status == 'completed'` (early exit), OR
+/// - `work_chapters` has ≥1 row AND all rows have `status == 'finalized'`
+///   AND the row count equals `works.total_planned_chapters`.
+///
+/// Returns `false` if:
+/// - `total_planned_chapters` is NULL or 0
+/// - Any chapter is not in `finalized` status
+/// - The work or chapters don't exist
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool, LocalDbError> {
+    // SAFETY: SELECT against works — runtime query.
+    let row = sqlx::query("SELECT status, total_planned_chapters FROM works WHERE work_id = ?")
+        .bind(work_id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(row) = row else {
+        return Ok(false);
+    };
+
+    let status: String = row.get("status");
+    if status == "completed" {
+        return Ok(true);
+    }
+
+    let total: Option<i32> = row.get("total_planned_chapters");
+    let total = match total {
+        Some(t) if t > 0 => t,
+        _ => return Ok(false),
+    };
+
+    let chapters = list_chapters(pool, work_id).await?;
+    if chapters.len() != usize::try_from(total).unwrap_or(0) {
+        return Ok(false);
+    }
+
+    Ok(chapters.iter().all(|c| c.status == "finalized"))
+}
+
 /// Parse chapter number from a filename like `ch01-introduction.md`.
 fn parse_chapter_from_filename(filename: &str) -> Option<i32> {
     let name = filename.strip_suffix(".md")?;
@@ -642,6 +687,95 @@ mod tests {
             .expect("chapter 1");
         assert_eq!(row.status, "finalized");
         assert_eq!(row.actual_word_count, Some(4200));
+    }
+
+    // -----------------------------------------------------------------------
+    // is_work_completed: true when all chapters finalized
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_is_work_completed_all_finalized() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_comp_001").await;
+
+        // Set total_planned_chapters on the work
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query("UPDATE works SET total_planned_chapters = 3 WHERE work_id = ?")
+            .bind("wrk_comp_001")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        seed_chapters(&pool, "wrk_comp_001", "my-novel", 3, "2026-06-07T10:00:00Z")
+            .await
+            .unwrap();
+
+        // Finalize all 3 chapters
+        for ch in 1..=3 {
+            update_status(
+                &pool,
+                "wrk_comp_001",
+                ch,
+                "finalized",
+                Some(4000),
+                "2026-06-07T12:00:00Z",
+            )
+            .await
+            .unwrap();
+        }
+
+        assert!(
+            is_work_completed(&pool, "wrk_comp_001").await.unwrap(),
+            "3/3 chapters finalized → should be completed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // is_work_completed: false when 1 chapter still draft
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_is_work_completed_one_draft() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_comp_002").await;
+
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query("UPDATE works SET total_planned_chapters = 3 WHERE work_id = ?")
+            .bind("wrk_comp_002")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        seed_chapters(&pool, "wrk_comp_002", "my-novel", 3, "2026-06-07T10:00:00Z")
+            .await
+            .unwrap();
+
+        // Finalize ch1, ch2; leave ch3 as draft
+        for ch in 1..=2 {
+            update_status(
+                &pool,
+                "wrk_comp_002",
+                ch,
+                "finalized",
+                Some(4000),
+                "2026-06-07T12:00:00Z",
+            )
+            .await
+            .unwrap();
+        }
+        update_status(
+            &pool,
+            "wrk_comp_002",
+            3,
+            "draft",
+            None,
+            "2026-06-07T11:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !is_work_completed(&pool, "wrk_comp_002").await.unwrap(),
+            "2/3 finalized, 1 draft → should NOT be completed"
+        );
     }
 
     // -----------------------------------------------------------------------

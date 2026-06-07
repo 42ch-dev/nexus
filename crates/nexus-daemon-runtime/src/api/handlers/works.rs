@@ -49,6 +49,14 @@ pub struct WorkApiDto {
     pub current_stage: String,
     /// Current FL-E stage status (V1.34).
     pub stage_status: String,
+    /// Work profile (V1.36 novel-workflow-profile §2.1).
+    pub work_profile: Option<String>,
+    /// Human slug for Works/ directory (V1.36 §2.1).
+    pub work_ref: Option<String>,
+    /// Total planned chapters (V1.36 §2.1).
+    pub total_planned_chapters: Option<i32>,
+    /// Current chapter index (V1.36 §2.1).
+    pub current_chapter: i32,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -80,6 +88,10 @@ impl From<WorkRecord> for WorkApiDto {
             updated_at: r.updated_at,
             current_stage: r.current_stage,
             stage_status: r.stage_status,
+            work_profile: r.work_profile,
+            work_ref: r.work_ref,
+            total_planned_chapters: r.total_planned_chapters,
+            current_chapter: r.current_chapter,
         }
     }
 }
@@ -289,13 +301,57 @@ pub async fn get_work(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
-    let record = works::get_work(state.pool(), &creator_id, &work_id)
+    let mut record = works::get_work(state.pool(), &creator_id, &work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    // V1.36 P4 (T1): auto-promote works.status to 'completed' when all
+    // chapters are finalized per novel-workflow-profile §6.1.
+    if record.status != "completed" && record.work_profile.as_deref() == Some("novel") {
+        match nexus_local_db::work_chapters::is_work_completed(state.pool(), &work_id).await {
+            Ok(true) => {
+                let now = chrono::Utc::now().to_rfc3339();
+                let patch = WorkPatch {
+                    status: Some("completed".to_string()),
+                    ..Default::default()
+                };
+                match works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now).await {
+                    Ok(updated) => {
+                        tracing::info!(
+                            target: "novel.completion",
+                            work_id = %work_id,
+                            creator_id = %creator_id,
+                            work_ref = ?updated.work_ref,
+                            total_planned_chapters = ?updated.total_planned_chapters,
+                            "Auto-promoted work to 'completed' (all chapters finalized)"
+                        );
+                        record = updated;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "novel.completion",
+                            work_id = %work_id,
+                            error = %e,
+                            "Failed to auto-promote work to 'completed'"
+                        );
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(
+                    target: "novel.completion",
+                    work_id = %work_id,
+                    error = %e,
+                    "Failed to check work completion status"
+                );
+            }
+        }
+    }
 
     Ok(Json(WorkApiDto::from(record)))
 }

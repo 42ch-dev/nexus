@@ -1,6 +1,6 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Draft (V1.36 — 2026-06-07)  
+**Status**: Shipped (V1.36 — 2026-06-07)  
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  

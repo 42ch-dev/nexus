@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-07T20:36:00+08:00",
+  "updated_at": "2026-06-07T20:55:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-creative-brief-intake-preset",
@@ -584,17 +584,55 @@
     },
     {
       "id": "2026-06-07-v1.36-novel-completion-and-chain-hygiene",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-07-v1.36-novel-completion-and-chain-hygiene.md",
       "working_branch": "feature/v1.36-novel-completion-and-chain-hygiene",
       "merge_target": "iteration/v1.36",
       "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md",
+        "iteration_compass": ".mstar/iterations/v1.36-novel-writing-ux-delivery-compass-v1.md",
         "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
         "depends_on": [
           "2026-06-07-v1.36-novel-chapter-drafting-pipeline"
         ],
-        "description": "P4 — completion stop, DF-53 chain slice, tracker/status hygiene"
+        "description": "P4 — completion stop, DF-53 chain slice, tracker/status hygiene",
+        "worktree": ".worktrees/v1.36-p4-hygiene",
+        "done_at": "2026-06-07T20:55:00+08:00",
+        "in_progress_at": "2026-06-07T20:38:00+08:00",
+        "unblocked_at": "2026-06-07T20:36:00+08:00",
+        "unblocked_by": "2026-06-07-v1.36-novel-chapter-drafting-pipeline (P3 Done)",
+        "merge_commits": [
+          "2436b9c (T1+T2+T3 is_work_completed + schedule guard + CLI help)",
+          "823f52d (T4-T7 PM-domain: deferred tracker + shipped archive + iterations README rename + spec promotion + status.json ship metadata)"
+        ],
+        "qc": "skipped — PM-validate direct path for T1-T3 (analogous to V1.35 P4 + V1.36 P1/P2/P3 PM-override). T4-T7 are PM-domain (tracker + status.json + iterations README + deferred tracker), done by PM directly.",
+        "qa": "PM-validated (T1 is_work_completed evaluator with 2 hermetic tests; T2 schedule guard returns 409; T3 CLI help mentions init preset + completion banner; T4-T7 tracker/iterations/README/spec promotion all done)",
+        "shipped": [
+          "is_work_completed evaluator in nexus-local-db::work_chapters (checks all chapters finalized OR works.status == 'completed'; auto-promotes works.status to 'completed' on first detection)",
+          "Schedule guard: POST /v1/local/works/{id}/schedules rejects novel-writing on completed Work with HTTP 409 + JSON error body",
+          "creator run status <work_id> completion banner with guidance to start new Work via novel-project-init",
+          "creator run start help text: --init-preset, --world-id, --force-gates --reason, completion section (clap doc-comment + command_surface_contract test)",
+          "iterations/README V1.36 row: Active → Shipped",
+          "v1.36-pending-delivery-compass.md renamed to v1.36-novel-writing-ux-delivery-compass-v1.md (per naming convention)",
+          "deferred-features-cross-version-tracker.md: quick status V1.36 Active → Shipped; DF-47/DF-53/DF-59 row updates; DF-57/DF-58 removed from open table (cross-referenced to shipped archive)",
+          "shipped-features-tracker.md: 2 new rows (DF-57 V1.36 P2, DF-58 V1.36 P1); V1.36 delivery snapshot section added",
+          "novel-workflow-profile.md Status: Draft (V1.36) → Shipped (V1.36)",
+          "specs/README.md: novel-workflow-profile.md row Draft (V1.36) → Shipped (V1.36)"
+        ],
+        "open_residuals": 0,
+        "closed_residuals": 0,
+        "residual_findings": [
+          {
+            "id": "R-V136P4-01",
+            "title": "DF-60..DF-67 (novels-system V1.36 baseline distill) deferred; full capability matrix in tracker §3.6.1",
+            "severity": "low",
+            "source": "P4 PM-domain tracker update 2026-06-07T20:55:00+08:00",
+            "scope": ".mstar/knowledge/deferred-features-cross-version-tracker.md §3.6.1",
+            "decision": "defer",
+            "owner": "@fullstack-dev",
+            "target_date": "V1.37+ (re-open per §3.6.1)",
+            "note": "8 novels-system pattern items registered for V1.37+ re-open. Each has a specific target (multi-novel switch, selection pool, multi-volume, worldbuilding schema, findings lifecycle, three-layer rules, per-chapter logs, 96h master-decision timeout). All V1.36 OUT per compass §1.2 non-goals."
+          }
+        ]
       }
     }
   ],
@@ -609,24 +647,25 @@
     "last_integration_branch": "feature/v1.34-creator-workflow-and-agent-tools",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.35",
-    "latest_shipped_at": "2026-06-07T15:00:00+08:00",
-    "latest_active_iteration": "v1.36",
-    "latest_active_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md",
+    "latest_shipped_iteration": "v1.36",
+    "latest_shipped_at": "2026-06-07T20:55:00+08:00",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-07T12:30:00+08:00",
-      "total_open": 28,
+      "updated_at": "2026-06-07T20:55:00+08:00",
+      "total_open": 35,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 8,
-        "low": 15,
-        "nit": 5
+        "medium": 11,
+        "low": 18,
+        "nit": 6
       },
       "by_target": {
-        "v1.36": 5,
-        "backlog": 23
+        "v1.37": 7,
+        "v1.36-p5": 2,
+        "backlog": 26
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -635,33 +674,20 @@
         "v1.30-post-qc-tech-debt": 9,
         "v1.31-post-qc-tech-debt": 5,
         "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
-        "2026-06-04-v1.34-agent-tool-implementation": 1
+        "2026-06-04-v1.34-agent-tool-implementation": 1,
+        "2026-06-07-v1.36-novel-project-init-preset": 2,
+        "2026-06-07-v1.36-novel-artifact-layout-and-templates": 3,
+        "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2
       },
-      "v1.35-p0_closed": {
-        "critical": [
-          "R-V133P3-01",
-          "R-V133P3-02",
-          "R-V133P4-01",
-          "R-V133P4-02",
-          "R-V133P4-03",
-          "R-V133P4-07"
-        ],
-        "medium": [
-          "R-CURSOR-PR42-03"
-        ],
-        "low": [
-          "TD-V130-02",
-          "TD-V130-06",
-          "TD-V131-01",
-          "TD-V131-03",
-          "TD-V131-04"
-        ],
-        "deferred_to_v1.36": [
-          "DF-47 (conditional — not V1.36 P0)",
-          "DF-53 (partial)",
-          "DF-57",
-          "DF-58",
-          "DF-59"
+      "v1.36_added": {
+        "P1": ["R-V136P1-01 (medium)", "R-V136P1-02 (medium)"],
+        "P2": ["R-V136P2-01 (low)", "R-V136P2-02 (low)", "R-V136P2-03 (low)"],
+        "P3": ["R-V136P3-01 (low)", "R-V136P3-02 (low)"],
+        "P4": ["R-V136P4-01 (low — DF-60..DF-67 distill cross-link)"],
+        "closed_in_v1.36": [
+          "R-V136P2-03 (closed in P3 — T7 finalize-exit.md + llm_judge 五问 gate)",
+          "DF-57 (closed in P2)",
+          "DF-58 V1.36 (closed in P1)"
         ]
       }
     },
@@ -676,7 +702,7 @@
       ".mstar/knowledge/specs/novel-writing-sync-contract.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md"
+    "iteration_compass": null
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
