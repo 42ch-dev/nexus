@@ -64,7 +64,7 @@ pub use memory_fragment::{
 // Re-export world_stories types
 pub use world_stories::{
     create_world_story, delete_world_story, generate_id as generate_world_story_id, get_by_id,
-    list_by_world, update_chapters, update_status, WorldStory,
+    list_by_world, update_chapters, update_status as update_world_story_status, WorldStory,
 };
 
 // Re-export narrative_write types
@@ -103,7 +103,10 @@ pub use works::{
 };
 
 // Re-export work_chapters types
-pub use work_chapters::{count_chapters, list_chapters, seed_chapters, WorkChapterRecord};
+pub use work_chapters::{
+    count_chapters, get_chapter, insert_chapter, list_chapters, reconcile_from_filesystem,
+    seed_chapters, update_paths, update_status, ReconcileReport, WorkChapterRecord,
+};
 
 /// Runtime role for database initialization
 ///
