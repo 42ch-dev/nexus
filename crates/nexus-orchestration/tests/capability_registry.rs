@@ -10,10 +10,12 @@ async fn registry_lookup_builtin_workspace_open() {
 }
 
 #[tokio::test]
-async fn registry_has_nineteen_builtins() {
-    // V1.36 P1 added `novel.project_scaffold`; previously 18, now 19.
+async fn registry_has_twenty_builtins() {
+    // V1.36 P1 added `novel.project_scaffold` (18→19);
+    // P3 added `novel.chapter_transition` (19→20).
+    // UPDATE THIS TEST when adding a new builtin.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 19);
+    assert_eq!(reg.len(), 20);
 }
 
 #[tokio::test]
