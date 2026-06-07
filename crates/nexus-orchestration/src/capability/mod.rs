@@ -182,8 +182,9 @@ impl CapabilityRegistry {
             Box::new(builtins::AcpSessionLoad),
             Box::new(builtins::JudgeLlm::new()),
             Box::new(builtins::ContextSummarize::new()),
-            Box::new(builtins::KbExtractWork::with_pool(pool)),
+            Box::new(builtins::KbExtractWork::with_pool(pool.clone())),
             Box::new(builtins::SoulExperienceAggregate),
+            Box::new(builtins::NovelProjectScaffold::with_pool(pool)),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -274,6 +275,13 @@ impl CapabilityRegistry {
             Box::new(context_summarize),
             Box::new(kb),
             Box::new(builtins::SoulExperienceAggregate),
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::NovelProjectScaffold::new, |pool| {
+                        builtins::NovelProjectScaffold::with_pool(pool.clone())
+                    }),
+            ),
         ];
         let mut reg = Self {
             capabilities: caps,

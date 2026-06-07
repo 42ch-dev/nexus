@@ -11,6 +11,7 @@ mod creator;
 mod judge_llm;
 mod judge_rule;
 mod kb_extract_work;
+mod novel_scaffold;
 mod outbox;
 pub mod registry;
 mod soul_experience_aggregate;
@@ -27,6 +28,7 @@ pub use creator::{
 pub use judge_llm::JudgeLlm;
 pub use judge_rule::JudgeRule;
 pub use kb_extract_work::KbExtractWork;
+pub use novel_scaffold::NovelProjectScaffold;
 pub use outbox::{OutboxCompact, OutboxFlush};
 pub use registry::RegistryRefresh;
 pub use soul_experience_aggregate::SoulExperienceAggregate;
