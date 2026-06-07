@@ -283,6 +283,17 @@ async fn t7d_works_patch_world_id_existing() {
     let cap = make_cap(pool.clone(), &works_root);
 
     let world_id = "wld_existing_123";
+    // F5: world_id FK is enforced — seed the row first.
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        world_id,
+        "ctr_test",
+        "Existing World",
+        "existing-world",
+        "private",
+        "single",
+    )
+    .await;
     let input = scaffold_input(
         "wrk_t7d_exist",
         "world-exist",
@@ -342,6 +353,18 @@ async fn t7d_works_patch_world_id_new_placeholder() {
     let cap = make_cap(pool.clone(), &works_root);
 
     let new_world_id = "wld_newly_created_456";
+    // F5: world_id FK is enforced — simulate the row a future
+    // `creator world create` would persist before binding the Work.
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        new_world_id,
+        "ctr_test",
+        "Newly Created World",
+        "newly-created-world",
+        "private",
+        "single",
+    )
+    .await;
     let input = scaffold_input(
         "wrk_t7d_new",
         "world-new",
@@ -363,6 +386,53 @@ async fn t7d_works_patch_world_id_new_placeholder() {
         "V1.36: world_id from 'create new' placeholder must be set on works table"
     );
     assert_eq!(work.work_profile.as_deref(), Some("novel"));
+}
+
+// ---------------------------------------------------------------------------
+// T7d-bis: F5 — world_id FK enforced before any side effect (C-3)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
+    // Spec §3.5: binding a Work to a non-existent world is a config error.
+    // Verify (1) the scaffold returns InputInvalid, (2) no FS directory was
+    // created, (3) the works row is NOT patched with the bogus world_id.
+    let (pool, dir) = fresh_pool().await;
+    insert_test_work(&pool, "wrk_t7d_bis").await;
+
+    let works_root = dir.path().join("Works");
+    let cap = make_cap(pool.clone(), &works_root);
+
+    let input = scaffold_input(
+        "wrk_t7d_bis",
+        "world-bis",
+        "World Bis",
+        Some("wld_does_not_exist_xyz"),
+        2,
+    );
+
+    let err = cap.run(input).await.expect_err("must reject unknown world_id");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("world_id") && msg.contains("not found"),
+        "F5 error message must mention world_id+not found, got: {msg}"
+    );
+
+    // No FS scaffold should have been written for this work_ref.
+    assert!(
+        !works_root.join("world-bis").exists(),
+        "F5: no Works/<ref>/ should be created when FK check fails"
+    );
+
+    // works row world_id must still be NULL.
+    let work = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_t7d_bis")
+        .await
+        .expect("get work")
+        .expect("work must exist");
+    assert!(
+        work.world_id.is_none(),
+        "F5: works.world_id must remain NULL when FK check fails"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +690,17 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
 
     // Partial re-init: only world_id changed. Use a DIFFERENT work_ref and
     // chapter count in the input to verify they are NOT applied to the DB.
+    // F5: world_id FK is enforced — seed the row first.
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        "wld_new_xyz",
+        "ctr_test",
+        "New XYZ World",
+        "new-xyz-world",
+        "private",
+        "single",
+    )
+    .await;
     let mut partial = scaffold_input(
         "wrk_t7f",
         "original-ref", // FS path must match (idempotent re-render); keep same

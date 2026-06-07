@@ -170,6 +170,30 @@ impl Capability for NovelProjectScaffold {
         };
         let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
 
+        // ── F5 — verify world_id FK exists before any side effect (C-3) ─
+        // Spec §3.5: world_id binds a Work to an existing World. If the
+        // user (or LLM) supplies a stale/typo'd ID, fail fast before
+        // creating FS scaffold or PATCHing the works row. Worldless
+        // (None) is the documented branch and skipped here.
+        if let (Some(world_id), Some(pool)) = (inp.world_id.as_deref(), self.pool.as_ref()) {
+            // SAFETY: SELECT against narrative_worlds — runtime query; the
+            // typed module DF-63 lands in V1.37+. See R-V133P1-09 for the
+            // workspace-wide runtime->compile-time conversion follow-up.
+            let exists: Option<(i64,)> =
+                sqlx::query_as("SELECT 1 FROM narrative_worlds WHERE world_id = ?")
+                    .bind(world_id)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| {
+                        CapabilityError::Internal(format!("world_id existence check: {e}"))
+                    })?;
+            if exists.is_none() {
+                return Err(CapabilityError::InputInvalid(format!(
+                    "world_id {world_id:?} not found in narrative_worlds (worldless requires null)"
+                )));
+            }
+        }
+
         let root = self.works_root.join(&inp.work_ref);
 
         // ── T2a: root directory ────────────────────────────────────────
