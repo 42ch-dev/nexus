@@ -7,7 +7,7 @@
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-07 (V1.36 architecture refactor: work_chapters table replaces work-status.md; per-Work Worldbuilding/ removed in favor of World KB + world_id binding; novel-workflow-profile §3.5 World integration; §4.1.1/§4.1.2/§4.1.3 work_chapters SSOT + reconciliation; DF-63 reframed to "World KB cross-Work unification"; P0/P2 plans updated with T12/T13 + T9-T13; status.json metadata patched for round-1)
+**Last updated**: 2026-06-07 (V1.36 round 3: preset gates mechanism — orchestration-engine.md §7.9 Master addition (work_field / filesystem / previous_preset kinds + enqueue-time evaluation + --force-gates override); novel-workflow-profile §5.3 Draft overlay (novel-project-init permissive / novel-writing strict / reflection-loop post-draft; world_binding: required|optional toggle); §5.4 scaffold protocol (file enumeration + template sources + work_chapters row seeding + atomicity + idempotency); P0 T15 added; P1 plan rewritten with T1-T8 covering scaffold capability sub-tasks T2a-T2i, work_chapters seed T3, works PATCH T4, CLI T5, idempotency T6, hermetic tests T7)
 
 ---
 
@@ -274,4 +274,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-07. Status: V1.36 Active; V1.35 Shipped 2026-06-07; 28 open residuals (0 critical); tracker quick status aligned to status.json. 8 novel-system deferred items (DF-60..DF-67) + 1 distill section (§3.6.1) registered for V1.37+ re-open.*
+*Last updated: 2026-06-07. Status: V1.36 Active; V1.35 Shipped 2026-06-07; 28 open residuals (0 critical); tracker quick status aligned to status.json. 8 novel-system deferred items (DF-60..DF-67) + 1 distill section (§3.6.1) registered for V1.37+ re-open. Round 3 (2026-06-07): preset gates mechanism landed in orchestration-engine.md §7.9 Master + novel-workflow-profile.md §5.3 Draft overlay; novel-project-init scaffold protocol enumerated in §5.4; P0 T15 + P1 T1-T8 expanded.*

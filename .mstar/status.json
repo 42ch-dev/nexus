@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-07T19:00:00+08:00",
+  "updated_at": "2026-06-07T19:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-04-v1.33-creative-brief-intake-preset",
@@ -271,20 +271,18 @@
         ],
         "description": "P0 — novel profile spec lock + spec cross-links",
         "spec_gaps_v1_36": {
-          "expanded_at": "2026-06-07T19:00:00+08:00",
-          "expansion_source": "V1.36 architecture refactor (round 2: World KB cross-Work + work_chapters SSOT)",
+          "expanded_at": "2026-06-07T19:30:00+08:00",
+          "expansion_source": "V1.36 round 3: preset gates mechanism + scaffold protocol",
           "new_tasks": [
-            "T12",
-            "T13"
+            "T15"
           ],
-          "new_task_summary": "T12: replace §4.1 with work_chapters table DDL (state.db SSOT for chapter state); remove work-status.md file; document truth model; T13: remove per-Work Worldbuilding/ subtree; add §3.5 World integration (cross-Work content lives in World KB; world_id binding; novel-project-init grill-me; --world-id CLI; world_refs advisory frontmatter); update §2.1/§5/§8",
+          "new_task_summary": "T15: Add gates: field to orchestration-engine.md §7.9 Master (work_field/filesystem/previous_preset kinds + enqueue-time evaluation + --force-gates override). Add novel-specific gate values in novel-workflow-profile.md §5.3 (Draft overlay) + world_binding toggle in §5.3.4 + scaffold protocol in §5.4 (file enumeration + template sources + work_chapters row seeding + atomicity + idempotency). This is the first V1.36 Master spec change (orchestration-engine.md).",
           "downstream_plan_changes": {
-            "2026-06-07-v1.36-novel-artifact-layout-and-templates": "T3 updated (work-status.md template not shipped); T9 updated (chapter body template gets world_refs); T10-T13 added (work_chapters DDL migration + works.world_id FK + init preset seeding + sync module rewrite + reconcile command)",
-            "2026-06-07-v1.36-novel-project-init-preset": "T1 grill-me adds World binding question (existing/new/worldless); updates per novel-workflow-profile §3.5"
+            "2026-06-07-v1.36-novel-project-init-preset": "Plan rewritten: T1 preset YAML + prompts (incl. World binding); T2 scaffold capability sub-tasks T2a-T2i (file enumeration per spec §5.4.1); T3 work_chapters row seeding per spec §5.4.3; T4 works PATCH per spec §5.4.4; T5 CLI wiring --init-preset + --force-gates; T6 idempotency; T7 hermetic tests T7a-T7e (incl. gate-pass verification T7e); T8 cli-spec update"
           },
           "acceptance_added": "rg 5 lines (foreshadowing.md / event-index.md / 实际字数 / volume: integer / llm_judge)",
-          "rationale": "User feedback 2026-06-07: Worldbuilding is cross-Work (World KB is canonical, not per-Work); work-status.md duplicates state (work_chapters table is the SSOT). user approved work_chapters (not work_status) as table name.",
-          "round": 2
+          "rationale": "User feedback 2026-06-07: preset run-condition restrictions must be enforced; novel-project-init must implement the new V1.36 directory structure. User chose option (A): gates in Master + novel-specific in Draft overlay. Replaces implicit demo pain with explicit enqueue-time enforcement.",
+          "round": 3
         }
       }
     },
@@ -302,10 +300,21 @@
         ],
         "description": "P1 — interactive novel project init preset (grill-me)",
         "spec_gaps_v1_36": {
-          "round": 2,
-          "expanded_at": "2026-06-07T19:00:00+08:00",
-          "expansion_source": "V1.36 architecture refactor (round 2: World binding in init grill-me)",
-          "new_requirements": "T1 grill-me now asks World binding question: existing world_id / create new World / worldless (default). On success: scaffold Works/<work_ref>/ dirs + seed work_chapters rows 1..N; set work.world_id (if bound). See novel-workflow-profile §3.5/§5"
+          "round": 3,
+          "expanded_at": "2026-06-07T19:30:00+08:00",
+          "expansion_source": "V1.36 round 3: scaffold protocol enumeration + gates",
+          "plan_rewritten": true,
+          "new_tasks": [
+            "T1 (presets + prompts incl. World)",
+            "T2a-T2i (scaffold sub-tasks)",
+            "T3 (work_chapters seed)",
+            "T4 (works PATCH)",
+            "T5 (CLI)",
+            "T6 (idempotency)",
+            "T7 (tests T7a-T7e)",
+            "T8 (cli-spec)"
+          ],
+          "key_changes": "T2 expanded from single high-level task to T2a-T2i sub-tasks (file enumeration per spec §5.4.1); T3 work_chapters row seeding; T4 works PATCH; T6 idempotency; T7e gate-pass verification (proves init T1-T5 enable downstream novel-writing schedule to pass §5.3.2 gate)"
         }
       }
     },

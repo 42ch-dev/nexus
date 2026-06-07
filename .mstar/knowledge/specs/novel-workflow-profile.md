@@ -205,14 +205,14 @@ V1.36 implement wave ships template stubs under `crates/nexus-orchestration/embe
 
 ## 5. Preset responsibilities
 
-| Preset | Role | When |
-| --- | --- | --- |
-| `novel-project-init` | Interactive grill-me; sets `work_ref`, `total_planned_chapters`, `world_id` (bind to existing / create new / worldless), scaffolds `Works/<work_ref>/` dirs, seeds `work_chapters` rows | Before first `novel-writing` if scaffold missing |
-| `creative-brief-intake` | Structured brief on Work | FL-E `intake` / `creator run start` |
-| `novel-writing` | Outline → draft → **finalize (gated by `llm_judge`)** → `finalized`; per-chapter transitions update both `work_chapters` row + chapter frontmatter | FL-E `produce` |
-| `reflection-loop` | Optional deeper quality pass; **not** in V1.36 default flow | FL-E `review` (optional V1.36) |
+| Preset | Role | When | Gates (see §5.3) |
+| --- | --- | --- | --- |
+| `novel-project-init` | Interactive grill-me; sets `work_ref`, `total_planned_chapters`, `world_id` (bind to existing / create new / worldless), scaffolds `Works/<work_ref>/` dirs (§5.4), seeds `work_chapters` rows | Before first `novel-writing` if scaffold missing | §5.3.1 |
+| `creative-brief-intake` | Structured brief on Work | FL-E `intake` / `creator run start` | (generic; out of novel overlay) |
+| `novel-writing` | Outline → draft → **finalize (gated by `llm_judge`)** → `finalized`; per-chapter transitions update both `work_chapters` row + chapter frontmatter | FL-E `produce` | §5.3.2 |
+| `reflection-loop` | Optional deeper quality pass; **not** in V1.36 default flow | FL-E `review` (optional V1.36) | §5.3.3 |
 
-**Separation rule**: `novel-project-init` is **not** auto-chained inside `novel-writing`. User or `creator run` explicitly schedules it when starting a new novel Work.
+**Separation rule**: `novel-project-init` is **not** auto-chained inside `novel-writing`. User or `creator run` explicitly schedules it when starting a new novel Work. The engine enforces this via the `previous_preset: novel-project-init` gate on `novel-writing` (§5.3.2).
 
 ### 5.1 V1.36 chapter finalize quality gate
 
@@ -233,6 +233,202 @@ When a Work has `world_id != NULL`:
 - `world_refs: [char_xxx, loc_yyy]` frontmatter is filled by the agent based on what the chapter references. V1.36 does not validate; V1.37+ may validate.
 
 For **worldless** Works (`world_id == NULL`): no World context block; LLM uses `README.md` setting notes as the only world context.
+
+### 5.3 V1.36 novel preset gates (Draft overlay on orchestration-engine.md §7.9)
+
+The novel profile declares **gate sets** for each of its three presets. The gate mechanism itself is generic (orchestration-engine.md §7.9 Master); this section defines the **novel-specific values**.
+
+#### 5.3.1 `novel-project-init` gates
+
+```yaml
+gates:
+  - kind: work_field
+    field: work_profile
+    op: in
+    value: [null, novel]              # fresh Work, or re-init allowed
+  - kind: work_field
+    field: workspace_slug
+    op: required
+```
+
+**Rationale**: `novel-project-init` is the bootstrap preset; it should run before `Works/<work_ref>/` exists, so it must NOT gate on filesystem. It also runs before `intake_status` is finalised, so no intake gate.
+
+#### 5.3.2 `novel-writing` gates (most-constrained preset)
+
+```yaml
+gates:
+  - kind: work_field
+    field: work_profile
+    op: equals
+    value: novel
+  - kind: work_field
+    field: work_ref
+    op: required                      # non-null
+  - kind: work_field
+    field: intake_status
+    op: equals
+    value: complete
+  - kind: filesystem
+    path: "Works/{{work_ref}}/"
+    must_exist: true                  # scaffold must exist (from novel-project-init or hand-created)
+  - kind: filesystem
+    path: "Works/{{work_ref}}/Outlines/"
+    must_exist: true
+  - kind: filesystem
+    path: "Works/{{work_ref}}/Stories/"
+    must_exist: true
+  - kind: work_field
+    field: world_id
+    op: required                      # if preset manifest declares world-binding required (see §5.3.4)
+  - kind: previous_preset
+    preset: novel-project-init
+    status: complete
+    scope: work
+```
+
+**Rationale**: `novel-writing` runs in the FL-E `produce` stage. The gates enforce the **layer cake** from §3.1 (scaffold dirs), the **Work identity** (profile + work_ref), the **intake** requirement, and the **World binding** (if the preset's `run_intents` declares it world-required). The `previous_preset` gate ensures the scaffold was actually created via `novel-project-init` (not hand-edited or copied from another Work).
+
+#### 5.3.3 `reflection-loop` gates (optional quality pass)
+
+```yaml
+gates:
+  - kind: work_field
+    field: work_profile
+    op: equals
+    value: novel
+  - kind: work_field
+    field: work_ref
+    op: required
+  - kind: filesystem
+    path: "Works/{{work_ref}}/Stories/"
+    must_exist: true
+  - kind: previous_preset
+    preset: novel-writing
+    status: any_session               # at least one novel-writing session reached a state
+    scope: work
+```
+
+**Rationale**: `reflection-loop` is optional and runs after at least one chapter draft. It needs the chapter directory but does not require the chapter to be `finalized` (reflection may be triggered on `draft` too).
+
+#### 5.3.4 World-binding toggle (preset-level opt-in)
+
+The `world_id` gate in §5.3.2 is conditional. The preset manifest can declare:
+
+```yaml
+preset:
+  id: novel-writing
+  # ...
+  world_binding:
+    mode: required                   # required | optional
+```
+
+- **`required`** (default for `novel-writing`): the `world_id` gate is active; World-bound Works must have `world_id` set. For **worldless** Works (`world_id == NULL`), the user must either set `world_id` before scheduling or use `--force` with audit reason.
+- **`optional`**: the `world_id` gate is skipped; `novel-writing` runs regardless of `world_id`. The prompt still injects World KB context block when `world_id != NULL` (per §5.2).
+
+For V1.36, `novel-writing` ships with `world_binding: optional` (so worldless users aren't blocked). Future iterations may tighten to `required` if the World ecosystem matures.
+
+#### 5.3.5 Gate failure user experience
+
+When a `novel-writing` gate fails (e.g. user runs `creator run start --idea "..."` without first running `novel-project-init`), the CLI surfaces:
+
+```text
+error: preset_gates_failed
+  preset: novel-writing
+  work_id: wrk_abc123
+  failed_gates:
+    - filesystem: Works/cozy-mystery/ must exist (actual: missing)
+        ↳ Run `creator run start --init-preset novel-project-init` to scaffold the Work.
+    - work_field: intake_status must equal "complete" (actual: pending)
+        ↳ Complete intake via `creator run stage advance --stage intake`.
+  override: pass --force-gates with --reason "<text>" to bypass (audit-logged)
+```
+
+This is the **user-visible demo-pain killer**: instead of scheduling `novel-writing` and failing deep in the state graph, the engine rejects at enqueue with a clear remediation.
+
+#### 5.3.6 Implementation note (V1.36)
+
+- Gate evaluation is **read-only** at enqueue time; the engine queries `works` table and filesystem; it does not mutate.
+- Gate evaluation is **idempotent**: a failed check leaves no side effects.
+- Engine logs gate failures to the structured log with `preset_id`, `work_id`, `failed_gates` array. Failed-gate rate by preset is a future observability dashboard (out of V1.36 scope).
+
+### 5.4 `novel-project-init` scaffold protocol (file enumeration)
+
+`novel-project-init` is the canonical way to bootstrap a Work's `Works/<work_ref>/` tree. The grill-me collects `work_ref`, `total_planned_chapters`, and the World binding question (§3.5); on success, the preset's **scaffold capability** (or handler) creates the full directory tree, copies template stubs, and seeds `work_chapters` rows. This section enumerates every file/dir so the P1 implementer (and any hand-rolled init script) has a checklist.
+
+#### 5.4.1 Directory tree created (all paths relative to workspace root)
+
+```text
+Works/
+  <work_ref>/
+    README.md                              # copy from embedded template; render with {{work_ref}}, {{title}}, {{world_id_or_null}}
+    Outlines/
+      volume-outline.md                    # copy from embedded template; V1.36 single-volume: still created (placeholder)
+      chapters/                            # mkdir (empty; first outline created on first outline pass)
+      foreshadowing.md                     # copy from embedded template (F### table header; §3.1/§3.2)
+      event-index.md                       # copy from embedded template (E### table header; §3.1/§3.2)
+    Stories/                               # mkdir (empty; first chapter body created on first draft pass)
+    Logs/                                  # mkdir (empty; structure OUT V1.36 per DF-66)
+```
+
+**Not created** (intentional):
+
+- `work-status.md` — replaced by `work_chapters` table (§4.1).
+- `Worldbuilding/` subtree — content lives in World KB (§3.5).
+
+#### 5.4.2 Template sources
+
+All template files live under `crates/nexus-orchestration/embedded-presets/novel-project-init/templates/` (P1 deliverable). The init preset's scaffold capability:
+
+1. Reads each template from the embedded asset.
+2. Substitutes preset input vars (`work_ref`, `title`, `world_id`, etc.) using `handlebars-rust` (per [orchestration-engine.md](orchestration-engine.md) §7.3).
+3. Writes to `Works/<work_ref>/...` at the path listed above.
+
+For **World-bound** Works, `README.md` is rendered with a one-line `world_id: <uuid>` header and links to the World KB items the Work will reference most. For **worldless** Works, `README.md` includes a 1–2 paragraph inline world setting note (collected from grill-me, optional).
+
+#### 5.4.3 `work_chapters` row seeding (DB writes)
+
+For `chapter IN 1..total_planned_chapters`, insert one `work_chapters` row per chapter:
+
+| Column | Value |
+| --- | --- |
+| `work_id` | from grill-me / `creator run start` |
+| `chapter` | `i` (1..N) |
+| `volume` | `NULL` (V1.36 single-volume) |
+| `slug` | user-provided per chapter from grill-me (or auto-derived from `chNN` for V1.36 MVP) |
+| `planned_word_count` | default `4000` (single V1.36 value; user may override per chapter in grill-me) |
+| `actual_word_count` | `NULL` (set on first transition to `finalized`) |
+| `status` | `'not_started'` |
+| `outline_path` | `Works/<work_ref>/Outlines/chapters/ch<NN>-outline.md` (with `NN` zero-padded to 2 digits) |
+| `body_path` | `Works/<work_ref>/Stories/ch<NN>-<slug>.md` (slug from grill-me; if absent, use `ch<NN>` as the slug) |
+| `created_at` | now() |
+| `updated_at` | now() |
+
+**Atomicity**: the entire scaffold (mkdir + template copies + `work_chapters` inserts + `works` PATCH) **must succeed or fail together**. If any step fails, the engine rolls back filesystem deletes and DB inserts in a single transaction. The P1 implementer should use a `creator.workspace.transaction` or equivalent capability.
+
+#### 5.4.4 PATCH on `works` table
+
+After scaffold succeeds, the init preset PATCHes the Work record:
+
+| Field | New value |
+| --- | --- |
+| `work_profile` | `'novel'` (was `null` or previously set) |
+| `work_ref` | the chosen directory name |
+| `total_planned_chapters` | from grill-me |
+| `world_id` | from grill-me (existing / new / NULL) |
+| `current_chapter` | `0` (reset on fresh init) |
+| `updated_at` | now() |
+
+If the Work already has a `work_ref` and `Works/<work_ref>/` exists (re-init case), the scaffold **does not overwrite** existing files. The PATCH only updates fields the user explicitly changed in this grill-me session.
+
+#### 5.4.5 Idempotency
+
+Re-running `novel-project-init` on a Work that already has the scaffold is **safe**:
+
+- Files that exist are not overwritten (unless user explicitly opts in via grill-me "re-scaffold from templates" answer).
+- `work_chapters` rows are not duplicated (PK conflict on `(work_id, chapter)`; existing rows preserved).
+- `works` PATCH is a no-op if all fields are unchanged.
+
+The grill-me offers an "overwrite templates" option for users who want to re-render the README/Outlines/ from latest embedded templates (useful after a toolchain update). V1.36 default is **preserve**; "overwrite" is the explicit user opt-in.
 
 ---
 
@@ -311,6 +507,8 @@ First-run path unchanged (≤7 steps per cli-spec §7.1); novel init preset may 
   - `work_chapters` table replaces `work-status.md` file (§4.1)
   - `Works/<work_ref>/Worldbuilding/` subtree **removed**; world content lives in World KB (§3.5)
   - `world_id` becomes the cross-Work binding (§2.1, §3.5, §5, §8)
+  - **Preset gates mechanism added** (orchestration-engine.md §7.9 Master + novel-specific gate values in this spec §5.3; new `world_binding: required | optional` toggle in §5.3.4). Replaces the implicit "novel-writing should already have scaffold" assumption with explicit enqueue-time enforcement.
+  - **`novel-project-init` scaffold protocol enumerated** (§5.4): explicit file list, template sources, `work_chapters` row seeding, atomicity, idempotency, re-init handling. Replaces the high-level "mkdir scaffold + write template stubs" P1 T2 with a P1-implementer checklist.
 
 ---
 

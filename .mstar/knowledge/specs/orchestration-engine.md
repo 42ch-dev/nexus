@@ -722,6 +722,83 @@ Loader rules (V1.33):
 
 Normative classification table: [work-experience-model.md](work-experience-model.md) §5.2.
 
+### 7.9 Preset `gates` (V1.36 — Implemented)
+
+Presets may declare **precondition gates** that the orchestration engine evaluates **before scheduling** the preset for execution. Gates let a profile require specific Work fields, filesystem state, or prior-preset completion — turning implicit "this should already be true" expectations into enforced preconditions with structured error reporting.
+
+```yaml
+preset:
+  id: novel-writing
+  # ...
+  run_intents: [work_init, work_continue]
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+    - kind: work_field
+      field: intake_status
+      op: equals
+      value: complete
+    - kind: filesystem
+      path: "Works/{{work_ref}}/"
+      must_exist: true
+    - kind: previous_preset
+      preset: novel-project-init
+      status: complete
+      scope: work            # same work_id
+```
+
+#### 7.9.1 Gate kinds (closed set)
+
+| `kind` | `op` / required keys | Semantics |
+| --- | --- | --- |
+| `work_field` | `field` (string, dot-path), `op` (closed enum), `value` (any, op-dependent) | Query the `works` table for the bound `work_id`; check field against op. `op` enum: `equals` \| `not_equals` \| `required` (non-null) \| `in` (`value: [v1, v2]`) \| `not_in`. |
+| `filesystem` | `path` (string, preset-input-var-substituted), `must_exist: true \| false` | Resolve `path` against workspace root (with `{{work_ref}}` and other preset input vars substituted); check existence. Symlink-safe (canonicalize first; see §7.6.1 path-safety rules). |
+| `previous_preset` | `preset` (string, id), `status` (closed enum: `complete` \| `any_session`), `scope: work` (only `work` is normative V1.36) | Query the orchestration session log for the named preset, scoped to the same `work_id`; check the named status. `any_session` accepts completed/paused/waiting_for_input; `complete` requires terminal-completion. |
+
+#### 7.9.2 Evaluation timing and contract
+
+1. **Load-time validation** (§7.6 facade): each gate is schema-validated. Unknown `kind` → error. Unknown `op` → error. `field` must be a known column on `works` table (or a known entity extension column). `path` must pass path-safety (no `..` escape, no absolute path).
+2. **Enqueue-time evaluation**: the engine evaluates the gate list **immediately before enqueuing** a preset for execution (after preset-input-var binding, before the first state runs). All gates must pass.
+3. **Failure behavior**:
+   - Return a structured error to the caller (`creator run start` / `creator run stage advance` / schedule API):
+
+     ```json
+     {
+       "error": "preset_gates_failed",
+       "preset_id": "novel-writing",
+       "work_id": "wrk_abc",
+       "failed_gates": [
+         { "kind": "filesystem", "path": "Works/cozy-mystery/", "must_exist": true, "actual": "missing",
+           "remediation": "Run `creator run start --init-preset novel-project-init` first." },
+         { "kind": "work_field", "field": "intake_status", "op": "equals", "expected": "complete", "actual": "pending",
+           "remediation": "Complete intake via `creator run stage advance --stage intake`." }
+       ]
+     }
+     ```
+   - Preset is **not enqueued**; no state runs.
+4. **`--force` override** (audit-logged): `creator run start --force-gates` or `creator run stage advance --force` skips gate evaluation. The override records `forced: true`, the user identity, and a free-text reason (when provided) to the audit log. Forced runs still respect the engine's other invariants (capability registry, run_intents, etc.).
+5. **Idempotency**: gate evaluation is read-only; it does not mutate Work state. A failed gate check leaves no side effects.
+
+#### 7.9.3 Relationship to other constraints
+
+| Constraint | Scope | Enforced at | Authoritative spec |
+| --- | --- | --- | --- |
+| `run_intents` (V1.33) | Coarse: which `creator run` subcommand surfaces the preset | CLI dispatch time | §7.8, [work-experience-model.md](work-experience-model.md) §5 |
+| `requires_capabilities` (V1.4) | Capability availability at engine startup | Loader | §7.2 |
+| `gates` (V1.36) | Per-invocation preconditions (Work fields, filesystem, prior-preset) | Enqueue time | §7.9 |
+| `stage` gates (V1.34) | FL-E linear stage ordering (`intake → research → produce → review → persist`) | `creator run stage advance` | [creator-workflow.md](creator-workflow.md) §3.3 |
+
+Gates are **additive** to `run_intents` and `stage` gates; they do not replace either. A preset can declare any combination. Profile-specific gate sets (e.g. novel profile's `Works/<work_ref>/` requirement) live in the profile overlay spec, not in this Master.
+
+#### 7.9.4 Worked example: novel-writing
+
+Full gate set for `novel-writing` is documented in [novel-workflow-profile.md §5.3](./novel-workflow-profile.md). The Master here defines the mechanism; the Draft overlay defines the values.
+
 ---
 
 ## 8. Preset Loader (YAML → graph-flow Graph)
