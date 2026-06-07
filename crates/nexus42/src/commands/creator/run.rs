@@ -153,6 +153,29 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 ));
             }
 
+            // F7 (W-001 partial fix, R-V136P1-01): resolve active creator once and
+            // populate AddScheduleRequest.creator_id for every schedule we create
+            // below. The previous code passed `String::new()`, which left the
+            // creator_id empty in the daemon-side Schedule row and broke
+            // downstream lookups (e.g. fl_e.audit logs and per-creator schedule
+            // queries).
+            //
+            // GAP DEFERRED (R-V136P1-01): the `--init-preset` flow still does not
+            // thread the grill-me output (work_ref / total_planned_chapters /
+            // world_id) into `preset.input.*`. AddScheduleRequest currently has no
+            // `input: HashMap<String, serde_json::Value>` field; adding one
+            // requires a wire-contract change + `pnpm run codegen` + daemon
+            // handler + scheduler input-routing. That is out of V1.36 P1 scope and
+            // tracked as R-V136P1-01 in `.mstar/status.json`. The init preset's
+            // committing state will hit `preset.input.*` with empty values at
+            // runtime until that lands; the daemon logs a warn! trace on every
+            // such schedule (see `crates/nexus-daemon-runtime/src/api/handlers/
+            // orchestration/schedules.rs`).
+            let resolved_creator_id = config
+                .active_creator_id
+                .clone()
+                .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
             let work_title = title.unwrap_or_else(|| {
                 let max_len = idea.chars().take(60).collect::<String>();
                 if idea.len() > max_len.len() {
@@ -218,7 +241,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             let mut init_schedule_id: Option<String> = None;
             if let Some(ref ip) = init_preset {
                 let init_request = AddScheduleRequest {
-                    creator_id: String::new(),
+                    creator_id: resolved_creator_id.clone(),
                     preset_id: ip.clone(),
                     seed: Some(idea.clone()),
                     label: None,
@@ -250,7 +273,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             let mut schedule_id: Option<String> = None;
             if !skip_intake {
                 let intake_request = AddScheduleRequest {
-                    creator_id: String::new(),
+                    creator_id: resolved_creator_id.clone(),
                     preset_id: "creative-brief-intake".to_string(),
                     seed: Some(idea.clone()),
                     label: None,
@@ -297,7 +320,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 // Intake skipped → schedule novel-writing directly.
                 let production_preset = preset.as_deref().unwrap_or("novel-writing");
                 let novel_request = AddScheduleRequest {
-                    creator_id: String::new(),
+                    creator_id: resolved_creator_id.clone(),
                     preset_id: production_preset.to_string(),
                     seed: Some(idea.clone()),
                     label: None,

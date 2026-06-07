@@ -811,6 +811,19 @@
         "target_date": "V1.36",
         "note": "V1.35 P0 assessed: adapter exists, but production wiring requires IPC-layer changes (IpcClient notification handling, WorkerHandleProvider trait extension, worker-side tool request forwarding). Non-surgical across 3+ crates — deferred to V1.36. V1.35 ships dispatch_from_worker adapter + tests only."
       }
+    ],
+    "2026-06-07-v1.36-novel-project-init-preset": [
+      {
+        "id": "R-V136P1-01",
+        "title": "novel-project-init CLI --init-preset does not thread grill-me output to preset.input (W-001 partial fix; F7 Option C)",
+        "severity": "medium",
+        "source": "qc1 W-001 / PM-Option-C decision 2026-06-07",
+        "scope": "crates/nexus42/src/commands/creator/run.rs + crates/nexus-contracts/src/local/schedule/http.rs:23 (AddScheduleRequest)",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target_date": "V1.37 (or V1.36 P5 if low-cost wire change lands)",
+        "note": "Creator_id empty bug is fixed in F7 Option C; full preset.input.* plumbing (work_ref / total_planned_chapters / world_id) requires extending AddScheduleRequest with input: HashMap<String, serde_json::Value>, pnpm run codegen, daemon handler, and scheduler input-routing — out of P1 scope. F6 committing state will hit preset.input.* with empty values at runtime until the wire change lands; trace logged with warn! level."
+      }
     ]
   }
 }
