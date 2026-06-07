@@ -35,6 +35,22 @@ pub struct AddScheduleRequest {
     /// Accepts `ISO-8601` datetime in `CLI`; HTTP accepts Unix timestamp string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_at: Option<String>,
+    /// Structured input context for the preset (V1.37 R-V136P1-01).
+    ///
+    /// Carries `novel-project-init` grill-me answers (`work_ref`,
+    /// `total_planned_chapters`, `world_id`, `title`) and other preset-specific
+    /// key-value pairs into `preset.input.*` for scaffold and prompt rendering.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
+    /// Force bypass of preset gate evaluation (V1.37 §7.9).
+    ///
+    /// When `true`, gate evaluation is skipped, an audit row is persisted,
+    /// and the schedule is created normally. Requires `reason` to be set.
+    #[serde(default)]
+    pub force_gates: bool,
+    /// Audit reason for `force_gates` (required when `force_gates` is `true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,11 +206,60 @@ mod tests {
             depends_on: None,
             concurrency: None,
             scheduled_at: None,
+            input: None,
+            force_gates: false,
+            reason: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.creator_id, "c1");
         assert_eq!(back.seed, Some("topic=bees".to_string()));
+        assert!(back.input.is_none());
+        assert!(!back.force_gates);
+    }
+
+    #[test]
+    fn add_schedule_request_with_input() {
+        let input = serde_json::json!({
+            "work_ref": "my-novel",
+            "total_planned_chapters": 12,
+            "title": "The Great Novel"
+        });
+        let req = AddScheduleRequest {
+            creator_id: "c1".to_string(),
+            preset_id: "novel-project-init".to_string(),
+            seed: None,
+            label: None,
+            depends_on: None,
+            concurrency: None,
+            scheduled_at: None,
+            input: Some(input.clone()),
+            force_gates: false,
+            reason: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.input.unwrap()["work_ref"], "my-novel");
+    }
+
+    #[test]
+    fn add_schedule_request_with_force_gates() {
+        let req = AddScheduleRequest {
+            creator_id: "c1".to_string(),
+            preset_id: "novel-writing".to_string(),
+            seed: None,
+            label: None,
+            depends_on: None,
+            concurrency: None,
+            scheduled_at: None,
+            input: None,
+            force_gates: true,
+            reason: Some("testing override".to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: AddScheduleRequest = serde_json::from_str(&json).unwrap();
+        assert!(back.force_gates);
+        assert_eq!(back.reason.unwrap(), "testing override");
     }
 
     #[test]
@@ -207,6 +272,9 @@ mod tests {
             depends_on: None,
             concurrency: None,
             scheduled_at: Some("253402300799".to_string()), // Unix timestamp
+            input: None,
+            force_gates: false,
+            reason: None,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"scheduled_at\":\"253402300799\""));
