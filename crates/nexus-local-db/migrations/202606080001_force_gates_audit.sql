@@ -9,3 +9,7 @@ CREATE TABLE IF NOT EXISTS force_gates_audit (
     reason     TEXT,                   -- NULL only if client omitted reason (should not happen)
     forced_at  TEXT NOT NULL           -- ISO-8601
 );
+
+-- Index for audit lookups by creator, ordered by most recent first.
+CREATE INDEX IF NOT EXISTS force_gates_audit_by_creator_forced_at
+    ON force_gates_audit(creator_id, forced_at DESC);

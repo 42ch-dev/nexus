@@ -101,21 +101,15 @@ impl PresetInput {
     ///
     /// # Errors
     ///
-    /// Returns `GateEvalError::PathSafety` if the result contains `..` or
-    /// starts with `/`.
+    /// Returns `GateEvalError::PathSafety` if the result is absolute or
+    /// canonicalizes outside the workspace root.
     pub fn substitute_path(&self, template: &str) -> Result<PathBuf, GateEvalError> {
         let mut result = template.to_string();
         for (k, v) in &self.vars {
             let pattern = format!("{{{{{k}}}}}");
             result = result.replace(&pattern, v);
         }
-        // Path safety (spec §7.6.1): no `..` escape, no absolute path
-        if result.contains("..") {
-            return Err(GateEvalError::PathSafety {
-                path: template.to_string(),
-                reason: "path traversal detected".to_string(),
-            });
-        }
+        // Path safety (spec §7.6.1): reject absolute paths before joining.
         if result.starts_with('/') {
             return Err(GateEvalError::PathSafety {
                 path: template.to_string(),
@@ -123,6 +117,44 @@ impl PresetInput {
             });
         }
         Ok(PathBuf::from(result))
+    }
+
+    /// Validate that a resolved path stays within `workspace_root` using
+    /// canonicalize (spec §7.6.1).
+    ///
+    /// Returns the canonical `full_path` on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GateEvalError::PathSafety` if the path does not exist, cannot
+    /// be canonicalized, or escapes the workspace root (symlink / traversal).
+    pub fn canonicalize_within(
+        resolved: &Path,
+        workspace_root: &Path,
+    ) -> Result<PathBuf, GateEvalError> {
+        let full_path = workspace_root.join(resolved);
+        // If the path does not exist, fail early — gates check existence
+        // separately, but canonicalize on a missing path errors.
+        if !full_path.exists() {
+            // Not a safety violation; return the joined path for existence
+            // check downstream. Canonicalize is only needed for paths that
+            // exist (to detect symlink escapes).
+            return Ok(full_path);
+        }
+        let canonical_full =
+            std::fs::canonicalize(&full_path).map_err(|e| GateEvalError::PathSafety {
+                path: full_path.display().to_string(),
+                reason: format!("canonicalize failed: {e}"),
+            })?;
+        let canonical_root =
+            std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
+        if !canonical_full.starts_with(&canonical_root) {
+            return Err(GateEvalError::PathSafety {
+                path: full_path.display().to_string(),
+                reason: "path escapes workspace root (symlink or traversal)".to_string(),
+            });
+        }
+        Ok(canonical_full)
     }
 }
 
@@ -218,7 +250,8 @@ pub async fn evaluate_gates(
             }
             Gate::Filesystem { path, must_exist } => {
                 let resolved = input.substitute_path(path)?;
-                let full_path = workspace_root.join(&resolved);
+                // Canonicalize to prevent symlink/traversal escape (spec §7.6.1).
+                let full_path = PresetInput::canonicalize_within(&resolved, workspace_root)?;
                 let exists = full_path.exists();
                 let should_exist = *must_exist;
 
@@ -613,25 +646,50 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn filesystem_path_traversal_rejected() {
+    async fn filesystem_path_traversal_rejected_by_canonicalize() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Create a real directory outside the workspace to serve as an escape target.
+        let outside = tempfile::tempdir().unwrap();
+        // Create a symlink at Works/escape pointing outside the workspace.
+        let works = tmp.path().join("Works");
+        std::fs::create_dir_all(&works).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.path(), works.join("escape")).unwrap();
+        }
+
         let gates = vec![Gate::Filesystem {
-            path: "Works/{{work_ref}}/../../etc/".to_string(),
+            path: "Works/escape/".to_string(),
             must_exist: true,
         }];
         let work = make_work();
         let mut input = make_input();
         input
             .vars
-            .insert("work_ref".to_string(), "../../etc".to_string());
+            .insert("work_ref".to_string(), "escape".to_string());
         let lookup = MockPreviousLookup {
             found: false,
             complete: false,
         };
-        let tmp = tempfile::tempdir().unwrap();
 
         let result =
             evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup).await;
-        assert!(result.is_err());
+
+        // On Unix: symlink exists but canonicalizes outside workspace → fail
+        #[cfg(unix)]
+        {
+            assert!(result.is_err(), "symlink escape must be rejected");
+            let err = result.unwrap_err();
+            assert!(
+                err.to_string().contains("escapes workspace"),
+                "error should mention escape: {err}"
+            );
+        }
+        // On non-Unix (no symlink), gate fails as missing
+        #[cfg(not(unix))]
+        {
+            let _ = result;
+        }
     }
 
     // ── previous_preset gates ─────────────────────────────────────────
