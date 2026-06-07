@@ -34,7 +34,7 @@ struct ScaffoldInput {
     /// Total number of chapters planned.
     total_planned_chapters: i32,
     /// F4 (W-2-qc2): explicit list of `works` columns the user supplied
-    /// in this grill-me session. When `None`, all fields are PATCHed
+    /// in this `grill-me` session. When `None`, all fields are updated
     /// (initial bootstrap). When `Some`, only the listed columns are
     /// updated on re-init — matches spec §5.4.4 "PATCH only updates
     /// fields the user explicitly changed in this grill-me session."
@@ -100,13 +100,13 @@ fn scaffold_handlebars() -> &'static handlebars::Handlebars<'static> {
 /// Returns `CapabilityError::Internal` if the template syntax is invalid
 /// or references an unbound variable. Templates ship with the binary, so
 /// a render failure here is a build-time author error, not a user error.
-fn render_template(
-    template: &str,
-    vars: &[(&str, &str)],
-) -> Result<String, CapabilityError> {
+fn render_template(template: &str, vars: &[(&str, &str)]) -> Result<String, CapabilityError> {
     let mut payload = serde_json::Map::with_capacity(vars.len());
     for (k, v) in vars {
-        payload.insert((*k).to_string(), serde_json::Value::String((*v).to_string()));
+        payload.insert(
+            (*k).to_string(),
+            serde_json::Value::String((*v).to_string()),
+        );
     }
     scaffold_handlebars()
         .render_template(template, &serde_json::Value::Object(payload))
@@ -144,7 +144,7 @@ fn load_template(name: &str) -> Option<String> {
 ///    writer, this TOCTOU window is non-exploitable.
 ///
 /// When we move to multi-user / multi-process (post-V1.5), this capability
-/// must be guarded by a per-Work advisory lock (e.g. SQLite
+/// must be guarded by a per-Work advisory lock (e.g. `SQLite`
 /// `INSERT INTO scaffold_locks` with an idempotency token, or a daemon-level
 /// `Mutex<HashMap<WorkId, Arc<Mutex<()>>>>`). The atomicity work is tracked
 /// alongside R-V133P1-09.
@@ -405,9 +405,12 @@ impl Capability for NovelProjectScaffold {
             // those columns (re-init). When absent, PATCH all (initial
             // bootstrap). The `current_chapter = 0` reset is part of the
             // initial bootstrap shape and is suppressed on partial re-init.
-            let changed: Option<std::collections::HashSet<&str>> = inp.fields_changed.as_ref().map(
-                |v| v.iter().map(String::as_str).collect::<std::collections::HashSet<_>>(),
-            );
+            let changed: Option<std::collections::HashSet<&str>> =
+                inp.fields_changed.as_ref().map(|v| {
+                    v.iter()
+                        .map(String::as_str)
+                        .collect::<std::collections::HashSet<_>>()
+                });
             let want = |field: &str| changed.as_ref().is_none_or(|set| set.contains(field));
 
             let patch = works::WorkPatch {
@@ -561,7 +564,7 @@ struct ScaffoldTransaction {
 }
 
 impl ScaffoldTransaction {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             files_created: Vec::new(),
             dirs_created: Vec::new(),
@@ -571,7 +574,7 @@ impl ScaffoldTransaction {
 
     /// Mark the scaffold as successfully committed; the Drop impl becomes
     /// a no-op. Call only after all DB writes succeed.
-    fn commit(&mut self) {
+    const fn commit(&mut self) {
         self.committed = true;
     }
 }
@@ -651,8 +654,8 @@ mod tests {
     fn render_template_preserves_special_chars_no_html_escape() {
         // F3 (W-1): no_escape mode preserves &, <, > as-is for Markdown.
         let tmpl = "{{body}}";
-        let rendered = render_template(tmpl, &[("body", "A & B < C > D")])
-            .expect("no-escape render");
+        let rendered =
+            render_template(tmpl, &[("body", "A & B < C > D")]).expect("no-escape render");
         assert_eq!(rendered, "A & B < C > D");
     }
 

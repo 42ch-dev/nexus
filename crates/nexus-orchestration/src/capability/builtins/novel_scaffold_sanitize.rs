@@ -104,7 +104,7 @@ fn validate_slug_inner(s: &str, label: &str) -> Result<String, CapabilityError> 
 ///
 /// Returns `CapabilityError::InputInvalid` if the count is out of range.
 pub fn validate_total_chapters(n: i32) -> Result<u32, CapabilityError> {
-    if n < MIN_CHAPTERS || n > MAX_CHAPTERS {
+    if !(MIN_CHAPTERS..=MAX_CHAPTERS).contains(&n) {
         return Err(CapabilityError::InputInvalid(format!(
             "total_planned_chapters must be {MIN_CHAPTERS}..={MAX_CHAPTERS} (got {n})"
         )));

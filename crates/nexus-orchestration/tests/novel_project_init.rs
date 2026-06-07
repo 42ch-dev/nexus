@@ -411,7 +411,10 @@ async fn t7d_bis_unknown_world_id_rejected_without_side_effects() {
         2,
     );
 
-    let err = cap.run(input).await.expect_err("must reject unknown world_id");
+    let err = cap
+        .run(input)
+        .await
+        .expect_err("must reject unknown world_id");
     let msg = format!("{err}");
     assert!(
         msg.contains("world_id") && msg.contains("not found"),
@@ -624,7 +627,10 @@ async fn t7a_bis_rejects_oversize_work_ref() {
     let big = "a".repeat(65);
     let input = scaffold_input("wrk_t7abis", &big, "Bad", None, 1);
     let err = run_invalid_input(input).await.unwrap_err();
-    assert!(err.contains("invalid input"), "C-1: oversize rejected: {err}");
+    assert!(
+        err.contains("invalid input"),
+        "C-1: oversize rejected: {err}"
+    );
 }
 
 #[tokio::test]
@@ -733,7 +739,6 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
     );
 }
 
-
 // ---------------------------------------------------------------------------
 // T7g: F2 — scaffold is atomic; mid-flight failure rolls back FS state
 // ---------------------------------------------------------------------------
@@ -750,13 +755,7 @@ async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    let input = scaffold_input(
-        "wrk_no_such_row",
-        "atomic-test",
-        "Atomic Test",
-        None,
-        2,
-    );
+    let input = scaffold_input("wrk_no_such_row", "atomic-test", "Atomic Test", None, 2);
 
     let err = cap
         .run(input)
