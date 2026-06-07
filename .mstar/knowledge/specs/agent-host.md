@@ -32,7 +32,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 ```text
 OSS CLI (cli-spec)
   └─ nexus-daemon-runtime
-       ├─ /v1/local/agent-host/*  (Local API — normative surface TBD in knowledge SSOT)
+       ├─ /v1/local/agent-host/*  (Local API — normative surface per [daemon-runtime.md §2 layered surface](./daemon-runtime.md))
        └─ Arc<dyn HostFacade>
             └─ nexus-agent-host
                  ├─ core: sessions, operations, lifecycle
