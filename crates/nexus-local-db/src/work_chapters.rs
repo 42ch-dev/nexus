@@ -86,6 +86,49 @@ pub async fn seed_chapters(
     Ok(())
 }
 
+/// Seed chapter rows inside an existing transaction (V1.37 R-V136P1-02).
+///
+/// Same logic as [`seed_chapters`] but uses a caller-provided transaction
+/// so the seed can be atomic with a subsequent `patch_work_tx` call.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any insert fails. The caller decides whether
+/// to commit or roll back the transaction.
+pub async fn seed_chapters_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    work_id: &str,
+    work_ref: &str,
+    total_chapters: i32,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    for ch in 1..=total_chapters {
+        let ch_nn = format!("ch{ch:02}");
+        let outline_path = format!("Works/{work_ref}/Outlines/chapters/{ch_nn}-outline.md");
+        let slug = ch_nn.clone();
+        let body_path = format!("Works/{work_ref}/Stories/{ch_nn}-{slug}.md");
+
+        // SAFETY: INSERT OR IGNORE against work_chapters — runtime query
+        // (same rationale as seed_chapters).
+        sqlx::query(
+            "INSERT OR IGNORE INTO work_chapters
+             (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
+              status, outline_path, body_path, created_at, updated_at)
+             VALUES (?, ?, NULL, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+        )
+        .bind(work_id)
+        .bind(ch)
+        .bind(&slug)
+        .bind(&outline_path)
+        .bind(&body_path)
+        .bind(now)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 /// List all chapter rows for a Work, ordered by chapter number.
 ///
 /// # Errors

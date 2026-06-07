@@ -10,6 +10,7 @@
 //!
 //! See `.mstar/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
+pub mod force_gates_audit;
 pub mod identity;
 pub mod kb_extract_job;
 pub mod kb_store;
@@ -107,6 +108,11 @@ pub use work_chapters::{
     count_chapters, get_chapter, insert_chapter, is_work_completed, reconcile_from_filesystem,
     seed_chapters, update_paths, update_status, InsertChapterParams, ReconcileReport,
     WorkChapterRecord,
+};
+
+// Re-export force_gates_audit types
+pub use force_gates_audit::{
+    insert_force_gates_audit, list_force_gates_audit, ForceGatesAuditParams, ForceGatesAuditRow,
 };
 
 /// Runtime role for database initialization

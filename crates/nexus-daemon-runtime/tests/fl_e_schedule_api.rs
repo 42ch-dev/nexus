@@ -20,13 +20,16 @@ use nexus_daemon_runtime::api::auth_middleware::{AuthMode, DaemonApiConfig};
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
+use nexus_local_db::list_force_gates_audit;
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 struct TestCtx {
     _tmp: TestTempRoot,
     server: TestServer,
+    db_path: PathBuf,
 }
 
 async fn test_ctx() -> TestCtx {
@@ -48,7 +51,11 @@ async fn test_ctx() -> TestCtx {
     };
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
-    TestCtx { _tmp: tmp, server }
+    TestCtx {
+        _tmp: tmp,
+        server,
+        db_path,
+    }
 }
 
 // ── Test 1: Schedule creation with correct AddScheduleRequest DTO ────────────
@@ -73,6 +80,9 @@ async fn schedule_create_with_correct_dto_shape() {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
 
     let resp = ctx
@@ -136,6 +146,9 @@ async fn schedule_create_seeds_core_context_from_preset_input() {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
 
     let resp = ctx
@@ -180,6 +193,9 @@ async fn schedule_list_isolation_by_creator() {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
     let req_b = AddScheduleRequest {
         creator_id: "ctr_beta".to_string(),
@@ -189,6 +205,9 @@ async fn schedule_list_isolation_by_creator() {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
 
     let resp_a = ctx
@@ -237,6 +256,9 @@ async fn schedule_create_without_seed_no_core_context() {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
 
     let resp = ctx
@@ -286,6 +308,9 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
     let resp_empty = ctx
         .server
@@ -303,6 +328,9 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         depends_on: None,
         concurrency: None,
         scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
     let resp_real = ctx
         .server
@@ -328,4 +356,89 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     let all_body: Value = all_resp.json();
     let all_schedules = all_body["schedules"].as_array().unwrap();
     assert_eq!(all_schedules.len(), 2, "Both schedules exist in total");
+}
+
+// ── Test 6: Force-gates audit row is written and queryable (V1.37 T5/T6) ──
+
+#[tokio::test]
+async fn force_gates_writes_audit_row() {
+    let ctx = test_ctx().await;
+
+    // Create a schedule with force_gates=true and a reason
+    let req = AddScheduleRequest {
+        creator_id: "ctr_audit".to_string(),
+        preset_id: "novel-writing".to_string(),
+        seed: Some("test force gates audit".to_string()),
+        label: Some("force-gates audit test".to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(json!({
+            "work_id": "wrk_audit_test",
+            "work_ref": "audit-novel"
+        })),
+        force_gates: true,
+        reason: Some("testing emergency override".to_string()),
+    };
+
+    let resp = ctx
+        .server
+        .post("/v1/local/orchestration/schedules")
+        .json(&req)
+        .await;
+    resp.assert_status(StatusCode::CREATED);
+
+    let body: Value = resp.json();
+    assert!(
+        body.get("schedule_id").is_some(),
+        "Schedule should be created: {body}"
+    );
+
+    // Query the audit table directly via a separate pool to the same DB
+    let audit_pool =
+        sqlx::SqlitePool::connect(&format!("sqlite:{}?mode=rw", ctx.db_path.display()))
+            .await
+            .unwrap();
+
+    let rows = list_force_gates_audit(&audit_pool, "ctr_audit")
+        .await
+        .unwrap();
+
+    assert_eq!(rows.len(), 1, "Should find exactly one audit row");
+    let row = &rows[0];
+    assert_eq!(row.preset_id, "novel-writing");
+    assert_eq!(row.work_id, "wrk_audit_test");
+    assert!(row.forced);
+    assert_eq!(
+        row.reason.as_deref(),
+        Some("testing emergency override"),
+        "Reason must match the provided text"
+    );
+}
+
+// ── Test 7: Force-gates without reason is rejected ──────────────────────────
+
+#[tokio::test]
+async fn force_gates_without_reason_is_rejected() {
+    let ctx = test_ctx().await;
+
+    let req = AddScheduleRequest {
+        creator_id: "ctr_noreason".to_string(),
+        preset_id: "novel-writing".to_string(),
+        seed: None,
+        label: None,
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: None,
+        force_gates: true,
+        reason: Some(String::new()), // empty reason
+    };
+
+    let resp = ctx
+        .server
+        .post("/v1/local/orchestration/schedules")
+        .json(&req)
+        .await;
+    resp.assert_status(StatusCode::BAD_REQUEST);
 }

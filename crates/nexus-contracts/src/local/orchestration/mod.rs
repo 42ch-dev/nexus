@@ -7,6 +7,7 @@
 
 pub mod http;
 pub mod preset;
+pub mod preset_gate;
 
 use serde::{Deserialize, Serialize};
 

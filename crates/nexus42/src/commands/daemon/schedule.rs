@@ -320,6 +320,9 @@ async fn add_schedule(
         depends_on: after.map(|id| vec![id]),
         concurrency,
         scheduled_at: scheduled_at_ts,
+        input: None,
+        force_gates: false,
+        reason: None,
     };
 
     let resp: AddScheduleResponse = client.post(SCHEDULE_BASE, &body).await?;
