@@ -32,3 +32,4 @@ Paths in archived plan JSON / metadata may still point here for historical refer
 | [outbox-schema.md](outbox-schema.md) | `v1-tech-debt-cleanup` (Batch C / SYNC-R10) | Sync outbox schema + migration guidance. | Archived — historical reference |
 | [regression-gate.md](regression-gate.md) | `2026-04-14-v1.2-regression-suite` | V1.2 M3 regression-gate definition. | Archived — historical reference |
 | [program-overview-legacy.md](program-overview-legacy.md) | V1.1 | Long-form V1.1 overview. | Archived — superseded by [v1.1-overview-v2](../../iterations/v1.1-overview-v2.md) |
+| [fl-d-conditional-routing-exploration-v1.35-prepare.md](fl-d-conditional-routing-exploration-v1.35-prepare.md) | V1.35 Prepare | FL-D exploration note from knowledge root. | Archived — superseded by [preset-conditional-routing.md](../../knowledge/specs/preset-conditional-routing.md) |

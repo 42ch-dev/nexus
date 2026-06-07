@@ -3,6 +3,7 @@
 | Attribute | Value |
 | --- | --- |
 | **Status** | Active — normative V1.26 design for local reference registry + body storage |
+| **Document class** | Master |
 | **Scope** | User-scoped reference registration metadata in SQLite; canonical reference body text on disk under `~/.nexus42` |
 | **Related** | [v1.26 delivery compass §2](../../iterations/v1.26-local-persistence-delivery-compass-v1.md#2-reference-storage-layout-normative-draft), [local-db-schema.md](local-db-schema.md), [entity-scope-model.md](entity-scope-model.md) |
 

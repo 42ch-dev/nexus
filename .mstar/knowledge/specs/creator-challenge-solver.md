@@ -1,7 +1,8 @@
 # Creator Challenge Solver（CLI 侧 — 冻结）
 
-**状态**: Frozen  
-**创建**: 2026-04-23  
+**Status**: Frozen (normative for shipped CLI registration path)  
+**Document class**: Master  
+**Created**: 2026-04-23  
 **平台侧对照**: nexus-platform `v1-spec/platform/creator-agent-registration-v1.md` §3–§4  
 **实现仓库**: `nexus`（CLI），**非** `nexus-platform`  
 **CLI Spec**: [`cli-spec.md`](./cli-spec.md) §6.2B  

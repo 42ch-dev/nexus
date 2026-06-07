@@ -272,10 +272,10 @@ pub struct JudgeRuleOutput {
 }
 
 // ---------------------------------------------------------------------------
-// FL-E stages (V1.34 creator-workflow-fl-e §3.1)
+// FL-E stages (V1.34 creator-workflow §3.1)
 // ---------------------------------------------------------------------------
 
-/// Ordered FL-E stages — single source of truth (V1.34 creator-workflow-fl-e §3.1).
+/// Ordered FL-E stages — single source of truth (V1.34 creator-workflow §3.1).
 ///
 /// All crates that need the canonical stage list or stage-to-index mapping
 /// must `use` this constant and the associated functions rather than

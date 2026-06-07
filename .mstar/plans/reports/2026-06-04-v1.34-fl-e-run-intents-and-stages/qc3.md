@@ -36,7 +36,7 @@ generated_at: "2026-06-05"
 
 **Source**: `crates/nexus42/src/commands/creator/run.rs` (T2 commit), `crates/nexus-local-db/src/works.rs` (T1 commit)
 
-**Issue**: The plan's primary spec (creator-workflow-fl-e §2) defines invariant #4: "At most one active FL-E stage schedule per Work." After reviewing all 3 commits, there is **no implementation** of this invariant anywhere in the codebase:
+**Issue**: The plan's primary spec (creator-workflow §2) defines invariant #4: "At most one active FL-E stage schedule per Work." After reviewing all 3 commits, there is **no implementation** of this invariant anywhere in the codebase:
 
 - No database constraint or unique index on `(work_id, stage_status='active')`
 - No transaction-level check in `update_work_stage()` or `patch_work()` that prevents setting `stage_status='active'` when another schedule for the same work is already active

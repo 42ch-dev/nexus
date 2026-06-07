@@ -43,9 +43,9 @@ pub struct WorkRecord {
     pub created_at: String,
     /// Last update timestamp (ISO 8601).
     pub updated_at: String,
-    /// Current FL-E stage (V1.34 creator-workflow-fl-e §3.1).
+    /// Current FL-E stage (V1.34 creator-workflow §3.1).
     pub current_stage: String,
-    /// Current stage status (V1.34 creator-workflow-fl-e §3.2).
+    /// Current stage status (V1.34 creator-workflow §3.2).
     pub stage_status: String,
 }
 

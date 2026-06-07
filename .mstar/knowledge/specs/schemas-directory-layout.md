@@ -5,6 +5,7 @@
 | Attribute | Value |
 | --- | --- |
 | **Status** | Active — normative layout for JSON Schema wire tree |
+| **Document class** | Master |
 | **Scope** | Folder names, product-line mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
 | **Boundary rule** | [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) — what may appear under `schemas/` at all |
 | **Crate alignment** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) — `nexus-contracts` generated vs `src/local/` |

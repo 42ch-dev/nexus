@@ -1,6 +1,7 @@
 # Creator Schedule and Core Context — Specification
 
-**Status**: Active — authoritative design input for V1.4 WS7 (formerly B-track, now folded into V1.4 per 2026-04-17 user direction).
+**Status**: Shipped (V1.4 WS7 → V1.34 agent-host + schedule wiring). The schedule/core_context primitives landed across V1.4–V1.34; the canonical SSOT for ongoing schedule work is now [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md) cross-referenced from `orchestration-engine.md`. Future scope (e.g. multi-Schedule priority / preemption) tracked in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
+**Document class**: Master  
 **Author**: @project-manager (2026-04-17 prep-phase spec); to be co-signed by @architect before WS7 implement.
 **Scope**: Multi-Schedule lifecycle per creator + the immutable versioned `core_context` that stabilises preset execution across edits.
 **Wave-0 design inputs consumed**:

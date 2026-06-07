@@ -1,5 +1,8 @@
 # Nexus Local Runtime Boundary
 
+**Status**: Normative  
+**Document class**: Master  
+
 ## 0. Document position
 
 This document defines boundaries between:

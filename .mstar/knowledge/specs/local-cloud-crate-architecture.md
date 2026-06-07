@@ -5,6 +5,7 @@
 | Attribute | Value |
 | --- | --- |
 | **Status** | Active — long-term normative SSOT, reconciled with the V1.23 entity scope model |
+| **Document class** | Master |
 | **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Local API *classes* allowed/forbidden |
 | **Scope model SSOT** | [entity-scope-model.md](./entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
 | **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests → [v1.21-local-platform-isolation-delivery-compass-v1.md](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |

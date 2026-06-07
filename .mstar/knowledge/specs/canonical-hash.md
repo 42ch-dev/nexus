@@ -1,5 +1,9 @@
 # Delta bundle `canonical_hash` (OSS companion)
 
+**Status**: Normative (OSS implementation notes)  
+**Document class**: Companion  
+**Platform authority**: nexus-platform `v1-spec/adr/adr-006-bundle-canonical-hash.md`
+
 Implementation notes for this repository. Normative definition: nexus-platform `v1-spec/adr/adr-006-bundle-canonical-hash.md`.
 
 ## Bundle content digest

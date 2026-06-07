@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.35 Active (TBD)** · Latest shipped: **V1.34** · Latest active compass: TBD · FL-E **Shipped in V1.34** · Platform **paused** · Open FL-D deferrals: **DF-29, DF-31, conditional routing (DF-56)** · V1.34 deferred: **DF-46, 47, 48, 49, 50, 52, 53, 55, 56** (DF-51, 54 closed in V1.34) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 39)
+**Quick status**: **V1.36 Active** · Latest shipped: **V1.35** · Latest active compass: TBD · FL-E **Shipped in V1.34** · Platform **paused** · V1.35 focus: **CLI IA + critical residual convergence + DF-47 carry-forward + DF-53 partial shipment** → Done · V1.36 focus: **DF-47 production caller + remaining V1.33/V1.30/V1.31 backlog** · Open FL-D deferrals: **DF-29, DF-31, DF-56** (exploration: [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md)) · Tech debt SSOT: [`status.json`](../status.json) (`total_open`: 28, `critical`: 0)
 
 **Status**: Active  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-05 (V1.34 Shipped; FL-E closed; DF-51/54 removed; DF-47 still OPEN — production caller wiring)
+**Last updated**: 2026-06-07 (V1.35 Shipped; 6 critical residuals closed; DF-47/DF-53 still OPEN — DF-47 → V1.36 P0)
 
 ---
 
@@ -54,7 +54,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | ID | Product line | Suggested target | Notes |
 |----|--------------|------------------|-------|
 | FL-D | **Preset orchestration** (Agentic Design Patterns) | Post-V1.34 | V1.31–32 shipped capabilities + quality gate; **still open**: DF-29, DF-31, **conditional routing** (DF-56; OUT of V1.34) |
-| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | **V1.34** | **Shipped in V1.34** — [creator-workflow-fl-e.md](specs/creator-workflow-fl-e.md) (Status: Shipped V1.34) + compass [v1.34](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md). FL-E closed in V1.34 with 5 plan P0–P5; minimal preset chain (research → produce → review → persist) + Work `stage`/`stage_status` + linear gates + active schedule uniqueness (P1) + preset chain wiring (P2). `--auto-chain` default still DF-53. |
+| FL-E | **Generic creator workflow** (intake → research → draft → review → persist) | **V1.34** | **Shipped in V1.34** — [creator-workflow.md](specs/creator-workflow.md) (Status: Shipped V1.34) + compass [v1.34](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md). FL-E closed in V1.34 with 5 plan P0–P5; minimal preset chain (research → produce → review → persist) + Work `stage`/`stage_status` + linear gates + active schedule uniqueness (P1) + preset chain wiring (P2). `--auto-chain` default still DF-53. |
 
 ### 3.3 Open features (deferred from compass "Out" or audit)
 
@@ -71,16 +71,16 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
-| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.34+ | M | V1.34 | P4 shipped adapter; **production caller wiring OPEN** (deferred to P5/future). Remove when wired end-to-end. |
+| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.36 P0** | M | V1.34→V1.35→V1.36 | V1.34 P4 shipped adapter (`HostToolExecutor::execute` + `dispatch_from_worker`); V1.35 P0 closed deferred carry-forward: **production caller wiring OPEN** — requires IPC-layer changes across 3+ crates (non-surgical for V1.35 P0); V1.36 P0 target |
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
-| DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 P0** (commits a044f94 + 71c10cc on `feature/v1.34-residual-convergence`). Schema now declares `prompt_file` + `vars` with `anyOf`. |
+| DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 residual-convergence** (commits a044f94 + 71c10cc). Schema now declares `prompt_file` + `vars` with `anyOf`. Closure recorded in [`.mstar/archived/residuals/v1.32-post-qc-tech-debt.json`](../archived/residuals/v1.32-post-qc-tech-debt.json) (R-P2-01). |
 | DF-52 | Top-level `nexus42 preset` command group | V1.33 | Any future | S | V1.33 | Use `creator run` + `system preset`. |
-| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | Post-V1.34 | S | V1.34 | V1.34 uses explicit `creator run stage advance`. |
+| DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | V1.36+ (partial shipped V1.35 P4) | S | V1.34→V1.35 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce); clap opt-out syntax `--chain-novel-writing=false` works. Full multi-stage auto-chain remains a V1.36+ exploration; DF-53 stays open until full chain landed |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
-| DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34; see FL-D. |
+| DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing.md](specs/preset-conditional-routing.md). |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -107,19 +107,18 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-05**; `tech_debt_summary.updated_at` **2026-06-05**). Do **not** mirror full rows here — JSON wins on conflict. Total open: **40**.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-07**; `tech_debt_summary.updated_at` **2026-06-07**). Do **not** mirror full rows here — JSON wins on conflict. Total open: **28** (0 critical, 0 high, 8 medium, 15 low, 5 nit).
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.30 post-QC | 11 | `v1.30-post-qc-tech-debt` |
-| V1.31 post-QC | 8 | `v1.31-post-qc-tech-debt` (incl. ~~SEC-V131-01~~ → **closed V1.32** via P3) |
-| V1.33 work model (P1) | 3 | `2026-06-04-v1.33-work-model-and-creator-run` |
-| V1.33 llm_judge (P3) | 4 | `2026-06-04-v1.33-llm-judge-runtime-fix` |
-| V1.33 memory review (P4) | 7 | `2026-06-04-v1.33-memory-review-closed-loop` |
-| V1.34 FL-E stages (P1) | 5 | `2026-06-04-v1.34-fl-e-run-intents-and-stages` (R-FL-E-DDL/DEAD/LIST/FNAME/ENDP) |
-| V1.34 agent tool (P4) | 1 | `2026-06-04-v1.34-agent-tool-implementation` (DF-47 production caller wiring) |
-| V1.34 PR #42 cursor (R-CURSOR-PR42-03) | 1 | `2026-06-04-v1.34-cursor-pr42-stage-status` (FL-E `stage_status` gate bypass via status-only PATCH) |
-| **Total** | **40** | See `metadata.tech_debt_summary.total_open` |
+| V1.30 post-QC | 9 | `v1.30-post-qc-tech-debt` (V1.35 P0 closed 2: TD-V130-02, TD-V130-06) |
+| V1.31 post-QC | 5 | `v1.31-post-qc-tech-debt` (V1.35 P0 closed 3: TD-V131-01, TD-V131-03, TD-V131-04) |
+| V1.33 work model (P1) | 3 | `2026-06-04-v1.33-work-model-and-creator-run` (R-V133P1-03/08/09; partial / defer; not P0) |
+| V1.33 llm_judge (P3) | 2 | `2026-06-04-v1.33-llm-judge-runtime-fix` (V1.35 P0 closed 2 critical: R-V133P3-01, R-V133P3-02; remaining 2 medium: R-V133P3-03/04) |
+| V1.33 memory review (P4) | 3 | `2026-06-04-v1.33-memory-review-closed-loop` (V1.35 P0 closed 4 critical: R-V133P4-01, R-V133P4-02, R-V133P4-03, R-V133P4-07; remaining 3 medium: R-V133P4-04, R-V133P4-05, R-V133P4-06) |
+| V1.34 FL-E stages (P1) | 5 | `2026-06-04-v1.34-fl-e-run-intents-and-stages` (R-FL-E-DDL/DEAD/LIST/FNAME/ENDP, all low; not P0) |
+| V1.34 agent tool (P4) | 1 | `2026-06-04-v1.34-agent-tool-implementation` (DF-47 production caller wiring → V1.36 P0) |
+| **Total** | **28** | See `metadata.tech_debt_summary.total_open` (after V1.35 P0) |
 
 **Closed / historical residuals**
 
@@ -128,6 +127,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 - V1.33 P1 (4 closed via fix waves): [`archived/residuals/2026-06-04-v1.33-work-model-and-creator-run.json`](../archived/residuals/2026-06-04-v1.33-work-model-and-creator-run.json)
 - V1.32 (R-P2-01/02 closed via V1.34 P0): [`archived/residuals/v1.32-post-qc-tech-debt.json`](../archived/residuals/v1.32-post-qc-tech-debt.json)
 - **V1.34 PR #42 cursor automation** (2 medium resolved in 3b24aaf: R-CURSOR-PR42-01 permission policy bypass; R-CURSOR-PR42-02 FL-E force default): [`archived/residuals/2026-06-04-v1.34-pr-42-cursor-automation.json`](../archived/residuals/2026-06-04-v1.34-pr-42-cursor-automation.json)
+- **V1.35 P0** (11 closed: 6 V1.33 criticals + 1 V1.34 medium R-CURSOR-PR42-03 + 4 V1.30/31 backlog — see [`.mstar/archived/residuals/2026-06-04-v1.33-llm-judge-runtime-fix.json`](../archived/residuals/2026-06-04-v1.33-llm-judge-runtime-fix.json), [`.mstar/archived/residuals/2026-06-04-v1.33-memory-review-closed-loop.json`](../archived/residuals/2026-06-04-v1.33-memory-review-closed-loop.json), [`.mstar/archived/residuals/2026-06-04-v1.34-cursor-pr42-stage-status.json`](../archived/residuals/2026-06-04-v1.34-cursor-pr42-stage-status.json), [`.mstar/archived/residuals/v1.30-post-qc-tech-debt.json`](../archived/residuals/v1.30-post-qc-tech-debt.json), [`.mstar/archived/residuals/v1.31-post-qc-tech-debt.json`](../archived/residuals/v1.31-post-qc-tech-debt.json))
 - Cross-cutting accept items (e.g. DEBT-RAND-073): `status.json` → `metadata.tech_debt_summary.cross_cutting`
 
 ---
@@ -145,14 +145,17 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 **Latest shipped iteration**
 
-- V1.32 delivery compass: [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md)
+- V1.35 delivery compass: [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) (Shipped 2026-06-07; PR [#43](https://github.com/42ch-dev/nexus/pull/43) awaiting merge to main)
 
 **Latest active iteration**
 
-- **V1.34** (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E stage workflow + Agent `nexus.*` tool bridge (8 tools in registry) + 5 plans P0–P5 Done. Closed: DF-51 (P0), DF-54 (P1). FL-E shipped. DF-47 (production caller wiring) remains OPEN. DF-46/48/49/50/52/53/55/56 carry-forward.
+- **V1.36** (Active 2026-06-07): focus TBD — DF-47 production caller wiring carry-forward; remaining V1.30/V1.31 backlog (TD-V130-04/07/08/09/10/11, TD-V131-02/05/06/07/08); V1.33 P1/P3/P4 medium residuals; V1.34 R-FL-E-* cleanup; cli-spec.md §6.0B merge follow-up
+- **V1.35** (Shipped 2026-06-07): [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) — CLI IA (5 groups; sync→platform), creator hub polish, critical residual P0 (6 criticals + R-CURSOR-PR42-03 + 5 backlog), FL-E UX polish (chain default true); 5 implement plans P0/P2/P3/P4/P5 + prepare P-1 + P1 docs all Done; DF-47 → V1.36 P0
+- **V1.34** (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E + Agent tools; DF-47 carried forward to V1.35 P0 (now V1.36 P0)
 
 **Recent shipped compasses** (detail in archive §2)
 
+- V1.34: [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E + Agent tools (8 `nexus.*` tool bridge); **Shipped 2026-06-05** (5 plans P0–P5 all Done); DF-47 → V1.35 P0 → V1.36 P0
 - V1.33: [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) — narrative Work loop, Creative Brief Intake, `creator run`, `llm_judge` fix, memory review closed loop; **Shipped 2026-06-04** (5 plans P1–P5 all Done)
 - V1.32: [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md)
 - V1.31: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
@@ -162,6 +165,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 - Shipped history archive: [shipped-features-tracker.md](../archived/shipped-features-tracker.md)
 - Done plans index: [archived/plans-done.json](../archived/plans-done.json)
+- CLI IA (V1.35): [specs/cli-command-ia.md](specs/cli-command-ia.md), [specs/creator-centric-entry-model.md](specs/creator-centric-entry-model.md), [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md); audit evidence in [v1.35 compass Appendix A](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-a-cli-usability-audit-v135)
 - Orchestration engine: [specs/orchestration-engine.md](specs/orchestration-engine.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
 - Iteration index: [iterations/README.md](../iterations/README.md)
@@ -171,4 +175,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-05. Status: V1.34 Shipped (2026-06-05); V1.35 Active (TBD); 40 open residuals including 1 new from Cursor PR #42 revalidation (R-CURSOR-PR42-03).*
+*Last updated: 2026-06-07. Status: V1.36 Active; V1.35 Shipped 2026-06-07; 28 open residuals (0 critical); tracker quick status aligned to status.json.*

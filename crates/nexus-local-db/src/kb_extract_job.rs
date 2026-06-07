@@ -248,6 +248,11 @@ pub async fn next_queued(
 
 /// Mark a job as running. Sets `started_at` to now.
 ///
+/// TD-V130-06: Only transitions from `queued` status. If the job is not in
+/// `queued` status (e.g. already `running`, `done`, or `failed`), this is a
+/// no-op. This prevents a race where a completed/done job gets marked running
+/// by a stale `mark_running` call.
+///
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
@@ -255,7 +260,7 @@ pub async fn mark_running(pool: &SqlitePool, job_id: &str) -> Result<(), sqlx::E
     sqlx::query!(
         r#"UPDATE kb_extract_jobs
            SET status = 'running', started_at = datetime('now')
-           WHERE job_id = ?"#,
+           WHERE job_id = ? AND status = 'queued'"#,
         job_id,
     )
     .execute(pool)

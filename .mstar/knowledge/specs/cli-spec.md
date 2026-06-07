@@ -1,5 +1,9 @@
 # Nexus CLI Spec
 
+**Status**: Normative  
+**Document class**: Master  
+**V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
+
 ## 0. 文档定位
 
 本稿是 nexus-platform `v1-spec/architecture.md` 的下钻文档，聚焦 Nexus 本地 CLI / runtime 的产品行为、运行模型与集成边界。
@@ -172,7 +176,9 @@ CLI 不默认同步：
 - 顶层命令尽量面向用户意图，而不是内部模块
 - 关键命令必须稳定、可脚本化
 
-**Big-bang command-surface lock**：顶层 CLI 一次性收敛为六组：`daemon` / `acp` / `creator` / `sync` / `platform` / `system`。除这六组外，不再新增平行顶层命令面。
+**Command-surface lock (V1.35)**：顶层 CLI 收敛为五组：`creator` / `daemon` / `acp` / `platform` / `system`。`sync` 迁入 **`platform sync`**；顶层 `nexus42 sync` 仅作 deprecated 兼容 alias（≥1 迭代，V1.35 不硬删）。权威 IA：[cli-command-ia.md](cli-command-ia.md)。除这五组外，不再新增平行顶层命令面。
+
+> **Legacy (V1.16–V1.34)**：六组含独立 `sync` — superseded by cli-command-ia.md when V1.35 P2 ships.
 
 ### 6.0A 与 Platform Creator 三层标识兼容约束（V2 权威约束）
 
@@ -184,16 +190,20 @@ CLI 不默认同步：
 4. 任何 `creator soul|memory|kb` 子命令，均绑定当前活跃 `creator_id`，不得以 `display_name` 隐式路由。
 5. `sync` / `context` / `publish` 等 Creator-context 请求，仍遵守 nexus-platform `v1-spec/platform/auth-session-model-v1.md` §4 的身份头约束（Creator API key 路径 vs User+`X-Creator-Id` 路径）。
 
-### 6.0B V2 Big-bang 命令信息架构（权威）
+### 6.0B V2 命令信息架构（权威）
 
-V2 命令面按以下顶层执行（pre-release 允许破坏性调整）：
+V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.35 SSOT**：[cli-command-ia.md](cli-command-ia.md)。
 
-- `nexus42 daemon`：daemon runtime 生命周期与编排运行控制（`schedule` 为已发货控制面；`orchestrate` 子命令仍为 Deferred/stubbed 兼容入口）
+- `nexus42 creator`：**Creator 身份 hub** — Work（`creator run`）、workspace、SOUL、memory、kb/knowledge、world（默认用户创意入口）
+- `nexus42 daemon`：daemon runtime 生命周期与编排运行控制（`schedule` 为 power-user 控制面）
 - `nexus42 acp`：独立 ACP 能力面（探测、协商、调用、诊断）
-- `nexus42 creator`：身份 + 本地知识资产（含 `profile|workspace|soul|memory|kb`）
-- `nexus42 sync`：本地与平台的数据同步与冲突处理
-- `nexus42 platform`：平台增值能力入口（跨 scope 检索/增强能力）
-- `nexus42 system`：本机配置与诊断
+- `nexus42 platform`：User 会话 — auth、**sync**、explore、context、publish（cloud 边界；local-only 时可跳过）
+- `nexus42 system`：本机配置、诊断、`preset list|validate`
+
+**Sync 迁移（V1.35 target）**：
+
+- **Canonical**：`nexus42 platform sync pull|push|status`
+- **Deprecated alias**：`nexus42 sync ...` → 转发至 `platform sync`，stderr 警告
 
 设计约束：
 
@@ -354,7 +364,7 @@ Rules:
 
 ### 6.2E `nexus42 creator run stage` (FL-E — V1.34 target)
 
-Normative stage model: [creator-workflow-fl-e.md](./creator-workflow-fl-e.md).
+Normative stage model: [creator-workflow.md](./creator-workflow.md).
 
 | Command | Purpose |
 | --- | --- |
@@ -436,7 +446,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 
 | User intent | CLI group | ACP / preset contract |
 | --- | --- | --- |
-| Structured state sync | `nexus42 sync ...` | `sync.*` + bundle/delta contracts |
+| Structured state sync | `nexus42 platform sync ...`（**V1.35**；legacy `nexus42 sync` deprecated alias） | `sync.*` + bundle/delta contracts |
 | Runtime orchestration control | `nexus42 daemon schedule ...` (**Shipped**) | schedule commands call daemon orchestration schedules Local API and own session control via `current_session_id` + supervisor signal cascade |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
 | Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-moment` (**Shipped local four-domain Moment — single SSOT**) | shipped path is CLI in-process; `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores and SQLite User knowledge. Frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`. Daemon context-assemble Local API is **Retired** (KCA-002 B2). `assemble-local` is **removed** in pre-release. |
@@ -448,21 +458,29 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 
 ## 7. 首次使用路径
 
-推荐的首次使用流程（**User-first**，与 nexus-platform `v1-spec/architecture.md` §10.3 路径 A 一致）：
+V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = paused` 时）与 **挂载 Platform** 两条路径。Creator 中心化规则见 [creator-centric-entry-model.md](creator-centric-entry-model.md)。
+
+### 7.1 纯本地路径（Local-first，≤7 步到 `creator run start`）
 
 1. 安装 `nexus42`
-2. 执行 `nexus42 system doctor`
-3. 执行 `nexus42 platform auth login`（若走 User-first）
-4. 准备 **Creator** 凭证：由 Web 创建后 **`nexus42 creator list`**，或 **`nexus42 creator register`**（可选先 `acp probe`）
-5. 执行 **`nexus42 creator use <creator_id_or_handle>`**，将 CLI 设为该 Creator（本地自动确保 **`default`** workspace 存在，见 §6.2C）
-6. （可选）执行 **`nexus42 creator workspace create <workspace_slug>`** 增加第二套创作根；否则继续使用 **`default`**
-7. （若有多 slug）执行 **`nexus42 creator workspace use <workspace_slug>`** 选择活跃 workspace
-8. 执行 **`nexus42 creator workspace init`**（在默认或当前目录登记创作根与 operational 树；**不**默认创建 `Stories/` / `References/`；按需由 preset 创建技能根或 `.nexus42/references/` 等，见 §6.2C、§13）
-9. 执行 `nexus42 daemon start`
-10. 让 Nexus runtime 发现并连接你选定的本地 ACP agent
-11. 执行 `nexus42 sync pull` 获取结构化世界基线
+2. `nexus42 system doctor`
+3. `nexus42 creator register --name "..."`（或复用已有 Creator）
+4. `nexus42 creator use <creator_id_or_handle>`
+5. `nexus42 creator workspace init`
+6. `nexus42 daemon start` + `nexus42 acp agent use <agent>`
+7. `nexus42 creator run start --idea "..."`
 
-**Creator-first**：可先 **`nexus42 creator register`**（可选先 `nexus42 acp probe`），再 **`nexus42 creator use`**（落到 **`default`** workspace），再 **`nexus42 creator workspace init`**；需要私有世界或完整持久化时再 **`nexus42 platform auth login`** + **`nexus42 creator pair`**（路径 B，见架构 §10.3）。
+**不需要** `platform auth login` 或 sync。`daemon schedule` 不是首次使用入口。
+
+### 7.2 Platform 挂载路径（User-first / cloud sync）
+
+在 §7.1 之前或之后增加 Platform 步骤（与 nexus-platform `v1-spec/architecture.md` §10.3 路径 A 对齐）：
+
+1. `nexus42 platform auth login`
+2. `nexus42 creator list` 或 `creator register` + `creator pair`（按需）
+3. **`nexus42 platform sync pull`** 获取结构化世界基线（**V1.35**；legacy `nexus42 sync pull` 为 deprecated alias）
+
+**Creator-first 变体**：先完成 §7.1 步骤 3–5，再在需要 cloud 世界时执行 `platform auth login` + `creator pair` + `platform sync pull`（路径 B，见架构 §10.3）。
 
 ### 7.1 UX 原则
 

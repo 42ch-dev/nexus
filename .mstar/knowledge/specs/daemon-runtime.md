@@ -4,6 +4,8 @@
 
 | Attribute | Value |
 | --- | --- |
+| **Status** | Normative |
+| **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
 

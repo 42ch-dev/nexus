@@ -1,5 +1,8 @@
 # Nexus ACP Registry Integration
 
+**Status**: Normative  
+**Document class**: Master  
+
 ## 0. Document position
 
 This document specifies how **Nexus CLI runtime (ACP Client)** integrates with **ACP Registry** for agent discovery, selection, caching, and transport choice.

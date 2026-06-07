@@ -1,6 +1,7 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Active — orchestration engine SSOT (`nexus-orchestration`, preset loader, worker IPC, capability registry). Primary wave-0 spec for V1.4; still cited by ongoing schedule/cron/multi-agent work.
+**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). Continues to evolve: V1.31 agentic patterns + V1.32 quality gate landed; FL-D (DF-29/31/56) and DF-53 full auto-chain remain in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
+**Document class**: Master  
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17
 **Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
@@ -609,6 +610,8 @@ Suggest ten concrete research directions, each as a bullet with a one-line justi
 
 ### 7.5 Conditional `next` (optional, deferred semantics)
 
+**Long-term SSOT (exploration):** [preset-conditional-routing.md](preset-conditional-routing.md) — Status **Exploration**; not loadable until a future implement compass ships. When normative, this subsection defers to that document for schema and validation rules.
+
 Simple linear `next: <state-id>` covers the first release. Conditional form (future):
 
 ```yaml
@@ -691,7 +694,7 @@ The binary includes embedded presets under `crates/nexus-orchestration/embedded-
 | `soul-experience-refresh` | SOUL Experience (deterministic) | aggregate → done | `soul.experience.aggregate` |
 | `reflection-loop` | Reflection demonstrator | draft → revise → summarize → done | `acp.prompt`, `judge.llm`, `context.summarize` |
 | `memory-augmented` | Memory demonstrator | recall → generate → persist → done | `creator.*`, `judge.rule` |
-| `creative-brief-intake` | **V1.33 planned** — grill-me intake | TBD in P2 plan | `acp.prompt` |
+| `creative-brief-intake` | **V1.33 Shipped** (`2026-06-04-v1.33-creative-brief-intake-preset` P2 plan) — grill-me intake preset | intake → done | `acp.prompt` |
 
 All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5).
 
