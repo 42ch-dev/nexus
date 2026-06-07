@@ -1188,3 +1188,26 @@ fn v135_chain_novel_writing_opt_out_syntax_accepted() {
         "V1.35 P4: --chain-novel-writing=true must be accepted by clap (got: {stderr})"
     );
 }
+
+/// V1.36 P4 (T3): `creator run start --help` mentions auto-completion semantics.
+#[test]
+fn v136_start_help_mentions_auto_completion() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("auto-promotes"),
+        "V1.36 P4: creator run start --help must mention 'auto-promotes' completion semantics"
+    );
+    assert!(
+        help_text.contains("completed"),
+        "V1.36 P4: creator run start --help must reference 'completed' Work status"
+    );
+}

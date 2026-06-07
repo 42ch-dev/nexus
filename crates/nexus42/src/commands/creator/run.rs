@@ -16,7 +16,11 @@ use nexus_orchestration::stage_gates::{self, WorkFields, WorkStageState};
 
 #[derive(Debug, Subcommand)]
 pub enum RunCommand {
-    /// Start a new Work and run the initial preset
+    /// Start a new Work and run the initial preset.
+    ///
+    /// When all chapters of a novel Work are finalized, the daemon auto-promotes
+    /// the Work to "completed" (V1.36 §6). Further `novel-writing` schedule
+    /// creation is rejected until a new Work is started via this command.
     Start {
         /// Initial creative idea (one or more sentences)
         #[arg(long)]
@@ -499,28 +503,63 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
-                // Key-value dump
-                let fields = [
-                    ("work_id", "work_id"),
-                    ("title", "title"),
-                    ("status", "status"),
-                    ("intake_status", "intake_status"),
-                    ("current_stage", "current_stage"),
-                    ("stage_status", "stage_status"),
-                    ("long_term_goal", "long_term_goal"),
-                    ("initial_idea", "initial_idea"),
-                    ("primary_preset_id", "primary_preset_id"),
-                    ("world_id", "world_id"),
-                    ("story_ref", "story_ref"),
-                    ("created_at", "created_at"),
-                    ("updated_at", "updated_at"),
-                ];
-                for (label, key) in &fields {
-                    let val = resp
-                        .get(key)
+                let work_status = resp
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(not set)");
+
+                // V1.36 P4 (T1): completed banner per novel-workflow-profile §6.2.
+                if work_status == "completed" {
+                    let title = resp
+                        .get("title")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("(not set)");
-                    println!("{label:>20}: {val}");
+                        .unwrap_or("(untitled)");
+                    let work_ref = resp
+                        .get("work_ref")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(no ref)");
+                    let total = resp
+                        .get("total_planned_chapters")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(0);
+                    let updated_at = resp
+                        .get("updated_at")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(unknown)");
+                    println!("═══════════════════════════════════════════════════════");
+                    println!("  \"{title}\" — Work {work_id} ({work_ref})");
+                    println!("  COMPLETED at {updated_at}");
+                    println!("  {total}/{total} chapters finalized.");
+                    println!("  No further novel-writing schedules will be enqueued.");
+                    println!();
+                    println!("  To start a new Work, run:");
+                    println!("    nexus42 creator run start \\");
+                    println!("      --init-preset novel-project-init --idea \"...\"");
+                    println!("═══════════════════════════════════════════════════════");
+                } else {
+                    // Key-value dump
+                    let fields = [
+                        ("work_id", "work_id"),
+                        ("title", "title"),
+                        ("status", "status"),
+                        ("intake_status", "intake_status"),
+                        ("current_stage", "current_stage"),
+                        ("stage_status", "stage_status"),
+                        ("long_term_goal", "long_term_goal"),
+                        ("initial_idea", "initial_idea"),
+                        ("primary_preset_id", "primary_preset_id"),
+                        ("world_id", "world_id"),
+                        ("story_ref", "story_ref"),
+                        ("created_at", "created_at"),
+                        ("updated_at", "updated_at"),
+                    ];
+                    for (label, key) in &fields {
+                        let val = resp
+                            .get(key)
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("(not set)");
+                        println!("{label:>20}: {val}");
+                    }
                 }
             }
         }
