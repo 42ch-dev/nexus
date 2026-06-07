@@ -574,3 +574,63 @@ pub fn read_active_workspace_slug(
         .and_then(|v| v.as_str())
         .map(std::string::ToString::to_string)
 }
+
+// ---------------------------------------------------------------------------
+// Reconcile chapters (V1.36 §4.1.2, §8)
+// ---------------------------------------------------------------------------
+
+/// Reconcile `work_chapters` from filesystem for a Work.
+///
+/// `POST /v1/local/works/{work_id}/reconcile-chapters`
+pub async fn reconcile_chapters(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+) -> Result<
+    (
+        StatusCode,
+        Json<nexus_local_db::work_chapters::ReconcileReport>,
+    ),
+    NexusApiError,
+> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let pool = state.pool();
+
+    // Get the Work record to find work_ref
+    let work = works::get_work(pool, &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("get_work failed: {e}"),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("Work '{work_id}' not found")))?;
+
+    let work_ref = work
+        .story_ref
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "PRECONDITION_FAILED".to_string(),
+            message: "`story_ref` (work_ref) not set on Work; run novel-project-init first"
+                .to_string(),
+        })?;
+
+    // Resolve workspace root from state
+    let workspace_path_str = state.workspace_path().unwrap_or_default();
+    let workspace_root = std::path::Path::new(&workspace_path_str);
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let report = nexus_local_db::work_chapters::reconcile_from_filesystem(
+        pool,
+        &work_id,
+        work_ref,
+        workspace_root,
+        &now,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("reconcile failed: {e}"),
+    })?;
+
+    Ok((StatusCode::OK, Json(report)))
+}

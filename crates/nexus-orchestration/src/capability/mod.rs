@@ -351,9 +351,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_eighteen_builtins() {
+    fn registry_has_nineteen_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 18);
+        assert_eq!(reg.len(), 19);
     }
 
     #[test]
@@ -378,6 +378,7 @@ mod tests {
             "context.summarize",
             "kb.extract_work",
             "soul.experience.aggregate",
+            "novel.project_scaffold",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -396,7 +397,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 18);
+        assert_eq!(names.len(), 19);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -404,5 +405,6 @@ mod tests {
         assert!(names.contains(&"context.summarize"));
         assert!(names.contains(&"kb.extract_work"));
         assert!(names.contains(&"soul.experience.aggregate"));
+        assert!(names.contains(&"novel.project_scaffold"));
     }
 }
