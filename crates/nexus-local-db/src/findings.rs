@@ -74,10 +74,7 @@ pub struct FindingListFilters {
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
-pub async fn create_finding(
-    pool: &SqlitePool,
-    f: &Finding,
-) -> Result<(), LocalDbError> {
+pub async fn create_finding(pool: &SqlitePool, f: &Finding) -> Result<(), LocalDbError> {
     sqlx::query!(
         "INSERT INTO findings (finding_id, work_id, chapter, severity, status, title, description, target_executor, creator_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

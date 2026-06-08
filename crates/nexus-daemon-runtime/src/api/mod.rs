@@ -239,6 +239,9 @@ fn memory_routes() -> Router<WorkspaceState> {
 }
 
 /// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).
+///
+/// Also includes findings sub-routes (V1.39 P1) merged into the same router
+/// to avoid axum 0.7 path-param conflict across `.merge()` boundaries.
 fn works_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
@@ -257,25 +260,21 @@ fn works_routes() -> Router<WorkspaceState> {
             "/v1/local/works/{work_id}/reconcile-chapters",
             post(handlers::works::reconcile_chapters),
         )
-}
-
-/// Findings routes — Finding CRUD + review-verdict hook (V1.39 P1).
-fn findings_routes() -> Router<WorkspaceState> {
-    Router::new()
+        // ── Findings sub-routes (V1.39 P1) ───────────────────────────
         .route(
             "/v1/local/works/{work_id}/findings",
             post(handlers::findings::create_finding_handler)
                 .get(handlers::findings::list_findings_handler),
         )
         .route(
+            "/v1/local/works/{work_id}/findings/from-review",
+            post(handlers::findings::create_from_review_handler),
+        )
+        .route(
             "/v1/local/works/{work_id}/findings/{finding_id}",
             get(handlers::findings::get_finding_handler)
                 .patch(handlers::findings::update_finding_handler)
                 .delete(handlers::findings::delete_finding_handler),
-        )
-        .route(
-            "/v1/local/works/{work_id}/findings/from-review",
-            post(handlers::findings::create_from_review_handler),
         )
 }
 /// Create the Local API router
@@ -310,7 +309,6 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(kb_routes())
         .merge(memory_routes())
         .merge(works_routes())
-        .merge(findings_routes())
         .merge(narrative_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
