@@ -274,6 +274,15 @@ impl From<sqlx::Error> for NexusApiError {
     }
 }
 
+impl From<nexus_local_db::LocalDbError> for NexusApiError {
+    fn from(err: nexus_local_db::LocalDbError) -> Self {
+        Self::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: err.to_string(),
+        }
+    }
+}
+
 // Note: These tests remain inline because they use `crate::test_utils::create_test_workspace`,
 // which is a private test-only helper. Integration tests in `tests/` cannot access
 // `#[cfg(test)]` modules. Consider extracting the pure unit tests (error mapping logic)

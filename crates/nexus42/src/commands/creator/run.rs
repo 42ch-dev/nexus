@@ -718,6 +718,45 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         // daemon reconcile-chapters operation validates this.
                         // The DB status remains the selection SSOT per §4.4.
 
+                        // V1.39 P1 (T5): Findings section per §5.5.6.
+                        // Fetch findings for this work and display open count,
+                        // severity breakdown, and top 3 with routing hints.
+                        {
+                            let findings_resp: serde_json::Value = client
+                                .get::<serde_json::Value>(&format!(
+                                    "/v1/local/works/{work_id}/findings?status=open&limit=3"
+                                ))
+                                .await
+                                .unwrap_or_else(|_| serde_json::json!([]));
+
+                            if let Some(findings_list) = findings_resp.as_array() {
+                                if !findings_list.is_empty() {
+                                    println!();
+                                    println!("Findings ({} open):", findings_list.len());
+                                    for f in findings_list {
+                                        let f_title = f.get("title")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("(untitled)");
+                                        let f_sev = f.get("severity")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("info");
+                                        let hint = f.get("routing_hint")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("→ none");
+                                        let f_ch = f.get("chapter")
+                                            .and_then(serde_json::Value::as_i64);
+                                        let ch_str = match f_ch {
+                                            Some(ch) => format!(" ch{ch}"),
+                                            None => String::new(),
+                                        };
+                                        println!(
+                                            "  [{f_sev:<7}] {f_title}{ch_str}  {hint}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
                         // Next action hint (§8.1)
                         println!();
                         if let Some(nch) = next_ch_val {

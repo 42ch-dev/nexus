@@ -258,6 +258,26 @@ fn works_routes() -> Router<WorkspaceState> {
             post(handlers::works::reconcile_chapters),
         )
 }
+
+/// Findings routes — Finding CRUD + review-verdict hook (V1.39 P1).
+fn findings_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/works/{work_id}/findings",
+            post(handlers::findings::create_finding_handler)
+                .get(handlers::findings::list_findings_handler),
+        )
+        .route(
+            "/v1/local/works/{work_id}/findings/{finding_id}",
+            get(handlers::findings::get_finding_handler)
+                .patch(handlers::findings::update_finding_handler)
+                .delete(handlers::findings::delete_finding_handler),
+        )
+        .route(
+            "/v1/local/works/{work_id}/findings/from-review",
+            post(handlers::findings::create_from_review_handler),
+        )
+}
 /// Create the Local API router
 ///
 /// **Unguarded routes** (no auth, always reachable):
@@ -290,6 +310,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(kb_routes())
         .merge(memory_routes())
         .merge(works_routes())
+        .merge(findings_routes())
         .merge(narrative_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
