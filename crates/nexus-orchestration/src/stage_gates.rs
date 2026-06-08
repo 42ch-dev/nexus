@@ -47,6 +47,10 @@ pub struct WorkFields {
     pub creative_brief: String,
     /// Inspiration log JSON array (may be "[]" if empty).
     pub inspiration_log: String,
+    /// Work reference slug (V1.38 P0: needed for novel-writing template vars).
+    pub work_ref: Option<String>,
+    /// Selected chapter number for novel-writing (V1.38 P0 §4.5.2).
+    pub chapter: Option<i32>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -58,12 +62,28 @@ pub struct WorkFields {
 /// fields they need from the preset input namespace.
 #[must_use]
 pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
-    serde_json::json!({
+    let mut map = serde_json::json!({
         "work_id": fields.work_id,
         "fl_e_stage": fields.fl_e_stage,
         "creative_brief": fields.creative_brief,
         "inspiration_log": fields.inspiration_log,
-    })
+    });
+
+    // V1.38 P0 (T4): include work_ref and chapter when available.
+    if let Some(ref wr) = fields.work_ref {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "work_ref".to_string(),
+                serde_json::Value::String(wr.clone()),
+            )
+        });
+    }
+    if let Some(ch) = fields.chapter {
+        map.as_object_mut()
+            .map(|o| o.insert("chapter".to_string(), serde_json::Value::Number(ch.into())));
+    }
+
+    map
 }
 
 /// Build a correctly-shaped `AddScheduleRequest` for an FL-E stage advance
@@ -394,6 +414,8 @@ mod tests {
             fl_e_stage: stage.to_string(),
             creative_brief: r#"{"genre":"sci-fi","tone":"literary"}"#.to_string(),
             inspiration_log: r#"[{"note":"first angle"}]"#.to_string(),
+            work_ref: Some("my-novel".to_string()),
+            chapter: Some(1),
         }
     }
 

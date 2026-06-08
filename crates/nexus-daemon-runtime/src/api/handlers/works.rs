@@ -57,6 +57,12 @@ pub struct WorkApiDto {
     pub total_planned_chapters: Option<i32>,
     /// Current chapter index (V1.36 §2.1).
     pub current_chapter: i32,
+    /// Per-chapter rows (V1.38 P0 §8.1 — populated for novel profile Works).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapters: Option<Vec<serde_json::Value>>,
+    /// Next chapter to work on per §4.5.2 selection (V1.38 P0 — populated for novel profile).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_chapter: Option<i32>,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -92,6 +98,8 @@ impl From<WorkRecord> for WorkApiDto {
             work_ref: r.work_ref,
             total_planned_chapters: r.total_planned_chapters,
             current_chapter: r.current_chapter,
+            chapters: None,     // populated by enrich_with_chapters()
+            next_chapter: None, // populated by enrich_with_chapters()
         }
     }
 }
@@ -315,6 +323,9 @@ pub async fn get_work(
         match nexus_local_db::work_chapters::is_work_completed(state.pool(), &work_id).await {
             Ok(true) => {
                 let now = chrono::Utc::now().to_rfc3339();
+                // V1.38 P0 (T7): set works.status = 'completed' per §6.1.
+                // novel_completion_status column not yet migrated — will be
+                // added in a future schema change; tracked as residual.
                 let patch = WorkPatch {
                     status: Some("completed".to_string()),
                     ..Default::default()
@@ -353,7 +364,69 @@ pub async fn get_work(
         }
     }
 
-    Ok(Json(WorkApiDto::from(record)))
+    Ok(Json(enrich_with_chapters(&state, record).await))
+}
+
+/// Enrich a `WorkApiDto` with chapter rows and `next_chapter` for novel profile Works.
+///
+/// Populates `chapters` and `next_chapter` fields when the Work has
+/// `work_profile == "novel"`. Non-novel Works return the DTO unchanged.
+async fn enrich_with_chapters(
+    state: &WorkspaceState,
+    record: nexus_local_db::works::WorkRecord,
+) -> WorkApiDto {
+    let mut dto = WorkApiDto::from(record);
+
+    if dto.work_profile.as_deref() != Some("novel") {
+        return dto;
+    }
+
+    let work_id = &dto.work_id;
+
+    // Populate chapter rows
+    match nexus_local_db::work_chapters::list_chapters(state.pool(), work_id).await {
+        Ok(chapters) => {
+            let chapter_values: Vec<serde_json::Value> = chapters
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "chapter": c.chapter,
+                        "volume": c.volume,
+                        "slug": c.slug,
+                        "status": c.status,
+                        "planned_word_count": c.planned_word_count,
+                        "actual_word_count": c.actual_word_count,
+                        "outline_path": c.outline_path,
+                        "body_path": c.body_path,
+                    })
+                })
+                .collect();
+            dto.chapters = Some(chapter_values);
+        }
+        Err(e) => {
+            tracing::warn!(
+                target: "novel.chapters",
+                work_id = %work_id,
+                error = %e,
+                "Failed to list chapters for work"
+            );
+        }
+    }
+
+    // Populate next_chapter (§4.5.2 selection)
+    match nexus_local_db::work_chapters::next_chapter(state.pool(), work_id).await {
+        Ok(ch) => dto.next_chapter = ch,
+        Err(e) => {
+            tracing::warn!(
+                target: "novel.chapters",
+                work_id = %work_id,
+                error = %e,
+                "Failed to compute next_chapter"
+            );
+        }
+    }
+
+    dto
 }
 
 /// Handle PATCH with stage changes: gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).

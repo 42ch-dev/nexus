@@ -218,14 +218,9 @@ impl NovelChapterTransition {
         .await
         .map_err(|e| CapabilityError::Internal(format!("update_status: {e}")))?;
 
-        // T4: If transitioning to draft, advance works.current_chapter
-        if inp.to_status == "draft" {
-            if let Some(cid) = &inp.creator_id {
-                Self::advance_current_chapter(pool, cid, &inp.work_id, inp.chapter).await?;
-            }
-        }
-
-        // Also advance on finalize
+        // T6 (V1.38 P0): current_chapter advances ONLY on finalize.
+        // Per novel-workflow-profile §4.5.2, current_chapter is the latest
+        // finalized chapter number — not the chapter being drafted or outlined.
         if inp.to_status == "finalized" {
             if let Some(cid) = &inp.creator_id {
                 Self::advance_current_chapter(pool, cid, &inp.work_id, inp.chapter).await?;

@@ -229,7 +229,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 4); // P4 fix wave: finalize split into finalize + finalize_commit
+        assert_eq!(loaded.version, 5); // V1.38 P0: chapter selection via preset.input.chapter
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
