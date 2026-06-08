@@ -73,6 +73,9 @@ pub struct WorkFields {
     pub body_path: Option<String>,
     /// Chapter slug from `work_chapters.slug` (V1.38 P1).
     pub slug: Option<String>,
+    /// Fix W-2: path to research artifacts directory, populated when
+    /// the produce stage follows a completed research stage in the auto-chain.
+    pub research_artifacts_dir: Option<String>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -133,6 +136,16 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
     if let Some(ref sl) = fields.slug {
         map.as_object_mut()
             .map(|o| o.insert("slug".to_string(), serde_json::Value::String(sl.clone())));
+    }
+
+    // Fix W-2: research artifacts directory for produce stage (after research).
+    if let Some(ref rad) = fields.research_artifacts_dir {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "research_artifacts_dir".to_string(),
+                serde_json::Value::String(rad.clone()),
+            )
+        });
     }
 
     map
@@ -472,6 +485,7 @@ mod tests {
             outline_path: Some("Works/my-novel/Outlines/chapters/ch01-outline.md".to_string()),
             body_path: Some("Works/my-novel/Stories/ch01-ch01.md".to_string()),
             slug: Some("ch01".to_string()),
+            research_artifacts_dir: None,
         }
     }
 
@@ -643,6 +657,7 @@ mod tests {
                 "Works/{work_ref}/Stories/ch{ch_label}-ch{ch_label}.md"
             )),
             slug: Some(format!("ch{ch_label}")),
+            research_artifacts_dir: None,
         }
     }
 
@@ -704,6 +719,7 @@ mod tests {
             outline_path: None,
             body_path: None,
             slug: None,
+            research_artifacts_dir: None,
         };
         let input = build_preset_input(&fields);
         assert!(input.get("chapter").is_none());
@@ -714,6 +730,20 @@ mod tests {
         // Base fields still present
         assert!(input.get("work_id").is_some());
         assert!(input.get("fl_e_stage").is_some());
+        // Fix W-2: research_artifacts_dir not present when None
+        assert!(input.get("research_artifacts_dir").is_none());
+    }
+
+    #[test]
+    fn build_preset_input_includes_research_artifacts_dir_when_set() {
+        let mut fields = demo_work_fields("produce");
+        fields.research_artifacts_dir =
+            Some(".nexus42/references/ACH20260609120000000/".to_string());
+        let input = build_preset_input(&fields);
+        assert_eq!(
+            input["research_artifacts_dir"],
+            ".nexus42/references/ACH20260609120000000/"
+        );
     }
 
     #[test]
