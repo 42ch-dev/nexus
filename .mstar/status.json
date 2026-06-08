@@ -194,14 +194,15 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.37",
-    "last_integration_branch": "iteration/v1.36",
+    "integration_branch": null,
+    "last_integration_branch": "iteration/v1.37",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.37",
     "latest_shipped_at": "2026-06-08T22:30:00+08:00",
     "latest_active_iteration": "v1.37",
     "latest_active_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
+    "integration_branch_retired": "iteration/v1.37 (V1.37 SHIPPED 2026-06-08 via PR #47; integration role empty until V1.38 active compass is opened)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-06-08T22:30:00+08:00",
