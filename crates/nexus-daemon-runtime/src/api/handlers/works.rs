@@ -625,6 +625,23 @@ pub async fn append_inspiration(
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    // V1.39 §5.6 (T6): Single FL-E driver invariant.
+    // If the Work has an active auto-chain driver, reject side input
+    // to prevent concurrent schedule conflicts.
+    if let Ok(Some(work)) =
+        nexus_local_db::works::get_work(state.pool(), &creator_id, &work_id).await
+    {
+        if work.auto_chain_enabled && work.driver_schedule_id.is_some() {
+            return Err(NexusApiError::Conflict(format!(
+                "AUTO_CHAIN_DRIVER_ACTIVE: Work {} has an active auto-chain driver schedule ({}). \
+                 Side input is not allowed while auto-chain is running. \
+                 Wait for the current stage to complete or pause the driver first.",
+                work_id,
+                work.driver_schedule_id.as_deref().unwrap_or("?")
+            )));
+        }
+    }
+
     // Build JSON for inspiration entry
     let entry = serde_json::json!({
         "at": now.clone(),
