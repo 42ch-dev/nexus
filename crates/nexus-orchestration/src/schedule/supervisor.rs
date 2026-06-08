@@ -460,6 +460,7 @@ impl ScheduleSupervisor {
     /// Delegates to the shared `auto_chain::enqueue_auto_chain_schedule` helper
     /// (Fix A / W-A) so that the ID-mint + INSERT + set_driver logic is not
     /// duplicated between the supervisor and boot paths.
+    #[allow(clippy::doc_markdown)]
     async fn enqueue_auto_chain_step(
         &self,
         creator_id: &str,
@@ -494,11 +495,11 @@ impl ScheduleSupervisor {
                 // Extract the underlying sqlx error from LocalDbError.
                 match e {
                     nexus_local_db::LocalDbError::Sqlx(s) => s,
-                    other => sqlx::Error::Protocol(other.to_string().into()),
+                    other => sqlx::Error::Protocol(other.to_string()),
                 },
             )),
             Err(other) => Err(SupervisorError::Database(
-                sqlx::Error::Protocol(other.to_string().into()),
+                sqlx::Error::Protocol(other.to_string()),
             )),
         }
     }

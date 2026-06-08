@@ -556,7 +556,7 @@ async fn patch_work_stage(
     // invasive for this fix wave. The fail-fast ordering is sufficient: the
     // stage-advance atomic transaction either commits (and then non-stage fields
     // are applied) or rolls back (and non-stage fields are never touched).
-    let updated = works::advance_work_stage_atomic(
+    let _updated = works::advance_work_stage_atomic(
         state.pool(),
         creator_id,
         work_id,
