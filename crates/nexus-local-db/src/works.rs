@@ -1663,9 +1663,6 @@ mod tests {
             sql.contains("auto_chain_interrupted"),
             "index should cover auto_chain_interrupted: {sql}"
         );
-        assert!(
-            sql.contains("status"),
-            "index should cover status: {sql}"
-        );
+        assert!(sql.contains("status"), "index should cover status: {sql}");
     }
 }

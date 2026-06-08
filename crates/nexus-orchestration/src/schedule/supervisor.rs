@@ -472,12 +472,7 @@ impl ScheduleSupervisor {
         use crate::auto_chain::{self, AutoChainError};
 
         match auto_chain::enqueue_auto_chain_schedule(
-            &self.pool,
-            creator_id,
-            work_id,
-            stage,
-            chapter,
-            work,
+            &self.pool, creator_id, work_id, stage, chapter, work,
         )
         .await
         {
@@ -498,9 +493,9 @@ impl ScheduleSupervisor {
                     other => sqlx::Error::Protocol(other.to_string()),
                 },
             )),
-            Err(other) => Err(SupervisorError::Database(
-                sqlx::Error::Protocol(other.to_string()),
-            )),
+            Err(other) => Err(SupervisorError::Database(sqlx::Error::Protocol(
+                other.to_string(),
+            ))),
         }
     }
 
