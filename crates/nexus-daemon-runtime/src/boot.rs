@@ -219,28 +219,101 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         }
     }
 
-    // V1.39 §5.5 (T5): Auto-chain boot recovery.
+    // V1.39 §5.5 (T5 + Fix 2): Auto-chain boot recovery.
     // Find Works whose auto-chain driver schedule is no longer running
-    // (interrupted by daemon restart) and log them for manual recovery.
-    // Auto-resumption will be wired in a future iteration (T9 integration tests).
+    // (interrupted by daemon restart) and auto-resume them by evaluating
+    // the next step and enqueuing a new schedule.
     {
         let recovery_pool = state.pool();
         match nexus_orchestration::auto_chain::find_resumable_works(recovery_pool).await {
             Ok(resumable) => {
                 if !resumable.is_empty() {
                     tracing::info!(
-                        "found {} auto-chain work(s) with interrupted driver schedule(s)",
+                        "found {} auto-chain work(s) with interrupted driver schedule(s), resuming",
                         resumable.len()
                     );
                     for work in &resumable {
-                        tracing::info!(
-                            work_id = %work.work_id,
-                            current_stage = %work.current_stage,
-                            current_chapter = work.current_chapter,
-                            driver_schedule_id = %work.driver_schedule_id.as_deref().unwrap_or("none"),
-                            "auto-chain work eligible for resumption (use `nexus42 creator run resume {}`)",
-                            work.work_id
-                        );
+                        // Reload from DB (SSOT)
+                        let fresh = nexus_local_db::works::get_work(
+                            recovery_pool,
+                            &work.creator_id,
+                            &work.work_id,
+                        )
+                        .await;
+
+                        if let Ok(Some(latest)) = fresh {
+                            let action = nexus_orchestration::auto_chain::evaluate_next_step(&latest);
+
+                            match action {
+                                nexus_orchestration::auto_chain::ChainAction::AdvanceStage { ref work_id, ref next_stage } => {
+                                    match resume_auto_chain_work(
+                                        recovery_pool,
+                                        &latest.creator_id,
+                                        work_id,
+                                        next_stage,
+                                        None,
+                                        &latest,
+                                    ).await {
+                                        Ok(sid) => tracing::info!(
+                                            work_id = %work_id,
+                                            stage = %next_stage,
+                                            schedule_id = %sid,
+                                            "auto-chain boot resume: enqueued next stage"
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            work_id = %work_id,
+                                            error = %e,
+                                            "auto-chain boot resume: failed to enqueue next stage"
+                                        ),
+                                    }
+                                }
+                                nexus_orchestration::auto_chain::ChainAction::NextChapter { ref work_id, ref next_chapter } => {
+                                    match resume_auto_chain_work(
+                                        recovery_pool,
+                                        &latest.creator_id,
+                                        work_id,
+                                        "produce",
+                                        Some(*next_chapter),
+                                        &latest,
+                                    ).await {
+                                        Ok(sid) => tracing::info!(
+                                            work_id = %work_id,
+                                            chapter = *next_chapter,
+                                            schedule_id = %sid,
+                                            "auto-chain boot resume: enqueued next chapter"
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            work_id = %work_id,
+                                            error = %e,
+                                            "auto-chain boot resume: failed to enqueue next chapter"
+                                        ),
+                                    }
+                                }
+                                nexus_orchestration::auto_chain::ChainAction::WorkComplete { ref work_id } => {
+                                    match nexus_orchestration::auto_chain::mark_work_completed(
+                                        recovery_pool, &latest.creator_id, work_id,
+                                    ).await {
+                                        Ok(_) => tracing::info!(
+                                            work_id = %work_id,
+                                            "auto-chain boot resume: work completed"
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            work_id = %work_id,
+                                            error = %e,
+                                            "auto-chain boot resume: failed to mark work completed"
+                                        ),
+                                    }
+                                }
+                                nexus_orchestration::auto_chain::ChainAction::NoAction => {
+                                    tracing::info!(
+                                        work_id = %latest.work_id,
+                                        current_stage = %latest.current_stage,
+                                        stage_status = %latest.stage_status,
+                                        "auto-chain boot resume: no action needed"
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -492,6 +565,56 @@ fn create_subsystems(
     )));
 
     subsystems
+}
+
+/// Create a new schedule for an auto-chain work at boot recovery.
+///
+/// Mirrors `ScheduleSupervisor::enqueue_auto_chain_step` but is usable
+/// from boot context before the supervisor is fully wired.
+async fn resume_auto_chain_work(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    stage: &str,
+    chapter: Option<i32>,
+    work: &nexus_local_db::works::WorkRecord,
+) -> Result<String, String> {
+    let schedule_req = nexus_orchestration::auto_chain::build_auto_chain_schedule(
+        stage, creator_id, work, chapter,
+    );
+
+    let req = schedule_req.ok_or_else(|| format!("no schedule mapping for stage '{stage}'"))?;
+
+    let schedule_id = format!("ACH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+    let now_ts = chrono::Utc::now().timestamp();
+
+    // SAFETY: dynamic SQL — auto-chain schedule insert at boot recovery.
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id)
+           VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+    )
+    .bind(&schedule_id)
+    .bind(creator_id)
+    .bind(&req.preset_id)
+    .bind(&req.label)
+    .bind(now_ts)
+    .bind(now_ts)
+    .bind(work_id)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("failed to insert schedule: {e}"))?;
+
+    // Update the Work checkpoint
+    nexus_orchestration::auto_chain::set_driver(
+        pool, creator_id, work_id, &schedule_id, stage,
+    )
+    .await
+    .map_err(|e| format!("failed to set driver: {e}"))?;
+
+    Ok(schedule_id)
 }
 
 #[cfg(test)]

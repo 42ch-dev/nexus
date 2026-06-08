@@ -582,3 +582,166 @@ async fn fix1_last_chapter_marks_work_complete() {
     assert_eq!(updated.status, "completed", "work should be marked completed");
     assert!(updated.driver_schedule_id.is_none(), "driver should be cleared");
 }
+
+// ── Fix 2: Boot auto-resume (AC4 end-to-end) ───────────────────────────
+
+/// Helper: simulate boot auto-resume logic (mirrors boot.rs resume_auto_chain_work).
+async fn simulate_boot_auto_resume(
+    pool: &SqlitePool,
+) -> Vec<(String, String, Option<String>)> {
+    // (work_id, action_description, new_schedule_id)
+    let mut results = Vec::new();
+    let resumable = auto_chain::find_resumable_works(pool).await.unwrap();
+
+    for work in &resumable {
+        // Reload from DB
+        let latest = works::get_work(pool, &work.creator_id, &work.work_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let action = auto_chain::evaluate_next_step(&latest);
+
+        match action {
+            auto_chain::ChainAction::AdvanceStage { ref work_id, ref next_stage } => {
+                let req = auto_chain::build_auto_chain_schedule(
+                    next_stage, &latest.creator_id, &latest, None,
+                );
+                if let Some(schedule_req) = req {
+                    let schedule_id = format!("BOOT{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+                    let now_ts = chrono::Utc::now().timestamp();
+                    // SAFETY: test-only — DML for boot resume simulation.
+                    sqlx::query(
+                        "INSERT INTO creator_schedules
+                           (schedule_id, creator_id, preset_id, preset_version, status,
+                            concurrency_kind, current_core_context_version, label,
+                            created_at, updated_at, work_id)
+                           VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+                    )
+                    .bind(&schedule_id)
+                    .bind(&latest.creator_id)
+                    .bind(&schedule_req.preset_id)
+                    .bind(&schedule_req.label)
+                    .bind(now_ts)
+                    .bind(now_ts)
+                    .bind(work_id)
+                    .execute(pool)
+                    .await
+                    .unwrap();
+
+                    auto_chain::set_driver(pool, &latest.creator_id, work_id, &schedule_id, next_stage)
+                        .await
+                        .unwrap();
+
+                    results.push((work_id.clone(), format!("advance to {next_stage}"), Some(schedule_id)));
+                }
+            }
+            auto_chain::ChainAction::WorkComplete { ref work_id } => {
+                auto_chain::mark_work_completed(pool, &latest.creator_id, work_id)
+                    .await
+                    .unwrap();
+                results.push((work_id.clone(), "work completed".to_string(), None));
+            }
+            _ => {
+                results.push((latest.work_id.clone(), "no action".to_string(), None));
+            }
+        }
+    }
+
+    results
+}
+
+#[tokio::test]
+async fn fix2_boot_resume_enqueues_next_schedule() {
+    let pool = test_pool().await;
+
+    // Create a Work at research/active with auto-chain enabled
+    let mut work = test_work("wrk_fix2a", 0, 3, true);
+    work.current_stage = "research".to_string();
+    work.stage_status = "active".to_string();
+    seed_work(&pool, &work).await;
+
+    // Set a driver schedule (which won't exist in creator_schedules → resumable)
+    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix2a", "sch_dead_research", "research")
+        .await
+        .unwrap();
+
+    // Mark stage as complete (simulating what the schedule runner does)
+    works::patch_work(
+        &pool,
+        "ctr_test",
+        "wrk_fix2a",
+        &works::WorkPatch {
+            stage_status: Some("complete".to_string()),
+            ..Default::default()
+        },
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await
+    .unwrap();
+
+    // Verify it's resumable
+    let resumable = auto_chain::find_resumable_works(&pool).await.unwrap();
+    assert_eq!(resumable.len(), 1);
+    assert_eq!(resumable[0].work_id, "wrk_fix2a");
+
+    // Run boot auto-resume
+    let results = simulate_boot_auto_resume(&pool).await;
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].0, "wrk_fix2a");
+    assert!(results[0].2.is_some(), "should have created a new schedule");
+
+    // Verify the work advanced to produce
+    let updated = works::get_work(&pool, "ctr_test", "wrk_fix2a")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.current_stage, "produce", "should have advanced to produce");
+    assert!(updated.driver_schedule_id.is_some(), "should have a new driver");
+    assert_ne!(
+        updated.driver_schedule_id.as_deref(),
+        Some("sch_dead_research"),
+        "driver should be different from dead schedule"
+    );
+}
+
+#[tokio::test]
+async fn fix2_boot_resume_no_resumable_works() {
+    let pool = test_pool().await;
+
+    // No works at all → no action
+    let results = simulate_boot_auto_resume(&pool).await;
+    assert!(results.is_empty());
+}
+
+#[tokio::test]
+async fn fix2_boot_resume_interrupted_work_not_resumed() {
+    let pool = test_pool().await;
+
+    let mut work = test_work("wrk_fix2c", 1, 3, true);
+    work.current_stage = "produce".to_string();
+    work.stage_status = "complete".to_string();
+    seed_work(&pool, &work).await;
+
+    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix2c", "sch_interrupted", "produce")
+        .await
+        .unwrap();
+
+    // Mark as interrupted
+    works::patch_work(
+        &pool,
+        "ctr_test",
+        "wrk_fix2c",
+        &works::WorkPatch {
+            auto_chain_interrupted: Some(true),
+            ..Default::default()
+        },
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await
+    .unwrap();
+
+    // Should NOT be resumable
+    let resumable = auto_chain::find_resumable_works(&pool).await.unwrap();
+    assert!(resumable.is_empty(), "interrupted work should not be resumable");
+}
