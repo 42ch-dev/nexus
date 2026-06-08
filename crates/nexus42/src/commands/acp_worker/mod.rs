@@ -82,13 +82,14 @@ pub struct AcpWorkerArgs {
 struct MultiplexedWorkerState {
     creator_id: String,
     sessions: std::sync::RwLock<HashMap<String, AgentSlot>>,
+    /// Session-scoped capture trackers (R14). Created at session start,
+    /// populated during IPC events, consumed on `agent_stop`.
+    session_captures: std::sync::RwLock<HashMap<String, crate::session_capture::SessionCapture>>,
     shutdown_requested: AtomicBool,
     start_time: std::time::Instant,
     request_counter: AtomicU64,
     /// Daemon HTTP client for session-capture submissions.
     daemon_client: crate::api::daemon_client::DaemonClient,
-    /// Per-session captures for R14 session quality tracking.
-    session_captures: std::sync::RwLock<HashMap<String, crate::session_capture::SessionCapture>>,
 }
 
 impl MultiplexedWorkerState {
@@ -329,6 +330,11 @@ async fn handle_initialize(
                 "worker/initialize called with existing sessions, clearing"
             );
             sessions.clear();
+        }
+
+        // Also clear any stale session captures from a prior init (R14).
+        if let Ok(mut captures) = state.session_captures.write() {
+            captures.clear();
         }
 
         // Check for new multi-agent format first.
