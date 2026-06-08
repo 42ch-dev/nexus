@@ -393,9 +393,25 @@ Rules:
 - Stage order: `intake` → `research` → `produce` → `review` → `persist` (linear; no conditional routing).
 - Advance requires prior stage `complete` unless `--force` (audited).
 - At most one active FL-E stage schedule per Work.
-- `--auto-chain` is **not** in V1.34 scope (DF-53).
+**V1.39 flags (`creator run start` / auto-chain — DF-53):**
 
-**Target (V1.34 P1):** implement in `crates/nexus42/src/commands/creator/run.rs` (or `run/stage.rs` submodule). Plan: `2026-06-04-v1.34-fl-e-run-intents-and-stages`.
+| Flag | Purpose |
+| --- | --- |
+| `--auto-chain` | Default **true**. Full FL-E stage chain + novel chapter outer loop while daemon online. |
+| `--no-auto-chain` | Opt out of automatic stage/chapter enqueue; checkpoint still written. |
+| `creator run resume <work_id>` | Resume checkpointed auto-chain after daemon restart or manual pause. |
+
+**V1.39 `creator run status` extensions (novel + auto-chain):**
+
+| Field | Meaning |
+| --- | --- |
+| `daemon` | `online` \| `offline` (CLI reachability to local daemon) |
+| `chain` | `running` \| `paused_at_<stage>_ch<N>` \| `completed` |
+| `pending_resume` | Whether boot auto-resume is pending or user action needed |
+| `pending_inspiration_count` | Unmerged `--note` entries awaiting next state transition |
+| `findings` | Open findings summary (V1.39 P1+); 96h banner when applicable (P4) |
+
+**Shipped (V1.34 P1):** stage commands in `crates/nexus42/src/commands/creator/run.rs`. **Target (V1.39 P0):** auto-chain and resume surfaces per plan `2026-06-09-v1.39-fl-e-auto-chain-engine`.
 
 ### 6.3A Preset management and validation surfaces
 
