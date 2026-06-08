@@ -229,7 +229,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 4); // P4 fix wave: finalize split into finalize + finalize_commit
+        assert_eq!(loaded.version, 6); // V1.38 P1: chapter_label/outline_path/body_path/slug prompt vars
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
@@ -255,6 +255,28 @@ mod tests {
         assert!(
             presets.iter().any(|p| p == "novel-writing"),
             "expected 'novel-writing' in embedded presets: {presets:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_novel_writing_excludes_deprecated_prompt_archive() {
+        assert!(
+            EMBEDDED_PRESETS
+                .get_dir("novel-writing/prompts/_deprecated")
+                .is_none(),
+            "deprecated prompt archive must not be compiled into embedded presets"
+        );
+        assert!(
+            read_embedded_template("novel-writing", "prompts/_deprecated/draft-intro.md").is_none(),
+            "deprecated draft-intro.md should not be readable from embedded presets"
+        );
+        assert!(
+            read_embedded_template("novel-writing", "prompts/_deprecated/draft-body.md").is_none(),
+            "deprecated draft-body.md should not be readable from embedded presets"
+        );
+        assert!(
+            read_embedded_template("novel-writing", "prompts/draft-chapter.md").is_some(),
+            "current novel-writing prompt templates should remain embedded"
         );
     }
 
@@ -385,15 +407,14 @@ mod tests {
             "expected draft-chapter.md reference"
         );
 
-        // Verify the embedded directory has prompt files (including new P3 files
-        // and legacy files kept for backward compat).
+        // Verify the embedded directory has only current prompt files.
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-writing/prompts")
             .expect("novel-writing/prompts dir should exist");
         let prompt_count = prompts_dir.files().count();
         assert!(
-            prompt_count >= 14,
-            "expected at least 14 embedded prompt files (11 legacy + 3 new P3), got {prompt_count}"
+            prompt_count >= 12,
+            "expected at least 12 current embedded prompt files, got {prompt_count}"
         );
     }
 

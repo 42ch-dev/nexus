@@ -24,6 +24,12 @@ fn demo_work_fields(stage: &str) -> WorkFields {
         fl_e_stage: stage.to_string(),
         creative_brief: r#"{"genre":"sci-fi","tone":"literary","audience":"adult"}"#.to_string(),
         inspiration_log: r#"[{"note":"AI consciousness angle"}]"#.to_string(),
+        work_ref: Some("my-novel".to_string()),
+        chapter: Some(1),
+        chapter_label: Some("01".to_string()),
+        outline_path: Some("Works/my-novel/Outlines/chapters/ch01-outline.md".to_string()),
+        body_path: Some("Works/my-novel/Stories/ch01-ch01.md".to_string()),
+        slug: Some("ch01".to_string()),
     }
 }
 

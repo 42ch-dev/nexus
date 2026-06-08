@@ -11,6 +11,20 @@
 use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
+/// Format a chapter number as a zero-padded label for path construction.
+///
+/// - `chapter_label(1) == "01"`
+/// - `chapter_label(9) == "09"`
+/// - `chapter_label(10) == "10"`
+/// - `chapter_label(100) == "100"` (2-digit pad for 1-99, then grows naturally)
+///
+/// Spec §4.5.6 accepts 2-digit zero-pad for chapter 1-99; future iterations
+/// may tighten to fixed-width if novels require it.
+#[must_use]
+pub fn chapter_label(chapter: i32) -> String {
+    format!("{chapter:02}")
+}
+
 /// Normative stage → default preset mapping (spec §4).
 ///
 /// Returns the canonical preset ID for a given FL-E stage.
@@ -47,6 +61,18 @@ pub struct WorkFields {
     pub creative_brief: String,
     /// Inspiration log JSON array (may be "[]" if empty).
     pub inspiration_log: String,
+    /// Work reference slug (V1.38 P0: needed for novel-writing template vars).
+    pub work_ref: Option<String>,
+    /// Selected chapter number for novel-writing (V1.38 P0 §4.5.2).
+    pub chapter: Option<i32>,
+    /// Zero-padded chapter label (V1.38 P1): `"01"`, `"02"`, … `"10"`.
+    pub chapter_label: Option<String>,
+    /// Full path to chapter outline file (V1.38 P1).
+    pub outline_path: Option<String>,
+    /// Full path to chapter body file (V1.38 P1).
+    pub body_path: Option<String>,
+    /// Chapter slug from `work_chapters.slug` (V1.38 P1).
+    pub slug: Option<String>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -58,12 +84,58 @@ pub struct WorkFields {
 /// fields they need from the preset input namespace.
 #[must_use]
 pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
-    serde_json::json!({
+    let mut map = serde_json::json!({
         "work_id": fields.work_id,
         "fl_e_stage": fields.fl_e_stage,
         "creative_brief": fields.creative_brief,
         "inspiration_log": fields.inspiration_log,
-    })
+    });
+
+    // V1.38 P0 (T4): include work_ref and chapter when available.
+    if let Some(ref wr) = fields.work_ref {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "work_ref".to_string(),
+                serde_json::Value::String(wr.clone()),
+            )
+        });
+    }
+    if let Some(ch) = fields.chapter {
+        map.as_object_mut()
+            .map(|o| o.insert("chapter".to_string(), serde_json::Value::Number(ch.into())));
+    }
+
+    // V1.38 P1: include chapter context fields when available.
+    if let Some(ref cl) = fields.chapter_label {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "chapter_label".to_string(),
+                serde_json::Value::String(cl.clone()),
+            )
+        });
+    }
+    if let Some(ref op) = fields.outline_path {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "outline_path".to_string(),
+                serde_json::Value::String(op.clone()),
+            )
+        });
+    }
+    if let Some(ref bp) = fields.body_path {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "body_path".to_string(),
+                serde_json::Value::String(bp.clone()),
+            )
+        });
+    }
+    if let Some(ref sl) = fields.slug {
+        map.as_object_mut()
+            .map(|o| o.insert("slug".to_string(), serde_json::Value::String(sl.clone())));
+    }
+
+    map
 }
 
 /// Build a correctly-shaped `AddScheduleRequest` for an FL-E stage advance
@@ -394,6 +466,12 @@ mod tests {
             fl_e_stage: stage.to_string(),
             creative_brief: r#"{"genre":"sci-fi","tone":"literary"}"#.to_string(),
             inspiration_log: r#"[{"note":"first angle"}]"#.to_string(),
+            work_ref: Some("my-novel".to_string()),
+            chapter: Some(1),
+            chapter_label: Some("01".to_string()),
+            outline_path: Some("Works/my-novel/Outlines/chapters/ch01-outline.md".to_string()),
+            body_path: Some("Works/my-novel/Stories/ch01-ch01.md".to_string()),
+            slug: Some("ch01".to_string()),
         }
     }
 
@@ -543,5 +621,133 @@ mod tests {
         assert_eq!(seed["fl_e_stage"], "research");
         assert!(seed["creative_brief"].is_string());
         assert!(seed["inspiration_log"].is_string());
+    }
+
+    // ── V1.38 P1: chapter context parameterization tests ─────────────────────
+
+    /// Helper: produce WorkFields for a given chapter number.
+    fn chapter_work_fields(chapter: i32, work_ref: &str) -> WorkFields {
+        let ch_label = chapter_label(chapter);
+        WorkFields {
+            work_id: format!("wrk_{work_ref}"),
+            fl_e_stage: "produce".to_string(),
+            creative_brief: r#"{"genre":"sci-fi"}"#.to_string(),
+            inspiration_log: "[]".to_string(),
+            work_ref: Some(work_ref.to_string()),
+            chapter: Some(chapter),
+            chapter_label: Some(ch_label.clone()),
+            outline_path: Some(format!(
+                "Works/{work_ref}/Outlines/chapters/ch{ch_label}-outline.md"
+            )),
+            body_path: Some(format!(
+                "Works/{work_ref}/Stories/ch{ch_label}-ch{ch_label}.md"
+            )),
+            slug: Some(format!("ch{ch_label}")),
+        }
+    }
+
+    #[test]
+    fn build_preset_input_chapter2_includes_all_context_fields() {
+        let fields = chapter_work_fields(2, "my-novel");
+        let input = build_preset_input(&fields);
+        assert_eq!(input["chapter"], 2);
+        assert_eq!(input["chapter_label"], "02");
+        assert_eq!(
+            input["outline_path"],
+            "Works/my-novel/Outlines/chapters/ch02-outline.md"
+        );
+        assert_eq!(input["body_path"], "Works/my-novel/Stories/ch02-ch02.md");
+        assert_eq!(input["slug"], "ch02");
+    }
+
+    #[test]
+    fn build_preset_input_chapter10_label_is_not_triple_digit() {
+        let fields = chapter_work_fields(10, "epic-saga");
+        let input = build_preset_input(&fields);
+        assert_eq!(input["chapter"], 10);
+        assert_eq!(
+            input["chapter_label"], "10",
+            "chapter 10 label must be '10', not '010'"
+        );
+        assert_eq!(
+            input["outline_path"],
+            "Works/epic-saga/Outlines/chapters/ch10-outline.md"
+        );
+    }
+
+    #[test]
+    fn build_preset_input_chapter1_compat() {
+        let fields = chapter_work_fields(1, "my-novel");
+        let input = build_preset_input(&fields);
+        assert_eq!(input["chapter"], 1);
+        assert_eq!(input["chapter_label"], "01");
+        assert!(input["outline_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("ch01-outline.md"));
+        assert!(input["body_path"]
+            .as_str()
+            .unwrap()
+            .ends_with("ch01-ch01.md"));
+    }
+
+    #[test]
+    fn build_preset_input_omits_none_fields() {
+        let fields = WorkFields {
+            work_id: "wrk_minimal".to_string(),
+            fl_e_stage: "produce".to_string(),
+            creative_brief: "{}".to_string(),
+            inspiration_log: "[]".to_string(),
+            work_ref: None,
+            chapter: None,
+            chapter_label: None,
+            outline_path: None,
+            body_path: None,
+            slug: None,
+        };
+        let input = build_preset_input(&fields);
+        assert!(input.get("chapter").is_none());
+        assert!(input.get("chapter_label").is_none());
+        assert!(input.get("outline_path").is_none());
+        assert!(input.get("body_path").is_none());
+        assert!(input.get("slug").is_none());
+        // Base fields still present
+        assert!(input.get("work_id").is_some());
+        assert!(input.get("fl_e_stage").is_some());
+    }
+
+    #[test]
+    fn schedule_for_produce_chapter2_includes_all_context() {
+        let fields = chapter_work_fields(2, "cozy-mystery");
+        let req = build_schedule_for_stage("produce", "ctr_test", &fields)
+            .expect("produce should have a preset");
+        assert_eq!(req.preset_id, "novel-writing");
+
+        let input = req.input.expect("input should be set");
+        assert_eq!(input["chapter"], 2);
+        assert_eq!(input["chapter_label"], "02");
+        assert_eq!(
+            input["outline_path"],
+            "Works/cozy-mystery/Outlines/chapters/ch02-outline.md"
+        );
+        assert_eq!(
+            input["body_path"],
+            "Works/cozy-mystery/Stories/ch02-ch02.md"
+        );
+        assert_eq!(input["slug"], "ch02");
+
+        // Seed should also contain the chapter context
+        let seed: serde_json::Value = serde_json::from_str(&req.seed.unwrap()).unwrap();
+        assert_eq!(seed["chapter"], 2);
+        assert_eq!(seed["chapter_label"], "02");
+    }
+
+    #[test]
+    fn chapter_label_formats_zero_padded_for_1_to_99() {
+        assert_eq!(chapter_label(1), "01");
+        assert_eq!(chapter_label(9), "09");
+        assert_eq!(chapter_label(10), "10");
+        assert_eq!(chapter_label(99), "99");
+        assert_eq!(chapter_label(100), "100");
     }
 }
