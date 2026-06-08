@@ -1631,4 +1631,41 @@ mod tests {
         assert_eq!(updated.current_stage, "produce");
         assert_eq!(updated.stage_status, "active");
     }
+
+    /// Fix E (W-E): Verify the partial index for auto-chain boot resume exists
+    /// after migration. The index covers (auto_chain_enabled, auto_chain_interrupted,
+    /// status) with a partial WHERE clause for auto_chain_enabled = 1.
+    #[tokio::test]
+    async fn test_auto_chain_resume_index_exists() {
+        let (pool, _dir) = fresh_pool().await;
+
+        // Query sqlite_master to verify the index was created by the migration.
+        let index_sql: Option<String> = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master \
+             WHERE type = 'index' AND name = 'works_auto_chain_resume'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .flatten();
+
+        assert!(
+            index_sql.is_some(),
+            "Fix E: works_auto_chain_resume index should exist after migration"
+        );
+
+        let sql = index_sql.unwrap();
+        assert!(
+            sql.contains("auto_chain_enabled"),
+            "index should cover auto_chain_enabled: {sql}"
+        );
+        assert!(
+            sql.contains("auto_chain_interrupted"),
+            "index should cover auto_chain_interrupted: {sql}"
+        );
+        assert!(
+            sql.contains("status"),
+            "index should cover status: {sql}"
+        );
+    }
 }
