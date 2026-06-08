@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-08-v1.38-novel-writing-parameterization"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-08"
 ---
 
@@ -116,3 +116,59 @@ Two Warning-level findings remain unresolved:
 1. **W-1** (CLI silent degradation): When the daemon response lacks a `chapters` array or the selected chapter row is absent, `outline_path` and `body_path` become `None` and are silently omitted from preset input. Since both prompt templates declare these as `required: true`, template rendering will fail at runtime with no user-facing explanation. This is a regression from the pre-P1 state where `ch0{{chapter}}` always resolved from the numeric `chapter` field.
 
 2. **W-2** (duplicated label formatting): `chapter_label` computation is duplicated across CLI and orchestration with no shared source. If the format changes, both sites must be updated with no compile-time enforcement.
+
+## Revalidation (targeted re-review)
+
+### Reviewer Metadata
+- Reviewer: @qc-specialist
+- Runtime Agent ID: qc-specialist
+- Runtime Model: volcengine-plan/deepseek-v4-pro
+- Review Perspective: Architecture coherence and maintainability risk (targeted re-review)
+- Report Timestamp: 2026-06-08
+- Original verdict: Request Changes (initial tri-review)
+- Targeted findings to re-verify: W-1 (Warning), W-2 (Warning)
+
+### W-1 — Re-verdict
+- Status: ✅ Resolved
+- Evidence:
+  - `validate_produce_chapter_context()` defined at `crates/nexus42/src/commands/creator/run.rs:890-909` (commit `612b81d9`).
+  - Called at `run.rs:1042-1049` after `.and_then()` chain but before `WorkFields` construction.
+  - Error message: `"novel-writing schedule requires chapter context (outline_path, body_path).\nThe daemon response is missing chapters[] or the selected chapter row.\nHint: re-run \`nexus42 creator run status {work_id}\` to inspect,\nor re-seed the work via \`nexus42 creator run start --init-preset novel-project-init.\""` — includes remediation hint.
+  - Fires only when `target_stage=="produce" && next_chapter.is_some() && outline_path.is_none() && body_path.is_none()`.
+  - Does NOT fire when `next_chapter=None` (novel-completion) or for non-produce stages.
+  - 4 new tests (commit `612b81d9`): `stage_advance_produce_chapter_missing_chapter_array_returns_error`, `validate_produce_ok_when_chapter_context_present`, `validate_skips_when_next_chapter_is_none`, `validate_skips_for_non_produce_stage`.
+  - `cargo test -p nexus42 --lib -- stage_advance_produce validate_produce validate_skips`: **4/4 PASS**.
+  - `SQLX_OFFLINE=true cargo clippy -p nexus-local-db -p nexus-orchestration -p nexus-daemon-runtime -p nexus42 -- -D warnings`: **PASS**.
+- Notes: Fix is architecturally clean — fail-fast at CLI boundary with actionable error before template rendering. `next_chapter=None` (novel-completion) is correctly preserved as a latent residual (R-V138P1-01).
+
+### W-2 — Re-verdict
+- Status: ✅ Resolved
+- Evidence:
+  - `pub fn chapter_label(chapter: i32) -> String` defined at `crates/nexus-orchestration/src/stage_gates.rs:24-26` (commit `ba912fe1`).
+  - Used at `run.rs:1021` via `stage_gates::chapter_label(ch_num)` (imported at `run.rs:15`).
+  - Used at `stage_gates.rs:630` in test helper `chapter_work_fields()`.
+  - No remaining `format!("{:02}")` for chapter labels in `run.rs` (confirmed via grep).
+  - Unit test `chapter_label_formats_zero_padded_for_1_to_99` confirms 1→"01", 9→"09", 10→"10", 99→"99", 100→"100".
+  - `cargo test -p nexus-orchestration --lib stage_gates`: **38/38 PASS** (includes new test).
+  - `SQLX_OFFLINE=true cargo clippy -p nexus-local-db -p nexus-orchestration -p nexus-daemon-runtime -p nexus42 -- -D warnings`: **PASS**.
+- Notes: Single-authoritative formatting site in `stage_gates.rs`; both call sites import from it. Doc comment documents the format contract clearly.
+
+### Re-verdict Summary
+
+| Finding | Original Severity | Status |
+|---------|-------------------|--------|
+| W-1 | Warning | ✅ Resolved |
+| W-2 | Warning | ✅ Resolved |
+
+### Updated Verdict
+
+**Verdict**: Approve
+
+Rationale: Both targeted findings (W-1, W-2) are fully resolved with clean architectural fixes, adequate test coverage, and passing clippy. No new issues introduced. The original S-1, S-2, S-3 suggestions remain non-blocking and are unchanged from the initial review.
+
+Updated Severity Summary:
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 3 |
