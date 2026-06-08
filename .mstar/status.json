@@ -146,26 +146,26 @@
     "last_integration_branch": "iteration/v1.37",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.37",
-    "latest_shipped_at": "2026-06-08T22:30:00+08:00",
+    "latest_shipped_iteration": "v1.38",
+    "latest_shipped_at": "2026-06-09T00:30:00+08:00",
     "latest_active_iteration": "v1.38",
     "latest_active_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
     "integration_branch_retired": "iteration/v1.37 (V1.37 SHIPPED 2026-06-08 via PR #47; integration role handed off to iteration/v1.38 for active V1.38 prepare)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-08T22:30:00+08:00",
-      "total_open": 31,
+      "updated_at": "2026-06-09T00:30:00+08:00",
+      "total_open": 43,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 10,
-        "low": 18,
-        "nit": 6
+        "medium": 12,
+        "low": 21,
+        "nit": 10
       },
       "by_target": {
         "v1.37": 6,
-        "v1.36-p5": 2,
-        "backlog": 26
+        "backlog": 26,
+        "v1.38": 12
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -176,7 +176,10 @@
         "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
         "2026-06-04-v1.34-agent-tool-implementation": 1,
         "2026-06-07-v1.36-novel-artifact-layout-and-templates": 3,
-        "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2
+        "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2,
+        "2026-06-08-v1.38-harness-docs-prepare": 0,
+        "2026-06-08-v1.38-multi-chapter-selection-status": 5,
+        "2026-06-08-v1.38-novel-writing-parameterization": 7
       },
       "v1.36_added": {
         "P1": [
