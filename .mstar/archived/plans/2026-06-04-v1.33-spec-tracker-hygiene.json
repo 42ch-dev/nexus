@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "Archived pre-V1.37 plan per Profile B. Moved from status.json on V1.37 harness compaction.",
+  "plan_id": "2026-06-04-v1.33-spec-tracker-hygiene",
+  "title": "P5 — normative spec, tracker, harness hygiene (merge last)",
+  "done_at": "2026-06-04T18:00:00+08:00",
+  "archived_at": "2026-06-08T00:20:41+08:00",
+  "plan_file": ".mstar/plans/2026-06-04-v1.33-spec-tracker-hygiene.md",
+  "archived_record": ".mstar/archived/plans/2026-06-04-v1.33-spec-tracker-hygiene.json",
+  "snapshot": {
+    "id": "2026-06-04-v1.33-spec-tracker-hygiene",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-04-v1.33-spec-tracker-hygiene.md",
+    "working_branch": "feature/v1.33-spec-tracker-hygiene",
+    "merge_target": "feature/v1.33-work-experience-loop",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
+      "description": "P5 — normative spec, tracker, harness hygiene (merge last)",
+      "done_at": "2026-06-04T18:00:00+08:00",
+      "merge_commits": [
+        "e97f458 (P5 closeout)"
+      ]
+    }
+  },
+  "qc": "n/a",
+  "qa": "n/a",
+  "residual_count": 0,
+  "merge_commits": [
+    "e97f458 (P5 closeout)"
+  ],
+  "notes": "P5 — normative spec, tracker, harness hygiene (merge last)"
+}

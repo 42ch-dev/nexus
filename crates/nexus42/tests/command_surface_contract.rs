@@ -1211,3 +1211,62 @@ fn v136_start_help_mentions_auto_completion() {
         "V1.36 P4: creator run start --help must reference 'completed' Work status"
     );
 }
+
+// =============================================================================
+// Part N: V1.37 force-gates / gate-reason flags on `creator stage advance`
+// =============================================================================
+
+/// V1.37 T5/T6: `creator run stage advance --help` must surface `--force-gates` and
+/// `--gate-reason` flags.
+#[test]
+fn v137_stage_advance_has_force_gates_flags() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("run")
+        .arg("stage")
+        .arg("advance")
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--force-gates"),
+        "V1.37: 'creator run stage advance --help' must list --force-gates flag"
+    );
+    assert!(
+        help_text.contains("--gate-reason"),
+        "V1.37: 'creator run stage advance --help' must list --gate-reason flag"
+    );
+}
+
+/// V1.37 T5/T6: `creator run start --help` must surface `--force-gates` and
+/// `--reason` flags (these were added for the Start command in V1.37).
+#[test]
+fn v137_run_start_has_force_gates_flags() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .arg("creator")
+        .arg("run")
+        .arg("start")
+        .arg("--help")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--force-gates"),
+        "V1.37: 'creator run start --help' must list --force-gates flag"
+    );
+    assert!(
+        help_text.contains("--reason"),
+        "V1.37: 'creator run start --help' must list --reason flag"
+    );
+}

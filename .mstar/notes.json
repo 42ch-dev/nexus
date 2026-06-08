@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-04-20T00:00:00Z",
+  "updated_at": "2026-06-08",
   "entries": [
     {
       "updated_at": "2026-04-05",
@@ -181,6 +181,16 @@
     {
       "updated_at": "2026-05-26",
       "message": "V1.29 COMPLETE: Author Intelligence & Agent Hardening. 6 plans Done (FL-A1 session review, FL-A2 SOUL Experience, FL-A3 Stage0 delimiters, FL-B KB extract queue, Agent Host Batch 2, spec hygiene). 23 commits, 58 files, +3368/-305 lines. QC tri-review Approve, QA Pass with residuals (R14–R20 deferred to V1.30). FL-A/FL-B shipped; DF-21–23/27–28 closed; DF-35/36 partial; R11/R12/R13 closed. Integration branch merged to main. AGENTS.md merge discipline rule added (PR-only)."
+    },
+    {
+      "at": "2026-06-07",
+      "message": "V1.36 iteration plans archived per Profile B (6 Done rows removed from status.json.plans[]; snapshots in archived/plans/; catalog in archived/plans-done.json). V1.37 active.",
+      "plan_id": "2026-06-07-v1.37-harness-docs-prepare"
+    },
+    {
+      "at": "2026-06-08",
+      "message": "Pre-V1.37 plan compaction: archived 11 Done rows from status.json.plans[] (v1.33 + v1.35) to archived/plans/ per Profile B.",
+      "plan_id": "2026-06-07-v1.37-harness-docs-prepare"
     }
   ]
 }
