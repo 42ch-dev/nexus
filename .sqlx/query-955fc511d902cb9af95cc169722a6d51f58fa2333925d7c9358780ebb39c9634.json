@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO creator_schedules (schedule_id, creator_id, preset_id, preset_version, status, concurrency_kind, current_core_context_version, label, created_at, updated_at, work_id) VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "955fc511d902cb9af95cc169722a6d51f58fa2333925d7c9358780ebb39c9634"
+}
