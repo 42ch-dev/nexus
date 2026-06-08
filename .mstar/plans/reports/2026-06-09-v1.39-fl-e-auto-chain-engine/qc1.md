@@ -4,7 +4,7 @@ reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-09-v1.39-fl-e-auto-chain-engine"
 verdict: "Approve"
-generated_at: "2026-06-09"
+generated_at: "2026-06-09T19:30:00Z"
 ---
 
 # Code Review Report
@@ -15,6 +15,34 @@ generated_at: "2026-06-09"
 - Runtime Model: volcengine-plan/deepseek-v4-pro
 - Review Perspective: Architecture coherence and maintainability risk
 - Report Timestamp: 2026-06-09T18:00:00Z
+
+## Revalidation — W-A targeted re-review (initial wave: qc1, qc2, qc3; fix wave 2)
+
+- Reviewer (this re-review): @qc-specialist (qc-specialist)
+- Date: 2026-06-09T19:30:00Z
+- Scope of re-review: W-A only
+- Diff basis: 1e10e3ef..84db9a0e (7 commits, 7 files, +383 / -140)
+
+### W-A Re-review Finding: ✅ Resolved — helper extraction is solid
+
+The implementer extracted `auto_chain::enqueue_auto_chain_schedule(pool, creator_id, work_id, stage, chapter, work) -> Result<String, AutoChainError>` as the shared single-source-of-truth for ACH schedule ID minting, pending INSERT, and `set_driver`. Both caller sites delegate correctly:
+
+- **Boot path** (`boot.rs:600`): `resume_auto_chain_work` reduced from ~40 lines of duplicated logic to a single delegation call. The `chapter` parameter flows correctly from both `AdvanceStage` (None) and `NextChapter` (Some) branches.
+- **Supervisor path** (`supervisor.rs:474`): `enqueue_auto_chain_step` reduced from ~65 lines to delegation + error-type mapping. `InvalidState` → `Ok(())` (logged warning, preserves the old "no mapping → no-op" behavior). `Database` → `Err(SupervisorError::Database(...))` with proper sqlx error extraction.
+- **Helper signature** (`auto_chain.rs:325`): Well-shaped — `(pool, creator_id, work_id, stage, chapter, work)` — covers both current callers and is forward-compatible for future callers. The `chapter: Option<i32>` parameter is passed through to `build_auto_chain_schedule` and the tracing log, matching the old behavior exactly.
+- **Test coverage**: 2 new unit tests (`enqueue_helper_success_path`, `enqueue_helper_error_path_no_mapping`) verify the helper directly. The integration test `simulate_boot_auto_resume` was updated to use the shared helper instead of duplicating the logic. All 17 lib tests + 21 integration tests pass.
+- **Behavior preservation**: The old code and new code produce identical behavior — same schedule ID format (`ACH{timestamp}`), same INSERT SQL, same `set_driver` call, same tracing output. No behavior change in either path.
+
+**Verdict (W-A only): Approve** — the helper achieves single-source-of-truth, both caller sites delegate correctly, no behavior change, and the helper signature is well-shaped for future callers.
+
+### Verification Evidence (fix wave 2)
+
+```
+cargo clippy --all -- -D warnings  →  clean (0 warnings)
+cargo test -p nexus-orchestration --lib auto_chain  →  17 passed, 0 failed
+cargo test -p nexus-orchestration --test auto_chain  →  21 passed, 0 failed
+cargo +nightly fmt --all -- --check  →  clean (no output)
+```
 
 ## Scope
 - plan_id: 2026-06-09-v1.39-fl-e-auto-chain-engine
@@ -33,13 +61,14 @@ None.
 
 ### 🟡 Warning
 
-#### W-1: `resume_auto_chain_work` duplicates `enqueue_auto_chain_step` (~40 lines)
+#### W-1: `resume_auto_chain_work` duplicates `enqueue_auto_chain_step` (~40 lines) — **✅ RESOLVED in fix wave 2**
 
 - **File**: `crates/nexus-daemon-runtime/src/boot.rs:591-633` vs `crates/nexus-orchestration/src/schedule/supervisor.rs:463-531`
 - **Commit**: `e1766b07` (boot.rs) and `1cd73b31` (supervisor.rs)
 - **Issue**: The boot recovery helper `resume_auto_chain_work` is a near-identical copy of `ScheduleSupervisor::enqueue_auto_chain_step`. Both construct a schedule request via `build_auto_chain_schedule`, insert a pending schedule row, and call `set_driver`. The only difference is that the boot path runs before the supervisor is fully wired.
 - **Risk**: Future changes to the schedule insert logic (e.g., adding new columns, changing the schedule ID format, adding validation) must be applied in two places. This is a classic copy-paste maintenance hazard.
 - **Fix**: Extract the shared schedule-insert + set-driver logic into a public function in `auto_chain.rs` (e.g., `enqueue_auto_chain_schedule(pool, creator_id, work_id, stage, chapter, work) -> Result<String, AutoChainError>`) and call it from both the supervisor and the boot path. The boot path can then be reduced to calling this shared function.
+- **Resolution (fix wave 2, commit 6e505c06)**: Implementer extracted `auto_chain::enqueue_auto_chain_schedule` as the shared helper. Boot path reduced from ~40 lines to a single delegation. Supervisor path reduced from ~65 lines to delegation + error-type mapping. Both callers delegate correctly, no behavior change. See Revalidation block above for full analysis.
 
 #### W-2: Schedule ID uses `ACH{timestamp}` instead of ULID
 
@@ -96,7 +125,7 @@ None.
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 3 |
+| 🟡 Warning | 3 (W-1 resolved in fix wave 2; W-2, W-3 remain as deferred) |
 | 🟢 Suggestion | 3 |
 
 ### Architecture-Level Observations
@@ -105,7 +134,7 @@ None.
 
 2. **Good — Single FL-E driver invariant is correctly enforced.** The side-input gate in `append_inspiration` (works.rs:647-658) checks both `auto_chain_enabled` AND `driver_schedule_id.is_some()` before rejecting. The boot resume path and the supervisor terminal hook both respect the invariant — at most one active driver schedule per Work.
 
-3. **Concern — Code duplication between boot path and supervisor.** The `resume_auto_chain_work` helper in boot.rs is a near-copy of `enqueue_auto_chain_step` in supervisor.rs (W-1). This is the most actionable maintainability risk in the diff. Extracting the shared logic would reduce the duplication from ~40 lines to a single function call.
+3. **✅ Resolved — Code duplication between boot path and supervisor (W-1).** The `enqueue_auto_chain_schedule` helper extracted in fix wave 2 (commit `6e505c06`) is now the single source of truth for ACH schedule ID minting, pending INSERT, and `set_driver`. Both `boot.rs:resume_auto_chain_work` and `supervisor.rs:enqueue_auto_chain_step` delegate to it. The helper signature `(pool, creator_id, work_id, stage, chapter, work)` is well-shaped for future callers. This is good architecture.
 
 ### Acceptance Criteria Verification
 
