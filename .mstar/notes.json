@@ -1,7 +1,11 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-08",
+  "updated_at": "2026-06-08T22:45:00+08:00",
   "entries": [
+    {
+      "updated_at": "2026-06-08T22:45:00+08:00",
+      "message": "V1.37 Novel Writing Foundation SHIPPED (2026-06-08) via PR #47 → main. 5 plans archived under Profile B (snapshot files at .mstar/archived/plans/<plan-id>.json + minimal entries in .mstar/archived/plans-done.json; status.json.plans[] empty). P0 foundation-first: gate_evaluator + AddScheduleRequest.input + scaffold atomicity + --force-gates audit + novel-writing gates §5.3.2 — full implementation with QC tri-review + QA Approval (6/6 ACs, 981 tests, all CI gates clean). P1/P2/P3 spec/roadmap-only: multi-chapter chronology (DF-62), World KB continuity (DF-63), quality-loop backplane (DF-64/65/66/67) — single QC each, all Approve. Closed residuals: R-V136P1-01, R-V136P1-02, R-V136P3-02. Opened residual: R-V137P0-01 (serde strict-mode for misplaced YAML keys, low). Latest active compass: V1.37 (Shipped); next iteration (V1.38) TBD. Tracker/compass/iterations README/shipped archive all updated."
+    },
     {
       "updated_at": "2026-04-05",
       "message": "Phase 0 plans execute on main branch for initialization. V1.0-phase1+ plans require feature branches."
