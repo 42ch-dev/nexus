@@ -298,3 +298,69 @@ pub async fn count_open_findings_by_severity(
         })
         .collect())
 }
+
+/// Parameters for creating a finding from a review-stage result (T3 hook).
+///
+/// This is the **minimal path** signal source: the supervisor (or daemon
+/// API handler) extracts a structured verdict from the review stage's
+/// terminal output context and passes it here. The actual LLM-judge
+/// parsing is the caller's responsibility; this function just persists
+/// the finding.
+///
+/// ## Signal source (documented choice)
+///
+/// The chosen signal is the review schedule's **terminal context JSON**,
+/// which contains a `verdict` object with `severity`, `title`,
+/// `description`, and `target_executor` fields. The daemon API handler
+/// (or a future orchestration hook) is responsible for parsing this JSON
+/// and constructing a `ReviewVerdictFinding` — keeping the DB layer
+/// free of LLM output parsing.
+#[derive(Debug, Clone)]
+pub struct ReviewVerdictFinding {
+    /// Owning Work.
+    pub work_id: String,
+    /// Optional chapter (from review context).
+    pub chapter: Option<i64>,
+    /// Severity from LLM-judge verdict.
+    pub severity: String,
+    /// Short title from LLM-judge verdict.
+    pub title: String,
+    /// Detailed description from LLM-judge verdict.
+    pub description: String,
+    /// Routing hint from LLM-judge verdict.
+    pub target_executor: String,
+    /// Owning creator.
+    pub creator_id: String,
+}
+
+/// Create a finding from a review-stage verdict (T3 minimal path).
+///
+/// Generates a ULID `finding_id` and inserts the finding row. Errors are
+/// logged by the caller; findings creation must not fork or block the
+/// auto-chain driver schedule (AC4).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn create_finding_from_review(
+    pool: &SqlitePool,
+    verdict: &ReviewVerdictFinding,
+) -> Result<String, LocalDbError> {
+    let finding_id = format!("fnd_{}", uuid::Uuid::new_v4().simple());
+    let now = chrono::Utc::now().timestamp();
+    let f = Finding {
+        finding_id: finding_id.clone(),
+        work_id: verdict.work_id.clone(),
+        chapter: verdict.chapter,
+        severity: verdict.severity.clone(),
+        status: "open".to_string(),
+        title: verdict.title.clone(),
+        description: verdict.description.clone(),
+        target_executor: verdict.target_executor.clone(),
+        creator_id: verdict.creator_id.clone(),
+        created_at: now,
+        updated_at: now,
+    };
+    create_finding(pool, &f).await?;
+    Ok(finding_id)
+}
