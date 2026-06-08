@@ -1,6 +1,7 @@
 //! nexus-orchestration — engine adapter, capability registry, worker manager.
 //! Authoritative design: `.mstar/knowledge/specs/orchestration-engine.md`.
 
+pub mod auto_chain;
 pub mod capability;
 pub mod embedded_skills;
 pub mod engine;
