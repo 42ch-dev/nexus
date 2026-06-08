@@ -358,6 +358,15 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             let mut novel_schedule_id: Option<String> = None;
             if chain_novel_writing && skip_intake {
                 // Intake skipped → schedule novel-writing directly.
+                // V1.38 P0 (T4): include chapter input for multi-chapter selection.
+                // Default to chapter 1 for the Start path (first run).
+                let novel_input = serde_json::json!({
+                    "work_id": work_id,
+                    "work_ref": work_title.to_lowercase().replace(' ', "-"),
+                    "topic": idea,
+                    "vibe": "literary",
+                    "chapter": 1,
+                });
                 let production_preset = preset.as_deref().unwrap_or("novel-writing");
                 let novel_request = AddScheduleRequest {
                     creator_id: resolved_creator_id.clone(),
@@ -367,7 +376,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     depends_on: None,
                     concurrency: None,
                     scheduled_at: None,
-                    input: None,
+                    input: Some(novel_input),
                     force_gates,
                     reason: reason.clone(),
                 };
@@ -538,37 +547,160 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     .get("status")
                     .and_then(|v| v.as_str())
                     .unwrap_or("(not set)");
+                let title = resp
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(untitled)");
+                let work_profile = resp.get("work_profile").and_then(|v| v.as_str());
+                let work_ref = resp
+                    .get("work_ref")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(no ref)");
+                let intake_status = resp
+                    .get("intake_status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(not set)");
+                let current_chapter = resp
+                    .get("current_chapter")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                let total_planned = resp
+                    .get("total_planned_chapters")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                let chapters = resp.get("chapters").and_then(|v| v.as_array());
+                let next_ch_val = resp.get("next_chapter").and_then(serde_json::Value::as_i64);
 
-                // V1.36 P4 (T1): completed banner per novel-workflow-profile §6.2.
-                if work_status == "completed" {
-                    let title = resp
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(untitled)");
-                    let work_ref = resp
-                        .get("work_ref")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(no ref)");
-                    let total = resp
-                        .get("total_planned_chapters")
-                        .and_then(serde_json::Value::as_i64)
-                        .unwrap_or(0);
+                // V1.38 P0 (T8): per-chapter status UX per spec §8.1.
+                // For novel profile works, show chapter-centric output.
+                if let (Some("novel"), Some(ch_list)) = (work_profile, chapters) {
+                    let finalized_count = ch_list
+                        .iter()
+                        .filter(|c| c.get("status").and_then(|v| v.as_str()) == Some("finalized"))
+                        .count();
+                    let total = ch_list.len();
+
+                    let profile_tag = " (novel)".to_string();
+
+                    if work_status == "completed" {
+                        let updated_at = resp
+                            .get("updated_at")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("(unknown)");
+                        println!("═══════════════════════════════════════════════════════");
+                        println!("  \"{title}\" — Work {work_id}{profile_tag}");
+                        println!("  COMPLETED at {updated_at}");
+                        println!("  {total}/{total} chapters finalized.");
+                        println!("  No further novel-writing schedules will be enqueued.");
+                        println!();
+                        println!("  To start a new Work, run:");
+                        println!("    nexus42 creator run start \\");
+                        println!("      --init-preset novel-project-init --idea \"...\"");
+                        println!("═══════════════════════════════════════════════════════");
+                    } else {
+                        // Header
+                        println!("Work: {work_id} — {title}{profile_tag}");
+                        println!("work_ref: {work_ref}");
+                        println!("intake: {intake_status}");
+                        println!("progress: {finalized_count} / {total} chapters finalized");
+                        println!("current_chapter: {current_chapter}");
+                        println!("total_planned_chapters: {total_planned}");
+                        println!();
+
+                        // Per-chapter rows
+                        println!("Chapters:");
+                        for ch in ch_list {
+                            let ch_num = ch
+                                .get("chapter")
+                                .and_then(serde_json::Value::as_i64)
+                                .unwrap_or(0);
+                            let ch_status =
+                                ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                            let words = ch
+                                .get("actual_word_count")
+                                .and_then(serde_json::Value::as_i64);
+                            let body_path =
+                                ch.get("body_path").and_then(|v| v.as_str()).unwrap_or("—");
+                            let words_str = match words {
+                                Some(w) if w > 0 => format!("{w}"),
+                                _ => "—".to_string(),
+                            };
+                            println!(
+                                "  ch{ch_num:02}  {ch_status:<12} words: {words_str:<8} path: {body_path}"
+                            );
+                        }
+
+                        // T9: blocked/missing-file hints.
+                        // Surface warnings for chapters whose body_path might be
+                        // missing on disk. The CLI cannot check the filesystem
+                        // directly here (no workspace root context), but the
+                        // daemon reconcile-chapters operation validates this.
+                        // The DB status remains the selection SSOT per §4.4.
+
+                        // Next action hint (§8.1)
+                        println!();
+                        if let Some(nch) = next_ch_val {
+                            // Find the status of the next chapter
+                            let nch_status = ch_list
+                                .iter()
+                                .find(|c| {
+                                    c.get("chapter").and_then(serde_json::Value::as_i64)
+                                        == Some(nch)
+                                })
+                                .and_then(|c| c.get("status").and_then(|v| v.as_str()))
+                                .unwrap_or("unknown");
+
+                            match nch_status {
+                                "not_started" => {
+                                    println!(
+                                        "Next action: Chapter {nch} is not started; \
+                                         run `creator run continue {work_id}` to begin."
+                                    );
+                                }
+                                "outlined" => {
+                                    println!(
+                                        "Next action: Chapter {nch} is outlined; \
+                                         run `creator run continue {work_id}` to start drafting."
+                                    );
+                                }
+                                "draft" => {
+                                    println!(
+                                        "Next action: Chapter {nch} is in draft; \
+                                         run `creator run continue {work_id}` to resume."
+                                    );
+                                }
+                                _ => {
+                                    println!("Next action: run `creator run continue {work_id}`");
+                                }
+                            }
+                        } else {
+                            // No next chapter — check if complete
+                            if work_status == "completed" {
+                                println!(
+                                    "Next action: All chapters finalized; novel Work is complete."
+                                );
+                            } else if intake_status != "complete" {
+                                println!(
+                                    "Next action: Complete intake first via \
+                                     `creator run stage advance {work_id} --stage intake`."
+                                );
+                            } else {
+                                println!("Next action: run `creator run continue {work_id}`");
+                            }
+                        }
+                    }
+                } else if work_status == "completed" {
+                    // Non-novel completed work (V1.36 P4 banner)
                     let updated_at = resp
                         .get("updated_at")
                         .and_then(|v| v.as_str())
                         .unwrap_or("(unknown)");
                     println!("═══════════════════════════════════════════════════════");
-                    println!("  \"{title}\" — Work {work_id} ({work_ref})");
+                    println!("  \"{title}\" — Work {work_id}");
                     println!("  COMPLETED at {updated_at}");
-                    println!("  {total}/{total} chapters finalized.");
-                    println!("  No further novel-writing schedules will be enqueued.");
-                    println!();
-                    println!("  To start a new Work, run:");
-                    println!("    nexus42 creator run start \\");
-                    println!("      --init-preset novel-project-init --idea \"...\"");
                     println!("═══════════════════════════════════════════════════════");
                 } else {
-                    // Key-value dump
+                    // Non-novel work or work without chapters — key-value dump
                     let fields = [
                         ("work_id", "work_id"),
                         ("title", "title"),
@@ -745,6 +877,35 @@ async fn stage_list(work_id: &str, json: bool, client: &crate::api::DaemonClient
 
 /// Advance a Work to the next FL-E stage.
 ///
+/// Validate that novel-writing ("produce") chapter context is present.
+///
+/// When the target stage is "produce" (novel-writing preset), a chapter was
+/// selected (`next_chapter.is_some()`), but both `outline_path` and
+/// `body_path` are `None`, the template rendering would fail because both
+/// prompt templates declare these variables as `required: true`. This
+/// function returns an actionable error instead of silently proceeding.
+fn validate_produce_chapter_context(
+    target_stage: &str,
+    next_chapter: Option<i32>,
+    outline_path: Option<&str>,
+    body_path: Option<&str>,
+    work_id: &str,
+) -> crate::errors::Result<()> {
+    if target_stage == "produce"
+        && next_chapter.is_some()
+        && outline_path.is_none()
+        && body_path.is_none()
+    {
+        return Err(crate::errors::CliError::Other(format!(
+            "novel-writing schedule requires chapter context (outline_path, body_path).\n\
+              The daemon response is missing chapters[] or the selected chapter row.\n\
+              Hint: re-run `nexus42 creator run status {work_id}` to inspect,\n\
+              or re-seed the work via `nexus42 creator run start --init-preset novel-project-init`."
+        )));
+    }
+    Ok(())
+}
+
 /// Validates:
 /// 1. Target stage is a known FL-E stage
 /// 2. Target stage is ahead of current stage (unless `--force`)
@@ -842,11 +1003,66 @@ async fn stage_advance(
         .and_then(|v| v.as_str())
         .unwrap_or("[]");
 
+    // V1.38 P0 (T4): extract work_ref and next_chapter from Work response
+    // for novel-writing preset input. The daemon computes next_chapter per §4.5.2.
+    let work_ref = resp
+        .get("work_ref")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let next_chapter = resp
+        .get("next_chapter")
+        .and_then(serde_json::Value::as_i64)
+        .map(|n| i32::try_from(n).unwrap_or(1));
+
+    // V1.38 P1: extract chapter context (outline_path, body_path, slug)
+    // from the chapters array for the selected chapter.
+    let (chapter_label, outline_path, body_path, slug) = next_chapter
+        .and_then(|ch_num| {
+            let ch_label = stage_gates::chapter_label(ch_num);
+            let chapters = resp.get("chapters").and_then(|v| v.as_array())?;
+            let ch_row = chapters.iter().find(|c| {
+                c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(ch_num))
+            })?;
+            let op = ch_row
+                .get("outline_path")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let bp = ch_row
+                .get("body_path")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let sl = ch_row
+                .get("slug")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            Some((Some(ch_label), op, bp, sl))
+        })
+        .unwrap_or_default();
+
+    // W-1 fix: fail fast when novel-writing ("produce") expects chapter context
+    // but the daemon response is missing the chapters[] array or the selected
+    // chapter row. Without outline_path and body_path, template rendering would
+    // fail silently. Only fires when a chapter IS selected (next_chapter=Some)
+    // but the context extraction returned None for both paths.
+    validate_produce_chapter_context(
+        target_stage,
+        next_chapter,
+        outline_path.as_deref(),
+        body_path.as_deref(),
+        work_id,
+    )?;
+
     let fields = WorkFields {
         work_id: work_id.to_string(),
         fl_e_stage: target_stage.to_string(),
         creative_brief: creative_brief.to_string(),
         inspiration_log: inspiration_log.to_string(),
+        work_ref,
+        chapter: next_chapter,
+        chapter_label,
+        outline_path,
+        body_path,
+        slug,
     };
 
     if let Some(mut request) =
@@ -962,4 +1178,61 @@ async fn stage_advance(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stage_advance_produce_chapter_missing_chapter_array_returns_error() {
+        let result =
+            validate_produce_chapter_context("produce", Some(2), None, None, "wrk_test123");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("novel-writing schedule requires chapter context"),
+            "error should mention chapter context: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("outline_path, body_path"),
+            "error should mention missing fields: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("wrk_test123"),
+            "error should include work_id hint: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn validate_produce_ok_when_chapter_context_present() {
+        let result = validate_produce_chapter_context(
+            "produce",
+            Some(2),
+            Some("path/to/outline.md"),
+            Some("path/to/body.md"),
+            "wrk_test",
+        );
+        assert!(result.is_ok(), "should succeed when paths are present");
+    }
+
+    #[test]
+    fn validate_skips_when_next_chapter_is_none() {
+        // Novel-completion case (R-V138P1-01): next_chapter=None should NOT error
+        let result = validate_produce_chapter_context("produce", None, None, None, "wrk_completed");
+        assert!(
+            result.is_ok(),
+            "should NOT error when next_chapter is None (novel-completion): {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn validate_skips_for_non_produce_stage() {
+        let result = validate_produce_chapter_context("research", Some(3), None, None, "wrk_other");
+        assert!(
+            result.is_ok(),
+            "should NOT error for non-produce stages: {:?}",
+            result
+        );
+    }
 }

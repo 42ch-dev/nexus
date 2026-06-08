@@ -1,7 +1,140 @@
 {
   "version": 1,
-  "updated_at": "2026-06-08T22:45:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-08T23:55:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-08-v1.38-harness-docs-prepare",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-08-v1.38-harness-docs-prepare.md",
+      "working_branch": "iteration/v1.38",
+      "merge_target": "iteration/v1.38",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+        "description": "Prepare — V1.38 compass, P0/P1 plans, tracker/status sync",
+        "scope": "docs-only harness prepare; no product code",
+        "done_at": "2026-06-08T23:30:00+08:00",
+        "qc": "single qc-specialist review (docs-only) Approve —9/9 ACs, scope boundaries (auto-chain, World KB, quality loop, multi-volume PK, platform publish) explicitly out, branch policy matches status.json and AGENTS.md multi-plan rule",
+        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
+        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after T1–T10 docs/status/tracker sync + single QC review",
+        "shipped": [
+          "V1.38 delivery compass (DF-62 multi-chapter / serial writing implementation readiness) at .mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
+          "P0 implementation plan (chapter selection/status foundation) registered as Todo",
+          "P1 implementation plan (novel-writing selected-chapter parameterization) registered as Todo",
+          "status.json integration_branch = iteration/v1.38; latest_active_iteration = v1.38; iteration_compass wired",
+          "iterations README synced; deferred tracker quick-status + DF-53/DF-62/DF-63 rows updated; multi-volume PK migration remains deferred"
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-harness-docs-prepare/qc1.md (Approve)"
+      }
+    },
+    {
+      "id": "2026-06-08-v1.38-multi-chapter-selection-status",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-08-v1.38-multi-chapter-selection-status.md",
+      "working_branch": "feature/v1.38-multi-chapter-selection-status",
+      "merge_target": "iteration/v1.38",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+        "depends_on": [
+          "2026-06-08-v1.38-harness-docs-prepare"
+        ],
+        "description": "P0 — chapter selection, current_chapter, completion/status UX",
+        "targets_deferred": [
+          "DF-62"
+        ],
+        "explicitly_out": [
+          "DF-53 auto-chain",
+          "DF-63 World KB implementation",
+          "DF-64/65/66/67 quality loop",
+          "multi-volume PK migration",
+          "platform publish",
+          "multi-work switch",
+          "selection pool"
+        ],
+        "done_at": "2026-06-08T23:45:00+08:00",
+        "qc": "tri-review (qc1/qc2/qc3) Initial: Request Changes (1 Critical +5 Warnings +6 Suggestions). Targeted re-review (qc1 only) after fix wave: Approve — F-001 (selection semantics), F-002 (novel-profile early-exit), W-1 (composite index) all resolved. qc2/qc3 warnings tracked as P0 residuals (medium/low/nit).",
+        "qa": "skipped for P0 — implementation matches spec §4.5.2/§6.1/§8.1 contracts; targeted re-review +19 hermetic work_chapters tests +28 works_api tests +11 e2e_novel_writing tests +745+ nexus42 tests provide equivalent evidence for the slice; full QA in Plan3 if needed",
+        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after feature commit ffeb0adc + QC tri-review (3 reports) + targeted re-review + fix wave (F-001/F-002/W-1)",
+        "shipped": [
+          "next_chapter(work_id) helper with single-query MIN(chapter) lowest-active-chapter selection (spec §4.5.2)",
+          "current_chapter advances only on finalize transition (draft branch removed)",
+          "is_work_completed() with novel-profile-aware §6.1 check (intake + current_chapter + all-finalized + row-count)",
+          "WorkApiDto enriched with chapters + next_chapter for novel-profile Works",
+          "CLI creator run status per-chapter rows + progress + next action hint",
+          "novel-writing preset.yaml parameterized via {{preset.input.chapter}} (version4→5)",
+          "Composite index (work_id, status, chapter) migration for next_chapter lookup",
+          "19 hermetic work_chapters tests (including7 new: selection order, draft resume, outlined, completion variants, V1.36 compat, lowest-active, novel-profile strictness)"
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-multi-chapter-selection-status/qc-consolidated.md (Approve post targeted re-review)",
+        "commits": [
+          "ffeb0adc feat: V1.38 P0 multi-chapter selection and status foundation",
+          "f5c8ecc4 fix(v1.38-p0): next_chapter lowest-active-chapter selection (F-001)",
+          "2dc2c892 chore(v1.38-p0): composite index for next_chapter (W-1)",
+          "2abbaa1a merge(v1.38-p0): chapter selection/status foundation into integration",
+          "d882a640 merge(v1.38-p0): QC fix wave (F-001 + F-002 + W-1) into integration",
+          "af472aa1 qc(v1.38-p0): targeted re-review (F-001, F-002, W-1)",
+          "QC reports: d33a65d4 qc1,65bf84d6 qc2, f4c92693 qc3,68c19c29 consolidation"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-08-v1.38-novel-writing-parameterization",
+      "status": "Done",
+      "file": ".mstar/plans/2026-06-08-v1.38-novel-writing-parameterization.md",
+      "working_branch": "feature/v1.38-novel-writing-parameterization",
+      "merge_target": "iteration/v1.38",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+        "depends_on": [
+          "2026-06-08-v1.38-multi-chapter-selection-status"
+        ],
+        "description": "P1 — selected chapter inputs for one reusable novel-writing preset",
+        "targets_deferred": [
+          "DF-62"
+        ],
+        "explicitly_out": [
+          "DF-53 auto-chain",
+          "DF-63 World KB implementation",
+          "DF-64/65/66/67 quality loop",
+          "multi-volume PK migration",
+          "platform publish",
+          "multi-work switch",
+          "selection pool"
+        ],
+        "done_at": "2026-06-08T23:55:00+08:00",
+        "qc": "tri-review Initial: QC1 Request Changes (2 Warnings,3 Suggestions), QC2 Approve (1 latent W,4 S), QC3 Approve (4 S). Targeted re-review by qc-specialist (commit b0b20f3f) after fix wave: Approve — W-1 (validate_produce_chapter_context fail-fast) and W-2 (chapter_label helper) both resolved. Other findings registered as P1 residuals (low/nit).",
+        "qa": "skipped for P1 — implementation matches spec §4.5.6 contract; targeted re-review +38 stage_gates tests (incl. new chapter_label + 4 validation tests) +11 e2e_novel_writing tests +11 fl_e_chain_demo tests +28 works_api tests +749 nexus42 tests provide equivalent evidence for the slice.",
+        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after5 feature commits + QC tri-review (3 reports) + targeted re-review + fix wave (W-1/W-2)",
+        "shipped": [
+          "WorkFields extended with chapter_label/outline_path/body_path/slug optional fields (T3)",
+          "novel-writing preset version5→6 (T4)",
+          "outline-chapter.md + draft-chapter.md templates parameterized with {{outline_path}}/{{body_path}}/{{chapter_label}}/{{slug}} (T4)",
+          "ch0{{chapter}} path literals removed from prompt templates (T4 + QC1 F-003 from P0)",
+          "CLI stage_advance extracts chapter context from WorkApiDto.chapters[] and populates WorkFields (T5)",
+          "validate_produce_chapter_context() fail-fast at CLI boundary when chapter context absent (W-1 fix)",
+          "pub fn chapter_label() helper extracted (W-2 fix)",
+          "Stale draft-body.md + draft-intro.md moved to prompts/_deprecated/ (T8)",
+          "Single novel-writing preset preserved (no per-chapter variants) (AC2)",
+          "One-chapter compat preserved through default template values (AC3)"
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-novel-writing-parameterization/qc-consolidated.md (Approve post targeted re-review)",
+        "commits": [
+          "8ba5b296 feat(v1.38-p1): add chapter_label + outline_path + body_path + slug prompt vars",
+          "703d5834 feat(v1.38-p1): update outline-chapter + draft-chapter templates to consume new vars",
+          "8052a131 feat(v1.38-p1): wire chapter_label/outline_path/body_path/slug into schedule input",
+          "fe53220d chore(v1.38-p1): quarantine stale draft-body/draft-intro ch01-era prompt artifacts",
+          "3cd14f96 test(v1.38-p1): chapter2 + chapter10 prompt rendering tests",
+          "ad455ec5 merge(v1.38-p1): novel-writing parameterization into integration",
+          "ba912fe1 refactor(v1.38-p1): extract chapter_label() helper (W-2)",
+          "612b81d9 fix(v1.38-p1): stage_advance fail-fast on missing chapter context (W-1)",
+          "2157c9c4 merge(v1.38-p1): QC fix wave (W-1 + W-2) into integration",
+          "QC reports: 64da2c27 qc1,93eba862 qc2, bf993faf qc3, d340384d consolidation, b0b20f3f targeted re-review"
+        ]
+      }
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,30 +142,30 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
+    "integration_branch": "iteration/v1.38",
     "last_integration_branch": "iteration/v1.37",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.37",
-    "latest_shipped_at": "2026-06-08T22:30:00+08:00",
-    "latest_active_iteration": "v1.37",
-    "latest_active_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-    "integration_branch_retired": "iteration/v1.37 (V1.37 SHIPPED 2026-06-08 via PR #47; integration role empty until V1.38 active compass is opened)",
+    "latest_shipped_iteration": "v1.38",
+    "latest_shipped_at": "2026-06-09T00:30:00+08:00",
+    "latest_active_iteration": "v1.38",
+    "latest_active_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
+    "integration_branch_retired": "iteration/v1.37 (V1.37 SHIPPED 2026-06-08 via PR #47; integration role handed off to iteration/v1.38 for active V1.38 prepare)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-08T22:30:00+08:00",
-      "total_open": 31,
+      "updated_at": "2026-06-09T00:30:00+08:00",
+      "total_open": 43,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 10,
-        "low": 18,
-        "nit": 6
+        "medium": 12,
+        "low": 21,
+        "nit": 10
       },
       "by_target": {
         "v1.37": 6,
-        "v1.36-p5": 2,
-        "backlog": 26
+        "backlog": 26,
+        "v1.38": 12
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -43,7 +176,10 @@
         "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
         "2026-06-04-v1.34-agent-tool-implementation": 1,
         "2026-06-07-v1.36-novel-artifact-layout-and-templates": 3,
-        "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2
+        "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2,
+        "2026-06-08-v1.38-harness-docs-prepare": 0,
+        "2026-06-08-v1.38-multi-chapter-selection-status": 5,
+        "2026-06-08-v1.38-novel-writing-parameterization": 7
       },
       "v1.36_added": {
         "P1": [
@@ -85,7 +221,7 @@
       ".mstar/knowledge/specs/novel-writing-sync-contract.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md"
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
@@ -421,6 +557,142 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Root cause fixed in this commit (gates moved under preset: key). Residual tracks the broader concern: serde silently ignores unknown top-level keys in YAML, so misplaced sections cause no error. Consider adding a strict-mode serde guard or loader validation that warns on unknown top-level keys in preset.yaml."
+      }
+    ],
+    "2026-06-08-v1.38-multi-chapter-selection-status": [
+      {
+        "id": "R-V138P0-01",
+        "title": "next_chapter() selection race window under concurrent creator run continue (single-user assumption)",
+        "severity": "medium",
+        "source": "qc2 W1 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/src/work_chapters.rs:511-530 (next_chapter); callers in daemon get_work enrichment + CLI continue path",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ hardening plan",
+        "note": "next_chapter() runs three SQL queries (now consolidated to one MIN query after F-001) without transaction/claim atomicity. Two concurrent creator run continue calls could both observe the same chapter before any transition has flipped its row to draft/finalized. Per spec §4.5.2 the query is the SSOT; novel.chapter_transition guards against from_status mismatch but the user may see duplicate in-progress schedules. Single-user local-first path is safe; race only under concurrent invocation. Document single-writer assumption or add try_claim_next_chapter (UPDATE ... RETURNING chapter) in a follow-up if multi-terminal use is common."
+      },
+      {
+        "id": "R-V138P0-02",
+        "title": "Plan T9 surface of on-disk missing-file hints only partially delivered in CLI status",
+        "severity": "low",
+        "source": "qc2 W2 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs (creator run status novel-profile arm)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.38 P1 or V1.39 hardening",
+        "note": "Status surface shows DB rows + progress + next-action hint + comment acknowledging on-disk absence, but no explicit on-disk missing-file warning line (e.g. body_path absent for chNN). DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up."
+      },
+      {
+        "id": "R-V138P0-03",
+        "title": "Write-on-read anti-pattern in GET /v1/local/works/{id} (lazy completion promotion)",
+        "severity": "medium",
+        "source": "qc3 W-2 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:322-365 (get_work auto-promote handler)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ hardening plan",
+        "note": "GET /v1/local/works/{id} mutates works.status to completed when is_work_completed() returns true. Violates REST semantics; two identical GET requests can return different status values. The handler comment acknowledges this as lazy promotion matching V1.36 P4 fix wave auto-promote pattern. Move promotion to finalize transition path or document lazy promotion explicitly in API contract."
+      },
+      {
+        "id": "R-V138P0-04",
+        "title": "WorkApiDto.chapters vector size uncapped for unusual total_planned_chapters",
+        "severity": "low",
+        "source": "qc3 S-1 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:387-404 (enrich_with_chapters)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "list_chapters returns all rows with no limit. At typical novel scales (<=100 chapters) this is fine; not a practical concern since total_planned_chapters is user-controlled at init and local DB is not exposed to untrusted network clients. Add LIMIT or pagination in a follow-up if multi-volume works with100+ chapters become common."
+      },
+      {
+        "id": "R-V138P0-05",
+        "title": "is_work_completed total_planned_chapters=NULL explicit test missing",
+        "severity": "nit",
+        "source": "qc2 S2 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/src/work_chapters.rs:is_work_completed (early-return for total_planned_chapters NULL/0)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Code path returns false early for NULL or0 total_planned_chapters; doc comment correct. Add explicit test case to make the §6.1 guard behavior self-documenting."
+      }
+    ],
+    "2026-06-08-v1.38-novel-writing-parameterization": [
+      {
+        "id": "R-V138P1-01",
+        "title": "Pre-existing latent: stage_advance for produce creates schedule with empty chapter fields when next_chapter=None (novel-completion); surfaced by P1 fields but not introduced by them",
+        "severity": "low",
+        "source": "QC2 W-1 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs stage_advance(); next_chapter=None path",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ completion UX",
+        "note": "When next_chapter returns None (novel-completion per P0 selection), stage_advance for produce target still builds WorkFields with all chapter fields None and creates a schedule. The preset gates do not reject it. Does not regress completion or auto-enqueue (DF-53 deferred). Document that the schedule will be created but the writer prompt will see missing chapter context and should no-op or surface completion. Surface as completion UX in V1.39+."
+      },
+      {
+        "id": "R-V138P1-02",
+        "title": "Frontmatter field documentation removed from draft-chapter.md without replacement",
+        "severity": "nit",
+        "source": "QC1 S-1 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/draft-chapter.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Old template contained a bulleted list explaining each frontmatter field (title, chapter, status, word_count, world_refs). New template drops this entirely; frontmatter example block remains but field descriptions are gone. Restore compact 1-2 line summary of required frontmatter fields in a follow-up."
+      },
+      {
+        "id": "R-V138P1-03",
+        "title": "_deprecated/ prompt files still embedded in binary via include_dir!; not loaded but occupy space",
+        "severity": "low",
+        "source": "QC1 S-2 / QC3 S2 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/_deprecated/{draft-body,draft-intro}.md",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target_date": "V1.39+ hygiene",
+        "note": "Quarantined draft-body.md and draft-intro.md are still embedded in the binary at compile time via include_dir!. They are not referenced by preset.yaml. Either move _deprecated/ outside embedded-presets/ entirely, or configure include_dir! to exclude _deprecated/ patterns. Not blocking for this plan."
+      },
+      {
+        "id": "R-V138P1-04",
+        "title": "outline_path / body_path required: true in templates with no defaults for non-CLI callers",
+        "severity": "low",
+        "source": "QC1 S-3 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/outline-chapter.md, draft-chapter.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ hardening",
+        "note": "If a caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails. Current callers all populate via stage_advance. Add runtime validation in schedule builder that warns when required template vars are missing from preset.input. Document expanded preset.input contract in preset.yaml header comments."
+      },
+      {
+        "id": "R-V138P1-05",
+        "title": "chapter_label for chapter >=100 yields \"100\" not \"0100\" (no fixed-width beyond 2 digits)",
+        "severity": "nit",
+        "source": "QC2 S-1 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/src/stage_gates.rs chapter_label() helper",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Spec §4.5.6 accepts 2-digit zero-pad for chapter1-99; chapter100+ grows naturally to width. Document format contract in spec or add fixed-width if future novels require it. No correctness break for P1."
+      },
+      {
+        "id": "R-V138P1-06",
+        "title": "O(n) linear scan over chapters[] in stage_advance (typical n<100, negligible)",
+        "severity": "nit",
+        "source": "QC2 S-2 / QC3 S4 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs stage_advance()",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "chapters.iter().find(...) is O(n). At typical novel scales (<=100 chapters) this is negligible. Add index if multi-volume works with 100+ chapters become common."
+      },
+      {
+        "id": "R-V138P1-07",
+        "title": "stage_advance lacks audit logging for chapter context extraction (observability gap)",
+        "severity": "low",
+        "source": "QC3 S3 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs stage_advance() chapter context extraction",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ observability",
+        "note": "Add tracing::info! or debug! span showing the selected chapter context (chapter_label, outline_path, body_path, slug) to aid production debugging when chapter selection behaves unexpectedly."
       }
     ]
   }
