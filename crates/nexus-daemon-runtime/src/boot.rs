@@ -242,10 +242,14 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                         .await;
 
                         if let Ok(Some(latest)) = fresh {
-                            let action = nexus_orchestration::auto_chain::evaluate_next_step(&latest);
+                            let action =
+                                nexus_orchestration::auto_chain::evaluate_next_step(&latest);
 
                             match action {
-                                nexus_orchestration::auto_chain::ChainAction::AdvanceStage { ref work_id, ref next_stage } => {
+                                nexus_orchestration::auto_chain::ChainAction::AdvanceStage {
+                                    ref work_id,
+                                    ref next_stage,
+                                } => {
                                     match resume_auto_chain_work(
                                         recovery_pool,
                                         &latest.creator_id,
@@ -253,7 +257,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         next_stage,
                                         None,
                                         &latest,
-                                    ).await {
+                                    )
+                                    .await
+                                    {
                                         Ok(sid) => tracing::info!(
                                             work_id = %work_id,
                                             stage = %next_stage,
@@ -267,7 +273,10 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         ),
                                     }
                                 }
-                                nexus_orchestration::auto_chain::ChainAction::NextChapter { ref work_id, ref next_chapter } => {
+                                nexus_orchestration::auto_chain::ChainAction::NextChapter {
+                                    ref work_id,
+                                    ref next_chapter,
+                                } => {
                                     match resume_auto_chain_work(
                                         recovery_pool,
                                         &latest.creator_id,
@@ -275,7 +284,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         "produce",
                                         Some(*next_chapter),
                                         &latest,
-                                    ).await {
+                                    )
+                                    .await
+                                    {
                                         Ok(sid) => tracing::info!(
                                             work_id = %work_id,
                                             chapter = *next_chapter,
@@ -289,10 +300,16 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         ),
                                     }
                                 }
-                                nexus_orchestration::auto_chain::ChainAction::WorkComplete { ref work_id } => {
+                                nexus_orchestration::auto_chain::ChainAction::WorkComplete {
+                                    ref work_id,
+                                } => {
                                     match nexus_orchestration::auto_chain::mark_work_completed(
-                                        recovery_pool, &latest.creator_id, work_id,
-                                    ).await {
+                                        recovery_pool,
+                                        &latest.creator_id,
+                                        work_id,
+                                    )
+                                    .await
+                                    {
                                         Ok(_) => tracing::info!(
                                             work_id = %work_id,
                                             "auto-chain boot resume: work completed"
@@ -608,11 +625,9 @@ async fn resume_auto_chain_work(
     .map_err(|e| format!("failed to insert schedule: {e}"))?;
 
     // Update the Work checkpoint
-    nexus_orchestration::auto_chain::set_driver(
-        pool, creator_id, work_id, &schedule_id, stage,
-    )
-    .await
-    .map_err(|e| format!("failed to set driver: {e}"))?;
+    nexus_orchestration::auto_chain::set_driver(pool, creator_id, work_id, &schedule_id, stage)
+        .await
+        .map_err(|e| format!("failed to set driver: {e}"))?;
 
     Ok(schedule_id)
 }

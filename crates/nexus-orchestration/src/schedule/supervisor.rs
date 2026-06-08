@@ -380,19 +380,19 @@ impl ScheduleSupervisor {
         }
 
         // Read latest WorkRecord from DB (SSOT, not cached state)
-        let work = match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await
-        {
-            Ok(Some(w)) => w,
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(
-                    work_id = %work.work_id,
-                    error = %e,
-                    "auto-chain: failed to reload work record"
-                );
-                return;
-            }
-        };
+        let work =
+            match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await {
+                Ok(Some(w)) => w,
+                Ok(None) => return,
+                Err(e) => {
+                    tracing::warn!(
+                        work_id = %work.work_id,
+                        error = %e,
+                        "auto-chain: failed to reload work record"
+                    );
+                    return;
+                }
+            };
 
         let action = auto_chain::evaluate_next_step(&work);
         match action {
@@ -401,13 +401,7 @@ impl ScheduleSupervisor {
                 ref next_stage,
             } => {
                 if let Err(e) = self
-                    .enqueue_auto_chain_step(
-                        creator_id,
-                        work_id,
-                        next_stage,
-                        None,
-                        &work,
-                    )
+                    .enqueue_auto_chain_step(creator_id, work_id, next_stage, None, &work)
                     .await
                 {
                     tracing::warn!(
@@ -476,8 +470,7 @@ impl ScheduleSupervisor {
     ) -> Result<(), SupervisorError> {
         use crate::auto_chain;
 
-        let schedule_req =
-            auto_chain::build_auto_chain_schedule(stage, creator_id, work, chapter);
+        let schedule_req = auto_chain::build_auto_chain_schedule(stage, creator_id, work, chapter);
 
         let Some(req) = schedule_req else {
             tracing::warn!(
