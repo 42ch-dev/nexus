@@ -24,3 +24,6 @@ CREATE INDEX IF NOT EXISTS idx_findings_work_status
     ON findings(work_id, status);
 CREATE INDEX IF NOT EXISTS idx_findings_creator_status
     ON findings(creator_id, status);
+-- Per novel-quality-loop.md §2.1: chapter-scoped lookups (review-stage hook hot path)
+CREATE INDEX IF NOT EXISTS idx_findings_work_chapter_status
+    ON findings(work_id, chapter, status);
