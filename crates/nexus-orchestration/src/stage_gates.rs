@@ -11,6 +11,20 @@
 use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
+/// Format a chapter number as a zero-padded label for path construction.
+///
+/// - `chapter_label(1) == "01"`
+/// - `chapter_label(9) == "09"`
+/// - `chapter_label(10) == "10"`
+/// - `chapter_label(100) == "100"` (2-digit pad for 1-99, then grows naturally)
+///
+/// Spec §4.5.6 accepts 2-digit zero-pad for chapter 1-99; future iterations
+/// may tighten to fixed-width if novels require it.
+#[must_use]
+pub fn chapter_label(chapter: i32) -> String {
+    format!("{chapter:02}")
+}
+
 /// Normative stage → default preset mapping (spec §4).
 ///
 /// Returns the canonical preset ID for a given FL-E stage.
@@ -613,7 +627,7 @@ mod tests {
 
     /// Helper: produce WorkFields for a given chapter number.
     fn chapter_work_fields(chapter: i32, work_ref: &str) -> WorkFields {
-        let ch_label = format!("{chapter:02}");
+        let ch_label = chapter_label(chapter);
         WorkFields {
             work_id: format!("wrk_{work_ref}"),
             fl_e_stage: "produce".to_string(),
@@ -726,5 +740,14 @@ mod tests {
         let seed: serde_json::Value = serde_json::from_str(&req.seed.unwrap()).unwrap();
         assert_eq!(seed["chapter"], 2);
         assert_eq!(seed["chapter_label"], "02");
+    }
+
+    #[test]
+    fn chapter_label_formats_zero_padded_for_1_to_99() {
+        assert_eq!(chapter_label(1), "01");
+        assert_eq!(chapter_label(9), "09");
+        assert_eq!(chapter_label(10), "10");
+        assert_eq!(chapter_label(99), "99");
+        assert_eq!(chapter_label(100), "100");
     }
 }
