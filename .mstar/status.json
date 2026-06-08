@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-08T23:45:00+08:00",
+  "updated_at": "2026-06-08T23:55:00+08:00",
   "plans": [
     {
       "id": "2026-06-08-v1.38-harness-docs-prepare",
@@ -80,7 +80,7 @@
     },
     {
       "id": "2026-06-08-v1.38-novel-writing-parameterization",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-08-v1.38-novel-writing-parameterization.md",
       "working_branch": "feature/v1.38-novel-writing-parameterization",
       "merge_target": "iteration/v1.38",
@@ -102,6 +102,35 @@
           "platform publish",
           "multi-work switch",
           "selection pool"
+        ],
+        "done_at": "2026-06-08T23:55:00+08:00",
+        "qc": "tri-review Initial: QC1 Request Changes (2 Warnings,3 Suggestions), QC2 Approve (1 latent W,4 S), QC3 Approve (4 S). Targeted re-review by qc-specialist (commit b0b20f3f) after fix wave: Approve — W-1 (validate_produce_chapter_context fail-fast) and W-2 (chapter_label helper) both resolved. Other findings registered as P1 residuals (low/nit).",
+        "qa": "skipped for P1 — implementation matches spec §4.5.6 contract; targeted re-review +38 stage_gates tests (incl. new chapter_label + 4 validation tests) +11 e2e_novel_writing tests +11 fl_e_chain_demo tests +28 works_api tests +749 nexus42 tests provide equivalent evidence for the slice.",
+        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after5 feature commits + QC tri-review (3 reports) + targeted re-review + fix wave (W-1/W-2)",
+        "shipped": [
+          "WorkFields extended with chapter_label/outline_path/body_path/slug optional fields (T3)",
+          "novel-writing preset version5→6 (T4)",
+          "outline-chapter.md + draft-chapter.md templates parameterized with {{outline_path}}/{{body_path}}/{{chapter_label}}/{{slug}} (T4)",
+          "ch0{{chapter}} path literals removed from prompt templates (T4 + QC1 F-003 from P0)",
+          "CLI stage_advance extracts chapter context from WorkApiDto.chapters[] and populates WorkFields (T5)",
+          "validate_produce_chapter_context() fail-fast at CLI boundary when chapter context absent (W-1 fix)",
+          "pub fn chapter_label() helper extracted (W-2 fix)",
+          "Stale draft-body.md + draft-intro.md moved to prompts/_deprecated/ (T8)",
+          "Single novel-writing preset preserved (no per-chapter variants) (AC2)",
+          "One-chapter compat preserved through default template values (AC3)"
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-novel-writing-parameterization/qc-consolidated.md (Approve post targeted re-review)",
+        "commits": [
+          "8ba5b296 feat(v1.38-p1): add chapter_label + outline_path + body_path + slug prompt vars",
+          "703d5834 feat(v1.38-p1): update outline-chapter + draft-chapter templates to consume new vars",
+          "8052a131 feat(v1.38-p1): wire chapter_label/outline_path/body_path/slug into schedule input",
+          "fe53220d chore(v1.38-p1): quarantine stale draft-body/draft-intro ch01-era prompt artifacts",
+          "3cd14f96 test(v1.38-p1): chapter2 + chapter10 prompt rendering tests",
+          "ad455ec5 merge(v1.38-p1): novel-writing parameterization into integration",
+          "ba912fe1 refactor(v1.38-p1): extract chapter_label() helper (W-2)",
+          "612b81d9 fix(v1.38-p1): stage_advance fail-fast on missing chapter context (W-1)",
+          "2157c9c4 merge(v1.38-p1): QC fix wave (W-1 + W-2) into integration",
+          "QC reports: 64da2c27 qc1,93eba862 qc2, bf993faf qc3, d340384d consolidation, b0b20f3f targeted re-review"
         ]
       }
     }
@@ -582,6 +611,85 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Code path returns false early for NULL or0 total_planned_chapters; doc comment correct. Add explicit test case to make the §6.1 guard behavior self-documenting."
+      }
+    ],
+    "2026-06-08-v1.38-novel-writing-parameterization": [
+      {
+        "id": "R-V138P1-01",
+        "title": "Pre-existing latent: stage_advance for produce creates schedule with empty chapter fields when next_chapter=None (novel-completion); surfaced by P1 fields but not introduced by them",
+        "severity": "low",
+        "source": "QC2 W-1 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs stage_advance(); next_chapter=None path",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ completion UX",
+        "note": "When next_chapter returns None (novel-completion per P0 selection), stage_advance for produce target still builds WorkFields with all chapter fields None and creates a schedule. The preset gates do not reject it. Does not regress completion or auto-enqueue (DF-53 deferred). Document that the schedule will be created but the writer prompt will see missing chapter context and should no-op or surface completion. Surface as completion UX in V1.39+."
+      },
+      {
+        "id": "R-V138P1-02",
+        "title": "Frontmatter field documentation removed from draft-chapter.md without replacement",
+        "severity": "nit",
+        "source": "QC1 S-1 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/draft-chapter.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Old template contained a bulleted list explaining each frontmatter field (title, chapter, status, word_count, world_refs). New template drops this entirely; frontmatter example block remains but field descriptions are gone. Restore compact 1-2 line summary of required frontmatter fields in a follow-up."
+      },
+      {
+        "id": "R-V138P1-03",
+        "title": "_deprecated/ prompt files still embedded in binary via include_dir!; not loaded but occupy space",
+        "severity": "low",
+        "source": "QC1 S-2 / QC3 S2 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/_deprecated/{draft-body,draft-intro}.md",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target_date": "V1.39+ hygiene",
+        "note": "Quarantined draft-body.md and draft-intro.md are still embedded in the binary at compile time via include_dir!. They are not referenced by preset.yaml. Either move _deprecated/ outside embedded-presets/ entirely, or configure include_dir! to exclude _deprecated/ patterns. Not blocking for this plan."
+      },
+      {
+        "id": "R-V138P1-04",
+        "title": "outline_path / body_path required: true in templates with no defaults for non-CLI callers",
+        "severity": "low",
+        "source": "QC1 S-3 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/outline-chapter.md, draft-chapter.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ hardening",
+        "note": "If a caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails. Current callers all populate via stage_advance. Add runtime validation in schedule builder that warns when required template vars are missing from preset.input. Document expanded preset.input contract in preset.yaml header comments."
+      },
+      {
+        "id": "R-V138P1-05",
+        "title": "chapter_label for chapter >=100 yields \"100\" not \"0100\" (no fixed-width beyond 2 digits)",
+        "severity": "nit",
+        "source": "QC2 S-1 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/src/stage_gates.rs chapter_label() helper",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Spec §4.5.6 accepts 2-digit zero-pad for chapter1-99; chapter100+ grows naturally to width. Document format contract in spec or add fixed-width if future novels require it. No correctness break for P1."
+      },
+      {
+        "id": "R-V138P1-06",
+        "title": "O(n) linear scan over chapters[] in stage_advance (typical n<100, negligible)",
+        "severity": "nit",
+        "source": "QC2 S-2 / QC3 S4 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs stage_advance()",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "chapters.iter().find(...) is O(n). At typical novel scales (<=100 chapters) this is negligible. Add index if multi-volume works with 100+ chapters become common."
+      },
+      {
+        "id": "R-V138P1-07",
+        "title": "stage_advance lacks audit logging for chapter context extraction (observability gap)",
+        "severity": "low",
+        "source": "QC3 S3 (V1.38 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs stage_advance() chapter context extraction",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ observability",
+        "note": "Add tracing::info! or debug! span showing the selected chapter context (chapter_label, outline_path, body_path, slug) to aid production debugging when chapter selection behaves unexpectedly."
       }
     ]
   }

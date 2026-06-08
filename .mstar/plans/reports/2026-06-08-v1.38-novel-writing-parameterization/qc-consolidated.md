@@ -1,23 +1,23 @@
 ---
 report_kind: qc-consolidated
 plan_id: "2026-06-08-v1.38-novel-writing-parameterization"
-verdict: "Request Changes — fix W-1 (silent degradation) and W-2 (label duplication); accept others as residuals"
+verdict: "Approve (post targeted re-review by qc-specialist on W-1 + W-2)"
 generated_at: "2026-06-08"
-qc_wave: "initial"
-active_wave_note: "Initial tri-review. Targeted re-review by qc-specialist after fix wave."
+qc_wave: "initial + targeted re-review"
+active_wave_note: "Initial tri-review issued Request Changes from QC1; targeted re-review by qc-specialist after fix wave approved. Plan Done. QC2 latent W-1 + 11 Suggestions registered as P1 residuals in status.json."
 ---
 
 # QC Consolidated Report — V1.38 P1 Novel-Writing Parameterization
 
 ## Gate Verdict
 
-**Request Changes** — QC1 raised 2 Warnings that block Approval. QC2 has 1 latent Warning and QC3 is clean. Fix-now scope: W-1 (silent CLI degradation when chapter context absent) + W-2 (duplicated chapter_label formatting). Other findings registered as residuals below.
+**Approve** (post targeted re-review by qc-specialist on W-1 + W-2). Initial tri-review issued Request Changes from QC1. Fix-now scope (W-1 + W-2) resolved; targeted re-review by `@qc-specialist` (`b0b20f3f qc(v1.38-p1): targeted re-review`) approved. Other Warnings and Suggestions registered as P1 residuals below.
 
 ## Reviewers
 
 | Seat | Reviewer | Verdict | Critical | Warning | Suggestion | Report |
 |------|----------|---------|----------|---------|------------|--------|
-|1 | @qc-specialist | Request Changes |0 |2 |3 | [qc1.md](qc1.md) |
+|1 | @qc-specialist | Approve (post targeted re-review) |0 |0 |3 | [qc1.md](qc1.md) |
 |2 | @qc-specialist-2 | Approve |0 |1 (latent) |4 | [qc2.md](qc2.md) |
 |3 | @qc-specialist-3 | Approve |0 |0 |4 | [qc3.md](qc3.md) |
 
