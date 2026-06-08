@@ -218,6 +218,37 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             tracing::warn!("failed to resume running schedules on boot: {}", e);
         }
     }
+
+    // V1.39 §5.5 (T5): Auto-chain boot recovery.
+    // Find Works whose auto-chain driver schedule is no longer running
+    // (interrupted by daemon restart) and log them for manual recovery.
+    // Auto-resumption will be wired in a future iteration (T9 integration tests).
+    {
+        let recovery_pool = state.pool();
+        match nexus_orchestration::auto_chain::find_resumable_works(recovery_pool).await {
+            Ok(resumable) => {
+                if !resumable.is_empty() {
+                    tracing::info!(
+                        "found {} auto-chain work(s) with interrupted driver schedule(s)",
+                        resumable.len()
+                    );
+                    for work in &resumable {
+                        tracing::info!(
+                            work_id = %work.work_id,
+                            current_stage = %work.current_stage,
+                            current_chapter = work.current_chapter,
+                            driver_schedule_id = %work.driver_schedule_id.as_deref().unwrap_or("none"),
+                            "auto-chain work eligible for resumption (use `nexus42 creator run resume {}`)",
+                            work.work_id
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("failed to query auto-chain resumable works: {}", e);
+            }
+        }
+    }
     tracing::info!("Schedule supervisor wired");
 
     // --- Section 5: Agent Host subsystem ---
