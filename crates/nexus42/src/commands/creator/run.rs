@@ -112,6 +112,17 @@ pub enum RunCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Resume an auto-chain Work whose driver was interrupted (V1.39 §5.7).
+    ///
+    /// Re-evaluates the current Work state and enqueues the next auto-chain
+    /// step (stage advance or next chapter) if applicable.
+    Resume {
+        /// Work ID (wrk_...) to resume
+        work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 /// FL-E stage subcommands (V1.34 cli-spec §6.2E).
@@ -796,6 +807,45 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("  Created:   {created}");
                 println!("  Updated:   {updated}");
                 println!("  Preserved: {preserved}");
+            }
+        }
+        RunCommand::Resume { work_id, json } => {
+            // V1.39 §5.7 (T8): Resume an interrupted auto-chain Work.
+            // This clears auto_chain_interrupted and re-evaluates the next step.
+            let patch = serde_json::json!({
+                "auto_chain_interrupted": false,
+            });
+            let resp: serde_json::Value = client
+                .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
+                .await?;
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                let stage = resp
+                    .get("current_stage")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let status = resp
+                    .get("stage_status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let auto_chain = resp
+                    .get("auto_chain_enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+
+                if auto_chain {
+                    println!(
+                        "Work {work_id} auto-chain resumed at stage '{stage}' ({status}). \
+                         The daemon will evaluate the next step automatically."
+                    );
+                } else {
+                    println!(
+                        "Work {work_id} auto-chain is disabled. \
+                         Use manual stage advance: nexus42 creator run stage advance {work_id} --stage <stage>"
+                    );
+                }
             }
         }
     }
