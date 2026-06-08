@@ -82,8 +82,12 @@ states:
           prompt_file: prompts/synthesizing.md
           vars:
             output_dir: "{{preset.input.output_dir}}"
+    # Fix W-1: changed from `kind: manual` to `kind: llm_judge` so auto-chain
+    # progresses autonomously. Manual exit stalls auto-chain at research → produce.
     exit_when:
-      kind: manual
+      kind: llm_judge
+      template_file: prompts/synthesizing-exit.md
+      judge_capability: judge.llm
     next: done
     context_update:
       op:
