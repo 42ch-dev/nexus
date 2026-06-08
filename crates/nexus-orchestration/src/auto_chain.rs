@@ -698,4 +698,79 @@ mod tests {
             "should be InvalidState: {err:?}"
         );
     }
+
+    // ── V1.39 P0.5 (T6): research-stage wiring integration tests ───────
+
+    /// AC1: research preset schedule has fl_e_stage = "research" and includes
+    /// creative_brief + inspiration_log in the seed (same surface produce reads).
+    #[test]
+    fn research_schedule_seed_includes_context_for_produce() {
+        let work = work_at("research", "active", 0, 5);
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None)
+            .expect("research should have a preset");
+        assert_eq!(req.preset_id, "research");
+
+        let seed: serde_json::Value =
+            serde_json::from_str(&req.seed.expect("seed must be set")).unwrap();
+
+        // fl_e_stage annotation
+        assert_eq!(seed["fl_e_stage"], "research");
+        // creative_brief and inspiration_log are the shared surface
+        // that produce reads — research can enrich these.
+        assert!(seed["creative_brief"].is_string());
+        assert!(seed["inspiration_log"].is_string());
+        assert_eq!(seed["work_id"], "wrk_test");
+    }
+
+    /// AC1: produce stage seed also carries creative_brief and inspiration_log,
+    /// confirming the shared context surface between research and produce.
+    #[test]
+    fn produce_schedule_seed_carries_research_enrichable_fields() {
+        let work = work_at("produce", "active", 1, 5);
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1))
+            .expect("produce should have a preset");
+        assert_eq!(req.preset_id, "novel-writing");
+
+        let input = req.input.expect("input must be set");
+        assert_eq!(input["fl_e_stage"], "produce");
+        // These are the same fields research enriches, confirming
+        // the downstream produce stage can see research-derived material.
+        assert!(input.get("creative_brief").is_some());
+        assert!(input.get("inspiration_log").is_some());
+    }
+
+    /// AC2: full chain intake→research→produce advances correctly
+    /// (verifies evaluate_next_step for the research-middle position).
+    #[test]
+    fn full_chain_intake_research_produce_advances() {
+        // intake complete → advance to research
+        let work = work_at("intake", "complete", 0, 3);
+        assert_eq!(
+            evaluate_next_step(&work),
+            ChainAction::AdvanceStage {
+                work_id: "wrk_test".to_string(),
+                next_stage: "research".to_string(),
+            }
+        );
+
+        // research complete → advance to produce
+        let work = work_at("research", "complete", 0, 3);
+        assert_eq!(
+            evaluate_next_step(&work),
+            ChainAction::AdvanceStage {
+                work_id: "wrk_test".to_string(),
+                next_stage: "produce".to_string(),
+            }
+        );
+
+        // produce complete (ch1 of 3) → advance to review (not NextChapter)
+        let work = work_at("produce", "complete", 1, 3);
+        assert_eq!(
+            evaluate_next_step(&work),
+            ChainAction::AdvanceStage {
+                work_id: "wrk_test".to_string(),
+                next_stage: "review".to_string(),
+            }
+        );
+    }
 }
