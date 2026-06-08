@@ -1,25 +1,25 @@
 ---
 report_kind: qc-consolidated
 plan_id: "2026-06-08-v1.38-multi-chapter-selection-status"
-verdict: "Request Changes — fix F-001 (Critical) and W-1 (Warning); accept others as residuals"
+verdict: "Approve (post targeted re-review by qc-specialist on F-001/F-002/W-1)"
 generated_at: "2026-06-08"
-qc_wave: "initial"
-active_wave_note: "Initial tri-review. Re-review (qc1-rev2) targets QC1 only after fix lands."
+qc_wave: "initial + targeted re-review"
+active_wave_note: "Initial tri-review issued Request Changes; targeted re-review by qc-specialist after fix wave approved. Plan Done. qc2/qc3 warnings registered as P0 residuals in status.json."
 ---
 
 # QC Consolidated Report — V1.38 P0 Multi-Chapter Selection and Status
 
 ## Gate Verdict
 
-**Request Changes** — one Critical and several Warnings raised across the three reviewers. Fix-now vs residual mapping below.
+**Approve** (post targeted re-review) — initial wave raised1 Critical +5 Warnings +6 Suggestions. Fix-now scope (F-001, F-002, W-1) resolved; targeted re-review by `@qc-specialist` (`af472aa1 qc(v1.38-p0): targeted re-review`) approved. Other Warnings registered as V1.38 P0 residuals below.
 
 ## Reviewers
 
 | Seat | Reviewer | Verdict | Critical | Warning | Suggestion | Report |
 |------|----------|---------|----------|---------|------------|--------|
-|1 | @qc-specialist | Request Changes |1 |1 |1 | [qc1.md](qc1.md) |
-|2 | @qc-specialist-2 | Request Changes |0 |2 |3 | [qc2.md](qc2.md) |
-|3 | @qc-specialist-3 | Request Changes |0 |2 |2 | [qc3.md](qc3.md) |
+|1 | @qc-specialist | Approve (post targeted re-review) |0 |0 |1 | [qc1.md](qc1.md) |
+|2 | @qc-specialist-2 | Request Changes (initial wave) |0 |2 |3 | [qc2.md](qc2.md) |
+|3 | @qc-specialist-3 | Request Changes (initial wave) |0 |2 |2 | [qc3.md](qc3.md) |
 
 ## Scope alignment (verified verbatim)
 

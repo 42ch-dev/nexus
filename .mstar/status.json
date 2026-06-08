@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-08T23:30:00+08:00",
+  "updated_at": "2026-06-08T23:45:00+08:00",
   "plans": [
     {
       "id": "2026-06-08-v1.38-harness-docs-prepare",
@@ -29,7 +29,7 @@
     },
     {
       "id": "2026-06-08-v1.38-multi-chapter-selection-status",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-08-v1.38-multi-chapter-selection-status.md",
       "working_branch": "feature/v1.38-multi-chapter-selection-status",
       "merge_target": "iteration/v1.38",
@@ -51,6 +51,30 @@
           "platform publish",
           "multi-work switch",
           "selection pool"
+        ],
+        "done_at": "2026-06-08T23:45:00+08:00",
+        "qc": "tri-review (qc1/qc2/qc3) Initial: Request Changes (1 Critical +5 Warnings +6 Suggestions). Targeted re-review (qc1 only) after fix wave: Approve — F-001 (selection semantics), F-002 (novel-profile early-exit), W-1 (composite index) all resolved. qc2/qc3 warnings tracked as P0 residuals (medium/low/nit).",
+        "qa": "skipped for P0 — implementation matches spec §4.5.2/§6.1/§8.1 contracts; targeted re-review +19 hermetic work_chapters tests +28 works_api tests +11 e2e_novel_writing tests +745+ nexus42 tests provide equivalent evidence for the slice; full QA in Plan3 if needed",
+        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after feature commit ffeb0adc + QC tri-review (3 reports) + targeted re-review + fix wave (F-001/F-002/W-1)",
+        "shipped": [
+          "next_chapter(work_id) helper with single-query MIN(chapter) lowest-active-chapter selection (spec §4.5.2)",
+          "current_chapter advances only on finalize transition (draft branch removed)",
+          "is_work_completed() with novel-profile-aware §6.1 check (intake + current_chapter + all-finalized + row-count)",
+          "WorkApiDto enriched with chapters + next_chapter for novel-profile Works",
+          "CLI creator run status per-chapter rows + progress + next action hint",
+          "novel-writing preset.yaml parameterized via {{preset.input.chapter}} (version4→5)",
+          "Composite index (work_id, status, chapter) migration for next_chapter lookup",
+          "19 hermetic work_chapters tests (including7 new: selection order, draft resume, outlined, completion variants, V1.36 compat, lowest-active, novel-profile strictness)"
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-multi-chapter-selection-status/qc-consolidated.md (Approve post targeted re-review)",
+        "commits": [
+          "ffeb0adc feat: V1.38 P0 multi-chapter selection and status foundation",
+          "f5c8ecc4 fix(v1.38-p0): next_chapter lowest-active-chapter selection (F-001)",
+          "2dc2c892 chore(v1.38-p0): composite index for next_chapter (W-1)",
+          "2abbaa1a merge(v1.38-p0): chapter selection/status foundation into integration",
+          "d882a640 merge(v1.38-p0): QC fix wave (F-001 + F-002 + W-1) into integration",
+          "af472aa1 qc(v1.38-p0): targeted re-review (F-001, F-002, W-1)",
+          "QC reports: d33a65d4 qc1,65bf84d6 qc2, f4c92693 qc3,68c19c29 consolidation"
         ]
       }
     },
@@ -501,6 +525,63 @@
         "owner": "@fullstack-dev",
         "target_date": "backlog",
         "note": "Root cause fixed in this commit (gates moved under preset: key). Residual tracks the broader concern: serde silently ignores unknown top-level keys in YAML, so misplaced sections cause no error. Consider adding a strict-mode serde guard or loader validation that warns on unknown top-level keys in preset.yaml."
+      }
+    ],
+    "2026-06-08-v1.38-multi-chapter-selection-status": [
+      {
+        "id": "R-V138P0-01",
+        "title": "next_chapter() selection race window under concurrent creator run continue (single-user assumption)",
+        "severity": "medium",
+        "source": "qc2 W1 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/src/work_chapters.rs:511-530 (next_chapter); callers in daemon get_work enrichment + CLI continue path",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ hardening plan",
+        "note": "next_chapter() runs three SQL queries (now consolidated to one MIN query after F-001) without transaction/claim atomicity. Two concurrent creator run continue calls could both observe the same chapter before any transition has flipped its row to draft/finalized. Per spec §4.5.2 the query is the SSOT; novel.chapter_transition guards against from_status mismatch but the user may see duplicate in-progress schedules. Single-user local-first path is safe; race only under concurrent invocation. Document single-writer assumption or add try_claim_next_chapter (UPDATE ... RETURNING chapter) in a follow-up if multi-terminal use is common."
+      },
+      {
+        "id": "R-V138P0-02",
+        "title": "Plan T9 surface of on-disk missing-file hints only partially delivered in CLI status",
+        "severity": "low",
+        "source": "qc2 W2 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs (creator run status novel-profile arm)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.38 P1 or V1.39 hardening",
+        "note": "Status surface shows DB rows + progress + next-action hint + comment acknowledging on-disk absence, but no explicit on-disk missing-file warning line (e.g. body_path absent for chNN). DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up."
+      },
+      {
+        "id": "R-V138P0-03",
+        "title": "Write-on-read anti-pattern in GET /v1/local/works/{id} (lazy completion promotion)",
+        "severity": "medium",
+        "source": "qc3 W-2 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:322-365 (get_work auto-promote handler)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.39+ hardening plan",
+        "note": "GET /v1/local/works/{id} mutates works.status to completed when is_work_completed() returns true. Violates REST semantics; two identical GET requests can return different status values. The handler comment acknowledges this as lazy promotion matching V1.36 P4 fix wave auto-promote pattern. Move promotion to finalize transition path or document lazy promotion explicitly in API contract."
+      },
+      {
+        "id": "R-V138P0-04",
+        "title": "WorkApiDto.chapters vector size uncapped for unusual total_planned_chapters",
+        "severity": "low",
+        "source": "qc3 S-1 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:387-404 (enrich_with_chapters)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "list_chapters returns all rows with no limit. At typical novel scales (<=100 chapters) this is fine; not a practical concern since total_planned_chapters is user-controlled at init and local DB is not exposed to untrusted network clients. Add LIMIT or pagination in a follow-up if multi-volume works with100+ chapters become common."
+      },
+      {
+        "id": "R-V138P0-05",
+        "title": "is_work_completed total_planned_chapters=NULL explicit test missing",
+        "severity": "nit",
+        "source": "qc2 S2 (V1.38 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/src/work_chapters.rs:is_work_completed (early-return for total_planned_chapters NULL/0)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog",
+        "note": "Code path returns false early for NULL or0 total_planned_chapters; doc comment correct. Add explicit test case to make the §6.1 guard behavior self-documenting."
       }
     ]
   }
