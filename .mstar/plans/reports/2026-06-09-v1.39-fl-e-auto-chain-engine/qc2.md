@@ -4,7 +4,7 @@ reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-09-v1.39-fl-e-auto-chain-engine"
 verdict: "Approve"
-generated_at: "2026-06-09"
+generated_at: "2026-06-09T18:25:00Z"
 ---
 
 # Code Review Report
@@ -15,6 +15,76 @@ generated_at: "2026-06-09"
 - Runtime Model: grok-build-0.1 (xai/grok-build-0.1)
 - Review Perspective: Security and correctness risk
 - Report Timestamp: 2026-06-09T18:30:00Z
+
+## Revalidation — W-A targeted re-review (initial wave: qc1, qc2, qc3; fix wave 2)
+- Reviewer (this re-review): @qc-specialist-2 (qc-specialist-2)
+- Date: 2026-06-09T18:25:00Z
+- Scope of re-review: W-A only
+- Diff basis: 1e10e3ef..84db9a0e (verbatim copy from Assignment)
+- Commits / files in this wave: 7 commits, 7 files, +383 / -140
+- Tools run:
+  - `cd /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.39-p0 && git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.39-p0`
+  - `cd ... && git branch --show-current` → `feature/v1.39-fl-e-auto-chain-engine`
+  - `cd ... && git log 1e10e3ef..84db9a0e --oneline` → 5 commits shown (style + fix(local-db) W-E + fix(daemon-runtime) W-D + fix(orchestration) W-A 6e505c06 + final style); the W-A helper extraction is commit 6e505c06.
+  - `cd ... && git diff --stat 1e10e3ef...84db9a0e` → 7 files, +383/-140 (including the 4 targeted files).
+  - Targeted: `git diff 1e10e3ef...84db9a0e -- crates/nexus-orchestration/src/auto_chain.rs crates/nexus-orchestration/src/schedule/supervisor.rs crates/nexus-daemon-runtime/src/boot.rs crates/nexus-orchestration/tests/auto_chain.rs` → confirms helper extraction at auto_chain.rs:309+, delegation in supervisor.rs:474 and boot.rs:600, removal of duplicated INSERT+set_driver blocks, addition of two new unit tests.
+  - `cargo clippy --all -- -D warnings 2>&1 | tail -5` → clean ("Finished `dev` profile...").
+  - `cargo test -p nexus-orchestration --lib auto_chain 2>&1 | tail -5` → 17 passed (explicitly includes `enqueue_helper_success_path` and `enqueue_helper_error_path_no_mapping`).
+  - `cargo test -p nexus-orchestration --test auto_chain 2>&1 | tail -5` → 21 passed (including boot resume simulation tests now calling the shared helper).
+  - `cargo +nightly fmt --all -- --check` → clean (no output).
+
+### Revalidation Analysis (W-A correctness questions)
+
+**1. Fresh DB read before enqueue vs. trusting the `&WorkRecord` parameter?**
+
+The helper `pub async fn enqueue_auto_chain_schedule` (auto_chain.rs:325) **trusts the caller-supplied `work: &WorkRecord`**. It immediately calls `build_auto_chain_schedule(stage, creator_id, work, chapter)` (line 333) with no internal `get_work` reload or re-check of `driver_schedule_id IS NULL`.
+
+However, both production call sites perform a **fresh reload immediately before** delegating:
+- Supervisor path (`process_auto_chain_after_terminal`, supervisor.rs:361): does `nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await` (line 384 in the fix-wave diff context, confirmed in current code), then passes the fresh `&work` to `enqueue_auto_chain_step` (lines 404, 421) which forwards to the helper (474).
+- Boot recovery path (boot.rs:228): after `find_resumable_works`, does `let fresh = nexus_local_db::works::get_work(...)` (line 237), checks `if let Ok(Some(latest)) = fresh`, then calls `resume_auto_chain_work` (now thin delegate at 600) with `&latest`.
+
+The stale-snapshot concern raised in the initial W-1 is therefore mitigated at the call sites (the same discipline that existed before the extraction), but the helper itself does not enforce or re-validate the snapshot. A future direct caller could still pass a stale record.
+
+**2. Atomicity of INSERT + set_driver?**
+
+No. The helper does the `INSERT INTO creator_schedules ... 'pending'` (lines 343-358) followed by a separate `set_driver(pool, creator_id, work_id, &schedule_id, stage).await?` (line 365). There is no `BEGIN` / transaction wrapper, no `ON CONFLICT` guard, and no re-check inside the helper that `driver_schedule_id IS NULL` at the moment of the INSERT. A crash between the two statements can still leave an "orphan" pending schedule whose `work.driver_schedule_id` was never updated (pre-existing surface; the helper merely relocates the two statements under one roof). The callers (supervisor terminal hook and boot loop) had the identical non-atomic pattern before.
+
+**3. Visibility / callable only from intended sites?**
+
+The helper is declared `pub async fn enqueue_auto_chain_schedule` inside `pub mod auto_chain;` (lib.rs:4 exposes `pub mod auto_chain;`). It is therefore visible to any downstream crate that depends on `nexus-orchestration` (and can construct a `&WorkRecord`). It is not `pub(crate)` or `pub(super)`. 
+
+Current production call sites are only the two intended ones (supervisor::enqueue_auto_chain_step and boot::resume_auto_chain_work). The integration test in `tests/auto_chain.rs` (simulate_boot_auto_resume) and the new unit tests also call it directly. A future surface such as `creator run resume` (or any other code that can reach the orchestration crate) could in principle call it directly without going through the supervisor/boot "evaluate + decide" flow. The extraction improves locality but does not add a visibility gate or a "must come from supervisor or boot recovery" contract.
+
+**4. `enqueue_helper_error_path_no_mapping` test coverage and error typing**
+
+The test (auto_chain.rs: tests::enqueue_helper_error_path_no_mapping, added in this wave) constructs a Work with a nonexistent preset, calls the helper with stage `"unknown_stage_xyz"`, and asserts:
+- `result.is_err()`
+- `matches!(err, AutoChainError::InvalidState(_))`
+
+It covers exactly the "no schedule mapping for stage" path (the `build_auto_chain_schedule` returns `None` case, now turned into `AutoChainError::InvalidState`). The error is a typed `AutoChainError::InvalidState(String)`, distinguishable from `AutoChainError::Database(...)`.
+
+In the supervisor caller (supervisor.rs:480), `InvalidState` is deliberately turned into a non-error `Ok(())` + warn log (the "no mapping for this stage" terminal case is expected to be a no-op). Boot maps any error to `String`. The typing therefore allows callers to distinguish "fatal / retryable DB error" from "expected no-mapping case".
+
+### Duplication hazard disposition (original W-1 / consolidated W-A)
+
+**Eliminated.** The ~40-line duplicated blocks (build + ACH{ts} mint + INSERT + set_driver + tracing/error mapping) that lived in `boot.rs:resume_auto_chain_work` and `supervisor.rs:enqueue_auto_chain_step` have been removed. Both sites are now thin delegates to the single `enqueue_auto_chain_schedule` implementation (auto_chain.rs:325-376, introduced in 6e505c06). The "Fix A (W-A)" comment and docstring explicitly document the intent.
+
+### Remaining risks (W-A re-review lens)
+
+- **Stale WorkRecord trust**: helper takes `&WorkRecord` with no internal freshness or "still eligible for driver" re-check. Call-site reload discipline is still required (and is present today in both sites).
+- **Non-atomic INSERT + set_driver**: crash window between the two statements can still produce orphan pending schedules. The helper does not introduce a transaction or a `driver_schedule_id IS NULL` guard at enqueue time.
+- **pub visibility**: the helper is `pub` (exported via the module). Future code paths (e.g. direct CLI resume, tests, or new recovery logic) can invoke it without the supervisor/boot decision flow. No `pub(crate)` or documented "internal only" restriction beyond the doc comment naming the two intended callers.
+
+### New test quality
+
+- `enqueue_helper_success_path`: creates a valid work, calls the helper, asserts (a) returned ID starts with "ACH", (b) row exists in `creator_schedules` with status='pending', (c) the Work's `driver_schedule_id` and `current_stage` were updated by `set_driver`. Good coverage of the happy path through the helper.
+- `enqueue_helper_error_path_no_mapping`: as described above — explicitly exercises the `InvalidState` branch with a typed match. The test is narrow but precise for the error variant.
+
+No new blocking finding introduced by the extraction itself.
+
+**W-A resolved — no new blocking finding.**
+
+**Revalidation verdict (W-A scope only): Approve**
 
 ## Scope
 - plan_id: 2026-06-09-v1.39-fl-e-auto-chain-engine
