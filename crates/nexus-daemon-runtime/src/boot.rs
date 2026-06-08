@@ -586,8 +586,9 @@ fn create_subsystems(
 
 /// Create a new schedule for an auto-chain work at boot recovery.
 ///
-/// Mirrors `ScheduleSupervisor::enqueue_auto_chain_step` but is usable
-/// from boot context before the supervisor is fully wired.
+/// Delegates to the shared `auto_chain::enqueue_auto_chain_schedule` helper
+/// (Fix A / W-A) so that the ID-mint + INSERT + set_driver logic is not
+/// duplicated between the boot and supervisor paths.
 async fn resume_auto_chain_work(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -596,40 +597,11 @@ async fn resume_auto_chain_work(
     chapter: Option<i32>,
     work: &nexus_local_db::works::WorkRecord,
 ) -> Result<String, String> {
-    let schedule_req = nexus_orchestration::auto_chain::build_auto_chain_schedule(
-        stage, creator_id, work, chapter,
-    );
-
-    let req = schedule_req.ok_or_else(|| format!("no schedule mapping for stage '{stage}'"))?;
-
-    let schedule_id = format!("ACH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
-    let now_ts = chrono::Utc::now().timestamp();
-
-    // SAFETY: dynamic SQL — auto-chain schedule insert at boot recovery.
-    sqlx::query(
-        "INSERT INTO creator_schedules
-           (schedule_id, creator_id, preset_id, preset_version, status,
-            concurrency_kind, current_core_context_version, label,
-            created_at, updated_at, work_id)
-           VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+    nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
+        pool, creator_id, work_id, stage, chapter, work,
     )
-    .bind(&schedule_id)
-    .bind(creator_id)
-    .bind(&req.preset_id)
-    .bind(&req.label)
-    .bind(now_ts)
-    .bind(now_ts)
-    .bind(work_id)
-    .execute(pool)
     .await
-    .map_err(|e| format!("failed to insert schedule: {e}"))?;
-
-    // Update the Work checkpoint
-    nexus_orchestration::auto_chain::set_driver(pool, creator_id, work_id, &schedule_id, stage)
-        .await
-        .map_err(|e| format!("failed to set driver: {e}"))?;
-
-    Ok(schedule_id)
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

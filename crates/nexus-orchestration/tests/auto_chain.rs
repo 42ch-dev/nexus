@@ -654,7 +654,7 @@ async fn fix1_last_chapter_marks_work_complete() {
 
 // ── Fix 2: Boot auto-resume (AC4 end-to-end) ───────────────────────────
 
-/// Helper: simulate boot auto-resume logic (mirrors boot.rs resume_auto_chain_work).
+/// Helper: simulate boot auto-resume logic using the shared enqueue helper (Fix A / W-A).
 async fn simulate_boot_auto_resume(pool: &SqlitePool) -> Vec<(String, String, Option<String>)> {
     // (work_id, action_description, new_schedule_id)
     let mut results = Vec::new();
@@ -674,50 +674,26 @@ async fn simulate_boot_auto_resume(pool: &SqlitePool) -> Vec<(String, String, Op
                 ref work_id,
                 ref next_stage,
             } => {
-                let req = auto_chain::build_auto_chain_schedule(
-                    next_stage,
+                // Fix A: Use the shared enqueue helper instead of duplicating the logic.
+                match auto_chain::enqueue_auto_chain_schedule(
+                    pool,
                     &latest.creator_id,
-                    &latest,
+                    work_id,
+                    next_stage,
                     None,
-                );
-                if let Some(schedule_req) = req {
-                    let schedule_id =
-                        format!("BOOT{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
-                    let now_ts = chrono::Utc::now().timestamp();
-                    // SAFETY: test-only — DML for boot resume simulation.
-                    sqlx::query(
-                        "INSERT INTO creator_schedules
-                           (schedule_id, creator_id, preset_id, preset_version, status,
-                            concurrency_kind, current_core_context_version, label,
-                            created_at, updated_at, work_id)
-                           VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
-                    )
-                    .bind(&schedule_id)
-                    .bind(&latest.creator_id)
-                    .bind(&schedule_req.preset_id)
-                    .bind(&schedule_req.label)
-                    .bind(now_ts)
-                    .bind(now_ts)
-                    .bind(work_id)
-                    .execute(pool)
-                    .await
-                    .unwrap();
-
-                    auto_chain::set_driver(
-                        pool,
-                        &latest.creator_id,
-                        work_id,
-                        &schedule_id,
-                        next_stage,
-                    )
-                    .await
-                    .unwrap();
-
-                    results.push((
+                    &latest,
+                )
+                .await
+                {
+                    Ok(sid) => results.push((
                         work_id.clone(),
                         format!("advance to {next_stage}"),
-                        Some(schedule_id),
-                    ));
+                        Some(sid),
+                    )),
+                    Err(e) => {
+                        tracing::warn!("boot resume failed: {e}");
+                        results.push((work_id.clone(), format!("error: {e}"), None));
+                    }
                 }
             }
             auto_chain::ChainAction::WorkComplete { ref work_id } => {

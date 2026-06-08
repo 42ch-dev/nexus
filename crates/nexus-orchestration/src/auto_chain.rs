@@ -306,6 +306,74 @@ pub async fn set_driver(
     Ok(())
 }
 
+// Fix A (W-A): Shared enqueue logic — single source of truth for ACH schedule
+// ID minting, pending INSERT, and set_driver. Used by both the supervisor
+// terminal hook and the boot recovery path to eliminate duplication.
+/// Enqueue a new auto-chain schedule and update the Work checkpoint.
+///
+/// This is the single shared path for:
+/// 1. Supervisor `on_schedule_terminal` → `enqueue_auto_chain_step`
+/// 2. Boot `resume_auto_chain_work`
+///
+/// It owns: (a) schedule ID generation (`ACH{timestamp}`), (b) pending schedule
+/// INSERT into `creator_schedules`, (c) `set_driver` call on the Work.
+///
+/// # Errors
+///
+/// Returns `AutoChainError::InvalidState` if no schedule mapping exists for the
+/// given stage. Returns `AutoChainError::Database` if any DB operation fails.
+pub async fn enqueue_auto_chain_schedule(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    stage: &str,
+    chapter: Option<i32>,
+    work: &WorkRecord,
+) -> Result<String, AutoChainError> {
+    let schedule_req = build_auto_chain_schedule(stage, creator_id, work, chapter).ok_or_else(
+        || AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'")),
+    )?;
+
+    // Fix A: Single source of truth for ACH schedule ID format.
+    let schedule_id = format!("ACH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+    let now_ts = chrono::Utc::now().timestamp();
+
+    // SAFETY: dynamic SQL — auto-chain schedule insert with derived params.
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id)
+           VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+    )
+    .bind(&schedule_id)
+    .bind(creator_id)
+    .bind(&schedule_req.preset_id)
+    .bind(&schedule_req.label)
+    .bind(now_ts)
+    .bind(now_ts)
+    .bind(work_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "auto-chain: failed to insert schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+
+    // Update the Work checkpoint to point at the new driver schedule.
+    set_driver(pool, creator_id, work_id, &schedule_id, stage).await?;
+
+    tracing::info!(
+        work_id = %work_id,
+        schedule_id = %schedule_id,
+        stage = %stage,
+        chapter = chapter.unwrap_or(0),
+        "auto-chain: enqueued next step"
+    );
+
+    Ok(schedule_id)
+}
+
 /// Find auto-chain-enabled Works that have a `driver_schedule_id` but whose
 /// schedule is no longer running (interrupted during daemon restart).
 ///
@@ -536,6 +604,96 @@ mod tests {
                 work_id: "wrk_test".to_string(),
                 next_chapter: 6,
             }
+        );
+    }
+
+    // ── Fix A (W-A): enqueue_auto_chain_schedule shared helper ─────────
+
+    #[tokio::test]
+    async fn enqueue_helper_success_path() {
+        let db = tempfile::Builder::new()
+            .prefix("auto_chain_helper_")
+            .suffix(".db")
+            .tempfile()
+            .unwrap();
+        let db_path = db.path().to_path_buf();
+        std::mem::forget(db);
+
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let work = work_at("intake", "complete", 0, 3);
+        nexus_local_db::works::create_work(&pool, &work).await.unwrap();
+
+        let sid = enqueue_auto_chain_schedule(
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            "research",
+            None,
+            &work,
+        )
+        .await
+        .unwrap();
+
+        // Verify schedule ID format
+        assert!(
+            sid.starts_with("ACH"),
+            "schedule ID should start with ACH: {sid}"
+        );
+
+        // Verify schedule was inserted as pending
+        let status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM creator_schedules WHERE schedule_id = ?",
+        )
+        .bind(&sid)
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .flatten();
+        assert_eq!(status.as_deref(), Some("pending"), "schedule should be pending");
+
+        // Verify driver_schedule_id was set on the work
+        let updated = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_test")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.driver_schedule_id, Some(sid));
+        assert_eq!(updated.current_stage, "research");
+    }
+
+    #[tokio::test]
+    async fn enqueue_helper_error_path_no_mapping() {
+        let db = tempfile::Builder::new()
+            .prefix("auto_chain_helper_err_")
+            .suffix(".db")
+            .tempfile()
+            .unwrap();
+        let db_path = db.path().to_path_buf();
+        std::mem::forget(db);
+
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let mut work = work_at("intake", "complete", 0, 3);
+        work.primary_preset_id = "nonexistent-preset".to_string();
+        nexus_local_db::works::create_work(&pool, &work).await.unwrap();
+
+        let result = enqueue_auto_chain_schedule(
+            &pool,
+            "ctr_test",
+            "wrk_test",
+            "unknown_stage_xyz",
+            None,
+            &work,
+        )
+        .await;
+
+        assert!(result.is_err(), "should fail for unknown stage");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, AutoChainError::InvalidState(_)),
+            "should be InvalidState: {err:?}"
         );
     }
 }
