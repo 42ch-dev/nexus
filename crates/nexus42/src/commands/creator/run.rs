@@ -657,6 +657,37 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         );
                         println!();
 
+                        // V1.39 P0.5 (T5): research stage hint.
+                        // When the work has passed through the research FL-E stage,
+                        // surface a one-line summary so the user knows research
+                        // artifacts are available for the produce stage.
+                        {
+                            let current_stage = resp
+                                .get("current_stage")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("intake");
+                            let stage_status = resp
+                                .get("stage_status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("pending");
+
+                            // Show hint when research is the current stage or has completed.
+                            let research_done =
+                                current_stage == "research" && stage_status == "complete";
+                            let past_research =
+                                matches!(current_stage, "produce" | "review" | "persist");
+                            let research_active =
+                                current_stage == "research" && stage_status == "active";
+
+                            if research_active {
+                                println!("research: in progress (stage: research)");
+                            } else if research_done {
+                                println!("research: complete — references ready for produce");
+                            } else if past_research {
+                                println!("research: done (current stage: {current_stage})");
+                            }
+                        }
+
                         // Per-chapter rows
                         println!("Chapters:");
                         for ch in ch_list {
@@ -1155,6 +1186,7 @@ async fn stage_advance(
         outline_path,
         body_path,
         slug,
+        research_artifacts_dir: None,
     };
 
     if let Some(mut request) =

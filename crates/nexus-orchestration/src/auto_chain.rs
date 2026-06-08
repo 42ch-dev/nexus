@@ -174,6 +174,17 @@ pub fn build_auto_chain_schedule(
     let work_ref = work.work_ref.clone();
     let chapter_label = chapter.map(stage_gates::chapter_label);
 
+    // Fix W-2: when the stage is produce (following research), include the
+    // research artifacts directory in the preset input so produce can see
+    // research-derived material (AC2, AC3).
+    let research_artifacts_dir = if stage == "produce" {
+        work.driver_schedule_id
+            .as_ref()
+            .map(|sid| format!(".nexus42/references/{sid}/"))
+    } else {
+        None
+    };
+
     let fields = WorkFields {
         work_id: work.work_id.clone(),
         fl_e_stage: stage.to_string(),
@@ -185,6 +196,7 @@ pub fn build_auto_chain_schedule(
         outline_path: None,
         body_path: None,
         slug: None,
+        research_artifacts_dir,
     };
 
     stage_gates::build_schedule_for_stage(stage, creator_id, &fields)
@@ -696,6 +708,121 @@ mod tests {
         assert!(
             matches!(err, AutoChainError::InvalidState(_)),
             "should be InvalidState: {err:?}"
+        );
+    }
+
+    // ── V1.39 P0.5 (T6): research-stage wiring integration tests ───────
+
+    /// AC1: research preset schedule has fl_e_stage = "research" and includes
+    /// creative_brief + inspiration_log in the seed (same surface produce reads).
+    #[test]
+    fn research_schedule_seed_includes_context_for_produce() {
+        let work = work_at("research", "active", 0, 5);
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None)
+            .expect("research should have a preset");
+        assert_eq!(req.preset_id, "research");
+
+        let seed: serde_json::Value =
+            serde_json::from_str(&req.seed.expect("seed must be set")).unwrap();
+
+        // fl_e_stage annotation
+        assert_eq!(seed["fl_e_stage"], "research");
+        // creative_brief and inspiration_log are the shared surface
+        // that produce reads — research can enrich these.
+        assert!(seed["creative_brief"].is_string());
+        assert!(seed["inspiration_log"].is_string());
+        assert_eq!(seed["work_id"], "wrk_test");
+    }
+
+    /// AC1: produce stage seed also carries creative_brief and inspiration_log,
+    /// confirming the shared context surface between research and produce.
+    #[test]
+    fn produce_schedule_seed_carries_research_enrichable_fields() {
+        let work = work_at("produce", "active", 1, 5);
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1))
+            .expect("produce should have a preset");
+        assert_eq!(req.preset_id, "novel-writing");
+
+        let input = req.input.expect("input must be set");
+        assert_eq!(input["fl_e_stage"], "produce");
+        // These are the same fields research enriches, confirming
+        // the downstream produce stage can see research-derived material.
+        assert!(input.get("creative_brief").is_some());
+        assert!(input.get("inspiration_log").is_some());
+    }
+
+    /// Fix W-2: produce stage input includes research_artifacts_dir when
+    /// the work has a driver_schedule_id (the research schedule that just
+    /// completed). This enables AC2 and AC3 (produce sees research output).
+    #[test]
+    fn produce_schedule_includes_research_artifacts_dir() {
+        let mut work = work_at("produce", "active", 1, 5);
+        // Simulate: driver_schedule_id is the research schedule that just completed
+        work.driver_schedule_id = Some("ACH20260609120000000".to_string());
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1))
+            .expect("produce should have a preset");
+
+        let input = req.input.expect("input must be set");
+        let rad = input
+            .get("research_artifacts_dir")
+            .expect("Fix W-2: produce input must include research_artifacts_dir");
+        assert!(
+            rad.as_str().unwrap().contains("ACH20260609120000000"),
+            "research_artifacts_dir should contain the driver schedule ID: {rad}"
+        );
+        assert!(
+            rad.as_str().unwrap().starts_with(".nexus42/references/"),
+            "research_artifacts_dir should use .nexus42/references/ prefix: {rad}"
+        );
+    }
+
+    /// Fix W-2 (negative): research stage does NOT include research_artifacts_dir.
+    #[test]
+    fn research_schedule_does_not_include_research_artifacts_dir() {
+        let mut work = work_at("research", "active", 0, 5);
+        work.driver_schedule_id = Some("SCH_prev_research".to_string());
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None)
+            .expect("research should have a preset");
+
+        let input = req.input.expect("input must be set");
+        assert!(
+            input.get("research_artifacts_dir").is_none(),
+            "research stage should NOT include research_artifacts_dir"
+        );
+    }
+
+    /// AC2: full chain intake→research→produce advances correctly
+    /// (verifies evaluate_next_step for the research-middle position).
+    #[test]
+    fn full_chain_intake_research_produce_advances() {
+        // intake complete → advance to research
+        let work = work_at("intake", "complete", 0, 3);
+        assert_eq!(
+            evaluate_next_step(&work),
+            ChainAction::AdvanceStage {
+                work_id: "wrk_test".to_string(),
+                next_stage: "research".to_string(),
+            }
+        );
+
+        // research complete → advance to produce
+        let work = work_at("research", "complete", 0, 3);
+        assert_eq!(
+            evaluate_next_step(&work),
+            ChainAction::AdvanceStage {
+                work_id: "wrk_test".to_string(),
+                next_stage: "produce".to_string(),
+            }
+        );
+
+        // produce complete (ch1 of 3) → advance to review (not NextChapter)
+        let work = work_at("produce", "complete", 1, 3);
+        assert_eq!(
+            evaluate_next_step(&work),
+            ChainAction::AdvanceStage {
+                work_id: "wrk_test".to_string(),
+                next_stage: "review".to_string(),
+            }
         );
     }
 }
