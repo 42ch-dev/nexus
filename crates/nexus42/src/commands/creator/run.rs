@@ -734,24 +734,25 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                                     println!();
                                     println!("Findings ({} open):", findings_list.len());
                                     for f in findings_list {
-                                        let f_title = f.get("title")
+                                        let f_title = f
+                                            .get("title")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("(untitled)");
-                                        let f_sev = f.get("severity")
+                                        let f_sev = f
+                                            .get("severity")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("info");
-                                        let hint = f.get("routing_hint")
+                                        let hint = f
+                                            .get("routing_hint")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("→ none");
-                                        let f_ch = f.get("chapter")
-                                            .and_then(serde_json::Value::as_i64);
+                                        let f_ch =
+                                            f.get("chapter").and_then(serde_json::Value::as_i64);
                                         let ch_str = match f_ch {
                                             Some(ch) => format!(" ch{ch}"),
                                             None => String::new(),
                                         };
-                                        println!(
-                                            "  [{f_sev:<7}] {f_title}{ch_str}  {hint}"
-                                        );
+                                        println!("  [{f_sev:<7}] {f_title}{ch_str}  {hint}");
                                     }
                                 }
                             }

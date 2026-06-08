@@ -134,6 +134,7 @@ pub struct TopFindingDto {
 /// - `brainstorm` → `→ brainstorm`
 /// - `none` → `→ none` (manual resolution)
 /// - `master` → `→ review-master`
+#[must_use]
 pub fn format_routing_hint(target_executor: &str) -> String {
     match target_executor {
         "write" => "→ write".to_string(),
@@ -163,7 +164,7 @@ pub async fn create_finding_handler(
         title: body.title,
         description: body.description,
         target_executor: body.target_executor,
-        creator_id: creator_id.to_string(),
+        creator_id: creator_id.clone(),
         created_at: now,
         updated_at: now,
     };
@@ -209,6 +210,10 @@ pub async fn get_finding_handler(
 }
 
 /// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
+///
+/// # Panics
+/// Panics if the finding row disappears between successful update and re-fetch
+/// (database invariant violation — should never happen).
 pub async fn update_finding_handler(
     State(state): State<WorkspaceState>,
     Path((work_id, finding_id)): Path<(String, String)>,
@@ -230,9 +235,7 @@ pub async fn update_finding_handler(
     let updated =
         findings::update_finding(state.pool(), &creator_id, &finding_id, &patch, now).await?;
     if !updated {
-        return Err(NexusApiError::NotFound(format!(
-            "finding {finding_id}"
-        )));
+        return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
     }
     let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
         .await?
@@ -254,9 +257,7 @@ pub async fn delete_finding_handler(
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(NexusApiError::NotFound(format!(
-            "finding {finding_id}"
-        )))
+        Err(NexusApiError::NotFound(format!("finding {finding_id}")))
     }
 }
 
@@ -265,6 +266,10 @@ pub async fn delete_finding_handler(
 /// This endpoint is called by the orchestration layer after a review stage
 /// completes. The request body contains the review verdict fields extracted
 /// from the terminal schedule context.
+///
+/// # Panics
+/// Panics if the finding row disappears between creation and re-fetch
+/// (database invariant violation — should never happen).
 pub async fn create_from_review_handler(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
