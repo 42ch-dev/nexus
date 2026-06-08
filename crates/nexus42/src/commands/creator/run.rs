@@ -1218,8 +1218,7 @@ mod tests {
     #[test]
     fn validate_skips_when_next_chapter_is_none() {
         // Novel-completion case (R-V138P1-01): next_chapter=None should NOT error
-        let result =
-            validate_produce_chapter_context("produce", None, None, None, "wrk_completed");
+        let result = validate_produce_chapter_context("produce", None, None, None, "wrk_completed");
         assert!(
             result.is_ok(),
             "should NOT error when next_chapter is None (novel-completion): {:?}",
@@ -1229,8 +1228,7 @@ mod tests {
 
     #[test]
     fn validate_skips_for_non_produce_stage() {
-        let result =
-            validate_produce_chapter_context("research", Some(3), None, None, "wrk_other");
+        let result = validate_produce_chapter_context("research", Some(3), None, None, "wrk_other");
         assert!(
             result.is_ok(),
             "should NOT error for non-produce stages: {:?}",
