@@ -950,10 +950,7 @@ mod tests_fix_d {
         // with target_status="active" when current is "active" should fail.
         let now = chrono::Utc::now().to_rfc3339();
         let result = works::advance_work_stage_atomic(
-            &pool,
-            "ctr_test",
-            "wrk_fixd",
-            "research", // same stage
+            &pool, "ctr_test", "wrk_fixd", "research", // same stage
             "active",   // same status → constraint violation
             &now,
         )

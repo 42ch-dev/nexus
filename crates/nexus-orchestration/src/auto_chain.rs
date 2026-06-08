@@ -330,9 +330,10 @@ pub async fn enqueue_auto_chain_schedule(
     chapter: Option<i32>,
     work: &WorkRecord,
 ) -> Result<String, AutoChainError> {
-    let schedule_req = build_auto_chain_schedule(stage, creator_id, work, chapter).ok_or_else(
-        || AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'")),
-    )?;
+    let schedule_req =
+        build_auto_chain_schedule(stage, creator_id, work, chapter).ok_or_else(|| {
+            AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
+        })?;
 
     // Fix A: Single source of truth for ACH schedule ID format.
     let schedule_id = format!("ACH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
@@ -623,18 +624,14 @@ mod tests {
         nexus_local_db::run_migrations(&pool).await.unwrap();
 
         let work = work_at("intake", "complete", 0, 3);
-        nexus_local_db::works::create_work(&pool, &work).await.unwrap();
+        nexus_local_db::works::create_work(&pool, &work)
+            .await
+            .unwrap();
 
-        let sid = enqueue_auto_chain_schedule(
-            &pool,
-            "ctr_test",
-            "wrk_test",
-            "research",
-            None,
-            &work,
-        )
-        .await
-        .unwrap();
+        let sid =
+            enqueue_auto_chain_schedule(&pool, "ctr_test", "wrk_test", "research", None, &work)
+                .await
+                .unwrap();
 
         // Verify schedule ID format
         assert!(
@@ -643,15 +640,18 @@ mod tests {
         );
 
         // Verify schedule was inserted as pending
-        let status: Option<String> = sqlx::query_scalar(
-            "SELECT status FROM creator_schedules WHERE schedule_id = ?",
-        )
-        .bind(&sid)
-        .fetch_optional(&pool)
-        .await
-        .unwrap()
-        .flatten();
-        assert_eq!(status.as_deref(), Some("pending"), "schedule should be pending");
+        let status: Option<String> =
+            sqlx::query_scalar("SELECT status FROM creator_schedules WHERE schedule_id = ?")
+                .bind(&sid)
+                .fetch_optional(&pool)
+                .await
+                .unwrap()
+                .flatten();
+        assert_eq!(
+            status.as_deref(),
+            Some("pending"),
+            "schedule should be pending"
+        );
 
         // Verify driver_schedule_id was set on the work
         let updated = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_test")
@@ -677,7 +677,9 @@ mod tests {
 
         let mut work = work_at("intake", "complete", 0, 3);
         work.primary_preset_id = "nonexistent-preset".to_string();
-        nexus_local_db::works::create_work(&pool, &work).await.unwrap();
+        nexus_local_db::works::create_work(&pool, &work)
+            .await
+            .unwrap();
 
         let result = enqueue_auto_chain_schedule(
             &pool,
