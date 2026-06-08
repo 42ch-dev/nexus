@@ -1206,4 +1206,133 @@ states:
             result.diagnostics
         );
     }
+
+    // ── V1.39 P2: novel-brainstorm + novel-review-master ──────────────
+
+    #[test]
+    fn list_embedded_presets_includes_novel_brainstorm() {
+        let presets = list_embedded_presets();
+        assert!(
+            presets.iter().any(|p| p == "novel-brainstorm"),
+            "expected 'novel-brainstorm' in embedded presets: {presets:?}"
+        );
+    }
+
+    #[test]
+    fn list_embedded_presets_includes_novel_review_master() {
+        let presets = list_embedded_presets();
+        assert!(
+            presets.iter().any(|p| p == "novel-review-master"),
+            "expected 'novel-review-master' in embedded presets: {presets:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_novel_brainstorm_loads_and_validates() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("novel-brainstorm", &caps).unwrap();
+
+        assert_eq!(loaded.id, "novel-brainstorm");
+        assert_eq!(loaded.version, 1);
+
+        // State machine: gather → synthesize → done
+        assert_eq!(loaded.manifest.preset.initial, "gather");
+        assert!(loaded.outer_graph.get_task("gather").is_some());
+        assert!(loaded.outer_graph.get_task("synthesize").is_some());
+        assert!(loaded.outer_graph.get_task("done").is_some());
+
+        // Verify linear transitions
+        assert!(loaded.manifest.states.iter().any(|s| {
+            s.id == "gather"
+                && s.next
+                    == Some(manifest::NextTarget::Linear("synthesize".into()))
+        }));
+        assert!(loaded.manifest.states.iter().any(|s| {
+            s.id == "synthesize"
+                && s.next == Some(manifest::NextTarget::Linear("done".into()))
+        }));
+
+        // Auto-chain compatible: exit_when uses llm_judge (not manual)
+        let gather = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "gather")
+            .expect("gather state must exist");
+        assert!(
+            matches!(gather.exit_when, Some(manifest::ExitWhen::LlmJudge { .. })),
+            "gather must use llm_judge exit for auto-chain compatibility"
+        );
+
+        // Gates present under preset section
+        assert!(
+            !loaded.manifest.preset.gates.is_empty(),
+            "novel-brainstorm must have preset gates"
+        );
+
+        // Prompt templates exist
+        assert!(
+            read_embedded_template("novel-brainstorm", "prompts/gather-findings.md").is_some(),
+            "gather-findings.md prompt must exist"
+        );
+        assert!(
+            read_embedded_template("novel-brainstorm", "prompts/synthesize-ideas.md").is_some(),
+            "synthesize-ideas.md prompt must exist"
+        );
+    }
+
+    #[test]
+    fn embedded_novel_review_master_loads_and_validates() {
+        let caps = CapabilityRegistry::with_builtins();
+        let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
+
+        assert_eq!(loaded.id, "novel-review-master");
+        assert_eq!(loaded.version, 1);
+
+        // State machine: present → await_decision → done
+        assert_eq!(loaded.manifest.preset.initial, "present");
+        assert!(loaded.outer_graph.get_task("present").is_some());
+        assert!(loaded.outer_graph.get_task("await_decision").is_some());
+        assert!(loaded.outer_graph.get_task("done").is_some());
+
+        // Verify linear transitions
+        assert!(loaded.manifest.states.iter().any(|s| {
+            s.id == "present"
+                && s.next
+                    == Some(manifest::NextTarget::Linear("await_decision".into()))
+        }));
+        assert!(loaded.manifest.states.iter().any(|s| {
+            s.id == "await_decision"
+                && s.next == Some(manifest::NextTarget::Linear("done".into()))
+        }));
+
+        // Human-in-loop: exit_when uses manual (not auto-chain)
+        let present = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "present")
+            .expect("present state must exist");
+        assert!(
+            matches!(present.exit_when, Some(manifest::ExitWhen::Manual)),
+            "present must use manual exit for human-in-loop"
+        );
+
+        // Gates present under preset section
+        assert!(
+            !loaded.manifest.preset.gates.is_empty(),
+            "novel-review-master must have preset gates"
+        );
+
+        // Prompt templates exist
+        assert!(
+            read_embedded_template("novel-review-master", "prompts/present-findings.md")
+                .is_some(),
+            "present-findings.md prompt must exist"
+        );
+        assert!(
+            read_embedded_template("novel-review-master", "prompts/await-decision.md").is_some(),
+            "await-decision.md prompt must exist"
+        );
+    }
 }
