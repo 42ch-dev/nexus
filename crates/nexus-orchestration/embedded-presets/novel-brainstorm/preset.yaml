@@ -1,0 +1,94 @@
+# Novel Brainstorm Preset — Quality Loop Ideation (V1.39 P2)
+#
+# Consumes open findings (target_executor: brainstorm) from the quality loop
+# and generates structured ideation material for downstream novel-writing.
+# This preset does NOT write 正文 directly — its output feeds into the
+# produce stage of the FL-E driver.
+#
+# Input variables (passed via core_context when starting a schedule):
+#   work_id:        Work entity ID (wrk_...).
+#   work_ref:       Human-readable short reference used as directory name.
+#   topic:          Novel topic or description.
+#   open_findings:  Serialized list of open findings (JSON) with target_executor=brainstorm.
+#
+# State machine: gather → synthesize → done
+#   - gather:    Ingest findings, identify thematic gaps and creative opportunities.
+#   - synthesize: Produce structured ideation prompts and cluster proposals.
+#   - done:      Terminal; output available for downstream consume.
+#
+# Launch:
+#   nexus42 creator run stage advance <work_id> --stage produce
+#   (with preset routed from findings where target_executor=brainstorm)
+#
+# Alternatively via daemon schedule:
+#   nexus42 daemon schedule add --preset novel-brainstorm \
+#     --creator <creator-id> --seed '{"work_id":"...","work_ref":"..."}'
+
+preset:
+  id: novel-brainstorm
+  version: 1
+  kind: creator
+  description: "Consume open findings and generate ideation prompts for novel writing; no direct text write"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - judge.llm
+  run_intents:
+    - work_continue
+  initial: gather
+  terminal: done
+  world_binding:
+    mode: optional
+  # Preset gates — enforced at enqueue time.
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+
+states:
+  - id: gather
+    description: "Ingest open findings and identify thematic gaps / creative opportunities"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/gather-findings.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            topic: "{{preset.input.topic}}"
+            open_findings: "{{preset.input.open_findings}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/gather-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: synthesize
+
+  - id: synthesize
+    description: "Produce structured ideation prompts and cluster proposals from gathered findings"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/synthesize-ideas.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            topic: "{{preset.input.topic}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/synthesize-exit.md
+      judge_capability: judge.llm
+    next: done
+    context_update:
+      op:
+        kind: append
+      template_file: prompts/synthesize-ctx-update.md
+
+  - id: done
+    terminal: true
