@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-09T04:00:00+08:00",
+  "updated_at": "2026-06-09T04:45:00+08:00",
   "plans": [
     {
       "id": "2026-06-09-v1.39-harness-docs-prepare",
@@ -27,24 +27,6 @@
           "DF-63 World KB",
           "multi-volume PK",
           "product code in prepare session"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-09-v1.39-findings-and-review-routing",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-09-v1.39-findings-and-review-routing.md",
-      "working_branch": "feature/v1.39-findings-and-review-routing",
-      "merge_target": "iteration/v1.39",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
-        "description": "P1 — findings table/API + review executor routing",
-        "depends_on": [
-          "2026-06-09-v1.39-research-stage-wiring"
-        ],
-        "targets_deferred": [
-          "DF-64"
         ]
       }
     },
@@ -254,20 +236,20 @@
     "integration_branch_retired": "iteration/v1.38 (V1.38 SHIPPED 2026-06-09 via PR #49; integration role handed off to iteration/v1.39 for active V1.39 prepare)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-09T04:00:00+08:00",
-      "total_open": 59,
+      "updated_at": "2026-06-09T04:45:00+08:00",
+      "total_open": 65,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 12,
-        "low": 35,
+        "medium": 13,
+        "low": 40,
         "nit": 12
       },
       "by_target": {
         "v1.37": 6,
         "backlog": 26,
         "v1.38": 12,
-        "v1.39": 16
+        "v1.39": 22
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -284,7 +266,8 @@
         "2026-06-08-v1.38-novel-writing-parameterization": 7,
         "2026-06-09-v1.39-fl-e-auto-chain-engine": 5,
         "2026-06-09-v1.39-research-stage-wiring": 8,
-        "2026-06-09-v1.39-v138-hardening": 3
+        "2026-06-09-v1.39-v138-hardening": 3,
+        "2026-06-09-v1.39-findings-and-review-routing": 6
       },
       "v1.36_added": {
         "P1": [
@@ -1004,6 +987,74 @@
         "owner": "@fullstack-dev",
         "target": "V1.40 hardening",
         "note": "If a non-CLI caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails."
+      }
+    ],
+    "2026-06-09-v1.39-findings-and-review-routing": [
+      {
+        "id": "R-V139P1-W-1",
+        "title": "No server-side enum validation on severity/status/target_executor — typo from non-CLI caller could store invalid value",
+        "severity": "medium",
+        "source": "qc1 W-1 (V1.39 P1 review)",
+        "scope": "crates/nexus-local-db/src/findings.rs (DAO create_finding/update_finding)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hardening",
+        "note": "Cheap to add CHECK constraints in migration or runtime match!()."
+      },
+      {
+        "id": "R-V139P1-W-2",
+        "title": "Duplicated finding ID generation across handler and DB layer",
+        "severity": "low",
+        "source": "qc1 W-2 (V1.39 P1 review)",
+        "scope": "crates/nexus-local-db/src/findings.rs + crates/nexus-daemon-runtime/src/api/handlers/findings.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene",
+        "note": "Single source of truth for ID mint."
+      },
+      {
+        "id": "R-V139P1-W-3",
+        "title": "CLI status HTTP timeout unbounded — slow daemon could freeze CLI",
+        "severity": "low",
+        "source": "qc3 W-1 (V1.39 P1 review)",
+        "scope": "crates/nexus42/src/commands/creator/run.rs (status HTTP fetch)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene",
+        "note": "Add reqwest timeout."
+      },
+      {
+        "id": "R-V139P1-W-4",
+        "title": "List query may skip index for cross-creator patterns",
+        "severity": "low",
+        "source": "qc3 W-2 (V1.39 P1 review)",
+        "scope": "crates/nexus-local-db/src/findings.rs (list_findings)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene",
+        "note": "EXPLAIN QUERY PLAN audit."
+      },
+      {
+        "id": "R-V139P1-W-5",
+        "title": "Runtime sqlx query not compile-time checked (count_open_findings_by_severity)",
+        "severity": "low",
+        "source": "qc3 W-3 (V1.39 P1 review)",
+        "scope": "crates/nexus-local-db/src/findings.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene",
+        "note": "Convert to compile-time query_as! if a struct shape is appropriate."
+      },
+      {
+        "id": "R-V139P1-W-6",
+        "title": "from-review hook error not explicitly logged — production debugging gap",
+        "severity": "low",
+        "source": "qc3 W-4 (V1.39 P1 review)",
+        "scope": "crates/nexus-local-db/src/findings.rs (create_finding_from_review)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene",
+        "note": "Add tracing::warn! on error."
       }
     ]
   }
