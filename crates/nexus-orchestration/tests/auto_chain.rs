@@ -392,13 +392,11 @@ async fn insert_driver_schedule(
 /// Helper: check if a schedule exists with the given status.
 async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> Option<String> {
     // SAFETY: test-only — scalar lookup for schedule status.
-    sqlx::query_scalar::<_, String>(
-        "SELECT status FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(schedule_id)
-    .fetch_optional(pool)
-    .await
-    .unwrap()
+    sqlx::query_scalar::<_, String>("SELECT status FROM creator_schedules WHERE schedule_id = ?")
+        .bind(schedule_id)
+        .fetch_optional(pool)
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -413,7 +411,15 @@ async fn fix1_terminal_completed_enqueues_next_stage() {
     seed_work(&pool, &work).await;
 
     // Insert the driver schedule as running
-    insert_driver_schedule(&pool, "sch_intake_001", "ctr_test", "novel-writing", "running", "wrk_fix1a").await;
+    insert_driver_schedule(
+        &pool,
+        "sch_intake_001",
+        "ctr_test",
+        "novel-writing",
+        "running",
+        "wrk_fix1a",
+    )
+    .await;
 
     // Set driver — this also sets stage_status to "active"
     auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1a", "sch_intake_001", "intake")
@@ -435,17 +441,26 @@ async fn fix1_terminal_completed_enqueues_next_stage() {
     .unwrap();
 
     // Complete the intake schedule via the supervisor terminal handler
-    sup.on_schedule_terminal("sch_intake_001", nexus_contracts::local::schedule::ScheduleStatus::Completed)
-        .await
-        .unwrap();
+    sup.on_schedule_terminal(
+        "sch_intake_001",
+        nexus_contracts::local::schedule::ScheduleStatus::Completed,
+    )
+    .await
+    .unwrap();
 
     // Verify the work now has a new driver schedule and is at research stage
     let updated = works::get_work(&pool, "ctr_test", "wrk_fix1a")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(updated.current_stage, "research", "should have advanced to research");
-    assert!(updated.driver_schedule_id.is_some(), "should have a new driver schedule");
+    assert_eq!(
+        updated.current_stage, "research",
+        "should have advanced to research"
+    );
+    assert!(
+        updated.driver_schedule_id.is_some(),
+        "should have a new driver schedule"
+    );
 
     // Verify the old schedule is completed
     assert_eq!(
@@ -477,23 +492,37 @@ async fn fix1_terminal_failed_does_not_enqueue_next() {
     work.stage_status = "active".to_string();
     seed_work(&pool, &work).await;
 
-    insert_driver_schedule(&pool, "sch_fail_001", "ctr_test", "novel-writing", "running", "wrk_fix1b").await;
+    insert_driver_schedule(
+        &pool,
+        "sch_fail_001",
+        "ctr_test",
+        "novel-writing",
+        "running",
+        "wrk_fix1b",
+    )
+    .await;
 
     auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1b", "sch_fail_001", "intake")
         .await
         .unwrap();
 
     // Fail the schedule — should NOT trigger auto-chain
-    sup.on_schedule_terminal("sch_fail_001", nexus_contracts::local::schedule::ScheduleStatus::Failed)
-        .await
-        .unwrap();
+    sup.on_schedule_terminal(
+        "sch_fail_001",
+        nexus_contracts::local::schedule::ScheduleStatus::Failed,
+    )
+    .await
+    .unwrap();
 
     // Work should still be at intake (no advancement on failure)
     let updated = works::get_work(&pool, "ctr_test", "wrk_fix1b")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(updated.current_stage, "intake", "should NOT advance on failure");
+    assert_eq!(
+        updated.current_stage, "intake",
+        "should NOT advance on failure"
+    );
 }
 
 #[tokio::test]
@@ -507,7 +536,15 @@ async fn fix1_chapter_loop_after_persist() {
     work.stage_status = "active".to_string();
     seed_work(&pool, &work).await;
 
-    insert_driver_schedule(&pool, "sch_persist_001", "ctr_test", "novel-writing", "running", "wrk_fix1c").await;
+    insert_driver_schedule(
+        &pool,
+        "sch_persist_001",
+        "ctr_test",
+        "novel-writing",
+        "running",
+        "wrk_fix1c",
+    )
+    .await;
 
     auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1c", "sch_persist_001", "persist")
         .await
@@ -527,17 +564,26 @@ async fn fix1_chapter_loop_after_persist() {
     .await
     .unwrap();
 
-    sup.on_schedule_terminal("sch_persist_001", nexus_contracts::local::schedule::ScheduleStatus::Completed)
-        .await
-        .unwrap();
+    sup.on_schedule_terminal(
+        "sch_persist_001",
+        nexus_contracts::local::schedule::ScheduleStatus::Completed,
+    )
+    .await
+    .unwrap();
 
     let updated = works::get_work(&pool, "ctr_test", "wrk_fix1c")
         .await
         .unwrap()
         .unwrap();
     // Should advance to produce for chapter 2
-    assert_eq!(updated.current_stage, "produce", "should advance to produce for chapter 2");
-    assert!(updated.driver_schedule_id.is_some(), "should have a new driver");
+    assert_eq!(
+        updated.current_stage, "produce",
+        "should advance to produce for chapter 2"
+    );
+    assert!(
+        updated.driver_schedule_id.is_some(),
+        "should have a new driver"
+    );
 }
 
 #[tokio::test]
@@ -551,11 +597,25 @@ async fn fix1_last_chapter_marks_work_complete() {
     work.stage_status = "active".to_string();
     seed_work(&pool, &work).await;
 
-    insert_driver_schedule(&pool, "sch_last_persist", "ctr_test", "novel-writing", "running", "wrk_fix1d").await;
+    insert_driver_schedule(
+        &pool,
+        "sch_last_persist",
+        "ctr_test",
+        "novel-writing",
+        "running",
+        "wrk_fix1d",
+    )
+    .await;
 
-    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1d", "sch_last_persist", "persist")
-        .await
-        .unwrap();
+    auto_chain::set_driver(
+        &pool,
+        "ctr_test",
+        "wrk_fix1d",
+        "sch_last_persist",
+        "persist",
+    )
+    .await
+    .unwrap();
 
     // Mark stage as complete
     works::patch_work(
@@ -571,24 +631,31 @@ async fn fix1_last_chapter_marks_work_complete() {
     .await
     .unwrap();
 
-    sup.on_schedule_terminal("sch_last_persist", nexus_contracts::local::schedule::ScheduleStatus::Completed)
-        .await
-        .unwrap();
+    sup.on_schedule_terminal(
+        "sch_last_persist",
+        nexus_contracts::local::schedule::ScheduleStatus::Completed,
+    )
+    .await
+    .unwrap();
 
     let updated = works::get_work(&pool, "ctr_test", "wrk_fix1d")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(updated.status, "completed", "work should be marked completed");
-    assert!(updated.driver_schedule_id.is_none(), "driver should be cleared");
+    assert_eq!(
+        updated.status, "completed",
+        "work should be marked completed"
+    );
+    assert!(
+        updated.driver_schedule_id.is_none(),
+        "driver should be cleared"
+    );
 }
 
 // ── Fix 2: Boot auto-resume (AC4 end-to-end) ───────────────────────────
 
 /// Helper: simulate boot auto-resume logic (mirrors boot.rs resume_auto_chain_work).
-async fn simulate_boot_auto_resume(
-    pool: &SqlitePool,
-) -> Vec<(String, String, Option<String>)> {
+async fn simulate_boot_auto_resume(pool: &SqlitePool) -> Vec<(String, String, Option<String>)> {
     // (work_id, action_description, new_schedule_id)
     let mut results = Vec::new();
     let resumable = auto_chain::find_resumable_works(pool).await.unwrap();
@@ -603,12 +670,19 @@ async fn simulate_boot_auto_resume(
         let action = auto_chain::evaluate_next_step(&latest);
 
         match action {
-            auto_chain::ChainAction::AdvanceStage { ref work_id, ref next_stage } => {
+            auto_chain::ChainAction::AdvanceStage {
+                ref work_id,
+                ref next_stage,
+            } => {
                 let req = auto_chain::build_auto_chain_schedule(
-                    next_stage, &latest.creator_id, &latest, None,
+                    next_stage,
+                    &latest.creator_id,
+                    &latest,
+                    None,
                 );
                 if let Some(schedule_req) = req {
-                    let schedule_id = format!("BOOT{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+                    let schedule_id =
+                        format!("BOOT{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
                     let now_ts = chrono::Utc::now().timestamp();
                     // SAFETY: test-only — DML for boot resume simulation.
                     sqlx::query(
@@ -629,11 +703,21 @@ async fn simulate_boot_auto_resume(
                     .await
                     .unwrap();
 
-                    auto_chain::set_driver(pool, &latest.creator_id, work_id, &schedule_id, next_stage)
-                        .await
-                        .unwrap();
+                    auto_chain::set_driver(
+                        pool,
+                        &latest.creator_id,
+                        work_id,
+                        &schedule_id,
+                        next_stage,
+                    )
+                    .await
+                    .unwrap();
 
-                    results.push((work_id.clone(), format!("advance to {next_stage}"), Some(schedule_id)));
+                    results.push((
+                        work_id.clone(),
+                        format!("advance to {next_stage}"),
+                        Some(schedule_id),
+                    ));
                 }
             }
             auto_chain::ChainAction::WorkComplete { ref work_id } => {
@@ -662,9 +746,15 @@ async fn fix2_boot_resume_enqueues_next_schedule() {
     seed_work(&pool, &work).await;
 
     // Set a driver schedule (which won't exist in creator_schedules → resumable)
-    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix2a", "sch_dead_research", "research")
-        .await
-        .unwrap();
+    auto_chain::set_driver(
+        &pool,
+        "ctr_test",
+        "wrk_fix2a",
+        "sch_dead_research",
+        "research",
+    )
+    .await
+    .unwrap();
 
     // Mark stage as complete (simulating what the schedule runner does)
     works::patch_work(
@@ -696,8 +786,14 @@ async fn fix2_boot_resume_enqueues_next_schedule() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(updated.current_stage, "produce", "should have advanced to produce");
-    assert!(updated.driver_schedule_id.is_some(), "should have a new driver");
+    assert_eq!(
+        updated.current_stage, "produce",
+        "should have advanced to produce"
+    );
+    assert!(
+        updated.driver_schedule_id.is_some(),
+        "should have a new driver"
+    );
     assert_ne!(
         updated.driver_schedule_id.as_deref(),
         Some("sch_dead_research"),
@@ -743,5 +839,8 @@ async fn fix2_boot_resume_interrupted_work_not_resumed() {
 
     // Should NOT be resumable
     let resumable = auto_chain::find_resumable_works(&pool).await.unwrap();
-    assert!(resumable.is_empty(), "interrupted work should not be resumable");
+    assert!(
+        resumable.is_empty(),
+        "interrupted work should not be resumable"
+    );
 }
