@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-09T12:30:00+08:00",
+  "updated_at": "2026-06-09T02:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-09-v1.39-harness-docs-prepare",
@@ -27,30 +27,6 @@
           "DF-63 World KB",
           "multi-volume PK",
           "product code in prepare session"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-09-v1.39-fl-e-auto-chain-engine",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md",
-      "working_branch": "feature/v1.39-fl-e-auto-chain-engine",
-      "merge_target": "iteration/v1.39",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
-        "description": "P0 — auto-chain engine, chapter outer loop, daemon continuity, side-input",
-        "depends_on": [
-          "2026-06-09-v1.39-harness-docs-prepare"
-        ],
-        "targets_deferred": [
-          "DF-53",
-          "DF-68"
-        ],
-        "explicitly_out": [
-          "DF-63",
-          "DF-64/65/66/67 full presets",
-          "multi-volume PK"
         ]
       }
     },
@@ -311,20 +287,20 @@
     "integration_branch_retired": "iteration/v1.38 (V1.38 SHIPPED 2026-06-09 via PR #49; integration role handed off to iteration/v1.39 for active V1.39 prepare)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-09T12:00:00+08:00",
-      "total_open": 43,
+      "updated_at": "2026-06-09T02:30:00+08:00",
+      "total_open": 48,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 12,
-        "low": 21,
-        "nit": 10
+        "low": 24,
+        "nit": 12
       },
       "by_target": {
         "v1.37": 6,
         "backlog": 26,
         "v1.38": 12,
-        "v1.39": 0
+        "v1.39": 5
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -338,7 +314,8 @@
         "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2,
         "2026-06-08-v1.38-harness-docs-prepare": 0,
         "2026-06-08-v1.38-multi-chapter-selection-status": 5,
-        "2026-06-08-v1.38-novel-writing-parameterization": 7
+        "2026-06-08-v1.38-novel-writing-parameterization": 7,
+        "2026-06-09-v1.39-fl-e-auto-chain-engine": 5
       },
       "v1.36_added": {
         "P1": [
@@ -855,6 +832,64 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.39+ observability",
         "note": "Add tracing::info! or debug! span showing the selected chapter context (chapter_label, outline_path, body_path, slug) to aid production debugging when chapter selection behaves unexpectedly."
+      }
+    ],
+    "2026-06-09-v1.39-fl-e-auto-chain-engine": [
+      {
+        "id": "R-V139P0-W-B",
+        "title": "ACH timestamp ID format %Y%m%d%H%M%S%3f lacks entropy — concurrent writers that both observe driver_schedule_id=null could collide in same millisecond",
+        "severity": "low",
+        "source": "qc2 W-2 (V1.39 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs (enqueue_auto_chain_schedule ID minting)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene plan",
+        "tracking": null,
+        "note": "Local-first single-user assumption lowers probability to near-zero. Fix: append ULID suffix or per-creator monotonic counter to the timestamp ID format. Helper is single source of truth (W-A) so the fix is one location."
+      },
+      {
+        "id": "R-V139P0-W-C",
+        "title": "creator run resume only clears auto_chain_interrupted; no synchronous nudge/tick/enqueue creates observable 'resume requested but chain idle' window",
+        "severity": "low",
+        "source": "qc2 W-3 (V1.39 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/run.rs (creator run resume subcommand)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene plan",
+        "note": "Fix: after clearing the auto_chain_interrupted flag, call supervisor.tick() (or a small kick() helper) so the resumed Work progresses in the same request rather than waiting for the next cycle. Could also fold into auto_chain::enqueue_auto_chain_schedule."
+      },
+      {
+        "id": "R-V139P0-W-F",
+        "title": "tick_inner loads ALL creator_schedules rows regardless of status on every terminal event — auto-chain increases completion frequency and amplifies O(N) cost",
+        "severity": "low",
+        "source": "qc3 W-3 (V1.39 P0 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (tick_inner)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hygiene plan",
+        "note": "Fix: scope the SELECT in tick_inner to pending|running statuses only. Auto-chain does not create new schedules with these statuses (it creates 'pending' or 'running' at enqueue, then transitions), so scope change is safe."
+      },
+      {
+        "id": "R-V139P0-S1",
+        "title": "patch_work_stage fail-fast reorder test (W-D) exercises the atomic function in isolation, not handler-level reordering — stronger test would simulate full handler",
+        "severity": "nit",
+        "source": "qc3 S-1 targeted re-review (V1.39 P0); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (tests_fix_d::stage_advance_failure_does_not_apply_non_stage_fields)",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "backlog",
+        "note": "Atomic-function test still proves the fail-fast property. Integration test would be more thorough but adds dependency on the surrounding handler. Accept as-is; document in test docstring if helper makes it visible."
+      },
+      {
+        "id": "R-V139P0-S2",
+        "title": "Boot-resume partial index existence verified but planner usage not empirically confirmed via EXPLAIN QUERY PLAN",
+        "severity": "nit",
+        "source": "qc3 S-2 targeted re-review (V1.39 P0); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/migrations/202606090001_works_auto_chain_checkpoint.sql (works_auto_chain_resume index)",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "backlog",
+        "note": "SQLite's planner may or may not use the partial index depending on table statistics; index is still safe (additive, no write overhead on paths that don't match the WHERE clause). Empirical EXPLAIN test can be added in a follow-up."
       }
     ]
   }

@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.39 plan per Profile B. Moved from status.json on V1.39 P0 closeout (P0 merged to iteration/v1.39; P0.5/P1..P5 still in flight on same integration branch).",
+  "plan_id": "2026-06-09-v1.39-fl-e-auto-chain-engine",
+  "title": "P0 — auto-chain engine, chapter outer loop, daemon continuity, side-input",
+  "done_at": "2026-06-09T02:30:00+08:00",
+  "archived_at": "2026-06-09T02:30:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md",
+  "archived_record": ".mstar/archived/plans/2026-06-09-v1.39-fl-e-auto-chain-engine.json",
+  "snapshot": {
+    "id": "2026-06-09-v1.39-fl-e-auto-chain-engine",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md",
+    "working_branch": "feature/v1.39-fl-e-auto-chain-engine",
+    "merge_target": "iteration/v1.39",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
+      "depends_on": [
+        "2026-06-09-v1.39-harness-docs-prepare"
+      ],
+      "description": "P0 — auto-chain engine, chapter outer loop, daemon continuity, side-input",
+      "targets_deferred": [
+        "DF-53",
+        "DF-68"
+      ],
+      "explicitly_out": [
+        "DF-63",
+        "DF-64/65/66/67 full presets",
+        "multi-volume PK"
+      ],
+      "updated_at": "2026-06-09T02:30:00+08:00",
+      "done_at": "2026-06-09T02:30:00+08:00",
+      "qc": "Initial tri-review (qc1/qc2/qc3) all Approve; consolidated gate Request Changes on 3 medium Warnings (W-A duplication, W-D non-atomic PATCH, W-E missing boot-resume index). Fix wave 2 (5+2 style commits, +383/-140) closed all 3 medium Warnings. Targeted re-review (qc1 W-A, qc2 W-A, qc3 W-D+W-E) all Approve. Final consolidated gate: Approve (0 Critical, 0 unresolved Warning). 3 low-severity Warnings (W-B ID entropy, W-C resume timing, W-F tick scan) deferred to V1.40 hygiene. 2 Suggestions from qc3 re-review registered as residuals.",
+      "qa": "skipped per harness convention for the round (initial QC tri-review + targeted re-review + 21 green integration tests + clippy clean + fmt clean + 266 daemon-runtime + 158 local-db tests provide equivalent evidence; QA in Plan iteration sign-off if needed)",
+      "shipped": [
+        "Work table extension: 3 new columns (auto_chain_enabled, auto_chain_interrupted, driver_schedule_id) + migration 202606090001_works_auto_chain_checkpoint.sql + partial index works_auto_chain_resume (W-E)",
+        "WorkPatch / WorkRecord / WorkApiDto surface includes the 3 new fields with creator isolation",
+        "Pure logic module crates/nexus-orchestration/src/auto_chain.rs (ChainAction enum, evaluate_next_step, 15 unit tests + DB helpers)",
+        "ScheduleSupervisor.on_schedule_terminal → process_auto_chain_after_terminal → enqueue_auto_chain_schedule (shared helper, W-A) → enqueue next stage / next chapter schedule",
+        "Shared enqueue helper (W-A): enqueue_auto_chain_schedule(pool, creator_id, work_id, stage, chapter, work) is the single source of truth for ACH ID mint + INSERT + set_driver, used by both supervisor and boot paths",
+        "Boot auto-resume in crates/nexus-daemon-runtime/src/boot.rs: find_resumable_works → for each interrupted work, re-fetch + evaluate_next_step + enqueue_next_schedule; preserves existing resume_running_as_paused for non-checkpoint schedules",
+        "Side-input single FL-E driver invariant (T6): 409 Conflict on creator run continue --note when active driver schedule exists for the same Work; inspiration visible in status",
+        "CLI status fields (T7): auto_chain_enabled, auto_chain_interrupted, driver_schedule_id, pending_inspiration surfaced via creator run status",
+        "CLI creator run resume <work_id> (T8) for manual recovery when not auto-resumed on boot",
+        "--auto-chain (default true) / --no-auto-chain flag on creator run start (T4) writes auto_chain_enabled to Work creation body",
+        "patch_work_stage atomicity fix (W-D): stage transition validated and run BEFORE non-stage field application; if stage advance fails, no non-stage fields are persisted; non-atomicity between the two operations documented with NOTE",
+        "Boot resume partial index (W-E): CREATE INDEX works_auto_chain_resume ON works(auto_chain_enabled, auto_chain_interrupted, status) WHERE auto_chain_enabled = 1",
+        "21 hermetic integration tests in crates/nexus-orchestration/tests/auto_chain.rs (14 initial + 4 fix1_* + 3 fix2_*) covering AC1..AC6, work completion, single-FL-E invariant, side-input 409, --no-auto-chain, checkpoint persistence, boot resume / no-resumable / interrupted",
+        "apply_non_stage_fields() helper extracted from patch_work_stage (Fix 3)",
+        "2 unit tests for shared enqueue helper (success + typed InvalidState error)",
+        "1 hermetic test for patch_work_stage fail-fast reorder (W-D) — stage_advance_failure_does_not_apply_non_stage_fields",
+        "1 hermetic test for boot-resume partial index existence (W-E) — queries sqlite_master",
+        "3 pre-existing clippy issues fixed in same slice: redundant_closure_for_method_calls (creator/run.rs), missing auto-chain fields in 2 test fixtures (host_tool_executor.rs, agent_tool_api.rs)",
+        "Deferred tracker DF-53/DF-68/DF-40 disposition updated (T10): implemented in V1.39 P0"
+      ],
+      "closed_residuals": [],
+      "deferred_residuals": [
+        "R-V139P0-W-B (low) — ACH timestamp ID format %Y%m%d%H%M%S%3f lacks entropy; defer to V1.40 hygiene",
+        "R-V139P0-W-C (low) — creator run resume only clears auto_chain_interrupted, no synchronous nudge; defer to V1.40 hygiene",
+        "R-V139P0-W-F (low) — tick_inner loads ALL creator_schedules rows regardless of status; defer to V1.40 hygiene",
+        "R-V139P0-S1 (low/nit) — patch_work_stage reorder test is atomic-function-level; suggest integration test (qc3 S-1 re-review)",
+        "R-V139P0-S2 (low/nit) — boot-resume index planner usage not empirically confirmed; suggest EXPLAIN QUERY PLAN assertion (qc3 S-2 re-review)"
+      ],
+      "commits": [
+        "9b9609e2 feat(auto-chain): add auto-chain checkpoint fields to works table (T2)",
+        "eb251ba9 feat(auto-chain): T3 — on_complete handler with stage advance and chapter loop",
+        "332d4ed7 feat(auto-chain): T4 — --no-auto-chain flag on creator run start",
+        "d3f95576 feat(auto-chain): T5 — boot recovery for interrupted auto-chain works",
+        "99102ec4 feat(auto-chain): T6 — single FL-E driver invariant for side input",
+        "49a86c61 feat(auto-chain): T7 — auto-chain fields in creator run status",
+        "f04b16c4 feat(auto-chain): T8 — creator run resume subcommand",
+        "689b6995 test(auto-chain): T9 — integration tests for AC1–AC6",
+        "1507325a docs(auto-chain): T10 — update deferred tracker DF-53/DF-68 to implemented",
+        "263c974d refactor(daemon-runtime): extract apply_non_stage_fields helper from patch_work_stage (Fix 3)",
+        "1cd73b31 feat(orchestration): wire auto-chain into ScheduleSupervisor terminal handler (Fix 1 — critical wiring)",
+        "e1766b07 feat(daemon-runtime): auto-resume interrupted auto-chain works on boot (Fix 2 — critical wiring)",
+        "b56ce485 style(nexus42): replace redundant closures with method references (pre-existing clippy)",
+        "6897e541 fix(daemon-runtime): add missing auto-chain fields to test WorkRecord (pre-existing test fixture)",
+        "c143da1f fix(daemon-runtime): add missing auto-chain fields to agent_tool_api test fixture (pre-existing test fixture)",
+        "6e505c06 fix(orchestration): extract shared enqueue_auto_chain_schedule helper (W-A fix wave 2)",
+        "9b9f613c fix(daemon-runtime): reorder patch_work_stage for fail-fast (W-D fix wave 2)",
+        "df2049bd fix(local-db): add partial index for auto-chain boot resume query (W-E fix wave 2)",
+        "d512b2dd style: fix clippy lint errors from Fix A/D",
+        "84db9a0e style: apply cargo +nightly fmt"
+      ],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-06-09-v1.39-fl-e-auto-chain-engine/qc-consolidated.md (final Approve post targeted re-review)",
+        ".mstar/plans/reports/2026-06-09-v1.39-fl-e-auto-chain-engine/qc1.md (initial Approve + W-A targeted re-review Approve)",
+        ".mstar/plans/reports/2026-06-09-v1.39-fl-e-auto-chain-engine/qc2.md (initial Approve + W-A targeted re-review Approve)",
+        ".mstar/plans/reports/2026-06-09-v1.39-fl-e-auto-chain-engine/qc3.md (initial Approve + W-D + W-E targeted re-review Approve)"
+      ]
+    }
+  },
+  "qc": "Initial tri-review (qc1+qc2+qc3) all Approve; consolidated gate Request Changes on 3 medium Warnings (W-A, W-D, W-E). Fix wave 2 (5 fix commits + 2 style) closed all 3 medium. Targeted re-review (qc1 W-A, qc2 W-A, qc3 W-D+W-E) all Approve. Final: Approve.",
+  "qa": "skipped (initial QC + targeted re-review + 21 green integration tests + 158 nexus-local-db + 266 nexus-daemon-runtime + clippy + fmt clean provide equivalent evidence; full QA in iteration sign-off if needed)",
+  "residual_count": 5,
+  "merge_commits": [
+    "9b9609e2 feat(auto-chain): add auto-chain checkpoint fields to works table (T2)",
+    "eb251ba9 feat(auto-chain): T3 — on_complete handler with stage advance and chapter loop",
+    "332d4ed7 feat(auto-chain): T4 — --no-auto-chain flag on creator run start",
+    "d3f95576 feat(auto-chain): T5 — boot recovery for interrupted auto-chain works",
+    "99102ec4 feat(auto-chain): T6 — single FL-E driver invariant for side input",
+    "49a86c61 feat(auto-chain): T7 — auto-chain fields in creator run status",
+    "f04b16c4 feat(auto-chain): T8 — creator run resume subcommand",
+    "689b6995 test(auto-chain): T9 — integration tests for AC1–AC6",
+    "1507325a docs(auto-chain): T10 — update deferred tracker DF-53/DF-68 to implemented",
+    "263c974d refactor(daemon-runtime): extract apply_non_stage_fields helper from patch_work_stage (Fix 3)",
+    "1cd73b31 feat(orchestration): wire auto-chain into ScheduleSupervisor terminal handler (Fix 1)",
+    "e1766b07 feat(daemon-runtime): auto-resume interrupted auto-chain works on boot (Fix 2)",
+    "b56ce485 style(nexus42): replace redundant closures with method references",
+    "6897e541 fix(daemon-runtime): add missing auto-chain fields to test WorkRecord",
+    "c143da1f fix(daemon-runtime): add missing auto-chain fields to agent_tool_api test fixture",
+    "6e505c06 fix(orchestration): extract shared enqueue_auto_chain_schedule helper (W-A)",
+    "9b9f613c fix(daemon-runtime): reorder patch_work_stage for fail-fast (W-D)",
+    "df2049bd fix(local-db): add partial index for auto-chain boot resume query (W-E)",
+    "d512b2dd style: fix clippy lint errors from Fix A/D",
+    "84db9a0e style: apply cargo +nightly fmt"
+  ],
+  "notes": "P0 — auto-chain engine, chapter outer loop, daemon continuity, side-input. DF-53 + DF-68 implemented (T10). 3 medium Warnings (W-A, W-D, W-E) closed in fix wave 2. 3 low-severity Warnings + 2 Suggestions deferred to V1.40 hygiene."
+}
