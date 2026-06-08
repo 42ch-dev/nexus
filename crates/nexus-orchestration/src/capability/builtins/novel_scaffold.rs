@@ -433,6 +433,9 @@ impl Capability for NovelProjectScaffold {
                 schedule_ids: None,
                 current_stage: None,
                 stage_status: None,
+                auto_chain_enabled: None,
+                driver_schedule_id: None,
+                auto_chain_interrupted: None,
             };
             works::patch_work_tx(&mut tx, &inp.creator_id, &inp.work_id, &patch, &now)
                 .await

@@ -48,6 +48,13 @@ pub enum RunCommand {
         /// daemon `on_complete` auto-chain is a future enhancement (DF-53 partial).
         #[arg(long, default_value_t = true, value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
         chain_novel_writing: bool,
+        /// Disable daemon-side auto-chain for this Work (V1.39 §5.4).
+        /// When set, the daemon will NOT automatically advance FL-E stages
+        /// or loop chapters after each stage completes. Manual stage advance
+        /// via `creator run stage advance` is still available.
+        /// Default: auto-chain enabled (--no-auto-chain opts out).
+        #[arg(long, default_value_t = false)]
+        no_auto_chain: bool,
         /// Force gate bypass with audit reason (V1.36 §5.3.5)
         /// Requires --reason to be set alongside
         #[arg(long, default_value_t = false)]
@@ -100,6 +107,17 @@ pub enum RunCommand {
     /// Rebuild `work_chapters` from filesystem (V1.36 §4.1.2, §8)
     ReconcileChapters {
         /// Work ID (wrk_...) to reconcile
+        work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Resume an auto-chain Work whose driver was interrupted (V1.39 §5.7).
+    ///
+    /// Re-evaluates the current Work state and enqueues the next auto-chain
+    /// step (stage advance or next chapter) if applicable.
+    Resume {
+        /// Work ID (wrk_...) to resume
         work_id: String,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
@@ -160,6 +178,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             init_preset,
             skip_intake,
             chain_novel_writing,
+            no_auto_chain,
             force_gates,
             reason,
             client_request_id,
@@ -235,6 +254,17 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     o.insert(
                         "force_gates_reason".to_string(),
                         serde_json::Value::String(reason.clone().unwrap_or_default()),
+                    );
+                }
+            }
+
+            // V1.39 §5.4: pass auto_chain_enabled through to Work creation.
+            // Default is true (auto-chain active); --no-auto-chain opts out.
+            if no_auto_chain {
+                if let Some(o) = body.as_object_mut() {
+                    o.insert(
+                        "auto_chain_enabled".to_string(),
+                        serde_json::Value::Bool(false),
                     );
                 }
             }
@@ -605,6 +635,26 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         println!("progress: {finalized_count} / {total} chapters finalized");
                         println!("current_chapter: {current_chapter}");
                         println!("total_planned_chapters: {total_planned}");
+
+                        // V1.39 T7: auto-chain checkpoint fields
+                        let auto_chain = resp
+                            .get("auto_chain_enabled")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(true);
+                        let driver = resp
+                            .get("driver_schedule_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("none");
+                        let interrupted = resp
+                            .get("auto_chain_interrupted")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false);
+                        println!(
+                            "auto_chain: {} (driver: {}, interrupted: {})",
+                            if auto_chain { "enabled" } else { "disabled" },
+                            driver,
+                            interrupted
+                        );
                         println!();
 
                         // Per-chapter rows
@@ -708,6 +758,9 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         ("intake_status", "intake_status"),
                         ("current_stage", "current_stage"),
                         ("stage_status", "stage_status"),
+                        ("auto_chain_enabled", "auto_chain_enabled"),
+                        ("driver_schedule_id", "driver_schedule_id"),
+                        ("auto_chain_interrupted", "auto_chain_interrupted"),
                         ("long_term_goal", "long_term_goal"),
                         ("initial_idea", "initial_idea"),
                         ("primary_preset_id", "primary_preset_id"),
@@ -754,6 +807,45 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("  Created:   {created}");
                 println!("  Updated:   {updated}");
                 println!("  Preserved: {preserved}");
+            }
+        }
+        RunCommand::Resume { work_id, json } => {
+            // V1.39 §5.7 (T8): Resume an interrupted auto-chain Work.
+            // This clears auto_chain_interrupted and re-evaluates the next step.
+            let patch = serde_json::json!({
+                "auto_chain_interrupted": false,
+            });
+            let resp: serde_json::Value = client
+                .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
+                .await?;
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                let stage = resp
+                    .get("current_stage")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let status = resp
+                    .get("stage_status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let auto_chain = resp
+                    .get("auto_chain_enabled")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true);
+
+                if auto_chain {
+                    println!(
+                        "Work {work_id} auto-chain resumed at stage '{stage}' ({status}). \
+                         The daemon will evaluate the next step automatically."
+                    );
+                } else {
+                    println!(
+                        "Work {work_id} auto-chain is disabled. \
+                         Use manual stage advance: nexus42 creator run stage advance {work_id} --stage <stage>"
+                    );
+                }
             }
         }
     }

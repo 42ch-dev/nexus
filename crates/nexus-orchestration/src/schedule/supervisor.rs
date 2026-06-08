@@ -277,8 +277,8 @@ impl ScheduleSupervisor {
     /// Called when a schedule reaches a terminal state.
     ///
     /// Flips the Schedule row to the given terminal status, removes it from
-    /// the running set, and triggers a `tick()` to potentially start the
-    /// next eligible schedule.
+    /// the running set, evaluates auto-chain continuation, and triggers a
+    /// `tick()` to potentially start the next eligible schedule.
     ///
     /// # Errors
     /// Returns [`SupervisorError`] if database operations fail.
@@ -329,10 +329,19 @@ impl ScheduleSupervisor {
         .await?;
 
         // Remove from running cache
-        if let Some(creator_id) = row {
+        if let Some(ref creator_id) = row {
             let mut inner = self.inner.lock().await;
-            if let Some(ids) = inner.running_by_creator.get_mut(&creator_id) {
+            if let Some(ids) = inner.running_by_creator.get_mut(creator_id) {
                 ids.remove(&ScheduleId(schedule_id.to_string()));
+            }
+        }
+
+        // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
+        // Only on success — failed/cancelled schedules do not trigger auto-chain.
+        if terminal_status == ScheduleStatus::Completed {
+            if let Some(ref creator_id) = row {
+                self.process_auto_chain_after_terminal(schedule_id, creator_id)
+                    .await;
             }
         }
 
@@ -340,6 +349,154 @@ impl ScheduleSupervisor {
         self.tick().await?;
 
         Ok(())
+    }
+
+    /// Evaluate and execute auto-chain continuation after a schedule completes.
+    ///
+    /// Looks up the Work whose `driver_schedule_id` matches the completed schedule,
+    /// evaluates the next chain step, and enqueues the next schedule if appropriate.
+    ///
+    /// Errors are logged but do not propagate — auto-chain failure should not block
+    /// the terminal transition.
+    async fn process_auto_chain_after_terminal(&self, schedule_id: &str, creator_id: &str) {
+        use crate::auto_chain::{self, ChainAction};
+
+        // Find the Work that was driven by this schedule
+        let work = match auto_chain::find_work_for_driver(&self.pool, schedule_id).await {
+            Ok(Some(w)) => w,
+            Ok(None) => return, // Not an auto-chain driver
+            Err(e) => {
+                tracing::warn!(
+                    schedule_id,
+                    error = %e,
+                    "auto-chain: failed to find work for driver schedule"
+                );
+                return;
+            }
+        };
+
+        if !work.auto_chain_enabled {
+            return;
+        }
+
+        // Read latest WorkRecord from DB (SSOT, not cached state)
+        let work =
+            match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await {
+                Ok(Some(w)) => w,
+                Ok(None) => return,
+                Err(e) => {
+                    tracing::warn!(
+                        work_id = %work.work_id,
+                        error = %e,
+                        "auto-chain: failed to reload work record"
+                    );
+                    return;
+                }
+            };
+
+        let action = auto_chain::evaluate_next_step(&work);
+        match action {
+            ChainAction::AdvanceStage {
+                ref work_id,
+                ref next_stage,
+            } => {
+                if let Err(e) = self
+                    .enqueue_auto_chain_step(creator_id, work_id, next_stage, None, &work)
+                    .await
+                {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        next_stage = %next_stage,
+                        error = %e,
+                        "auto-chain: failed to enqueue next stage"
+                    );
+                }
+            }
+            ChainAction::NextChapter {
+                ref work_id,
+                ref next_chapter,
+            } => {
+                // Next chapter starts at produce stage
+                if let Err(e) = self
+                    .enqueue_auto_chain_step(
+                        creator_id,
+                        work_id,
+                        "produce",
+                        Some(*next_chapter),
+                        &work,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        next_chapter = *next_chapter,
+                        error = %e,
+                        "auto-chain: failed to enqueue next chapter"
+                    );
+                }
+            }
+            ChainAction::WorkComplete { ref work_id } => {
+                if let Err(e) =
+                    auto_chain::mark_work_completed(&self.pool, creator_id, work_id).await
+                {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        error = %e,
+                        "auto-chain: failed to mark work completed"
+                    );
+                } else {
+                    tracing::info!(
+                        work_id = %work_id,
+                        "auto-chain: work completed"
+                    );
+                }
+            }
+            ChainAction::NoAction => {}
+        }
+    }
+
+    /// Enqueue a new auto-chain schedule and update the Work checkpoint.
+    ///
+    /// Delegates to the shared `auto_chain::enqueue_auto_chain_schedule` helper
+    /// (Fix A / W-A) so that the ID-mint + INSERT + set_driver logic is not
+    /// duplicated between the supervisor and boot paths.
+    #[allow(clippy::doc_markdown)]
+    async fn enqueue_auto_chain_step(
+        &self,
+        creator_id: &str,
+        work_id: &str,
+        stage: &str,
+        chapter: Option<i32>,
+        work: &nexus_local_db::works::WorkRecord,
+    ) -> Result<(), SupervisorError> {
+        use crate::auto_chain::{self, AutoChainError};
+
+        match auto_chain::enqueue_auto_chain_schedule(
+            &self.pool, creator_id, work_id, stage, chapter, work,
+        )
+        .await
+        {
+            Ok(_schedule_id) => Ok(()),
+            Err(AutoChainError::InvalidState(msg)) => {
+                // No schedule mapping for this stage — not a DB error.
+                tracing::warn!(
+                    work_id = %work_id,
+                    stage = %stage,
+                    "auto-chain: {msg}"
+                );
+                Ok(())
+            }
+            Err(AutoChainError::Database(e)) => Err(SupervisorError::Database(
+                // Extract the underlying sqlx error from LocalDbError.
+                match e {
+                    nexus_local_db::LocalDbError::Sqlx(s) => s,
+                    other => sqlx::Error::Protocol(other.to_string()),
+                },
+            )),
+            Err(other) => Err(SupervisorError::Database(sqlx::Error::Protocol(
+                other.to_string(),
+            ))),
+        }
     }
 
     /// Insert a pending schedule into the database (for testing and CLI use).

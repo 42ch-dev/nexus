@@ -9,14 +9,16 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use crate::error::LocalDbError;
 
 /// Column list for all SELECT queries on works.
-const WORKS_COLUMNS: &str = "\
+pub const WORKS_COLUMNS: &str = "\
     work_id, creator_id, workspace_slug, status, title, long_term_goal, \
     initial_idea, creative_brief, intake_status, world_id, story_ref, \
     inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, \
-    current_stage, stage_status, work_profile, work_ref, total_planned_chapters, current_chapter";
+    current_stage, stage_status, work_profile, work_ref, total_planned_chapters, current_chapter, \
+    auto_chain_enabled, driver_schedule_id, auto_chain_interrupted";
 
 /// Map a sqlx row to [`WorkRecord`].
-fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
+#[must_use]
+pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
     WorkRecord {
         work_id: r.get("work_id"),
         creator_id: r.get("creator_id"),
@@ -40,6 +42,9 @@ fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
         work_ref: r.get("work_ref"),
         total_planned_chapters: r.get("total_planned_chapters"),
         current_chapter: r.get("current_chapter"),
+        auto_chain_enabled: r.get("auto_chain_enabled"),
+        driver_schedule_id: r.get("driver_schedule_id"),
+        auto_chain_interrupted: r.get("auto_chain_interrupted"),
     }
 }
 
@@ -90,6 +95,12 @@ pub struct WorkRecord {
     pub total_planned_chapters: Option<i32>,
     /// Current chapter index (V1.36 §2.1).
     pub current_chapter: i32,
+    /// Auto-chain enabled flag (V1.39 §5.4, default true).
+    pub auto_chain_enabled: bool,
+    /// Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
+    pub driver_schedule_id: Option<String>,
+    /// Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
+    pub auto_chain_interrupted: bool,
 }
 
 /// Inspiration log entry — `{at, note}`.
@@ -147,6 +158,12 @@ pub struct WorkPatch {
     pub total_planned_chapters: Option<Option<i32>>,
     /// New `current_chapter` (V1.36 §2.1).
     pub current_chapter: Option<i32>,
+    /// New `auto_chain_enabled` (V1.39 §5.4).
+    pub auto_chain_enabled: Option<bool>,
+    /// New `driver_schedule_id` (V1.39 §5.4, nullable).
+    pub driver_schedule_id: Option<Option<String>>,
+    /// New `auto_chain_interrupted` (V1.39 §5.4).
+    pub auto_chain_interrupted: Option<bool>,
 }
 
 /// Create a new Work (simple, non-transactional).
@@ -164,8 +181,9 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
          primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
-         work_profile, work_ref, total_planned_chapters, current_chapter)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         work_profile, work_ref, total_planned_chapters, current_chapter,
+         auto_chain_enabled, driver_schedule_id, auto_chain_interrupted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -189,6 +207,8 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     .bind(&record.work_ref)
     .bind(record.total_planned_chapters)
     .bind(record.current_chapter)
+    .bind(record.auto_chain_enabled)
+    .bind(record.auto_chain_interrupted)
     .execute(pool)
     .await?;
     Ok(())
@@ -205,8 +225,9 @@ async fn insert_work_tx(
         "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
          primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
-         work_profile, work_ref, total_planned_chapters, current_chapter)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         work_profile, work_ref, total_planned_chapters, current_chapter,
+         auto_chain_enabled, driver_schedule_id, auto_chain_interrupted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -230,6 +251,8 @@ async fn insert_work_tx(
     .bind(&record.work_ref)
     .bind(record.total_planned_chapters)
     .bind(record.current_chapter)
+    .bind(record.auto_chain_enabled)
+    .bind(record.auto_chain_interrupted)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -608,6 +631,15 @@ pub async fn patch_work(
     if patch.current_chapter.is_some() {
         set_clauses.push("current_chapter = ?");
     }
+    if patch.auto_chain_enabled.is_some() {
+        set_clauses.push("auto_chain_enabled = ?");
+    }
+    if patch.driver_schedule_id.is_some() {
+        set_clauses.push("driver_schedule_id = ?");
+    }
+    if patch.auto_chain_interrupted.is_some() {
+        set_clauses.push("auto_chain_interrupted = ?");
+    }
 
     if set_clauses.is_empty() {
         // Nothing to update — just return current record.
@@ -688,6 +720,18 @@ pub async fn patch_work(
         }
     }
     if let Some(ref v) = patch.current_chapter {
+        query = query.bind(v);
+    }
+    if let Some(v) = patch.auto_chain_enabled {
+        query = query.bind(v);
+    }
+    if let Some(ref opt_val) = patch.driver_schedule_id {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(v) = patch.auto_chain_interrupted {
         query = query.bind(v);
     }
 
@@ -773,6 +817,15 @@ pub async fn patch_work_tx(
     if patch.current_chapter.is_some() {
         set_clauses.push("current_chapter = ?");
     }
+    if patch.auto_chain_enabled.is_some() {
+        set_clauses.push("auto_chain_enabled = ?");
+    }
+    if patch.driver_schedule_id.is_some() {
+        set_clauses.push("driver_schedule_id = ?");
+    }
+    if patch.auto_chain_interrupted.is_some() {
+        set_clauses.push("auto_chain_interrupted = ?");
+    }
 
     if set_clauses.is_empty() {
         return Ok(false);
@@ -849,6 +902,18 @@ pub async fn patch_work_tx(
         }
     }
     if let Some(ref v) = patch.current_chapter {
+        query = query.bind(v);
+    }
+    if let Some(v) = patch.auto_chain_enabled {
+        query = query.bind(v);
+    }
+    if let Some(ref opt_val) = patch.driver_schedule_id {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(v) = patch.auto_chain_interrupted {
         query = query.bind(v);
     }
 
@@ -1134,6 +1199,9 @@ mod tests {
             work_ref: None,
             total_planned_chapters: None,
             current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
         }
     }
 
@@ -1562,5 +1630,39 @@ mod tests {
         .unwrap();
         assert_eq!(updated.current_stage, "produce");
         assert_eq!(updated.stage_status, "active");
+    }
+
+    /// Fix E (W-E): Verify the partial index for auto-chain boot resume exists
+    /// after migration. The index covers (auto_chain_enabled, auto_chain_interrupted,
+    /// status) with a partial WHERE clause for auto_chain_enabled = 1.
+    #[tokio::test]
+    async fn test_auto_chain_resume_index_exists() {
+        let (pool, _dir) = fresh_pool().await;
+
+        // Query sqlite_master to verify the index was created by the migration.
+        let index_sql: Option<String> = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master \
+             WHERE type = 'index' AND name = 'works_auto_chain_resume'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .flatten();
+
+        assert!(
+            index_sql.is_some(),
+            "Fix E: works_auto_chain_resume index should exist after migration"
+        );
+
+        let sql = index_sql.unwrap();
+        assert!(
+            sql.contains("auto_chain_enabled"),
+            "index should cover auto_chain_enabled: {sql}"
+        );
+        assert!(
+            sql.contains("auto_chain_interrupted"),
+            "index should cover auto_chain_interrupted: {sql}"
+        );
+        assert!(sql.contains("status"), "index should cover status: {sql}");
     }
 }
