@@ -587,7 +587,7 @@ fn create_subsystems(
 /// Create a new schedule for an auto-chain work at boot recovery.
 ///
 /// Delegates to the shared `auto_chain::enqueue_auto_chain_schedule` helper
-/// (Fix A / W-A) so that the ID-mint + INSERT + set_driver logic is not
+/// (Fix A / W-A) so that the ID-mint + INSERT + `set_driver` logic is not
 /// duplicated between the boot and supervisor paths.
 async fn resume_auto_chain_work(
     pool: &sqlx::SqlitePool,
