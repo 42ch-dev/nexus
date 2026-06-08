@@ -48,6 +48,13 @@ pub enum RunCommand {
         /// daemon `on_complete` auto-chain is a future enhancement (DF-53 partial).
         #[arg(long, default_value_t = true, value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
         chain_novel_writing: bool,
+        /// Disable daemon-side auto-chain for this Work (V1.39 §5.4).
+        /// When set, the daemon will NOT automatically advance FL-E stages
+        /// or loop chapters after each stage completes. Manual stage advance
+        /// via `creator run stage advance` is still available.
+        /// Default: auto-chain enabled (--no-auto-chain opts out).
+        #[arg(long, default_value_t = false)]
+        no_auto_chain: bool,
         /// Force gate bypass with audit reason (V1.36 §5.3.5)
         /// Requires --reason to be set alongside
         #[arg(long, default_value_t = false)]
@@ -160,6 +167,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             init_preset,
             skip_intake,
             chain_novel_writing,
+            no_auto_chain,
             force_gates,
             reason,
             client_request_id,
@@ -235,6 +243,17 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     o.insert(
                         "force_gates_reason".to_string(),
                         serde_json::Value::String(reason.clone().unwrap_or_default()),
+                    );
+                }
+            }
+
+            // V1.39 §5.4: pass auto_chain_enabled through to Work creation.
+            // Default is true (auto-chain active); --no-auto-chain opts out.
+            if no_auto_chain {
+                if let Some(o) = body.as_object_mut() {
+                    o.insert(
+                        "auto_chain_enabled".to_string(),
+                        serde_json::Value::Bool(false),
                     );
                 }
             }
