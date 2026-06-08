@@ -51,6 +51,8 @@ async fn seed_novel_writing_preset_input(
     ctx.set("preset.input.vibe", "literary").await;
     ctx.set("preset.input.work_ref", "e2e-test-novel").await;
     ctx.set("preset.input.work_id", "wrk_e2e_test").await;
+    // V1.38 P0: chapter is now a preset.input template variable
+    ctx.set("preset.input.chapter", 1).await;
 }
 
 async fn start_novel_writing_session(
