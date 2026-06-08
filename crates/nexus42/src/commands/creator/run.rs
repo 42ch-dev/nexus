@@ -985,6 +985,31 @@ async fn stage_advance(
         .and_then(serde_json::Value::as_i64)
         .map(|n| i32::try_from(n).unwrap_or(1));
 
+    // V1.38 P1: extract chapter context (outline_path, body_path, slug)
+    // from the chapters array for the selected chapter.
+    let (chapter_label, outline_path, body_path, slug) = next_chapter
+        .and_then(|ch_num| {
+            let ch_label = format!("{ch_num:02}");
+            let chapters = resp.get("chapters").and_then(|v| v.as_array())?;
+            let ch_row = chapters.iter().find(|c| {
+                c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(ch_num))
+            })?;
+            let op = ch_row
+                .get("outline_path")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let bp = ch_row
+                .get("body_path")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let sl = ch_row
+                .get("slug")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            Some((Some(ch_label), op, bp, sl))
+        })
+        .unwrap_or_default();
+
     let fields = WorkFields {
         work_id: work_id.to_string(),
         fl_e_stage: target_stage.to_string(),
@@ -992,6 +1017,10 @@ async fn stage_advance(
         inspiration_log: inspiration_log.to_string(),
         work_ref,
         chapter: next_chapter,
+        chapter_label,
+        outline_path,
+        body_path,
+        slug,
     };
 
     if let Some(mut request) =
