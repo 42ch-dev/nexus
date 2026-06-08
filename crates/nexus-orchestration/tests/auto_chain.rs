@@ -347,3 +347,238 @@ async fn find_work_for_driver_returns_none_for_unknown() {
         .unwrap();
     assert!(found.is_none());
 }
+
+// ── Fix 1: Supervisor terminal hook for auto-chain (AC1 end-to-end) ───
+
+use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
+use std::sync::Arc;
+
+/// Helper: create a supervisor backed by the test pool.
+fn test_supervisor(pool: SqlitePool) -> Arc<ScheduleSupervisor> {
+    Arc::new(ScheduleSupervisor::new(Arc::new(pool)))
+}
+
+/// Helper: insert a minimal schedule row directly (bypasses insert_pending validation).
+async fn insert_driver_schedule(
+    pool: &SqlitePool,
+    schedule_id: &str,
+    creator_id: &str,
+    preset_id: &str,
+    status: &str,
+    work_id: &str,
+) {
+    let now = chrono::Utc::now().timestamp();
+    // SAFETY: test-only — DML helper for schedule row insertion.
+    sqlx::query(
+        r"INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version,
+            label, created_at, updated_at, work_id)
+           VALUES (?, ?, ?, 1, ?, 'serial', 0, ?, ?, ?, ?)",
+    )
+    .bind(schedule_id)
+    .bind(creator_id)
+    .bind(preset_id)
+    .bind(status)
+    .bind(format!("fl-e-intake-{work_id}"))
+    .bind(now)
+    .bind(now)
+    .bind(work_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Helper: check if a schedule exists with the given status.
+async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> Option<String> {
+    // SAFETY: test-only — scalar lookup for schedule status.
+    sqlx::query_scalar::<_, String>(
+        "SELECT status FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(schedule_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn fix1_terminal_completed_enqueues_next_stage() {
+    let pool = test_pool().await;
+    let sup = test_supervisor(pool.clone());
+
+    // Create a Work at intake/complete with auto-chain enabled
+    let mut work = test_work("wrk_fix1a", 0, 3, true);
+    work.current_stage = "intake".to_string();
+    work.stage_status = "active".to_string(); // start active, will be advanced via patch
+    seed_work(&pool, &work).await;
+
+    // Insert the driver schedule as running
+    insert_driver_schedule(&pool, "sch_intake_001", "ctr_test", "novel-writing", "running", "wrk_fix1a").await;
+
+    // Set driver — this also sets stage_status to "active"
+    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1a", "sch_intake_001", "intake")
+        .await
+        .unwrap();
+
+    // Mark stage as complete (simulating what the schedule runner does when it finishes)
+    works::patch_work(
+        &pool,
+        "ctr_test",
+        "wrk_fix1a",
+        &works::WorkPatch {
+            stage_status: Some("complete".to_string()),
+            ..Default::default()
+        },
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await
+    .unwrap();
+
+    // Complete the intake schedule via the supervisor terminal handler
+    sup.on_schedule_terminal("sch_intake_001", nexus_contracts::local::schedule::ScheduleStatus::Completed)
+        .await
+        .unwrap();
+
+    // Verify the work now has a new driver schedule and is at research stage
+    let updated = works::get_work(&pool, "ctr_test", "wrk_fix1a")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.current_stage, "research", "should have advanced to research");
+    assert!(updated.driver_schedule_id.is_some(), "should have a new driver schedule");
+
+    // Verify the old schedule is completed
+    assert_eq!(
+        schedule_status(&pool, "sch_intake_001").await,
+        Some("completed".to_string()),
+        "intake schedule should be completed"
+    );
+
+    // Verify a new schedule was created and is pending or running
+    let new_driver = updated.driver_schedule_id.unwrap();
+    let new_status = schedule_status(&pool, &new_driver).await;
+    assert!(
+        new_status.is_some(),
+        "new driver schedule should exist: {new_driver}"
+    );
+    assert!(
+        matches!(new_status.as_deref(), Some("pending" | "running")),
+        "new driver should be pending or running, got: {new_status:?}"
+    );
+}
+
+#[tokio::test]
+async fn fix1_terminal_failed_does_not_enqueue_next() {
+    let pool = test_pool().await;
+    let sup = test_supervisor(pool.clone());
+
+    let mut work = test_work("wrk_fix1b", 0, 3, true);
+    work.current_stage = "intake".to_string();
+    work.stage_status = "active".to_string();
+    seed_work(&pool, &work).await;
+
+    insert_driver_schedule(&pool, "sch_fail_001", "ctr_test", "novel-writing", "running", "wrk_fix1b").await;
+
+    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1b", "sch_fail_001", "intake")
+        .await
+        .unwrap();
+
+    // Fail the schedule — should NOT trigger auto-chain
+    sup.on_schedule_terminal("sch_fail_001", nexus_contracts::local::schedule::ScheduleStatus::Failed)
+        .await
+        .unwrap();
+
+    // Work should still be at intake (no advancement on failure)
+    let updated = works::get_work(&pool, "ctr_test", "wrk_fix1b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.current_stage, "intake", "should NOT advance on failure");
+}
+
+#[tokio::test]
+async fn fix1_chapter_loop_after_persist() {
+    let pool = test_pool().await;
+    let sup = test_supervisor(pool.clone());
+
+    // Work at persist/active, chapter 1 of 3
+    let mut work = test_work("wrk_fix1c", 1, 3, true);
+    work.current_stage = "persist".to_string();
+    work.stage_status = "active".to_string();
+    seed_work(&pool, &work).await;
+
+    insert_driver_schedule(&pool, "sch_persist_001", "ctr_test", "novel-writing", "running", "wrk_fix1c").await;
+
+    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1c", "sch_persist_001", "persist")
+        .await
+        .unwrap();
+
+    // Mark stage as complete
+    works::patch_work(
+        &pool,
+        "ctr_test",
+        "wrk_fix1c",
+        &works::WorkPatch {
+            stage_status: Some("complete".to_string()),
+            ..Default::default()
+        },
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await
+    .unwrap();
+
+    sup.on_schedule_terminal("sch_persist_001", nexus_contracts::local::schedule::ScheduleStatus::Completed)
+        .await
+        .unwrap();
+
+    let updated = works::get_work(&pool, "ctr_test", "wrk_fix1c")
+        .await
+        .unwrap()
+        .unwrap();
+    // Should advance to produce for chapter 2
+    assert_eq!(updated.current_stage, "produce", "should advance to produce for chapter 2");
+    assert!(updated.driver_schedule_id.is_some(), "should have a new driver");
+}
+
+#[tokio::test]
+async fn fix1_last_chapter_marks_work_complete() {
+    let pool = test_pool().await;
+    let sup = test_supervisor(pool.clone());
+
+    // Work at persist/active, chapter 3 of 3 (last chapter)
+    let mut work = test_work("wrk_fix1d", 3, 3, true);
+    work.current_stage = "persist".to_string();
+    work.stage_status = "active".to_string();
+    seed_work(&pool, &work).await;
+
+    insert_driver_schedule(&pool, "sch_last_persist", "ctr_test", "novel-writing", "running", "wrk_fix1d").await;
+
+    auto_chain::set_driver(&pool, "ctr_test", "wrk_fix1d", "sch_last_persist", "persist")
+        .await
+        .unwrap();
+
+    // Mark stage as complete
+    works::patch_work(
+        &pool,
+        "ctr_test",
+        "wrk_fix1d",
+        &works::WorkPatch {
+            stage_status: Some("complete".to_string()),
+            ..Default::default()
+        },
+        &chrono::Utc::now().to_rfc3339(),
+    )
+    .await
+    .unwrap();
+
+    sup.on_schedule_terminal("sch_last_persist", nexus_contracts::local::schedule::ScheduleStatus::Completed)
+        .await
+        .unwrap();
+
+    let updated = works::get_work(&pool, "ctr_test", "wrk_fix1d")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.status, "completed", "work should be marked completed");
+    assert!(updated.driver_schedule_id.is_none(), "driver should be cleared");
+}
