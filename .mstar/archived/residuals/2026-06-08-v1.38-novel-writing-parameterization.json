@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-08-v1.38-novel-writing-parameterization",
+  "entries": [
+    {
+      "id": "R-V138P1-01",
+      "title": "stage_advance for produce creates schedule with empty chapter fields when next_chapter=None (novel-completion)",
+      "severity": "low",
+      "source": "QC2 W-1 (V1.38 P1 review); qc-consolidated.md",
+      "scope": "crates/nexus42/src/commands/creator/run.rs stage_advance(); next_chapter=None path",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.39+ completion UX",
+      "note": "When next_chapter returns None (novel-completion per P0 selection), stage_advance for produce target still builds WorkFields with all chapter fields None and creates a schedule. The preset gates do not reject it. Does not regress completion or auto-enqueue (DF-53 deferred). Document that the schedule will be created but the writer prompt will see missing chapter context and should no-op or surface completion. Surface as completion UX in V1.39+.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-09",
+      "closure_note": "V1.39 P5 added reject_produce_when_novel_complete guard; 3 unit tests; returns NOVEL_COMPLETE error.",
+      "closure_evidence": "commit 02948f59 on feature/v1.39-v138-hardening",
+      "archived_at": "2026-06-09"
+    },
+    {
+      "id": "R-V138P1-04",
+      "title": "outline_path / body_path required: true in templates with no defaults for non-CLI callers",
+      "severity": "low",
+      "source": "QC1 S-3 (V1.38 P1 review); qc-consolidated.md",
+      "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/outline-chapter.md, draft-chapter.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.39+ hardening",
+      "note": "If a caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails. Current callers all populate via stage_advance. Add runtime validation in schedule builder that warns when required template vars are missing from preset.input. Document expanded preset.input contract in preset.yaml header comments."
+    }
+  ]
+}

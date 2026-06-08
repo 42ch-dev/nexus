@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-09T03:30:00+08:00",
+  "updated_at": "2026-06-09T04:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-09-v1.39-harness-docs-prepare",
@@ -100,21 +100,6 @@
         ],
         "targets_deferred": [
           "DF-67"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-09-v1.39-v138-hardening",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-09-v1.39-v138-hardening.md",
-      "working_branch": "feature/v1.39-v138-hardening",
-      "merge_target": "iteration/v1.39",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
-        "description": "P5 — V1.38 residual fixes and terminal-state polish",
-        "depends_on": [
-          "2026-06-09-v1.39-fl-e-auto-chain-engine"
         ]
       }
     },
@@ -269,20 +254,20 @@
     "integration_branch_retired": "iteration/v1.38 (V1.38 SHIPPED 2026-06-09 via PR #49; integration role handed off to iteration/v1.39 for active V1.39 prepare)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-09T03:30:00+08:00",
-      "total_open": 56,
+      "updated_at": "2026-06-09T04:00:00+08:00",
+      "total_open": 59,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 12,
-        "low": 32,
+        "low": 35,
         "nit": 12
       },
       "by_target": {
         "v1.37": 6,
         "backlog": 26,
         "v1.38": 12,
-        "v1.39": 13
+        "v1.39": 16
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -298,7 +283,8 @@
         "2026-06-08-v1.38-multi-chapter-selection-status": 5,
         "2026-06-08-v1.38-novel-writing-parameterization": 7,
         "2026-06-09-v1.39-fl-e-auto-chain-engine": 5,
-        "2026-06-09-v1.39-research-stage-wiring": 8
+        "2026-06-09-v1.39-research-stage-wiring": 8,
+        "2026-06-09-v1.39-v138-hardening": 3
       },
       "v1.36_added": {
         "P1": [
@@ -691,7 +677,11 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.39+ hardening plan",
-        "note": "next_chapter() runs three SQL queries (now consolidated to one MIN query after F-001) without transaction/claim atomicity. Two concurrent creator run continue calls could both observe the same chapter before any transition has flipped its row to draft/finalized. Per spec §4.5.2 the query is the SSOT; novel.chapter_transition guards against from_status mismatch but the user may see duplicate in-progress schedules. Single-user local-first path is safe; race only under concurrent invocation. Document single-writer assumption or add try_claim_next_chapter (UPDATE ... RETURNING chapter) in a follow-up if multi-terminal use is common."
+        "note": "next_chapter() runs three SQL queries (now consolidated to one MIN query after F-001) without transaction/claim atomicity. Two concurrent creator run continue calls could both observe the same chapter before any transition has flipped its row to draft/finalized. Per spec §4.5.2 the query is the SSOT; novel.chapter_transition guards against from_status mismatch but the user may see duplicate in-progress schedules. Single-user local-first path is safe; race only under concurrent invocation. Document single-writer assumption or add try_claim_next_chapter (UPDATE ... RETURNING chapter) in a follow-up if multi-terminal use is common.",
+        "lifecycle": "waived",
+        "closure_note": "V1.39 P5 accept-with-doc: local-first single-writer invariant. Doc on next_chapter() captures invariant + upgrade pattern. Commit 932097ea.",
+        "closed_at": "2026-06-09",
+        "closure_evidence": "V1.39 P5 acceptance — see closure_note"
       },
       {
         "id": "R-V138P0-02",
@@ -702,7 +692,11 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.38 P1 or V1.39 hardening",
-        "note": "Status surface shows DB rows + progress + next-action hint + comment acknowledging on-disk absence, but no explicit on-disk missing-file warning line (e.g. body_path absent for chNN). DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up."
+        "note": "Status surface shows DB rows + progress + next-action hint + comment acknowledging on-disk absence, but no explicit on-disk missing-file warning line (e.g. body_path absent for chNN). DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up.",
+        "lifecycle": "waived",
+        "closure_note": "V1.39 P5 accept: CLI surface of on-disk missing-file hints out of P5 scope. Register R-V139P5-N1 for V1.40 UX follow-up.",
+        "closed_at": "2026-06-09",
+        "closure_evidence": "V1.39 P5 acceptance — see closure_note"
       },
       {
         "id": "R-V138P0-03",
@@ -713,7 +707,11 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.39+ hardening plan",
-        "note": "GET /v1/local/works/{id} mutates works.status to completed when is_work_completed() returns true. Violates REST semantics; two identical GET requests can return different status values. The handler comment acknowledges this as lazy promotion matching V1.36 P4 fix wave auto-promote pattern. Move promotion to finalize transition path or document lazy promotion explicitly in API contract."
+        "note": "GET /v1/local/works/{id} mutates works.status to completed when is_work_completed() returns true. Violates REST semantics; two identical GET requests can return different status values. The handler comment acknowledges this as lazy promotion matching V1.36 P4 fix wave auto-promote pattern. Move promotion to finalize transition path or document lazy promotion explicitly in API contract.",
+        "lifecycle": "waived",
+        "closure_note": "V1.39 P5 accept-with-doc + idempotency test. Lazy completion-promotion is intentional, now contractual. Commit 63b6ad59.",
+        "closed_at": "2026-06-09",
+        "closure_evidence": "V1.39 P5 acceptance — see closure_note"
       },
       {
         "id": "R-V138P0-04",
@@ -724,7 +722,11 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "backlog",
-        "note": "list_chapters returns all rows with no limit. At typical novel scales (<=100 chapters) this is fine; not a practical concern since total_planned_chapters is user-controlled at init and local DB is not exposed to untrusted network clients. Add LIMIT or pagination in a follow-up if multi-volume works with100+ chapters become common."
+        "note": "list_chapters returns all rows with no limit. At typical novel scales (<=100 chapters) this is fine; not a practical concern since total_planned_chapters is user-controlled at init and local DB is not exposed to untrusted network clients. Add LIMIT or pagination in a follow-up if multi-volume works with100+ chapters become common.",
+        "lifecycle": "waived",
+        "closure_note": "V1.39 P5 accept: chapters uncapped is theoretical DoS for local-first. Register R-V139P5-N2 for V1.40 UX.",
+        "closed_at": "2026-06-09",
+        "closure_evidence": "V1.39 P5 acceptance — see closure_note"
       },
       {
         "id": "R-V138P0-05",
@@ -781,7 +783,11 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.39+ hardening",
-        "note": "If a caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails. Current callers all populate via stage_advance. Add runtime validation in schedule builder that warns when required template vars are missing from preset.input. Document expanded preset.input contract in preset.yaml header comments."
+        "note": "If a caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails. Current callers all populate via stage_advance. Add runtime validation in schedule builder that warns when required template vars are missing from preset.input. Document expanded preset.input contract in preset.yaml header comments.",
+        "lifecycle": "waived",
+        "closure_note": "V1.39 P5 accept: current callers all CLI flows. Register R-V139P5-N3 for V1.40 if non-CLI caller added.",
+        "closed_at": "2026-06-09",
+        "closure_evidence": "V1.39 P5 acceptance — see closure_note"
       },
       {
         "id": "R-V138P1-05",
@@ -963,6 +969,41 @@
         "owner": "@fullstack-dev",
         "target": "backlog",
         "note": "Add a test that asserts a real research artifact file exists after research stage."
+      }
+    ],
+    "2026-06-09-v1.39-v138-hardening": [
+      {
+        "id": "R-V139P5-N1",
+        "title": "R-V138P0-02 follow-up: CLI status command should surface on-disk missing-file hints",
+        "severity": "low",
+        "source": "qc1 W-002 (V1.39 P5 review)",
+        "scope": "crates/nexus42/src/commands/creator/run.rs (status command)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 UX",
+        "note": "DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up."
+      },
+      {
+        "id": "R-V139P5-N2",
+        "title": "R-V138P0-04 follow-up: WorkApiDto.chapters vector size cap or pagination (defense-in-depth)",
+        "severity": "low",
+        "source": "qc1 W-002 + qc3 S-2 (V1.39 P5 review)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (enrich_with_chapters)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 UX",
+        "note": "At typical novel scales (<=100 chapters) this is fine; not a practical concern."
+      },
+      {
+        "id": "R-V139P5-N3",
+        "title": "R-V138P1-04 follow-up: outline_path/body_path required with no defaults for non-CLI callers",
+        "severity": "low",
+        "source": "qc1 W-002 (V1.39 P5 review)",
+        "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/outline-chapter.md, draft-chapter.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.40 hardening",
+        "note": "If a non-CLI caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails."
       }
     ]
   }
