@@ -607,6 +607,9 @@ async fn execute_work_patch(
             work_ref: None,
             total_planned_chapters: None,
             current_chapter: None,
+            auto_chain_enabled: None,
+            driver_schedule_id: None,
+            auto_chain_interrupted: None,
         };
         let now = chrono::Utc::now().to_rfc3339();
         works::patch_work(state.pool(), creator_id, work_id, &patch, &now)
