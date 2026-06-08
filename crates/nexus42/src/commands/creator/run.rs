@@ -998,6 +998,32 @@ fn validate_produce_chapter_context(
     Ok(())
 }
 
+/// V1.39 P5 (R-V138P1-01): Reject `stage advance` to `produce` when the novel
+/// is complete (no remaining active chapter).
+///
+/// When the target stage is "produce" but `next_chapter` is `None`, the
+/// daemon has determined that every chapter is finalized/published per
+/// novel-workflow-profile §4.5.2. Building a `novel-writing` schedule in
+/// this state would create a run with empty chapter fields (no outline,
+/// no body path, no chapter number) that the prompt templates cannot
+/// render. The correct response is to refuse the advance and point the
+/// user at the persist stage which finalizes the Work.
+fn reject_produce_when_novel_complete(
+    target_stage: &str,
+    next_chapter: Option<i32>,
+    work_id: &str,
+) -> crate::errors::Result<()> {
+    if target_stage == "produce" && next_chapter.is_none() {
+        return Err(crate::errors::CliError::Other(format!(
+            "NOVEL_COMPLETE: cannot advance Work {work_id} to stage 'produce' — \
+              no remaining active chapter (novel-workflow-profile §4.5.2).\n\
+              Hint: advance to the 'persist' stage instead to finalize the Work, \
+              or use `nexus42 creator run status {work_id}` to inspect chapter status."
+        )));
+    }
+    Ok(())
+}
+
 /// Validates:
 /// 1. Target stage is a known FL-E stage
 /// 2. Target stage is ahead of current stage (unless `--force`)
@@ -1143,6 +1169,10 @@ async fn stage_advance(
         body_path.as_deref(),
         work_id,
     )?;
+
+    // V1.39 P5 (R-V138P1-01): when target_stage is "produce" but no chapter is
+    // active (novel complete), refuse to build an empty-chapter schedule.
+    reject_produce_when_novel_complete(target_stage, next_chapter, work_id)?;
 
     let fields = WorkFields {
         work_id: work_id.to_string(),
@@ -1309,12 +1339,13 @@ mod tests {
 
     #[test]
     fn validate_skips_when_next_chapter_is_none() {
-        // Novel-completion case (R-V138P1-01): next_chapter=None should NOT error
+        // The chapter-context guard handles only the "context missing" case.
+        // Novel-completion (next_chapter=None) is handled by the separate
+        // `reject_produce_when_novel_complete` guard — see test below.
         let result = validate_produce_chapter_context("produce", None, None, None, "wrk_completed");
         assert!(
             result.is_ok(),
-            "should NOT error when next_chapter is None (novel-completion): {:?}",
-            result
+            "validate_produce_chapter_context should NOT error when next_chapter is None: {result:?}"
         );
     }
 
@@ -1323,8 +1354,55 @@ mod tests {
         let result = validate_produce_chapter_context("research", Some(3), None, None, "wrk_other");
         assert!(
             result.is_ok(),
-            "should NOT error for non-produce stages: {:?}",
-            result
+            "should NOT error for non-produce stages: {result:?}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.39 P5 (R-V138P1-01): reject_produce_when_novel_complete
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn reject_produce_when_novel_complete_errors_on_none_next_chapter() {
+        // R-V138P1-01: when target_stage is "produce" and next_chapter is None
+        // (all chapters finalized), advance must be refused — no empty-chapter
+        // schedule should be created.
+        let result = reject_produce_when_novel_complete("produce", None, "wrk_done");
+        let err = result.expect_err("expected NOVEL_COMPLETE error when next_chapter=None");
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("NOVEL_COMPLETE"),
+            "error should be tagged NOVEL_COMPLETE: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("persist"),
+            "error should hint at 'persist' stage: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("wrk_done"),
+            "error should include work_id: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn reject_produce_when_novel_complete_allows_chapter_present() {
+        // Normal case: a chapter is selected — advance is allowed.
+        let result = reject_produce_when_novel_complete("produce", Some(2), "wrk_active");
+        assert!(
+            result.is_ok(),
+            "should allow advance when next_chapter is Some: {result:?}"
+        );
+    }
+
+    #[test]
+    fn reject_produce_when_novel_complete_skips_other_stages() {
+        // Non-produce stages (research/review/persist) are not gated by this rule.
+        for stage in ["research", "review", "persist", "intake"] {
+            let result = reject_produce_when_novel_complete(stage, None, "wrk_x");
+            assert!(
+                result.is_ok(),
+                "stage '{stage}' should NOT be gated by novel-complete check: {result:?}"
+            );
+        }
     }
 }
