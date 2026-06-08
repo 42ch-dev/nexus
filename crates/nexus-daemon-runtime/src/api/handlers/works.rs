@@ -63,6 +63,13 @@ pub struct WorkApiDto {
     /// Next chapter to work on per §4.5.2 selection (V1.38 P0 — populated for novel profile).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_chapter: Option<i32>,
+    /// Auto-chain enabled flag (V1.39 §5.4).
+    pub auto_chain_enabled: bool,
+    /// Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub driver_schedule_id: Option<String>,
+    /// Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
+    pub auto_chain_interrupted: bool,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -100,6 +107,9 @@ impl From<WorkRecord> for WorkApiDto {
             current_chapter: r.current_chapter,
             chapters: None,     // populated by enrich_with_chapters()
             next_chapter: None, // populated by enrich_with_chapters()
+            auto_chain_enabled: r.auto_chain_enabled,
+            driver_schedule_id: r.driver_schedule_id,
+            auto_chain_interrupted: r.auto_chain_interrupted,
         }
     }
 }
@@ -218,6 +228,9 @@ pub async fn create_work(
         work_ref: None,
         total_planned_chapters: None,
         current_chapter: 0,
+        auto_chain_enabled: true,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -501,6 +514,9 @@ async fn patch_work_stage(
             work_ref: None,
             total_planned_chapters: None,
             current_chapter: None,
+            auto_chain_enabled: None,
+            driver_schedule_id: None,
+            auto_chain_interrupted: None,
         };
         works::patch_work(state.pool(), creator_id, work_id, &non_stage_patch, now)
             .await
@@ -580,6 +596,9 @@ pub async fn patch_work(
         work_ref: None,
         total_planned_chapters: None,
         current_chapter: None,
+        auto_chain_enabled: None,
+        driver_schedule_id: None,
+        auto_chain_interrupted: None,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
