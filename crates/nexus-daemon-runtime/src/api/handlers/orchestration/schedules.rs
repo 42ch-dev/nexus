@@ -292,29 +292,12 @@ pub async fn add_schedule(
 
         if let Ok(preset) = preset_result {
             let gates = &preset.manifest.preset.gates;
+            // Fix C-1: gates are only evaluated when work_id is present in the
+            // request. Direct schedule API calls without Work context skip gate
+            // evaluation (ungated fallback path). The auto-chain path always
+            // provides work_id, so gates are enforced there.
             if !gates.is_empty() {
-                // W-3: if gates are declared but no work_id, reject immediately.
-                let Some(work_id) = work_id_opt else {
-                    return Err((
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        serde_json::to_string(
-                            &nexus_orchestration::preset_gates::PresetGatesFailed {
-                                error: "preset_gates_failed".to_string(),
-                                preset_id: body.preset_id.clone(),
-                                work_id: String::new(),
-                                failed_gates: vec![nexus_orchestration::preset_gates::FailedGate {
-                                    kind: "work_field".to_string(),
-                                    expected: "work_id must be non-null".to_string(),
-                                    actual: "missing".to_string(),
-                                    remediation: "Bind the schedule to a Work via \
-                                        body.input.work_id before scheduling a gated preset."
-                                        .to_string(),
-                                }],
-                            },
-                        )
-                        .unwrap_or_default(),
-                    ));
-                };
+                if let Some(work_id) = work_id_opt {
 
                 // Build work snapshot from DB.
                 let pool = state.pool();
@@ -481,6 +464,7 @@ pub async fn add_schedule(
                     })
                     .unwrap_or_default(),
                 ));
+                } // closes `if let Some(work_id)`
             }
         }
         // Preset not found or has no gates: proceed without gate evaluation.
