@@ -15,6 +15,8 @@ This directory contains embedded presets compiled into the `nexus42` binary at b
 | `reflection-loop` | Self-reflection | draft → revise → summarize → done | Generate, critique, revise, and summarize with LLM judge |
 | `research` | Research workflow | scanning → extracting → synthesizing → done | Scan references, extract content, produce structured reports |
 | `soul-experience-refresh` | SOUL maintenance | aggregate → done | Aggregate long-term memories into SOUL Experience section |
+| `novel-brainstorm` | Quality loop ideation | gather → synthesize → done | Consume open findings (target_executor=brainstorm), generate ideation prompts (V1.39 P2) |
+| `novel-review-master` | Human-in-loop review | present → await_decision → done | Surface findings (target_executor=master) for approval/reject/wont_fix decisions (V1.39 P2) |
 
 ## Manual Run
 
@@ -74,6 +76,34 @@ Then `novel-writing` drives the chapter pipeline:
 
 See `.mstar/knowledge/specs/novel-workflow-profile.md` §3 (layout), §4.1 (work_chapters), §5.1 (五问 gate).
 
+## Quality Loop Presets (V1.39 P2)
+
+Auxiliary presets invoked by the quality loop when findings are routed to specific executors. These are NOT FL-E stages — they are triggered from findings routing (novel-quality-loop §2.2).
+
+### `novel-brainstorm`
+
+Consumes open findings with `target_executor: brainstorm` and generates structured ideation prompts for downstream `novel-writing`. Auto-chain compatible (uses `llm_judge` exit).
+
+```bash
+# Trigger brainstorm via daemon schedule (findings-driven routing):
+nexus42 daemon schedule add \
+  --preset novel-brainstorm \
+  --creator <creator-id> \
+  --seed '{"work_id":"<work_id>","work_ref":"<work_ref>"}'
+```
+
+### `novel-review-master`
+
+Interactive human-in-loop preset that surfaces open findings with `target_executor: master` for approval/reject/wont_fix decisions. Uses `manual` exit (waits for human input).
+
+```bash
+# Trigger review-master via daemon schedule (findings-driven routing):
+nexus42 daemon schedule add \
+  --preset novel-review-master \
+  --creator <creator-id> \
+  --seed '{"work_id":"<work_id>","work_ref":"<work_ref>"}'
+```
+
 ## Validation
 
 All presets are embedded at compile time and validated by the loader at startup. The P1 strict validation gate runs at test time:
@@ -86,6 +116,8 @@ cargo test -p nexus-orchestration -- all_embedded_presets_pass
 cargo test -p nexus-orchestration -- reflection_loop
 cargo test -p nexus-orchestration -- memory_augmented
 cargo test -p nexus-orchestration -- kb_extract
+cargo test -p nexus-orchestration -- novel_brainstorm
+cargo test -p nexus-orchestration -- novel_review_master
 
 # Run full validation suite
 cargo test -p nexus-orchestration
