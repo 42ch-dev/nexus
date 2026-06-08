@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "updated_at": "2026-06-08T23:00:00+08:00",
+  "updated_at": "2026-06-08T23:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-08-v1.38-harness-docs-prepare",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-08-v1.38-harness-docs-prepare.md",
       "working_branch": "iteration/v1.38",
       "merge_target": "iteration/v1.38",
@@ -13,7 +13,18 @@
         "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
         "description": "Prepare — V1.38 compass, P0/P1 plans, tracker/status sync",
         "scope": "docs-only harness prepare; no product code",
-        "pm_signoff": "pending"
+        "done_at": "2026-06-08T23:30:00+08:00",
+        "qc": "single qc-specialist review (docs-only) Approve —9/9 ACs, scope boundaries (auto-chain, World KB, quality loop, multi-volume PK, platform publish) explicitly out, branch policy matches status.json and AGENTS.md multi-plan rule",
+        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
+        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after T1–T10 docs/status/tracker sync + single QC review",
+        "shipped": [
+          "V1.38 delivery compass (DF-62 multi-chapter / serial writing implementation readiness) at .mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
+          "P0 implementation plan (chapter selection/status foundation) registered as Todo",
+          "P1 implementation plan (novel-writing selected-chapter parameterization) registered as Todo",
+          "status.json integration_branch = iteration/v1.38; latest_active_iteration = v1.38; iteration_compass wired",
+          "iterations README synced; deferred tracker quick-status + DF-53/DF-62/DF-63 rows updated; multi-volume PK migration remains deferred"
+        ],
+        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-harness-docs-prepare/qc1.md (Approve)"
       }
     },
     {
