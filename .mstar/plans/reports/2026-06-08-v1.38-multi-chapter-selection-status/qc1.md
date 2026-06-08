@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-08-v1.38-multi-chapter-selection-status"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-08"
 ---
 
@@ -102,3 +102,57 @@ No diff hunks were found touching the explicitly deferred boundaries: auto-chain
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation (targeted re-review)
+
+### Reviewer Metadata
+- Reviewer: @qc-specialist
+- Runtime Agent ID: qc-specialist
+- Runtime Model: openai/gpt-5.5
+- Review Perspective: Architecture coherence and maintainability risk (targeted re-review)
+- Report Timestamp:2026-06-08
+- Original verdict: Request Changes (initial tri-review)
+- Targeted findings to re-verify: F-001 (Critical), F-002 (Warning), W-1 (Warning)
+
+### Scope (unchanged)
+- **plan_id**: `2026-06-08-v1.38-multi-chapter-selection-status`
+- **Review range / Diff basis**: `merge-base(3f72b085, HEAD)..HEAD` on `iteration/v1.38` (covers initial feature commit `ffeb0adc` AND the fix-wave commits `f5c8ecc4` and `2dc2c892`, all merged via `2abbaa1a` and `d882a640`).
+- **Working branch (verified)**: `iteration/v1.38`
+- **Review cwd**: `/Users/bibi/workspace/organizations/42ch/nexus`
+- **Reviewer focus**: architecture coherence and maintainability risk.
+
+### F-001 — Re-verdict
+- Status: ✅ Resolved
+- Evidence: `f5c8ecc4`; `crates/nexus-local-db/src/work_chapters.rs:512-530` now uses one `SELECT MIN(chapter) ... status IN ('not_started', 'outlined', 'draft')` query; `test_next_chapter_resumes_draft` (`:1102-1157`), `test_next_chapter_outlined_not_skipped` (`:1162-1206`), and `test_next_chapter_skips_finalized` (`:1211-1256`) assert lowest-active-chapter semantics. `cargo test -p nexus-local-db work_chapters -- --test-threads=1` passed: 19 passed, 0 failed.
+- Notes: The prior priority-tier selection is gone; draft/outlined rows are resumed by lowest chapter number before advancing to later active rows.
+
+### F-002 — Re-verdict
+- Status: ✅ Resolved
+- Evidence: `f5c8ecc4`; `crates/nexus-local-db/src/work_chapters.rs:552-573` selects `work_profile` and keeps the `status == "completed"` early exit only when `work_profile != "novel"`; `test_completion_novel_profile_needs_full_check` (`:1386-1461`) verifies novel-profile full-check behavior including `status='completed'` with a draft row returning false. `cargo test -p nexus-local-db work_chapters -- --test-threads=1` passed: 19 passed, 0 failed.
+- Notes: Novel-profile Works now always fall through to the §6.1 completion criteria; the shortcut remains limited to non-novel backward compatibility.
+
+### W-1 — Re-verdict
+- Status: ✅ Resolved
+- Evidence: `2dc2c892`; `crates/nexus-local-db/migrations/202606080003_work_chapters_composite_index.sql:4-5` adds `CREATE INDEX IF NOT EXISTS work_chapters_by_work_status_chapter ON work_chapters(work_id, status, chapter)`. Review-range file check shows no `.sqlx/` deltas because the changed lookup uses runtime `sqlx::query` and the fix-wave W-1 commit is migration-only; `SQLX_OFFLINE=true cargo clippy -p nexus-local-db -p nexus-orchestration -p nexus-daemon-runtime -p nexus42 -- -D warnings` passed cleanly.
+- Notes: The query pattern now has the intended composite index; offline clippy confirms committed SQLx metadata remains sufficient for compile-time checked queries.
+
+### Re-verdict Summary
+
+| Finding | Original Severity | Status |
+|---------|-------------------|--------|
+| F-001 | Critical | resolved |
+| F-002 | Warning | resolved |
+| W-1 | Warning | resolved |
+
+### Updated Verdict
+
+**Verdict**: Approve
+
+Rationale: All three targeted fix-now findings are resolved in the fix wave, with targeted chapter tests passing and the required offline clippy gate clean. No remaining Critical or mandatory Warning issue blocks this targeted re-review; the pre-existing F-003 suggestion remains non-blocking and outside this fix-now scope.
+
+Updated Severity Summary:
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 1 |
