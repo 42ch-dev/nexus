@@ -748,10 +748,8 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                                             .unwrap_or("→ none");
                                         let f_ch =
                                             f.get("chapter").and_then(serde_json::Value::as_i64);
-                                        let ch_str = match f_ch {
-                                            Some(ch) => format!(" ch{ch}"),
-                                            None => String::new(),
-                                        };
+                                        let ch_str =
+                                            f_ch.map_or_else(String::new, |ch| format!(" ch{ch}"));
                                         println!("  [{f_sev:<7}] {f_title}{ch_str}  {hint}");
                                     }
                                 }
