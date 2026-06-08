@@ -53,6 +53,19 @@ async fn seed_novel_writing_preset_input(
     ctx.set("preset.input.work_id", "wrk_e2e_test").await;
     // V1.38 P0: chapter is now a preset.input template variable
     ctx.set("preset.input.chapter", 1).await;
+    // V1.38 P1: chapter context fields for parameterized paths
+    ctx.set("preset.input.chapter_label", "01").await;
+    ctx.set(
+        "preset.input.outline_path",
+        "Works/e2e-test-novel/Outlines/chapters/ch01-outline.md",
+    )
+    .await;
+    ctx.set(
+        "preset.input.body_path",
+        "Works/e2e-test-novel/Stories/ch01-ch01.md",
+    )
+    .await;
+    ctx.set("preset.input.slug", "ch01").await;
 }
 
 async fn start_novel_writing_session(
