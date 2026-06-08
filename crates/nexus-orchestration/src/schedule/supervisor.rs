@@ -457,9 +457,9 @@ impl ScheduleSupervisor {
 
     /// Enqueue a new auto-chain schedule and update the Work checkpoint.
     ///
-    /// Creates a pending schedule, inserts it into the DB, and updates the
-    /// Work's `driver_schedule_id` and stage fields. The supervisor's `tick()`
-    /// will start the schedule after this method returns.
+    /// Delegates to the shared `auto_chain::enqueue_auto_chain_schedule` helper
+    /// (Fix A / W-A) so that the ID-mint + INSERT + set_driver logic is not
+    /// duplicated between the supervisor and boot paths.
     async fn enqueue_auto_chain_step(
         &self,
         creator_id: &str,
@@ -468,66 +468,39 @@ impl ScheduleSupervisor {
         chapter: Option<i32>,
         work: &nexus_local_db::works::WorkRecord,
     ) -> Result<(), SupervisorError> {
-        use crate::auto_chain;
+        use crate::auto_chain::{self, AutoChainError};
 
-        let schedule_req = auto_chain::build_auto_chain_schedule(stage, creator_id, work, chapter);
-
-        let Some(req) = schedule_req else {
-            tracing::warn!(
-                work_id = %work_id,
-                stage = %stage,
-                "auto-chain: no schedule mapping for stage"
-            );
-            return Ok(());
-        };
-
-        // Generate a schedule ID and insert as pending
-        let schedule_id = format!("ACH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
-        let now_ts = chrono::Utc::now().timestamp();
-
-        // SAFETY: dynamic SQL — auto-chain schedule insert with derived params.
-        sqlx::query(
-            "INSERT INTO creator_schedules
-               (schedule_id, creator_id, preset_id, preset_version, status,
-                concurrency_kind, current_core_context_version, label,
-                created_at, updated_at, work_id)
-               VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+        match auto_chain::enqueue_auto_chain_schedule(
+            &self.pool,
+            creator_id,
+            work_id,
+            stage,
+            chapter,
+            work,
         )
-        .bind(&schedule_id)
-        .bind(creator_id)
-        .bind(&req.preset_id)
-        .bind(&req.label)
-        .bind(now_ts)
-        .bind(now_ts)
-        .bind(work_id)
-        .execute(&*self.pool)
         .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "auto-chain: failed to insert schedule");
-            SupervisorError::Database(e)
-        })?;
-
-        // Update the Work checkpoint to point at the new driver schedule
-        if let Err(e) =
-            auto_chain::set_driver(&self.pool, creator_id, work_id, &schedule_id, stage).await
         {
-            tracing::warn!(
-                work_id = %work_id,
-                schedule_id = %schedule_id,
-                error = %e,
-                "auto-chain: failed to update driver_schedule_id"
-            );
+            Ok(_schedule_id) => Ok(()),
+            Err(AutoChainError::InvalidState(msg)) => {
+                // No schedule mapping for this stage — not a DB error.
+                tracing::warn!(
+                    work_id = %work_id,
+                    stage = %stage,
+                    "auto-chain: {msg}"
+                );
+                Ok(())
+            }
+            Err(AutoChainError::Database(e)) => Err(SupervisorError::Database(
+                // Extract the underlying sqlx error from LocalDbError.
+                match e {
+                    nexus_local_db::LocalDbError::Sqlx(s) => s,
+                    other => sqlx::Error::Protocol(other.to_string().into()),
+                },
+            )),
+            Err(other) => Err(SupervisorError::Database(
+                sqlx::Error::Protocol(other.to_string().into()),
+            )),
         }
-
-        tracing::info!(
-            work_id = %work_id,
-            schedule_id = %schedule_id,
-            stage = %stage,
-            chapter = chapter.unwrap_or(0),
-            "auto-chain: enqueued next step"
-        );
-
-        Ok(())
     }
 
     /// Insert a pending schedule into the database (for testing and CLI use).
