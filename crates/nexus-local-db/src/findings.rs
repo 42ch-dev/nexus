@@ -361,3 +361,45 @@ pub async fn create_finding_from_review(
     create_finding(pool, &f).await?;
     Ok(finding_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use sqlx::SqlitePool;
+
+    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = crate::open_pool(&db_path).await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    /// C-1 fix: Verify the spec-required composite index on
+    /// (work_id, chapter, status) exists after migration.
+    /// Per novel-quality-loop.md §2.1: chapter-scoped finding lookups
+    /// (the review-stage hook's hot path) must use this index.
+    #[tokio::test]
+    async fn test_findings_work_chapter_status_index_exists() {
+        let (pool, _dir) = fresh_pool().await;
+
+        let index_sql: Option<String> = sqlx::query_scalar(
+            "SELECT sql FROM sqlite_master \
+             WHERE type = 'index' AND name = 'idx_findings_work_chapter_status'",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .flatten();
+
+        assert!(
+            index_sql.is_some(),
+            "C-1 fix: idx_findings_work_chapter_status index should exist after migration"
+        );
+
+        let sql = index_sql.unwrap();
+        assert!(
+            sql.contains("work_id") && sql.contains("chapter") && sql.contains("status"),
+            "index should cover (work_id, chapter, status): {sql}"
+        );
+    }
+}
