@@ -259,6 +259,28 @@ mod tests {
     }
 
     #[test]
+    fn embedded_novel_writing_excludes_deprecated_prompt_archive() {
+        assert!(
+            EMBEDDED_PRESETS
+                .get_dir("novel-writing/prompts/_deprecated")
+                .is_none(),
+            "deprecated prompt archive must not be compiled into embedded presets"
+        );
+        assert!(
+            read_embedded_template("novel-writing", "prompts/_deprecated/draft-intro.md").is_none(),
+            "deprecated draft-intro.md should not be readable from embedded presets"
+        );
+        assert!(
+            read_embedded_template("novel-writing", "prompts/_deprecated/draft-body.md").is_none(),
+            "deprecated draft-body.md should not be readable from embedded presets"
+        );
+        assert!(
+            read_embedded_template("novel-writing", "prompts/draft-chapter.md").is_some(),
+            "current novel-writing prompt templates should remain embedded"
+        );
+    }
+
+    #[test]
     fn embedded_preset_unknown_id_fails() {
         let caps = CapabilityRegistry::with_builtins();
         let err = load_embedded_preset("nonexistent-preset", &caps).unwrap_err();
@@ -385,15 +407,14 @@ mod tests {
             "expected draft-chapter.md reference"
         );
 
-        // Verify the embedded directory has prompt files (including P3 files).
-        // V1.38 P1: draft-body.md and draft-intro.md moved to _deprecated/.
+        // Verify the embedded directory has only current prompt files.
         let prompts_dir = EMBEDDED_PRESETS
             .get_dir("novel-writing/prompts")
             .expect("novel-writing/prompts dir should exist");
         let prompt_count = prompts_dir.files().count();
         assert!(
             prompt_count >= 12,
-            "expected at least 12 embedded prompt files (moved 2 stale to _deprecated), got {prompt_count}"
+            "expected at least 12 current embedded prompt files, got {prompt_count}"
         );
     }
 
