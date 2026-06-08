@@ -5,6 +5,9 @@ vars:
   topic: { type: string, required: true }
   vibe: { type: string, default: "literary" }
   chapter: { type: integer, default: 1 }
+  chapter_label: { type: string, default: "01" }
+  outline_path: { type: string, required: true }
+  slug: { type: string, default: "ch01" }
 max_tokens: 3000
 ---
 
@@ -16,7 +19,7 @@ about **{{preset.input.topic}}** with a **{{preset.input.vibe}}** vibe.
 **Work directory**: `Works/{{work_ref}}/`
 
 **Output path**: Write the outline to:
-`Works/{{work_ref}}/Outlines/chapters/ch0{{chapter}}-outline.md`
+`{{outline_path}}`
 
 If the directory `Works/{{work_ref}}/Outlines/chapters/` does not exist, create it first.
 
