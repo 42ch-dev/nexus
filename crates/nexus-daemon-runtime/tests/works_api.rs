@@ -1208,3 +1208,117 @@ async fn patch_stage_status_active_without_force_is_allowed() {
     assert_eq!(dto.stage_status, "active");
     drop(tmp);
 }
+
+// ─── V1.39 P5 (R-V138P0-03): get_work lazy-promotion idempotency ──────────
+//
+// Contract: GET /v1/local/works/{id} for a novel-profile Work whose every
+// chapter is finalized must auto-promote works.status='completed' on the
+// first read AND be idempotent on the second read (no spurious updates, no
+// status flip-flop, no errors).
+
+#[tokio::test]
+async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
+    use nexus_local_db::work_chapters;
+    use nexus_local_db::works::{patch_work, WorkPatch};
+
+    let (state, _tmp) = handler_state().await;
+
+    // 1. Create a Work via the handler (work_profile=NULL by default).
+    let req = CreateWorkRequest {
+        title: "Lazy Promote Test".into(),
+        long_term_goal: "All chapters finalized".into(),
+        initial_idea: "Idempotency probe".into(),
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+    };
+    let (_status, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+    let creator_id =
+        nexus_daemon_runtime::api::handlers::works::read_active_creator_id(state.nexus_home())
+            .unwrap();
+
+    // 2. Patch the Work into a novel-profile shape that satisfies §6.1:
+    //    work_profile='novel', total_planned_chapters=2, current_chapter=2,
+    //    intake_status='complete', work_ref set so seed_chapters can build paths.
+    let now = "2026-06-09T10:00:00Z";
+    let patch = WorkPatch {
+        work_profile: Some(Some("novel".to_string())),
+        total_planned_chapters: Some(Some(2)),
+        current_chapter: Some(2),
+        intake_status: Some("complete".to_string()),
+        work_ref: Some(Some("lazy-promote-novel".to_string())),
+        ..Default::default()
+    };
+    patch_work(state.pool(), &creator_id, &work_id, &patch, now)
+        .await
+        .unwrap();
+
+    // 3. Seed 2 chapter rows and mark both finalized.
+    work_chapters::seed_chapters(state.pool(), &work_id, "lazy-promote-novel", 2, now)
+        .await
+        .unwrap();
+    for ch in 1..=2 {
+        work_chapters::update_status(state.pool(), &work_id, ch, "finalized", Some(4000), now)
+            .await
+            .unwrap();
+    }
+
+    // Sanity: at this point works.status is still 'active' (or whatever
+    // create_work set), NOT yet 'completed'. The promotion is lazy — only
+    // GET triggers it.
+    let pre = nexus_local_db::works::get_work(state.pool(), &creator_id, &work_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(
+        pre.status, "completed",
+        "pre-condition: status must NOT be 'completed' before any GET"
+    );
+
+    // 4. First GET → should auto-promote and return status='completed'.
+    let dto1 = nexus_daemon_runtime::api::handlers::works::get_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        dto1.status, "completed",
+        "1st GET must lazy-promote to 'completed' (R-V138P0-03)"
+    );
+    let updated_at_after_first = dto1.updated_at.clone();
+
+    // 5. Second GET → must return status='completed' WITHOUT re-promoting
+    //    (the `status != 'completed'` guard in get_work skips the path).
+    let dto2 = nexus_daemon_runtime::api::handlers::works::get_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        dto2.status, "completed",
+        "2nd GET must still be 'completed' (idempotent)"
+    );
+    assert_eq!(
+        dto2.updated_at, updated_at_after_first,
+        "2nd GET must NOT issue another PATCH (updated_at unchanged)"
+    );
+
+    // 6. Third GET → same invariants (defense-in-depth).
+    let dto3 = nexus_daemon_runtime::api::handlers::works::get_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(dto3.status, "completed");
+    assert_eq!(dto3.updated_at, updated_at_after_first);
+}

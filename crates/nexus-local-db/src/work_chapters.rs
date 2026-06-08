@@ -506,6 +506,22 @@ pub async fn reconcile_from_filesystem(
 ///
 /// Returns `Ok(None)` when all chapters are finalized/published (novel-completion).
 ///
+/// # Concurrency (R-V138P0-01)
+///
+/// Nexus is **local-first single-user**: there is exactly one writer for any
+/// given `work_id` at a time (one CLI / one creator). Under that invariant,
+/// the single-statement `SELECT MIN(chapter)` query below is race-free: no
+/// other transaction can advance a chapter between the read and the caller's
+/// subsequent status update.
+///
+/// If a future change introduces concurrent writers for the same Work (for
+/// example, a daemon-side auto-advancer running alongside a `creator run
+/// continue`), this function must be paired with an atomic claim helper
+/// (e.g. `UPDATE work_chapters SET status='draft' WHERE work_id=? AND
+/// chapter=(SELECT MIN(...)) AND status='not_started' RETURNING chapter`) to
+/// prevent two writers from claiming the same chapter. Until then, this
+/// pattern is intentional and acceptable.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
@@ -924,6 +940,68 @@ mod tests {
         assert!(
             !is_work_completed(&pool, "wrk_comp_002").await.unwrap(),
             "2/3 finalized, 1 draft → should NOT be completed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.39 P5 (R-V138P0-05): is_work_completed must return false when
+    // total_planned_chapters is NULL (Works that never seeded a plan, e.g.
+    // intake_status='pending'). Explicit defense-in-depth test — previously
+    // covered only by §6.1 control flow, not by a dedicated assertion.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_is_work_completed_false_when_total_planned_chapters_null() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_comp_null").await;
+
+        // insert_test_work leaves total_planned_chapters as NULL by default
+        // (intake_status='pending', no chapter plan seeded). §6.1 requires
+        // total > 0 — NULL must NOT be treated as "complete".
+        assert!(
+            !is_work_completed(&pool, "wrk_comp_null").await.unwrap(),
+            "total_planned_chapters=NULL → MUST NOT be completed (R-V138P0-05)"
+        );
+
+        // Even after intake completes and current_chapter is bumped, NULL
+        // total_planned_chapters must still gate completion to false.
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query(
+            "UPDATE works SET intake_status = 'complete', current_chapter = 5 \
+             WHERE work_id = ?",
+        )
+        .bind("wrk_comp_null")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            !is_work_completed(&pool, "wrk_comp_null").await.unwrap(),
+            "total_planned_chapters=NULL with intake=complete → still NOT completed"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.39 P5 (R-V138P0-05 companion): total_planned_chapters = 0 must also
+    // gate to false (degenerate value — no chapter plan).
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_is_work_completed_false_when_total_planned_chapters_zero() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_comp_zero").await;
+
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query(
+            "UPDATE works SET total_planned_chapters = 0, intake_status = 'complete', \
+             current_chapter = 0 WHERE work_id = ?",
+        )
+        .bind("wrk_comp_zero")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            !is_work_completed(&pool, "wrk_comp_zero").await.unwrap(),
+            "total_planned_chapters=0 → MUST NOT be completed"
         );
     }
 
