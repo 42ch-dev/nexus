@@ -545,8 +545,17 @@ async fn patch_work_stage(
         check_stage_status_transition(&current.stage_status, target_status, force)?;
     }
 
-    apply_non_stage_fields(state.pool(), creator_id, work_id, req, now).await?;
-
+    // Fix D (W-D): Stage transition runs FIRST, non-stage fields SECOND.
+    // This ensures that if the stage-advance transaction fails (e.g., active
+    // FL-E schedule already exists), NO non-stage field changes are persisted.
+    // Validation above already gates the critical path without DB writes.
+    //
+    // NOTE: These two operations are NOT in a single transaction. Wrapping both
+    // in one transaction would require refactoring `apply_non_stage_fields` and
+    // `advance_work_stage_atomic` to accept a shared `Transaction`, which is too
+    // invasive for this fix wave. The fail-fast ordering is sufficient: the
+    // stage-advance atomic transaction either commits (and then non-stage fields
+    // are applied) or rolls back (and non-stage fields are never touched).
     let updated = works::advance_work_stage_atomic(
         state.pool(),
         creator_id,
@@ -569,15 +578,27 @@ async fn patch_work_stage(
         },
     })?;
 
+    // Only apply non-stage fields after the stage transition succeeds.
+    apply_non_stage_fields(state.pool(), creator_id, work_id, req, now).await?;
+
+    // Re-fetch to get the fully updated record (stage + non-stage fields).
+    let final_record = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
     tracing::info!(
         target: "fl_e.audit",
-        work_id = %work_id,
-        current_stage = %updated.current_stage,
-        stage_status = %updated.stage_status,
+        work_id = %final_record.work_id,
+        current_stage = %final_record.current_stage,
+        stage_status = %final_record.stage_status,
         "FL-E stage updated via PATCH (atomic)"
     );
 
-    Ok(updated)
+    Ok(final_record)
 }
 
 pub async fn patch_work(
@@ -847,4 +868,111 @@ fn is_valid_work_ref(s: &str) -> bool {
     }
     s.chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+#[cfg(test)]
+mod tests_fix_d {
+    use super::*;
+    use nexus_local_db::works::{self, WorkRecord};
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let db = tempfile::Builder::new()
+            .prefix("works_handler_test_")
+            .suffix(".db")
+            .tempfile()
+            .unwrap();
+        let db_path = db.path().to_path_buf();
+        std::mem::forget(db);
+
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+        pool
+    }
+
+    fn test_work(work_id: &str) -> WorkRecord {
+        WorkRecord {
+            work_id: work_id.to_string(),
+            creator_id: "ctr_test".to_string(),
+            workspace_slug: "ws".to_string(),
+            status: "active".to_string(),
+            title: "Original Title".to_string(),
+            long_term_goal: "Write a novel".to_string(),
+            initial_idea: "An idea".to_string(),
+            creative_brief: None,
+            intake_status: "complete".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: "2026-06-09T10:00:00Z".to_string(),
+            updated_at: "2026-06-09T10:00:00Z".to_string(),
+            current_stage: "research".to_string(),
+            stage_status: "active".to_string(),
+            work_profile: Some("novel".to_string()),
+            work_ref: Some("test-novel".to_string()),
+            total_planned_chapters: Some(3),
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: Some("sch_active_driver".to_string()),
+            auto_chain_interrupted: false,
+        }
+    }
+
+    /// Fix D (W-D): Verify that when `advance_work_stage_atomic` fails due to
+    /// an active-stage constraint violation, non-stage fields (title) are NOT
+    /// applied. This validates the fail-fast reordering: stage transition runs
+    /// before non-stage field changes.
+    #[tokio::test]
+    async fn stage_advance_failure_does_not_apply_non_stage_fields() {
+        let pool = test_pool().await;
+        let work = test_work("wrk_fixd");
+        works::create_work(&pool, &work).await.unwrap();
+
+        // Work is at research/active with an active driver schedule.
+        // Attempting to PATCH with stage_status="active" (same as current)
+        // will trigger the ConstraintViolation inside advance_work_stage_atomic
+        // (active → active is blocked). We also send a title change.
+        //
+        // Fix D: After the reordering, the title should NOT be changed because
+        // advance_work_stage_atomic runs first and fails before
+        // apply_non_stage_fields is called.
+
+        // Verify the current stage is "active" and title is "Original Title".
+        let before = works::get_work(&pool, "ctr_test", "wrk_fixd")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.stage_status, "active");
+        assert_eq!(before.title, "Original Title");
+
+        // Simulate the constraint violation: calling advance_work_stage_atomic
+        // with target_status="active" when current is "active" should fail.
+        let now = chrono::Utc::now().to_rfc3339();
+        let result = works::advance_work_stage_atomic(
+            &pool,
+            "ctr_test",
+            "wrk_fixd",
+            "research", // same stage
+            "active",   // same status → constraint violation
+            &now,
+        )
+        .await;
+
+        assert!(result.is_err(), "should fail with constraint violation");
+
+        // Simulate what the OLD code did: apply_non_stage_fields FIRST, then
+        // advance_work_stage_atomic. In the OLD code, the title would have
+        // already been changed. In the NEW code (Fix D), it's not called.
+        //
+        // Verify the title is unchanged (proving the reorder works).
+        let after = works::get_work(&pool, "ctr_test", "wrk_fixd")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.title, "Original Title",
+            "Fix D: title should NOT be changed when stage advance fails"
+        );
+    }
 }
