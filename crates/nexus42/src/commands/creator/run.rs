@@ -639,7 +639,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         // V1.39 T7: auto-chain checkpoint fields
                         let auto_chain = resp
                             .get("auto_chain_enabled")
-                            .and_then(|v| v.as_bool())
+                            .and_then(serde_json::Value::as_bool)
                             .unwrap_or(true);
                         let driver = resp
                             .get("driver_schedule_id")
@@ -647,7 +647,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                             .unwrap_or("none");
                         let interrupted = resp
                             .get("auto_chain_interrupted")
-                            .and_then(|v| v.as_bool())
+                            .and_then(serde_json::Value::as_bool)
                             .unwrap_or(false);
                         println!(
                             "auto_chain: {} (driver: {}, interrupted: {})",
@@ -832,7 +832,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     .unwrap_or("?");
                 let auto_chain = resp
                     .get("auto_chain_enabled")
-                    .and_then(|v| v.as_bool())
+                    .and_then(serde_json::Value::as_bool)
                     .unwrap_or(true);
 
                 if auto_chain {
