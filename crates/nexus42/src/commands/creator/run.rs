@@ -877,6 +877,35 @@ async fn stage_list(work_id: &str, json: bool, client: &crate::api::DaemonClient
 
 /// Advance a Work to the next FL-E stage.
 ///
+/// Validate that novel-writing ("produce") chapter context is present.
+///
+/// When the target stage is "produce" (novel-writing preset), a chapter was
+/// selected (`next_chapter.is_some()`), but both `outline_path` and
+/// `body_path` are `None`, the template rendering would fail because both
+/// prompt templates declare these variables as `required: true`. This
+/// function returns an actionable error instead of silently proceeding.
+fn validate_produce_chapter_context(
+    target_stage: &str,
+    next_chapter: Option<i32>,
+    outline_path: Option<&str>,
+    body_path: Option<&str>,
+    work_id: &str,
+) -> crate::errors::Result<()> {
+    if target_stage == "produce"
+        && next_chapter.is_some()
+        && outline_path.is_none()
+        && body_path.is_none()
+    {
+        return Err(crate::errors::CliError::Other(format!(
+            "novel-writing schedule requires chapter context (outline_path, body_path).\n\
+              The daemon response is missing chapters[] or the selected chapter row.\n\
+              Hint: re-run `nexus42 creator run status {work_id}` to inspect,\n\
+              or re-seed the work via `nexus42 creator run start --init-preset novel-project-init`."
+        )));
+    }
+    Ok(())
+}
+
 /// Validates:
 /// 1. Target stage is a known FL-E stage
 /// 2. Target stage is ahead of current stage (unless `--force`)
@@ -989,7 +1018,7 @@ async fn stage_advance(
     // from the chapters array for the selected chapter.
     let (chapter_label, outline_path, body_path, slug) = next_chapter
         .and_then(|ch_num| {
-            let ch_label = format!("{ch_num:02}");
+            let ch_label = stage_gates::chapter_label(ch_num);
             let chapters = resp.get("chapters").and_then(|v| v.as_array())?;
             let ch_row = chapters.iter().find(|c| {
                 c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(ch_num))
@@ -1009,6 +1038,19 @@ async fn stage_advance(
             Some((Some(ch_label), op, bp, sl))
         })
         .unwrap_or_default();
+
+    // W-1 fix: fail fast when novel-writing ("produce") expects chapter context
+    // but the daemon response is missing the chapters[] array or the selected
+    // chapter row. Without outline_path and body_path, template rendering would
+    // fail silently. Only fires when a chapter IS selected (next_chapter=Some)
+    // but the context extraction returned None for both paths.
+    validate_produce_chapter_context(
+        target_stage,
+        next_chapter,
+        outline_path.as_deref(),
+        body_path.as_deref(),
+        work_id,
+    )?;
 
     let fields = WorkFields {
         work_id: work_id.to_string(),
@@ -1136,4 +1178,63 @@ async fn stage_advance(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stage_advance_produce_chapter_missing_chapter_array_returns_error() {
+        let result =
+            validate_produce_chapter_context("produce", Some(2), None, None, "wrk_test123");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("novel-writing schedule requires chapter context"),
+            "error should mention chapter context: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("outline_path, body_path"),
+            "error should mention missing fields: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("wrk_test123"),
+            "error should include work_id hint: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn validate_produce_ok_when_chapter_context_present() {
+        let result = validate_produce_chapter_context(
+            "produce",
+            Some(2),
+            Some("path/to/outline.md"),
+            Some("path/to/body.md"),
+            "wrk_test",
+        );
+        assert!(result.is_ok(), "should succeed when paths are present");
+    }
+
+    #[test]
+    fn validate_skips_when_next_chapter_is_none() {
+        // Novel-completion case (R-V138P1-01): next_chapter=None should NOT error
+        let result =
+            validate_produce_chapter_context("produce", None, None, None, "wrk_completed");
+        assert!(
+            result.is_ok(),
+            "should NOT error when next_chapter is None (novel-completion): {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn validate_skips_for_non_produce_stage() {
+        let result =
+            validate_produce_chapter_context("research", Some(3), None, None, "wrk_other");
+        assert!(
+            result.is_ok(),
+            "should NOT error for non-produce stages: {:?}",
+            result
+        );
+    }
 }
