@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT finding_id as \"finding_id!\", work_id as \"work_id!\", chapter,\n                severity as \"severity!\", status as \"status!\",\n                title as \"title!\", description as \"description!\",\n                target_executor as \"target_executor!\",\n                creator_id as \"creator_id!\",\n                created_at as \"created_at!\", updated_at as \"updated_at!\"\n         FROM findings\n         WHERE creator_id = ? AND finding_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "finding_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "work_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "chapter",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "severity!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "target_executor!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 10,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d17f40ff8d54a4467f13cbd9cfd5c940cd138e28105662a97b7dc81967dfbf7e"
+}
