@@ -442,6 +442,64 @@ async fn enrich_with_chapters(
     dto
 }
 
+/// Apply non-stage fields (title, goal, brief, etc.) if any are present in the request.
+///
+/// Returns early with `Ok(())` if no non-stage fields are present.
+async fn apply_non_stage_fields(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    req: &PatchWorkRequest,
+    now: &str,
+) -> Result<(), NexusApiError> {
+    let has_non_stage = req.title.is_some()
+        || req.long_term_goal.is_some()
+        || req.creative_brief.is_some()
+        || req.intake_status.is_some()
+        || req.status.is_some()
+        || req.world_id.is_some()
+        || req.story_ref.is_some()
+        || req.primary_preset_id.is_some();
+
+    if !has_non_stage {
+        return Ok(());
+    }
+
+    let non_stage_patch = WorkPatch {
+        title: req.title.clone(),
+        long_term_goal: req.long_term_goal.clone(),
+        creative_brief: req.creative_brief.clone().map(Some),
+        intake_status: req.intake_status.clone(),
+        status: req.status.clone(),
+        world_id: req.world_id.clone(),
+        story_ref: req.story_ref.clone(),
+        primary_preset_id: req.primary_preset_id.clone(),
+        schedule_ids: None,
+        current_stage: None,
+        stage_status: None,
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: None,
+        auto_chain_enabled: None,
+        driver_schedule_id: None,
+        auto_chain_interrupted: None,
+    };
+    works::patch_work(pool, creator_id, work_id, &non_stage_patch, now)
+        .await
+        .map_err(|e| match &e {
+            nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+                NexusApiError::NotFound(format!("work {work_id}"))
+            }
+            _ => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            },
+        })?;
+
+    Ok(())
+}
+
 /// Handle PATCH with stage changes: gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
 async fn patch_work_stage(
     state: &WorkspaceState,
@@ -487,49 +545,7 @@ async fn patch_work_stage(
         check_stage_status_transition(&current.stage_status, target_status, force)?;
     }
 
-    // Apply non-stage fields first if present
-    let has_non_stage = req.title.is_some()
-        || req.long_term_goal.is_some()
-        || req.creative_brief.is_some()
-        || req.intake_status.is_some()
-        || req.status.is_some()
-        || req.world_id.is_some()
-        || req.story_ref.is_some()
-        || req.primary_preset_id.is_some();
-
-    if has_non_stage {
-        let non_stage_patch = WorkPatch {
-            title: req.title.clone(),
-            long_term_goal: req.long_term_goal.clone(),
-            creative_brief: req.creative_brief.clone().map(Some),
-            intake_status: req.intake_status.clone(),
-            status: req.status.clone(),
-            world_id: req.world_id.clone(),
-            story_ref: req.story_ref.clone(),
-            primary_preset_id: req.primary_preset_id.clone(),
-            schedule_ids: None,
-            current_stage: None,
-            stage_status: None,
-            work_profile: None,
-            work_ref: None,
-            total_planned_chapters: None,
-            current_chapter: None,
-            auto_chain_enabled: None,
-            driver_schedule_id: None,
-            auto_chain_interrupted: None,
-        };
-        works::patch_work(state.pool(), creator_id, work_id, &non_stage_patch, now)
-            .await
-            .map_err(|e| match &e {
-                nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                    NexusApiError::NotFound(format!("work {work_id}"))
-                }
-                _ => NexusApiError::Internal {
-                    code: "DATABASE_ERROR".to_string(),
-                    message: e.to_string(),
-                },
-            })?;
-    }
+    apply_non_stage_fields(state.pool(), creator_id, work_id, req, now).await?;
 
     let updated = works::advance_work_stage_atomic(
         state.pool(),
