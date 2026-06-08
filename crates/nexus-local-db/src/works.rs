@@ -9,7 +9,7 @@ use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use crate::error::LocalDbError;
 
 /// Column list for all SELECT queries on works.
-const WORKS_COLUMNS: &str = "\
+pub const WORKS_COLUMNS: &str = "\
     work_id, creator_id, workspace_slug, status, title, long_term_goal, \
     initial_idea, creative_brief, intake_status, world_id, story_ref, \
     inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, \
@@ -17,7 +17,8 @@ const WORKS_COLUMNS: &str = "\
     auto_chain_enabled, driver_schedule_id, auto_chain_interrupted";
 
 /// Map a sqlx row to [`WorkRecord`].
-fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
+#[must_use]
+pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
     WorkRecord {
         work_id: r.get("work_id"),
         creator_id: r.get("creator_id"),
