@@ -1186,6 +1186,7 @@ async fn stage_advance(
         outline_path,
         body_path,
         slug,
+        research_artifacts_dir: None,
     };
 
     if let Some(mut request) =
