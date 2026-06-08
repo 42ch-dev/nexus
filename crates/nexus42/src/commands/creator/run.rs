@@ -624,6 +624,26 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         println!("progress: {finalized_count} / {total} chapters finalized");
                         println!("current_chapter: {current_chapter}");
                         println!("total_planned_chapters: {total_planned}");
+
+                        // V1.39 T7: auto-chain checkpoint fields
+                        let auto_chain = resp
+                            .get("auto_chain_enabled")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+                        let driver = resp
+                            .get("driver_schedule_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("none");
+                        let interrupted = resp
+                            .get("auto_chain_interrupted")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        println!(
+                            "auto_chain: {} (driver: {}, interrupted: {})",
+                            if auto_chain { "enabled" } else { "disabled" },
+                            driver,
+                            interrupted
+                        );
                         println!();
 
                         // Per-chapter rows
@@ -727,6 +747,9 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         ("intake_status", "intake_status"),
                         ("current_stage", "current_stage"),
                         ("stage_status", "stage_status"),
+                        ("auto_chain_enabled", "auto_chain_enabled"),
+                        ("driver_schedule_id", "driver_schedule_id"),
+                        ("auto_chain_interrupted", "auto_chain_interrupted"),
                         ("long_term_goal", "long_term_goal"),
                         ("initial_idea", "initial_idea"),
                         ("primary_preset_id", "primary_preset_id"),
