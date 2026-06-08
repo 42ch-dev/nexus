@@ -24,6 +24,8 @@ fn demo_work_fields(stage: &str) -> WorkFields {
         fl_e_stage: stage.to_string(),
         creative_brief: r#"{"genre":"sci-fi","tone":"literary","audience":"adult"}"#.to_string(),
         inspiration_log: r#"[{"note":"AI consciousness angle"}]"#.to_string(),
+        work_ref: Some("my-novel".to_string()),
+        chapter: Some(1),
     }
 }
 

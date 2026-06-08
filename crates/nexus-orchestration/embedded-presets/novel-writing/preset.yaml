@@ -3,15 +3,16 @@
 #   work_ref:  Human-readable short reference used as directory name (e.g., "my-first-novel").
 #   topic:     Novel topic or description (e.g., "A sci-fi thriller about AI consciousness").
 #   vibe:      Writing style (default: "literary").
+#   chapter:   Chapter number to work on (auto-selected by next_chapter() or default 1).
 #
 #   Launch: nexus42 creator run stage advance --stage produce
 #   Requires: novel-project-init completed (gated by §5.3.2).
 
 preset:
   id: novel-writing
-  version: 4  # Bumped for V1.36 finalize state restructure (P4 fix wave)
+  version: 5  # V1.38 P0: chapter selection via preset.input.chapter (replaces hard-coded ch01)
   kind: creator
-  description: "Single-chapter outline → draft → finalize pipeline (ch01 MVP); gated by llm_judge 五问 quality check"
+  description: "Per-chapter outline → draft → finalize pipeline; gated by llm_judge 五問 quality check"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
@@ -68,7 +69,7 @@ roles:
 
 states:
   - id: outline_chapter
-    description: "Write chapter outline for ch01 (uses chapter-outline.md template)"
+    description: "Write chapter outline (uses chapter-outline.md template)"
     enter:
       - kind: capability
         name: creator.inject_prompt
@@ -79,13 +80,13 @@ states:
             work_id: "{{preset.input.work_id}}"
             topic: "{{preset.input.topic}}"
             vibe: "{{preset.input.vibe}}"
-            chapter: 1
+            chapter: "{{preset.input.chapter}}"
     exit_when:
       kind: manual
     next: draft_chapter
 
   - id: draft_chapter
-    description: "Draft ch01 body (uses chapter-body.md template; frontmatter status: draft)"
+    description: "Draft chapter body (uses chapter-body.md template; frontmatter status: draft)"
     enter:
       - kind: capability
         name: creator.inject_prompt
@@ -96,13 +97,13 @@ states:
             work_id: "{{preset.input.work_id}}"
             topic: "{{preset.input.topic}}"
             vibe: "{{preset.input.vibe}}"
-            chapter: 1
-      # Advance current_chapter after draft enters
+            chapter: "{{preset.input.chapter}}"
+      # Transition chapter status from outlined to draft
       - kind: capability
         name: novel.chapter_transition
         args:
           work_id: "{{preset.input.work_id}}"
-          chapter: 1
+          chapter: "{{preset.input.chapter}}"
           from_status: "outlined"
           to_status: "draft"
     exit_when:
@@ -125,7 +126,7 @@ states:
         name: novel.chapter_transition
         args:
           work_id: "{{preset.input.work_id}}"
-          chapter: 1
+          chapter: "{{preset.input.chapter}}"
           from_status: "draft"
           to_status: "finalized"
     next: done
