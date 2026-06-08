@@ -499,74 +499,45 @@ pub async fn reconcile_from_filesystem(
 
 /// Select the next chapter to work on per novel-workflow-profile §4.5.2.
 ///
-/// Selection order:
-/// 1. Lowest `not_started` chapter.
-/// 2. If none: lowest `outlined` chapter (outline exists, drafting not started).
-/// 3. If none: lowest `draft` chapter (resume in-progress draft).
-/// 4. If none: `Ok(None)` — the Work is at novel-completion.
+/// Returns the **lowest chapter number** whose status is in the active set
+/// `{not_started, outlined, draft}`. This preserves serial chapter order:
+/// an earlier draft/outlined chapter is always resumed before advancing to
+/// a later `not_started` chapter (spec §4.5.2 resume/outlined semantics).
+///
+/// Returns `Ok(None)` when all chapters are finalized/published (novel-completion).
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
 pub async fn next_chapter(pool: &SqlitePool, work_id: &str) -> Result<Option<i32>, LocalDbError> {
-    // Try not_started first (lowest chapter number).
+    // Single query: lowest chapter among all active statuses.
+    // Excludes finalized/published so completed chapters are never selected.
     // SAFETY: SELECT against work_chapters — runtime query.
     let row = sqlx::query(
-        "SELECT chapter FROM work_chapters \
-         WHERE work_id = ? AND status = 'not_started' \
-         ORDER BY chapter ASC LIMIT 1",
+        "SELECT MIN(chapter) AS chapter FROM work_chapters \
+         WHERE work_id = ? AND status IN ('not_started', 'outlined', 'draft')",
     )
     .bind(work_id)
     .fetch_optional(pool)
     .await?;
 
-    if let Some(r) = row {
-        let ch: i32 = r.get("chapter");
-        return Ok(Some(ch));
-    }
-
-    // Try outlined next (outline exists but drafting hasn't started).
-    let row = sqlx::query(
-        "SELECT chapter FROM work_chapters \
-         WHERE work_id = ? AND status = 'outlined' \
-         ORDER BY chapter ASC LIMIT 1",
+    row.map_or_else(
+        || Ok(None),
+        |r| {
+            let ch: Option<i32> = r.get("chapter");
+            Ok(ch)
+        },
     )
-    .bind(work_id)
-    .fetch_optional(pool)
-    .await?;
-
-    if let Some(r) = row {
-        let ch: i32 = r.get("chapter");
-        return Ok(Some(ch));
-    }
-
-    // Try draft (resume in-progress chapter).
-    let row = sqlx::query(
-        "SELECT chapter FROM work_chapters \
-         WHERE work_id = ? AND status = 'draft' \
-         ORDER BY chapter ASC LIMIT 1",
-    )
-    .bind(work_id)
-    .fetch_optional(pool)
-    .await?;
-
-    if let Some(r) = row {
-        let ch: i32 = r.get("chapter");
-        return Ok(Some(ch));
-    }
-
-    // No eligible chapter — novel is complete or has no chapters.
-    Ok(None)
 }
 
 /// Check whether a Work is completed per novel-workflow-profile §6.1.
 ///
-/// Returns `true` if:
-/// - `works.status == 'completed'` (early exit), OR
-/// - `work_chapters` has ≥1 row AND all rows have `status == 'finalized'`
-///   AND the row count equals `works.total_planned_chapters`
-///   AND `works.current_chapter >= works.total_planned_chapters`
-///   AND `works.intake_status == 'complete'`.
+/// For **novel-profile** Works (`work_profile == 'novel'`): always runs the
+/// full §6.1 check — all rows finalized, row count == `total_planned_chapters`,
+/// `current_chapter >= total_planned_chapters`, and `intake_status == 'complete'`.
+///
+/// For **non-novel** Works (V1.36 backwards compat): returns `true` immediately
+/// if `works.status == 'completed'` — the early exit preserves legacy behaviour.
 ///
 /// Returns `false` if:
 /// - `total_planned_chapters` is NULL or 0
@@ -581,7 +552,7 @@ pub async fn next_chapter(pool: &SqlitePool, work_id: &str) -> Result<Option<i32
 pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool, LocalDbError> {
     // SAFETY: SELECT against works — runtime query.
     let row = sqlx::query(
-        "SELECT status, total_planned_chapters, current_chapter, intake_status \
+        "SELECT status, work_profile, total_planned_chapters, current_chapter, intake_status \
          FROM works WHERE work_id = ?",
     )
     .bind(work_id)
@@ -593,7 +564,11 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
     };
 
     let status: String = row.get("status");
-    if status == "completed" {
+    let work_profile: Option<String> = row.get("work_profile");
+
+    // Non-novel Works: keep the legacy early exit (V1.36 backwards compat).
+    // Novel-profile Works: always fall through to the full §6.1 check.
+    if status == "completed" && work_profile.as_deref() != Some("novel") {
         return Ok(true);
     }
 
@@ -1122,7 +1097,7 @@ mod tests {
         assert_eq!(next, Some(2), "should select ch2 (lowest not_started)");
     }
 
-    // T10.2: next_chapter draft resume (one draft row, no not_started)
+    // T10.2: next_chapter resumes lowest active chapter (draft beats later not_started)
     #[tokio::test]
     async fn test_next_chapter_resumes_draft() {
         let (pool, _dir) = fresh_pool().await;
@@ -1154,19 +1129,19 @@ mod tests {
         .await
         .unwrap();
 
-        // ch3 is not_started but ch2 is draft and earlier — not_started wins
+        // ch2 is draft (lower chapter) — must resume it, not skip to ch3
         let next = next_chapter(&pool, "wrk_sel_002").await.unwrap();
         assert_eq!(
             next,
-            Some(3),
-            "should select ch3 (not_started) over ch2 (draft)"
+            Some(2),
+            "should resume ch2 (draft, lowest active chapter) over ch3 (not_started)"
         );
 
-        // Now make ch3 finalized too — only ch2 draft remains
+        // Now finalize ch2 too — ch3 (not_started) is the only active chapter left
         update_status(
             &pool,
             "wrk_sel_002",
-            3,
+            2,
             "finalized",
             Some(4000),
             "2026-06-08T13:00:00Z",
@@ -1177,12 +1152,12 @@ mod tests {
         let next2 = next_chapter(&pool, "wrk_sel_002").await.unwrap();
         assert_eq!(
             next2,
-            Some(2),
-            "should resume ch2 (draft, no not_started left)"
+            Some(3),
+            "should select ch3 (not_started) after ch2 finalized"
         );
     }
 
-    // T10.3: Outlined handling (outlined is not skipped)
+    // T10.3: Outlined chapter is not skipped in favor of later chapters
     #[tokio::test]
     async fn test_next_chapter_outlined_not_skipped() {
         let (pool, _dir) = fresh_pool().await;
@@ -1192,8 +1167,7 @@ mod tests {
             .await
             .unwrap();
 
-        // ch1=outlined, ch2=not_started — outlined is selected over not_started per T5?
-        // No: not_started wins per §4.5.2. outlined is tried AFTER not_started.
+        // ch1=outlined, ch2=not_started — lowest active chapter wins (ch1)
         update_status(
             &pool,
             "wrk_sel_003",
@@ -1208,28 +1182,18 @@ mod tests {
         let next = next_chapter(&pool, "wrk_sel_003").await.unwrap();
         assert_eq!(
             next,
-            Some(2),
-            "ch2 (not_started) should be selected over ch1 (outlined)"
+            Some(1),
+            "ch1 (outlined) should be selected over ch2 (not_started) — lowest active chapter wins"
         );
 
-        // Now finalize ch2, ch3 — only ch1 (outlined) remains
+        // Now finalize ch1 — ch2 (not_started) becomes the next active chapter
         update_status(
             &pool,
             "wrk_sel_003",
-            2,
+            1,
             "finalized",
             Some(4000),
             "2026-06-08T12:00:00Z",
-        )
-        .await
-        .unwrap();
-        update_status(
-            &pool,
-            "wrk_sel_003",
-            3,
-            "finalized",
-            Some(4000),
-            "2026-06-08T13:00:00Z",
         )
         .await
         .unwrap();
@@ -1237,8 +1201,58 @@ mod tests {
         let next2 = next_chapter(&pool, "wrk_sel_003").await.unwrap();
         assert_eq!(
             next2,
-            Some(1),
-            "outlined ch1 should be selected when no not_started/draft remain"
+            Some(2),
+            "ch2 (not_started) should be selected after ch1 finalized"
+        );
+    }
+
+    // T10.8: Finalized chapters are excluded from selection
+    #[tokio::test]
+    async fn test_next_chapter_skips_finalized() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_sel_004").await;
+        setup_work_for_selection(&pool, "wrk_sel_004", 3).await;
+        seed_chapters(&pool, "wrk_sel_004", "my-novel", 3, "2026-06-08T10:00:00Z")
+            .await
+            .unwrap();
+
+        // ch1=finalized, ch2=outlined, ch3=draft
+        update_status(
+            &pool,
+            "wrk_sel_004",
+            1,
+            "finalized",
+            Some(4000),
+            "2026-06-08T11:00:00Z",
+        )
+        .await
+        .unwrap();
+        update_status(
+            &pool,
+            "wrk_sel_004",
+            2,
+            "outlined",
+            None,
+            "2026-06-08T12:00:00Z",
+        )
+        .await
+        .unwrap();
+        update_status(
+            &pool,
+            "wrk_sel_004",
+            3,
+            "draft",
+            None,
+            "2026-06-08T13:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        let next = next_chapter(&pool, "wrk_sel_004").await.unwrap();
+        assert_eq!(
+            next,
+            Some(2),
+            "should select ch2 (outlined, lowest active) — ch1 finalized excluded"
         );
     }
 
@@ -1364,6 +1378,86 @@ mod tests {
         assert!(
             !is_work_completed(&pool, "wrk_comp_012").await.unwrap(),
             "intake_status='pending' → should NOT be completed even if all finalized"
+        );
+    }
+
+    // F-002: is_work_completed novel-profile early-exit narrowing
+    #[tokio::test]
+    async fn test_completion_novel_profile_needs_full_check() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_comp_novel_001").await;
+
+        // Set work_profile='novel', all §6.1 conditions met, but works.status='draft'
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query(
+            "UPDATE works SET work_profile = 'novel', total_planned_chapters = 2, \
+             current_chapter = 2, intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("wrk_comp_novel_001")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        seed_chapters(
+            &pool,
+            "wrk_comp_novel_001",
+            "my-novel",
+            2,
+            "2026-06-08T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        // Finalize all chapters
+        for ch in 1..=2 {
+            update_status(
+                &pool,
+                "wrk_comp_novel_001",
+                ch,
+                "finalized",
+                Some(4000),
+                "2026-06-08T12:00:00Z",
+            )
+            .await
+            .unwrap();
+        }
+
+        // works.status is still 'draft' but §6.1 conditions are met → completed
+        assert!(
+            is_work_completed(&pool, "wrk_comp_novel_001").await.unwrap(),
+            "novel-profile Work: all §6.1 conditions met → completed even when works.status='draft'"
+        );
+
+        // Now set works.status='completed' — still returns true
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query("UPDATE works SET status = 'completed' WHERE work_id = ?")
+            .bind("wrk_comp_novel_001")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(
+            is_work_completed(&pool, "wrk_comp_novel_001")
+                .await
+                .unwrap(),
+            "novel-profile Work: completed status + all §6.1 met → still completed"
+        );
+
+        // Now introduce an unfinalized row — should return false despite works.status='completed'
+        update_status(
+            &pool,
+            "wrk_comp_novel_001",
+            1,
+            "draft",
+            None,
+            "2026-06-08T13:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !is_work_completed(&pool, "wrk_comp_novel_001").await.unwrap(),
+            "novel-profile Work: works.status='completed' but ch1 is draft → NOT completed (§6.1 authoritative)"
         );
     }
 
