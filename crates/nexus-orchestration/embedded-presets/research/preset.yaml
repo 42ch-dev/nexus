@@ -9,7 +9,7 @@
 
 preset:
   id: research
-  version: 1
+  version: 2
   kind: creator
   description: "A research workflow: scan references, extract content, and produce structured reports"
   requires_capabilities:
@@ -17,10 +17,21 @@ preset:
     - acp.prompt
     - judge.llm
   run_intents:
-    - work_init
+    - knowledge_ingest
     - work_continue
   initial: scanning
   terminal: done
+  # Preset gates — enforced at enqueue time.
+  # Research requires intake to be complete (brief must exist for meaningful research).
+  # work_ref is required for the preset to know where to write artifacts.
+  gates:
+    - kind: work_field
+      field: intake_status
+      op: equals
+      value: complete
+    - kind: work_field
+      field: work_ref
+      op: required
 
 # Roles for the research workflow
 roles:
