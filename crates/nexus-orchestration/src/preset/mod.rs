@@ -1243,13 +1243,10 @@ states:
 
         // Verify linear transitions
         assert!(loaded.manifest.states.iter().any(|s| {
-            s.id == "gather"
-                && s.next
-                    == Some(manifest::NextTarget::Linear("synthesize".into()))
+            s.id == "gather" && s.next == Some(manifest::NextTarget::Linear("synthesize".into()))
         }));
         assert!(loaded.manifest.states.iter().any(|s| {
-            s.id == "synthesize"
-                && s.next == Some(manifest::NextTarget::Linear("done".into()))
+            s.id == "synthesize" && s.next == Some(manifest::NextTarget::Linear("done".into()))
         }));
 
         // Auto-chain compatible: exit_when uses llm_judge (not manual)
@@ -1298,12 +1295,10 @@ states:
         // Verify linear transitions
         assert!(loaded.manifest.states.iter().any(|s| {
             s.id == "present"
-                && s.next
-                    == Some(manifest::NextTarget::Linear("await_decision".into()))
+                && s.next == Some(manifest::NextTarget::Linear("await_decision".into()))
         }));
         assert!(loaded.manifest.states.iter().any(|s| {
-            s.id == "await_decision"
-                && s.next == Some(manifest::NextTarget::Linear("done".into()))
+            s.id == "await_decision" && s.next == Some(manifest::NextTarget::Linear("done".into()))
         }));
 
         // Human-in-loop: exit_when uses manual (not auto-chain)
@@ -1326,8 +1321,7 @@ states:
 
         // Prompt templates exist
         assert!(
-            read_embedded_template("novel-review-master", "prompts/present-findings.md")
-                .is_some(),
+            read_embedded_template("novel-review-master", "prompts/present-findings.md").is_some(),
             "present-findings.md prompt must exist"
         );
         assert!(
