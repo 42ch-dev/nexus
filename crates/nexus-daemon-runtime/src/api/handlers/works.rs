@@ -315,6 +315,44 @@ pub async fn list_works(
     }))
 }
 
+/// `GET /v1/local/works/{id}` — fetch a single Work by id.
+///
+/// # Lazy completion-promotion contract (R-V138P0-03)
+///
+/// This handler intentionally performs a **write-on-read** for novel-profile
+/// Works: when the row's `status != 'completed'` and
+/// [`nexus_local_db::work_chapters::is_work_completed`] returns `true` (every
+/// chapter finalized per novel-workflow-profile §6.1), the handler issues a
+/// `PATCH` to flip `works.status` → `'completed'` before returning the DTO.
+///
+/// **Why this is intentional, not an accident:**
+///
+/// 1. There is no daemon-side scheduler watching for "all chapters finalized"
+///    — completion is a derived state that only crystallises on access.
+/// 2. The platform requires `status='completed'` as the canonical signal for
+///    sync/UI; computing it on every read without persisting would force every
+///    downstream consumer to re-derive it.
+/// 3. The patch is **idempotent**: subsequent GETs find `status='completed'`
+///    on the first read, skip the `is_work_completed` check entirely (early
+///    exit via the `status != "completed"` guard), and return the cached value.
+///
+/// **Failure semantics:** if the auto-promote PATCH fails, the handler logs a
+/// warning and returns the un-promoted record — `GET` never fails because of
+/// a promotion error. The caller will retry on the next read.
+///
+/// **Consistency:** because Nexus is single-user local-first (see
+/// `next_chapter()` doc), there is no race with concurrent finalizers — the
+/// read-then-write window is safe under the single-writer invariant.
+///
+/// A future cleanup may move this into a daemon-side post-finalize hook (e.g.
+/// `update_status` for the last chapter triggers the promotion), at which
+/// point this lazy path can become a no-op or be removed.
+///
+/// # Errors
+///
+/// - `404 NotFound` if the work id is unknown for the active creator.
+/// - `401 AuthRequired` if no active creator is configured.
+/// - `500 Internal` on database error.
 pub async fn get_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
