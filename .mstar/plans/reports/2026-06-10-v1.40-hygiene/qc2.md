@@ -121,3 +121,67 @@ The two Critical items are both directly related to the security/correctness res
 All other security/correctness items (timeout, supervisor scoping, preset version, from-review logging, ULID entropy, waived UX items) are either correctly implemented, acceptably bounded for the local-first threat model, or appropriately documented as deferred.
 
 Re-fix the migration (or reclassify the residual) and make `mint_finding_id()` the single call site inside the findings crate, then targeted re-review of those two files is sufficient.
+
+## Revalidation
+
+**Re-validation scope**: Targeted re-review of QC #2 blocking findings only (C-1, C-2, W-1) per PM assignment.  
+**Re-validation diff / basis**: `95233c32..12b80662` (commits landing the fixes after prior QC #2 "Request Changes").  
+**Working branch (re-verified)**: `feature/v1.40-hygiene`  
+**Review cwd (re-verified)**: `/Users/bibi/workspace/organizations/42ch/nexus`  
+**Commands executed for verification** (as specified):
+```
+git rev-parse --show-toplevel
+git branch --show-current
+git log --oneline 95233c32..HEAD
+git diff --stat 95233c32..HEAD
+```
+- Repo root: `/Users/bibi/workspace/organizations/42ch/nexus`
+- Current branch: `feature/v1.40-hygiene`
+- Commits in reval range (6): `12b80662 test(orchestration): ...`, `d37c0691 refactor(local-db): QC2/3 C-1 — drop unsupported ALTER TABLE...`, `57e7b854 fix(daemon-runtime): ...`, `deca8e16 fix(supervisor): ...`, plus the two prior QC report commits (qc1, qc3). The critical fix commits for C-1/C-2 are `d37c0691` (migration drop + runtime doc) and the findings.rs delta within the hygiene wave.
+- Diff stat relevant to C-1/C-2: deletion of `.../202606100002_findings_check_constraints.sql | 15 ---` and `crates/nexus-local-db/src/findings.rs | 14 ++-` (plus other hygiene files outside security/correctness lens).
+
+**C-1 re-validation (unsupported ALTER TABLE ADD CONSTRAINT migration)**:  
+- The migration file `202606100002_findings_check_constraints.sql` has been deleted (confirmed via `ls crates/nexus-local-db/migrations/` — only `202606090002_findings.sql` and an unrelated `202606100001_...` remain; `git diff --stat` shows the 15-line deletion).  
+- The base `CREATE TABLE findings` (in `202606090002_findings.sql`) correctly contains no `CHECK` constraints (SQLite limitation is respected).  
+- Documentation in `crates/nexus-local-db/src/findings.rs:90-98` (the `validate_finding_enums` doc comment) now explicitly states:  
+  > "R-V139P1-W-1: Runtime validation is the **sole enforcement mechanism** for finding enum fields. `SQLite` does not support `ALTER TABLE ADD CONSTRAINT` for `CHECK` constraints on existing tables; adding `CHECK` to the original `CREATE TABLE` is not retroactively applicable. This function is called on both create and patch paths, providing the only guard against invalid enum values."  
+- No DB-level CHECK migration artifact remains in the tree. The residual closure rationale has been updated to rely on the runtime guard (cross-referenced in status.json hygiene updates).  
+- **Resolved**. No new security/correctness finding.
+
+**C-2 re-validation (ID mint SSOT not honored)**:  
+- `create_finding_from_review` (findings.rs:572) now does:  
+  ```rust
+  let finding_id = mint_finding_id();
+  ...
+  create_finding(pool, &f).await?;
+  ```
+  (line 576 per read at reval time).  
+- The direct handler path in `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:160` also delegates: `let finding_id = findings::mint_finding_id();`.  
+- `mint_finding_id()` (findings.rs:86-88) remains the single format site (`format!("fnd_{}", uuid::Uuid::new_v4().simple())`).  
+- `create_finding_from_review` no longer duplicates the format string.  
+- **Resolved**. No new security/correctness finding. (A unit test asserting the single call site would be nice future hygiene but is not required for this reval.)
+
+**W-1 re-validation (runtime validation cross-cutting / documented as sole contract)**:  
+- `validate_finding_enums` (findings.rs:103-136) is the centralized predicate.  
+- Create path: `create_finding` (143) calls `validate_finding_enums(...)` before the INSERT (144).  
+- From-review hook path: `create_finding_from_review` (572) constructs the struct and calls `create_finding` (591) → validate.  
+- Update/patch path: `update_finding` (280) performs equivalent explicit membership checks against the three `VALID_*` slices for any provided patch fields (288-320); the semantics are identical to the centralized function (defense-in-depth for the partial patch case).  
+- The doc comment (90-98) now declares this as the **sole** contract and covers "both create and patch paths". All three entry points (handler direct-create, orchestration from-review hook, patch update) are guarded before any row is written.  
+- No other creation sites for `Finding` rows exist in the reviewed diff.  
+- **Resolved**. No new security/correctness finding.
+
+**Whole-crate sanity (re-executed)**:  
+- `cargo +nightly fmt --all -- --check` → `fmt_exit=0` (clean).  
+- `cargo clippy --all -- -D warnings` → libraries (including nexus-local-db and nexus-daemon-runtime) compiled cleanly under the lints; no new `-D warnings` regressions from the hygiene changes.  
+- `cargo build --all-targets` → surfaces pre-existing sqlx query-macro type-inference errors in test-only code paths (`nexus-daemon-runtime/src/db/pool.rs` test setup and `nexus-local-db/src/kb_store.rs` test fixtures). These require `cargo sqlx prepare` / `DATABASE_URL` for full test compilation (documented repo convention; unrelated to findings.rs or the deleted migration). The core library surfaces under review (findings module, handlers) build and were exercised in the clippy phase. No new compile breakage introduced by the C-1/C-2 fixes.  
+- `cargo test -p nexus-local-db --lib findings` (attempted) hit the same pre-existing sqlx cache state for its test harness — not indicative of a regression in the validated runtime paths.
+
+**New findings under security/correctness lens in reval range**: None. The commits landing since the prior QC #2 "Request Changes" are the targeted fixes (migration deletion + SSOT + doc hardening + unrelated supervisor/auto-chain/test hygiene) plus the other reviewers' QC reports. No additional Critical or Warning class issues (injection, ID collision outside the now-SSOT'd mint, enum bypass, authz, logging of sensitive data, unbounded behavior, etc.) were introduced or discovered in the reval diff.
+
+**Counts (new pass / reval only)**: critical=0, warning=0, suggestion=0.
+
+**Verdict (after re-validation)**: **Approve**
+
+All three prior blocking items (C-1, C-2, W-1) for the security/correctness reviewer are properly resolved. The delivered mechanism now matches the stated contract: runtime validation (with clear documentation of its sole-enforcement status due to SQLite constraints) + single ID mint site. No new security or correctness risk was added by the fix wave.
+
+(End of revalidation section; original report preserved verbatim above.)
