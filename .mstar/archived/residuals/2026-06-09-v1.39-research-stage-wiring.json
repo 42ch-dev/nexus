@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-09-v1.39-research-stage-wiring",
+  "entries": [
+    {
+      "id": "R-V139P0-SecFix",
+      "title": "P0.5 C-1 fix introduced a security regression: gated presets could be enqueued without work_id (PR #50 cursor review medium). Closed by fix branch fix/v1.39-preset-gate-bypass.",
+      "severity": "medium",
+      "source": "PR #50 cursor automation review (medium); follow-up to V1.39 P0.5 C-1 fix",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs (gate-eval path)",
+      "decision": "resolved",
+      "owner": "@fullstack-dev",
+      "target": "fix/v1.39-preset-gate-bypass",
+      "tracking": "PR #50 review thread; commit 3cc1601f",
+      "note": "Security: when preset declares gates, work_id is now REQUIRED; resolved from input.work_id OR seed.work_id; missing work_id fails closed with 422 preset_gates_failed. Regression test gated_preset_without_work_id_is_rejected added. Commit 3cc1601f on fix/v1.39-preset-gate-bypass.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-09",
+      "closure_note": "Closed in fix branch fix/v1.39-preset-gate-bypass commit 3cc1601f. Gate-eval now resolves work_id from input OR seed; gated presets without work_id fail closed with 422 preset_gates_failed; regression test added.",
+      "closure_evidence": "commit 3cc1601f on fix/v1.39-preset-gate-bypass",
+      "archived_at": "2026-06-09"
+    }
+  ]
+}

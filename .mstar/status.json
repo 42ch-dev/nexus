@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-09T06:00:00+08:00",
+  "updated_at": "2026-06-09T07:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-09-v1.39-harness-docs-prepare",
@@ -178,15 +178,15 @@
     "latest_shipped_at": "2026-06-09T06:00:00+08:00",
     "latest_active_iteration": "v1.39",
     "latest_active_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-    "integration_branch_retired": "iteration/v1.39 SHIPPED 2026-06-09 (P0..P5 all Done; PR to main pending)",
+    "integration_branch_retired": "iteration/v1.39 SHIPPED 2026-06-09 (P0..P5 all Done; PR #50 OPEN; security review follow-up fix/v1.39-preset-gate-bypass 3cc1601f ready to merge)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-09T06:00:00+08:00",
-      "total_open": 65,
+      "updated_at": "2026-06-09T07:00:00+08:00",
+      "total_open": 66,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 13,
+        "medium": 14,
         "low": 40,
         "nit": 12
       },
@@ -194,7 +194,7 @@
         "v1.37": 6,
         "backlog": 26,
         "v1.38": 12,
-        "v1.39": 22
+        "v1.39": 23
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -210,7 +210,7 @@
         "2026-06-08-v1.38-multi-chapter-selection-status": 5,
         "2026-06-08-v1.38-novel-writing-parameterization": 7,
         "2026-06-09-v1.39-fl-e-auto-chain-engine": 5,
-        "2026-06-09-v1.39-research-stage-wiring": 8,
+        "2026-06-09-v1.39-research-stage-wiring": 9,
         "2026-06-09-v1.39-v138-hardening": 3,
         "2026-06-09-v1.39-findings-and-review-routing": 6
       },
@@ -897,6 +897,23 @@
         "owner": "@fullstack-dev",
         "target": "backlog",
         "note": "Add a test that asserts a real research artifact file exists after research stage."
+      },
+      {
+        "id": "R-V139P0-SecFix",
+        "title": "P0.5 C-1 fix introduced a security regression: gated presets could be enqueued without work_id (PR #50 cursor review medium). Closed by fix branch fix/v1.39-preset-gate-bypass.",
+        "severity": "medium",
+        "source": "PR #50 cursor automation review (medium); follow-up to V1.39 P0.5 C-1 fix",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs (gate-eval path)",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "fix/v1.39-preset-gate-bypass",
+        "tracking": "PR #50 review thread; commit 3cc1601f",
+        "note": "Security: when preset declares gates, work_id is now REQUIRED; resolved from input.work_id OR seed.work_id; missing work_id fails closed with 422 preset_gates_failed. Regression test gated_preset_without_work_id_is_rejected added. Commit 3cc1601f on fix/v1.39-preset-gate-bypass.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-09",
+        "closure_note": "Closed in fix branch fix/v1.39-preset-gate-bypass commit 3cc1601f. Gate-eval now resolves work_id from input OR seed; gated presets without work_id fail closed with 422 preset_gates_failed; regression test added.",
+        "closure_evidence": "commit 3cc1601f on fix/v1.39-preset-gate-bypass",
+        "archived_at": "2026-06-09"
       }
     ],
     "2026-06-09-v1.39-v138-hardening": [
