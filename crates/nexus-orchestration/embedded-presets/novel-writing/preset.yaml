@@ -14,7 +14,7 @@
 
 preset:
   id: novel-writing
-  version: 6  # V1.38 P1: chapter_label/outline_path/body_path/slug prompt vars (parameterized paths)
+  version: 7  # V1.40 P2: world_kb_block template var for World context prompt injection
   kind: creator
   description: "Per-chapter outline → draft → finalize pipeline; gated by llm_judge 五問 quality check"
   requires_capabilities:
@@ -88,6 +88,7 @@ states:
             chapter_label: "{{preset.input.chapter_label}}"
             outline_path: "{{preset.input.outline_path}}"
             slug: "{{preset.input.slug}}"
+            world_kb_block: "{{preset.input.world_kb_block}}"
     exit_when:
       kind: manual
     next: draft_chapter
@@ -109,6 +110,7 @@ states:
             outline_path: "{{preset.input.outline_path}}"
             body_path: "{{preset.input.body_path}}"
             slug: "{{preset.input.slug}}"
+            world_kb_block: "{{preset.input.world_kb_block}}"
       # Transition chapter status from outlined to draft
       - kind: capability
         name: novel.chapter_transition
