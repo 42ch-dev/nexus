@@ -1,164 +1,147 @@
 {
   "version": 1,
-  "updated_at": "2026-06-09T06:28:38+00:00",
+  "updated_at": "2026-06-10T12:00:00+08:00",
   "plans": [
     {
-      "id": "2026-06-09-v1.39-harness-docs-prepare",
+      "id": "2026-06-10-v1.40-harness-docs-prepare",
       "status": "Done",
-      "file": ".mstar/plans/2026-06-09-v1.39-harness-docs-prepare.md",
-      "working_branch": "iteration/v1.39",
-      "merge_target": "iteration/v1.39",
+      "file": ".mstar/plans/2026-06-10-v1.40-harness-docs-prepare.md",
+      "working_branch": "iteration/v1.40",
+      "merge_target": "iteration/v1.40",
       "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
-        "description": "Prepare — V1.39 compass, P0..P5 plans, tracker/status sync",
+        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+        "description": "Prepare — V1.40 compass, P0..P4 plans, tracker/status sync",
         "scope": "docs-only harness prepare; no product code",
-        "done_at": "2026-06-09T12:30:00+08:00",
-        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
-        "status_transition": "Todo → Done on 2026-06-09 after T1–T9 docs/status/tracker/spec sync",
-        "shipped": [
-          "V1.39 delivery compass (DF-53 auto-chain + DF-68 daemon continuation + quality loop) at .mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-          "P0..P5 implementation plans registered as Todo with topic branches",
-          "novel-quality-loop.md draft overlay + creator-workflow/orchestration/cli spec amendments",
-          "status.json integration_branch = iteration/v1.39; latest_active_iteration = v1.39",
-          "deferred tracker: DF-53/64/65/66/67/68 targeted; DF-63 + multi-volume PK OUT; V1.38 compass Shipped"
-        ],
         "explicitly_out": [
-          "DF-63 World KB",
           "multi-volume PK",
+          "DF-60",
+          "DF-61",
+          "DF-59",
+          "DF-56",
           "product code in prepare session"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-08-v1.38-harness-docs-prepare",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-08-v1.38-harness-docs-prepare.md",
-      "working_branch": "iteration/v1.38",
-      "merge_target": "iteration/v1.38",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "description": "Prepare — V1.38 compass, P0/P1 plans, tracker/status sync",
-        "scope": "docs-only harness prepare; no product code",
-        "done_at": "2026-06-08T23:30:00+08:00",
-        "qc": "single qc-specialist review (docs-only) Approve —9/9 ACs, scope boundaries (auto-chain, World KB, quality loop, multi-volume PK, platform publish) explicitly out, branch policy matches status.json and AGENTS.md multi-plan rule",
+        ],
+        "done_at": "2026-06-10T12:00:00+08:00",
         "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
-        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after T1–T10 docs/status/tracker sync + single QC review",
+        "status_transition": "Todo → Done on 2026-06-10 after T1–T10 docs/status/tracker/spec sync",
         "shipped": [
-          "V1.38 delivery compass (DF-62 multi-chapter / serial writing implementation readiness) at .mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
-          "P0 implementation plan (chapter selection/status foundation) registered as Todo",
-          "P1 implementation plan (novel-writing selected-chapter parameterization) registered as Todo",
-          "status.json integration_branch = iteration/v1.38; latest_active_iteration = v1.38; iteration_compass wired",
-          "iterations README synced; deferred tracker quick-status + DF-53/DF-62/DF-63 rows updated; multi-volume PK migration remains deferred"
-        ],
-        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-harness-docs-prepare/qc1.md (Approve)"
-      }
-    },
-    {
-      "id": "2026-06-08-v1.38-multi-chapter-selection-status",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-08-v1.38-multi-chapter-selection-status.md",
-      "working_branch": "feature/v1.38-multi-chapter-selection-status",
-      "merge_target": "iteration/v1.38",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "depends_on": [
-          "2026-06-08-v1.38-harness-docs-prepare"
-        ],
-        "description": "P0 — chapter selection, current_chapter, completion/status UX",
-        "targets_deferred": [
-          "DF-62"
-        ],
-        "explicitly_out": [
-          "DF-53 auto-chain",
-          "DF-63 World KB implementation",
-          "DF-64/65/66/67 quality loop",
-          "multi-volume PK migration",
-          "platform publish",
-          "multi-work switch",
-          "selection pool"
-        ],
-        "done_at": "2026-06-08T23:45:00+08:00",
-        "qc": "tri-review (qc1/qc2/qc3) Initial: Request Changes (1 Critical +5 Warnings +6 Suggestions). Targeted re-review (qc1 only) after fix wave: Approve — F-001 (selection semantics), F-002 (novel-profile early-exit), W-1 (composite index) all resolved. qc2/qc3 warnings tracked as P0 residuals (medium/low/nit).",
-        "qa": "skipped for P0 — implementation matches spec §4.5.2/§6.1/§8.1 contracts; targeted re-review +19 hermetic work_chapters tests +28 works_api tests +11 e2e_novel_writing tests +745+ nexus42 tests provide equivalent evidence for the slice; full QA in Plan3 if needed",
-        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after feature commit ffeb0adc + QC tri-review (3 reports) + targeted re-review + fix wave (F-001/F-002/W-1)",
-        "shipped": [
-          "next_chapter(work_id) helper with single-query MIN(chapter) lowest-active-chapter selection (spec §4.5.2)",
-          "current_chapter advances only on finalize transition (draft branch removed)",
-          "is_work_completed() with novel-profile-aware §6.1 check (intake + current_chapter + all-finalized + row-count)",
-          "WorkApiDto enriched with chapters + next_chapter for novel-profile Works",
-          "CLI creator run status per-chapter rows + progress + next action hint",
-          "novel-writing preset.yaml parameterized via {{preset.input.chapter}} (version4→5)",
-          "Composite index (work_id, status, chapter) migration for next_chapter lookup",
-          "19 hermetic work_chapters tests (including7 new: selection order, draft resume, outlined, completion variants, V1.36 compat, lowest-active, novel-profile strictness)"
-        ],
-        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-multi-chapter-selection-status/qc-consolidated.md (Approve post targeted re-review)",
-        "commits": [
-          "ffeb0adc feat: V1.38 P0 multi-chapter selection and status foundation",
-          "f5c8ecc4 fix(v1.38-p0): next_chapter lowest-active-chapter selection (F-001)",
-          "2dc2c892 chore(v1.38-p0): composite index for next_chapter (W-1)",
-          "2abbaa1a merge(v1.38-p0): chapter selection/status foundation into integration",
-          "d882a640 merge(v1.38-p0): QC fix wave (F-001 + F-002 + W-1) into integration",
-          "af472aa1 qc(v1.38-p0): targeted re-review (F-001, F-002, W-1)",
-          "QC reports: d33a65d4 qc1,65bf84d6 qc2, f4c92693 qc3,68c19c29 consolidation"
+          "V1.40 delivery compass (DF-63 World KB + P4 hygiene) at .mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+          "P0..P4 implementation plans registered as Todo with topic branches",
+          "novel-workflow-profile/entity-scope-model/cli-spec/creator-workflow/local-db-schema spec amendments",
+          "status.json integration_branch = iteration/v1.40; latest_active_iteration = v1.40",
+          "deferred tracker: DF-63 targeted V1.40; multi-volume PK OUT"
         ]
       }
     },
     {
-      "id": "2026-06-08-v1.38-novel-writing-parameterization",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-08-v1.38-novel-writing-parameterization.md",
-      "working_branch": "feature/v1.38-novel-writing-parameterization",
-      "merge_target": "iteration/v1.38",
+      "id": "2026-06-10-v1.40-world-create-and-validation",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.40-world-create-and-validation.md",
+      "working_branch": "feature/v1.40-world-create-and-validation",
+      "merge_target": "iteration/v1.40",
       "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
+        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
         "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
         "depends_on": [
-          "2026-06-08-v1.38-multi-chapter-selection-status"
+          "2026-06-10-v1.40-harness-docs-prepare"
         ],
-        "description": "P1 — selected chapter inputs for one reusable novel-writing preset",
+        "description": "P0 — creator world create + world_id/world_refs validation",
         "targets_deferred": [
-          "DF-62"
+          "DF-63"
         ],
         "explicitly_out": [
-          "DF-53 auto-chain",
-          "DF-63 World KB implementation",
-          "DF-64/65/66/67 quality loop",
-          "multi-volume PK migration",
-          "platform publish",
-          "multi-work switch",
-          "selection pool"
+          "multi-volume PK",
+          "DF-60",
+          "DF-61",
+          "DF-59",
+          "DF-56"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-10-v1.40-world-kb-taxonomy",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.40-world-kb-taxonomy.md",
+      "working_branch": "feature/v1.40-world-kb-taxonomy",
+      "merge_target": "iteration/v1.40",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/entity-scope-model.md",
+        "depends_on": [
+          "2026-06-10-v1.40-world-create-and-validation"
         ],
-        "done_at": "2026-06-08T23:55:00+08:00",
-        "qc": "tri-review Initial: QC1 Request Changes (2 Warnings,3 Suggestions), QC2 Approve (1 latent W,4 S), QC3 Approve (4 S). Targeted re-review by qc-specialist (commit b0b20f3f) after fix wave: Approve — W-1 (validate_produce_chapter_context fail-fast) and W-2 (chapter_label helper) both resolved. Other findings registered as P1 residuals (low/nit).",
-        "qa": "skipped for P1 — implementation matches spec §4.5.6 contract; targeted re-review +38 stage_gates tests (incl. new chapter_label + 4 validation tests) +11 e2e_novel_writing tests +11 fl_e_chain_demo tests +28 works_api tests +749 nexus42 tests provide equivalent evidence for the slice.",
-        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after5 feature commits + QC tri-review (3 reports) + targeted re-review + fix wave (W-1/W-2)",
-        "shipped": [
-          "WorkFields extended with chapter_label/outline_path/body_path/slug optional fields (T3)",
-          "novel-writing preset version5→6 (T4)",
-          "outline-chapter.md + draft-chapter.md templates parameterized with {{outline_path}}/{{body_path}}/{{chapter_label}}/{{slug}} (T4)",
-          "ch0{{chapter}} path literals removed from prompt templates (T4 + QC1 F-003 from P0)",
-          "CLI stage_advance extracts chapter context from WorkApiDto.chapters[] and populates WorkFields (T5)",
-          "validate_produce_chapter_context() fail-fast at CLI boundary when chapter context absent (W-1 fix)",
-          "pub fn chapter_label() helper extracted (W-2 fix)",
-          "Stale draft-body.md + draft-intro.md moved to prompts/_deprecated/ (T8)",
-          "Single novel-writing preset preserved (no per-chapter variants) (AC2)",
-          "One-chapter compat preserved through default template values (AC3)"
+        "description": "P1 — narrative World KB taxonomy in nexus-kb / local DB",
+        "targets_deferred": [
+          "DF-63"
         ],
-        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-novel-writing-parameterization/qc-consolidated.md (Approve post targeted re-review)",
-        "commits": [
-          "8ba5b296 feat(v1.38-p1): add chapter_label + outline_path + body_path + slug prompt vars",
-          "703d5834 feat(v1.38-p1): update outline-chapter + draft-chapter templates to consume new vars",
-          "8052a131 feat(v1.38-p1): wire chapter_label/outline_path/body_path/slug into schedule input",
-          "fe53220d chore(v1.38-p1): quarantine stale draft-body/draft-intro ch01-era prompt artifacts",
-          "3cd14f96 test(v1.38-p1): chapter2 + chapter10 prompt rendering tests",
-          "ad455ec5 merge(v1.38-p1): novel-writing parameterization into integration",
-          "ba912fe1 refactor(v1.38-p1): extract chapter_label() helper (W-2)",
-          "612b81d9 fix(v1.38-p1): stage_advance fail-fast on missing chapter context (W-1)",
-          "2157c9c4 merge(v1.38-p1): QC fix wave (W-1 + W-2) into integration",
-          "QC reports: 64da2c27 qc1,93eba862 qc2, bf993faf qc3, d340384d consolidation, b0b20f3f targeted re-review"
+        "explicitly_out": [
+          "multi-volume PK",
+          "DF-47"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-10-v1.40-world-context-prompt-block",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.40-world-context-prompt-block.md",
+      "working_branch": "feature/v1.40-world-context-prompt-block",
+      "merge_target": "iteration/v1.40",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+        "depends_on": [
+          "2026-06-10-v1.40-world-kb-taxonomy"
+        ],
+        "description": "P2 — prompt-time World context block for novel-writing",
+        "targets_deferred": [
+          "DF-63"
+        ],
+        "explicitly_out": [
+          "multi-volume PK",
+          "DF-47"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-10-v1.40-world-kb-extract-binding",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.40-world-kb-extract-binding.md",
+      "working_branch": "feature/v1.40-world-kb-extract-binding",
+      "merge_target": "iteration/v1.40",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
+        "depends_on": [
+          "2026-06-10-v1.40-world-context-prompt-block"
+        ],
+        "description": "P3 — chapter to World KB extract via kb-extract / persist",
+        "targets_deferred": [
+          "DF-63"
+        ],
+        "explicitly_out": [
+          "multi-volume PK",
+          "DF-60",
+          "DF-61",
+          "DF-59"
+        ]
+      }
+    },
+    {
+      "id": "2026-06-10-v1.40-hygiene",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.40-hygiene.md",
+      "working_branch": "feature/v1.40-hygiene",
+      "merge_target": "iteration/v1.40",
+      "metadata": {
+        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+        "depends_on": [
+          "2026-06-10-v1.40-world-kb-extract-binding"
+        ],
+        "description": "P4 — V1.39 QC residual convergence (V1.40-tagged only)",
+        "explicitly_out": [
+          "full 66-item tech debt sweep",
+          "DF-63",
+          "multi-volume PK"
         ]
       }
     }
@@ -170,18 +153,18 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.39",
-    "last_integration_branch": "iteration/v1.38",
+    "integration_branch": "iteration/v1.40",
+    "last_integration_branch": "iteration/v1.39",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
     "latest_shipped_iteration": "v1.39",
     "latest_shipped_at": "2026-06-09T06:28:38+00:00",
-    "latest_active_iteration": "v1.39 (shipped; next prepare TBD)",
-    "latest_active_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-    "integration_branch_retired": "iteration/v1.39 RETIRED 2026-06-09 — V1.39 SHIPPED via PR #50 (merge ad9725d8); next iteration uninitialized; set integration_branch when next prepare starts",
+    "latest_active_iteration": "v1.40",
+    "latest_active_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+    "integration_branch_retired": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-09T06:28:38+00:00",
+      "updated_at": "2026-06-10T12:00:00+08:00",
       "total_open": 66,
       "by_severity": {
         "critical": 0,
@@ -194,7 +177,8 @@
         "v1.37": 6,
         "backlog": 26,
         "v1.38": 12,
-        "v1.39": 23
+        "v1.39": 23,
+        "v1.40": 17
       },
       "by_plan": {
         "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
@@ -212,7 +196,8 @@
         "2026-06-09-v1.39-fl-e-auto-chain-engine": 5,
         "2026-06-09-v1.39-research-stage-wiring": 9,
         "2026-06-09-v1.39-v138-hardening": 3,
-        "2026-06-09-v1.39-findings-and-review-routing": 6
+        "2026-06-09-v1.39-findings-and-review-routing": 6,
+        "2026-06-10-v1.40-hygiene": 17
       },
       "v1.36_added": {
         "P1": [
@@ -241,23 +226,26 @@
           "R-V136P1-02 (closed in V1.37 P0 — preset gate evaluator with structured error)",
           "R-V136P3-02 (closed in V1.37 P0 — scaffold atomicity via DB transaction)"
         ]
-      }
+      },
+      "v1.40_hygiene_inventory": "P4 plan 2026-06-10-v1.40-hygiene — 17 residuals with target containing V1.40"
     },
-    "wave_0_spec": ".mstar/knowledge/specs/creator-workflow.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
     "spec_refs": [
       ".mstar/knowledge/specs/novel-workflow-profile.md",
+      ".mstar/knowledge/specs/entity-scope-model.md",
       ".mstar/knowledge/specs/cli-command-ia.md",
       ".mstar/knowledge/specs/creator-centric-entry-model.md",
       ".mstar/knowledge/specs/cli-spec.md",
       ".mstar/knowledge/specs/work-experience-model.md",
       ".mstar/knowledge/specs/creator-workflow.md",
       ".mstar/knowledge/specs/novel-writing-sync-contract.md",
+      ".mstar/knowledge/specs/local-db-schema.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md",
       ".mstar/knowledge/specs/novel-quality-loop.md",
       ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
       ".mstar/knowledge/specs/orchestration-engine.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md"
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [

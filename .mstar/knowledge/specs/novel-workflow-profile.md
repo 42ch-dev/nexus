@@ -1,9 +1,9 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; **V1.39 target** — auto-chain status UX + quality-loop implement ([novel-quality-loop.md](novel-quality-loop.md))
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 target** — World KB implement contract (§3.5.1)
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
-**Last updated**: 2026-06-08
+**Last updated**: 2026-06-10
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
@@ -115,13 +115,13 @@ Therefore:
 - **`novel-project-init` asks the binding question** (grill-me). Three options: bind to existing `world_id` (user picks from list) / create new World (calls `creator world create --name "..." --kind narrative`, which is a **future** CLI command; V1.36 may prompt for the world metadata inline and pass to a future API) / stay worldless (default).
 - **Work → World KB promotion** is the **long-term** path: as chapters finalize, `kb-extract` preset (existing, per [creator-workflow.md](creator-workflow.md) `persist` stage) can extract entities / events / rules from chapter body into World KB items. V1.36 documents this path; enforcement is V1.37+.
 
-### 3.5.1 World KB continuity roadmap (V1.37 P2 extension)
+### 3.5.1 World KB continuity implement contract (V1.37 P2 roadmap → V1.40 implement)
 
-**Scope of this extension**: V1.37 P2 is **roadmap-only**. It locks the contract for World KB continuity but does not claim a CLI, Local API, schema migration, prompt runtime, validator, or `kb-extract` implementation. The current V1.37 `novel-writing` `world_binding` mode remains `optional`; worldless Works continue to run without a World context block.
+**Scope of this extension**: V1.37 P2 locked the roadmap; **V1.40** implements it across plans P0–P3 ([v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md)). The `novel-writing` `world_binding` mode remains `optional` for V1.40; worldless Works continue without a World context block. Implement slices: P0 world create + validation; P1 taxonomy; P2 prompt context block; P3 kb-extract binding.
 
 #### 3.5.1.1 World creation path for `novel-project-init`
 
-Future CLI contract:
+**V1.40 implement** — CLI contract:
 
 ```text
 nexus42 creator world create --name "Neon River" --kind narrative --description "Solarpunk noir city-world"
@@ -135,7 +135,7 @@ The init grill-me "create new World" path composes with P0 `AddScheduleRequest.i
 3. The returned `world_id` is bound to the Work and PATCHed via the same atomic scaffold transaction as `work_ref`, `total_planned_chapters`, and `work_chapters` seeding (§5.4.3–§5.4.4).
 4. If world creation fails, the scaffold transaction fails closed: no partial `Works/<work_ref>/` tree, no duplicated `work_chapters`, and no `works.world_id` mutation.
 
-This is V1.37+ implementation scope; P2 only defines the contract.
+**V1.40 P0** ships this path; until then behavior remains stubbed.
 
 #### 3.5.1.2 `world_id` validation
 
@@ -203,7 +203,7 @@ The `creator-workflow.md` `persist` stage already maps Work → World KB to `cre
 - **Worldless Work**: extraction is skipped or remains local Work scope; it MUST NOT silently create a new World or promote content into an arbitrary World.
 - **Explicit promotion**: rows in `Outlines/event-index.md` and `Outlines/foreshadowing.md` may be promoted to World KB items only when the Work is World-bound and the agent/user marks the promotion explicitly (e.g. "promote E012 as background" or "promote F007 as rule").
 
-Future implementation acceptance must include tests for valid/invalid `world_id`, prompt block presence/absence for World-bound vs worldless Works, `world_refs` warning/error timing, and `kb-extract` target selection.
+**V1.40 acceptance** (per plan P0–P3): hermetic tests for valid/invalid `world_id`, prompt block presence/absence for World-bound vs worldless Works, `world_refs` warning/error timing, and `kb-extract` target selection. On ship, close DF-63 in [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md).
 
 **Anti-patterns** explicitly rejected:
 

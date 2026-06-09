@@ -103,7 +103,7 @@ creator run status <work_id>    # includes current_stage + stage_status
 | `research` | `research` | May append references to Work context |
 | `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log`; novel profile writes to `Works/<work_ref>/` per [novel-workflow-profile.md](novel-workflow-profile.md) |
 | `review` | `reflection-loop` | `llm_judge` gates per orchestration-engine |
-| `persist` | `kb-extract` (via queue) + CLI memory review | No dedicated persist-only preset required |
+| `persist` | `kb-extract` (via queue) + CLI memory review | **V1.40 P3**: World-bound novel Works enqueue extract with `work.world_id`; worldless Works skip World promotion. See [novel-workflow-profile.md §3.5.1.5](novel-workflow-profile.md). |
 
 P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
 
@@ -122,8 +122,10 @@ creator run stage advance --stage produce
 creator run stage advance --stage review
 creator run stage advance --stage persist
 creator memory review <id>
-creator kb queue-extract  # when applicable
+creator kb queue-extract --world-id <work.world_id>  # World-bound novel Works (V1.40 P3)
 ```
+
+For **World-bound** novel Works (`work.world_id != NULL`), the auto-chain `persist` stage MUST enqueue extraction targeting `work.world_id`. For **worldless** Works, persist skips World KB promotion.
 
 ### 5.2 Inspiration without stage change
 

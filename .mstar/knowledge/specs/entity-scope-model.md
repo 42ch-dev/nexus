@@ -142,9 +142,9 @@ explicitly declares uniqueness.
 - KB graph insertion/query is a `World` concern and is coordinated with `nexus-narrative`.
 - `nexus-kb` MUST NOT be treated as generic Creator knowledge or User knowledge.
 
-#### 5.1.1 Narrative World KB item taxonomy (V1.37 P2 roadmap)
+#### 5.1.1 Narrative World KB item taxonomy (V1.37 P2 roadmap → V1.40 implement)
 
-The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body_json`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2). V1.37 P2 does **not** introduce a new schema migration, but future novel drafting implementations MUST use the following category vocabulary for `block_type` (or an equivalent typed enum generated from this vocabulary) so prompt context, `world_refs`, and `kb-extract` agree on item ids.
+The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body_json`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2). **V1.40 P1** introduces schema validation / migration for the category vocabulary below. Novel drafting implementations MUST use these `block_type` values (or an equivalent typed enum) so prompt context, `world_refs`, and `kb-extract` agree on item ids. Iteration: [v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md).
 
 Minimum common fields for every World KB item:
 
