@@ -158,7 +158,7 @@ impl ScheduleSupervisor {
         // over historical schedules on every terminal event.
         // SAFETY: dynamic SQL — runtime query for ScheduleRow (FromRow struct);
         // the WHERE filter is constant, not user-controlled.
-        let all_rows = sqlx::query_as::<_, ScheduleRow>(
+        let active_rows = sqlx::query_as::<_, ScheduleRow>(
             "SELECT schedule_id, creator_id, preset_id, preset_version,
                     status, concurrency_kind, concurrency_whitelist,
                     current_core_context_version, current_session_id,
@@ -169,12 +169,25 @@ impl ScheduleSupervisor {
         .fetch_all(pool)
         .await?;
 
-        // Classify into running (by creator), completed/cancelled, and pending
+        // QC1 C-1 fix: Load completed/cancelled IDs separately for dependency
+        // resolution. The active query above excludes terminal states, so
+        // completed_ids must come from its own query — otherwise schedules
+        // with `depends_on` are permanently blocked.
+        // SAFETY: dynamic SQL — runtime query; constant WHERE filter.
+        let completed_rows: Vec<String> = sqlx::query_scalar(
+            "SELECT schedule_id FROM creator_schedules
+             WHERE status IN ('completed', 'cancelled')",
+        )
+        .fetch_all(pool)
+        .await?;
+
+        let completed_ids: Vec<ScheduleId> = completed_rows.into_iter().map(ScheduleId).collect();
+
+        // Classify active rows into running (by creator) and pending
         let mut running_by_creator: HashMap<String, HashSet<ScheduleId>> = HashMap::new();
-        let mut completed_ids: Vec<ScheduleId> = Vec::new();
         let mut pending: Vec<Schedule> = Vec::new();
 
-        for row in &all_rows {
+        for row in &active_rows {
             let schedule = row.to_schedule();
             match schedule.status {
                 ScheduleStatus::Running => {
@@ -182,9 +195,6 @@ impl ScheduleSupervisor {
                         .entry(schedule.creator_id.clone())
                         .or_default()
                         .insert(schedule.id.clone());
-                }
-                ScheduleStatus::Completed | ScheduleStatus::Cancelled => {
-                    completed_ids.push(schedule.id.clone());
                 }
                 ScheduleStatus::Pending => {
                     // V1.5 WS-D: filter by scheduled_at for clock-triggered tick
@@ -814,7 +824,7 @@ impl ScheduleSupervisor {
         // Build the current running set and completed set from DB.
         // SAFETY: dynamic SQL — runtime query for ScheduleRow (FromRow struct);
         // the WHERE filter is constant, not user-controlled.
-        let all_rows = sqlx::query_as::<_, ScheduleRow>(
+        let active_rows = sqlx::query_as::<_, ScheduleRow>(
             "SELECT schedule_id, creator_id, preset_id, preset_version,
                     status, concurrency_kind, concurrency_whitelist,
                     current_core_context_version, current_session_id,
@@ -825,20 +835,24 @@ impl ScheduleSupervisor {
         .fetch_all(&*self.pool)
         .await?;
 
+        // QC1 C-1 fix: Load completed/cancelled IDs separately for dependency
+        // resolution — same pattern as tick_inner.
+        // SAFETY: dynamic SQL — runtime query; constant WHERE filter.
+        let completed_rows: Vec<String> = sqlx::query_scalar(
+            "SELECT schedule_id FROM creator_schedules
+             WHERE status IN ('completed', 'cancelled')",
+        )
+        .fetch_all(&*self.pool)
+        .await?;
+        let completed_ids: Vec<ScheduleId> = completed_rows.into_iter().map(ScheduleId).collect();
+
         let mut running_entries: HashSet<(String, ScheduleId)> = HashSet::new();
-        let mut completed_ids: Vec<ScheduleId> = Vec::new();
         let mut candidate_schedule: Option<Schedule> = None;
 
-        for r in &all_rows {
+        for r in &active_rows {
             let s = r.to_schedule();
-            match s.status {
-                ScheduleStatus::Running => {
-                    running_entries.insert((s.creator_id.clone(), s.id.clone()));
-                }
-                ScheduleStatus::Completed | ScheduleStatus::Cancelled => {
-                    completed_ids.push(s.id.clone());
-                }
-                _ => {}
+            if s.status == ScheduleStatus::Running {
+                running_entries.insert((s.creator_id.clone(), s.id.clone()));
             }
             if s.id.0 == schedule_id {
                 let mut candidate = s;
@@ -1172,6 +1186,36 @@ mod tests_t9 {
             sup.status_of("DEP-B-FAIL").await.unwrap(),
             ScheduleStatus::Pending,
             "B should not start — A is failed, not completed"
+        );
+    }
+
+    /// QC1 C-1 regression: schedule with `depends_on` on a **pre-existing**
+    /// completed predecessor must admit on tick — the completed set must be
+    /// loaded from DB, not derived from the active-schedules query.
+    #[tokio::test]
+    async fn tick_admits_schedule_with_already_completed_predecessor() {
+        let sup = test_supervisor_with_db().await;
+        let pool = sup.pool();
+
+        // Insert A as already completed (simulates historical schedule)
+        insert_schedule(&sup, "QC1-A", "completed").await;
+        // Insert B (pending) with dependency on A
+        insert_schedule(&sup, "QC1-B", "pending").await;
+
+        // SAFETY: test-only — DML helper for dependency setup.
+        sqlx::query("INSERT INTO schedule_dependencies (schedule_id, depends_on) VALUES (?, ?)")
+            .bind("QC1-B")
+            .bind("QC1-A")
+            .execute(&*pool)
+            .await
+            .unwrap();
+
+        // Tick: B should start immediately — A is already completed
+        sup.tick().await.unwrap();
+        assert_eq!(
+            sup.status_of("QC1-B").await.unwrap(),
+            ScheduleStatus::Running,
+            "QC1 C-1 regression: B should start — A is already completed"
         );
     }
 
