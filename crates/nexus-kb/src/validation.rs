@@ -10,7 +10,7 @@ use crate::key_block::KeyBlockBody;
 use nexus_contracts::BlockType;
 use std::fmt;
 
-/// Valid `novel_category` values (body layer, NOT a second block_type).
+/// Valid `novel_category` values (body layer, NOT a second `block_type`).
 ///
 /// Per entity-scope-model.md §5.1.1 mapping table:
 ///
@@ -99,19 +99,14 @@ pub fn validate_body(
         )
     })?;
 
-    let category_value = attrs
-        .get("novel_category")
-        .ok_or_else(|| {
-            KbError::ValidationError(
-                "body.attributes.novel_category is required for novel-profile KeyBlocks"
-                    .to_string(),
-            )
-        })?;
+    let category_value = attrs.get("novel_category").ok_or_else(|| {
+        KbError::ValidationError(
+            "body.attributes.novel_category is required for novel-profile KeyBlocks".to_string(),
+        )
+    })?;
 
     let category = category_value.as_str().ok_or_else(|| {
-        KbError::ValidationError(
-            "body.attributes.novel_category must be a string".to_string(),
-        )
+        KbError::ValidationError("body.attributes.novel_category must be a string".to_string())
     })?;
 
     if !is_valid_novel_category(category) {
@@ -187,13 +182,13 @@ mod tests {
     #[test]
     fn novel_mode_accepts_all_seven_categories() {
         let block_types = [
-            BlockType::InfoPoint,   // foundation
-            BlockType::Event,       // background
-            BlockType::Character,   // character
-            BlockType::Scene,       // location
+            BlockType::InfoPoint,    // foundation
+            BlockType::Event,        // background
+            BlockType::Character,    // character
+            BlockType::Scene,        // location
             BlockType::Organization, // society
-            BlockType::Conflict,    // rules
-            BlockType::Item,        // economy
+            BlockType::Conflict,     // rules
+            BlockType::Item,         // economy
         ];
 
         for (i, bt) in block_types.iter().enumerate() {
