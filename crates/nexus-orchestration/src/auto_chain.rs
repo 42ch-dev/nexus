@@ -351,20 +351,33 @@ pub async fn enqueue_auto_chain_schedule(
         })?;
 
     // Fix A: Single source of truth for ACH schedule ID format.
-    let schedule_id = format!("ACH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+    // R-V139P0-W-B: append per-process monotonic counter for collision resistance.
+    // Pure-timestamp IDs could collide under millisecond-granule concurrent enqueue;
+    // the counter provides unique suffix without adding a new crate dependency.
+    static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let counter = ACH_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let schedule_id = format!(
+        "ACH{}{:06x}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S%3f"),
+        counter & 0xFFFFFF
+    );
     let now_ts = chrono::Utc::now().timestamp();
 
     // SAFETY: dynamic SQL — auto-chain schedule insert with derived params.
+    // R-V139P5-S4: read preset_version from the manifest mapping instead of
+    // hard-coding 1. Keep in sync with embedded-presets/*/preset.yaml `version:`.
+    let preset_version = preset_version_for_id(&schedule_req.preset_id);
     sqlx::query(
         "INSERT INTO creator_schedules
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
             created_at, updated_at, work_id)
-           VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
     .bind(&schedule_req.preset_id)
+    .bind(preset_version)
     .bind(&schedule_req.label)
     .bind(now_ts)
     .bind(now_ts)
@@ -390,6 +403,26 @@ pub async fn enqueue_auto_chain_schedule(
     Ok(schedule_id)
 }
 
+/// R-V139P5-S4: Map preset_id to its embedded manifest version.
+///
+/// Must be kept in sync with `embedded-presets/*/preset.yaml` `version:` field.
+/// Returns 1 as fallback for unknown preset IDs.
+fn preset_version_for_id(preset_id: &str) -> i64 {
+    match preset_id {
+        "novel-writing" => 7,
+        "research" => 2,
+        "creative-brief-intake" => 1,
+        "novel-brainstorm" => 1,
+        "reflection-loop" => 1,
+        "kb-extract" => 3,
+        "novel-review-master" => 2,
+        "novel-project-init" => 1,
+        "memory-augmented" => 1,
+        "soul-experience-refresh" => 1,
+        _ => 1,
+    }
+}
+
 /// Enqueue a `novel-review-master` preset run for a Work whose findings have
 /// passed the master-decision SLA (V1.39 P4 T4).
 ///
@@ -413,6 +446,7 @@ pub async fn enqueue_review_master_schedule(
     let schedule_id = format!("RVM{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
     let now_ts = chrono::Utc::now().timestamp();
     let label = format!("auto-review-master: {work_id}");
+    let preset_version = preset_version_for_id("novel-review-master");
 
     // SAFETY: dynamic SQL — review-master schedule insert with derived params.
     // Matches the `enqueue_auto_chain_schedule` pattern (runtime sqlx is the
@@ -422,10 +456,11 @@ pub async fn enqueue_review_master_schedule(
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version, label,
             created_at, updated_at, work_id)
-           VALUES (?, ?, 'novel-review-master', 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+           VALUES (?, ?, 'novel-review-master', ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
     )
     .bind(&schedule_id)
     .bind(creator_id)
+    .bind(preset_version)
     .bind(&label)
     .bind(now_ts)
     .bind(now_ts)
