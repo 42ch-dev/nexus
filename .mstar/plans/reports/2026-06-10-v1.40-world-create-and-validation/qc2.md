@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-10-v1.40-world-create-and-validation"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-09"
 ---
 
@@ -92,3 +92,47 @@ generated_at: "2026-06-09"
 **Verdict**: Request Changes
 
 (The four Warnings are directly tied to the mandatory binding security/correctness story: atomicity of world creation, ownership isolation at binding time, post-creation downgrade, and negative test coverage. No Criticals (no injection, no path traversal, no secret leaks, no bypass of creation gates themselves). Targeted re-review after fixes should focus on the tx scope, the FK query filter, the PATCH clear guard, and added adversarial tests.)
+
+## Revalidation
+
+**Fix context**: W-01 (atomicity of create_world with seed+patch), W-02 (ownership FK on world_id binding), W-03 (PATCH clear of world_id on V1.40+ novel Works), W-04 (adversarial world_id test matrix).
+
+**Diff since previous review**: single commit `d3a18d14` ("fix(world): address QC1/QC2/QC3 findings — world_id validation, atomicity, 422 status"). Review range `iteration/v1.40..feature/v1.40-world-create-and-validation` on branch `feature/v1.40-world-create-and-validation` (HEAD `d3a18d14`). Verified cwd and branch at start of re-review.
+
+**Re-verification** (targeted per finding, all evidence from `git log 9564918f..HEAD`, direct file reads, and required test runs):
+
+- **W-01 atomicity**: `create_world_tx(&mut sqlx::Transaction<'_, sqlx::Sqlite>)` added in `narrative_write.rs:94-144` (validates creator FK, INSERTs narrative_worlds inside caller tx). Wired in `novel_scaffold.rs`:
+  - Phase 1 (pre-tx, ~302-361): decide `should_create_world`, validate title/slug, early FK check for pre-existing world_id (with owner_creator_id filter).
+  - Phase 2 (inside tx, ~499-604): `let mut tx = pool.begin()...`; if should_create_world: `nexus_local_db::create_world_tx(&mut tx, &inp.creator_id, ...)` (line 510) → `seed_chapters_tx` → `patch_work_tx` (with resolved_world_id) → `tx.commit()`. Explicit comment: "V1.40 (QC2 W-01 / QC3 W-1): create_world is also inside this transaction". FS ScaffoldTransaction remains independent (correct separation). `cargo test -p nexus-orchestration --test novel_project_init` (19/19 passed, including t7g_db_failure_rolls_back_filesystem_scaffold).
+- **W-02 ownership FK**: Both binding paths now filter on creator:
+  - `novel_scaffold.rs:345-346`: `SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?)` (binds creator_id; rejects cross-creator with clear remediation).
+  - `works.rs:601-602` (PATCH `apply_non_stage_fields`): identical query with `AND owner_creator_id = ?`.
+  - Test `create_work_with_other_creators_world_id_returns_error` (works_api.rs:1230): seeds ctr_other + world, POSTs with that world_id, asserts 422 + error. Cross-creator binding rejected at creation and PATCH.
+- **W-03 PATCH clear**: Guard in `works.rs:578-597` (inside `apply_non_stage_fields`):
+  ```rust
+  if non_stage_patch.world_id == Some(None) {
+      let current = works::get_work(...) ?;
+      if current.world_id.is_some() {
+          return Err(NexusApiError::BadRequest { code: "WORLD_CLEAR_FORBIDDEN", ... });
+      }
+  }
+  ```
+  Rejects `Some(None)` clear on any Work that currently has a non-null world_id. Test `patch_work_clearing_world_id_on_bound_work_returns_error` (works_api.rs:1285): creates bound novel Work, PATCH with `world_id: Some(None)`, asserts 422 + WORLD_CLEAR_FORBIDDEN in message, then verifies via direct `works::get_work` that world_id is still set. Also covers the non-stage PATCH path.
+- **W-04 adversarial tests**: New inline test `create_work_with_adversarial_world_ids_returns_error` (works_api.rs:1354-1401) exercises a 7-value matrix on the POST create_work path (now mandatory world_id):
+  - `"wld_' OR 1=1--"` (SQLi)
+  - `"wld_; DROP TABLE works--"` (SQLi)
+  - `"wld_../etc/passwd"` (path traversal)
+  - `"wld_\x00null"` (control / null byte)
+  - (very long string)
+  - `"not_wld_prefix"`
+  - `""`
+  All return `is_err()` + 422 (UNPROCESSABLE_ENTITY) + `INVALID_WORLD_ID` in the error. No panics, no leaks, clear remediation. (Note: parameterization already prevents injection; this is regression/negative coverage.)
+
+**Sanity gates (all run during re-review)**:
+- `cargo build -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -p nexus-orchestration --all-targets` → success (minor unrelated warnings only).
+- `cargo test -p nexus-daemon-runtime --test works_api` → 29 passed (0 failed).
+- `cargo test -p nexus-orchestration --test novel_project_init` → 19 passed (0 failed).
+- `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -p nexus-orchestration -- -D warnings` → clean.
+- `cargo +nightly fmt --all -- --check` → fmt_exit=0.
+
+**Updated verdict**: Approve. All four prior Warnings (W-01..W-04) are resolved with code + targeted regression tests. No new Critical or Warning findings in the fix diff. HTTP status now consistently 422 for validation errors (aligns with spec and other gates). Security/correctness surface for mandatory world binding is now closed.
