@@ -4,16 +4,26 @@
 //! `state.db` pool. Uses compile-time checked `sqlx` queries for all
 //! static SQL.
 //!
+//! # Validation
+//!
+//! `SqliteKbStore` runs body validation on insert and update when a
+//! [`ValidationMode`](nexus_kb::validation::ValidationMode) is configured.
+//! The default mode is `Generic` (no novel-specific checks). Set
+//! `validation_mode` to [`ValidationMode::Novel`] to enforce
+//! `body.attributes.novel_category` requirements per entity-scope-model.md §5.1.1.
+//!
 //! # Test helpers
 //!
 //! The [`seed`] submodule provides async functions to insert test data
 //! (key blocks, source anchors) into the database for integration tests.
 
 use nexus_contracts::BlockType;
+use nexus_kb::errors::ValidationError;
 use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
 use nexus_kb::query::{KbInsertResult, KbQuery, KbQueryResult};
 use nexus_kb::source_anchor::SourceAnchor;
 use nexus_kb::store::KbStoreError;
+use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
 use nexus_kb::KbStore;
 use sqlx::SqlitePool;
 use std::sync::Arc;
@@ -91,16 +101,27 @@ const LIST_BY_WORLD_LIMIT: i64 = 500;
 /// at daemon/CLI boot and inject as `Arc<dyn KbStore>`.
 pub struct SqliteKbStore {
     pool: Arc<SqlitePool>,
+    validation_mode: ValidationMode,
 }
 
 impl SqliteKbStore {
-    /// Create a new store backed by the given pool.
+    /// Create a new store backed by the given pool with `Generic` validation.
     ///
     /// The pool is wrapped in `Arc` for cheap cloning if needed.
     #[must_use]
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             pool: Arc::new(pool),
+            validation_mode: ValidationMode::Generic,
+        }
+    }
+
+    /// Create a new store backed by the given pool with the given validation mode.
+    #[must_use]
+    pub fn with_validation_mode(pool: SqlitePool, mode: ValidationMode) -> Self {
+        Self {
+            pool: Arc::new(pool),
+            validation_mode: mode,
         }
     }
 }
@@ -151,7 +172,14 @@ impl KeyBlockRow {
 }
 
 /// Parse a `block_type` string into `BlockType`.
+///
+/// Accepts both `snake_case` (wire format via serde) and `PascalCase` (legacy DB).
 fn parse_block_type(s: &str) -> Result<BlockType, KbStoreError> {
+    // Try serde (snake_case) first — matches wire format
+    if let Ok(bt) = serde_json::from_value::<BlockType>(serde_json::Value::String(s.to_string())) {
+        return Ok(bt);
+    }
+    // Fallback: legacy PascalCase stored by prior versions via Debug format
     match s {
         "Character" => Ok(BlockType::Character),
         "Ability" => Ok(BlockType::Ability),
@@ -170,11 +198,35 @@ fn db_err(err: &sqlx::Error) -> KbStoreError {
     KbStoreError::Storage(format!("database error: {err}"))
 }
 
+/// Convert a `KbError` from validation into a `KbStoreError`.
+fn validation_err(e: nexus_kb::KbError) -> KbStoreError {
+    match e {
+        nexus_kb::KbError::Validation(ve) => KbStoreError::Validation(ve),
+        nexus_kb::KbError::ValidationError(msg) => KbStoreError::Validation(ValidationError {
+            kind: nexus_kb::ValidationKind::MissingBody,
+            field: None,
+            message: msg,
+        }),
+        other => KbStoreError::Validation(ValidationError {
+            kind: nexus_kb::ValidationKind::MissingBody,
+            field: None,
+            message: other.to_string(),
+        }),
+    }
+}
+
 // SAFETY: sqlx SQLite futures borrow the connection pool internally;
 // safe for single-threaded SQLite usage within our tokio runtime.
 #[allow(clippy::future_not_send)]
 impl KbStore for SqliteKbStore {
     async fn insert_key_block(&self, kb: KeyBlock) -> Result<KbInsertResult, KbStoreError> {
+        // Validate canonical_name format/safety
+        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
+
+        // Validate body semantics before persisting
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
+            .map_err(validation_err)?;
+
         let key_block_id = kb.key_block_id.clone();
         let world_id = kb.world_id.clone();
         let created_at = kb.created_at.clone();
@@ -187,7 +239,11 @@ impl KbStore for SqliteKbStore {
             .source_anchor
             .as_ref()
             .map(|a| serde_json::to_string(a).unwrap_or_default());
-        let block_type_str = format!("{:?}", kb.block_type);
+        // Stable snake_case serialization matching wire format (not Debug)
+        let block_type_str = serde_json::to_string(&kb.block_type)
+            .unwrap_or_else(|_| format!("{:?}", kb.block_type));
+        // Strip surrounding quotes from serde_json string output
+        let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
 
         sqlx::query!(
@@ -406,13 +462,22 @@ impl KbStore for SqliteKbStore {
     }
 
     async fn update_key_block(&self, kb: KeyBlock) -> Result<(), KbStoreError> {
+        // Validate canonical_name format/safety
+        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
+
+        // Validate body semantics before persisting
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
+            .map_err(validation_err)?;
+
         // Verify exists
         let existing = self.get_key_block(&kb.key_block_id).await?;
 
         // If name or type changed, check uniqueness
         if existing.canonical_name != kb.canonical_name || existing.block_type != kb.block_type {
-            // Check for active duplicate (excluding self)
-            let block_type_str = format!("{:?}", kb.block_type);
+            // Stable snake_case serialization matching wire format
+            let block_type_str = serde_json::to_string(&kb.block_type)
+                .unwrap_or_else(|_| format!("{:?}", kb.block_type));
+            let block_type_str = block_type_str.trim_matches('"').to_string();
             let count: i64 = sqlx::query_scalar!(
                 r#"SELECT COUNT(*) as count FROM kb_key_blocks
                    WHERE world_id = ?
@@ -446,7 +511,10 @@ impl KbStore for SqliteKbStore {
             .source_anchor
             .as_ref()
             .map(|a| serde_json::to_string(a).unwrap_or_default());
-        let block_type_str = format!("{:?}", kb.block_type);
+        // Stable snake_case serialization matching wire format (not Debug)
+        let block_type_str = serde_json::to_string(&kb.block_type)
+            .unwrap_or_else(|_| format!("{:?}", kb.block_type));
+        let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
 
         sqlx::query!(
@@ -718,5 +786,199 @@ mod tests {
 
         let result = store.query(&KbQuery::new("wld_2")).await.unwrap();
         assert!(result.items.is_empty());
+    }
+
+    // ── Validation tests (QC1 C-001 / QC2 C1 + QC2 W2 + QC2 W3) ──
+
+    fn make_novel_block_sql(
+        world_id: &str,
+        block_type: BlockType,
+        name: &str,
+        novel_category: &str,
+    ) -> KeyBlock {
+        let mut kb = KeyBlock::new(world_id, block_type, name);
+        kb.body = Some(KeyBlockBody {
+            summary: Some(format!("{novel_category}: {name}")),
+            attributes: Some(serde_json::json!({
+                "novel_category": novel_category,
+                "traits": ["test"]
+            })),
+            tags: Some(vec!["novel".to_string()]),
+        });
+        kb
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_novel_valid_category_succeeds() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
+        let kb = make_novel_block_sql("wld_1", BlockType::Character, "char_lin_xia", "character");
+        let result = store.insert_key_block(kb).await;
+        assert!(result.is_ok(), "expected ok, got {:?}", result.unwrap_err());
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_novel_missing_category_rejected() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
+        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "char_no_cat");
+        kb.body = Some(KeyBlockBody {
+            summary: Some("A character without category".to_string()),
+            attributes: Some(serde_json::json!({"aliases": ["NoCat"]})),
+            tags: Some(vec!["novel".to_string()]),
+        });
+
+        let err = store.insert_key_block(kb).await.unwrap_err();
+        match err {
+            KbStoreError::Validation(ve) => {
+                assert!(ve.message.contains("novel_category is required"));
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_novel_invalid_category_rejected() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
+        let kb = make_novel_block_sql("wld_1", BlockType::Character, "char_bad", "invalid_cat");
+        let err = store.insert_key_block(kb).await.unwrap_err();
+        match err {
+            KbStoreError::Validation(ve) => {
+                assert!(ve.message.contains("invalid novel_category"));
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_uniqueness_preserved_with_validation() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
+        let kb1 = make_novel_block_sql("wld_1", BlockType::Character, "char_dupe", "character");
+        store.insert_key_block(kb1).await.unwrap();
+
+        let kb2 = make_novel_block_sql("wld_1", BlockType::Character, "char_dupe", "character");
+        let err = store.insert_key_block(kb2).await.unwrap_err();
+        assert!(matches!(err, KbStoreError::Duplicate { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_canonical_name_validation_rejects_slash() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let kb = KeyBlock::new("wld_1", BlockType::Character, "evil/../path");
+        let err = store.insert_key_block(kb).await.unwrap_err();
+        match err {
+            KbStoreError::Validation(ve) => {
+                assert!(ve.message.contains("forbidden character"));
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_canonical_name_validation_rejects_shell_meta() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let kb = KeyBlock::new("wld_1", BlockType::Character, "evil;rm -rf");
+        let err = store.insert_key_block(kb).await.unwrap_err();
+        match err {
+            KbStoreError::Validation(ve) => {
+                assert!(ve.message.contains("forbidden character"));
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_canonical_name_validation_rejects_empty() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "temp");
+        kb.canonical_name = String::new();
+        let err = store.insert_key_block(kb).await.unwrap_err();
+        match err {
+            KbStoreError::Validation(ve) => {
+                assert!(ve.message.contains("must not be empty"));
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_generic_mode_accepts_body_without_novel_category() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool); // Generic mode by default
+        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "char_generic");
+        kb.body = Some(KeyBlockBody {
+            summary: Some("A generic character".to_string()),
+            attributes: None,
+            tags: None,
+        });
+        assert!(store.insert_key_block(kb).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_update_validates_body_in_novel_mode() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel);
+        let kb = make_novel_block_sql("wld_1", BlockType::Character, "char_hero", "character");
+        let mut kb = kb;
+        store.insert_key_block(kb.clone()).await.unwrap();
+
+        // Update to body missing novel_category should fail
+        kb.body = Some(KeyBlockBody {
+            summary: Some("updated".to_string()),
+            attributes: Some(serde_json::json!({"traits": ["old"]})),
+            tags: None,
+        });
+        kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
+
+        let err = store.update_key_block(kb).await.unwrap_err();
+        match err {
+            KbStoreError::Validation(ve) => {
+                assert!(ve.message.contains("novel_category is required"));
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_stores_block_type_snake_case() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool);
+        let kb = KeyBlock::new("wld_1", BlockType::InfoPoint, "test_block");
+        let id = kb.key_block_id.clone();
+        store.insert_key_block(kb).await.unwrap();
+
+        // Verify DB contains snake_case "info_point" (not Debug "InfoPoint")
+        let row: (String,) =
+            sqlx::query_as("SELECT block_type FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(&id)
+                .fetch_one(&*store.pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0, "info_point");
     }
 }
