@@ -210,9 +210,27 @@ fn kb_to_item(kb: nexus_kb::key_block::KeyBlock) -> WorldContextItem {
 /// This is the primary entry point for the chapter KB block. It:
 /// 1. Queries characters (BlockType::Character) and locations (BlockType::Scene).
 /// 2. If `world_refs` is non-empty, resolves items by canonical_name; otherwise
-///    falls back to all characters/locations in the world.
+///    falls back to all characters/locations in the world. If `chapter_text` is
+///    provided, uses heuristic text matching to narrow the fallback set.
 /// 3. Queries active rules (novel_category: foundation + rules).
 /// 4. Applies token budget truncation.
+///
+/// # Ownership / Isolation (QC2-W02)
+///
+/// This function is **intentionally world-scoped only**: it takes `world_id`
+/// but does NOT accept `creator_id` or `workspace_slug`. The caller is
+/// responsible for verifying that the authenticated creator owns (or has
+/// access to) the Work that references this `world_id` before calling.
+/// The underlying `KbStore` impl enforces world-scoped isolation.
+///
+/// # Missing World / 404 Contract (QC2-W03)
+///
+/// This function returns `Ok(Some(block))` even when the world has zero KB
+/// items — the block will have empty sections. It does NOT distinguish
+/// "world exists but has no items" from "world_id is unknown to the system."
+/// The 404/remediation contract lives one layer up (in the caller), which
+/// should validate `world_id` existence against the narrative store before
+/// calling this function.
 ///
 /// # Errors
 ///
@@ -234,7 +252,7 @@ pub async fn build_chapter_kb_block<K: KbStore>(
     let max_chars = max_tokens.saturating_mul(CHARS_PER_TOKEN);
 
     // Resolve characters
-    let characters = if params.world_refs.is_empty() {
+    let all_characters = if params.world_refs.is_empty() {
         // Fallback: all characters in the world
         let query = builder.query_for_block_type(BlockType::Character);
         let result = store.query(&query).await?;
@@ -244,8 +262,28 @@ pub async fn build_chapter_kb_block<K: KbStore>(
         resolve_items_by_refs(store, &builder, &params.world_refs, BlockType::Character).await?
     };
 
+    // QC1-W002 fix: heuristic fallback when world_refs is empty but chapter_text is provided.
+    // Scan chapter text for known character canonical_names and prefer those that match.
+    let mut characters = if params.world_refs.is_empty() {
+        params.chapter_text.as_ref().map_or_else(
+            || all_characters.clone(),
+            |text| {
+                let text_lower = text.to_lowercase();
+                all_characters
+                    .iter()
+                    .filter(|item| text_lower.contains(&item.name.to_lowercase()))
+                    .cloned()
+                    .collect()
+            },
+        )
+    } else {
+        all_characters.clone()
+    };
+    // QC3-W4 fix: sort by canonical_name for deterministic prompt output.
+    characters.sort_by(|a, b| a.name.cmp(&b.name));
+
     // Resolve locations
-    let locations = if params.world_refs.is_empty() {
+    let all_locations = if params.world_refs.is_empty() {
         let query = builder.query_for_block_type(BlockType::Scene);
         let result = store.query(&query).await?;
         result.items.into_iter().map(kb_to_item).collect()
@@ -253,8 +291,27 @@ pub async fn build_chapter_kb_block<K: KbStore>(
         resolve_items_by_refs(store, &builder, &params.world_refs, BlockType::Scene).await?
     };
 
+    // Heuristic fallback for locations.
+    let mut locations = if params.world_refs.is_empty() {
+        params.chapter_text.as_ref().map_or_else(
+            || all_locations.clone(),
+            |text| {
+                let text_lower = text.to_lowercase();
+                all_locations
+                    .iter()
+                    .filter(|item| text_lower.contains(&item.name.to_lowercase()))
+                    .cloned()
+                    .collect()
+            },
+        )
+    } else {
+        all_locations.clone()
+    };
+    locations.sort_by(|a, b| a.name.cmp(&b.name));
+
     // Resolve active rules: foundation + rules novel_category items
-    let active_rules = resolve_active_rules(store, &builder).await?;
+    let mut active_rules = resolve_active_rules(store, &builder).await?;
+    active_rules.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut block = WorldContextBlock {
         world_id: params.world_id.clone(),
@@ -322,28 +379,48 @@ async fn resolve_active_rules<K: KbStore>(
 /// Apply token budget by truncating items from the end of each section.
 ///
 /// Truncation priority (removed first): locations → characters → rules.
+///
+/// QC3-W3 fix: avoids O(n²) re-rendering by estimating per-item char cost
+/// and popping items until the estimated total is within budget.
 fn apply_token_budget(block: &mut WorldContextBlock, max_chars: usize) {
-    let mut yaml = block.to_yaml();
-
-    // Remove locations from the end until we fit
-    while yaml.chars().count() > max_chars && !block.locations_referenced.is_empty() {
-        block.locations_referenced.pop();
-        yaml = block.to_yaml();
+    // Estimate the cost of removing one item from a section.
+    // Each item contributes roughly: "  - id: <id>\n    name: <name>\n    descriptor: <desc>\n"
+    const fn estimate_item_chars(item: &WorldContextItem) -> usize {
+        // "  - id: " (7) + id.len + "\n    name: " (11) + name.len + "\n    descriptor: " (15) + desc.len + "\n" (1)
+        7 + item.id.len() + 11 + item.name.len() + 15 + item.descriptor.len() + 1
     }
 
-    // Remove characters
-    while yaml.chars().count() > max_chars && !block.characters_in_chapter.is_empty() {
-        block.characters_in_chapter.pop();
-        yaml = block.to_yaml();
+    // Compute current total and check if we're already within budget.
+    let current_chars = block.to_yaml().chars().count();
+    let mut over_by = current_chars.saturating_sub(max_chars);
+    if over_by == 0 {
+        return;
     }
 
-    // Remove rules
-    while yaml.chars().count() > max_chars && !block.active_rules.is_empty() {
-        block.active_rules.pop();
-        yaml = block.to_yaml();
+    // Remove locations from the end until estimated within budget.
+    while over_by > 0 && !block.locations_referenced.is_empty() {
+        if let Some(item) = block.locations_referenced.pop() {
+            over_by = over_by.saturating_sub(estimate_item_chars(&item));
+        }
     }
 
-    if yaml.chars().count() > max_chars {
+    // Remove characters.
+    while over_by > 0 && !block.characters_in_chapter.is_empty() {
+        if let Some(item) = block.characters_in_chapter.pop() {
+            over_by = over_by.saturating_sub(estimate_item_chars(&item));
+        }
+    }
+
+    // Remove rules.
+    while over_by > 0 && !block.active_rules.is_empty() {
+        if let Some(item) = block.active_rules.pop() {
+            over_by = over_by.saturating_sub(estimate_item_chars(&item));
+        }
+    }
+
+    // Final check: if still over budget (header alone exceeds limit), mark truncated.
+    let final_chars = block.to_yaml().chars().count();
+    if final_chars > max_chars {
         block.truncated = true;
     }
 }
@@ -529,6 +606,90 @@ mod tests {
         assert!(!rule_names.contains(&"evt_bg"));
     }
 
+    // QC1-W002 fix: chapter_text heuristic narrows fallback when world_refs is empty.
+    #[tokio::test]
+    async fn chapter_text_heuristic_narrows_fallback() {
+        let store = nexus_kb::InMemoryKbStore::new();
+
+        let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
+        let char2 = make_novel_block("wld_1", BlockType::Character, "bob", "character");
+        let loc1 = make_novel_block("wld_1", BlockType::Scene, "tavern", "location");
+        let loc2 = make_novel_block("wld_1", BlockType::Scene, "forest", "location");
+
+        store.insert_key_block(char1).await.unwrap();
+        store.insert_key_block(char2).await.unwrap();
+        store.insert_key_block(loc1).await.unwrap();
+        store.insert_key_block(loc2).await.unwrap();
+
+        // chapter_text mentions Alice and the tavern but not Bob or the forest
+        let params = ChapterKbBlockParams {
+            world_id: "wld_1".to_string(),
+            world_name: "Test".to_string(),
+            current_timeline: "chapter 1".to_string(),
+            world_refs: vec![], // empty → heuristic fallback
+            chapter_text: Some("Alice walked into the tavern.".to_string()),
+            max_tokens: None,
+        };
+
+        let block = build_chapter_kb_block(&store, &params)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Heuristic should narrow to only matching names
+        let char_names: Vec<&str> = block
+            .characters_in_chapter
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(
+            char_names.contains(&"alice"),
+            "should contain alice (mentioned in text)"
+        );
+        assert!(
+            !char_names.contains(&"bob"),
+            "should not contain bob (not mentioned)"
+        );
+
+        let loc_names: Vec<&str> = block
+            .locations_referenced
+            .iter()
+            .map(|l| l.name.as_str())
+            .collect();
+        assert!(
+            loc_names.contains(&"tavern"),
+            "should contain tavern (mentioned in text)"
+        );
+        assert!(
+            !loc_names.contains(&"forest"),
+            "should not contain forest (not mentioned)"
+        );
+    }
+
+    // Without chapter_text, fallback returns all items (no narrowing).
+    #[tokio::test]
+    async fn no_chapter_text_returns_all_in_fallback() {
+        let store = nexus_kb::InMemoryKbStore::new();
+
+        let char1 = make_novel_block("wld_1", BlockType::Character, "alice", "character");
+        let char2 = make_novel_block("wld_1", BlockType::Character, "bob", "character");
+        store.insert_key_block(char1).await.unwrap();
+        store.insert_key_block(char2).await.unwrap();
+
+        let params = ChapterKbBlockParams {
+            chapter_text: None,
+            ..make_params("wld_1", &[])
+        };
+
+        let block = build_chapter_kb_block(&store, &params)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Without chapter_text, all characters are returned
+        assert_eq!(block.characters_in_chapter.len(), 2);
+    }
+
     // AC5: Legacy V1.39 worldless Work → block omitted.
     // (Verified by caller: if world_id is None, don't call build_chapter_kb_block.)
     // We test that the function requires a world_id.
@@ -653,6 +814,41 @@ mod tests {
         assert!(yaml.contains("active_rules:"));
         assert!(yaml.contains("  - id: kb_ghi"));
         assert!(!yaml.contains("truncated"));
+    }
+
+    // QC3-W4 fix: output is deterministic regardless of insertion order.
+    #[tokio::test]
+    async fn output_is_deterministic_regardless_of_insertion_order() {
+        let store1 = nexus_kb::InMemoryKbStore::new();
+        let store2 = nexus_kb::InMemoryKbStore::new();
+
+        // Insert in opposite orders
+        let char_a = make_novel_block("wld_1", BlockType::Character, "alpha", "character");
+        let char_b = make_novel_block("wld_1", BlockType::Character, "beta", "character");
+
+        store1.insert_key_block(char_a.clone()).await.unwrap();
+        store1.insert_key_block(char_b.clone()).await.unwrap();
+
+        store2.insert_key_block(char_b).await.unwrap();
+        store2.insert_key_block(char_a).await.unwrap();
+
+        let params = make_params("wld_1", &[]);
+
+        let yaml1 = build_chapter_kb_block(&store1, &params)
+            .await
+            .unwrap()
+            .unwrap()
+            .to_yaml();
+        let yaml2 = build_chapter_kb_block(&store2, &params)
+            .await
+            .unwrap()
+            .unwrap()
+            .to_yaml();
+
+        assert_eq!(
+            yaml1, yaml2,
+            "YAML output must be identical regardless of KB insertion order"
+        );
     }
 
     // Unit test: empty sections render as `[]`.
