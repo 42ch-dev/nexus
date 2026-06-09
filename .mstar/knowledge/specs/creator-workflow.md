@@ -1,6 +1,6 @@
 # Creator Workflow — Normative Specification
 
-**Status**: Shipped (V1.34 — 2026-06-05; chain default true behavior extended in V1.35 P4 partial)  
+**Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; **V1.39 target** — DF-53 full auto-chain + daemon continuity)  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
 **Scope**: Staged creator journey on **Work** (`intake → research → produce → review → persist`), built on shipped `creator run` + `run_intents`  
@@ -24,7 +24,7 @@ The Work loop shipped in V1.33 centered on Creative Brief Intake and `novel-writ
 intake → research → produce → review → persist
 ```
 
-without introducing a second scheduler or replacing World/KB SSOT. Stages are **explicit** (user or script advances); `--auto-chain` across all stages remains deferred (DF-53). After V1.35 P4, `creator run start` chains intake → produce by default (`--chain-novel-writing`, default true); users may opt out with `--chain-novel-writing=false`.
+without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P4, `creator run start` chains intake → produce by default (`--chain-novel-writing`, default true). **V1.39** ships full-stage `--auto-chain` (default **true**, opt-out `--no-auto-chain`): while the daemon is online, stages advance through `research → produce → review → persist` per chapter without manual `stage advance` at each boundary. Daemon restart resumes from a Work continuation checkpoint (DF-68).
 
 ---
 
@@ -137,6 +137,29 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 
 `daemon schedule` remains valid; schedules created via `creator run` / stage advance **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation).
 
+### 5.4 Daemon-attached auto-chain (V1.39 extension)
+
+When `auto_chain_enabled` on a Work (default true for new starts):
+
+1. **Online**: on stage/chapter completion, the engine enqueues the next FL-E driver schedule without CLI `stage advance`.
+2. **Chapter outer loop**: after `persist` for chapter N, auto-enqueue `produce` for chapter N+1 until Work completion (novel profile).
+3. **Checkpoint**: persist `stage`, `chapter`, `driver_schedule_id`, and `auto_chain_interrupted` on daemon shutdown or unexpected pause.
+4. **Boot resume**: daemon restart auto-resumes only schedules tied to checkpointed auto-chain Works; other schedules remain paused (safe default).
+
+`creator run resume <work_id>` recovers when auto-resume did not run or user disabled auto-chain.
+
+### 5.5 Side-input lane (V1.39 extension)
+
+Insertions during an active auto-chain **must not** fork or cancel the driver schedule:
+
+| Insertion | Behavior |
+| --- | --- |
+| `creator run continue --note` | Appends `inspiration_log`; visible in status; merged into prompt context at **next** preset state transition |
+| `nexus.work.patch` (agent) | Same append-only inspiration surface per agent-nexus-tool-bridge |
+| Research stage side effects | KB/reference artifacts written during chain; consumed by downstream produce/review via existing assembly (P0.5) |
+
+Invariant: at most one active FL-E stage driver schedule per Work remains enforced.
+
 ---
 
 ## 6. Conflicts and non-goals
@@ -146,7 +169,7 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 | Work vs `creator kb --scope work` | Index entries may tag `work_id`; index does not define Work |
 | Agent tools vs presets | Agent may read/patch Work via `nexus.work.*`; production presets still run via orchestration |
 | Conditional routing | **Not** used for stage selection (DF-56) |
-| `--auto-chain` | Deferred DF-53; explicit `stage advance` required (intake → produce chain defaults true since V1.35 P4) |
+| `--auto-chain` | **V1.39 target (DF-53)**: default true for full FL-E chain + chapter outer loop; `--no-auto-chain` opt-out; manual `stage advance` still valid for power users |
 | Novel project init | Separate preset `novel-project-init` (DF-58); **not** part of `novel-writing` auto-chain |
 | Novel completion | Work `status == completed` stops further `novel-writing`; no auto new-project switch (DF-59) |
 | Platform cloud assemble | Not part of this workflow; see agent-nexus-tool-bridge `policy_blocked` |

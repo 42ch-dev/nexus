@@ -30,6 +30,8 @@ fn demo_work_fields(stage: &str) -> WorkFields {
         outline_path: Some("Works/my-novel/Outlines/chapters/ch01-outline.md".to_string()),
         body_path: Some("Works/my-novel/Stories/ch01-ch01.md".to_string()),
         slug: Some("ch01".to_string()),
+        research_artifacts_dir: None,
+        workspace_dir: None,
     }
 }
 

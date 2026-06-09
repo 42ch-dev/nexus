@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-08-v1.38-multi-chapter-selection-status",
+  "entries": [
+    {
+      "id": "R-V138P0-01",
+      "title": "next_chapter() selection race window under concurrent creator run continue (single-user assumption)",
+      "severity": "medium",
+      "source": "qc2 W1 (V1.38 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus-local-db/src/work_chapters.rs:511-530 (next_chapter); callers in daemon get_work enrichment + CLI continue path",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.39+ hardening plan",
+      "note": "next_chapter() runs three SQL queries (now consolidated to one MIN query after F-001) without transaction/claim atomicity. Two concurrent creator run continue calls could both observe the same chapter before any transition has flipped its row to draft/finalized. Per spec §4.5.2 the query is the SSOT; novel.chapter_transition guards against from_status mismatch but the user may see duplicate in-progress schedules. Single-user local-first path is safe; race only under concurrent invocation. Document single-writer assumption or add try_claim_next_chapter (UPDATE ... RETURNING chapter) in a follow-up if multi-terminal use is common."
+    },
+    {
+      "id": "R-V138P0-02",
+      "title": "Plan T9 surface of on-disk missing-file hints only partially delivered in CLI status",
+      "severity": "low",
+      "source": "qc2 W2 (V1.38 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus42/src/commands/creator/run.rs (creator run status novel-profile arm)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.38 P1 or V1.39 hardening",
+      "note": "Status surface shows DB rows + progress + next-action hint + comment acknowledging on-disk absence, but no explicit on-disk missing-file warning line (e.g. body_path absent for chNN). DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up."
+    },
+    {
+      "id": "R-V138P0-03",
+      "title": "Write-on-read anti-pattern in GET /v1/local/works/{id} (lazy completion promotion)",
+      "severity": "medium",
+      "source": "qc3 W-2 (V1.38 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:322-365 (get_work auto-promote handler)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.39+ hardening plan",
+      "note": "GET /v1/local/works/{id} mutates works.status to completed when is_work_completed() returns true. Violates REST semantics; two identical GET requests can return different status values. The handler comment acknowledges this as lazy promotion matching V1.36 P4 fix wave auto-promote pattern. Move promotion to finalize transition path or document lazy promotion explicitly in API contract."
+    },
+    {
+      "id": "R-V138P0-04",
+      "title": "WorkApiDto.chapters vector size uncapped for unusual total_planned_chapters",
+      "severity": "low",
+      "source": "qc3 S-1 (V1.38 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:387-404 (enrich_with_chapters)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "list_chapters returns all rows with no limit. At typical novel scales (<=100 chapters) this is fine; not a practical concern since total_planned_chapters is user-controlled at init and local DB is not exposed to untrusted network clients. Add LIMIT or pagination in a follow-up if multi-volume works with100+ chapters become common."
+    },
+    {
+      "id": "R-V138P0-05",
+      "title": "is_work_completed total_planned_chapters=NULL explicit test missing",
+      "severity": "nit",
+      "source": "qc2 S2 (V1.38 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus-local-db/src/work_chapters.rs:is_work_completed (early-return for total_planned_chapters NULL/0)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Code path returns false early for NULL or0 total_planned_chapters; doc comment correct. Add explicit test case to make the §6.1 guard behavior self-documenting.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-09",
+      "closure_note": "V1.39 P5 added 2 hermetic unit tests covering NULL and 0 total_planned_chapters in crates/nexus-local-db/src/work_chapters.rs.",
+      "closure_evidence": "commit 932097ea on feature/v1.39-v138-hardening",
+      "archived_at": "2026-06-09"
+    }
+  ]
+}

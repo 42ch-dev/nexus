@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.39 plan per Profile B. P3 merged to iteration/v1.39.",
+  "plan_id": "2026-06-09-v1.39-rules-and-logs",
+  "title": "P3 — three-layer rules + Logs subdirectory discipline (DF-65/66)",
+  "done_at": "2026-06-09T05:30:00+08:00",
+  "archived_at": "2026-06-09T05:30:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-09-v1.39-rules-and-logs.md",
+  "archived_record": ".mstar/archived/plans/2026-06-09-v1.39-rules-and-logs.json",
+  "snapshot": {
+    "id": "2026-06-09-v1.39-rules-and-logs",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-09-v1.39-rules-and-logs.md",
+    "working_branch": "feature/v1.39-rules-and-logs",
+    "merge_target": "iteration/v1.39",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-quality-loop.md",
+      "depends_on": [
+        "2026-06-09-v1.39-harness-docs-prepare",
+        "2026-06-09-v1.39-novel-review-presets"
+      ],
+      "description": "P3 — three-layer rules + Logs subdirectory discipline (DF-65/66)",
+      "targets_deferred": ["DF-65", "DF-66"],
+      "updated_at": "2026-06-09T05:30:00+08:00",
+      "done_at": "2026-06-09T05:30:00+08:00",
+      "qc": "PM-validated Approve. 0 Critical, 0 Warning, 0 Suggestion. Narrow scope, all 519 orchestration lib tests pass, regression clean, clippy clean, fmt clean.",
+      "qa": "skipped — PM-validated path for narrow-scope plan with strong evidence",
+      "shipped": [
+        "Layer 1: embedded-presets/rules/writing-craft.md (default craft rules)",
+        "Layer 2: novel-project-init/templates/novel-rules.md (per-work stub created by scaffold)",
+        "Layer 3: append-only history writer in crates/nexus-orchestration/src/rules_history.rs (atomic temp+rename)",
+        "Scaffold: novel_scaffold extended to create Works/<work_ref>/Rules/novel-rules.md + Logs/{brainstorm,write,review,publish}/ subdirs",
+        "Reader: rules_history::read_rules_layers() reads Layer 1 + Layer 2 if present; build_preset_input exposes rules_content",
+        "Logs discipline: novel-writing prompt writes to Logs/write/; sync exclusion in crates/nexus-orchestration/src/sync_module.rs documented for Rules/** + Logs/**",
+        "8 hermetic tests covering scaffold dirs, rules reader (Layer 1 only, both layers, empty L2), preset input, history append, sync exclusion"
+      ],
+      "closed_residuals": [],
+      "deferred_residuals": [],
+      "commits": [
+        "9ad20b74 feat(rules): T1 — embedded writing-craft rules + scaffold Rules/ and Logs/ subdirs",
+        "544d38e3 feat(rules): T2 — rules reader in orchestration prompt binding",
+        "1c0c0204 feat(rules): T3 — append-only history writer + home-layout helpers",
+        "49096f81 feat(rules): T4 — Logs write discipline in preset + sync exclusion docs",
+        "50d91dc6 test(rules): T5 — hermetic tests for scaffold, reader, sync exclusion",
+        "ca786ede style: cargo +nightly fmt --all",
+        "bbab8a05 qc: V1.39 P3 consolidated gate (Approve — PM-validated)"
+      ],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-06-09-v1.39-rules-and-logs/qc-consolidated.md (Approve — PM-validated)"
+      ]
+    }
+  },
+  "qc": "PM-validated Approve",
+  "qa": "skipped — PM-validated path",
+  "residual_count": 0,
+  "merge_commits": [
+    "9ad20b74 feat(rules): T1",
+    "544d38e3 feat(rules): T2",
+    "1c0c0204 feat(rules): T3",
+    "49096f81 feat(rules): T4",
+    "50d91dc6 test(rules): T5",
+    "ca786ede style: cargo +nightly fmt --all"
+  ],
+  "notes": "P3 — three-layer rules + Logs subdirectory discipline. AC1..AC4 satisfied. DF-65 + DF-66 implemented. 0 residuals."
+}

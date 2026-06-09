@@ -1,6 +1,6 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 P1 multi-chapter roadmap, V1.37 P2 World KB roadmap, and V1.37 P3 quality-loop roadmap extensions added 2026-06-08
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; **V1.39 target** — auto-chain status UX + quality-loop implement ([novel-quality-loop.md](novel-quality-loop.md))
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
 **Last updated**: 2026-06-08
@@ -740,9 +740,9 @@ Write discipline:
 
 This integration depends on the `findings` table and rules files existing, so it is future implementation scope.
 
-#### 5.5.7 V1.37 P3 scope decision
+#### 5.5.7 V1.37 P3 scope decision (superseded for implement by V1.39)
 
-V1.37 P3 remains roadmap-only. A quality-loop-lite implementation is deferred because the first useful slice spans five coupled work items:
+V1.37 P3 was roadmap-only. **V1.39** reopens implementation via [novel-quality-loop.md](novel-quality-loop.md) and plans P1–P4. The five coupled work items are now in scope:
 
 1. `findings` table migration and DAO/API surface (`nexus-local-db`, daemon handlers, CLI status rendering).
 2. Net-new `novel-brainstorm` and `novel-review-master` presets plus prompt templates.
@@ -750,7 +750,7 @@ V1.37 P3 remains roadmap-only. A quality-loop-lite implementation is deferred be
 4. Rules file readers/writers plus append-only history discipline.
 5. `Logs/` subdirectory write discipline and `reflection-loop` integration that depends on findings.
 
-These are larger than a safe docs-only P3 slice and depend on P0 foundation stability. Future plans may reopen a narrow first implementation, but must preserve the local-first path above and avoid Redis, cron, platform workers, and platform publish dependencies.
+Implement authority: V1.39 compass [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md). Must preserve local-first path; no Redis, external cron, platform workers, or platform publish.
 
 ---
 
@@ -813,7 +813,8 @@ Sync **must not** upload full正文 by default (cli-spec §5.3 unchanged).
 | `creator run start --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path |
 | `creator run start --idea "..." --world-id <world_id>` | Bind the new Work to an existing World (per §3.5); World KB is injected as context in `novel-writing` prompts |
 | `creator run start --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + World binding question + `work_chapters` seed rows) before intake |
-| `creator run status <work_id>` | Reads from `work_chapters` table; shows `work_ref`, chapter list with status, completion state |
+| `creator run status <work_id>` | Reads from `work_chapters` table; shows `work_ref`, chapter list, completion; **V1.39** adds `daemon`, `chain`, `pending_resume`, `pending_inspiration_count`, `findings` banner per [cli-spec.md](cli-spec.md) |
+| `creator run resume <work_id>` | **V1.39** — resume checkpointed auto-chain after daemon restart |
 | `creator run continue <work_id> --note "..."` | Appends inspiration; does not advance chapter index |
 | `creator run reconcile-chapters <work_id>` | (V1.36 manual) Rebuilds `work_chapters` rows from `Works/<work_ref>/Stories/` filesystem state; per §4.1.2 reconciliation rules |
 

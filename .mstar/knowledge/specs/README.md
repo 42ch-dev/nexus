@@ -100,6 +100,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34) |
 | [novel-workflow-profile.md](novel-workflow-profile.md) | Draft overlay | **Shipped (V1.36)** |
+| [novel-quality-loop.md](novel-quality-loop.md) | Draft overlay | **Draft (V1.39)** |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration

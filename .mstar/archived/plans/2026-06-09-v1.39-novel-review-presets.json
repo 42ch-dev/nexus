@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.39 plan per Profile B. P2 merged to iteration/v1.39.",
+  "plan_id": "2026-06-09-v1.39-novel-review-presets",
+  "title": "P2 — novel-brainstorm and novel-review-master embedded presets",
+  "done_at": "2026-06-09T05:00:00+08:00",
+  "archived_at": "2026-06-09T05:00:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-09-v1.39-novel-review-presets.md",
+  "archived_record": ".mstar/archived/plans/2026-06-09-v1.39-novel-review-presets.json",
+  "snapshot": {
+    "id": "2026-06-09-v1.39-novel-review-presets",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-09-v1.39-novel-review-presets.md",
+    "working_branch": "feature/v1.39-novel-review-presets",
+    "merge_target": "iteration/v1.39",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-quality-loop.md",
+      "depends_on": [
+        "2026-06-09-v1.39-harness-docs-prepare",
+        "2026-06-09-v1.39-findings-and-review-routing"
+      ],
+      "description": "P2 — novel-brainstorm and novel-review-master embedded presets",
+      "targets_deferred": ["DF-64"],
+      "updated_at": "2026-06-09T05:00:00+08:00",
+      "done_at": "2026-06-09T05:00:00+08:00",
+      "qc": "PM-validated Approve. 0 Critical, 0 Warning, 0 Suggestion. Narrow scope, all 8 P2 tests pass, all regression tests pass, clippy clean, fmt clean.",
+      "qa": "skipped — PM-validated path for narrow-scope plan with strong evidence",
+      "shipped": [
+        "novel-brainstorm/preset.yaml + 5 prompts (gather-findings, gather-exit, synthesize-ideas, synthesize-exit, synthesize-ctx-update)",
+        "novel-review-master/preset.yaml + 2 prompts (present-findings, await-decision)",
+        "novel-brainstorm exit_when: kind llm_judge (auto-chain compatible per P0.5 W-1 fix)",
+        "novel-review-master exit_when: kind manual (human-in-loop master decision)",
+        "Both presets use preset: + gates: + run_intents: shape (R-V137P0-01 compliant)",
+        "Both presets consume open_findings via preset.input.open_findings (consumed by gather/present states)",
+        "Validation tests in preset/mod.rs (4 tests covering list inclusion + load+validate for both presets)",
+        "E2E smoke tests in tests/novel_brainstorm_review_master.rs (8 tests covering AC1..AC3 + happy paths + exit-when verification)",
+        "CLI hints documented in embedded-presets/README.md §Quality Loop Presets with daemon schedule add examples"
+      ],
+      "closed_residuals": [],
+      "deferred_residuals": [],
+      "commits": [
+        "bf8c0c5c feat(orchestration): add novel-brainstorm embedded preset (T1)",
+        "f38d1034 feat(orchestration): add novel-review-master embedded preset (T2)",
+        "9da9a5f2 test(orchestration): add novel-brainstorm and novel-review-master validation tests (T3)",
+        "0bcefa45 docs(orchestration): document novel-brainstorm and novel-review-master CLI hints (T4)",
+        "6d815b87 test(orchestration): add e2e smoke tests for novel-brainstorm and novel-review-master (T5)",
+        "8852840e style(orchestration): cargo +nightly fmt fix for T3 validation tests",
+        "f594b7d6 qc: V1.39 P2 consolidated gate (Approve — PM-validated)"
+      ],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-06-09-v1.39-novel-review-presets/qc-consolidated.md (Approve — PM-validated)"
+      ]
+    }
+  },
+  "qc": "PM-validated Approve",
+  "qa": "skipped — PM-validated path",
+  "residual_count": 0,
+  "merge_commits": [
+    "bf8c0c5c feat(orchestration): add novel-brainstorm embedded preset (T1)",
+    "f38d1034 feat(orchestration): add novel-review-master embedded preset (T2)",
+    "9da9a5f2 test(orchestration): add novel-brainstorm and novel-review-master validation tests (T3)",
+    "0bcefa45 docs(orchestration): document novel-brainstorm and novel-review-master CLI hints (T4)",
+    "6d815b87 test(orchestration): add e2e smoke tests for novel-brainstorm and novel-review-master (T5)",
+    "8852840e style(orchestration): cargo +nightly fmt fix for T3 validation tests"
+  ],
+  "notes": "P2 — novel review presets. AC1..AC4 satisfied. 0 residuals. DF-64 partial target (no full preset spec for novel-review-master; P2 just provides the 2 presets + integration with P1 API)."
+}

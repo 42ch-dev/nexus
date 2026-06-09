@@ -189,19 +189,35 @@ pub async fn add_schedule(
         }
     }
 
-    // Resolve work_id from input (needed for gates, audit, and work_id column).
-    let work_id_opt = body
+    // Resolve work_id from input OR seed (needed for gates, audit, and work_id column).
+    // Security: gates must be evaluated whenever the preset declares them; if the
+    // request omits work_id entirely, the gate-eval path cannot load the Work
+    // snapshot and must fail closed (422 preset_gates_failed) — never silently
+    // bypass gate evaluation. PR #50 review (cursor automation, medium):
+    // regression that allowed gated presets to be enqueued without gate checks.
+    let work_id_opt: Option<String> = body
         .input
         .as_ref()
         .and_then(|v| v.get("work_id"))
-        .and_then(|v| v.as_str());
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
+        .or_else(|| {
+            body.seed
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|v| {
+                    v.get("work_id")
+                        .and_then(|w| w.as_str())
+                        .map(std::string::ToString::to_string)
+                })
+        });
 
     if body.force_gates {
         // V1.37 (T5/T6): force-gates path — write audit row.
         let pool = state.pool();
         let audit_id = format!("fga_{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
         let forced_at = chrono::Utc::now().to_rfc3339();
-        let work_id = work_id_opt.unwrap_or("unknown").to_string();
+        let work_id = work_id_opt.clone().unwrap_or_else(|| "unknown".to_string());
         let reason_text = body.reason.as_deref().unwrap_or("");
 
         // C-2: Use transaction for atomicity (audit + schedule insert).
@@ -292,28 +308,44 @@ pub async fn add_schedule(
 
         if let Ok(preset) = preset_result {
             let gates = &preset.manifest.preset.gates;
+            // Security: a gated preset ALWAYS requires work_id for evaluation.
+            // If the caller didn't provide work_id (via input.work_id or seed.work_id),
+            // we fail closed with 422 — never silently bypass gate evaluation. The
+            // auto-chain path always provides work_id; tests must do the same.
+            // PR #50 review regression fix: cursor automation flagged this as
+            // an authorization bypass (medium).
             if !gates.is_empty() {
-                // W-3: if gates are declared but no work_id, reject immediately.
-                let Some(work_id) = work_id_opt else {
-                    return Err((
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        serde_json::to_string(
-                            &nexus_orchestration::preset_gates::PresetGatesFailed {
-                                error: "preset_gates_failed".to_string(),
-                                preset_id: body.preset_id.clone(),
-                                work_id: String::new(),
-                                failed_gates: vec![nexus_orchestration::preset_gates::FailedGate {
-                                    kind: "work_field".to_string(),
-                                    expected: "work_id must be non-null".to_string(),
-                                    actual: "missing".to_string(),
-                                    remediation: "Bind the schedule to a Work via \
-                                        body.input.work_id before scheduling a gated preset."
-                                        .to_string(),
-                                }],
-                            },
-                        )
-                        .unwrap_or_default(),
-                    ));
+                // work_id is now guaranteed Some (or returned 422 above). The
+                // historical "if let Some(work_id)" outer wrapper has been collapsed
+                // since work_id_opt is resolved earlier and gates-required-work_id
+                // is enforced before reaching here.
+                let work_id: &str = match &work_id_opt {
+                    Some(w) => w.as_str(),
+                    None => {
+                        return Err((
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            serde_json::to_string(
+                                &nexus_orchestration::preset_gates::PresetGatesFailed {
+                                    error: "preset_gates_failed".to_string(),
+                                    preset_id: body.preset_id.clone(),
+                                    work_id: String::new(),
+                                    failed_gates: vec![
+                                        nexus_orchestration::preset_gates::FailedGate {
+                                            kind: "work_field".to_string(),
+                                            expected: "work_id must be provided for gated preset"
+                                                .to_string(),
+                                            actual: "omitted".to_string(),
+                                            remediation:
+                                                "Pass work_id via input.work_id or seed.work_id, \
+                                         or use force_gates=true with a reason."
+                                                    .to_string(),
+                                        },
+                                    ],
+                                },
+                            )
+                            .unwrap_or_default(),
+                        ));
+                    }
                 };
 
                 // Build work snapshot from DB.
@@ -330,8 +362,8 @@ pub async fn add_schedule(
                 let work_row: Option<WorkSnapshotRow> = sqlx::query_as!(
                     WorkSnapshotRow,
                     "SELECT work_profile, work_ref, workspace_slug, intake_status, \
-                     world_id, status, current_stage, total_planned_chapters \
-                     FROM works WHERE work_id = ? AND creator_id = ?",
+                 world_id, status, current_stage, total_planned_chapters \
+                 FROM works WHERE work_id = ? AND creator_id = ?",
                     work_id,
                     body.creator_id,
                 )
@@ -344,146 +376,160 @@ pub async fn add_schedule(
                     )
                 })?;
 
-                if let Some(row) = work_row {
-                    let work_snapshot = nexus_orchestration::preset_gates::WorkSnapshot {
-                        work_id: work_id.to_string(),
-                        creator_id: body.creator_id.clone(),
-                        work_profile: row.work_profile,
-                        work_ref: row.work_ref,
-                        workspace_slug: row.workspace_slug,
-                        intake_status: row.intake_status,
-                        world_id: row.world_id,
-                        status: row.status,
-                        current_stage: row.current_stage,
-                        title: None,
-                        total_planned_chapters: row.total_planned_chapters,
-                    };
+                // Suppress single_match_else: explicit Some/None branches preserve
+                // parallel structure to the historical code; refactoring to if let
+                // Some/else would re-introduce deep nesting with no semantic change.
+                #[allow(clippy::single_match_else)]
+                match work_row {
+                    Some(row) => {
+                        let work_snapshot = nexus_orchestration::preset_gates::WorkSnapshot {
+                            work_id: work_id.to_string(),
+                            creator_id: body.creator_id.clone(),
+                            work_profile: row.work_profile,
+                            work_ref: row.work_ref,
+                            workspace_slug: row.workspace_slug,
+                            intake_status: row.intake_status,
+                            world_id: row.world_id,
+                            status: row.status,
+                            current_stage: row.current_stage,
+                            title: None,
+                            total_planned_chapters: row.total_planned_chapters,
+                        };
 
-                    let mut vars = std::collections::HashMap::new();
-                    if let Some(input) = &body.input {
-                        if let Some(obj) = input.as_object() {
-                            for (k, v) in obj {
-                                vars.insert(k.clone(), v.to_string());
+                        let mut vars = std::collections::HashMap::new();
+                        if let Some(input) = &body.input {
+                            if let Some(obj) = input.as_object() {
+                                for (k, v) in obj {
+                                    vars.insert(k.clone(), v.to_string());
+                                }
                             }
                         }
-                    }
-                    if let Some(ref wr) = work_snapshot.work_ref {
-                        vars.insert("work_ref".to_string(), wr.clone());
-                    }
-                    vars.insert("work_id".to_string(), work_id.to_string());
+                        if let Some(ref wr) = work_snapshot.work_ref {
+                            vars.insert("work_ref".to_string(), wr.clone());
+                        }
+                        vars.insert("work_id".to_string(), work_id.to_string());
 
-                    let preset_input = nexus_orchestration::preset_gates::PresetInput { vars };
+                        let preset_input = nexus_orchestration::preset_gates::PresetInput { vars };
 
-                    let workspace_root = state
-                        .workspace_path()
-                        .map_or_else(|| state.nexus_home().clone(), std::path::PathBuf::from);
+                        let workspace_root = state
+                            .workspace_path()
+                            .map_or_else(|| state.nexus_home().clone(), std::path::PathBuf::from);
 
-                    let lookup = DbPreviousPresetLookup {
-                        pool: std::sync::Arc::new(pool.clone()),
-                    };
+                        let lookup = DbPreviousPresetLookup {
+                            pool: std::sync::Arc::new(pool.clone()),
+                        };
 
-                    let eval_result = nexus_orchestration::preset_gates::evaluate_gates(
-                        gates,
-                        &body.preset_id,
-                        &work_snapshot,
-                        &preset_input,
-                        &workspace_root,
-                        &lookup,
-                    )
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("gate evaluation error: {e}"),
+                        let eval_result = nexus_orchestration::preset_gates::evaluate_gates(
+                            gates,
+                            &body.preset_id,
+                            &work_snapshot,
+                            &preset_input,
+                            &workspace_root,
+                            &lookup,
                         )
-                    })?;
+                        .await
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("gate evaluation error: {e}"),
+                            )
+                        })?;
 
-                    if let Err(gate_failure) = eval_result {
-                        // W-11: log gate failures at warn level before returning.
-                        tracing::warn!(
-                            target: "orchestration.gates",
-                            preset_id = %body.preset_id,
-                            work_id = %work_id,
-                            failed_count = %gate_failure.failed_gates.len(),
-                            "preset gates failed"
-                        );
-                        let error_json = serde_json::to_string(&gate_failure).unwrap_or_default();
-                        return Err((StatusCode::UNPROCESSABLE_ENTITY, error_json));
-                    }
+                        if let Err(gate_failure) = eval_result {
+                            // W-11: log gate failures at warn level before returning.
+                            tracing::warn!(
+                                target: "orchestration.gates",
+                                preset_id = %body.preset_id,
+                                work_id = %work_id,
+                                failed_count = %gate_failure.failed_gates.len(),
+                                "preset gates failed"
+                            );
+                            let error_json =
+                                serde_json::to_string(&gate_failure).unwrap_or_default();
+                            return Err((StatusCode::UNPROCESSABLE_ENTITY, error_json));
+                        }
 
-                    // Gates passed — insert schedule inside the same transaction.
-                    let schedule_id =
-                        format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
-                    let now_ts = chrono::Utc::now().timestamp();
-                    sqlx::query!(
-                        "INSERT INTO creator_schedules \
+                        // Gates passed — insert schedule inside the same transaction.
+                        let schedule_id =
+                            format!("SCH{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+                        let now_ts = chrono::Utc::now().timestamp();
+                        sqlx::query!(
+                            "INSERT INTO creator_schedules \
                          (schedule_id, creator_id, preset_id, preset_version, status, \
                           concurrency_kind, current_core_context_version, label, \
                           created_at, updated_at, work_id) \
                          VALUES (?, ?, ?, 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
-                        schedule_id,
-                        body.creator_id,
-                        body.preset_id,
-                        body.label,
-                        now_ts,
-                        now_ts,
-                        work_id,
-                    )
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("failed to create schedule: {e}"),
-                        )
-                    })?;
-
-                    tx.commit().await.map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("failed to commit schedule transaction: {e}"),
-                        )
-                    })?;
-
-                    let core_version =
-                        seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
-
-                    return Ok((
-                        StatusCode::CREATED,
-                        Json(AddScheduleResponse {
                             schedule_id,
-                            status: "pending".to_string(),
-                            core_context_version: core_version,
-                        }),
-                    ));
-                }
-                // No work row found — treat as gate failure (W-3).
-                tracing::warn!(
-                    target: "orchestration.gates",
-                    preset_id = %body.preset_id,
-                    work_id = %work_id,
-                    failed_count = 1,
-                    "preset gates failed — work not found"
-                );
-                return Err((
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    serde_json::to_string(&nexus_orchestration::preset_gates::PresetGatesFailed {
-                        error: "preset_gates_failed".to_string(),
-                        preset_id: body.preset_id.clone(),
-                        work_id: work_id.to_string(),
-                        failed_gates: vec![nexus_orchestration::preset_gates::FailedGate {
-                            kind: "work_field".to_string(),
-                            expected: "work must exist".to_string(),
-                            actual: "not found".to_string(),
-                            remediation: "Ensure the work_id refers to an existing Work."
-                                .to_string(),
-                        }],
-                    })
-                    .unwrap_or_default(),
-                ));
-            }
-        }
-        // Preset not found or has no gates: proceed without gate evaluation.
+                            body.creator_id,
+                            body.preset_id,
+                            body.label,
+                            now_ts,
+                            now_ts,
+                            work_id,
+                        )
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("failed to create schedule: {e}"),
+                            )
+                        })?;
+
+                        tx.commit().await.map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("failed to commit schedule transaction: {e}"),
+                            )
+                        })?;
+
+                        let core_version =
+                            seed_core_context(&supervisor, &schedule_id, &body, &state).await?;
+
+                        return Ok((
+                            StatusCode::CREATED,
+                            Json(AddScheduleResponse {
+                                schedule_id,
+                                status: "pending".to_string(),
+                                core_context_version: core_version,
+                            }),
+                        ));
+                    }
+                    // No work row found — treat as gate failure (W-3).
+                    None => {
+                        tracing::warn!(
+                            target: "orchestration.gates",
+                            preset_id = %body.preset_id,
+                            work_id = %work_id,
+                            failed_count = 1,
+                            "preset gates failed — work not found"
+                        );
+                        return Err((
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            serde_json::to_string(
+                                &nexus_orchestration::preset_gates::PresetGatesFailed {
+                                    error: "preset_gates_failed".to_string(),
+                                    preset_id: body.preset_id.clone(),
+                                    work_id: work_id.to_string(),
+                                    failed_gates: vec![
+                                        nexus_orchestration::preset_gates::FailedGate {
+                                            kind: "work_field".to_string(),
+                                            expected: "work must exist".to_string(),
+                                            actual: "not found".to_string(),
+                                            remediation:
+                                                "Ensure the work_id refers to an existing Work."
+                                                    .to_string(),
+                                        },
+                                    ],
+                                },
+                            )
+                            .unwrap_or_default(),
+                        ));
+                    }
+                } // closes `match work_row`
+            } // closes `if !gates.is_empty()`
+        } // closes `if let Ok(preset)`
+          // Preset not found or has no gates: proceed without gate evaluation.
     }
 
     // Fallback: no gates or no registry — create schedule directly via supervisor.

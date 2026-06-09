@@ -264,6 +264,47 @@ pub fn validate_creator_id_safe(id: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// `$HOME/.nexus42/rules/writing-craft.md` — user override for Layer 1 rules.
+#[must_use]
+pub fn user_writing_craft_rules_path(home: &Path) -> PathBuf {
+    nexus_root_from_home(home)
+        .join("rules")
+        .join("writing-craft.md")
+}
+
+/// Workspace-relative: `Works/<work_ref>/Rules/novel-rules.md` (Layer 2).
+#[must_use]
+pub fn work_novel_rules_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
+    workspace_dir
+        .join("Works")
+        .join(work_ref)
+        .join("Rules")
+        .join("novel-rules.md")
+}
+
+/// Workspace-relative: `Works/<work_ref>/Rules/novel-rules-history.md` (Layer 3 audit trail).
+#[must_use]
+pub fn work_novel_rules_history_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
+    workspace_dir
+        .join("Works")
+        .join(work_ref)
+        .join("Rules")
+        .join("novel-rules-history.md")
+}
+
+/// Workspace-relative: `Works/<work_ref>/Logs/<subdir>/` (DF-66).
+///
+/// Returns the path for one of the four Logs subdirectories.
+/// `subdir` must be one of: `brainstorm`, `write`, `review`, `publish`.
+#[must_use]
+pub fn work_logs_subdir(workspace_dir: &Path, work_ref: &str, subdir: &str) -> PathBuf {
+    workspace_dir
+        .join("Works")
+        .join(work_ref)
+        .join("Logs")
+        .join(subdir)
+}
+
 /// `$HOME/.nexus42/acp/runs` — base directory for run trace storage.
 #[must_use]
 pub fn acp_runs_dir(home: &Path) -> PathBuf {
@@ -735,5 +776,47 @@ mod tests {
     fn validate_reference_id_safe_rejects_control_chars() {
         let err = validate_reference_id_safe("ref_\x01ctrl").unwrap_err();
         assert!(err.contains("control characters"));
+    }
+
+    // ── Rules and Logs path helpers (V1.39 P3) ───────────────────────────
+
+    #[test]
+    fn user_writing_craft_rules_path_layout() {
+        let home = PathBuf::from("/h");
+        assert_eq!(
+            user_writing_craft_rules_path(&home),
+            PathBuf::from("/h/.nexus42/rules/writing-craft.md")
+        );
+    }
+
+    #[test]
+    fn work_novel_rules_path_layout() {
+        let ws = PathBuf::from("/ws");
+        assert_eq!(
+            work_novel_rules_path(&ws, "my-novel"),
+            PathBuf::from("/ws/Works/my-novel/Rules/novel-rules.md")
+        );
+    }
+
+    #[test]
+    fn work_novel_rules_history_path_layout() {
+        let ws = PathBuf::from("/ws");
+        assert_eq!(
+            work_novel_rules_history_path(&ws, "my-novel"),
+            PathBuf::from("/ws/Works/my-novel/Rules/novel-rules-history.md")
+        );
+    }
+
+    #[test]
+    fn work_logs_subdir_layout() {
+        let ws = PathBuf::from("/ws");
+        assert_eq!(
+            work_logs_subdir(&ws, "my-novel", "brainstorm"),
+            PathBuf::from("/ws/Works/my-novel/Logs/brainstorm")
+        );
+        assert_eq!(
+            work_logs_subdir(&ws, "my-novel", "write"),
+            PathBuf::from("/ws/Works/my-novel/Logs/write")
+        );
     }
 }

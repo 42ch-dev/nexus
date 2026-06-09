@@ -360,7 +360,31 @@ impl Capability for NovelProjectScaffold {
         // ── T2i: Logs/ ─────────────────────────────────────────────────
         let logs = root.join("Logs");
         if create_dir_all_idem(&logs)? {
-            txn.dirs_created.push(logs);
+            txn.dirs_created.push(logs.clone());
+        }
+
+        // V1.39 P3 (DF-66): Logs subdirectories for write discipline.
+        for subdir in &["brainstorm", "write", "review", "publish"] {
+            let sd = logs.join(subdir);
+            if create_dir_all_idem(&sd)? {
+                txn.dirs_created.push(sd);
+            }
+        }
+
+        // ── T2j: Rules/ (V1.39 P3, DF-65) ─────────────────────────────
+        let rules = root.join("Rules");
+        if create_dir_all_idem(&rules)? {
+            txn.dirs_created.push(rules);
+        }
+
+        // Layer 2: per-work novel-rules.md stub
+        if let Some(tmpl) = load_template("novel-rules.md") {
+            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
+            write_file_idem(
+                &root.join("Rules/novel-rules.md"),
+                &rendered,
+                &mut txn.files_created,
+            )?;
         }
 
         // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
@@ -433,6 +457,10 @@ impl Capability for NovelProjectScaffold {
                 schedule_ids: None,
                 current_stage: None,
                 stage_status: None,
+                auto_chain_enabled: None,
+                driver_schedule_id: None,
+                auto_chain_interrupted: None,
+                auto_review_master_on_timeout: None,
             };
             works::patch_work_tx(&mut tx, &inp.creator_id, &inp.work_id, &patch, &now)
                 .await
@@ -672,6 +700,14 @@ mod tests {
         assert!(scaffold_path.join("Outlines/chapters").is_dir());
         assert!(scaffold_path.join("Stories").is_dir());
         assert!(scaffold_path.join("Logs").is_dir());
+        // V1.39 P3: Logs subdirectories
+        assert!(scaffold_path.join("Logs/brainstorm").is_dir());
+        assert!(scaffold_path.join("Logs/write").is_dir());
+        assert!(scaffold_path.join("Logs/review").is_dir());
+        assert!(scaffold_path.join("Logs/publish").is_dir());
+        // V1.39 P3: Rules directory + Layer 2 stub
+        assert!(scaffold_path.join("Rules").is_dir());
+        assert!(scaffold_path.join("Rules/novel-rules.md").is_file());
 
         // Verify files
         assert!(scaffold_path.join("README.md").is_file());

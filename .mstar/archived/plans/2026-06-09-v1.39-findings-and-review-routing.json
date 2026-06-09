@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.39 plan per Profile B. Moved from status.json on V1.39 P1 closeout (P1 merged to iteration/v1.39; P2..P4 still in flight on same integration branch).",
+  "plan_id": "2026-06-09-v1.39-findings-and-review-routing",
+  "title": "P1 — findings table/API + review executor routing",
+  "done_at": "2026-06-09T04:45:00+08:00",
+  "archived_at": "2026-06-09T04:45:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-09-v1.39-findings-and-review-routing.md",
+  "archived_record": ".mstar/archived/plans/2026-06-09-v1.39-findings-and-review-routing.json",
+  "snapshot": {
+    "id": "2026-06-09-v1.39-findings-and-review-routing",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-09-v1.39-findings-and-review-routing.md",
+    "working_branch": "feature/v1.39-findings-and-review-routing",
+    "merge_target": "iteration/v1.39",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-quality-loop.md",
+      "depends_on": [
+        "2026-06-09-v1.39-harness-docs-prepare",
+        "2026-06-09-v1.39-research-stage-wiring"
+      ],
+      "description": "P1 — findings table/API + review executor routing",
+      "updated_at": "2026-06-09T04:45:00+08:00",
+      "done_at": "2026-06-09T04:45:00+08:00",
+      "qc": "Initial tri-review: qc1+qc2 Approve, qc3 Request Changes (C-1 spec violation: missing (work_id, chapter, status) index per novel-quality-loop.md §2.1). PM fix wave closed C-1. PM-validated merge after green tests.",
+      "qa": "skipped — initial QC + PM C-1 fix + green test sweep",
+      "shipped": [
+        "findings table migration 202606090002_findings.sql with severity/status/target_executor TEXT enums + 3 indexes (work_id,status), (creator_id,status), (work_id,chapter,status) — C-1 fix added the 3rd index",
+        "Findings DAO at crates/nexus-local-db/src/findings.rs — Finding struct + FindingPatch + create_finding + list_findings (with work_id, severity, status, target_executor filters) + update_finding + get_finding + delete_finding + count_open_findings_by_severity + create_finding_from_review",
+        "Compile-time sqlx::query! + query_as! for static DML; runtime query only for DDL (per nexus-local-db/AGENTS.md)",
+        "ReviewVerdictFinding struct + create_finding_from_review hook in DAO",
+        "Findings API handlers at crates/nexus-daemon-runtime/src/api/handlers/findings.rs — CRUD endpoints + /from-review special endpoint, all creator-scoped",
+        "Route registration in works_routes() (per implementer's note to avoid axum 0.7 path-param conflict); from-review registered before {finding_id} for literal-segment priority",
+        "CLI creator run status Findings section — open count, severity, top 3 titles, routing hints (→ write | brainstorm | none | master)",
+        "7 hermetic tests in tests/findings_api.rs — CRUD + list filter + update/close transition + creator isolation 404 + from-review auto-create + all 4 routing hints + 1 hermetic unit test (test_findings_work_chapter_status_index_exists) for the C-1 index",
+        "PM late fix wave: deduped session_captures field in acp_worker/mod.rs (was a merge artifact, removed duplicate struct field + duplicate impl initializer); fixed clippy::option_if_let_else on f_ch.map_or_else",
+        "PM C-1 fix: added idx_findings_work_chapter_status index in migration + test asserting the index exists with correct columns"
+      ],
+      "closed_residuals": [],
+      "deferred_residuals": [
+        "R-V139P1-W-1 (medium) — server-side enum validation; defer to V1.40",
+        "R-V139P1-W-2 (low) — duplicated ID generation; defer to V1.40",
+        "R-V139P1-W-3 (low) — CLI status HTTP timeout; defer to V1.40",
+        "R-V139P1-W-4 (low) — list query may skip index; defer to V1.40",
+        "R-V139P1-W-5 (low) — runtime sqlx query; defer to V1.40",
+        "R-V139P1-W-6 (low) — from-review error not logged; defer to V1.40"
+      ],
+      "commits": [
+        "bca38474 feat(db): add findings table migration + DAO module (T1, T2)",
+        "97ce58df feat(db): add review-verdict finding creation hook (T3)",
+        "bf9f864e feat(api+cli): findings CRUD endpoints, review hook, routing hints, status section (T3, T4, T5)",
+        "3cae722d test(daemon-runtime): hermetic findings API tests + clippy fixes (T6)",
+        "137fefaf fix(nexus42,v1.39-p1): PM fix wave — dedupe session_captures + map_or_else clippy",
+        "b0d6d1ad qc(report): QC #1 architecture/maintainability review",
+        "0e1618c5 qc(qc-specialist-2): V1.39 P1 security+correctness review",
+        "91481965 qc(v1.39-p1): QC Review #3 — performance and reliability",
+        "9350d80a qc: V1.39 P1 consolidated gate (Request Changes — C-1 spec violation)",
+        "9e3a4952 fix(local-db,v1.39-p1): add (work_id, chapter, status) index + test (QC C-1 fix)"
+      ],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc-consolidated.md (Approve post C-1 fix)",
+        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc1.md (Approve)",
+        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc2.md (Approve)",
+        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc3.md (Request Changes)"
+      ]
+    }
+  },
+  "qc": "Initial: qc1+qc2 Approve, qc3 Request Changes (C-1). PM fix wave closed C-1. Final: Approve post C-1 fix.",
+  "qa": "skipped — initial QC + PM C-1 fix + green test sweep",
+  "residual_count": 6,
+  "merge_commits": [
+    "bca38474 feat(db): add findings table migration + DAO module (T1, T2)",
+    "97ce58df feat(db): add review-verdict finding creation hook (T3)",
+    "bf9f864e feat(api+cli): findings CRUD endpoints, review hook, routing hints, status section (T3, T4, T5)",
+    "3cae722d test(daemon-runtime): hermetic findings API tests + clippy fixes (T6)",
+    "137fefaf fix(nexus42,v1.39-p1): PM fix wave — dedupe session_captures + map_or_else clippy",
+    "9e3a4952 fix(local-db,v1.39-p1): add (work_id, chapter, status) index + test (QC C-1 fix)"
+  ],
+  "notes": "P1 — findings table/API + review executor routing. AC1..AC4 satisfied. C-1 spec violation caught by qc3, closed by PM fix wave (1-line migration + 1 test). 6 deferred residuals (1 medium + 5 low) for V1.40."
+}

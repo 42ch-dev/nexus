@@ -1,6 +1,6 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). Continues to evolve: V1.31 agentic patterns + V1.32 quality gate landed; FL-D (DF-29/31/56) and DF-53 full auto-chain remain in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
+**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. FL-D (DF-29/31/56) remain in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
 **Document class**: Master  
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
 **Date**: 2026-04-17
@@ -392,6 +392,8 @@ Operational semantics:
 - **Supervise**: Worker Manager monitors exit status and writes to `tracing`; on unexpected exit during an active Session, the corresponding engine signal is `AcpSessionLost` — preset may have a retry path; if none, Session flips to `failed`.
 - **Graceful stop**: lifecycle HSM `Stopping` state sends a terminal IPC `shutdown` frame; worker finalises current prompt if any, closes ACP session via `cancel`, exits within 5 s; otherwise `SIGTERM` → `SIGKILL` path per `acp-client-tech-spec.md` §2.3.
 - **Crash recovery**: `daemon` restart reads `orchestration_sessions` table, finds sessions in `running` / `waiting_for_input` state that were owned by a now-dead worker, marks them `paused` with reason `worker_crash`, and exposes them to the user for manual resume (B-track may auto-resume on configured strategies).
+- **Boot schedule policy (V1.39 — DF-68)**: Today, boot calls `resume_running_as_paused("daemon_restart")` for all running schedules. V1.39 replaces this for **auto-chain driver schedules** tied to a Work continuation checkpoint: those schedules auto-resume when `auto_chain_enabled` and checkpoint `auto_chain_interrupted` is set. Schedules without a checkpoint remain paused. Work checkpoint fields live on `works` or an adjunct table per [creator-workflow.md](creator-workflow.md) §5.4.
+- **on_complete auto-chain (V1.39 — DF-53)**: When a stage driver schedule completes and Work `auto_chain_enabled`, the supervisor enqueues the next FL-E stage preset (or next chapter `produce` after `persist`) without CLI `stage advance`. At most one active stage driver per Work remains enforced.
 
 ### 6.2 One worker per creator (MVP)
 

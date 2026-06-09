@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.39 plan per Profile B. Moved from status.json on V1.39 P5 closeout (P5 merged to iteration/v1.39; P1..P4 still in flight on same integration branch).",
+  "plan_id": "2026-06-09-v1.39-v138-hardening",
+  "title": "P5 — V1.38 residual fixes and terminal-state polish",
+  "done_at": "2026-06-09T04:00:00+08:00",
+  "archived_at": "2026-06-09T04:00:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-09-v1.39-v138-hardening.md",
+  "archived_record": ".mstar/archived/plans/2026-06-09-v1.39-v138-hardening.json",
+  "snapshot": {
+    "id": "2026-06-09-v1.39-v138-hardening",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-09-v1.39-v138-hardening.md",
+    "working_branch": "feature/v1.39-v138-hardening",
+    "merge_target": "iteration/v1.39",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "depends_on": [
+        "2026-06-09-v1.39-harness-docs-prepare",
+        "2026-06-09-v1.39-fl-e-auto-chain-engine"
+      ],
+      "description": "P5 — V1.38 residual fixes and terminal-state polish",
+      "updated_at": "2026-06-09T04:00:00+08:00",
+      "done_at": "2026-06-09T04:00:00+08:00",
+      "qc": "All 3 reviewers Approve (initial wave). 0 Critical, 4 Warning (3 distinct, all non-blocking per reviewers), 8 Suggestion. 2 residuals resolved (R-V138P0-05 NULL/0 tests, R-V138P1-01 completion guard), 5 accepted with doc/rationale (R-V138P0-01/02/03/04, R-V138P1-04). 3 new low-severity residuals registered for V1.40 follow-up (R-V139P5-N1/N2/N3).",
+      "qa": "skipped per harness convention for the round",
+      "shipped": [
+        "R-V138P0-01 (accept-with-doc): Concurrency doc block on next_chapter() — single-writer invariant + atomic-claim upgrade pattern",
+        "R-V138P0-03 (accept-with-doc + idempotency test): Lazy completion-promotion contract on get_work() + handler_get_work_lazy_promotes_completed_then_is_idempotent test",
+        "R-V138P0-05 (fix): 2 NULL/0 total_planned_chapters unit tests",
+        "R-V138P1-01 (fix): reject_produce_when_novel_complete guard + 3 unit tests; returns NOVEL_COMPLETE error",
+        "R-V138P0-02, R-V138P0-04, R-V138P1-04 accepted: rationales documented"
+      ],
+      "closed_residuals": [
+        "R-V138P0-05 (resolved — 2 NULL/0 unit tests added)",
+        "R-V138P1-01 (resolved — completion guard + 3 unit tests)"
+      ],
+      "deferred_residuals": [
+        "R-V139P5-N1 (low) — R-V138P0-02 follow-up: CLI surface of on-disk missing-file hints; defer to V1.40 UX",
+        "R-V139P5-N2 (low) — R-V138P0-04 follow-up: WorkApiDto.chapters cap or pagination; defer to V1.40 UX",
+        "R-V139P5-N3 (low) — R-V138P1-04 follow-up: outline_path/body_path required with no defaults; defer to V1.40 hardening"
+      ],
+      "commits": [
+        "932097ea fix(local-db,v1.39-p5): doc next_chapter() single-writer assumption + cover NULL total_planned_chapters",
+        "02948f59 fix(nexus42,v1.39-p5): reject stage advance to produce when novel complete (R-V138P1-01)",
+        "63b6ad59 fix(daemon-runtime,v1.39-p5): document get_work lazy completion-promotion contract + idempotency test (R-V138P0-03)",
+        "24919b27 harness(v1.39-p5): mark T1–T4 done in plan checkboxes",
+        "693f6323 qc(v1.39-p5): QC1 architecture/maintainability review — Approve",
+        "59eac922 qc(v1.39-p5): qc2 (security+correctness) initial-wave review — Approve",
+        "c6becbf8 qc(v1.39-p5): qc3 (performance+reliability) initial-wave review — Approve",
+        "2bd7c31a qc: V1.39 P5 consolidated gate (Approve — all 3 reviewers Approve)"
+      ],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-06-09-v1.39-v138-hardening/qc-consolidated.md (Approve)",
+        ".mstar/plans/reports/2026-06-09-v1.39-v138-hardening/qc1.md (Approve)",
+        ".mstar/plans/reports/2026-06-09-v1.39-v138-hardening/qc2.md (Approve)",
+        ".mstar/plans/reports/2026-06-09-v1.39-v138-hardening/qc3.md (Approve)"
+      ]
+    }
+  },
+  "qc": "All 3 reviewers Approve (initial wave). 0 Critical, 4 Warning, 8 Suggestion. PM-validated merge after green tests.",
+  "qa": "skipped — initial QC all Approve + green test sweep",
+  "residual_count": 3,
+  "merge_commits": [
+    "932097ea fix(local-db,v1.39-p5): doc next_chapter() single-writer assumption + cover NULL total_planned_chapters",
+    "02948f59 fix(nexus42,v1.39-p5): reject stage advance to produce when novel complete (R-V138P1-01)",
+    "63b6ad59 fix(daemon-runtime,v1.39-p5): document get_work lazy completion-promotion contract + idempotency test (R-V138P0-03)",
+    "24919b27 harness(v1.39-p5): mark T1–T4 done in plan checkboxes"
+  ],
+  "notes": "P5 — V1.38 residual fixes and terminal-state polish. 7 V1.38 residuals triaged: 2 fix, 5 accept-with-doc/rationale. 3 new low-severity residuals for V1.40 follow-up."
+}

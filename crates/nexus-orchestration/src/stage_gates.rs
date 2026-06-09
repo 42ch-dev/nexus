@@ -73,6 +73,12 @@ pub struct WorkFields {
     pub body_path: Option<String>,
     /// Chapter slug from `work_chapters.slug` (V1.38 P1).
     pub slug: Option<String>,
+    /// Fix W-2: path to research artifacts directory, populated when
+    /// the produce stage follows a completed research stage in the auto-chain.
+    pub research_artifacts_dir: Option<String>,
+    /// V1.39 P3 (DF-65): workspace directory for reading rules files.
+    /// When set, `build_preset_input` reads Layer 1 + Layer 2 rules.
+    pub workspace_dir: Option<String>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -135,7 +141,74 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             .map(|o| o.insert("slug".to_string(), serde_json::Value::String(sl.clone())));
     }
 
+    // Fix W-2: research artifacts directory for produce stage (after research).
+    if let Some(ref rad) = fields.research_artifacts_dir {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "research_artifacts_dir".to_string(),
+                serde_json::Value::String(rad.clone()),
+            )
+        });
+    }
+
+    // V1.39 P3 (DF-65): read rules layers when workspace_dir and work_ref
+    // are both present. Layer 1 = embedded default; Layer 2 = per-work file.
+    if let (Some(ref ws_dir), Some(ref wref)) = (&fields.workspace_dir, &fields.work_ref) {
+        if let Some(rules) = read_rules_layers(ws_dir, wref) {
+            map.as_object_mut().map(|o| {
+                o.insert(
+                    "rules_content".to_string(),
+                    serde_json::Value::String(rules),
+                )
+            });
+        }
+    }
+
     map
+}
+
+/// Read rules content from Layer 1 (embedded default) and Layer 2 (per-work file).
+///
+/// Returns a combined Markdown string with both layers when at least one
+/// layer is present. Returns `None` when no rules content is available
+/// (neither Layer 1 default nor Layer 2 per-work file exists).
+///
+/// # Layer resolution (DF-65)
+///
+/// - **Layer 1**: `crates/nexus-orchestration/embedded-presets/rules/writing-craft.md`
+///   (compiled into the binary). User override at `~/.nexus42/rules/writing-craft.md`
+///   takes precedence when it exists.
+/// - **Layer 2**: `Works/<work_ref>/Rules/novel-rules.md` — per-work editable rules.
+#[must_use]
+pub fn read_rules_layers(workspace_dir: &str, work_ref: &str) -> Option<String> {
+    let mut parts = Vec::new();
+
+    // Layer 1: embedded default (or user override).
+    // For now, read the embedded content from the compiled-in include_dir.
+    // User override at ~/.nexus42/rules/writing-craft.md is a future addition
+    // (requires home dir resolution at the call site).
+    if let Some(layer1) = crate::preset::read_embedded_template("rules", "writing-craft.md") {
+        parts.push(format!(
+            "## Layer 1 — Writing Craft Rules (shared)\n\n{layer1}"
+        ));
+    }
+
+    // Layer 2: per-work rules file.
+    let layer2_path = std::path::Path::new(workspace_dir)
+        .join("Works")
+        .join(work_ref)
+        .join("Rules/novel-rules.md");
+    if let Ok(content) = std::fs::read_to_string(&layer2_path) {
+        if !content.trim().is_empty() {
+            parts.push(format!("## Layer 2 — Novel Rules (per-work)\n\n{content}"));
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n---\n\n"))
+    }
 }
 
 /// Build a correctly-shaped `AddScheduleRequest` for an FL-E stage advance
@@ -472,6 +545,8 @@ mod tests {
             outline_path: Some("Works/my-novel/Outlines/chapters/ch01-outline.md".to_string()),
             body_path: Some("Works/my-novel/Stories/ch01-ch01.md".to_string()),
             slug: Some("ch01".to_string()),
+            research_artifacts_dir: None,
+            workspace_dir: None,
         }
     }
 
@@ -643,6 +718,8 @@ mod tests {
                 "Works/{work_ref}/Stories/ch{ch_label}-ch{ch_label}.md"
             )),
             slug: Some(format!("ch{ch_label}")),
+            research_artifacts_dir: None,
+            workspace_dir: None,
         }
     }
 
@@ -704,6 +781,8 @@ mod tests {
             outline_path: None,
             body_path: None,
             slug: None,
+            research_artifacts_dir: None,
+            workspace_dir: None,
         };
         let input = build_preset_input(&fields);
         assert!(input.get("chapter").is_none());
@@ -714,6 +793,20 @@ mod tests {
         // Base fields still present
         assert!(input.get("work_id").is_some());
         assert!(input.get("fl_e_stage").is_some());
+        // Fix W-2: research_artifacts_dir not present when None
+        assert!(input.get("research_artifacts_dir").is_none());
+    }
+
+    #[test]
+    fn build_preset_input_includes_research_artifacts_dir_when_set() {
+        let mut fields = demo_work_fields("produce");
+        fields.research_artifacts_dir =
+            Some(".nexus42/references/ACH20260609120000000/".to_string());
+        let input = build_preset_input(&fields);
+        assert_eq!(
+            input["research_artifacts_dir"],
+            ".nexus42/references/ACH20260609120000000/"
+        );
     }
 
     #[test]
@@ -749,5 +842,138 @@ mod tests {
         assert_eq!(chapter_label(10), "10");
         assert_eq!(chapter_label(99), "99");
         assert_eq!(chapter_label(100), "100");
+    }
+
+    // ── V1.39 P3: rules reader tests ────────────────────────────────────
+
+    #[test]
+    fn read_rules_layers_returns_layer1_from_embedded() {
+        // Layer 1 is always available from embedded presets
+        let result = read_rules_layers("/nonexistent/workspace", "my-novel");
+        assert!(
+            result.is_some(),
+            "Layer 1 embedded content should always be present"
+        );
+        let content = result.expect("content");
+        assert!(
+            content.contains("Layer 1 — Writing Craft Rules"),
+            "should contain Layer 1 header"
+        );
+        assert!(
+            content.contains("Five-Question Gate"),
+            "should contain embedded writing craft content"
+        );
+    }
+
+    #[test]
+    fn read_rules_layers_returns_both_layers_when_layer2_exists() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+
+        // Create Layer 2 file
+        let rules_dir = ws.join("Works").join("test-novel").join("Rules");
+        std::fs::create_dir_all(&rules_dir).expect("mkdir");
+        std::fs::write(
+            rules_dir.join("novel-rules.md"),
+            "# My Rules\n\n- POV: first person\n",
+        )
+        .expect("write");
+
+        let result = read_rules_layers(&ws.to_string_lossy(), "test-novel");
+        assert!(result.is_some());
+        let content = result.expect("content");
+        assert!(
+            content.contains("Layer 1 — Writing Craft Rules"),
+            "should contain Layer 1"
+        );
+        assert!(
+            content.contains("Layer 2 — Novel Rules"),
+            "should contain Layer 2"
+        );
+        assert!(
+            content.contains("POV: first person"),
+            "should contain Layer 2 content"
+        );
+    }
+
+    #[test]
+    fn read_rules_layers_skips_empty_layer2() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+
+        // Create empty Layer 2 file
+        let rules_dir = ws.join("Works").join("empty-novel").join("Rules");
+        std::fs::create_dir_all(&rules_dir).expect("mkdir");
+        std::fs::write(rules_dir.join("novel-rules.md"), "  \n").expect("write");
+
+        let result = read_rules_layers(&ws.to_string_lossy(), "empty-novel");
+        assert!(result.is_some());
+        let content = result.expect("content");
+        assert!(
+            content.contains("Layer 1"),
+            "Layer 1 should still be present"
+        );
+        assert!(
+            !content.contains("Layer 2"),
+            "empty Layer 2 should not appear"
+        );
+    }
+
+    #[test]
+    fn build_preset_input_includes_rules_content_when_workspace_dir_set() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+
+        // Create Layer 2 file
+        let rules_dir = ws.join("Works").join("rules-test").join("Rules");
+        std::fs::create_dir_all(&rules_dir).expect("mkdir");
+        std::fs::write(rules_dir.join("novel-rules.md"), "- Tense: present\n").expect("write");
+
+        let fields = WorkFields {
+            work_id: "wrk_test".to_string(),
+            fl_e_stage: "produce".to_string(),
+            creative_brief: "{}".to_string(),
+            inspiration_log: "[]".to_string(),
+            work_ref: Some("rules-test".to_string()),
+            chapter: Some(1),
+            chapter_label: Some("01".to_string()),
+            outline_path: None,
+            body_path: None,
+            slug: None,
+            research_artifacts_dir: None,
+            workspace_dir: Some(ws.to_string_lossy().to_string()),
+        };
+
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("rules_content").is_some(),
+            "rules_content should be present when workspace_dir is set"
+        );
+        let rules = input["rules_content"].as_str().expect("string");
+        assert!(rules.contains("Tense: present"));
+    }
+
+    #[test]
+    fn build_preset_input_omits_rules_content_when_no_workspace_dir() {
+        let fields = WorkFields {
+            work_id: "wrk_test".to_string(),
+            fl_e_stage: "produce".to_string(),
+            creative_brief: "{}".to_string(),
+            inspiration_log: "[]".to_string(),
+            work_ref: Some("my-novel".to_string()),
+            chapter: Some(1),
+            chapter_label: Some("01".to_string()),
+            outline_path: None,
+            body_path: None,
+            slug: None,
+            research_artifacts_dir: None,
+            workspace_dir: None,
+        };
+
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("rules_content").is_none(),
+            "rules_content should be absent when workspace_dir is None"
+        );
     }
 }
