@@ -205,6 +205,17 @@ pub async fn create_work(
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
         .ok_or(NexusApiError::AuthRequired)?;
 
+    // T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
+    if req.world_id.is_none() {
+        return Err(NexusApiError::BadRequest {
+            code: "WORLD_ID_REQUIRED".to_string(),
+            message: "World binding is required for new Works (V1.40+).\n  \
+                      ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
+                      ↳ List existing Worlds: nexus42 creator world list"
+                .to_string(),
+        });
+    }
+
     let work_id = format!("wrk_{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
     let preset_id = req
@@ -551,8 +562,9 @@ async fn apply_non_stage_fields(
                 code: "INVALID_WORLD_ID".to_string(),
                 message: format!(
                     "world_id '{wid}' does not exist.\n  \
-                     ↳ Create a new world:  nexus42 creator world create --title \"...\"\n  \
-                     ↳ List existing worlds: nexus42 creator world list"
+                     ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
+                     ↳ List existing Worlds: nexus42 creator world list\n  \
+                     World binding is required for new Works (V1.40+)."
                 ),
             });
         }
@@ -1045,6 +1057,52 @@ mod tests_fix_d {
         assert_eq!(
             after.title, "Original Title",
             "Fix D: title should NOT be changed when stage advance fails"
+        );
+    }
+
+    // ── T0.4: mandatory world_id tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn create_work_without_world_id_returns_error() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let nexus_home = tmp.path().to_path_buf();
+        let db_path = tmp.path().join("state.db");
+
+        // Write a minimal config.toml with active creator
+        let config = toml::toml! {
+            active_creator_id = "ctr_test"
+            active_workspace_slug_by_creator = { ctr_test = "ws" }
+        };
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            toml::to_string(&config).unwrap(),
+        )
+        .expect("write config");
+
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = CreateWorkRequest {
+            title: "Test Novel".to_string(),
+            long_term_goal: "Write a novel".to_string(),
+            initial_idea: "An idea".to_string(),
+            world_id: None, // missing — should be rejected
+            story_ref: None,
+            primary_preset_id: None,
+            client_request_id: None,
+        };
+
+        let result = create_work(State(state), Json(req)).await;
+
+        assert!(result.is_err(), "POST /works without world_id must fail");
+        let err = result.unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("WORLD_ID_REQUIRED"),
+            "error code should be WORLD_ID_REQUIRED, got: {msg}"
+        );
+        assert!(
+            msg.contains("creator world create") || msg.contains("creator world list"),
+            "error should mention remediation, got: {msg}"
         );
     }
 }

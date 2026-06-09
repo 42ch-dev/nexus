@@ -47,10 +47,12 @@ struct ScaffoldInput {
     work_ref: String,
     /// Work title.
     title: String,
-    /// World ID if the Work is bound to an existing World (null for worldless).
+    /// V1.40 mandatory: either `world_id` or `create_world=true` must be set.
+    /// `world_id` binds to an existing World.
     world_id: Option<String>,
     /// When `true`, create a new World and bind its `world_id` to the Work.
     /// Mutually exclusive with `world_id` being set.
+    /// One of `world_id` or `create_world` is required for V1.40 new Works.
     create_world: Option<bool>,
     /// Title for the new World (used only when `create_world == true`).
     world_title: Option<String>,
@@ -276,6 +278,19 @@ impl Capability for NovelProjectScaffold {
         };
         let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
 
+        // ── T0.2: V1.40 mandatory world binding ──────────────────────
+        // Every new Work MUST have either an existing `world_id` or
+        // `create_world == true`. Worldless Works cannot be created in V1.40.
+        if !inp.create_world.unwrap_or(false) && inp.world_id.is_none() {
+            return Err(CapabilityError::InputInvalid(
+                "V1.40 requires world_id at Work creation. \
+                 Either provide world_id from 'nexus42 creator world list' \
+                 or set create_world=true with world_title \
+                 (equivalent to 'nexus42 creator world create --title \"...\")"
+                    .to_string(),
+            ));
+        }
+
         // ── T3: resolve world_id from create_world or existing binding ──
         // When `create_world == true`, invoke `nexus_local_db::create_world`
         // inside the same DB transaction as seed_chapters + patch_work to
@@ -352,8 +367,11 @@ impl Capability for NovelProjectScaffold {
 
         // ── T2b: README.md ─────────────────────────────────────────────
         if let Some(tmpl) = load_template("README.md") {
+            // V1.40: resolved_world_id is always Some (mandatory binding check above).
             let world_section = resolved_world_id.as_ref().map_or_else(
-                || "**Binding:** none (worldless)\n\nThis Work has no World binding. Inline world setting (if any) should be captured during the init grill-me and appended here.".to_string(),
+                // Legacy fallback — should not be reached for V1.40 new Works
+                // (the mandatory check above rejects world_id == None + create_world == false).
+                || "**Binding:** none (legacy V1.39 worldless Work)\n".to_string(),
                 |id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."),
             );
             // Description placeholder — collected during grill-me; left empty in V1.36.
@@ -758,7 +776,7 @@ mod tests {
             "work_id": "wrk_test123",
             "work_ref": "test-novel",
             "title": "Test Novel",
-            "world_id": null,
+            "world_id": "wld_test_world",
             "total_planned_chapters": 3,
         });
 
@@ -804,6 +822,7 @@ mod tests {
             "work_id": "wrk_idem",
             "work_ref": "idem-novel",
             "title": "Idem Novel",
+            "world_id": "wld_idem_world",
             "total_planned_chapters": 1,
         });
 
@@ -831,5 +850,78 @@ mod tests {
         let cap = NovelProjectScaffold::new();
         let result = cap.run(serde_json::json!({})).await;
         assert!(result.is_err());
+    }
+
+    // ── T0.2: mandatory world_id binding tests ────────────────────────
+
+    #[tokio::test]
+    async fn scaffold_rejects_worldless_creation_missing_world_id_and_create_world() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root,
+        };
+
+        // No world_id, no create_world → fail-closed
+        let input = serde_json::json!({
+            "creator_id": "creator_test",
+            "work_id": "wrk_worldless_reject",
+            "work_ref": "worldless-novel",
+            "title": "Worldless Reject",
+            "total_planned_chapters": 1,
+        });
+
+        let result = cap.run(input).await;
+        assert!(
+            result.is_err(),
+            "scaffold must reject creation without world_id or create_world"
+        );
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(
+            err_msg.contains("V1.40 requires world_id"),
+            "error should mention V1.40 mandatory binding, got: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("creator world list") || err_msg.contains("creator world create"),
+            "error should mention remediation commands, got: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn scaffold_succeeds_with_valid_world_id() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let cap = NovelProjectScaffold {
+            pool: None,
+            works_root: root.clone(),
+        };
+
+        let input = serde_json::json!({
+            "creator_id": "creator_test",
+            "work_id": "wrk_with_world",
+            "work_ref": "worldbound-novel",
+            "title": "Worldbound Novel",
+            "world_id": "wld_valid_world_123",
+            "total_planned_chapters": 2,
+        });
+
+        let out = cap
+            .run(input)
+            .await
+            .expect("scaffold with world_id should succeed (no pool → FK check skipped)");
+        let scaffold = out["scaffold_root"].as_str().expect("scaffold_root");
+        let scaffold_path = Path::new(scaffold);
+
+        assert!(scaffold_path.join("README.md").is_file());
+        let readme = std::fs::read_to_string(scaffold_path.join("README.md")).expect("read README");
+        assert!(
+            readme.contains("wld_valid_world_123"),
+            "README should contain the bound world_id"
+        );
+        assert!(
+            !readme.contains("worldless"),
+            "README should NOT contain worldless text for V1.40 bound Work"
+        );
     }
 }
