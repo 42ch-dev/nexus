@@ -815,7 +815,7 @@ mod tests {
         // The value parses as raw JSON but BlockType deserialization would fail.
         // nexus-kb validation layer relies on the typed enum.
         assert!(result.is_ok()); // raw JSON parses
-        // Actual BlockType deserialization of "unknown_type" would fail:
+                                 // Actual BlockType deserialization of "unknown_type" would fail:
         let bt_result = serde_json::from_value::<BlockType>(serde_json::json!("unknown_type"));
         assert!(bt_result.is_err());
     }
@@ -835,7 +835,12 @@ mod tests {
         assert!(store.insert_key_block(kb).await.is_ok());
 
         // organization → society
-        let kb = make_novel_block("wld_1", BlockType::Organization, "org_solar_cult", "society");
+        let kb = make_novel_block(
+            "wld_1",
+            BlockType::Organization,
+            "org_solar_cult",
+            "society",
+        );
         assert!(store.insert_key_block(kb).await.is_ok());
 
         // conflict → rules
@@ -872,7 +877,9 @@ mod tests {
         .unwrap();
 
         let err = store.insert_key_block(kb).await.unwrap_err();
-        assert!(matches!(err, KbStoreError::Validation(ref msg) if msg.contains("novel_category is required")));
+        assert!(
+            matches!(err, KbStoreError::Validation(ref msg) if msg.contains("novel_category is required"))
+        );
     }
 
     // AC3: (world_id, block_type, canonical_name) active uniqueness preserved on insert.
@@ -886,9 +893,7 @@ mod tests {
 
         let kb2 = make_novel_block("wld_1", BlockType::Character, "char_lin_xia", "character");
         let err = store.insert_key_block(kb2).await.unwrap_err();
-        assert!(
-            matches!(err, KbStoreError::Duplicate { ref name, .. } if name == "char_lin_xia")
-        );
+        assert!(matches!(err, KbStoreError::Duplicate { ref name, .. } if name == "char_lin_xia"));
     }
 
     // AC4: world_refs resolution — query by canonical_name after insert.
@@ -989,6 +994,8 @@ mod tests {
         .unwrap();
 
         let err = store.update_key_block(kb).await.unwrap_err();
-        assert!(matches!(err, KbStoreError::Validation(ref msg) if msg.contains("novel_category is required")));
+        assert!(
+            matches!(err, KbStoreError::Validation(ref msg) if msg.contains("novel_category is required"))
+        );
     }
 }

@@ -142,13 +142,15 @@ explicitly declares uniqueness.
 - KB graph insertion/query is a `World` concern and is coordinated with `nexus-narrative`.
 - `nexus-kb` MUST NOT be treated as generic Creator knowledge or User knowledge.
 
-#### 5.1.1 Narrative World KB item taxonomy (V1.40 grill-me locked)
+#### 5.1.1 Narrative World KB item taxonomy (V1.40 grill-me locked — **Shipped V1.40 P1**)
 
 The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2).
 
 **SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-kb` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
 
-**Novel profile semantics (body layer):** The V1.37 novel “seven categories” (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KeyBlock.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
+**Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KeyBlock.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
+
+**V1.40 P1 implementation:** `nexus-kb::validation` module provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. `InMemoryKbStore` (and by extension `SqliteKbStore`) runs validation on insert/update. See `crates/nexus-kb/src/validation.rs`.
 
 Recommended default mapping when ingesting or authoring novel items (P1 validation may require `novel_category` when `profile_hint=novel`):
 
@@ -178,7 +180,7 @@ Minimum common `body` shape for novel-profile items (V1.40 P1):
 }
 ```
 
-P1 adds validation helpers in `nexus-kb` for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums. No `schemas/` enum change in V1.40 unless a future ADR opts into a wire superset (out of V1.40 scope).
+P1 adds validation helpers in `nexus-kb` for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums. **Shipped in V1.40 P1** (`nexus-kb::validation`). No `schemas/` enum change in V1.40 unless a future ADR opts into a wire superset (out of V1.40 scope).
 
 ### 5.2 `nexus-knowledge` — User-scoped global knowledge
 
