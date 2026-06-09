@@ -89,9 +89,13 @@ pub fn mint_finding_id() -> String {
 
 /// Validate finding enum fields. Returns [`LocalDbError::ConstraintViolation`] on invalid values.
 ///
-/// R-V139P1-W-1: runtime match!() guard mirrors the CHECK constraints in
-/// migration `202606100002_findings_check_constraints.sql`. Catches invalid
-/// values before they reach the DB, providing actionable error messages.
+/// R-V139P1-W-1: Runtime validation is the **sole enforcement mechanism** for
+/// finding enum fields. `SQLite` does not support `ALTER TABLE ADD CONSTRAINT`
+/// for `CHECK` constraints on existing tables; adding `CHECK` to the original
+/// `CREATE TABLE` is not retroactively applicable. This function is called on
+/// both create and patch paths, providing the only guard against invalid enum
+/// values. Any non-`Rust` caller (future API, direct SQL) must be validated
+/// before reaching the DB.
 ///
 /// # Errors
 ///
@@ -569,7 +573,7 @@ pub async fn create_finding_from_review(
     pool: &SqlitePool,
     verdict: &ReviewVerdictFinding,
 ) -> Result<String, LocalDbError> {
-    let finding_id = format!("fnd_{}", uuid::Uuid::new_v4().simple());
+    let finding_id = mint_finding_id();
     let now = chrono::Utc::now().timestamp();
     let f = Finding {
         finding_id: finding_id.clone(),
@@ -590,7 +594,7 @@ pub async fn create_finding_from_review(
 
 #[cfg(test)]
 mod tests {
-    use sqlx::{FromRow, SqlitePool};
+    use sqlx::SqlitePool;
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
