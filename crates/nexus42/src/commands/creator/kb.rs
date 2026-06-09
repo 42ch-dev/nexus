@@ -823,6 +823,12 @@ async fn kb_queue_extract(
     let pool = crate::db::Schema::init(&db_path).await?;
 
     // Determine artifact locator fields from --chapter sugar.
+    // QC2 W-004: Validate chapter >= 1 to reject negative/zero values.
+    if let Some(ch) = chapter {
+        if ch < 1 {
+            return Err(CliError::Other("Chapter number must be >= 1".to_string()));
+        }
+    }
     let (source_kind, source_locator, profile_hint) = chapter.map_or((None, None, None), |ch| {
         let ch_label = format!("{ch:02}");
         // Best-effort: build a locator from chapter number.
