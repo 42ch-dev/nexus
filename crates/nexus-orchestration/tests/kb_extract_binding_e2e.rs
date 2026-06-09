@@ -3,6 +3,7 @@
 //! Validates: persist schedule → extract → P2 chapter block sees new item.
 //! Uses in-memory stores for KB and SQLite for job lifecycle.
 
+use nexus_contracts::BlockType;
 use nexus_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};
 use nexus_kb::key_block::KeyBlockBody;
 use nexus_kb::source_anchor::SourceAnchor;
@@ -11,7 +12,6 @@ use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
 use nexus_local_db::kb_store::seed;
 use nexus_local_db::{enqueue_extract_job_with_artifact, open_pool, run_migrations};
-use nexus_contracts::BlockType;
 
 async fn fresh_pool() -> (sqlx::SqlitePool, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -132,7 +132,16 @@ async fn test_worldless_work_skips_world_promotion() {
 async fn test_extract_idempotent_job() {
     let (pool, _dir) = fresh_pool().await;
     let creator_id = "ctr_idem";
-    seed::world(&pool, "wld_idem", creator_id, "Idem World", "idem", "private", "linear").await;
+    seed::world(
+        &pool,
+        "wld_idem",
+        creator_id,
+        "Idem World",
+        "idem",
+        "private",
+        "linear",
+    )
+    .await;
 
     // First enqueue
     let job1 = enqueue_extract_job_with_artifact(

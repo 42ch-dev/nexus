@@ -50,32 +50,22 @@ fn generate_job_id() -> String {
 }
 
 /// Column list shared across all SELECT queries (avoids drift).
-const JOB_COLUMNS: &str = r#"
-    job_id as "job_id!",
-    creator_id as "creator_id!",
-    workspace_id as "workspace_id!",
-    work_entry_id as "work_entry_id!",
-    world_id as "world_id!",
-    status as "status!",
-    error_text,
-    created_at as "created_at!",
-    started_at,
-    finished_at,
-    source_kind,
-    source_locator,
-    profile_hint,
-    work_id
-"#;
+///
+/// Uses plain column names (no `as "field!"` aliases) for runtime
+/// `sqlx::query_as` compatibility. Nullable fields are correctly
+/// mapped by `FromRow` derive.
+const JOB_COLUMNS: &str = "\
+    job_id, creator_id, workspace_id, work_entry_id, world_id, \
+    status, error_text, created_at, started_at, finished_at, \
+    source_kind, source_locator, profile_hint, work_id\
+";
 
 /// Fetch a single job by ID using the shared column list.
 ///
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
-async fn fetch_by_id(
-    pool: &SqlitePool,
-    job_id: &str,
-) -> Result<KbExtractJob, sqlx::Error> {
+async fn fetch_by_id(pool: &SqlitePool, job_id: &str) -> Result<KbExtractJob, sqlx::Error> {
     let query = format!("SELECT {JOB_COLUMNS} FROM kb_extract_jobs WHERE job_id = ?");
     // SAFETY: `JOB_COLUMNS` is a compile-time constant; `job_id` is a bind param.
     sqlx::query_as::<_, KbExtractJob>(&query)
@@ -184,8 +174,15 @@ pub async fn enqueue(
 
     // Insert new job with retry on PRIMARY KEY collision.
     insert_with_retry(
-        pool, creator_id, workspace_id, work_entry_id, world_id,
-        None, None, None, None,
+        pool,
+        creator_id,
+        workspace_id,
+        work_entry_id,
+        world_id,
+        None,
+        None,
+        None,
+        None,
     )
     .await
 }
@@ -227,8 +224,15 @@ pub fn enqueue_with_artifact<'a>(
         }
 
         insert_with_retry(
-            pool, creator_id, workspace_id, work_entry_id, world_id,
-            source_kind, source_locator, profile_hint, work_id,
+            pool,
+            creator_id,
+            workspace_id,
+            work_entry_id,
+            world_id,
+            source_kind,
+            source_locator,
+            profile_hint,
+            work_id,
         )
         .await
     })
