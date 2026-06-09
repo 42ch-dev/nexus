@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT world_id AS \"world_id!\" FROM narrative_worlds WHERE world_id = ?",
+  "query": "SELECT world_id AS \"world_id!\" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,11 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       true
     ]
   },
-  "hash": "3838ebbb0f7d9fdc517f9219c564341c616923282c6b9373835d6d1433e0f750"
+  "hash": "b7858dd9eb03de40fd2111de1e628446e5104fc2144f30cbbbbbf3ce6a010268"
 }

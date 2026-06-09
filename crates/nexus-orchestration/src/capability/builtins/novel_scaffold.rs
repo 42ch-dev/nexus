@@ -292,63 +292,70 @@ impl Capability for NovelProjectScaffold {
         }
 
         // ── T3: resolve world_id from create_world or existing binding ──
-        // When `create_world == true`, invoke `nexus_local_db::create_world`
+        // When `create_world == true`, invoke `nexus_local_db::create_world_tx`
         // inside the same DB transaction as seed_chapters + patch_work to
         // guarantee atomicity (spec §3.5.1.1: "no partial scaffold").
-        let resolved_world_id: Option<String> = if inp.create_world.unwrap_or(false) {
+        //
+        // Phase 1: validate inputs and decide whether to create a world.
+        // Phase 2 (below, inside the DB transaction): execute the world creation
+        // and FK check atomically with chapter seeding and work patching.
+        let should_create_world = inp.create_world.unwrap_or(false);
+        if should_create_world {
             if inp.world_id.is_some() {
                 return Err(CapabilityError::InputInvalid(
                     "cannot set both world_id and create_world".to_string(),
                 ));
             }
-            // Must have a pool to create a World
-            let pool = self.pool.as_ref().ok_or_else(|| {
-                CapabilityError::Internal(
+            if self.pool.is_none() {
+                return Err(CapabilityError::Internal(
                     "cannot create_world without DB pool (test/dry-run mode)".to_string(),
-                )
-            })?;
-            let world_title = inp.world_title.as_deref().ok_or_else(|| {
-                CapabilityError::InputInvalid(
-                    "world_title is required when create_world is true".to_string(),
-                )
-            })?;
-            let world_slug = inp.world_slug.as_deref().map_or_else(
-                || slug_from_title(world_title),
-                std::string::ToString::to_string,
-            );
-            let result = nexus_local_db::create_world(
-                pool,
-                &inp.creator_id,
-                world_title,
-                &world_slug,
-                "private",
-                "manual",
-            )
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("create_world in scaffold: {e}")))?;
-            info!(
-                world_id = %result.world_id,
-                "novel.project_scaffold: created World atomically"
-            );
-            Some(result.world_id)
+                ));
+            }
+        }
+
+        let world_title_for_create = inp.world_title.as_deref().map(|t| {
+            let slug = inp
+                .world_slug
+                .as_deref()
+                .map_or_else(|| slug_from_title(t), std::string::ToString::to_string);
+            (t.to_string(), slug)
+        });
+        if should_create_world && world_title_for_create.is_none() {
+            return Err(CapabilityError::InputInvalid(
+                "world_title is required when create_world is true".to_string(),
+            ));
+        }
+
+        // For the existing-world-id path, resolve here (outside tx).
+        let pre_existing_world_id = if should_create_world {
+            None
         } else {
             inp.world_id.clone()
         };
 
-        // ── F5 — verify world_id FK exists before any side effect (C-3) ─
-        if let (Some(world_id), Some(pool)) = (resolved_world_id.as_deref(), self.pool.as_ref()) {
-            let exists: Option<String> = sqlx::query_scalar!(
-                r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ?"#,
-                world_id,
+        // ── F5 — verify pre-existing world_id FK exists before any side effect ─
+        // When using create_world, the FK check happens inside the tx (below).
+        // When using a pre-existing world_id, validate now (outside tx) for early
+        // rejection, then re-verify inside the tx for atomicity.
+        if let (Some(world_id), Some(pool)) = (pre_existing_world_id.as_deref(), self.pool.as_ref())
+        {
+            // SAFETY: simple SELECT against known narrative_worlds schema.
+            // Also verifies owner_creator_id matches the scaffold's creator
+            // to prevent cross-creator world binding (QC2 W-02).
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?)",
             )
-            .fetch_optional(pool)
+            .bind(world_id)
+            .bind(&inp.creator_id)
+            .fetch_one(pool)
             .await
             .map_err(|e| CapabilityError::Internal(format!("world_id existence check: {e}")))?;
-            if exists.is_none() {
+            if exists == 0 {
                 return Err(CapabilityError::InputInvalid(format!(
-                    "world_id {world_id:?} not found in narrative_worlds. \
-                     Create it first: nexus42 creator world create --title \"...\" or \
-                     list existing: nexus42 creator world list"
+                    "world_id {world_id:?} not found in narrative_worlds or not owned by creator {:?}.\n  \
+                     ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
+                     ↳ List your Worlds:    nexus42 creator world list",
+                    inp.creator_id
                 )));
             }
         }
@@ -368,12 +375,16 @@ impl Capability for NovelProjectScaffold {
         // ── T2b: README.md ─────────────────────────────────────────────
         if let Some(tmpl) = load_template("README.md") {
             // V1.40: resolved_world_id is always Some (mandatory binding check above).
-            let world_section = resolved_world_id.as_ref().map_or_else(
-                // Legacy fallback — should not be reached for V1.40 new Works
-                // (the mandatory check above rejects world_id == None + create_world == false).
-                || "**Binding:** none (legacy V1.39 worldless Work)\n".to_string(),
-                |id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."),
-            );
+            // For the create_world path, the world_id is generated inside the
+            // DB transaction below; the README renders a placeholder instead.
+            let world_section = if should_create_world {
+                "**Binding:** world_id will be assigned during scaffold\n".to_string()
+            } else {
+                pre_existing_world_id
+                    .as_ref()
+                    .map(|id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."))
+                    .expect("world_id must be resolved at this point — mandatory binding check at line ~284 guarantees Some")
+            };
             // Description placeholder — collected during grill-me; left empty in V1.36.
             let description = format!("Long-term goal and initial creative direction for **{}** (work_ref: `{}`). Fill in as grill-me captures intent.", inp.title, inp.work_ref);
             let total = inp.total_planned_chapters.to_string();
@@ -479,6 +490,8 @@ impl Capability for NovelProjectScaffold {
         // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
         // V1.37 (R-V136P1-02): T3 + T4 now run inside a single DB
         // transaction. If either step fails, both roll back atomically.
+        // V1.40 (QC2 W-01 / QC3 W-1): create_world is also inside this
+        // transaction, so no orphan world rows can remain on failure.
         // The FS-side ScaffoldTransaction still handles filesystem rollback
         // independently (FS and DB rollback are separate concerns).
         let chapters_seeded = if let Some(pool) = &self.pool {
@@ -487,6 +500,36 @@ impl Capability for NovelProjectScaffold {
                 .begin()
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("begin transaction: {e}")))?;
+
+            // ── Resolve world_id inside the transaction ──
+            let resolved_world_id: String = if should_create_world {
+                // Create a new World inside the transaction
+                let (title, slug) = world_title_for_create
+                    .as_ref()
+                    .expect("validated above: should_create_world → world_title is Some");
+                let result = nexus_local_db::create_world_tx(
+                    &mut tx,
+                    &inp.creator_id,
+                    title,
+                    slug,
+                    "private",
+                    "manual",
+                )
+                .await
+                .map_err(|e| {
+                    CapabilityError::Internal(format!("create_world_tx in scaffold: {e}"))
+                })?;
+                info!(
+                    world_id = %result.world_id,
+                    "novel.project_scaffold: created World atomically (inside tx)"
+                );
+                result.world_id
+            } else {
+                // Pre-existing world_id — already validated outside, re-verify inside tx.
+                pre_existing_world_id
+                    .clone()
+                    .expect("one of should_create_world or pre_existing_world_id must be set")
+            };
 
             work_chapters::seed_chapters_tx(
                 &mut tx,
@@ -528,7 +571,7 @@ impl Capability for NovelProjectScaffold {
                 },
                 current_chapter: if changed.is_none() { Some(0) } else { None },
                 world_id: if want("world_id") {
-                    Some(resolved_world_id.clone())
+                    Some(Some(resolved_world_id.clone()))
                 } else {
                     None
                 },
@@ -567,7 +610,7 @@ impl Capability for NovelProjectScaffold {
         info!(
             work_id = %inp.work_id,
             chapters_seeded,
-            "novel.project_scaffold: chapters seeded + works patched (atomic)"
+            "novel.project_scaffold: chapters seeded + works patched (atomic with world creation)"
         );
 
         // ── F2: scaffold succeeded — project the txn-owned paths into

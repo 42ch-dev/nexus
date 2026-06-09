@@ -71,7 +71,8 @@ pub use world_stories::{
 
 // Re-export narrative_write types
 pub use narrative_write::{
-    append_event, create_world, AppendEventResult, CreateWorldResult, NarrativeWriteError,
+    append_event, create_world, create_world_tx, AppendEventResult, CreateWorldResult,
+    NarrativeWriteError,
 };
 
 // Re-export knowledge_store types
