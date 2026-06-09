@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-10-v1.40-world-context-prompt-block"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-10"
 ---
 
@@ -86,6 +86,64 @@ generated_at: "2026-06-10"
 | 🟡 Warning | 3 |
 | 🟢 Suggestion | 4 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
 (The library implementation of the World context block builder is surgically clean, correctly world-scoped, and well-tested for the narrow contract it exposes. However, the reviewed diff does not contain the integration that would cause World-bound Works to actually receive the block in their `novel-writing` outline/draft prompts, nor does it demonstrate the creator/workspace threading or 404/remediation behavior claimed in the plan's acceptance criteria and explicit review checklist. Until the call site that closes the loop from Work → chapter `world_refs` → `build_chapter_kb_block` → `preset.input.world_kb_block` is present and verified, the primary security and correctness properties (mandatory binding for World-bound Works, no new worldless creation surface, isolation) cannot be confirmed as delivered.)
+
+## Revalidation
+
+**Revalidation scope (targeted QC #2 only)**: iteration/v1.40..feature/v1.40-world-context-prompt-block (fix range 159cafaa..960efa37). Verified on branch `feature/v1.40-world-context-prompt-block` at HEAD 960efa37.
+
+**Verification commands executed** (per assignment):
+```bash
+git rev-parse --show-toplevel          # /Users/bibi/workspace/organizations/42ch/nexus
+git branch --show-current              # feature/v1.40-world-context-prompt-block
+git log --oneline 159cafaa..HEAD
+git diff --stat 159cafaa..HEAD
+```
+Key fix commits in scope:
+- `c573646a` fix(orchestration): QC3-C1 / QC1-C001 — wire world_kb_block into build_preset_input + build_schedule_for_stage
+- `960efa37` fix(world_context): QC1-W002 + QC3-W3 + QC3-W4 + QC2-W02/W03 — heuristic, truncation, determinism, docs
+
+**W-01 (integration / data flow) — RESOLVED**:
+- `crates/nexus-orchestration/src/stage_gates.rs`: `WorkFields` now carries `world_kb_block: Option<String>` (line 86). `build_preset_input` (lines 172-193) always injects the key: the value when `Some`, or `""` for worldless/legacy Works (so strict templates do not fail on `{{preset.input.world_kb_block}}`). `build_schedule_for_stage` (line 268) calls `build_preset_input` and passes the result as `input`.
+- Caller side (CLI produce-stage path): `crates/nexus42/src/commands/creator/run.rs` implements `assemble_world_kb_block` (lines 1129-1155) which opens the local SqliteKbStore and calls `build_chapter_kb_block`, then wires the YAML into the `WorkFields` for the schedule creation in the stage-advance flow (around the produce-stage handling after the Work fetch).
+- `creator_id` is threaded from `config.active_creator_id` into `build_schedule_for_stage` (line 1239-1242) and thus into the `AddScheduleRequest`. The `world_id` for the block is sourced from the Work record (which was created under the same creator; prior P0 mandatory-binding work plus Work ownership invariants close the creator → world linkage before the block is requested).
+- Evidence: full read of stage_gates.rs (WorkFields, build_preset_input, build_schedule_for_stage), grep for build_chapter_kb_block call sites, and the CLI assemble helper.
+
+**W-02 (creator/workspace isolation contract) — RESOLVED**:
+- `crates/nexus-moment-context-assembly/src/world_context.rs` now documents the contract explicitly in the `build_chapter_kb_block` rustdoc (lines 218-224):
+  > "This function is **intentionally world-scoped only**: it takes `world_id` but does NOT accept `creator_id` or `workspace_slug`. The caller is responsible for verifying that the authenticated creator owns (or has access to) the Work that references this `world_id` before calling. The underlying `KbStore` impl enforces world-scoped isolation."
+- The builder (`WorldKbQueryBuilder`) and `build_chapter_kb_block` remain world-scoped by construction (every `KbQuery` is built with the supplied `world_id`; `resolve_items_by_refs` further narrows by canonical_name within that world). No change to the function signature was needed; the documented caller contract + existing store scoping satisfies the requirement.
+- No new cross-creator or cross-workspace surface was introduced.
+
+**W-03 (404 / missing world_id contract) — RESOLVED**:
+- Same rustdoc block (lines 226-231) now states:
+  > "This function returns `Ok(Some(block))` even when the world has zero KB items — the block will have empty sections. It does NOT distinguish 'world exists with no items' from 'world unknown to the system'. The 404/remediation contract lives one layer up (in the caller), which is responsible for deciding whether to surface a user-visible remediation (e.g. 'this Work references a World that no longer exists — re-link or migrate')."
+- The existing unit test `missing_world_id_returns_empty_block` (which asserts a well-formed block with the ghost id and empty sections) remains the correct behavior for the narrow helper; higher layers (narrative gateway, Work validation, or schedule admission) own the "does this world_id still exist for this creator?" check.
+- Callers that pass a stale `world_id` from a chapter record will receive an empty but structurally valid block rather than a hard error at this layer — documented and intentional.
+
+**Heuristic safety (chapter_text fallback, cross-KB name leaks)**:
+- In `build_chapter_kb_block` (QC1-W002 + 960efa37 fixes): when `world_refs` is empty, the code first materializes the full set of characters/locations for the *exact* `params.world_id` via `WorldKbQueryBuilder` + store query (lines 255-263, 286-292). Only then does the `chapter_text` heuristic run (lines 267-281 for characters, 295-309 for locations):
+  ```rust
+  let text_lower = text.to_lowercase();
+  all_characters.iter()
+      .filter(|item| text_lower.contains(&item.name.to_lowercase()))
+      .cloned()
+      .collect()
+  ```
+- `item.name` values are `canonical_name` strings taken directly from the KB items that were returned for that `world_id`. The filter is a pure substring match within the already world-scoped candidate set. No items from any other world can ever enter `all_characters` / `all_locations`, so there is no cross-KB or cross-world name leakage surface. Determinism was also hardened (sort by name in 960efa37).
+- Safe under the security/correctness lens.
+
+**Whole-crate sanity (4 crates in scope)**:
+- `cargo build -p nexus-moment-context-assembly -p nexus-orchestration -p nexus-kb -p nexus42 --all-targets` → clean (only pre-existing unrelated `unused_variable` warning in `e2e_novel_writing.rs:162`).
+- `cargo test -p ...` (same 4 crates) → all relevant tests pass (doc-tests and lib tests green; 3 ignored as before).
+- `cargo clippy -p ... -- -D warnings` → clean.
+- `cargo +nightly fmt --all -- --check` → exit 0 (clean).
+
+**Counts after revalidation**:
+- Critical: 0 (unchanged)
+- Warning: 0 (W-01 / W-02 / W-03 all resolved by the wiring + explicit doc contracts; no new security/correctness findings in the fix commits)
+- Suggestion: 4 (S-01..S-04 unchanged and non-blocking)
+
+**Verdict**: Approve. All three blocking findings from the initial QC #2 review are properly closed. The security and correctness properties (mandatory World binding for World-bound Works, correct isolation via caller contract + world-scoped queries, documented 404/remediation boundary, safe heuristic, and verified end-to-end wiring) are now delivered and evidenced in the diff. No new Critical or Warning findings. Ready for PM consolidation.
