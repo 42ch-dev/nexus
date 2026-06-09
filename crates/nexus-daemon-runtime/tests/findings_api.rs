@@ -30,10 +30,14 @@ use nexus_daemon_runtime::workspace::WorkspaceState;
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    test_utils::seed_test_creator_and_world(state.pool()).await;
     (state, tmp)
 }
 
 /// Create a Work via handler, return its work_id.
+///
+/// Uses the pre-seeded test world (seeded by `seed_test_creator_and_world`
+/// in `handler_state`).
 async fn create_work(state: &WorkspaceState) -> String {
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -41,7 +45,7 @@ async fn create_work(state: &WorkspaceState) -> String {
             title: "Test Novel".into(),
             long_term_goal: "Finish a short story".into(),
             initial_idea: "A detective story".into(),
-            world_id: None,
+            world_id: Some("wld_test_world".to_string()),
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
