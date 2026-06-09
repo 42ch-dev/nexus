@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-10-v1.40-world-create-and-validation"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-09"
 ---
 
@@ -86,3 +86,67 @@ generated_at: "2026-06-09"
 **Architecture coherence assessment**: The mandatory binding refactor is well-structured and preserves layering (CLI → orchestration → local-db). The spec amendment (`464d0fba`) correctly changes `world_binding` from `optional` to `required` and removes the "stay worldless" creation option. The legacy V1.39 worldless path is properly isolated in `world_refs_validate.rs` (`is_world_bound: false` branch) and `novel_scaffold.rs` (mandatory check before any side effects). The `creator world` CLI surface matches spec §6.2G. No cross-crate reach-around detected. The deferred tracker DF-63 row is consistent with mandatory binding semantics.
 
 **Concerns on the spec amendment + adaptation**: The implementation faithfully follows the amended spec. The only gap is the HTTP status code inconsistency (W-1) and the broken pre-existing tests (C-1). The dead code in W-2 is minor but should be cleaned for maintainability.
+
+## Revalidation
+
+### Fix context
+This revalidation checks the fix commit `d3a18d14` against the three blocking findings from the initial QC #1 review:
+
+| Finding | Description | Status |
+|---------|-------------|--------|
+| C-1 | 7 `findings_api.rs` tests broken by mandatory `world_id` | → verified resolved |
+| W-1 | HTTP 400 vs 422 inconsistency for `world_id` gate failures | → verified resolved |
+| W-2 | Dead `map_or_else` fallback in `novel_scaffold.rs` README rendering | → verified resolved |
+
+### Diff since previous review
+```
+d3a18d14 fix(world): address QC1/QC2/QC3 findings — world_id validation, atomicity, 422 status
+```
+
+9 files changed, 521 insertions, 77 deletions across `errors.rs`, `works.rs`, `test_utils.rs`, `findings_api.rs`, `works_api.rs`, `lib.rs`, `narrative_write.rs`, `novel_scaffold.rs`, and one migration JSON.
+
+### Re-verification
+
+**C-1 — `findings_api.rs` tests:**
+```
+$ cargo test -p nexus-daemon-runtime --test findings_api
+running 7 tests
+test findings_list_filter_by_work_id ... ok
+test findings_crud_create_and_get ... ok
+test findings_from_review_endpoint_auto_create ... ok
+test findings_delete ... ok
+test findings_update_and_close_transition ... ok
+test findings_routing_hints_all_executors ... ok
+test findings_creator_isolation_cross_creator_404 ... ok
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+✅ All 7 tests pass. The `create_work()` helper now seeds a valid test world via `seed_test_creator_and_world()`.
+
+**W-1 — HTTP 422 for world_id errors:**
+`crates/nexus-daemon-runtime/src/api/errors.rs` lines 156–161:
+```rust
+// V1.40: WORLD_ID_REQUIRED and INVALID_WORLD_ID are semantic
+// validation errors → 422 Unprocessable Entity (aligned with
+// preset_gates_failed pattern per spec §3.5.1.2).
+"WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
+    StatusCode::UNPROCESSABLE_ENTITY
+}
+```
+The `error_code()` method (lines 198–201) also surfaces these codes as-is. `works_api.rs` tests all pass (29/29). ✅ Consistent 422 for all world-binding validation errors.
+
+**W-2 — Dead code removed:**
+`novel_scaffold.rs` line 386:
+```rust
+.expect("world_id must be resolved at this point — mandatory binding check at line ~284 guarantees Some")
+```
+The `map_or_else` with unreachable "legacy V1.39 worldless Work" fallback is gone. Replaced with `.expect()` — clean, intentional, no dead code. ✅
+
+**Whole-crate sanity:**
+- `cargo build -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -p nexus-orchestration --all-targets` → success (1 pre-existing warning: unused `ctx` in `e2e_novel_writing.rs`)
+- `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -p nexus-orchestration -- -D warnings` → success (0 warnings)
+- `cargo +nightly fmt --all -- --check` → `fmt_exit=0`
+
+### Updated verdict
+All three blocking findings (C-1, W-1, W-2) are properly resolved. No new architecture-level findings. Build, clippy, and fmt all clean.
+
+**Verdict**: Approve
