@@ -79,6 +79,11 @@ pub struct WorkFields {
     /// V1.39 P3 (DF-65): workspace directory for reading rules files.
     /// When set, `build_preset_input` reads Layer 1 + Layer 2 rules.
     pub workspace_dir: Option<String>,
+    /// V1.40 P2: pre-assembled World KB context block (YAML string).
+    /// Populated by the caller (CLI/daemon) via `build_chapter_kb_block`.
+    /// When `None`, the template guard `{{#if world_kb_block}}` correctly omits
+    /// the block — legacy V1.39 worldless Works receive no World context.
+    pub world_kb_block: Option<String>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -162,6 +167,29 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
                 )
             });
         }
+    }
+
+    // V1.40 P2 (QC3 C-1 fix): inject the pre-assembled World KB block.
+    // The caller (CLI/daemon) is responsible for building the block via
+    // `build_chapter_kb_block` and passing it here. When `None` (worldless
+    // Works or legacy V1.39), the template guard `{{#if world_kb_block}}`
+    // correctly omits the section.
+    if let Some(ref wkb) = fields.world_kb_block {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "world_kb_block".to_string(),
+                serde_json::Value::String(wkb.clone()),
+            )
+        });
+    } else {
+        // Ensure the key is present as empty string so strict-mode template
+        // rendering does not fail on `{{preset.input.world_kb_block}}`.
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "world_kb_block".to_string(),
+                serde_json::Value::String(String::new()),
+            )
+        });
     }
 
     map
@@ -550,6 +578,7 @@ mod tests {
             slug: Some("ch01".to_string()),
             research_artifacts_dir: None,
             workspace_dir: None,
+            world_kb_block: None,
         }
     }
 
@@ -723,6 +752,7 @@ mod tests {
             slug: Some(format!("ch{ch_label}")),
             research_artifacts_dir: None,
             workspace_dir: None,
+            world_kb_block: None,
         }
     }
 
@@ -786,6 +816,7 @@ mod tests {
             slug: None,
             research_artifacts_dir: None,
             workspace_dir: None,
+            world_kb_block: None,
         };
         let input = build_preset_input(&fields);
         assert!(input.get("chapter").is_none());
@@ -798,6 +829,8 @@ mod tests {
         assert!(input.get("fl_e_stage").is_some());
         // Fix W-2: research_artifacts_dir not present when None
         assert!(input.get("research_artifacts_dir").is_none());
+        // V1.40 P2: world_kb_block defaults to empty string for worldless Works
+        assert_eq!(input["world_kb_block"], "");
     }
 
     #[test]
@@ -945,6 +978,7 @@ mod tests {
             slug: None,
             research_artifacts_dir: None,
             workspace_dir: Some(ws.to_string_lossy().to_string()),
+            world_kb_block: None,
         };
 
         let input = build_preset_input(&fields);
@@ -971,6 +1005,7 @@ mod tests {
             slug: None,
             research_artifacts_dir: None,
             workspace_dir: None,
+            world_kb_block: None,
         };
 
         let input = build_preset_input(&fields);
@@ -978,5 +1013,31 @@ mod tests {
             input.get("rules_content").is_none(),
             "rules_content should be absent when workspace_dir is None"
         );
+    }
+
+    // ── V1.40 P2: world_kb_block preset input tests ─────────────────────────
+
+    #[test]
+    fn build_preset_input_includes_world_kb_block_when_set() {
+        let mut fields = demo_work_fields("produce");
+        fields.world_kb_block = Some("world_id: wld_1\nworld_name: Test\n".to_string());
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("world_kb_block").is_some(),
+            "world_kb_block should be present when set"
+        );
+        assert_eq!(
+            input["world_kb_block"],
+            "world_id: wld_1\nworld_name: Test\n"
+        );
+    }
+
+    #[test]
+    fn build_preset_input_world_kb_block_defaults_to_empty_for_worldless() {
+        let fields = demo_work_fields("produce");
+        let input = build_preset_input(&fields);
+        // When world_kb_block is None (worldless), the key is still present
+        // as empty string so strict-mode templates don't fail.
+        assert_eq!(input["world_kb_block"], "");
     }
 }
