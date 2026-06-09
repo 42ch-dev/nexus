@@ -1,4 +1,4 @@
-//! Master-decision timeout watcher (V1.39 P4 T1).
+//! Master-decision timeout watcher (V1.39 P4 T1 + T4).
 //!
 //! Periodically scans `findings` for open rows older than a threshold
 //! (default 96h) and emits a structured `tracing::warn!` per stale row so
@@ -13,13 +13,18 @@
 //!   overridable via env vars so the hermetic integration test in
 //!   `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs` can
 //!   drive a sub-second cadence with a tiny threshold.
-//! - The watcher only **reports** stale findings. Auto-scheduling
-//!   `review-master` is gated by the per-Work opt-in flag introduced in
-//!   T4 and is performed elsewhere (see T1 follow-up in P4).
+//! - T4 opt-in auto-enqueue: when a stale finding's Work has
+//!   `auto_review_master_on_timeout = true`, the watcher enqueues a
+//!   `novel-review-master` schedule via
+//!   [`nexus_orchestration::auto_chain::enqueue_review_master_schedule`].
+//!   The default flag value is `false`, so no schedule is ever created
+//!   without explicit opt-in (AC3).
 //!
 //! This module deliberately depends only on `nexus_local_db::findings`
-//! T2 DAOs (`list_all_stale_open_findings`) — it does **not** add any new
-//! SQL queries, so no `.sqlx/` regeneration is needed for this task.
+//! T2 DAOs (`list_all_stale_open_findings`), `nexus_local_db::works::get_work`,
+//! and `nexus_orchestration::auto_chain::enqueue_review_master_schedule` — it
+//! does **not** add any new SQL queries, so no `.sqlx/` regeneration is
+//! needed for this task.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -130,6 +135,11 @@ pub fn spawn_stale_findings_watcher(
 /// Perform a single sweep. Public for the hermetic integration test
 /// (V1.39 P4 T5) which drives the sweep deterministically without
 /// running the spawned interval loop.
+///
+/// For each stale finding, if the owning Work has
+/// `auto_review_master_on_timeout = true`, enqueue a `novel-review-master`
+/// schedule (T4 opt-in). The default flag value is `false` so no schedule
+/// is ever created without explicit opt-in (AC3).
 pub async fn run_one_sweep(pool: &SqlitePool, threshold_seconds: i64) {
     let now_epoch = current_epoch_seconds();
 
@@ -158,6 +168,8 @@ pub async fn run_one_sweep(pool: &SqlitePool, threshold_seconds: i64) {
                     age_seconds = row.age_seconds,
                     "stale open finding past master-decision timeout"
                 );
+
+                maybe_enqueue_review_master(pool, &row.creator_id, &row.work_id).await;
             }
         }
         Err(e) => {
@@ -168,6 +180,68 @@ pub async fn run_one_sweep(pool: &SqlitePool, threshold_seconds: i64) {
                 error = %e,
                 threshold_seconds,
                 "stale-findings sweep: database query failed"
+            );
+        }
+    }
+}
+
+/// Look up the Work for a stale finding and, if it has opted in via
+/// `auto_review_master_on_timeout = true`, enqueue a `novel-review-master`
+/// schedule (V1.39 P4 T4, AC3).
+///
+/// All errors are logged and swallowed — auto-enqueue is best-effort and
+/// must never crash the sweep loop. A missing Work, a Work with the flag
+/// disabled, and a successful enqueue all return silently from the caller's
+/// perspective; observability is via `tracing` only.
+async fn maybe_enqueue_review_master(pool: &SqlitePool, creator_id: &str, work_id: &str) {
+    let work = match nexus_local_db::works::get_work(pool, creator_id, work_id).await {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            tracing::warn!(
+                creator_id,
+                work_id,
+                "stale-findings: work not found for stale finding (skipping auto-enqueue)"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                creator_id,
+                work_id,
+                "stale-findings: failed to read work for auto-enqueue (skipping)"
+            );
+            return;
+        }
+    };
+
+    if !work.auto_review_master_on_timeout {
+        // Default branch — no opt-in, no schedule. AC3.
+        tracing::debug!(
+            creator_id,
+            work_id,
+            "stale-findings: work has not opted in to auto-review-master (no schedule)"
+        );
+        return;
+    }
+
+    match nexus_orchestration::auto_chain::enqueue_review_master_schedule(pool, creator_id, work_id)
+        .await
+    {
+        Ok(schedule_id) => {
+            tracing::info!(
+                creator_id,
+                work_id,
+                schedule_id = %schedule_id,
+                "stale-findings: enqueued novel-review-master (opt-in)"
+            );
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                creator_id,
+                work_id,
+                "stale-findings: failed to enqueue novel-review-master"
             );
         }
     }

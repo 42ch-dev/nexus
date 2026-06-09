@@ -436,6 +436,7 @@ impl Capability for NovelProjectScaffold {
                 auto_chain_enabled: None,
                 driver_schedule_id: None,
                 auto_chain_interrupted: None,
+                auto_review_master_on_timeout: None,
             };
             works::patch_work_tx(&mut tx, &inp.creator_id, &inp.work_id, &patch, &now)
                 .await

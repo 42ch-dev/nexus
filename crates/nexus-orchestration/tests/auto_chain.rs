@@ -45,6 +45,7 @@ fn test_work(work_id: &str, chapter: i32, total: i32, auto_chain: bool) -> WorkR
         // NOTE: driver_schedule_id is always NULL in create_work; set via set_driver.
         driver_schedule_id: None,
         auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
     }
 }
 

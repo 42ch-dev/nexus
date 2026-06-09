@@ -14,7 +14,7 @@ pub const WORKS_COLUMNS: &str = "\
     initial_idea, creative_brief, intake_status, world_id, story_ref, \
     inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, \
     current_stage, stage_status, work_profile, work_ref, total_planned_chapters, current_chapter, \
-    auto_chain_enabled, driver_schedule_id, auto_chain_interrupted";
+    auto_chain_enabled, driver_schedule_id, auto_chain_interrupted, auto_review_master_on_timeout";
 
 /// Map a sqlx row to [`WorkRecord`].
 #[must_use]
@@ -45,6 +45,7 @@ pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
         auto_chain_enabled: r.get("auto_chain_enabled"),
         driver_schedule_id: r.get("driver_schedule_id"),
         auto_chain_interrupted: r.get("auto_chain_interrupted"),
+        auto_review_master_on_timeout: r.get("auto_review_master_on_timeout"),
     }
 }
 
@@ -101,6 +102,10 @@ pub struct WorkRecord {
     pub driver_schedule_id: Option<String>,
     /// Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
     pub auto_chain_interrupted: bool,
+    /// Opt-in: when true the stale-findings watcher auto-enqueues
+    /// `novel-review-master` for this Work after the timeout threshold
+    /// (V1.39 P4 T4, default false).
+    pub auto_review_master_on_timeout: bool,
 }
 
 /// Inspiration log entry — `{at, note}`.
@@ -164,6 +169,8 @@ pub struct WorkPatch {
     pub driver_schedule_id: Option<Option<String>>,
     /// New `auto_chain_interrupted` (V1.39 §5.4).
     pub auto_chain_interrupted: Option<bool>,
+    /// New `auto_review_master_on_timeout` opt-in flag (V1.39 P4 T4).
+    pub auto_review_master_on_timeout: Option<bool>,
 }
 
 /// Create a new Work (simple, non-transactional).
@@ -182,8 +189,9 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
          primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
          work_profile, work_ref, total_planned_chapters, current_chapter,
-         auto_chain_enabled, driver_schedule_id, auto_chain_interrupted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+         auto_chain_enabled, driver_schedule_id, auto_chain_interrupted,
+         auto_review_master_on_timeout)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -209,6 +217,7 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
     .bind(record.current_chapter)
     .bind(record.auto_chain_enabled)
     .bind(record.auto_chain_interrupted)
+    .bind(record.auto_review_master_on_timeout)
     .execute(pool)
     .await?;
     Ok(())
@@ -226,8 +235,9 @@ async fn insert_work_tx(
          initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
          primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
          work_profile, work_ref, total_planned_chapters, current_chapter,
-         auto_chain_enabled, driver_schedule_id, auto_chain_interrupted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+         auto_chain_enabled, driver_schedule_id, auto_chain_interrupted,
+         auto_review_master_on_timeout)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -253,6 +263,7 @@ async fn insert_work_tx(
     .bind(record.current_chapter)
     .bind(record.auto_chain_enabled)
     .bind(record.auto_chain_interrupted)
+    .bind(record.auto_review_master_on_timeout)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -640,6 +651,9 @@ pub async fn patch_work(
     if patch.auto_chain_interrupted.is_some() {
         set_clauses.push("auto_chain_interrupted = ?");
     }
+    if patch.auto_review_master_on_timeout.is_some() {
+        set_clauses.push("auto_review_master_on_timeout = ?");
+    }
 
     if set_clauses.is_empty() {
         // Nothing to update — just return current record.
@@ -734,6 +748,9 @@ pub async fn patch_work(
     if let Some(v) = patch.auto_chain_interrupted {
         query = query.bind(v);
     }
+    if let Some(v) = patch.auto_review_master_on_timeout {
+        query = query.bind(v);
+    }
 
     query = query.bind(now).bind(work_id).bind(creator_id);
 
@@ -826,6 +843,9 @@ pub async fn patch_work_tx(
     if patch.auto_chain_interrupted.is_some() {
         set_clauses.push("auto_chain_interrupted = ?");
     }
+    if patch.auto_review_master_on_timeout.is_some() {
+        set_clauses.push("auto_review_master_on_timeout = ?");
+    }
 
     if set_clauses.is_empty() {
         return Ok(false);
@@ -914,6 +934,9 @@ pub async fn patch_work_tx(
         }
     }
     if let Some(v) = patch.auto_chain_interrupted {
+        query = query.bind(v);
+    }
+    if let Some(v) = patch.auto_review_master_on_timeout {
         query = query.bind(v);
     }
 
@@ -1202,6 +1225,7 @@ mod tests {
             auto_chain_enabled: true,
             driver_schedule_id: None,
             auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
         }
     }
 
