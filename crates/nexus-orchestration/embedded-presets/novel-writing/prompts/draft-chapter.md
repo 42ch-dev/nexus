@@ -9,6 +9,7 @@ vars:
   outline_path: { type: string, required: true }
   body_path: { type: string, required: true }
   slug: { type: string, default: "ch01" }
+  world_kb_block: { type: string, default: "" }
 max_tokens: 8000
 ---
 
@@ -23,6 +24,16 @@ about **{{preset.input.topic}}** with a **{{preset.input.vibe}}** vibe.
 `{{body_path}}`
 
 Create the `Stories/` directory if it does not exist.
+
+{{#if world_kb_block}}
+## World Context
+
+The following World context block provides characters, locations, and active rules from the World KB. Stay consistent with these when writing:
+
+```yaml
+{{world_kb_block}}
+```
+{{/if}}
 
 ## Frontmatter (REQUIRED)
 
