@@ -1,0 +1,11 @@
+-- V1.39 P4 T4: Add per-Work opt-in flag for the master-decision timeout watcher.
+--
+-- When auto_review_master_on_timeout = 1 (true), the stale-findings watcher
+-- (crates/nexus-daemon-runtime/src/stale_findings_watcher.rs) will enqueue a
+-- novel-review-master schedule for the Work after the threshold elapses
+-- (default 96h, see NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS).
+--
+-- Default is 0 (false) — the watcher never auto-schedules unless the
+-- creator explicitly opts in per-Work. This preserves the safety invariant
+-- documented in AC3: "default no auto-schedule; banner-only behavior".
+ALTER TABLE works ADD COLUMN auto_review_master_on_timeout INTEGER NOT NULL DEFAULT 0;

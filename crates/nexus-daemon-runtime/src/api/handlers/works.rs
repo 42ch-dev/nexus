@@ -70,6 +70,9 @@ pub struct WorkApiDto {
     pub driver_schedule_id: Option<String>,
     /// Set true when auto-chain driver is interrupted externally (V1.39 §5.4).
     pub auto_chain_interrupted: bool,
+    /// Opt-in: stale-findings watcher auto-enqueues `novel-review-master`
+    /// for this Work after the timeout threshold (V1.39 P4 T4, default false).
+    pub auto_review_master_on_timeout: bool,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -110,6 +113,7 @@ impl From<WorkRecord> for WorkApiDto {
             auto_chain_enabled: r.auto_chain_enabled,
             driver_schedule_id: r.driver_schedule_id,
             auto_chain_interrupted: r.auto_chain_interrupted,
+            auto_review_master_on_timeout: r.auto_review_master_on_timeout,
         }
     }
 }
@@ -174,6 +178,9 @@ pub struct PatchWorkRequest {
     /// V1.34 FL-E: bypass stage-order gates (equivalent to CLI `--force`).
     #[serde(default)]
     pub force: Option<bool>,
+    /// V1.39 P4 T4: opt-in flag — when true the stale-findings watcher
+    /// auto-enqueues `novel-review-master` for this Work past the timeout.
+    pub auto_review_master_on_timeout: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +238,7 @@ pub async fn create_work(
         auto_chain_enabled: true,
         driver_schedule_id: None,
         auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -497,7 +505,8 @@ async fn apply_non_stage_fields(
         || req.status.is_some()
         || req.world_id.is_some()
         || req.story_ref.is_some()
-        || req.primary_preset_id.is_some();
+        || req.primary_preset_id.is_some()
+        || req.auto_review_master_on_timeout.is_some();
 
     if !has_non_stage {
         return Ok(());
@@ -522,6 +531,7 @@ async fn apply_non_stage_fields(
         auto_chain_enabled: None,
         driver_schedule_id: None,
         auto_chain_interrupted: None,
+        auto_review_master_on_timeout: req.auto_review_master_on_timeout,
     };
     works::patch_work(pool, creator_id, work_id, &non_stage_patch, now)
         .await
@@ -674,6 +684,7 @@ pub async fn patch_work(
         auto_chain_enabled: None,
         driver_schedule_id: None,
         auto_chain_interrupted: None,
+        auto_review_master_on_timeout: req.auto_review_master_on_timeout,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
@@ -954,6 +965,7 @@ mod tests_fix_d {
             auto_chain_enabled: true,
             driver_schedule_id: Some("sch_active_driver".to_string()),
             auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
         }
     }
 

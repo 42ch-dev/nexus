@@ -387,6 +387,62 @@ pub async fn enqueue_auto_chain_schedule(
     Ok(schedule_id)
 }
 
+/// Enqueue a `novel-review-master` preset run for a Work whose findings have
+/// passed the master-decision SLA (V1.39 P4 T4).
+///
+/// This is the auto-enqueue half of the stale-findings watcher. It is
+/// **only** called by the daemon's stale-findings sweep when the Work has
+/// `auto_review_master_on_timeout = true`. The flag default is `false`, so
+/// no schedule is created without explicit opt-in.
+///
+/// Unlike [`enqueue_auto_chain_schedule`], this does not touch the Work's
+/// `driver_schedule_id` — `novel-review-master` is an out-of-band review
+/// preset and the Work's FL-E driver is unrelated.
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the schedule INSERT fails.
+pub async fn enqueue_review_master_schedule(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+) -> Result<String, AutoChainError> {
+    let schedule_id = format!("RVM{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+    let now_ts = chrono::Utc::now().timestamp();
+    let label = format!("auto-review-master: {work_id}");
+
+    // SAFETY: dynamic SQL — review-master schedule insert with derived params.
+    // Matches the `enqueue_auto_chain_schedule` pattern (runtime sqlx is the
+    // established convention in this crate; see auto_chain.rs:354-355).
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id)
+           VALUES (?, ?, 'novel-review-master', 1, 'pending', 'serial', 0, ?, ?, ?, ?)",
+    )
+    .bind(&schedule_id)
+    .bind(creator_id)
+    .bind(&label)
+    .bind(now_ts)
+    .bind(now_ts)
+    .bind(work_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, work_id, "stale-findings: failed to insert review-master schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+
+    tracing::info!(
+        work_id,
+        schedule_id = %schedule_id,
+        "stale-findings: enqueued novel-review-master (opt-in)"
+    );
+
+    Ok(schedule_id)
+}
+
 /// Find auto-chain-enabled Works that have a `driver_schedule_id` but whose
 /// schedule is no longer running (interrupted during daemon restart).
 ///
@@ -449,6 +505,7 @@ mod tests {
             auto_chain_enabled: true,
             driver_schedule_id: Some("sch_driver_001".to_string()),
             auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
         }
     }
 
