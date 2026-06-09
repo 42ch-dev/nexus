@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-10-v1.40-world-context-prompt-block"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-10"
 ---
 
@@ -144,12 +144,69 @@ generated_at: "2026-06-10"
 - [x] Test coverage: 12 unit tests in `world_context.rs` covering all acceptance criteria. e2e test needs fix (C-001).
 
 ## Summary
-| Severity | Count |
-|----------|-------|
-| 🔴 Critical | 1 |
-| 🟡 Warning | 2 |
-| 🟢 Suggestion | 5 |
+| Severity | Count (Wave 1) | Count (Re-validation) |
+|----------|---------------|----------------------|
+| 🔴 Critical | 1 | 0 |
+| 🟡 Warning | 2 | 0 |
+| 🟢 Suggestion | 5 | 5 (unchanged, non-blocking) |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-**Rationale**: C-001 (e2e test regression) is blocking. W-001 (runtime wiring gap) means the feature is non-functional end-to-end and should be resolved before merge. W-002 (dead code) should be addressed or tracked as a residual.
+**Rationale**: All three blocking findings (C-001, W-001, W-002) resolved with test evidence. No new architecture or maintainability concerns. Suggestions remain as non-blocking improvements for future iterations.
+
+## Revalidation
+
+**Re-review date**: 2026-06-10
+**Re-review range**: ae925aba..960efa37 (3 fix commits)
+**Re-review scope**: C-001, W-001, W-002 (blocking findings from QC #1 wave 1)
+
+### C-001: e2e test regression — RESOLVED ✅
+
+**Evidence**: `seed_novel_writing_preset_input()` in `crates/nexus-orchestration/tests/e2e_novel_writing.rs` now seeds `preset.input.world_kb_block` with an empty string at line 69-71. All 11 e2e tests pass (`cargo test -p nexus-orchestration --test e2e_novel_writing` → 11 passed, 0 failed).
+
+**Verification**: `cargo test -p nexus-orchestration --test e2e_novel_writing 2>&1 | tail -5` shows `test result: ok. 11 passed; 0 failed`.
+
+### W-001: Runtime wiring — RESOLVED ✅
+
+**Evidence**: Three-part fix:
+1. `WorkFields` now has `world_kb_block: Option<String>` field (`stage_gates.rs:82-86`).
+2. `build_preset_input()` injects `world_kb_block` into the preset input map — either the populated string (when `Some`) or empty string `""` (when `None`) so strict-mode template rendering does not fail (`stage_gates.rs:172-194`).
+3. `stage_advance()` in `crates/nexus42/src/commands/creator/run.rs` now calls `assemble_world_kb_block()` (a new async helper at lines 1120-1148) when the Work has a `world_id`, opens the local SQLite KB store, queries characters/locations/rules via `build_chapter_kb_block`, and passes the YAML block into `WorkFields.world_kb_block`. On error, logs a warning and proceeds with empty block (best-effort).
+
+**Verification**: 
+- Unit tests: `build_preset_input_includes_world_kb_block_when_set` and `build_preset_input_world_kb_block_defaults_to_empty_for_worldless` both pass (46/46 stage_gates tests pass).
+- The `assemble_world_kb_block` function is called from `stage_advance()` before `build_schedule_for_stage()`, closing the end-to-end wiring gap.
+- `auto_chain.rs` and `fl_e_chain_demo.rs` constructors updated with `world_kb_block: None` (worldless default).
+
+### W-002: chapter_text heuristic — RESOLVED ✅
+
+**Evidence**: `build_chapter_kb_block()` in `world_context.rs` now reads `params.chapter_text` and applies case-insensitive substring matching to narrow the fallback set when `world_refs` is empty:
+- Characters: filters `all_characters` to those whose `name` appears in `chapter_text` (lines 265-278).
+- Locations: same heuristic for `all_locations` (lines 294-307).
+- When `chapter_text` is `None`, falls back to all items (no narrowing) — verified by `no_chapter_text_returns_all_in_fallback` test.
+
+**Verification**: `chapter_text_heuristic_narrows_fallback` test passes — with `chapter_text = "Alice walked into the tavern."`, only "alice" (character) and "tavern" (location) are included; "bob" and "forest" are excluded. All 15 world_context tests pass.
+
+### Additional fixes observed in re-review diff
+
+The implementer also addressed findings from QC #2 and QC #3 in this fix round:
+
+- **QC3-W3 (O(n²) truncation)**: `apply_token_budget` now uses `estimate_item_chars()` to compute per-item cost incrementally instead of re-rendering full YAML on every pop.
+- **QC3-W4 (determinism)**: Characters, locations, and rules are now sorted by `canonical_name` before rendering. Verified by `output_is_deterministic_regardless_of_insertion_order` test.
+- **QC2-W02/W03 (ownership/isolation docs)**: Doc comments added to `build_chapter_kb_block` explaining world-scoped isolation and 404 contract.
+- **QC3-W1 (runtime_compatibility.rs)**: Gated behind `#[cfg(feature = "cloud-stage")]` with doc comment explaining how to run.
+
+### Sanity checks
+
+| Check | Result |
+|-------|--------|
+| `cargo build --all-targets` (4 crates) | ✅ Pass (1 pre-existing warning: unused `ctx` in e2e test) |
+| `cargo test` (4 crates) | ✅ All pass |
+| `cargo clippy -- -D warnings` (4 crates) | ✅ Clean |
+| `cargo +nightly fmt --all -- --check` | ✅ Clean (exit 0) |
+
+### Verdict update
+
+All three blocking findings (C-001, W-001, W-002) are resolved with test evidence. No new architecture or maintainability concerns introduced by the fix commits. The fix diff is surgical (7 files, +351/-19 lines) and follows the same architectural patterns as the original implementation.
+
+**New verdict**: Approve
