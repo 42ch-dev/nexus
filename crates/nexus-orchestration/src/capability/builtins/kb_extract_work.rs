@@ -205,6 +205,18 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'creator_id'".into()))?;
 
+        // QC1/2 W-002: Guard against worldless Works — when world_id is absent
+        // or empty (legacy V1.39 worldless Works), return a success no-op so
+        // the preset state machine can cleanly transition to done.
+        let world_id_input = input.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
+        if world_id_input.is_empty() {
+            return Ok(json!({
+                "job_id": null,
+                "status": "skipped",
+                "reason": "world_id absent — worldless Work, no KB extraction needed"
+            }));
+        }
+
         // ── Phase 1: Load or claim job ──────────────────────────────
         let job = if let Some(job_id) = input.get("job_id").and_then(|v| v.as_str()) {
             // Load specific job
@@ -214,6 +226,11 @@ impl Capability for KbExtractWork {
                 .ok_or_else(|| {
                     CapabilityError::InputInvalid(format!("Job '{job_id}' not found"))
                 })?;
+
+            // QC2 W-005: Re-validate creator ownership on explicit job_id path.
+            if job.creator_id != creator_id {
+                return Err(CapabilityError::InputInvalid("job creator mismatch".into()));
+            }
 
             // Reject wrong status
             if job.status != "queued" && job.status != "running" {
@@ -358,26 +375,31 @@ impl Capability for KbExtractWork {
             validation_mode,
         };
 
-        // ── Phase 4b: Mark job as done BEFORE inserting KeyBlock ───────
-        // This ordering ensures: if mark_done fails, no KeyBlock was created
-        // and the job can be safely retried. A "done" job without a KeyBlock
-        // is recoverable; a "running" job with an orphaned KeyBlock is not.
+        // ── Phase 4b: Insert KeyBlock BEFORE marking job done ──────────
+        // Insert first; only mark done on success. On insert failure,
+        // mark the job as failed so the preset state machine can surface
+        // or retry. This prevents "done job with no KeyBlock" data loss.
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
+        let insert_result = match nexus_kb::finalize_extract(&store, finalize_input).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Mark job as failed so the content loss window is closed.
+                let _ = nexus_local_db::mark_extract_job_failed(
+                    pool,
+                    &job_id,
+                    &format!("KeyBlock insert failed: {e}"),
+                )
+                .await;
+                return Err(CapabilityError::Internal(format!(
+                    "KeyBlock insert failed: {e}"
+                )));
+            }
+        };
+
+        // Mark done only after the KeyBlock was successfully inserted.
         nexus_local_db::mark_extract_job_done(pool, &job_id)
             .await
             .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
-
-        // ── Phase 5: Insert KeyBlock via T3 finalize helper ────────────
-        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result = nexus_kb::finalize_extract(&store, finalize_input)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    job_id = %job_id,
-                    error = %e,
-                    "KeyBlock insert failed after job marked done — extraction content lost"
-                );
-                CapabilityError::Internal(format!("KeyBlock insert failed: {e}"))
-            })?;
 
         Ok(json!({
             "job_id": job_id,
