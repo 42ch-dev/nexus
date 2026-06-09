@@ -17,7 +17,7 @@ pub struct KbExtractJob {
     pub creator_id: String,
     /// Workspace ID the work entry belongs to.
     pub workspace_id: String,
-    /// Work-scope KB entry ID to extract from.
+    /// Work-scope KB entry ID to extract from (V1.29 legacy; still used for idempotency).
     pub work_entry_id: String,
     /// Target world ID for the resulting `KeyBlock`.
     pub world_id: String,
@@ -31,6 +31,14 @@ pub struct KbExtractJob {
     pub started_at: Option<String>,
     /// When the job finished (done or failed).
     pub finished_at: Option<String>,
+    /// V1.40 P3: artifact type discriminator (`work_chapter`, `work_section`, etc.).
+    pub source_kind: Option<String>,
+    /// V1.40 P3: artifact locator (relative path, artifact ID, or reference ID).
+    pub source_locator: Option<String>,
+    /// V1.40 P3: profile hint for extract prompt (`novel`, `screenplay`, `essay`, `generic`).
+    pub profile_hint: Option<String>,
+    /// V1.40 P3: work ID for the source work (chapter's parent).
+    pub work_id: Option<String>,
 }
 
 /// Generate a unique job ID: `xj_` + `UUIDv4` hex string.
@@ -39,6 +47,58 @@ pub struct KbExtractJob {
 /// Collision probability is negligible but handled by the caller via single retry.
 fn generate_job_id() -> String {
     format!("xj_{}", uuid::Uuid::new_v4().simple())
+}
+
+/// Column list shared across all SELECT queries (avoids drift).
+const JOB_COLUMNS: &str = r#"
+    job_id as "job_id!",
+    creator_id as "creator_id!",
+    workspace_id as "workspace_id!",
+    work_entry_id as "work_entry_id!",
+    world_id as "world_id!",
+    status as "status!",
+    error_text,
+    created_at as "created_at!",
+    started_at,
+    finished_at,
+    source_kind,
+    source_locator,
+    profile_hint,
+    work_id
+"#;
+
+/// Fetch a single job by ID using the shared column list.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+async fn fetch_by_id(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<KbExtractJob, sqlx::Error> {
+    let query = format!("SELECT {JOB_COLUMNS} FROM kb_extract_jobs WHERE job_id = ?");
+    // SAFETY: `JOB_COLUMNS` is a compile-time constant; `job_id` is a bind param.
+    sqlx::query_as::<_, KbExtractJob>(&query)
+        .bind(job_id)
+        .fetch_one(pool)
+        .await
+}
+
+/// Fetch a single optional job by ID using the shared column list.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+async fn fetch_optional_by_id(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<Option<KbExtractJob>, sqlx::Error> {
+    let query = format!("SELECT {JOB_COLUMNS} FROM kb_extract_jobs WHERE job_id = ?");
+    // SAFETY: `JOB_COLUMNS` is a compile-time constant; `job_id` is a bind param.
+    sqlx::query_as::<_, KbExtractJob>(&query)
+        .bind(job_id)
+        .fetch_optional(pool)
+        .await
 }
 
 /// Insert a new job row, retrying once on PRIMARY KEY collision (R18).
@@ -50,43 +110,35 @@ async fn insert_with_retry(
     workspace_id: &str,
     work_entry_id: &str,
     world_id: &str,
+    source_kind: Option<&str>,
+    source_locator: Option<&str>,
+    profile_hint: Option<&str>,
+    work_id: Option<&str>,
 ) -> Result<KbExtractJob, sqlx::Error> {
     for _ in 0..2 {
         let job_id = generate_job_id();
-        let result = sqlx::query!(
-            r#"INSERT INTO kb_extract_jobs
-                (job_id, creator_id, workspace_id, work_entry_id, world_id, status)
-               VALUES (?, ?, ?, ?, ?, 'queued')"#,
-            job_id,
-            creator_id,
-            workspace_id,
-            work_entry_id,
-            world_id,
+        // SAFETY: static INSERT with bind params; no user-controlled identifiers.
+        let result = sqlx::query(
+            "INSERT INTO kb_extract_jobs \
+             (job_id, creator_id, workspace_id, work_entry_id, world_id, status, \
+              source_kind, source_locator, profile_hint, work_id) \
+             VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)",
         )
+        .bind(&job_id)
+        .bind(creator_id)
+        .bind(workspace_id)
+        .bind(work_entry_id)
+        .bind(world_id)
+        .bind(source_kind)
+        .bind(source_locator)
+        .bind(profile_hint)
+        .bind(work_id)
         .execute(pool)
         .await;
 
         match result {
             Ok(_) => {
-                return sqlx::query_as!(
-                    KbExtractJob,
-                    r#"SELECT
-                        job_id as "job_id!",
-                        creator_id as "creator_id!",
-                        workspace_id as "workspace_id!",
-                        work_entry_id as "work_entry_id!",
-                        world_id as "world_id!",
-                        status as "status!",
-                        error_text,
-                        created_at as "created_at!",
-                        started_at,
-                        finished_at
-                    FROM kb_extract_jobs
-                    WHERE job_id = ?"#,
-                    job_id,
-                )
-                .fetch_one(pool)
-                .await;
+                return fetch_by_id(pool, &job_id).await;
             }
             Err(sqlx::Error::Database(ref db_err)) if db_err.code().as_deref() == Some("1555") => {
                 // SQLite UNIQUE constraint violation (code 1555) — retry with new UUID
@@ -114,37 +166,72 @@ pub async fn enqueue(
     world_id: &str,
 ) -> Result<KbExtractJob, sqlx::Error> {
     // Check for existing non-failed job (idempotency).
-    let existing = sqlx::query_as!(
-        KbExtractJob,
-        r#"SELECT
-            job_id as "job_id!",
-            creator_id as "creator_id!",
-            workspace_id as "workspace_id!",
-            work_entry_id as "work_entry_id!",
-            world_id as "world_id!",
-            status as "status!",
-            error_text,
-            created_at as "created_at!",
-            started_at,
-            finished_at
-        FROM kb_extract_jobs
-        WHERE creator_id = ?
-          AND work_entry_id = ?
-          AND world_id = ?
-          AND status != 'failed'"#,
-        creator_id,
-        work_entry_id,
-        world_id,
-    )
-    .fetch_optional(pool)
-    .await?;
+    let query = format!(
+        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
+         WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? AND status != 'failed'"
+    );
+    // SAFETY: JOB_COLUMNS constant; bind params.
+    let existing = sqlx::query_as::<_, KbExtractJob>(&query)
+        .bind(creator_id)
+        .bind(work_entry_id)
+        .bind(world_id)
+        .fetch_optional(pool)
+        .await?;
 
     if let Some(job) = existing {
         return Ok(job);
     }
 
     // Insert new job with retry on PRIMARY KEY collision.
-    insert_with_retry(pool, creator_id, workspace_id, work_entry_id, world_id).await
+    insert_with_retry(
+        pool, creator_id, workspace_id, work_entry_id, world_id,
+        None, None, None, None,
+    )
+    .await
+}
+
+/// Enqueue a new extract job with artifact locator fields (V1.40 P3).
+///
+/// Idempotent: if a non-failed job already exists for the same
+/// `(creator_id, work_entry_id, world_id)`, returns the existing job.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub fn enqueue_with_artifact<'a>(
+    pool: &'a SqlitePool,
+    creator_id: &'a str,
+    workspace_id: &'a str,
+    work_entry_id: &'a str,
+    world_id: &'a str,
+    source_kind: Option<&'a str>,
+    source_locator: Option<&'a str>,
+    profile_hint: Option<&'a str>,
+    work_id: Option<&'a str>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<KbExtractJob, sqlx::Error>> + 'a>> {
+    Box::pin(async move {
+        // Check for existing non-failed job (idempotency).
+        let query = format!(
+            "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
+             WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? AND status != 'failed'"
+        );
+        let existing = sqlx::query_as::<_, KbExtractJob>(&query)
+            .bind(creator_id)
+            .bind(work_entry_id)
+            .bind(world_id)
+            .fetch_optional(pool)
+            .await?;
+
+        if let Some(job) = existing {
+            return Ok(job);
+        }
+
+        insert_with_retry(
+            pool, creator_id, workspace_id, work_entry_id, world_id,
+            source_kind, source_locator, profile_hint, work_id,
+        )
+        .await
+    })
 }
 
 /// Get a specific job by ID.
@@ -153,25 +240,7 @@ pub async fn enqueue(
 ///
 /// Returns `sqlx::Error` on database failure.
 pub async fn get(pool: &SqlitePool, job_id: &str) -> Result<Option<KbExtractJob>, sqlx::Error> {
-    sqlx::query_as!(
-        KbExtractJob,
-        r#"SELECT
-            job_id as "job_id!",
-            creator_id as "creator_id!",
-            workspace_id as "workspace_id!",
-            work_entry_id as "work_entry_id!",
-            world_id as "world_id!",
-            status as "status!",
-            error_text,
-            created_at as "created_at!",
-            started_at,
-            finished_at
-        FROM kb_extract_jobs
-        WHERE job_id = ?"#,
-        job_id,
-    )
-    .fetch_optional(pool)
-    .await
+    fetch_optional_by_id(pool, job_id).await
 }
 
 /// List jobs for a given creator, bounded by `limit` (R20).
@@ -187,28 +256,16 @@ pub async fn list_by_creator(
     creator_id: &str,
     limit: u32,
 ) -> Result<Vec<KbExtractJob>, sqlx::Error> {
-    sqlx::query_as!(
-        KbExtractJob,
-        r#"SELECT
-            job_id as "job_id!",
-            creator_id as "creator_id!",
-            workspace_id as "workspace_id!",
-            work_entry_id as "work_entry_id!",
-            world_id as "world_id!",
-            status as "status!",
-            error_text,
-            created_at as "created_at!",
-            started_at,
-            finished_at
-        FROM kb_extract_jobs
-        WHERE creator_id = ?
-        ORDER BY created_at DESC
-        LIMIT ?"#,
-        creator_id,
-        limit,
-    )
-    .fetch_all(pool)
-    .await
+    let query = format!(
+        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
+         WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?"
+    );
+    // SAFETY: JOB_COLUMNS constant; bind params.
+    sqlx::query_as::<_, KbExtractJob>(&query)
+        .bind(creator_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
 }
 
 /// Fetch the next queued job (oldest first) for a given creator.
@@ -222,28 +279,15 @@ pub async fn next_queued(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Option<KbExtractJob>, sqlx::Error> {
-    sqlx::query_as!(
-        KbExtractJob,
-        r#"SELECT
-            job_id as "job_id!",
-            creator_id as "creator_id!",
-            workspace_id as "workspace_id!",
-            work_entry_id as "work_entry_id!",
-            world_id as "world_id!",
-            status as "status!",
-            error_text,
-            created_at as "created_at!",
-            started_at,
-            finished_at
-        FROM kb_extract_jobs
-        WHERE creator_id = ?
-          AND status = 'queued'
-        ORDER BY created_at ASC
-        LIMIT 1"#,
-        creator_id,
-    )
-    .fetch_optional(pool)
-    .await
+    let query = format!(
+        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
+         WHERE creator_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"
+    );
+    // SAFETY: JOB_COLUMNS constant; bind params.
+    sqlx::query_as::<_, KbExtractJob>(&query)
+        .bind(creator_id)
+        .fetch_optional(pool)
+        .await
 }
 
 /// Mark a job as running. Sets `started_at` to now.
@@ -285,28 +329,14 @@ pub async fn claim_job(
     let mut tx = pool.begin().await?;
 
     // Select oldest queued job for this creator.
-    let job = sqlx::query_as!(
-        KbExtractJob,
-        r#"SELECT
-            job_id as "job_id!",
-            creator_id as "creator_id!",
-            workspace_id as "workspace_id!",
-            work_entry_id as "work_entry_id!",
-            world_id as "world_id!",
-            status as "status!",
-            error_text,
-            created_at as "created_at!",
-            started_at,
-            finished_at
-        FROM kb_extract_jobs
-        WHERE creator_id = ?
-          AND status = 'queued'
-        ORDER BY created_at ASC
-        LIMIT 1"#,
-        creator_id,
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
+    let query = format!(
+        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
+         WHERE creator_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"
+    );
+    let job = sqlx::query_as::<_, KbExtractJob>(&query)
+        .bind(creator_id)
+        .fetch_optional(&mut *tx)
+        .await?;
 
     let Some(job) = job else {
         tx.rollback().await?;
@@ -314,7 +344,6 @@ pub async fn claim_job(
     };
 
     // Atomically mark as running within the same transaction.
-    // Check rows_affected() to detect concurrent claims (QC2-C1).
     let result = sqlx::query!(
         r#"UPDATE kb_extract_jobs
            SET status = 'running', started_at = datetime('now')
@@ -325,7 +354,6 @@ pub async fn claim_job(
     .await?;
 
     if result.rows_affected() == 0 {
-        // Another worker claimed this job between our SELECT and UPDATE.
         tx.rollback().await?;
         return Ok(None);
     }
@@ -333,26 +361,7 @@ pub async fn claim_job(
     tx.commit().await?;
 
     // Re-fetch to get the updated started_at timestamp.
-    let claimed = sqlx::query_as!(
-        KbExtractJob,
-        r#"SELECT
-            job_id as "job_id!",
-            creator_id as "creator_id!",
-            workspace_id as "workspace_id!",
-            work_entry_id as "work_entry_id!",
-            world_id as "world_id!",
-            status as "status!",
-            error_text,
-            created_at as "created_at!",
-            started_at,
-            finished_at
-        FROM kb_extract_jobs
-        WHERE job_id = ?"#,
-        job.job_id,
-    )
-    .fetch_one(pool)
-    .await?;
-
+    let claimed = fetch_by_id(pool, &job.job_id).await?;
     Ok(Some(claimed))
 }
 
@@ -450,7 +459,7 @@ mod tests {
         assert_eq!(j.status, "running");
         assert!(j.started_at.is_some());
 
-        mark_done(&pool, &job.job_id).await.unwrap();
+        mark_done(&pool, &j.job_id).await.unwrap();
         let j = get(&pool, &job.job_id).await.unwrap().unwrap();
         assert_eq!(j.status, "done");
         assert!(j.finished_at.is_some());
@@ -625,5 +634,81 @@ mod tests {
         mark_done(&pool, &claimed.job_id).await.unwrap();
         let done = get(&pool, &claimed.job_id).await.unwrap().unwrap();
         assert_eq!(done.status, "done");
+    }
+
+    // ── V1.40 P3: Artifact locator tests ────────────────────────────
+
+    #[tokio::test]
+    async fn test_enqueue_with_artifact_fields() {
+        let (pool, _dir) = fresh_pool().await;
+        let job = enqueue_with_artifact(
+            &pool,
+            "ctr_1",
+            "wrk_1",
+            "kb_chapter_03",
+            "wld_1",
+            Some("work_chapter"),
+            Some("Works/my-novel/Chapters/03.md"),
+            Some("novel"),
+            Some("wrk_novel_abc"),
+        )
+        .await
+        .unwrap();
+
+        assert!(job.job_id.starts_with("xj_"));
+        assert_eq!(job.source_kind.as_deref(), Some("work_chapter"));
+        assert_eq!(
+            job.source_locator.as_deref(),
+            Some("Works/my-novel/Chapters/03.md")
+        );
+        assert_eq!(job.profile_hint.as_deref(), Some("novel"));
+        assert_eq!(job.work_id.as_deref(), Some("wrk_novel_abc"));
+    }
+
+    #[tokio::test]
+    async fn test_enqueue_with_artifact_idempotent() {
+        let (pool, _dir) = fresh_pool().await;
+        let job1 = enqueue_with_artifact(
+            &pool,
+            "ctr_1",
+            "wrk_1",
+            "kb_chapter_03",
+            "wld_1",
+            Some("work_chapter"),
+            Some("Works/novel/Chapters/03.md"),
+            Some("novel"),
+            Some("wrk_abc"),
+        )
+        .await
+        .unwrap();
+
+        // Same work_entry_id + world_id → idempotent return
+        let job2 = enqueue_with_artifact(
+            &pool,
+            "ctr_1",
+            "wrk_1",
+            "kb_chapter_03",
+            "wld_1",
+            Some("work_chapter"),
+            Some("Works/novel/Chapters/03.md"),
+            Some("novel"),
+            Some("wrk_abc"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(job1.job_id, job2.job_id);
+    }
+
+    #[tokio::test]
+    async fn test_enqueue_without_artifact_has_null_fields() {
+        let (pool, _dir) = fresh_pool().await;
+        let job = enqueue(&pool, "ctr_1", "wrk_1", "kb_legacy", "wld_1")
+            .await
+            .unwrap();
+        assert!(job.source_kind.is_none());
+        assert!(job.source_locator.is_none());
+        assert!(job.profile_hint.is_none());
+        assert!(job.work_id.is_none());
     }
 }
