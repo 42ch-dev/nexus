@@ -197,6 +197,7 @@ pub fn build_auto_chain_schedule(
         body_path: None,
         slug: None,
         research_artifacts_dir,
+        workspace_dir: None,
     };
 
     stage_gates::build_schedule_for_stage(stage, creator_id, &fields)
