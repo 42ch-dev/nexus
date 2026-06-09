@@ -3,7 +3,7 @@ report_kind: qc_review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-10-v1.40-world-create-and-validation
-verdict: Request Changes
+verdict: Approve
 generated_at: 2026-06-10
 ---
 
@@ -125,10 +125,113 @@ _None._
 | 🟡 Warning | 2 |
 | 🟢 Suggestion | 2 |
 
-**Verdict**: **Request Changes**
+**Verdict**: **Approve**
 
-Two warnings block approval:
+Two warnings were previously blocking; both are now resolved. See `## Revalidation` below for evidence.
 
-1. **W-1 (Atomicity gap)**: The `create_world` path in `novel_scaffold` is documented as atomic with chapter seeding, but the code places `create_world` outside the transaction. This can orphan world rows on scaffold failure. Either move `create_world` into the transaction or update the comment and file a residual.
+## Revalidation
 
-2. **W-2 (Data integrity gap)**: The `works.rs` POST handler validates `world_id` presence but not existence. Without an FK constraint on `works.world_id`, invalid world IDs can be stored silently. Add the same existence check used in PATCH, or add an FK constraint to the schema.
+### Fix context
+- **W-1 (Atomicity gap)**: `create_world` was outside the scaffold DB transaction, risking orphan `narrative_worlds` rows on failure.
+- **W-2 (Data integrity gap)**: `works.rs` `create_work()` validated `world_id` presence but not existence/ownership before insert.
+
+### Diff since previous review
+- **Commit**: `d3a18d14` — `fix(world): address QC1/QC2/QC3 findings — world_id validation, atomicity, 422 status`
+- **Previous HEAD**: `9511e31c`
+- **Files changed**: 9 files, +521/−77 lines
+- **Key files**:
+  - `crates/nexus-orchestration/src/capability/builtins/novel_scaffold.rs`
+  - `crates/nexus-daemon-runtime/src/api/handlers/works.rs`
+  - `crates/nexus-local-db/src/narrative_write.rs`
+  - `crates/nexus-daemon-runtime/src/api/errors.rs`
+
+### Re-verification
+
+#### W-1 — Atomicity (novel_scaffold.rs)
+**Status**: ✅ **Resolved**
+
+Verified `create_world` now runs inside the same DB transaction as `seed_chapters` + `patch_work`:
+
+```rust
+// novel_scaffold.rs:499 — transaction begins BEFORE world creation
+let mut tx = pool.begin().await?;
+
+// novel_scaffold.rs:505-526 — create_world_tx uses the transaction
+let resolved_world_id: String = if should_create_world {
+    let result = nexus_local_db::create_world_tx(
+        &mut tx,           // ← tx, not pool
+        &inp.creator_id,
+        title,
+        slug,
+        "private",
+        "manual",
+    ).await?;
+    result.world_id
+} else { ... };
+
+// novel_scaffold.rs:534-542 — seed_chapters inside same tx
+work_chapters::seed_chapters_tx(&mut tx, ...).await?;
+
+// novel_scaffold.rs:597-599 — patch_work inside same tx
+works::patch_work_tx(&mut tx, ...).await?;
+
+// novel_scaffold.rs:602-604 — single commit for all three operations
+tx.commit().await?;
+```
+
+The new `create_world_tx()` helper in `nexus_local_db/src/narrative_write.rs:94-144` takes `&mut sqlx::Transaction<'_, sqlx::Sqlite>` instead of `&SqlitePool`, enabling the caller to control commit/rollback. The old `create_world(pool, ...)` remains available for non-transactional callers.
+
+**No orphan world risk**: if `seed_chapters_tx` or `patch_work_tx` fails, `create_world_tx`'s INSERT is rolled back with the same transaction.
+
+#### W-2 — POST existence check (works.rs)
+**Status**: ✅ **Resolved**
+
+Verified `create_work()` now validates `world_id` existence **and** ownership before insert:
+
+```rust
+// works.rs:219-244
+if let Some(ref wid) = req.world_id {
+    let exists: Option<String> = sqlx::query_scalar!(
+        r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
+        wid,
+        creator_id,
+    )
+    .fetch_optional(state.pool())
+    .await?;
+    if exists.is_none() {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_WORLD_ID".to_string(),
+            message: format!("world_id '{wid}' does not exist or is not owned by this creator."),
+        });
+    }
+}
+```
+
+The query checks **both** `world_id = ?` AND `owner_creator_id = ?`, preventing cross-creator world binding (also addresses QC2 W-02). The error maps to HTTP **422** (`UNPROCESSABLE_ENTITY`) per `errors.rs:159`.
+
+**Regression tests added**:
+- `create_work_with_nonexistent_world_id_returns_error` (works.rs:1194-1225)
+- `create_work_with_other_creators_world_id_returns_error` (works.rs:1229-1280)
+- Both assert `INVALID_WORLD_ID` code and `422` status code.
+
+### Sanity checks performed
+
+| Check | Result | Evidence |
+|-------|--------|----------|
+| `cargo build -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -p nexus-orchestration --all-targets` | ✅ PASS | Finished in 23.86s |
+| `cargo test -p nexus-daemon-runtime` | ✅ PASS | 29 passed, 0 failed |
+| `cargo test -p nexus-orchestration` | ✅ PASS | 11 passed, 0 failed |
+| `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-local-db -p nexus-orchestration -- -D warnings` | ✅ PASS | No warnings |
+| `cargo +nightly fmt --all -- --check` | ✅ PASS | fmt_exit=0 |
+
+### New findings
+**None.** No new Critical, Warning, or Suggestion findings introduced by the fix commit.
+
+### Updated verdict
+| Severity | Previous | Current |
+|----------|----------|---------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning | 2 | **0** |
+| 🟢 Suggestion | 2 | 2 (S-1, S-2 unchanged — non-blocking) |
+
+**Verdict**: **Approve**
