@@ -175,22 +175,25 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
 ///
 /// # Layer resolution (DF-65)
 ///
-/// - **Layer 1**: `crates/nexus-orchestration/embedded-presets/rules/writing-craft.md`
-///   (compiled into the binary). User override at `~/.nexus42/rules/writing-craft.md`
-///   takes precedence when it exists.
+/// - **Layer 1**: `crates/nexus-orchestration/embedded-rules/writing-craft.md`
+///   (compiled into the binary via `include_str!`). User override at
+///   `~/.nexus42/rules/writing-craft.md` takes precedence when it exists.
 /// - **Layer 2**: `Works/<work_ref>/Rules/novel-rules.md` — per-work editable rules.
 #[must_use]
 pub fn read_rules_layers(workspace_dir: &str, work_ref: &str) -> Option<String> {
     let mut parts = Vec::new();
 
     // Layer 1: embedded default (or user override).
-    // For now, read the embedded content from the compiled-in include_dir.
+    // Read from the dedicated embedded_rules module (not embedded-presets).
     // User override at ~/.nexus42/rules/writing-craft.md is a future addition
     // (requires home dir resolution at the call site).
-    if let Some(layer1) = crate::preset::read_embedded_template("rules", "writing-craft.md") {
-        parts.push(format!(
-            "## Layer 1 — Writing Craft Rules (shared)\n\n{layer1}"
-        ));
+    {
+        let layer1 = crate::embedded_rules::WRITING_CRAFT;
+        if !layer1.is_empty() {
+            parts.push(format!(
+                "## Layer 1 — Writing Craft Rules (shared)\n\n{layer1}"
+            ));
+        }
     }
 
     // Layer 2: per-work rules file.
