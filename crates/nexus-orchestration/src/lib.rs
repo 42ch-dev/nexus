@@ -3,6 +3,7 @@
 
 pub mod auto_chain;
 pub mod capability;
+pub mod embedded_rules;
 pub mod embedded_skills;
 pub mod engine;
 pub mod preset;
