@@ -153,14 +153,18 @@ impl ScheduleSupervisor {
     ) -> Result<(), SupervisorError> {
         let pool = &*self.pool;
 
-        // Load all schedules from DB
-        let all_rows = sqlx::query_as!(
-            ScheduleRow,
-            "SELECT schedule_id as \"schedule_id!\", creator_id, preset_id, preset_version,
+        // Load only actionable schedules from DB (pending, running, paused).
+        // R-V139P0-W-F: exclude completed/failed/cancelled rows to avoid O(N) scan
+        // over historical schedules on every terminal event.
+        // SAFETY: dynamic SQL — runtime query for ScheduleRow (FromRow struct);
+        // the WHERE filter is constant, not user-controlled.
+        let all_rows = sqlx::query_as::<_, ScheduleRow>(
+            "SELECT schedule_id, creator_id, preset_id, preset_version,
                     status, concurrency_kind, concurrency_whitelist,
                     current_core_context_version, current_session_id,
                     scheduled_at, label, created_at, updated_at, terminated_at
-             FROM creator_schedules",
+             FROM creator_schedules
+             WHERE status IN ('pending', 'running', 'paused')",
         )
         .fetch_all(pool)
         .await?;
@@ -808,13 +812,15 @@ impl ScheduleSupervisor {
         let mut should_run = false;
 
         // Build the current running set and completed set from DB.
-        let all_rows = sqlx::query_as!(
-            ScheduleRow,
-            "SELECT schedule_id as \"schedule_id!\", creator_id, preset_id, preset_version,
+        // SAFETY: dynamic SQL — runtime query for ScheduleRow (FromRow struct);
+        // the WHERE filter is constant, not user-controlled.
+        let all_rows = sqlx::query_as::<_, ScheduleRow>(
+            "SELECT schedule_id, creator_id, preset_id, preset_version,
                     status, concurrency_kind, concurrency_whitelist,
                     current_core_context_version, current_session_id,
                     scheduled_at, label, created_at, updated_at, terminated_at
-             FROM creator_schedules",
+             FROM creator_schedules
+             WHERE status IN ('pending', 'running', 'paused')",
         )
         .fetch_all(&*self.pool)
         .await?;
