@@ -18,6 +18,13 @@
 #
 # R-V139P5-S3 (deferred): i18n hint structure. The description and prompt
 # fields use English prose. A future i18n pass may externalize these strings.
+#
+# R-V139P5-W-4: preset versioning policy — the `version` field below must be
+# bumped on any breaking change to the state machine (adding/removing states,
+# changing transition edges, modifying prompt templates that alter output
+# contract). Non-breaking additions (new optional fields, comment changes)
+# may keep the same version. The version is stored in creator_schedules at
+# enqueue time and used by the loader to select compatible templates.
 
 preset:
   id: research
