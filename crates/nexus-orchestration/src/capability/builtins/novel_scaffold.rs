@@ -380,7 +380,11 @@ impl Capability for NovelProjectScaffold {
         // Layer 2: per-work novel-rules.md stub
         if let Some(tmpl) = load_template("novel-rules.md") {
             let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
-            write_file_idem(&root.join("Rules/novel-rules.md"), &rendered, &mut txn.files_created)?;
+            write_file_idem(
+                &root.join("Rules/novel-rules.md"),
+                &rendered,
+                &mut txn.files_created,
+            )?;
         }
 
         // ── T3: seed work_chapters rows + T4: PATCH works ─────────────

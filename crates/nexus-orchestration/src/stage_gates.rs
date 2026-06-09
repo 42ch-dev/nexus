@@ -188,12 +188,16 @@ pub fn read_rules_layers(workspace_dir: &str, work_ref: &str) -> Option<String> 
     // User override at ~/.nexus42/rules/writing-craft.md is a future addition
     // (requires home dir resolution at the call site).
     if let Some(layer1) = crate::preset::read_embedded_template("rules", "writing-craft.md") {
-        parts.push(format!("## Layer 1 — Writing Craft Rules (shared)\n\n{layer1}"));
+        parts.push(format!(
+            "## Layer 1 — Writing Craft Rules (shared)\n\n{layer1}"
+        ));
     }
 
     // Layer 2: per-work rules file.
-    let layer2_path =
-        std::path::Path::new(workspace_dir).join("Works").join(work_ref).join("Rules/novel-rules.md");
+    let layer2_path = std::path::Path::new(workspace_dir)
+        .join("Works")
+        .join(work_ref)
+        .join("Rules/novel-rules.md");
     if let Ok(content) = std::fs::read_to_string(&layer2_path) {
         if !content.trim().is_empty() {
             parts.push(format!("## Layer 2 — Novel Rules (per-work)\n\n{content}"));
@@ -846,7 +850,10 @@ mod tests {
     fn read_rules_layers_returns_layer1_from_embedded() {
         // Layer 1 is always available from embedded presets
         let result = read_rules_layers("/nonexistent/workspace", "my-novel");
-        assert!(result.is_some(), "Layer 1 embedded content should always be present");
+        assert!(
+            result.is_some(),
+            "Layer 1 embedded content should always be present"
+        );
         let content = result.expect("content");
         assert!(
             content.contains("Layer 1 — Writing Craft Rules"),
@@ -920,11 +927,7 @@ mod tests {
         // Create Layer 2 file
         let rules_dir = ws.join("Works").join("rules-test").join("Rules");
         std::fs::create_dir_all(&rules_dir).expect("mkdir");
-        std::fs::write(
-            rules_dir.join("novel-rules.md"),
-            "- Tense: present\n",
-        )
-        .expect("write");
+        std::fs::write(rules_dir.join("novel-rules.md"), "- Tense: present\n").expect("write");
 
         let fields = WorkFields {
             work_id: "wrk_test".to_string(),

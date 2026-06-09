@@ -555,7 +555,10 @@ mod tests {
 
         let result = discover_works(workspace.path());
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].chapters, vec!["ch01-intro.md"],
-            "only Stories/*.md should appear — Rules/ and Logs/ excluded");
+        assert_eq!(
+            result[0].chapters,
+            vec!["ch01-intro.md"],
+            "only Stories/*.md should appear — Rules/ and Logs/ excluded"
+        );
     }
 }

@@ -267,7 +267,9 @@ pub fn validate_creator_id_safe(id: &str) -> std::result::Result<(), String> {
 /// `$HOME/.nexus42/rules/writing-craft.md` — user override for Layer 1 rules.
 #[must_use]
 pub fn user_writing_craft_rules_path(home: &Path) -> PathBuf {
-    nexus_root_from_home(home).join("rules").join("writing-craft.md")
+    nexus_root_from_home(home)
+        .join("rules")
+        .join("writing-craft.md")
 }
 
 /// Workspace-relative: `Works/<work_ref>/Rules/novel-rules.md` (Layer 2).

@@ -85,8 +85,13 @@ mod tests {
 
         append_rules_history(ws, "my-novel", "Changed POV to first person", "user")
             .expect("first append");
-        append_rules_history(ws, "my-novel", "Updated chapter length target", "reflection-loop")
-            .expect("second append");
+        append_rules_history(
+            ws,
+            "my-novel",
+            "Updated chapter length target",
+            "reflection-loop",
+        )
+        .expect("second append");
 
         let path = nexus_home_layout::work_novel_rules_history_path(ws, "my-novel");
         let content = fs::read_to_string(&path).expect("read");
