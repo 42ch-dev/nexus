@@ -647,6 +647,8 @@ pub enum CredentialsAction {
 /// - Platform API calls fail (registration, credential rotation)
 /// - Configuration cannot be read or written
 /// - Creator authentication fails
+// CLI entry-point — single-threaded tokio; Send not required.
+#[allow(clippy::future_not_send)]
 pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         CreatorCommand::Register {

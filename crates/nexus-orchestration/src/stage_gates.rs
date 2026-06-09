@@ -84,7 +84,7 @@ pub struct WorkFields {
     /// When `None`, the template guard `{{#if world_kb_block}}` correctly omits
     /// the block — legacy V1.39 worldless Works receive no World context.
     pub world_kb_block: Option<String>,
-    /// V1.40 P3: world_id from Work row. Populated for World-bound Works.
+    /// V1.40 P3: `world_id` from Work row. Populated for World-bound Works.
     /// When `None`, the persist stage skips World KB promotion (legacy V1.39).
     pub world_id: Option<String>,
 }

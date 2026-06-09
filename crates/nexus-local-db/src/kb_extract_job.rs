@@ -94,6 +94,9 @@ async fn fetch_optional_by_id(
 /// Insert a new job row, retrying once on PRIMARY KEY collision (R18).
 ///
 /// `UUIDv4` collision is astronomically unlikely; this guard is defensive only.
+// 9 params mirrors the kb_extract_jobs column layout — splitting into a builder
+// would add indirection for a single call-site.
+#[allow(clippy::too_many_arguments)]
 async fn insert_with_retry(
     pool: &SqlitePool,
     creator_id: &str,
@@ -195,6 +198,9 @@ pub async fn enqueue(
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
+// 9 params mirrors the kb_extract_jobs column layout — same rationale as insert_with_retry.
+#[allow(clippy::too_many_arguments)]
+#[must_use]
 pub fn enqueue_with_artifact<'a>(
     pool: &'a SqlitePool,
     creator_id: &'a str,

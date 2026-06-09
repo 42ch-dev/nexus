@@ -131,7 +131,7 @@ fn parse_extraction_response(response_text: &str) -> Result<ExtractResponse, Cap
 
 /// Parse block type string into `BlockType`.
 ///
-/// Accepts both snake_case wire values (P1 extract.md) and PascalCase (legacy).
+/// Accepts both `snake_case` wire values (P1 extract.md) and `PascalCase` (legacy).
 fn parse_block_type(s: &str) -> Result<nexus_contracts::BlockType, CapabilityError> {
     match s {
         "Character" | "character" => Ok(nexus_contracts::BlockType::Character),
