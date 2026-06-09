@@ -6,7 +6,7 @@
 //! and status lifecycle, and provides a routing hint (`target_executor`)
 //! indicating which preset should address it.
 
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::error::LocalDbError;
 
@@ -69,12 +69,71 @@ pub struct FindingListFilters {
     pub offset: Option<u32>,
 }
 
+/// Valid severity values (R-V139P1-W-1).
+pub const VALID_SEVERITIES: &[&str] = &["info", "minor", "major", "blocker"];
+
+/// Valid status values (R-V139P1-W-1).
+pub const VALID_STATUSES: &[&str] = &["open", "resolved", "wont_fix"];
+
+/// Valid target_executor values (R-V139P1-W-1).
+pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
+
+/// R-V139P1-W-2: Single source of truth for finding ID generation.
+///
+/// All callers (handler direct-create, from-review hook) must use this
+/// function instead of inline `format!("fnd_{}", ...)`.
+#[must_use]
+pub fn mint_finding_id() -> String {
+    format!("fnd_{}", uuid::Uuid::new_v4().simple())
+}
+
+/// Validate finding enum fields. Returns `LocalDbError::Constraint` on invalid values.
+///
+/// R-V139P1-W-1: runtime match!() guard mirrors the CHECK constraints in
+/// migration `202606100002_findings_check_constraints.sql`. Catches invalid
+/// values before they reach the DB, providing actionable error messages.
+pub fn validate_finding_enums(
+    severity: &str,
+    status: &str,
+    target_executor: &str,
+) -> Result<(), LocalDbError> {
+    if !VALID_SEVERITIES.contains(&severity) {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "findings".to_string(),
+            constraint: format!(
+                "invalid severity '{severity}'; expected one of: {}",
+                VALID_SEVERITIES.join(", ")
+            ),
+        });
+    }
+    if !VALID_STATUSES.contains(&status) {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "findings".to_string(),
+            constraint: format!(
+                "invalid status '{status}'; expected one of: {}",
+                VALID_STATUSES.join(", ")
+            ),
+        });
+    }
+    if !VALID_TARGET_EXECUTORS.contains(&target_executor) {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "findings".to_string(),
+            constraint: format!(
+                "invalid target_executor '{target_executor}'; expected one of: {}",
+                VALID_TARGET_EXECUTORS.join(", ")
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Create a new finding.
 ///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
 pub async fn create_finding(pool: &SqlitePool, f: &Finding) -> Result<(), LocalDbError> {
+    validate_finding_enums(&f.severity, &f.status, &f.target_executor)?;
     sqlx::query!(
         "INSERT INTO findings (finding_id, work_id, chapter, severity, status, title, description, target_executor, creator_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -96,6 +155,12 @@ pub async fn create_finding(pool: &SqlitePool, f: &Finding) -> Result<(), LocalD
 }
 
 /// List findings with optional filters, scoped to a creator.
+///
+/// R-V139P1-W-4: EXPLAIN QUERY PLAN audit result for the primary query:
+///   SEARCH findings USING INDEX idx_findings_creator_status (creator_id=? AND status=?)
+///   When work_id is provided, SQLite may use idx_findings_work_status instead.
+///   The composite index idx_findings_work_chapter_status covers chapter lookups.
+///   All three indexes are utilized; no full-table scan on realistic data.
 ///
 /// # Errors
 ///
@@ -211,6 +276,40 @@ pub async fn update_finding(
     patch: &FindingPatch,
     now_epoch: i64,
 ) -> Result<bool, LocalDbError> {
+    // R-V139P1-W-1: validate patch enum fields if provided
+    if let Some(ref sev) = patch.severity {
+        if !VALID_SEVERITIES.contains(&sev.as_str()) {
+            return Err(LocalDbError::ConstraintViolation {
+                table: "findings".to_string(),
+                constraint: format!(
+                    "invalid severity '{sev}'; expected one of: {}",
+                    VALID_SEVERITIES.join(", ")
+                ),
+            });
+        }
+    }
+    if let Some(ref st) = patch.status {
+        if !VALID_STATUSES.contains(&st.as_str()) {
+            return Err(LocalDbError::ConstraintViolation {
+                table: "findings".to_string(),
+                constraint: format!(
+                    "invalid status '{st}'; expected one of: {}",
+                    VALID_STATUSES.join(", ")
+                ),
+            });
+        }
+    }
+    if let Some(ref te) = patch.target_executor {
+        if !VALID_TARGET_EXECUTORS.contains(&te.as_str()) {
+            return Err(LocalDbError::ConstraintViolation {
+                table: "findings".to_string(),
+                constraint: format!(
+                    "invalid target_executor '{te}'; expected one of: {}",
+                    VALID_TARGET_EXECUTORS.join(", ")
+                ),
+            });
+        }
+    }
     let result = sqlx::query!(
         "UPDATE findings
          SET severity        = COALESCE(?, severity),
@@ -261,6 +360,13 @@ pub struct SeverityCount {
     pub severity: String,
     /// Number of open findings with this severity.
     pub count: i64,
+}
+
+/// R-V139P1-W-5: internal row for compile-time query_as!.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct SeverityCountRow {
+    severity: String,
+    count: i64,
 }
 
 /// Summary of a single stale finding — used by the master-decision timeout
@@ -378,6 +484,11 @@ pub async fn list_all_stale_open_findings(
 ///
 /// Returns a list of (severity, count) pairs for all open findings.
 ///
+/// R-V139P1-W-5: investigated compile-time `query_as!` conversion; SQLite's
+/// `COUNT(*)` return type is not reliably inferred by sqlx offline macros.
+/// Keeping runtime `query_as::<_, SeverityCountRow>` (FromRow derives correctly)
+/// which still provides column-name-checked mapping without full sqlx prepare.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
@@ -386,10 +497,10 @@ pub async fn count_open_findings_by_severity(
     creator_id: &str,
     work_id: &str,
 ) -> Result<Vec<SeverityCount>, LocalDbError> {
-    // SAFETY: COUNT(*) return type cannot be inferred by sqlx compile-time
-    // macro for SQLite; use runtime query with manual row mapping.
-    let rows = sqlx::query(
-        "SELECT severity, COUNT(*) as count FROM findings
+    // SAFETY: dynamic SQL — runtime query_as with FromRow; COUNT(*) return type
+    // not reliably inferred by sqlx compile-time macro for SQLite offline mode.
+    let rows = sqlx::query_as::<_, SeverityCountRow>(
+        "SELECT severity, CAST(COUNT(*) AS INTEGER) as count FROM findings
          WHERE creator_id = ? AND work_id = ? AND status = 'open'
          GROUP BY severity",
     )
@@ -399,10 +510,10 @@ pub async fn count_open_findings_by_severity(
     .await?;
 
     Ok(rows
-        .iter()
+        .into_iter()
         .map(|r| SeverityCount {
-            severity: r.get("severity"),
-            count: r.get("count"),
+            severity: r.severity,
+            count: r.count,
         })
         .collect())
 }
@@ -475,7 +586,7 @@ pub async fn create_finding_from_review(
 
 #[cfg(test)]
 mod tests {
-    use sqlx::SqlitePool;
+use sqlx::{FromRow, SqlitePool};
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();

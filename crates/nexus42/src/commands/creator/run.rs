@@ -566,6 +566,8 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             }
         }
         RunCommand::Status { work_id, json } => {
+            // R-V139P1-W-3: DaemonClient already enforces DEFAULT_REQUEST_TIMEOUT
+            // (30s) on every request; no unbounded wait is possible.
             let resp: serde_json::Value = client
                 .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
                 .await?;
