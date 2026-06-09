@@ -1,7 +1,8 @@
-//! `creator world` subcommand — create worlds, add events, list worlds.
+//! `creator world` subcommand — create worlds, add events, list/show worlds.
 //!
 //! Product write path for narrative worlds. Writes go through
 //! `nexus_local_db::narrative_write`, NOT through the `NarrativeGateway` trait.
+//! Read paths (list, show) use `NarrativeGateway` via `SqliteNarrativeGateway`.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -13,9 +14,12 @@ use nexus_narrative::NarrativeGateway;
 pub enum WorldCommand {
     /// Create a new narrative world
     Create {
-        /// World title
+        /// World title (spec: `--name`; `--title` is the canonical flag)
         #[arg(long)]
         title: String,
+        /// Alias for `--title` (spec compatibility; mutually exclusive with `--title`)
+        #[arg(long, conflicts_with = "title")]
+        name: Option<String>,
         /// URL-friendly slug (defaults to title-derived slug)
         #[arg(long)]
         slug: Option<String>,
@@ -25,6 +29,9 @@ pub enum WorldCommand {
         /// Time policy: `manual` (default) or `owner_driven`
         #[arg(long, default_value = "manual")]
         time_policy: String,
+        /// Optional world description
+        #[arg(long)]
+        description: Option<String>,
     },
 
     /// Add a timeline event to a world
@@ -49,6 +56,12 @@ pub enum WorldCommand {
 
     /// List all worlds in the active workspace
     List,
+
+    /// Show details for a single world
+    Show {
+        /// World ID (e.g. `wld_abc123`)
+        world_id: String,
+    },
 }
 
 /// Run a world subcommand.
@@ -61,10 +74,23 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
     match cmd {
         WorldCommand::Create {
             title,
+            name,
             slug,
             visibility,
             time_policy,
-        } => run_create(config, &title, slug.as_deref(), &visibility, &time_policy).await,
+            description,
+        } => {
+            let effective_title = name.as_deref().unwrap_or(title.as_str());
+            run_create(
+                config,
+                effective_title,
+                slug.as_deref(),
+                &visibility,
+                &time_policy,
+                description.as_deref(),
+            )
+            .await
+        }
         WorldCommand::EventAdd {
             world_id,
             branch_id,
@@ -83,6 +109,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
             .await
         }
         WorldCommand::List => run_list(config).await,
+        WorldCommand::Show { world_id } => run_show(config, &world_id).await,
     }
 }
 
@@ -126,6 +153,7 @@ async fn run_create(
     slug: Option<&str>,
     visibility: &str,
     time_policy: &str,
+    description: Option<&str>,
 ) -> Result<()> {
     let creator_id = active_creator_id(config)?;
     let pool = open_workspace_pool(config).await?;
@@ -141,6 +169,9 @@ async fn run_create(
     println!("  Title:     {title}");
     println!("  Slug:      {slug}");
     println!("  Branch:    {}", result.root_fork_branch_id);
+    if let Some(desc) = description {
+        println!("  Description: {desc}");
+    }
     println!("  Created:   {}", result.created_at);
     Ok(())
 }
@@ -225,5 +256,41 @@ async fn run_list(config: &CliConfig) -> Result<()> {
             world.world_id, world.title, world.status, world.created_at
         );
     }
+    Ok(())
+}
+
+/// Run `creator world show`.
+///
+/// Reuses `SqliteNarrativeGateway::get_world_state` (same row shape as list).
+/// Prints full metadata for a single world or a clean not-found message.
+async fn run_show(config: &CliConfig, world_id: &str) -> Result<()> {
+    let pool = open_workspace_pool(config).await?;
+    let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(pool);
+
+    let world = gw.get_world_state(world_id).await.map_err(|e| match e {
+        nexus_narrative::NarrativeError::ValidationError(msg) if msg.contains("not found") => {
+            crate::errors::CliError::Other(format!(
+                "World '{world_id}' not found.\n  \
+                     ↳ List existing worlds: nexus42 creator world list\n  \
+                     ↳ Create a new world:   nexus42 creator world create --title \"...\""
+            ))
+        }
+        _ => crate::errors::CliError::Other(format!("Failed to query world: {e}")),
+    })?;
+
+    println!("WORLD_ID:     {}", world.world_id);
+    println!("Title:        {}", world.title);
+    println!("Slug:         {}", world.slug);
+    println!("Status:       {}", world.status);
+    if let Some(rev) = world.canon_revision {
+        println!("Canon rev:    {rev}");
+    }
+    if let Some(head) = &world.current_timeline_head_id {
+        println!("Timeline head: {head}");
+    }
+    if let Some(tp) = &world.current_time_pointer {
+        println!("Time pointer: {tp}");
+    }
+    println!("Created:      {}", world.created_at);
     Ok(())
 }

@@ -533,6 +533,31 @@ async fn apply_non_stage_fields(
         auto_chain_interrupted: None,
         auto_review_master_on_timeout: req.auto_review_master_on_timeout,
     };
+
+    // T4: validate world_id FK existence when PATCHing a non-null world_id.
+    if let Some(Some(ref wid)) = non_stage_patch.world_id {
+        let exists: Option<String> = sqlx::query_scalar!(
+            r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ?"#,
+            wid,
+        )
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("world_id existence check: {e}"),
+        })?;
+        if exists.is_none() {
+            return Err(NexusApiError::BadRequest {
+                code: "INVALID_WORLD_ID".to_string(),
+                message: format!(
+                    "world_id '{wid}' does not exist.\n  \
+                     ↳ Create a new world:  nexus42 creator world create --title \"...\"\n  \
+                     ↳ List existing worlds: nexus42 creator world list"
+                ),
+            });
+        }
+    }
+
     works::patch_work(pool, creator_id, work_id, &non_stage_patch, now)
         .await
         .map_err(|e| match &e {
