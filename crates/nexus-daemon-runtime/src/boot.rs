@@ -341,6 +341,24 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     }
     tracing::info!("Schedule supervisor wired");
 
+    // --- Section 4b: Master-decision timeout watcher (V1.39 P4 T1) ---
+    //
+    // Periodically scans `findings` for open rows older than 96h (the
+    // master-decision SLA) and logs a structured `warn!` per stale row.
+    // Non-blocking: errors are logged and the loop continues. The task
+    // exits cleanly when `shutdown_notify` fires. See
+    // `crates/nexus-daemon-runtime/src/stale_findings_watcher.rs`.
+    {
+        let watcher_pool = state.pool().clone();
+        let watcher_shutdown = state.shutdown_notify();
+        let watcher_config = crate::stale_findings_watcher::StaleFindingsWatcherConfig::from_env();
+        let _watcher_handle = crate::stale_findings_watcher::spawn_stale_findings_watcher(
+            watcher_pool,
+            watcher_shutdown,
+            watcher_config,
+        );
+    }
+
     // --- Section 5: Agent Host subsystem ---
     let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
         let manager = nexus_agent_host::core::manager::HostManager::new();
