@@ -263,6 +263,117 @@ pub struct SeverityCount {
     pub count: i64,
 }
 
+/// Summary of a single stale finding — used by the master-decision timeout
+/// daemon task (V1.39 P4, novel-quality-loop §6).
+///
+/// "Stale" means `status = 'open'` and `created_at < now - threshold_seconds`,
+/// where the threshold defaults to 96h. Only the fields needed by the
+/// status banner and the structured log line are included to keep the
+/// daemon task allocation light.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StaleFindingSummary {
+    /// Finding identifier.
+    pub finding_id: String,
+    /// Owning Work.
+    pub work_id: String,
+    /// Owning creator (used to scope the banner and optional auto-schedule).
+    pub creator_id: String,
+    /// Finding severity at the time of detection.
+    pub severity: String,
+    /// Original creation epoch (seconds).
+    pub created_at: i64,
+    /// Age in seconds at the time of the query (>= threshold).
+    pub age_seconds: i64,
+}
+
+/// List open findings that are older than `threshold_seconds`, **scoped to
+/// a single creator** so the banner respects per-creator isolation.
+///
+/// "Stale" condition: `status = 'open'` AND `created_at < now_epoch -
+/// threshold_seconds`. Results are ordered by `created_at ASC` so the
+/// oldest finding shows first.
+///
+/// The function takes `now_epoch` as a parameter so the master-decision
+/// timeout daemon task can be exercised hermetically with a mocked clock
+/// (V1.39 P4 T5).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn list_stale_open_findings(
+    pool: &SqlitePool,
+    creator_id: &str,
+    now_epoch: i64,
+    threshold_seconds: i64,
+) -> Result<Vec<StaleFindingSummary>, LocalDbError> {
+    let cutoff = now_epoch.saturating_sub(threshold_seconds);
+    let rows = sqlx::query!(
+        "SELECT finding_id as \"finding_id!\", work_id as \"work_id!\",
+                creator_id as \"creator_id!\", severity as \"severity!\",
+                created_at as \"created_at!\"
+         FROM findings
+         WHERE creator_id = ? AND status = 'open' AND created_at < ?
+         ORDER BY created_at ASC",
+        creator_id,
+        cutoff,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| StaleFindingSummary {
+            finding_id: r.finding_id,
+            work_id: r.work_id,
+            creator_id: r.creator_id,
+            severity: r.severity,
+            age_seconds: now_epoch.saturating_sub(r.created_at),
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
+/// List **all** open stale findings across creators, used by the daemon
+/// scheduled task to surface a workspace-wide structured log (V1.39 P4 T2).
+///
+/// The CLI banner uses `list_stale_open_findings` (per-creator scope);
+/// the daemon log uses this function because the daemon does not have a
+/// single bound creator and must log all stale rows it observes.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn list_all_stale_open_findings(
+    pool: &SqlitePool,
+    now_epoch: i64,
+    threshold_seconds: i64,
+) -> Result<Vec<StaleFindingSummary>, LocalDbError> {
+    let cutoff = now_epoch.saturating_sub(threshold_seconds);
+    let rows = sqlx::query!(
+        "SELECT finding_id as \"finding_id!\", work_id as \"work_id!\",
+                creator_id as \"creator_id!\", severity as \"severity!\",
+                created_at as \"created_at!\"
+         FROM findings
+         WHERE status = 'open' AND created_at < ?
+         ORDER BY created_at ASC",
+        cutoff,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| StaleFindingSummary {
+            finding_id: r.finding_id,
+            work_id: r.work_id,
+            creator_id: r.creator_id,
+            severity: r.severity,
+            age_seconds: now_epoch.saturating_sub(r.created_at),
+            created_at: r.created_at,
+        })
+        .collect())
+}
+
 /// Count open findings for a Work, grouped by severity.
 ///
 /// Returns a list of (severity, count) pairs for all open findings.
