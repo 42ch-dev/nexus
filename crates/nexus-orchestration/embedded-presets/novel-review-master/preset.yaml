@@ -5,9 +5,15 @@
 # approve (→ resolved), reject (→ wont_fix), or defer.
 #
 # V1.40 P3 (T8): Added sync_world_kb state after decisions. When the Work
-# is World-bound (preset.input.world_id is set), this state creates a child
-# kb-extract schedule so the reviewed chapter content is promoted to World KB.
-# For legacy worldless Works, sync_world_kb is a no-op pass-through.
+# is World-bound (preset.input.world_id is set), this state invokes
+# kb.extract_work directly via a capability enter action. The capability
+# itself returns a no-op skip when world_id is empty/absent, so legacy V1.39
+# worldless Works pass through cleanly to done.
+#
+# NOTE: The original plan (T8) described a `schedule.enqueue_child` approach
+# with parent dependency, but the shipped design uses direct capability
+# invocation from the preset state machine instead. `build_child_kb_extract_schedule`
+# was removed as dead code per QC1/2 W-001 / W-007.
 #
 # This preset is interactive — it presents findings to the user and waits
 # for manual input. It does NOT auto-advance.
@@ -91,7 +97,7 @@ states:
     next: sync_world_kb
 
   - id: sync_world_kb
-    description: "V1.40 P3: enqueue child kb-extract schedule for World-bound Works. No-op for worldless."
+    description: "V1.40 P3: invoke kb.extract_work for World-bound Works. Returns skip no-op for worldless (empty world_id)."
     enter:
       - kind: capability
         name: kb.extract_work
@@ -99,7 +105,6 @@ states:
           creator_id: "{{preset.input.creator_id}}"
           work_id: "{{preset.input.work_id}}"
           world_id: "{{preset.input.world_id}}"
-          work_entry_id: "auto"
           profile_hint: "novel"
           source_kind: "work_chapter"
           source_locator: "{{preset.input.body_path}}"
