@@ -4,7 +4,7 @@ plan_id: "2026-06-10-v1.40-architecture-hygiene"
 reviewer: qc-specialist-3
 reviewer_index: 3
 focus: performance and reliability risk
-verdict: Request Changes
+verdict: Approve
 generated_at: "2026-06-10"
 ---
 
@@ -62,3 +62,69 @@ generated_at: "2026-06-10"
 - Doc changes in `.mstar/knowledge/world-kb-runtime-architecture.md` (T5) contain no misleading performance claims — only path corrections from `embedded-presets/rules/` to `embedded-rules/`.
 - No pre-existing benchmarks in `nexus-orchestration` to re-run; the change is a pure relocation with strictly reduced runtime overhead.
 - The single unresolved Warning (W-1) is a formatting standards violation that would fail CI under the project's mandated nightly `cargo fmt` toolchain.
+
+## Revalidation
+
+### Fix context
+**W-1**: `crates/nexus-orchestration/src/embedded_rules.rs:21-22` was not formatted with nightly `cargo fmt`. The `pub const` declaration was split across two lines (`&str =` + newline + `include_str!(...)`), but nightly rustfmt collapses it to a single line. This was flagged as a Warning blocking approval.
+
+### Diff since previous review
+New commit added to `feature/v1.40-architecture-hygiene`:
+
+```
+1dd268ed style(orchestration): nightly fmt embedded_rules.rs (QC #3 fix)
+```
+
+This commit modifies exactly one file (`crates/nexus-orchestration/src/embedded_rules.rs`) with a whitespace-only change:
+
+```diff
+-pub const WRITING_CRAFT: &str =
+-    include_str!("../embedded-rules/writing-craft.md");
++pub const WRITING_CRAFT: &str = include_str!("../embedded-rules/writing-craft.md");
+```
+
+**Semantic delta**: zero. No runtime behavior, API, or compile-time semantics changed. Only formatting.
+
+### Re-verification evidence
+
+1. **Format check (mandatory nightly)**:
+   ```bash
+   $ cargo +nightly fmt --all -- --check
+   # (exit 0, no output — no formatting drift detected)
+   ```
+
+2. **Clippy (strict)**:
+   ```bash
+   $ cargo clippy -p nexus-orchestration -- -D warnings
+   # Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+   # (clean — zero warnings)
+   ```
+
+3. **Unit tests for `embedded_rules` module**:
+   ```bash
+   $ cargo test -p nexus-orchestration --lib embedded_rules
+   # running 3 tests
+   # test embedded_rules::tests::writing_craft_is_not_empty ... ok
+   # test embedded_rules::tests::writing_craft_contains_expected_heading ... ok
+   # test embedded_rules::tests::writing_craft_contains_five_question_gate ... ok
+   # test result: ok. 3 passed; 0 failed; 0 ignored; 520 filtered out
+   ```
+
+4. **Diff verification**:
+   ```bash
+   $ git show 1dd268ed --stat
+   # crates/nexus-orchestration/src/embedded_rules.rs | 3 +--
+   # 1 file changed, 1 insertion(+), 2 deletions(-)
+   ```
+
+### Disposition of prior findings
+
+| Finding | Status | Evidence |
+|---------|--------|----------|
+| W-1 Formatting drift in `embedded_rules.rs:21-22` | **Resolved** | `git show 1dd268ed` confirms single-line collapse; `cargo +nightly fmt --all -- --check` exits 0 |
+
+### New findings (this pass)
+- (none)
+
+### Updated verdict
+**Approve** — re-validation of QC #3. The blocking Warning (W-1) has been resolved with a whitespace-only formatting fix. No new findings. All static checks pass.
