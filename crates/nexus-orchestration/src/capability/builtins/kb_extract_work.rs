@@ -29,10 +29,22 @@ use std::sync::Arc;
 struct ExtractResponse {
     block_type: String,
     canonical_name: String,
+    /// Body may be a structured JSON object (preferred) or a plain string.
+    #[serde(deserialize_with = "deserialize_body")]
     body: String,
     #[serde(default)]
     #[allow(dead_code)] // read from LLM response, used for future provenance tracking
     source_work_entry_id: String,
+}
+
+/// Deserialize `body` from either a JSON object (serialized to string) or a plain string.
+fn deserialize_body<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
+    use serde::de::Error as _;
+    let value = serde_json::Value::deserialize(de)?;
+    match value {
+        serde_json::Value::String(s) => Ok(s),
+        other => serde_json::to_string(&other).map_err(D::Error::custom),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -298,11 +310,20 @@ impl Capability for KbExtractWork {
         };
 
         let mut kb = KeyBlock::new(&world_id, block_type, &extract.canonical_name);
-        kb.body = Some(nexus_kb::key_block::KeyBlockBody {
-            summary: Some(extract.body.clone()),
-            attributes: None,
-            tags: None,
-        });
+
+        // Try to parse body as structured JSON; if the LLM returned a JSON
+        // object with attributes, use it. Otherwise fall back to plain summary.
+        let body: nexus_kb::key_block::KeyBlockBody =
+            if let Ok(parsed) = serde_json::from_str(&extract.body) {
+                parsed
+            } else {
+                nexus_kb::key_block::KeyBlockBody {
+                    summary: Some(extract.body.clone()),
+                    attributes: None,
+                    tags: None,
+                }
+            };
+        kb.body = Some(body);
 
         // ── Phase 4: Mark job as done BEFORE inserting KeyBlock ───────
         // This ordering ensures: if mark_done fails, no KeyBlock was created

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T22:30:00+08:00",
+  "updated_at": "2026-06-10T23:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.40-harness-docs-prepare",
@@ -120,7 +120,7 @@
     },
     {
       "id": "2026-06-10-v1.40-world-kb-taxonomy",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-10-v1.40-world-kb-taxonomy.md",
       "working_branch": "feature/v1.40-world-kb-taxonomy",
       "merge_target": "iteration/v1.40",
@@ -137,8 +137,32 @@
         "explicitly_out": [
           "multi-volume PK",
           "DF-47"
-        ]
-      }
+        ],
+        "qa": "passed — all 5 ACs green; SqliteKbStore now wires validate_body + validate_canonical_name; backward-compat PascalCase preserved; nightly fmt clean",
+        "done_at": "2026-06-10T23:30:00+08:00",
+        "commits": [
+          "7e897c9a",
+          "fb9d9aa3",
+          "f711c802",
+          "8f9a5efc",
+          "2b0cf8fe",
+          "31b4736b",
+          "17e2bf8e",
+          "706fb605",
+          "61d2b060",
+          "cf4bea22",
+          "41c0d2d8",
+          "9e2a5cbc",
+          "fbd301c4",
+          "c3d6cbb1",
+          "2f5cc6c3"
+        ],
+        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10 (with mid-stream QC fix batch)"
+      },
+      "updated_at": "2026-06-10",
+      "notes": [
+        "2026-06-10: implement (7e897c9a..8f9a5efc); QC1/QC2 Request Changes initial (SqliteKbStore validation, advisory, structured errors); fix fbd301c4 + 6 fix commits; QC re-validation Approve; QA Pass → merge to iteration/v1.40"
+      ]
     },
     {
       "id": "2026-06-10-v1.40-world-context-prompt-block",
@@ -1139,6 +1163,68 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.40 hardening"
+      }
+    ],
+    "2026-06-10-v1.40-world-kb-taxonomy": [
+      {
+        "id": "R-V140P1-S1",
+        "title": "NOVEL_CATEGORIES list duplicated between Rust code and kb-extract/prompts/extract.md — drift risk",
+        "severity": "low",
+        "source": "qc1 S-001 / qc2 S3 (V1.40 P1 re-validation)",
+        "scope": "crates/nexus-kb/src/validation.rs + crates/nexus-orchestration/embedded-presets/kb-extract/prompts/extract.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      },
+      {
+        "id": "R-V140P1-S2",
+        "title": "test_invalid_block_type_via_deserialization test name misleading (tests serde, not store path)",
+        "severity": "low",
+        "source": "qc1 S-004 (V1.40 P1 review)",
+        "scope": "crates/nexus-kb/src/store.rs (test)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P1-S3",
+        "title": "No concurrent-uniqueness race test under Novel mode",
+        "severity": "low",
+        "source": "qc2 S1 (V1.40 P1 re-validation)",
+        "scope": "crates/nexus-kb/src/store.rs (test)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41"
+      },
+      {
+        "id": "R-V140P1-S4",
+        "title": "local-db-schema.md missing direct pointer to nexus-kb::validation from schema doc",
+        "severity": "low",
+        "source": "qc2 S4 (V1.40 P1 re-validation)",
+        "scope": ".mstar/knowledge/specs/local-db-schema.md §4.1.2",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      },
+      {
+        "id": "R-V140P1-S5",
+        "title": "String allocations in validation error paths (acceptable for low-frequency inserts)",
+        "severity": "low",
+        "source": "qc3 S-2 (V1.40 P1 review)",
+        "scope": "crates/nexus-kb/src/validation.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P1-S6",
+        "title": "No benchmarks for validation path",
+        "severity": "low",
+        "source": "qc3 S-3 (V1.40 P1 review)",
+        "scope": "crates/nexus-kb/benches/ (does not exist)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
       }
     ]
   }
