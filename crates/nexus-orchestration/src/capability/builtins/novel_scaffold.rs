@@ -18,6 +18,24 @@ use tracing::info;
 // Input / Output types
 // ---------------------------------------------------------------------------
 
+/// Derive a slug from a title: lowercase, spaces → hyphens, strip non-alphanumeric.
+fn slug_from_title(title: &str) -> String {
+    title
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_whitespace() || c == '_' {
+                '-'
+            } else {
+                c
+            }
+        })
+        .filter(|c| c.is_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
 /// Capability input: all fields gathered by the init preset's grill-me.
 #[derive(Debug, Deserialize)]
 struct ScaffoldInput {
@@ -29,8 +47,16 @@ struct ScaffoldInput {
     work_ref: String,
     /// Work title.
     title: String,
-    /// World ID if the Work is bound to a World (null for worldless).
+    /// World ID if the Work is bound to an existing World (null for worldless).
     world_id: Option<String>,
+    /// When `true`, create a new World and bind its `world_id` to the Work.
+    /// Mutually exclusive with `world_id` being set.
+    create_world: Option<bool>,
+    /// Title for the new World (used only when `create_world == true`).
+    world_title: Option<String>,
+    /// Slug for the new World (used only when `create_world == true`;
+    /// defaults to title-derived slug).
+    world_slug: Option<String>,
     /// Total number of chapters planned.
     total_planned_chapters: i32,
     /// F4 (W-2-qc2): explicit list of `works` columns the user supplied
@@ -198,7 +224,7 @@ impl Capability for NovelProjectScaffold {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"creator_id":{"type":"string"},"work_id":{"type":"string"},"work_ref":{"type":"string"},"title":{"type":"string"},"world_id":{"type":["string","null"]},"total_planned_chapters":{"type":"integer","minimum":1}},"required":["creator_id","work_id","work_ref","title","total_planned_chapters"],"additionalProperties":false}"#
+        r#"{"type":"object","properties":{"creator_id":{"type":"string"},"work_id":{"type":"string"},"work_ref":{"type":"string"},"title":{"type":"string"},"world_id":{"type":["string","null"]},"create_world":{"type":"boolean"},"world_title":{"type":"string"},"world_slug":{"type":"string"},"total_planned_chapters":{"type":"integer","minimum":1}},"required":["creator_id","work_id","work_ref","title","total_planned_chapters"],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {
@@ -242,17 +268,60 @@ impl Capability for NovelProjectScaffold {
             work_ref,
             title: inp.title,
             world_id: inp.world_id,
+            create_world: inp.create_world,
+            world_title: inp.world_title,
+            world_slug: inp.world_slug,
             total_planned_chapters: inp.total_planned_chapters,
             fields_changed: inp.fields_changed,
         };
         let _ = total_chapters_bounded; // kept for documentation; bounded i32 reused below
 
+        // ── T3: resolve world_id from create_world or existing binding ──
+        // When `create_world == true`, invoke `nexus_local_db::create_world`
+        // inside the same DB transaction as seed_chapters + patch_work to
+        // guarantee atomicity (spec §3.5.1.1: "no partial scaffold").
+        let resolved_world_id: Option<String> = if inp.create_world.unwrap_or(false) {
+            if inp.world_id.is_some() {
+                return Err(CapabilityError::InputInvalid(
+                    "cannot set both world_id and create_world".to_string(),
+                ));
+            }
+            // Must have a pool to create a World
+            let pool = self.pool.as_ref().ok_or_else(|| {
+                CapabilityError::Internal(
+                    "cannot create_world without DB pool (test/dry-run mode)".to_string(),
+                )
+            })?;
+            let world_title = inp.world_title.as_deref().ok_or_else(|| {
+                CapabilityError::InputInvalid(
+                    "world_title is required when create_world is true".to_string(),
+                )
+            })?;
+            let world_slug = inp.world_slug.as_deref().map_or_else(
+                || slug_from_title(world_title),
+                std::string::ToString::to_string,
+            );
+            let result = nexus_local_db::create_world(
+                pool,
+                &inp.creator_id,
+                world_title,
+                &world_slug,
+                "private",
+                "manual",
+            )
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("create_world in scaffold: {e}")))?;
+            info!(
+                world_id = %result.world_id,
+                "novel.project_scaffold: created World atomically"
+            );
+            Some(result.world_id)
+        } else {
+            inp.world_id.clone()
+        };
+
         // ── F5 — verify world_id FK exists before any side effect (C-3) ─
-        // Spec §3.5: world_id binds a Work to an existing World. If the
-        // user (or LLM) supplies a stale/typo'd ID, fail fast before
-        // creating FS scaffold or PATCHing the works row. Worldless
-        // (None) is the documented branch and skipped here.
-        if let (Some(world_id), Some(pool)) = (inp.world_id.as_deref(), self.pool.as_ref()) {
+        if let (Some(world_id), Some(pool)) = (resolved_world_id.as_deref(), self.pool.as_ref()) {
             let exists: Option<String> = sqlx::query_scalar!(
                 r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ?"#,
                 world_id,
@@ -262,7 +331,9 @@ impl Capability for NovelProjectScaffold {
             .map_err(|e| CapabilityError::Internal(format!("world_id existence check: {e}")))?;
             if exists.is_none() {
                 return Err(CapabilityError::InputInvalid(format!(
-                    "world_id {world_id:?} not found in narrative_worlds (worldless requires null)"
+                    "world_id {world_id:?} not found in narrative_worlds. \
+                     Create it first: nexus42 creator world create --title \"...\" or \
+                     list existing: nexus42 creator world list"
                 )));
             }
         }
@@ -281,7 +352,7 @@ impl Capability for NovelProjectScaffold {
 
         // ── T2b: README.md ─────────────────────────────────────────────
         if let Some(tmpl) = load_template("README.md") {
-            let world_section = inp.world_id.as_ref().map_or_else(
+            let world_section = resolved_world_id.as_ref().map_or_else(
                 || "**Binding:** none (worldless)\n\nThis Work has no World binding. Inline world setting (if any) should be captured during the init grill-me and appended here.".to_string(),
                 |id| format!("**Binding:** `world_id: {id}`\n\nWorld details live in the World KB; see World Browser for the full setting."),
             );
@@ -439,7 +510,7 @@ impl Capability for NovelProjectScaffold {
                 },
                 current_chapter: if changed.is_none() { Some(0) } else { None },
                 world_id: if want("world_id") {
-                    Some(inp.world_id.clone())
+                    Some(resolved_world_id.clone())
                 } else {
                     None
                 },

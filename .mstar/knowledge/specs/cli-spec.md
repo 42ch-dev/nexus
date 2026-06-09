@@ -419,15 +419,16 @@ Normative World binding: [novel-workflow-profile.md §3.5](./novel-workflow-prof
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator world create --name "<text>" --kind narrative [--description "<text>"]` | Create a World; returns `world_id` (`wld_<uuid>`). Used by `novel-project-init` grill-me "create new World" path. |
+| `nexus42 creator world create --title "<text>" [--name "<text>"] [--slug "<slug>"] [--description "<text>"]` | Create a World; returns `world_id` (`wld_<uuid>`). Used by `novel-project-init` grill-me "create new World" path. `--name` is an alias for `--title` (spec backward-compat). `--kind` deferred to P1 (narrative is implicit default). |
 | `nexus42 creator world list` | List Worlds visible under active `creator_id` + `workspace_slug`. |
-| `nexus42 creator world show <world_id>` | Show World metadata and summary counts (read-only). |
+| `nexus42 creator world show <world_id>` | Show World metadata and summary counts (read-only). Clean not-found with remediation if missing. |
 
 Rules:
 
 - `create` is idempotent by name only when PM/plan defines dedup policy; default is new row per invocation pre-1.0.
 - No local fork or platform merge mutations (PD-01).
 - `creator run start --world-id <uuid>` validates existence via same store as `show`.
+- `show` for a nonexistent `world_id` prints remediation pointing to `creator world create --title` or `creator world list`.
 
 **Target (V1.40 P0):** plan `2026-06-10-v1.40-world-create-and-validation`.
 

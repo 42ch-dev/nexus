@@ -124,9 +124,11 @@ Therefore:
 **V1.40 implement** — CLI contract:
 
 ```text
-nexus42 creator world create --name "Neon River" --kind narrative --description "Solarpunk noir city-world"
+nexus42 creator world create --title "Neon River" --description "Solarpunk noir city-world"
 → world_id: wld_<uuid>
 ```
+
+Note: `--kind narrative` is implicit (deferred to P1 taxonomy). `--title` is canonical; `--name` is an alias (see [cli-spec.md §6.2G](cli-spec.md)).
 
 The init grill-me "create new World" path composes with P0 `AddScheduleRequest.input` wiring as follows:
 
