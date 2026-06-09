@@ -19,6 +19,9 @@ use nexus_contracts::local::schedule::http::AddScheduleRequest;
 use nexus_local_db::works::{self, WorkPatch, WorkRecord};
 use sqlx::SqlitePool;
 
+/// R-V139P0-W-B: per-process monotonic counter for ACH schedule ID collision resistance.
+static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 use crate::stage_gates::{self, WorkFields};
 
 /// Result of an `on_schedule_complete` evaluation.
@@ -354,12 +357,12 @@ pub async fn enqueue_auto_chain_schedule(
     // R-V139P0-W-B: append per-process monotonic counter for collision resistance.
     // Pure-timestamp IDs could collide under millisecond-granule concurrent enqueue;
     // the counter provides unique suffix without adding a new crate dependency.
-    static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
     let counter = ACH_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let schedule_id = format!(
         "ACH{}{:06x}",
         chrono::Utc::now().format("%Y%m%d%H%M%S%3f"),
-        counter & 0xFFFFFF
+        counter & 0x00FF_FFFF
     );
     let now_ts = chrono::Utc::now().timestamp();
 
@@ -403,7 +406,7 @@ pub async fn enqueue_auto_chain_schedule(
     Ok(schedule_id)
 }
 
-/// R-V139P5-S4: Map preset_id to its embedded manifest version.
+/// R-V139P5-S4: Map `preset_id` to its embedded manifest version.
 ///
 /// Must be kept in sync with `embedded-presets/*/preset.yaml` `version:` field.
 /// Returns 1 as fallback for unknown preset IDs.
@@ -417,15 +420,9 @@ pub async fn enqueue_auto_chain_schedule(
 fn preset_version_for_id(preset_id: &str) -> i64 {
     match preset_id {
         "novel-writing" => 7,
-        "research" => 2,
-        "creative-brief-intake" => 1,
-        "novel-brainstorm" => 1,
-        "reflection-loop" => 1,
+        "research" | "novel-review-master" => 2,
         "kb-extract" => 3,
-        "novel-review-master" => 2,
-        "novel-project-init" => 1,
-        "memory-augmented" => 1,
-        "soul-experience-refresh" => 1,
+        // All other presets default to version 1
         _ => 1,
     }
 }

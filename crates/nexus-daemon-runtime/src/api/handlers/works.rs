@@ -181,7 +181,7 @@ pub struct PatchWorkRequest {
     /// V1.39 P4 T4: opt-in flag — when true the stale-findings watcher
     /// auto-enqueues `novel-review-master` for this Work past the timeout.
     pub auto_review_master_on_timeout: Option<bool>,
-    /// V1.39 §5.7: clear auto_chain_interrupted to resume auto-chain.
+    /// V1.39 §5.7: clear `auto_chain_interrupted` to resume auto-chain.
     /// R-V139P0-W-C: also triggers a supervisor tick so the resumed Work
     /// progresses immediately rather than waiting for the next cycle.
     pub auto_chain_interrupted: Option<bool>,
