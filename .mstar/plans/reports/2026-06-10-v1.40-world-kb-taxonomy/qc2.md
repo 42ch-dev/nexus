@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-10-v1.40-world-kb-taxonomy"
-verdict: "Request Changes"
-generated_at: "2026-06-09"
+verdict: "Approve"
+generated_at: "2026-06-10"
 ---
 
 # Code Review Report
@@ -87,3 +87,95 @@ generated_at: "2026-06-09"
 **Verdict**: Request Changes
 
 (The single Critical item is a direct violation of the plan's stated scope and the normative spec's "by extension" claim; the production taxonomy enforcement is not present on the paths that actually persist novel-profile KeyBlocks. The three Warnings are correctness / observability / safety gaps that should be addressed before the feature is considered shipped for V1.40 P1. Suggestions are recommended for test coverage and future wiring but are not blocking.)
+
+## Revalidation
+
+**Targeted re-review (QC #2 only, N=1)** for plan `2026-06-10-v1.40-world-kb-taxonomy`.
+
+### Fix context
+- **C1 (Critical)**: Production `SqliteKbStore::insert_key_block` / `update_key_block` and `kb_extract_work` bypassed the new `validate_body` / novel-category rules (only InMemory path was wired). Spec claim "by extension SqliteKbStore" was not delivered.
+- **W1 (Warning)**: Advisory `novel_category → block_type` mismatch was a documented no-op (`let _ = block_type;`); no observable `tracing::warn!`.
+- **W2 (Warning)**: No `canonical_name` format/safety validation (no rejection of control chars, path separators `/ \`, shell metachars `` ` $ ; | & * ? [ ] { } ! ~ ``, etc.).
+- **W3 (Warning)**: Validation errors were opaque `String` (`KbError::ValidationError(String)`); callers could not pattern-match on `kind`.
+
+**Diff since previous QC2 review** (previous QC2 commit `31b4736bb25f582ceb15bcc65d5d3a896e03452a`; reval range `31b4736b..fbd301c4`):
+- `fbd301c46ed2eca948e71b924a760ed3ee27ade6` docs(specs): QC1 C-001 / QC2 W2 — canonical_name grammar in entity-scope-model §5.1.1
+- `9e2a5cbc5c252eef503e525f185b925f11d64bd3` fix(kb): kb_extract_work — parse structured body from LLM response
+- `41c0d2d8df1f96000b4b8a0135b6585f6718dbf7` fix(kb): QC1 C-001 / QC2 C1 — wire validate_body into SqliteKbStore + QC1 W-002 — stable block_type storage
+- `cf4bea22f491d1a76c553fae9613178633877ad4` fix(kb): wire canonical_name + body validation into InMemoryKbStore
+- `61d2b060b49ba2e297b45e0b04d82d2a81c65cc1` fix(kb): QC1 W-001 / QC2 W1 — emit tracing::warn! on advisory mismatch + QC2 W2 — canonical_name validation
+- `706fb6059724f49df63a67d2459940b235b3448b` refactor(kb): QC2 W3 — structured ValidationError with ValidationKind enum
+
+(10 files, +779/-45; full `git log --oneline 31b4736b..HEAD` and `git diff --stat` captured at start of session.)
+
+### Re-verification (C1)
+- **Code reads**:
+  - `crates/nexus-local-db/src/kb_store.rs:222-228` (insert): `validate_canonical_name(&kb.canonical_name)...; validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)...` before any DB work. Same for `update_key_block:464-470`.
+  - `SqliteKbStore` now exposes `with_validation_mode(pool, ValidationMode::Novel)` and defaults to Generic. `validation_err` maps `KbError::Validation(ve)` → `KbStoreError::Validation(ve)` (structured).
+  - `crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs:316-326`: now does `if let Ok(parsed) = serde_json::from_str(&extract.body) { parsed } else { fallback summary-only }`; `kb.body = Some(body);` before calling the (now-validating) store. Store is instantiated as plain `SqliteKbStore::new(...)` (Generic is safe for the extract path; Novel mode is available for callers that need taxonomy enforcement).
+- **Tests run** (exact per assignment): `cargo test -p nexus-local-db -- kb_store 2>&1 | tail -20` → 21 passed (including new: `test_sqlite_novel_valid_category_succeeds`, `test_sqlite_novel_missing_category_rejected`, `test_sqlite_novel_invalid_category_rejected`, `test_sqlite_canonical_name_validation_rejects_slash`, `test_sqlite_canonical_name_validation_rejects_shell_meta`, `test_sqlite_update_validates_body_in_novel_mode`, `test_sqlite_stores_block_type_snake_case`, etc.). All C1 scenarios now covered on the real Sqlite path.
+- **Result**: C1 resolved. No bypass remains on the production persistence + extract paths.
+
+### Re-verification (W1)
+- **Code read** (`crates/nexus-kb/src/validation.rs:222-236`):
+  ```rust
+  if let Some(default_bt) = default_block_type_for_category(category) {
+      if block_type != default_bt {
+          tracing::warn!(
+              novel_category = category,
+              provided_block_type = ?block_type,
+              default_block_type = ?default_bt,
+              "novel_category '{}' does not map to default block_type {:?} \
+               (provided {:?}); this is advisory, not an error",
+              category, default_bt, block_type
+          );
+      }
+  }
+  ```
+  Real `tracing::warn!` (not `_ = ...` or no-op). Fires only on advisory mismatch under Novel mode.
+- **Result**: W1 resolved. Advisory is now observable.
+
+### Re-verification (W2)
+- **Code read** (`crates/nexus-kb/src/validation.rs:56-143`): `validate_canonical_name` rejects:
+  - empty
+  - control chars (0x00-0x1F, 0x7F)
+  - path separators (`/`, `\`)
+  - `FORBIDDEN_CHARS`: `` ` $ ; & | > < ! * ? " ' ( ) { } [ ] # `` (plus length >256)
+  - Returns structured `KbError::Validation(ValidationError { kind: ValidationKind::InvalidCanonicalName, ... })`.
+  - Wired into both `InMemoryKbStore` (store.rs) and `SqliteKbStore` insert/update, and `KeyBlock` construction paths.
+- **Tests run** (exact per assignment): `cargo test -p nexus-kb canonical_name 2>&1 | tail -30` → 8 passed (accepts valid; rejects empty, path_separators, shell_metacharacters, control_chars, excessive_length). Plus Sqlite equivalents (`test_sqlite_canonical_name_validation_rejects_*`) all pass.
+- **Entity-scope-model.md** also updated (per commit) to document the grammar.
+- **Result**: W2 resolved. `canonical_name` is now validated for safety on all insert/update paths.
+
+### Re-verification (W3)
+- **Code read**:
+  - `crates/nexus-kb/src/errors.rs:8-60`: `pub enum ValidationKind { MissingNovelCategory, InvalidNovelCategory, ..., InvalidCanonicalName }` + `pub struct ValidationError { pub kind: ValidationKind, pub field: Option<String>, pub message: String }`.
+  - `KbError::Validation(ValidationError)` (structured) vs legacy `ValidationError(String)`.
+  - `validation.rs` tests (e.g. `novel_missing_body_returns_structured_kind`, `novel_missing_category_returns_structured_kind`, `novel_invalid_category_returns_structured_kind`, `non_object_attributes_returns_structured_kind`, `canonical_name_rejects_*`) all do `match err { KbError::Validation(ve) => { assert_eq!(ve.kind, ValidationKind::...); ... } }`.
+  - `nexus-local-db/src/kb_store.rs` (validation_err + callers) and `nexus-kb/src/store.rs` propagate the structured form; `KbStoreError::Validation(ValidationError)` now carries the enum.
+- **Tests run**: `cargo test -p nexus-kb validation 2>&1 | tail -30` → 25 passed (all structured-kind assertions + the novel/canonical happy/error paths).
+- **Result**: W3 resolved. Callers (stores, extract work, tests, upper layers) can now `match` on `kind` for precise handling.
+
+### Whole-crate sanity (captured at end of session)
+```bash
+cargo build -p nexus-kb -p nexus-local-db -p nexus-orchestration --all-targets 2>&1 | tail -10
+# (succeeded; one unrelated unused-variable warning in an orchestration *test* file outside the changed modules)
+
+cargo test -p nexus-kb -p nexus-local-db -p nexus-orchestration 2>&1 | tail -15
+# (all relevant tests + doc-tests passed)
+
+cargo clippy -p nexus-kb -p nexus-local-db -p nexus-orchestration -- -D warnings 2>&1 | tail -10
+# (clean; no warnings emitted under -D)
+
+cargo +nightly fmt --all -- --check ; echo "fmt_exit=$?"
+# fmt_exit=0
+```
+
+### Updated verdict
+All four blocking findings (C1 + W1/W2/W3) are resolved with concrete code, tests, and observable behavior. The 6-fix delta introduces **no new security or correctness findings** under the QC #2 lens (input validation, canonical-name safety, structured error handling, and production-path enforcement are now present and tested). Original Suggestions (S1–S4) remain non-blocking and are unchanged.
+
+**Verdict (after revalidation)**: **Approve**
+
+(No Critical or mandatory Warning remains. The feature now delivers the taxonomy rules on the paths that actually persist data.)
+
+(End of revalidation for this targeted QC #2 wave.)
