@@ -22,8 +22,9 @@
 //! of the store traits. The crate provides no default runtime or storage backend.
 
 use crate::stage0::{Stage0Assembly, STAGE0_PERSONALITY_END, STAGE0_PERSONALITY_START};
+use crate::world_context::WorldKbQueryBuilder;
 use nexus_contracts::BlockType;
-use nexus_kb::{KbQuery, KbStore};
+use nexus_kb::KbStore;
 use nexus_knowledge::KnowledgeStore;
 use nexus_narrative::NarrativeGateway;
 
@@ -421,13 +422,16 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
 }
 
 /// Fetch World KB assets using structured query and format as context text.
+///
+/// Uses [`WorldKbQueryBuilder`] for shared filter logic (T2 refactor).
 #[allow(clippy::future_not_send)]
 async fn fetch_world_kb<K: KbStore>(
     kb_store: &K,
     world_id: &str,
     request: &MomentRequest,
 ) -> Result<Option<String>, nexus_kb::KbStoreError> {
-    let mut query = KbQuery::new(world_id);
+    let builder = WorldKbQueryBuilder::new(world_id);
+    let mut query = builder.query_all();
     if let Some(limit) = request.kb_limit {
         query = query.with_limit(limit);
     }
