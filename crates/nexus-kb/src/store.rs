@@ -2,10 +2,20 @@
 //!
 //! The `KbStore` trait defines insert/query/update/delete operations scoped by
 //! `world_id`. An in-memory implementation is provided for testing.
+//!
+//! # Validation
+//!
+//! `InMemoryKbStore` runs body validation on insert and update when a
+//! [`ValidationMode`](crate::validation::ValidationMode) is configured.
+//! The default mode is `Generic` (no novel-specific checks). Set `validation_mode`
+//! to [`ValidationMode::Novel`](crate::validation::ValidationMode::Novel) to
+//! enforce `body.attributes.novel_category` requirements per
+//! entity-scope-model.md §5.1.1.
 
 use crate::key_block::KeyBlock;
 use crate::query::{KbInsertResult, KbQuery, KbQueryResult};
 use crate::source_anchor::SourceAnchor;
+use crate::validation::{validate_body, ValidationMode};
 use nexus_contracts::BlockType;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -37,6 +47,10 @@ pub enum KbStoreError {
     /// Storage backend error.
     #[error("storage error: {0}")]
     Storage(String),
+
+    /// Body validation error (taxonomy / novel-category rules).
+    #[error("validation error: {0}")]
+    Validation(String),
 }
 
 // ── KbStore Trait ───────────────────────────────────────────────────
@@ -113,15 +127,27 @@ pub trait KbStore {
 pub struct InMemoryKbStore {
     blocks: RwLock<HashMap<String, KeyBlock>>,
     anchors: RwLock<HashMap<String, Vec<SourceAnchor>>>,
+    validation_mode: ValidationMode,
 }
 
 impl InMemoryKbStore {
-    /// Create a new empty in-memory store.
+    /// Create a new empty in-memory store with `Generic` validation.
     #[must_use]
     pub fn new() -> Self {
         Self {
             blocks: RwLock::new(HashMap::new()),
             anchors: RwLock::new(HashMap::new()),
+            validation_mode: ValidationMode::Generic,
+        }
+    }
+
+    /// Create a new empty in-memory store with the given validation mode.
+    #[must_use]
+    pub fn with_validation_mode(mode: ValidationMode) -> Self {
+        Self {
+            blocks: RwLock::new(HashMap::new()),
+            anchors: RwLock::new(HashMap::new()),
+            validation_mode: mode,
         }
     }
 
@@ -185,6 +211,10 @@ impl Default for InMemoryKbStore {
 
 impl KbStore for InMemoryKbStore {
     async fn insert_key_block(&self, kb: KeyBlock) -> Result<KbInsertResult, KbStoreError> {
+        // Validate body semantics before persisting
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
+            .map_err(|e| KbStoreError::Validation(e.to_string()))?;
+
         let key_block_id = kb.key_block_id.clone();
         let world_id = kb.world_id.clone();
         let created_at = kb.created_at.clone();
@@ -323,6 +353,10 @@ impl KbStore for InMemoryKbStore {
     }
 
     async fn update_key_block(&self, kb: KeyBlock) -> Result<(), KbStoreError> {
+        // Validate body semantics before persisting
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
+            .map_err(|e| KbStoreError::Validation(e.to_string()))?;
+
         {
             let mut blocks = self.write_blocks()?;
 
