@@ -12,10 +12,11 @@
 //! enforce `body.attributes.novel_category` requirements per
 //! entity-scope-model.md §5.1.1.
 
+use crate::errors::ValidationError;
 use crate::key_block::KeyBlock;
 use crate::query::{KbInsertResult, KbQuery, KbQueryResult};
 use crate::source_anchor::SourceAnchor;
-use crate::validation::{validate_body, ValidationMode};
+use crate::validation::{validate_body, validate_canonical_name, ValidationMode};
 use nexus_contracts::BlockType;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -48,9 +49,13 @@ pub enum KbStoreError {
     #[error("storage error: {0}")]
     Storage(String),
 
-    /// Body validation error (taxonomy / novel-category rules).
+    /// Structured body/canonical-name validation error.
     #[error("validation error: {0}")]
-    Validation(String),
+    Validation(ValidationError),
+
+    /// Legacy validation error with opaque message.
+    #[error("validation error: {0}")]
+    ValidationLegacy(String),
 }
 
 // ── KbStore Trait ───────────────────────────────────────────────────
@@ -211,9 +216,21 @@ impl Default for InMemoryKbStore {
 
 impl KbStore for InMemoryKbStore {
     async fn insert_key_block(&self, kb: KeyBlock) -> Result<KbInsertResult, KbStoreError> {
+        // Validate canonical_name format/safety
+        validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
+            crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+            crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+            other => KbStoreError::ValidationLegacy(other.to_string()),
+        })?;
+
         // Validate body semantics before persisting
-        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
-            .map_err(|e| KbStoreError::Validation(e.to_string()))?;
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
+            |e| match e {
+                crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+                crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+                other => KbStoreError::ValidationLegacy(other.to_string()),
+            },
+        )?;
 
         let key_block_id = kb.key_block_id.clone();
         let world_id = kb.world_id.clone();
@@ -353,9 +370,21 @@ impl KbStore for InMemoryKbStore {
     }
 
     async fn update_key_block(&self, kb: KeyBlock) -> Result<(), KbStoreError> {
+        // Validate canonical_name format/safety
+        validate_canonical_name(&kb.canonical_name).map_err(|e| match e {
+            crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+            crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+            other => KbStoreError::ValidationLegacy(other.to_string()),
+        })?;
+
         // Validate body semantics before persisting
-        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
-            .map_err(|e| KbStoreError::Validation(e.to_string()))?;
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode).map_err(
+            |e| match e {
+                crate::errors::KbError::Validation(ve) => KbStoreError::Validation(ve),
+                crate::errors::KbError::ValidationError(msg) => KbStoreError::ValidationLegacy(msg),
+                other => KbStoreError::ValidationLegacy(other.to_string()),
+            },
+        )?;
 
         {
             let mut blocks = self.write_blocks()?;
@@ -878,7 +907,7 @@ mod tests {
 
         let err = store.insert_key_block(kb).await.unwrap_err();
         assert!(
-            matches!(err, KbStoreError::Validation(ref msg) if msg.contains("novel_category is required"))
+            matches!(err, KbStoreError::Validation(ref ve) if ve.message.contains("novel_category is required"))
         );
     }
 
@@ -995,7 +1024,7 @@ mod tests {
 
         let err = store.update_key_block(kb).await.unwrap_err();
         assert!(
-            matches!(err, KbStoreError::Validation(ref msg) if msg.contains("novel_category is required"))
+            matches!(err, KbStoreError::Validation(ref ve) if ve.message.contains("novel_category is required"))
         );
     }
 }
