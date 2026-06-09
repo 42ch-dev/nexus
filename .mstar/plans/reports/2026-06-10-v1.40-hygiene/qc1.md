@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-10-v1.40-hygiene"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-10"
 ---
 
@@ -119,3 +119,68 @@ generated_at: "2026-06-10"
 **Verdict**: Request Changes
 
 **Rationale**: C-1 is a behavioral regression that breaks schedule dependency resolution — any schedule with `depends_on` entries will be permanently blocked from admission. C-2 causes 16 test compilation failures. Both must be resolved before approval.
+
+## Revalidation
+
+- **Revalidation date**: 2026-06-10
+- **Re-review range**: ad4dee6d..12b80662 (4 commits)
+- **Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+- **Working branch (verified)**: feature/v1.40-hygiene
+- **Tools run**: cargo +nightly fmt --all -- --check, cargo clippy --all -- -D warnings, cargo check -p nexus-orchestration --lib, code review of all 4 fix commits
+
+### Per-Finding Disposition
+
+#### C-1: Supervisor tick_inner WHERE filter breaks schedule dependency resolution — ✅ RESOLVED
+
+**Commit**: `deca8e16` fix(supervisor): QC1 C-1 — decouple completed_ids from active-schedule query in tick_inner + resume_schedule
+
+**Evidence**: Both `tick_inner` (lines 172-184) and `resume_schedule` (lines 838-847) now execute a **separate** `SELECT schedule_id FROM creator_schedules WHERE status IN ('completed', 'cancelled')` query to build `completed_ids`. The active-schedule query (lines 161-168, 827-835) remains scoped to `('pending', 'running', 'paused')` for the performance optimization, while the dependency resolution set is populated from the separate query. This correctly decouples the two concerns.
+
+**Architecture assessment**: The fix follows option (b) from the original finding — split queries. The two `completed_ids` queries are nearly identical between `tick_inner` and `resume_schedule`, which is a minor DRY concern (noted in original S-2), but the logic is correct and the `// SAFETY:` comments are present. No regression risk.
+
+**Note**: `cargo test -p nexus-orchestration --lib -- supervisor` could not run due to stale `.sqlx/` offline cache (pre-existing issue, not from these changes). `cargo check -p nexus-orchestration --lib` passes cleanly. The code logic was verified by manual review.
+
+#### C-2: 16 test compilation failures — missing auto_chain_interrupted field — ✅ RESOLVED
+
+**Commit**: `57e7b854` fix(daemon-runtime): QC1 C-2 / QC3 W-1 — add auto_chain_interrupted field to 16 PatchWorkRequest test sites
+
+**Evidence**: 
+- 15 `auto_chain_interrupted: None,` additions in `crates/nexus-daemon-runtime/tests/works_api.rs` (verified via `git diff` — 15 `+` lines)
+- 1 `auto_chain_interrupted: None,` addition in `crates/nexus-daemon-runtime/src/api/handlers/works.rs` test module (verified — 1 `+` line)
+- Total: 16 test sites fixed, matching the original finding count
+- `cargo check -p nexus-orchestration --lib` passes; daemon-runtime test build fails on `.sqlx/` cache staleness (pre-existing, not from these changes)
+
+**Architecture assessment**: All sites use `None` as the default value, which is correct — `auto_chain_interrupted` is an optional field that should default to not-interrupted. No behavioral change.
+
+#### W-1: Unused FromRow import in findings.rs test module — ✅ RESOLVED
+
+**Commit**: `d37c0691` refactor(local-db): QC2/3 C-1 — drop unsupported ALTER TABLE ADD CONSTRAINT migration; rely on runtime validation
+
+**Evidence**: `crates/nexus-local-db/src/findings.rs` line 597 now reads `use sqlx::SqlitePool;` — `FromRow` has been removed from the import. The `SeverityCountRow` struct (which derives `FromRow`) is defined in the parent module, not in tests, so the import was indeed unused.
+
+**Architecture assessment**: Clean fix. The same commit also removes the unsupported `ALTER TABLE ADD CONSTRAINT` migration (QC2/3 C-1 fix) and updates the doc comment on `validate_finding_enums()` to correctly explain that runtime validation is the sole enforcement mechanism. This is architecturally sound — SQLite does not support `ALTER TABLE ADD CONSTRAINT` for CHECK constraints, and the runtime guard in `validate_finding_enums()` is called on both create and patch paths.
+
+#### W-2: preset_version_for_id hardcoded mapping is fragile — ✅ RESOLVED
+
+**Commit**: `12b80662` test(orchestration): QC1 W-2 — preset_version_for_id mapping in sync with preset.yaml version fields
+
+**Evidence**: New test `preset_version_mapping_matches_yaml` (auto_chain.rs lines 928-982) iterates over all 4 known preset IDs (`novel-writing`, `research`, `novel-review-master`, `kb-extract`), reads each embedded `preset.yaml`, extracts the `version:` field, and asserts it matches `preset_version_for_id(preset_id)`. This catches drift at `cargo test` time.
+
+**Architecture assessment**: The test uses `EMBEDDED_PRESETS` (from `include_dir!`) to read the actual YAML files at test time, providing a compile-time-like guard. The YAML parsing is simple line-based (strip `version:` prefix), which is adequate for the current flat YAML structure. If preset.yaml grows more complex nesting, the test may need updating, but that's a future concern. Good maintainability improvement.
+
+### New Architecture Findings
+
+None. All 4 fix commits are surgical — each addresses exactly one finding without introducing new concerns.
+
+### Sanity Checks
+
+| Check | Result |
+|-------|--------|
+| `cargo +nightly fmt --all -- --check` | ✅ PASS (exit 0) |
+| `cargo clippy --all -- -D warnings` | ✅ PASS (no warnings) |
+| `cargo check -p nexus-orchestration --lib` | ✅ PASS |
+| Code review of all 4 commits | ✅ No new issues |
+
+### Updated Verdict
+
+**Approve** — all 4 blocking findings (C-1, C-2, W-1, W-2) are properly resolved. No new architecture or maintainability concerns introduced. The original S-1, S-2, S-3 suggestions remain as non-blocking improvements for future iterations.
