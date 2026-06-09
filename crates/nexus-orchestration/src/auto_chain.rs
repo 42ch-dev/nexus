@@ -199,6 +199,7 @@ pub fn build_auto_chain_schedule(
         research_artifacts_dir,
         workspace_dir: None,
         world_kb_block: None,
+        world_id: work.world_id.clone(),
     };
 
     stage_gates::build_schedule_for_stage(stage, creator_id, &fields)
