@@ -924,4 +924,60 @@ mod tests {
             }
         );
     }
+
+    /// QC1 W-2: assert `preset_version_for_id` stays in sync with
+    /// embedded preset.yaml version fields.
+    #[test]
+    fn preset_version_mapping_matches_yaml() {
+        use crate::preset::EMBEDDED_PRESETS;
+
+        let known_ids = [
+            "novel-writing",
+            "research",
+            "novel-review-master",
+            "kb-extract",
+        ];
+
+        for preset_id in &known_ids {
+            let mapping_version = preset_version_for_id(preset_id);
+
+            // Find the embedded preset
+            let preset_dir = EMBEDDED_PRESETS
+                .get_dir(preset_id)
+                .unwrap_or_else(|| panic!("embedded preset '{preset_id}' not found"));
+
+            let yaml_bytes = preset_dir
+                .get_file("preset.yaml")
+                .unwrap_or_else(|| panic!("preset.yaml missing for '{preset_id}'"));
+            let yaml_str = std::str::from_utf8(yaml_bytes.contents())
+                .unwrap_or_else(|e| panic!("preset.yaml for '{preset_id}' is not UTF-8: {e}"));
+
+            // Extract version: field from YAML
+            let yaml_version = yaml_str
+                .lines()
+                .find_map(|line| {
+                    let trimmed = line.trim();
+                    trimmed.strip_prefix("version:").map(|v| {
+                        v.trim()
+                            .split_whitespace()
+                            .next()
+                            .unwrap()
+                            .trim()
+                            .parse::<i64>()
+                            .unwrap_or_else(|_| {
+                                panic!(
+                                    "non-integer version in preset.yaml for '{preset_id}': '{v}'"
+                                )
+                            })
+                    })
+                })
+                .unwrap_or_else(|| panic!("no 'version:' field in preset.yaml for '{preset_id}'"));
+
+            assert_eq!(
+                mapping_version, yaml_version,
+                "preset_version_for_id('{preset_id}') = {mapping_version}, but preset.yaml version = {yaml_version}. \
+                 Update the match arm in preset_version_for_id() to match."
+            );
+        }
+    }
 }
