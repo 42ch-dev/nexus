@@ -239,6 +239,9 @@ fn memory_routes() -> Router<WorkspaceState> {
 }
 
 /// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).
+///
+/// Also includes findings sub-routes (V1.39 P1) merged into the same router
+/// to avoid axum 0.7 path-param conflict across `.merge()` boundaries.
 fn works_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
@@ -256,6 +259,27 @@ fn works_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/local/works/{work_id}/reconcile-chapters",
             post(handlers::works::reconcile_chapters),
+        )
+        // ── Findings sub-routes (V1.39 P1) ───────────────────────────
+        .route(
+            "/v1/local/works/{work_id}/findings",
+            post(handlers::findings::create_finding_handler)
+                .get(handlers::findings::list_findings_handler),
+        )
+        .route(
+            "/v1/local/works/{work_id}/findings/from-review",
+            post(handlers::findings::create_from_review_handler),
+        )
+        .route(
+            "/v1/local/works/{work_id}/findings/{finding_id}",
+            get(handlers::findings::get_finding_handler)
+                .patch(handlers::findings::update_finding_handler)
+                .delete(handlers::findings::delete_finding_handler),
+        )
+        // ── Stale findings banner endpoint (V1.39 P4 T3) ─────────────
+        .route(
+            "/v1/local/findings/stale",
+            get(handlers::findings::list_stale_findings_handler),
         )
 }
 /// Create the Local API router

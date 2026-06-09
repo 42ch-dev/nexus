@@ -1272,6 +1272,10 @@ mod tests {
                 work_ref: None,
                 total_planned_chapters: None,
                 current_chapter: 0,
+                auto_chain_enabled: true,
+                driver_schedule_id: None,
+                auto_chain_interrupted: false,
+                auto_review_master_on_timeout: false,
             },
         )
         .await

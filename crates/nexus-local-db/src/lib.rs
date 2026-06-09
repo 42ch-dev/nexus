@@ -10,6 +10,7 @@
 //!
 //! See `.mstar/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
+pub mod findings;
 pub mod force_gates_audit;
 pub mod identity;
 pub mod kb_extract_job;
@@ -94,6 +95,13 @@ pub use kb_extract_job::{
 pub use prompt_injection::{
     claim_prompt_injections, enqueue_prompt_injection, mark_prompt_injections_consumed,
     NewPromptInjection, PromptInjectionRow,
+};
+
+// Re-export findings types
+pub use findings::{
+    count_open_findings_by_severity, create_finding, create_finding_from_review, delete_finding,
+    get_finding, list_findings, update_finding, Finding, FindingListFilters, FindingPatch,
+    ReviewVerdictFinding, SeverityCount,
 };
 
 // Re-export works types

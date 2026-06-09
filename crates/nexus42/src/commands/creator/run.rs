@@ -48,6 +48,13 @@ pub enum RunCommand {
         /// daemon `on_complete` auto-chain is a future enhancement (DF-53 partial).
         #[arg(long, default_value_t = true, value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::Set)]
         chain_novel_writing: bool,
+        /// Disable daemon-side auto-chain for this Work (V1.39 §5.4).
+        /// When set, the daemon will NOT automatically advance FL-E stages
+        /// or loop chapters after each stage completes. Manual stage advance
+        /// via `creator run stage advance` is still available.
+        /// Default: auto-chain enabled (--no-auto-chain opts out).
+        #[arg(long, default_value_t = false)]
+        no_auto_chain: bool,
         /// Force gate bypass with audit reason (V1.36 §5.3.5)
         /// Requires --reason to be set alongside
         #[arg(long, default_value_t = false)]
@@ -100,6 +107,17 @@ pub enum RunCommand {
     /// Rebuild `work_chapters` from filesystem (V1.36 §4.1.2, §8)
     ReconcileChapters {
         /// Work ID (wrk_...) to reconcile
+        work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Resume an auto-chain Work whose driver was interrupted (V1.39 §5.7).
+    ///
+    /// Re-evaluates the current Work state and enqueues the next auto-chain
+    /// step (stage advance or next chapter) if applicable.
+    Resume {
+        /// Work ID (wrk_...) to resume
         work_id: String,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
@@ -160,6 +178,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             init_preset,
             skip_intake,
             chain_novel_writing,
+            no_auto_chain,
             force_gates,
             reason,
             client_request_id,
@@ -235,6 +254,17 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                     o.insert(
                         "force_gates_reason".to_string(),
                         serde_json::Value::String(reason.clone().unwrap_or_default()),
+                    );
+                }
+            }
+
+            // V1.39 §5.4: pass auto_chain_enabled through to Work creation.
+            // Default is true (auto-chain active); --no-auto-chain opts out.
+            if no_auto_chain {
+                if let Some(o) = body.as_object_mut() {
+                    o.insert(
+                        "auto_chain_enabled".to_string(),
+                        serde_json::Value::Bool(false),
                     );
                 }
             }
@@ -543,6 +573,30 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
+                // V1.39 P4 T3: stale findings banner — best-effort, never
+                // fails the status command. Older daemons without this
+                // endpoint will return 404 and the banner is simply skipped.
+                if let Ok(stale) = client
+                    .get::<serde_json::Value>("/v1/local/findings/stale")
+                    .await
+                {
+                    let stale_count = stale
+                        .get("stale_count")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let threshold_secs = stale
+                        .get("threshold_seconds")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(96 * 60 * 60);
+                    if stale_count > 0 {
+                        let threshold_hours = threshold_secs / 3600;
+                        println!(
+                            "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — run: nexus42 creator run schedule add --preset novel-review-master --work-id {work_id}"
+                        );
+                        println!();
+                    }
+                }
+
                 let work_status = resp
                     .get("status")
                     .and_then(|v| v.as_str())
@@ -605,7 +659,58 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         println!("progress: {finalized_count} / {total} chapters finalized");
                         println!("current_chapter: {current_chapter}");
                         println!("total_planned_chapters: {total_planned}");
+
+                        // V1.39 T7: auto-chain checkpoint fields
+                        let auto_chain = resp
+                            .get("auto_chain_enabled")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(true);
+                        let driver = resp
+                            .get("driver_schedule_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("none");
+                        let interrupted = resp
+                            .get("auto_chain_interrupted")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false);
+                        println!(
+                            "auto_chain: {} (driver: {}, interrupted: {})",
+                            if auto_chain { "enabled" } else { "disabled" },
+                            driver,
+                            interrupted
+                        );
                         println!();
+
+                        // V1.39 P0.5 (T5): research stage hint.
+                        // When the work has passed through the research FL-E stage,
+                        // surface a one-line summary so the user knows research
+                        // artifacts are available for the produce stage.
+                        {
+                            let current_stage = resp
+                                .get("current_stage")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("intake");
+                            let stage_status = resp
+                                .get("stage_status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("pending");
+
+                            // Show hint when research is the current stage or has completed.
+                            let research_done =
+                                current_stage == "research" && stage_status == "complete";
+                            let past_research =
+                                matches!(current_stage, "produce" | "review" | "persist");
+                            let research_active =
+                                current_stage == "research" && stage_status == "active";
+
+                            if research_active {
+                                println!("research: in progress (stage: research)");
+                            } else if research_done {
+                                println!("research: complete — references ready for produce");
+                            } else if past_research {
+                                println!("research: done (current stage: {current_stage})");
+                            }
+                        }
 
                         // Per-chapter rows
                         println!("Chapters:");
@@ -636,6 +741,44 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         // directly here (no workspace root context), but the
                         // daemon reconcile-chapters operation validates this.
                         // The DB status remains the selection SSOT per §4.4.
+
+                        // V1.39 P1 (T5): Findings section per §5.5.6.
+                        // Fetch findings for this work and display open count,
+                        // severity breakdown, and top 3 with routing hints.
+                        {
+                            let findings_resp: serde_json::Value = client
+                                .get::<serde_json::Value>(&format!(
+                                    "/v1/local/works/{work_id}/findings?status=open&limit=3"
+                                ))
+                                .await
+                                .unwrap_or_else(|_| serde_json::json!([]));
+
+                            if let Some(findings_list) = findings_resp.as_array() {
+                                if !findings_list.is_empty() {
+                                    println!();
+                                    println!("Findings ({} open):", findings_list.len());
+                                    for f in findings_list {
+                                        let f_title = f
+                                            .get("title")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("(untitled)");
+                                        let f_sev = f
+                                            .get("severity")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("info");
+                                        let hint = f
+                                            .get("routing_hint")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("→ none");
+                                        let f_ch =
+                                            f.get("chapter").and_then(serde_json::Value::as_i64);
+                                        let ch_str =
+                                            f_ch.map_or_else(String::new, |ch| format!(" ch{ch}"));
+                                        println!("  [{f_sev:<7}] {f_title}{ch_str}  {hint}");
+                                    }
+                                }
+                            }
+                        }
 
                         // Next action hint (§8.1)
                         println!();
@@ -708,6 +851,9 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         ("intake_status", "intake_status"),
                         ("current_stage", "current_stage"),
                         ("stage_status", "stage_status"),
+                        ("auto_chain_enabled", "auto_chain_enabled"),
+                        ("driver_schedule_id", "driver_schedule_id"),
+                        ("auto_chain_interrupted", "auto_chain_interrupted"),
                         ("long_term_goal", "long_term_goal"),
                         ("initial_idea", "initial_idea"),
                         ("primary_preset_id", "primary_preset_id"),
@@ -754,6 +900,45 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("  Created:   {created}");
                 println!("  Updated:   {updated}");
                 println!("  Preserved: {preserved}");
+            }
+        }
+        RunCommand::Resume { work_id, json } => {
+            // V1.39 §5.7 (T8): Resume an interrupted auto-chain Work.
+            // This clears auto_chain_interrupted and re-evaluates the next step.
+            let patch = serde_json::json!({
+                "auto_chain_interrupted": false,
+            });
+            let resp: serde_json::Value = client
+                .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
+                .await?;
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&resp)?);
+            } else {
+                let stage = resp
+                    .get("current_stage")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let status = resp
+                    .get("stage_status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let auto_chain = resp
+                    .get("auto_chain_enabled")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true);
+
+                if auto_chain {
+                    println!(
+                        "Work {work_id} auto-chain resumed at stage '{stage}' ({status}). \
+                         The daemon will evaluate the next step automatically."
+                    );
+                } else {
+                    println!(
+                        "Work {work_id} auto-chain is disabled. \
+                         Use manual stage advance: nexus42 creator run stage advance {work_id} --stage <stage>"
+                    );
+                }
             }
         }
     }
@@ -906,6 +1091,32 @@ fn validate_produce_chapter_context(
     Ok(())
 }
 
+/// V1.39 P5 (R-V138P1-01): Reject `stage advance` to `produce` when the novel
+/// is complete (no remaining active chapter).
+///
+/// When the target stage is "produce" but `next_chapter` is `None`, the
+/// daemon has determined that every chapter is finalized/published per
+/// novel-workflow-profile §4.5.2. Building a `novel-writing` schedule in
+/// this state would create a run with empty chapter fields (no outline,
+/// no body path, no chapter number) that the prompt templates cannot
+/// render. The correct response is to refuse the advance and point the
+/// user at the persist stage which finalizes the Work.
+fn reject_produce_when_novel_complete(
+    target_stage: &str,
+    next_chapter: Option<i32>,
+    work_id: &str,
+) -> crate::errors::Result<()> {
+    if target_stage == "produce" && next_chapter.is_none() {
+        return Err(crate::errors::CliError::Other(format!(
+            "NOVEL_COMPLETE: cannot advance Work {work_id} to stage 'produce' — \
+              no remaining active chapter (novel-workflow-profile §4.5.2).\n\
+              Hint: advance to the 'persist' stage instead to finalize the Work, \
+              or use `nexus42 creator run status {work_id}` to inspect chapter status."
+        )));
+    }
+    Ok(())
+}
+
 /// Validates:
 /// 1. Target stage is a known FL-E stage
 /// 2. Target stage is ahead of current stage (unless `--force`)
@@ -1052,6 +1263,10 @@ async fn stage_advance(
         work_id,
     )?;
 
+    // V1.39 P5 (R-V138P1-01): when target_stage is "produce" but no chapter is
+    // active (novel complete), refuse to build an empty-chapter schedule.
+    reject_produce_when_novel_complete(target_stage, next_chapter, work_id)?;
+
     let fields = WorkFields {
         work_id: work_id.to_string(),
         fl_e_stage: target_stage.to_string(),
@@ -1063,6 +1278,8 @@ async fn stage_advance(
         outline_path,
         body_path,
         slug,
+        research_artifacts_dir: None,
+        workspace_dir: None,
     };
 
     if let Some(mut request) =
@@ -1217,12 +1434,13 @@ mod tests {
 
     #[test]
     fn validate_skips_when_next_chapter_is_none() {
-        // Novel-completion case (R-V138P1-01): next_chapter=None should NOT error
+        // The chapter-context guard handles only the "context missing" case.
+        // Novel-completion (next_chapter=None) is handled by the separate
+        // `reject_produce_when_novel_complete` guard — see test below.
         let result = validate_produce_chapter_context("produce", None, None, None, "wrk_completed");
         assert!(
             result.is_ok(),
-            "should NOT error when next_chapter is None (novel-completion): {:?}",
-            result
+            "validate_produce_chapter_context should NOT error when next_chapter is None: {result:?}"
         );
     }
 
@@ -1231,8 +1449,55 @@ mod tests {
         let result = validate_produce_chapter_context("research", Some(3), None, None, "wrk_other");
         assert!(
             result.is_ok(),
-            "should NOT error for non-produce stages: {:?}",
-            result
+            "should NOT error for non-produce stages: {result:?}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.39 P5 (R-V138P1-01): reject_produce_when_novel_complete
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn reject_produce_when_novel_complete_errors_on_none_next_chapter() {
+        // R-V138P1-01: when target_stage is "produce" and next_chapter is None
+        // (all chapters finalized), advance must be refused — no empty-chapter
+        // schedule should be created.
+        let result = reject_produce_when_novel_complete("produce", None, "wrk_done");
+        let err = result.expect_err("expected NOVEL_COMPLETE error when next_chapter=None");
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("NOVEL_COMPLETE"),
+            "error should be tagged NOVEL_COMPLETE: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("persist"),
+            "error should hint at 'persist' stage: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("wrk_done"),
+            "error should include work_id: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn reject_produce_when_novel_complete_allows_chapter_present() {
+        // Normal case: a chapter is selected — advance is allowed.
+        let result = reject_produce_when_novel_complete("produce", Some(2), "wrk_active");
+        assert!(
+            result.is_ok(),
+            "should allow advance when next_chapter is Some: {result:?}"
+        );
+    }
+
+    #[test]
+    fn reject_produce_when_novel_complete_skips_other_stages() {
+        // Non-produce stages (research/review/persist) are not gated by this rule.
+        for stage in ["research", "review", "persist", "intake"] {
+            let result = reject_produce_when_novel_complete(stage, None, "wrk_x");
+            assert!(
+                result.is_ok(),
+                "stage '{stage}' should NOT be gated by novel-complete check: {result:?}"
+            );
+        }
     }
 }

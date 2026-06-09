@@ -850,4 +850,94 @@ mod tests {
         let back: Gate = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(gate, back);
     }
+
+    // ── V1.39 P0.5 (T6): research preset gate integration ──────────────
+
+    /// Research preset gates require intake_status == "complete" and
+    /// work_ref to be present. Verify that a Work with intake complete
+    /// and a work_ref passes all gates.
+    #[tokio::test]
+    async fn research_gates_pass_with_intake_complete_and_work_ref() {
+        let gates = vec![
+            Gate::WorkField {
+                field: "intake_status".to_string(),
+                op: GateOp::Equals {
+                    value: serde_json::json!("complete"),
+                },
+            },
+            Gate::WorkField {
+                field: "work_ref".to_string(),
+                op: GateOp::Required,
+            },
+        ];
+        let work = make_work(); // intake_status=complete, work_ref=Some
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "research", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        assert!(
+            result.is_ok(),
+            "research gates should pass with intake complete and work_ref"
+        );
+    }
+
+    /// Research preset gates fail when intake_status is not "complete".
+    #[tokio::test]
+    async fn research_gates_fail_when_intake_not_complete() {
+        let gates = vec![Gate::WorkField {
+            field: "intake_status".to_string(),
+            op: GateOp::Equals {
+                value: serde_json::json!("complete"),
+            },
+        }];
+        let mut work = make_work();
+        work.intake_status = Some("pending".to_string());
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "research", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        assert!(
+            result.is_err(),
+            "research gates should fail when intake is not complete"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.failed_gates[0].kind, "work_field");
+    }
+
+    /// Research preset gates fail when work_ref is missing.
+    #[tokio::test]
+    async fn research_gates_fail_when_work_ref_missing() {
+        let gates = vec![Gate::WorkField {
+            field: "work_ref".to_string(),
+            op: GateOp::Required,
+        }];
+        let mut work = make_work();
+        work.work_ref = None;
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "research", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        assert!(
+            result.is_err(),
+            "research gates should fail when work_ref is missing"
+        );
+    }
 }
