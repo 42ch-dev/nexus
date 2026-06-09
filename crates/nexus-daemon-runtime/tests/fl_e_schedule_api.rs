@@ -9,6 +9,12 @@
 //! - Work-derived context propagates via seed into core_context
 //! - Cross-creator isolation for schedules
 //! - List schedule verification via supervisor's own pool
+//!
+//! PR #50 review (cursor automation, medium): preset gate authorization
+//! bypass regression. Tests for gated presets (`research`, etc.) seed
+//! a Work row first via `seed_work()` so the gate-eval path can load
+//! the Work snapshot. Tests for un-gated presets (e.g., non-novel) need
+//! no Work seed.
 
 #![allow(clippy::unwrap_used)]
 
@@ -21,6 +27,7 @@ use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_local_db::list_force_gates_audit;
+use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -62,11 +69,50 @@ async fn test_ctx() -> TestCtx {
     }
 }
 
+/// Seed a minimal Work row so gated presets can load a Work snapshot during
+/// gate evaluation. Returns the pool for further seeding if needed.
+async fn seed_work(db_path: &PathBuf, work_id: &str, creator_id: &str) {
+    let db_url = format!("sqlite:{}?mode=rw", db_path.display());
+    let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
+    let record = WorkRecord {
+        work_id: work_id.to_string(),
+        creator_id: creator_id.to_string(),
+        workspace_slug: "default".to_string(),
+        status: "draft".to_string(),
+        title: "Test Novel".to_string(),
+        long_term_goal: "Write a great novel".to_string(),
+        initial_idea: "A sci-fi thriller".to_string(),
+        creative_brief: None,
+        intake_status: "complete".to_string(), // satisfies research preset's intake_status==complete gate
+        world_id: None,
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-04T10:00:00Z".to_string(),
+        updated_at: "2026-06-04T10:00:00Z".to_string(),
+        driver_schedule_id: None,
+        auto_chain_enabled: false,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        work_profile: Some("novel".to_string()),
+        work_ref: Some(work_id.to_string()),
+        current_stage: "research".to_string(),
+        stage_status: "active".to_string(),
+        total_planned_chapters: Some(10),
+        current_chapter: 0,
+    };
+    works::create_work(&pool, &record)
+        .await
+        .expect("seed_work: create_work failed");
+}
+
 // ── Test 1: Schedule creation with correct AddScheduleRequest DTO ────────────
 
 #[tokio::test]
 async fn schedule_create_with_correct_dto_shape() {
     let ctx = test_ctx().await;
+    seed_work(&ctx.db_path, "wrk_test123", "ctr_test").await;
 
     let req = AddScheduleRequest {
         creator_id: "ctr_test".to_string(),
@@ -134,6 +180,7 @@ async fn schedule_create_with_correct_dto_shape() {
 #[tokio::test]
 async fn schedule_create_seeds_core_context_from_preset_input() {
     let ctx = test_ctx().await;
+    seed_work(&ctx.db_path, "wrk_ctx_test", "ctr_ctx").await;
 
     let seed_data = json!({
         "work_id": "wrk_ctx_test",
@@ -187,12 +234,14 @@ async fn schedule_create_seeds_core_context_from_preset_input() {
 #[tokio::test]
 async fn schedule_list_isolation_by_creator() {
     let ctx = test_ctx().await;
+    seed_work(&ctx.db_path, "wrk_alpha_test", "ctr_alpha").await;
+    seed_work(&ctx.db_path, "wrk_beta_test", "ctr_beta").await;
 
     // Create two schedules with different creator IDs
     let req_a = AddScheduleRequest {
         creator_id: "ctr_alpha".to_string(),
         preset_id: "research".to_string(),
-        seed: None,
+        seed: Some(serde_json::to_string(&json!({"work_id": "wrk_alpha_test"})).unwrap()),
         label: None,
         depends_on: None,
         concurrency: None,
@@ -204,7 +253,7 @@ async fn schedule_list_isolation_by_creator() {
     let req_b = AddScheduleRequest {
         creator_id: "ctr_beta".to_string(),
         preset_id: "research".to_string(),
-        seed: None,
+        seed: Some(serde_json::to_string(&json!({"work_id": "wrk_beta_test"})).unwrap()),
         label: None,
         depends_on: None,
         concurrency: None,
@@ -302,8 +351,14 @@ async fn schedule_create_without_seed_no_core_context() {
 #[tokio::test]
 async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     let ctx = test_ctx().await;
+    seed_work(&ctx.db_path, "wrk_real_test", "ctr_real").await;
 
-    // Create a schedule with an empty creator_id (the pre-fix bug scenario)
+    // Create a schedule with an empty creator_id (the pre-fix bug scenario).
+    // PR #50 review: gated presets now require work_id AND gate-eval enforces
+    // creator scoping. Empty creator_id + no work_id fails closed with 422
+    // (correct: a request with no identity and no Work context cannot be
+    // authorized). The pre-fix bug is therefore amplified: requests can no
+    // longer bypass gate checks regardless of creator_id.
     let req_empty = AddScheduleRequest {
         creator_id: String::new(),
         preset_id: "research".to_string(),
@@ -321,13 +376,15 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         .post("/v1/local/orchestration/schedules")
         .json(&req_empty)
         .await;
-    resp_empty.assert_status(StatusCode::CREATED);
+    // Empty creator_id + no work_id → 422 preset_gates_failed (gate-eval requires
+    // work_id, which is None here). This is the desired fail-closed behavior.
+    resp_empty.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 
     // Create a schedule with a proper creator_id
     let req_real = AddScheduleRequest {
         creator_id: "ctr_real".to_string(),
         preset_id: "research".to_string(),
-        seed: None,
+        seed: Some(serde_json::to_string(&json!({"work_id": "wrk_real_test"})).unwrap()),
         label: Some("legitimate creator".to_string()),
         depends_on: None,
         concurrency: None,
@@ -355,11 +412,53 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     assert_eq!(schedules.len(), 1, "Only ctr_real schedule should appear");
     assert_eq!(schedules[0]["creator_id"], "ctr_real");
 
-    // Listing all schedules shows both (empty creator_id schedule exists)
+    // Listing all schedules shows only the real one (PR #50 review:
+    // empty creator_id request was rejected with 422 preset_gates_failed —
+    // the schedule was never created). Pre-fix this assertion expected 2.
     let all_resp = ctx.server.get("/v1/local/orchestration/schedules").await;
     let all_body: Value = all_resp.json();
     let all_schedules = all_body["schedules"].as_array().unwrap();
-    assert_eq!(all_schedules.len(), 2, "Both schedules exist in total");
+    assert_eq!(
+        all_schedules.len(),
+        1,
+        "Only the real schedule exists; the empty-creator_id request was rejected"
+    );
+    assert_eq!(all_schedules[0]["creator_id"], "ctr_real");
+}
+
+// ── Test 5b: PR #50 review — gated preset without work_id is rejected ────────
+//
+// Cursor automation flagged that the C-1 fix in P0.5 (making gate evaluation
+// conditional on work_id presence) created a security regression: any client
+// could POST a gated preset (e.g. `research`, `novel-writing`) without
+// providing work_id and the schedule would be enqueued without gate checks.
+// The fix is to always evaluate gates when the preset declares them and
+// fail closed (422 preset_gates_failed) if work_id is missing.
+
+#[tokio::test]
+async fn gated_preset_without_work_id_is_rejected() {
+    let ctx = test_ctx().await;
+    // Note: intentionally NOT calling seed_work() — work_id must be omitted
+    // from the request to exercise the security path.
+
+    let req = AddScheduleRequest {
+        creator_id: "ctr_security".to_string(),
+        preset_id: "research".to_string(), // gated preset
+        seed: None,                        // no work_id via seed
+        label: Some("security regression test".to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: None, // no work_id via input
+        force_gates: false,
+        reason: None,
+    };
+    let resp = ctx
+        .server
+        .post("/v1/local/orchestration/schedules")
+        .json(&req)
+        .await;
+    resp.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 }
 
 // ── Test 6: Force-gates audit row is written and queryable (V1.37 T5/T6) ──
