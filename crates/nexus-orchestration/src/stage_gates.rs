@@ -84,6 +84,9 @@ pub struct WorkFields {
     /// When `None`, the template guard `{{#if world_kb_block}}` correctly omits
     /// the block — legacy V1.39 worldless Works receive no World context.
     pub world_kb_block: Option<String>,
+    /// V1.40 P3: `world_id` from Work row. Populated for World-bound Works.
+    /// When `None`, the persist stage skips World KB promotion (legacy V1.39).
+    pub world_id: Option<String>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -188,6 +191,19 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             o.insert(
                 "world_kb_block".to_string(),
                 serde_json::Value::String(String::new()),
+            )
+        });
+    }
+
+    // V1.40 P3 (T5): inject world_id for World-bound Works.
+    // Persist stage uses this to route extraction to the correct World KB.
+    // When None (legacy V1.39 worldless Works), the persist stage skips
+    // World KB promotion.
+    if let Some(ref wid) = fields.world_id {
+        map.as_object_mut().map(|o| {
+            o.insert(
+                "world_id".to_string(),
+                serde_json::Value::String(wid.clone()),
             )
         });
     }
@@ -579,6 +595,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            world_id: None,
         }
     }
 
@@ -753,6 +770,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            world_id: None,
         }
     }
 
@@ -817,6 +835,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            world_id: None,
         };
         let input = build_preset_input(&fields);
         assert!(input.get("chapter").is_none());
@@ -979,6 +998,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: Some(ws.to_string_lossy().to_string()),
             world_kb_block: None,
+            world_id: None,
         };
 
         let input = build_preset_input(&fields);
@@ -1006,6 +1026,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            world_id: None,
         };
 
         let input = build_preset_input(&fields);

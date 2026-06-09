@@ -14,8 +14,6 @@
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
-use nexus_kb::key_block::KeyBlock;
-use nexus_kb::store::KbStore;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -132,16 +130,18 @@ fn parse_extraction_response(response_text: &str) -> Result<ExtractResponse, Cap
 }
 
 /// Parse block type string into `BlockType`.
+///
+/// Accepts both `snake_case` wire values (P1 extract.md) and `PascalCase` (legacy).
 fn parse_block_type(s: &str) -> Result<nexus_contracts::BlockType, CapabilityError> {
     match s {
-        "Character" => Ok(nexus_contracts::BlockType::Character),
-        "Ability" => Ok(nexus_contracts::BlockType::Ability),
-        "Scene" => Ok(nexus_contracts::BlockType::Scene),
-        "Organization" => Ok(nexus_contracts::BlockType::Organization),
-        "Item" => Ok(nexus_contracts::BlockType::Item),
-        "Conflict" => Ok(nexus_contracts::BlockType::Conflict),
-        "InfoPoint" => Ok(nexus_contracts::BlockType::InfoPoint),
-        "Event" => Ok(nexus_contracts::BlockType::Event),
+        "Character" | "character" => Ok(nexus_contracts::BlockType::Character),
+        "Ability" | "ability" => Ok(nexus_contracts::BlockType::Ability),
+        "Scene" | "scene" => Ok(nexus_contracts::BlockType::Scene),
+        "Organization" | "organization" => Ok(nexus_contracts::BlockType::Organization),
+        "Item" | "item" => Ok(nexus_contracts::BlockType::Item),
+        "Conflict" | "conflict" => Ok(nexus_contracts::BlockType::Conflict),
+        "InfoPoint" | "info_point" => Ok(nexus_contracts::BlockType::InfoPoint),
+        "Event" | "event" => Ok(nexus_contracts::BlockType::Event),
         _ => Err(CapabilityError::InputInvalid(format!(
             "Unknown block_type '{s}'"
         ))),
@@ -165,9 +165,13 @@ impl Capability for KbExtractWork {
                 "job_id": { "type": "string", "description": "Existing extract job ID" },
                 "work_entry_id": { "type": "string", "description": "Work-scope KB entry ID to extract" },
                 "world_id": { "type": "string", "description": "Target world ID for the resulting KeyBlock" },
+                "work_id": { "type": "string", "description": "Source work ID (parent of the chapter)" },
                 "work_content": { "type": "string", "description": "Pre-loaded work content" },
                 "creator_id": { "type": "string", "description": "Creator ID" },
-                "llm_response": { "type": "string", "description": "LLM response text from acp.prompt for finalizing" }
+                "llm_response": { "type": "string", "description": "LLM response text from acp.prompt for finalizing" },
+                "source_kind": { "type": "string", "description": "Artifact kind (work_chapter, work_section, etc.)" },
+                "source_locator": { "type": "string", "description": "Artifact locator (relative path)" },
+                "profile_hint": { "type": "string", "description": "Extract profile (novel, screenplay, essay, generic)" }
             }
         }"#
     }
@@ -201,6 +205,18 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CapabilityError::InputInvalid("missing 'creator_id'".into()))?;
 
+        // QC1/2 W-002: Guard against worldless Works — when world_id is absent
+        // or empty (legacy V1.39 worldless Works), return a success no-op so
+        // the preset state machine can cleanly transition to done.
+        let world_id_input = input.get("world_id").and_then(|v| v.as_str()).unwrap_or("");
+        if world_id_input.is_empty() {
+            return Ok(json!({
+                "job_id": null,
+                "status": "skipped",
+                "reason": "world_id absent — worldless Work, no KB extraction needed"
+            }));
+        }
+
         // ── Phase 1: Load or claim job ──────────────────────────────
         let job = if let Some(job_id) = input.get("job_id").and_then(|v| v.as_str()) {
             // Load specific job
@@ -210,6 +226,11 @@ impl Capability for KbExtractWork {
                 .ok_or_else(|| {
                     CapabilityError::InputInvalid(format!("Job '{job_id}' not found"))
                 })?;
+
+            // QC2 W-005: Re-validate creator ownership on explicit job_id path.
+            if job.creator_id != creator_id {
+                return Err(CapabilityError::InputInvalid("job creator mismatch".into()));
+            }
 
             // Reject wrong status
             if job.status != "queued" && job.status != "running" {
@@ -309,10 +330,18 @@ impl Capability for KbExtractWork {
             }
         };
 
-        let mut kb = KeyBlock::new(&world_id, block_type, &extract.canonical_name);
+        // Determine validation mode from profile_hint (V1.40 P3).
+        let profile_hint = input
+            .get("profile_hint")
+            .and_then(|v| v.as_str())
+            .unwrap_or("generic");
+        let validation_mode = if profile_hint == "novel" {
+            nexus_kb::ValidationMode::Novel
+        } else {
+            nexus_kb::ValidationMode::Generic
+        };
 
-        // Try to parse body as structured JSON; if the LLM returned a JSON
-        // object with attributes, use it. Otherwise fall back to plain summary.
+        // Build body from LLM response.
         let body: nexus_kb::key_block::KeyBlockBody =
             if let Ok(parsed) = serde_json::from_str(&extract.body) {
                 parsed
@@ -323,29 +352,54 @@ impl Capability for KbExtractWork {
                     tags: None,
                 }
             };
-        kb.body = Some(body);
 
-        // ── Phase 4: Mark job as done BEFORE inserting KeyBlock ───────
-        // This ordering ensures: if mark_done fails, no KeyBlock was created
-        // and the job can be safely retried. A "done" job without a KeyBlock
-        // is recoverable; a "running" job with an orphaned KeyBlock is not.
+        // Build source anchor from artifact locator.
+        let source_locator = input
+            .get("source_locator")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let source_anchor = if source_locator.is_empty() {
+            nexus_kb::source_anchor::SourceAnchor::from_excerpt(
+                &extract.body.chars().take(256).collect::<String>(),
+            )
+        } else {
+            nexus_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
+        };
+
+        let finalize_input = nexus_kb::ExtractFinalizeInput {
+            world_id: world_id.clone(),
+            block_type,
+            canonical_name: extract.canonical_name.clone(),
+            body,
+            source_anchor,
+            validation_mode,
+        };
+
+        // ── Phase 4b: Insert KeyBlock BEFORE marking job done ──────────
+        // Insert first; only mark done on success. On insert failure,
+        // mark the job as failed so the preset state machine can surface
+        // or retry. This prevents "done job with no KeyBlock" data loss.
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
+        let insert_result = match nexus_kb::finalize_extract(&store, finalize_input).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Mark job as failed so the content loss window is closed.
+                let _ = nexus_local_db::mark_extract_job_failed(
+                    pool,
+                    &job_id,
+                    &format!("KeyBlock insert failed: {e}"),
+                )
+                .await;
+                return Err(CapabilityError::Internal(format!(
+                    "KeyBlock insert failed: {e}"
+                )));
+            }
+        };
+
+        // Mark done only after the KeyBlock was successfully inserted.
         nexus_local_db::mark_extract_job_done(pool, &job_id)
             .await
             .map_err(|e| CapabilityError::Internal(format!("Failed to mark job done: {e}")))?;
-
-        // ── Phase 5: Insert KeyBlock ─────────────────────────────────
-        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.as_ref().clone());
-        let insert_result = store.insert_key_block(kb).await.map_err(|e| {
-            // KeyBlock insert failed after job was marked done. The job is
-            // in terminal "done" state; the extraction content is lost but
-            // the job lifecycle is clean. A new extract job can re-process.
-            tracing::error!(
-                job_id = %job_id,
-                error = %e,
-                "KeyBlock insert failed after job marked done — extraction content lost"
-            );
-            CapabilityError::Internal(format!("KeyBlock insert failed: {e}"))
-        })?;
 
         Ok(json!({
             "job_id": job_id,

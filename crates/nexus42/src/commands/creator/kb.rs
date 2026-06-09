@@ -106,6 +106,9 @@ pub enum KbCommand {
     ///
     /// Idempotent: if a non-failed job already exists for the same
     /// work entry + world combination, returns the existing job.
+    ///
+    /// Use `--chapter N` to resolve the body path from the work's chapter N
+    /// and set `source_kind=work_chapter`, `profile_hint=novel` automatically.
     #[command(name = "queue-extract")]
     QueueExtract {
         /// Work-scope entry ID to extract from (e.g. `kb_a1b2c3d4`)
@@ -113,6 +116,12 @@ pub enum KbCommand {
         /// Target world ID for the resulting `KeyBlock`
         #[arg(long)]
         world_id: String,
+        /// Source work ID (parent of the chapter artifact)
+        #[arg(long)]
+        work_id: Option<String>,
+        /// Chapter number sugar for novel profile (resolves `body_path` from chapter N)
+        #[arg(long)]
+        chapter: Option<i32>,
     },
 
     /// Show extract job status for the active creator.
@@ -135,6 +144,8 @@ pub enum KbCommand {
 ///
 /// Returns an error if `active_creator_id` fails validation or the underlying
 /// KB operation fails.
+// CLI entry-point runs on a single-threaded tokio runtime — Send not required.
+#[allow(clippy::future_not_send)]
 pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     if let Some(cid) = &config.active_creator_id {
         paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
@@ -176,7 +187,18 @@ pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
         KbCommand::QueueExtract {
             work_entry_id,
             world_id,
-        } => kb_queue_extract(config, &work_entry_id, &world_id).await,
+            work_id,
+            chapter,
+        } => {
+            kb_queue_extract(
+                config,
+                &work_entry_id,
+                &world_id,
+                work_id.as_deref(),
+                chapter,
+            )
+            .await
+        }
         KbCommand::ExtractStatus { job_id } => kb_extract_status(config, job_id.as_deref()).await,
     }
 }
@@ -775,7 +797,18 @@ async fn kb_remove(
 /// Creates a row in `kb_extract_jobs` with status `queued`.
 /// The actual extraction is performed by the `kb.extract_work` capability
 /// (triggered via preset or daemon orchestration). No LLM calls here.
-async fn kb_queue_extract(config: &CliConfig, work_entry_id: &str, world_id: &str) -> Result<()> {
+///
+/// When `--chapter N` is provided, sets `source_kind=work_chapter`,
+/// `profile_hint=novel`, and resolves the chapter body path.
+// CLI helper — runs on single-threaded tokio; Send not required.
+#[allow(clippy::future_not_send)]
+async fn kb_queue_extract(
+    config: &CliConfig,
+    work_entry_id: &str,
+    world_id: &str,
+    work_id: Option<&str>,
+    chapter: Option<i32>,
+) -> Result<()> {
     let creator_id = config
         .active_creator_id
         .as_deref()
@@ -789,19 +822,58 @@ async fn kb_queue_extract(config: &CliConfig, work_entry_id: &str, world_id: &st
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
 
-    let job =
-        nexus_local_db::enqueue_extract_job(&pool, &creator_id, &slug, work_entry_id, world_id)
-            .await
-            .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
+    // Determine artifact locator fields from --chapter sugar.
+    // QC2 W-004: Validate chapter >= 1 to reject negative/zero values.
+    if let Some(ch) = chapter {
+        if ch < 1 {
+            return Err(CliError::Other("Chapter number must be >= 1".to_string()));
+        }
+    }
+    let (source_kind, source_locator, profile_hint) = chapter.map_or((None, None, None), |ch| {
+        let ch_label = format!("{ch:02}");
+        // Best-effort: build a locator from chapter number.
+        // The exact path is resolved later by the capability from work_chapters.
+        let locator = format!("chapter:{ch_label}");
+        (
+            Some("work_chapter".to_string()),
+            Some(locator),
+            Some("novel".to_string()),
+        )
+    });
+
+    let job = nexus_local_db::enqueue_extract_job_with_artifact(
+        &pool,
+        &creator_id,
+        &slug,
+        work_entry_id,
+        world_id,
+        source_kind.as_deref(),
+        source_locator.as_deref(),
+        profile_hint.as_deref(),
+        work_id,
+    )
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to enqueue extract job: {e}")))?;
 
     if job.status == "queued" {
-        // Check if this was a new enqueue vs idempotent return
         println!("✓ Extract job queued: {}", job.job_id);
     } else {
         println!("ℹ Extract job already exists: {}", job.job_id);
     }
     println!("  Work entry:  {work_entry_id}");
     println!("  Target world: {world_id}");
+    if let Some(ref sk) = job.source_kind {
+        println!("  Source kind:  {sk}");
+    }
+    if let Some(ref sl) = job.source_locator {
+        println!("  Source loc:   {sl}");
+    }
+    if let Some(ref ph) = job.profile_hint {
+        println!("  Profile:      {ph}");
+    }
+    if let Some(ref wid) = job.work_id {
+        println!("  Work ID:      {wid}");
+    }
     println!("  Status:       {}", job.status);
     println!("  Created:      {}", job.created_at);
     Ok(())
