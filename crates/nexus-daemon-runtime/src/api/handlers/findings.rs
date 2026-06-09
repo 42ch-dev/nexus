@@ -7,10 +7,12 @@
 //! - `PATCH  /v1/local/works/{work_id}/findings/{finding_id}` — Update finding
 //! - `DELETE /v1/local/works/{work_id}/findings/{finding_id}` — Delete finding
 //! - `POST   /v1/local/works/{work_id}/findings/from-review` — Create from review verdict (T3)
+//! - `GET    /v1/local/findings/stale` — Stale open-findings count for active creator (V1.39 P4 T3)
 
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::stale_findings_watcher::{DEFAULT_STALE_THRESHOLD_SECS, ENV_STALE_THRESHOLD_SECS};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -296,4 +298,84 @@ pub async fn create_from_review_handler(
         .await?
         .expect("finding must exist after creation");
     Ok((StatusCode::CREATED, Json(f.into())))
+}
+
+// ─── Stale findings (V1.39 P4 T3) ──────────────────────────────────────────
+
+/// Response shape for `GET /v1/local/findings/stale`.
+///
+/// Lists open findings for the active creator that have aged past the
+/// stale threshold (default 96h, overridable via `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS`).
+/// The CLI status banner reads `stale_count` and only renders the banner
+/// when it is > 0.
+#[derive(Debug, Serialize)]
+pub struct StaleFindingsResponse {
+    /// Number of open findings older than `threshold_seconds`.
+    pub stale_count: u64,
+    /// Threshold (seconds) used for the query.
+    pub threshold_seconds: i64,
+    /// Server-side epoch used as `now` for the cutoff calculation.
+    pub now_epoch: i64,
+    /// Per-finding summaries (oldest first), used by the CLI to surface
+    /// the most-aged item in the banner hint.
+    pub findings: Vec<StaleFindingDto>,
+}
+
+/// Per-finding summary entry for `StaleFindingsResponse`.
+#[derive(Debug, Serialize)]
+pub struct StaleFindingDto {
+    pub finding_id: String,
+    pub work_id: String,
+    pub severity: String,
+    pub created_at: i64,
+    pub age_seconds: i64,
+}
+
+/// `GET /v1/local/findings/stale` — list stale open findings for the active creator (V1.39 P4 T3).
+///
+/// Per-creator scoped (uses `read_active_creator_id`). Returns an empty
+/// `findings` list and `stale_count = 0` when no findings have aged past
+/// the threshold — the CLI suppresses the banner in that case.
+///
+/// The threshold respects `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS`
+/// so that operators tuning the watcher get a matching banner without
+/// per-call configuration.
+pub async fn list_stale_findings_handler(
+    State(state): State<WorkspaceState>,
+) -> Result<Json<StaleFindingsResponse>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let threshold_seconds = std::env::var(ENV_STALE_THRESHOLD_SECS)
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_STALE_THRESHOLD_SECS);
+    let now_epoch = chrono::Utc::now().timestamp();
+
+    let rows = nexus_local_db::findings::list_stale_open_findings(
+        state.pool(),
+        &creator_id,
+        now_epoch,
+        threshold_seconds,
+    )
+    .await?;
+
+    let findings: Vec<StaleFindingDto> = rows
+        .into_iter()
+        .map(|r| StaleFindingDto {
+            finding_id: r.finding_id,
+            work_id: r.work_id,
+            severity: r.severity,
+            created_at: r.created_at,
+            age_seconds: r.age_seconds,
+        })
+        .collect();
+
+    Ok(Json(StaleFindingsResponse {
+        stale_count: findings.len() as u64,
+        threshold_seconds,
+        now_epoch,
+        findings,
+    }))
 }
