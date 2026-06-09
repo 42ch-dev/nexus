@@ -19,6 +19,7 @@ pub mod registry;
 mod soul_experience_aggregate;
 mod sync;
 mod workspace;
+mod world_refs_validate;
 
 pub use acp_prompt::AcpPrompt;
 pub use acp_session_load::AcpSessionLoad;
@@ -37,3 +38,7 @@ pub use registry::RegistryRefresh;
 pub use soul_experience_aggregate::SoulExperienceAggregate;
 pub use sync::{SyncPull, SyncPush};
 pub use workspace::{WorkspaceCommit, WorkspaceOpen};
+pub use world_refs_validate::{
+    validate_world_refs, ValidationStage, WorldRefFinding, WorldRefSeverity,
+    WorldRefsValidationParams, WorldRefsValidationResult,
+};

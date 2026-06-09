@@ -96,7 +96,19 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    let input = scaffold_input("wrk_t7a", "my-novel", "My Test Novel", None, 3);
+    // V1.40: world_id is mandatory — seed a World row for FK validation.
+    let world_id = "wld_t7a_world";
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        world_id,
+        "ctr_test",
+        "T7a Test World",
+        "t7a-test-world",
+        "private",
+        "single",
+    )
+    .await;
+    let input = scaffold_input("wrk_t7a", "my-novel", "My Test Novel", Some(world_id), 3);
 
     let out = cap.run(input).await.expect("scaffold should succeed");
     let scaffold = out["scaffold_root"].as_str().expect("scaffold_root");
@@ -136,10 +148,10 @@ async fn t7a_scaffold_tree_all_files_exist_with_correct_content() {
         readme.contains("My Test Novel"),
         "README must contain title: {readme}"
     );
-    // Worldless: should contain the "none (worldless)" placeholder
+    // V1.40: README must contain the bound world_id
     assert!(
-        readme.contains("worldless") || readme.contains("none"),
-        "README should indicate worldless for null world_id: {readme}"
+        readme.contains(world_id),
+        "README must contain bound world_id '{world_id}': {readme}"
     );
 
     let foreshadow = std::fs::read_to_string(root.join("Outlines/foreshadowing.md"))
@@ -181,7 +193,25 @@ async fn t7b_idempotent_reinit_preserves_existing_files() {
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    let input = scaffold_input("wrk_t7b", "idem-novel", "Idem Novel", None, 2);
+    let input = scaffold_input(
+        "wrk_t7b",
+        "idem-novel",
+        "Idem Novel",
+        Some("wld_idem_world"),
+        2,
+    );
+
+    // V1.40: seed World for FK check
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        "wld_idem_world",
+        "ctr_test",
+        "Idem World",
+        "idem-world",
+        "private",
+        "single",
+    )
+    .await;
 
     // First run
     let _out1 = cap.run(input.clone()).await.expect("first run");
@@ -216,7 +246,25 @@ async fn t7c_work_chapters_rows_seeded_correctly() {
     let cap = make_cap(pool.clone(), &works_root);
 
     let total = 4;
-    let input = scaffold_input("wrk_t7c", "chapter-test", "Chapter Test", None, total);
+    let input = scaffold_input(
+        "wrk_t7c",
+        "chapter-test",
+        "Chapter Test",
+        Some("wld_t7c_world"),
+        total,
+    );
+
+    // V1.40: seed World for FK check
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        "wld_t7c_world",
+        "ctr_test",
+        "T7c Test World",
+        "t7c-test-world",
+        "private",
+        "single",
+    )
+    .await;
 
     let out = cap.run(input).await.expect("scaffold should succeed");
     assert_eq!(out["chapters_seeded"], total, "chapters_seeded must match");
@@ -317,7 +365,9 @@ async fn t7d_works_patch_world_id_existing() {
 }
 
 #[tokio::test]
-async fn t7d_works_patch_world_id_none_worldless() {
+async fn t7d_works_patch_world_id_none_worldless_rejected() {
+    // V1.40: creating a worldless Work (world_id == None, create_world == false)
+    // must fail-closed with a remediation message.
     let (pool, dir) = fresh_pool().await;
     insert_test_work(&pool, "wrk_t7d_none").await;
 
@@ -326,17 +376,18 @@ async fn t7d_works_patch_world_id_none_worldless() {
 
     let input = scaffold_input("wrk_t7d_none", "world-none", "World None", None, 1);
 
-    cap.run(input).await.expect("scaffold");
-
-    let work = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_t7d_none")
+    let err = cap
+        .run(input)
         .await
-        .expect("get work")
-        .expect("work must exist");
-
-    assert_eq!(work.work_profile.as_deref(), Some("novel"));
+        .expect_err("V1.40: worldless creation must be rejected");
+    let msg = format!("{err}");
     assert!(
-        work.world_id.is_none(),
-        "world_id must be NULL for worldless Work"
+        msg.contains("V1.40 requires world_id"),
+        "error must mention V1.40 mandatory binding, got: {msg}"
+    );
+    assert!(
+        msg.contains("creator world create") || msg.contains("creator world list"),
+        "error must mention remediation commands, got: {msg}"
     );
 }
 
@@ -470,7 +521,25 @@ async fn t7e_gate_pass_init_enables_novel_writing_filesystem_gates() {
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    let input = scaffold_input("wrk_t7e", "gate-test", "Gate Test", None, 2);
+    let input = scaffold_input(
+        "wrk_t7e",
+        "gate-test",
+        "Gate Test",
+        Some("wld_t7e_world"),
+        2,
+    );
+
+    // V1.40: seed World for FK check
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        "wld_t7e_world",
+        "ctr_test",
+        "T7e Test World",
+        "t7e-test-world",
+        "private",
+        "single",
+    )
+    .await;
 
     cap.run(input).await.expect("scaffold");
 
@@ -660,9 +729,20 @@ async fn t7a_bis_chapters_bounds_accepted() {
         let (pool, dir) = fresh_pool().await;
         let wid = format!("wrk_bnd_{n}");
         insert_test_work(&pool, &wid).await;
+        // V1.40: seed World for FK check
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_bnd",
+            "ctr_test",
+            "Bounds World",
+            "bounds-world",
+            "private",
+            "single",
+        )
+        .await;
         let works_root = dir.path().join("Works");
         let cap = make_cap(pool.clone(), &works_root);
-        let input = scaffold_input(&wid, "bounded-ok", "OK", None, n);
+        let input = scaffold_input(&wid, "bounded-ok", "OK", Some("wld_bnd"), n);
         cap.run(input).await.unwrap_or_else(|e| {
             panic!("W-2: {n} chapters must be accepted, got error: {e}");
         });
@@ -683,7 +763,24 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
     let cap = make_cap(pool.clone(), &works_root);
 
     // Initial bootstrap: all fields PATCHed.
-    let initial = scaffold_input("wrk_t7f", "original-ref", "Original Title", None, 5);
+    // V1.40: world_id is mandatory — seed World rows.
+    nexus_local_db::narrative_gateway::seed::world(
+        &pool,
+        "wld_t7f_initial",
+        "ctr_test",
+        "T7f Initial World",
+        "t7f-initial-world",
+        "private",
+        "single",
+    )
+    .await;
+    let initial = scaffold_input(
+        "wrk_t7f",
+        "original-ref",
+        "Original Title",
+        Some("wld_t7f_initial"),
+        5,
+    );
     cap.run(initial).await.expect("initial bootstrap");
 
     let after_initial = nexus_local_db::works::get_work(&pool, "ctr_test", "wrk_t7f")
@@ -692,7 +789,7 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
         .expect("work");
     assert_eq!(after_initial.work_ref.as_deref(), Some("original-ref"));
     assert_eq!(after_initial.total_planned_chapters, Some(5));
-    assert!(after_initial.world_id.is_none());
+    assert_eq!(after_initial.world_id.as_deref(), Some("wld_t7f_initial"));
 
     // Partial re-init: only world_id changed. Use a DIFFERENT work_ref and
     // chapter count in the input to verify they are NOT applied to the DB.
@@ -745,26 +842,35 @@ async fn t7f_partial_reinit_only_updates_listed_fields() {
 
 #[tokio::test]
 async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
-    // Force T3 (work_chapters seed) to fail by referencing a work_id that
-    // does not exist in `works` (FK violation). Verify the FS scaffold
-    // written before T3 is removed by ScaffoldTransaction's Drop guard.
+    // Force scaffold failure by referencing a work_id that does not exist
+    // in `works` AND a world_id that does not exist in `narrative_worlds`.
+    // V1.40: the world_id FK check fires before seed_chapters, so we get
+    // a world_id-not-found error. Either way, the FS scaffold must be rolled back.
     let (pool, dir) = fresh_pool().await;
-    // intentionally do NOT call insert_test_work — work_chapters FK
-    // (work_id -> works.work_id) will fire on seed_chapters.
+    // intentionally do NOT call insert_test_work — no Work row exists.
 
     let works_root = dir.path().join("Works");
     let cap = make_cap(pool.clone(), &works_root);
 
-    let input = scaffold_input("wrk_no_such_row", "atomic-test", "Atomic Test", None, 2);
+    let input = scaffold_input(
+        "wrk_no_such_row",
+        "atomic-test",
+        "Atomic Test",
+        Some("wld_atomic"),
+        2,
+    );
 
     let err = cap
         .run(input)
         .await
-        .expect_err("seed_chapters must fail on missing work FK");
+        .expect_err("scaffold must fail on missing work or missing world_id");
     let msg = format!("{err}");
     assert!(
-        msg.contains("seed_chapters") || msg.contains("FOREIGN KEY") || msg.contains("constraint"),
-        "F2: expected FK / seed_chapters error, got: {msg}"
+        msg.contains("seed_chapters")
+            || msg.contains("FOREIGN KEY")
+            || msg.contains("constraint")
+            || msg.contains("world_id") && msg.contains("not found"),
+        "F2: expected FK/world_id error, got: {msg}"
     );
 
     // ScaffoldTransaction Drop must have removed the partial scaffold.
