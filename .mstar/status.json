@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T20:30:00+08:00",
+  "updated_at": "2026-06-10T22:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.40-harness-docs-prepare",
@@ -73,7 +73,7 @@
     },
     {
       "id": "2026-06-10-v1.40-world-create-and-validation",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-10-v1.40-world-create-and-validation.md",
       "working_branch": "feature/v1.40-world-create-and-validation",
       "merge_target": "iteration/v1.40",
@@ -93,8 +93,30 @@
           "DF-61",
           "DF-59",
           "DF-56"
-        ]
-      }
+        ],
+        "qa": "passed — all 6 ACs green; HTTP 422 confirmed; atomicity confirmed; ownership FK confirmed; nightly fmt clean",
+        "done_at": "2026-06-10T22:30:00+08:00",
+        "commits": [
+          "a903efd8",
+          "464d0fba",
+          "b76c5c1d",
+          "68e4a807",
+          "abaf514e",
+          "ae12b9f1",
+          "9564918f",
+          "9511e31c",
+          "d3a18d14",
+          "ec726e3a",
+          "20626228",
+          "16fe33d2"
+        ],
+        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10 (with mandatory-binding spec amendment mid-stream)",
+        "mandatory_binding_locked": true
+      },
+      "updated_at": "2026-06-10",
+      "notes": [
+        "2026-06-10: spec amendment (464d0fba) made world_id mandatory per user clarification; implement (a903efd8, b76c5c1d, 68e4a807, abaf514e); QC1/QC2/QC3 Request Changes initial; fix d3a18d14 addressed 8 blocking findings; QC re-validation Approve; QA Pass → merge to iteration/v1.40"
+      ]
     },
     {
       "id": "2026-06-10-v1.40-world-kb-taxonomy",
@@ -1075,6 +1097,48 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "When Layer 0 (~/.nexus42/rules/writing-craft.md user override) is wired"
+      }
+    ],
+    "2026-06-10-v1.40-world-create-and-validation": [
+      {
+        "id": "R-V140P0-S1",
+        "title": "Document 400 vs 422 deviation (HTTP status code choice for world-binding errors) in OpenAPI / handler docstring",
+        "severity": "nit",
+        "source": "qc2 S-01 (V1.40 P0 re-validation)",
+        "scope": "crates/nexus-daemon-runtime/src/api/errors.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P0-S2",
+        "title": "No --force unbind path for world_id; V1.40 simply rejects clear; consider escape hatch for V1.41",
+        "severity": "nit",
+        "source": "qc2 S-03 (V1.40 P0 re-validation)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41"
+      },
+      {
+        "id": "R-V140P0-S3",
+        "title": "sqlx offline metadata churn — verify CI re-prepare after P0 merge",
+        "severity": "low",
+        "source": "qc3 S-1 (V1.40 P0 re-validation)",
+        "scope": ".sqlx/ directory + CI pipeline",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P0-S4",
+        "title": "Add tracing span around new mandatory binding checks for observability",
+        "severity": "low",
+        "source": "qc3 S-2 (V1.40 P0 re-validation)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (POST + PATCH)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
       }
     ]
   }
