@@ -49,32 +49,38 @@ fn generate_job_id() -> String {
     format!("xj_{}", uuid::Uuid::new_v4().simple())
 }
 
-/// Column list shared across all SELECT queries (avoids drift).
-///
-/// Uses plain column names (no `as "field!"` aliases) for runtime
-/// `sqlx::query_as` compatibility. Nullable fields are correctly
-/// mapped by `FromRow` derive.
-const JOB_COLUMNS: &str = "\
-    job_id, creator_id, workspace_id, work_entry_id, world_id, \
-    status, error_text, created_at, started_at, finished_at, \
-    source_kind, source_locator, profile_hint, work_id\
-";
-
-/// Fetch a single job by ID using the shared column list.
+/// Fetch a single job by ID.
 ///
 /// # Errors
 ///
 /// Returns `sqlx::Error` on database failure.
 async fn fetch_by_id(pool: &SqlitePool, job_id: &str) -> Result<KbExtractJob, sqlx::Error> {
-    let query = format!("SELECT {JOB_COLUMNS} FROM kb_extract_jobs WHERE job_id = ?");
-    // SAFETY: `JOB_COLUMNS` is a compile-time constant; `job_id` is a bind param.
-    sqlx::query_as::<_, KbExtractJob>(&query)
-        .bind(job_id)
-        .fetch_one(pool)
-        .await
+    sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at,
+            source_kind,
+            source_locator,
+            profile_hint,
+            work_id
+        FROM kb_extract_jobs
+        WHERE job_id = ?"#,
+        job_id
+    )
+    .fetch_one(pool)
+    .await
 }
 
-/// Fetch a single optional job by ID using the shared column list.
+/// Fetch a single optional job by ID.
 ///
 /// # Errors
 ///
@@ -83,12 +89,29 @@ async fn fetch_optional_by_id(
     pool: &SqlitePool,
     job_id: &str,
 ) -> Result<Option<KbExtractJob>, sqlx::Error> {
-    let query = format!("SELECT {JOB_COLUMNS} FROM kb_extract_jobs WHERE job_id = ?");
-    // SAFETY: `JOB_COLUMNS` is a compile-time constant; `job_id` is a bind param.
-    sqlx::query_as::<_, KbExtractJob>(&query)
-        .bind(job_id)
-        .fetch_optional(pool)
-        .await
+    sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at,
+            source_kind,
+            source_locator,
+            profile_hint,
+            work_id
+        FROM kb_extract_jobs
+        WHERE job_id = ?"#,
+        job_id
+    )
+    .fetch_optional(pool)
+    .await
 }
 
 /// Insert a new job row, retrying once on PRIMARY KEY collision (R18).
@@ -159,17 +182,31 @@ pub async fn enqueue(
     world_id: &str,
 ) -> Result<KbExtractJob, sqlx::Error> {
     // Check for existing non-failed job (idempotency).
-    let query = format!(
-        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
-         WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? AND status != 'failed'"
-    );
-    // SAFETY: JOB_COLUMNS constant; bind params.
-    let existing = sqlx::query_as::<_, KbExtractJob>(&query)
-        .bind(creator_id)
-        .bind(work_entry_id)
-        .bind(world_id)
-        .fetch_optional(pool)
-        .await?;
+    let existing = sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at,
+            source_kind,
+            source_locator,
+            profile_hint,
+            work_id
+        FROM kb_extract_jobs
+        WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? AND status != 'failed'"#,
+        creator_id,
+        work_entry_id,
+        world_id
+    )
+    .fetch_optional(pool)
+    .await?;
 
     if let Some(job) = existing {
         return Ok(job);
@@ -200,48 +237,60 @@ pub async fn enqueue(
 /// Returns `sqlx::Error` on database failure.
 // 9 params mirrors the kb_extract_jobs column layout — same rationale as insert_with_retry.
 #[allow(clippy::too_many_arguments)]
-#[must_use]
-pub fn enqueue_with_artifact<'a>(
-    pool: &'a SqlitePool,
-    creator_id: &'a str,
-    workspace_id: &'a str,
-    work_entry_id: &'a str,
-    world_id: &'a str,
-    source_kind: Option<&'a str>,
-    source_locator: Option<&'a str>,
-    profile_hint: Option<&'a str>,
-    work_id: Option<&'a str>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<KbExtractJob, sqlx::Error>> + 'a>> {
-    Box::pin(async move {
-        // Check for existing non-failed job (idempotency).
-        let query = format!(
-            "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
-             WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? AND status != 'failed'"
-        );
-        let existing = sqlx::query_as::<_, KbExtractJob>(&query)
-            .bind(creator_id)
-            .bind(work_entry_id)
-            .bind(world_id)
-            .fetch_optional(pool)
-            .await?;
-
-        if let Some(job) = existing {
-            return Ok(job);
-        }
-
-        insert_with_retry(
-            pool,
-            creator_id,
-            workspace_id,
-            work_entry_id,
-            world_id,
+pub async fn enqueue_with_artifact(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_id: &str,
+    work_entry_id: &str,
+    world_id: &str,
+    source_kind: Option<&str>,
+    source_locator: Option<&str>,
+    profile_hint: Option<&str>,
+    work_id: Option<&str>,
+) -> Result<KbExtractJob, sqlx::Error> {
+    // Check for existing non-failed job (idempotency).
+    let existing = sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at,
             source_kind,
             source_locator,
             profile_hint,
-            work_id,
-        )
-        .await
-    })
+            work_id
+        FROM kb_extract_jobs
+        WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? AND status != 'failed'"#,
+        creator_id,
+        work_entry_id,
+        world_id
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(job) = existing {
+        return Ok(job);
+    }
+
+    insert_with_retry(
+        pool,
+        creator_id,
+        workspace_id,
+        work_entry_id,
+        world_id,
+        source_kind,
+        source_locator,
+        profile_hint,
+        work_id,
+    )
+    .await
 }
 
 /// Get a specific job by ID.
@@ -266,14 +315,19 @@ pub async fn list_by_creator(
     creator_id: &str,
     limit: u32,
 ) -> Result<Vec<KbExtractJob>, sqlx::Error> {
+    // SAFETY: sqlx::query_as! does not support LIMIT as bind param in SQLite
+    // offline mode. LIMIT is interpolated from a u32 (not user-controlled);
+    // column names are static; creator_id is a bind param.
     let query = format!(
-        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
-         WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?"
+        "SELECT \
+            job_id, creator_id, workspace_id, work_entry_id, world_id, \
+            status, error_text, created_at, started_at, finished_at, \
+            source_kind, source_locator, profile_hint, work_id \
+        FROM kb_extract_jobs \
+        WHERE creator_id = ? ORDER BY created_at DESC LIMIT {limit}"
     );
-    // SAFETY: JOB_COLUMNS constant; bind params.
     sqlx::query_as::<_, KbExtractJob>(&query)
         .bind(creator_id)
-        .bind(limit)
         .fetch_all(pool)
         .await
 }
@@ -289,15 +343,29 @@ pub async fn next_queued(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<Option<KbExtractJob>, sqlx::Error> {
-    let query = format!(
-        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
-         WHERE creator_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"
-    );
-    // SAFETY: JOB_COLUMNS constant; bind params.
-    sqlx::query_as::<_, KbExtractJob>(&query)
-        .bind(creator_id)
-        .fetch_optional(pool)
-        .await
+    sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at,
+            source_kind,
+            source_locator,
+            profile_hint,
+            work_id
+        FROM kb_extract_jobs
+        WHERE creator_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"#,
+        creator_id
+    )
+    .fetch_optional(pool)
+    .await
 }
 
 /// Mark a job as running. Sets `started_at` to now.
@@ -339,14 +407,29 @@ pub async fn claim_job(
     let mut tx = pool.begin().await?;
 
     // Select oldest queued job for this creator.
-    let query = format!(
-        "SELECT {JOB_COLUMNS} FROM kb_extract_jobs \
-         WHERE creator_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"
-    );
-    let job = sqlx::query_as::<_, KbExtractJob>(&query)
-        .bind(creator_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let job = sqlx::query_as!(
+        KbExtractJob,
+        r#"SELECT
+            job_id as "job_id!",
+            creator_id as "creator_id!",
+            workspace_id as "workspace_id!",
+            work_entry_id as "work_entry_id!",
+            world_id as "world_id!",
+            status as "status!",
+            error_text,
+            created_at as "created_at!",
+            started_at,
+            finished_at,
+            source_kind,
+            source_locator,
+            profile_hint,
+            work_id
+        FROM kb_extract_jobs
+        WHERE creator_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"#,
+        creator_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
 
     let Some(job) = job else {
         tx.rollback().await?;
