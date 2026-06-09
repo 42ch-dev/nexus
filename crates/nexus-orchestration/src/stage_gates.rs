@@ -258,61 +258,6 @@ pub fn read_rules_layers(workspace_dir: &str, work_ref: &str) -> Option<String> 
     }
 }
 
-/// Build a child `kb-extract` schedule that depends on a parent schedule.
-///
-/// V1.40 P3 (T8): Used by `novel-review-master` to auto-chain a `kb-extract`
-/// child job after the review completes, so the freshly reviewed chapter
-/// content gets promoted to World KB.
-///
-/// # Arguments
-/// * `creator_id` — Creator who owns the schedules
-/// * `parent_schedule_id` — The review-master schedule to depend on
-/// * `work_fields` — Work fields containing `world_id`, `body_path`, etc.
-///
-/// # Returns
-/// `Some(AddScheduleRequest)` when `work_fields.world_id` is set (World-bound).
-/// `None` for legacy worldless Works (no child extract).
-#[must_use]
-pub fn build_child_kb_extract_schedule(
-    creator_id: &str,
-    parent_schedule_id: &str,
-    work_fields: &WorkFields,
-) -> Option<AddScheduleRequest> {
-    // Only World-bound Works get child kb-extract (mandatory binding).
-    let world_id = work_fields.world_id.as_ref()?;
-
-    let mut preset_input = build_preset_input(work_fields);
-    // Ensure the kb-extract preset gets the world_id and profile_hint.
-    preset_input.as_object_mut().map(|o| {
-        o.insert(
-            "profile_hint".to_string(),
-            serde_json::Value::String("novel".to_string()),
-        )
-    });
-    preset_input.as_object_mut().map(|o| {
-        o.insert(
-            "source_kind".to_string(),
-            serde_json::Value::String("work_chapter".to_string()),
-        )
-    });
-
-    Some(AddScheduleRequest {
-        creator_id: creator_id.to_string(),
-        preset_id: "kb-extract".to_string(),
-        seed: Some(serde_json::to_string(&preset_input).unwrap_or_default()),
-        label: Some(format!(
-            "kb-extract child (work: {}, world: {world_id})",
-            work_fields.work_id
-        )),
-        depends_on: Some(vec![parent_schedule_id.to_string()]),
-        concurrency: None,
-        scheduled_at: None,
-        input: Some(preset_input),
-        force_gates: false,
-        reason: None,
-    })
-}
-
 /// Build a correctly-shaped `AddScheduleRequest` for an FL-E stage advance
 /// (R-FL-E-P2-03: shared facade, no CLI-side bespoke DTO).
 ///
