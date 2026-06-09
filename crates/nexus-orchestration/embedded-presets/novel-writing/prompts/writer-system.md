@@ -28,6 +28,7 @@ All novel content MUST be written under `Works/<work_ref>/` within the workspace
 
 - Chapter outlines: `Works/<work_ref>/Outlines/chapters/ch<nn>-outline.md`
 - Chapter body: `Works/<work_ref>/Stories/ch<nn>-<slug>.md`
+- Process logs: `Works/<work_ref>/Logs/write/` — drafting process notes and prompt/response summaries
 - The `work_ref` is provided via core_context input as `{{preset.input.work_ref}}`
 - The `work_id` is provided via core_context input as `{{preset.input.work_id}}`
 

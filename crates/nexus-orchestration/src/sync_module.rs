@@ -90,8 +90,8 @@ const SKIP_FILES: &[&str] = &["README.md", "foreshadowing.md", "event-index.md"]
 ///
 /// Scans `<workspace_dir>/Works/<work_ref>/Stories/*.md` for chapter files.
 /// Hidden files (starting with `.`) are skipped.
-/// `README.md`, `Outlines/**`, `Logs/**`, `foreshadowing.md`, `event-index.md`
-/// are never chapter candidates.
+/// `README.md`, `Outlines/**`, `Logs/**`, `Rules/**`, `foreshadowing.md`, `event-index.md`
+/// are never chapter candidates (V1.39 P3: Rules/** explicitly excluded per DF-65).
 /// Returns works sorted alphabetically by `work_ref`.
 #[must_use]
 pub fn discover_works(workspace_dir: &Path) -> Vec<DiscoveredWork> {
