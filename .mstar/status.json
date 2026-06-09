@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T02:30:00+08:00",
+  "updated_at": "2026-06-11T03:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.40-harness-docs-prepare",
@@ -318,77 +318,29 @@
     "last_integration_branch": "iteration/v1.39",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.39",
-    "latest_shipped_at": "2026-06-09T06:28:38+00:00",
+    "latest_shipped_iteration": "v1.40",
+    "latest_shipped_at": "2026-06-11T03:00:00+08:00",
     "latest_active_iteration": "v1.40",
     "latest_active_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
     "integration_branch_retired": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-10T12:00:00+08:00",
-      "total_open": 66,
+      "updated_at": "2026-06-11T03:00:00+08:00",
+      "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 14,
-        "low": 40,
-        "nit": 12
+        "medium": 1,
+        "low": 0,
+        "nit": 0
       },
       "by_target": {
-        "v1.37": 6,
-        "backlog": 26,
-        "v1.38": 12,
-        "v1.39": 23,
-        "v1.40": 17
+        "v1.40": 1
       },
       "by_plan": {
-        "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
-        "2026-06-04-v1.33-memory-review-closed-loop": 3,
-        "2026-06-04-v1.33-work-model-and-creator-run": 3,
-        "v1.30-post-qc-tech-debt": 9,
-        "v1.31-post-qc-tech-debt": 5,
-        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
-        "2026-06-04-v1.34-agent-tool-implementation": 1,
-        "2026-06-07-v1.36-novel-artifact-layout-and-templates": 3,
-        "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2,
-        "2026-06-08-v1.38-harness-docs-prepare": 0,
-        "2026-06-08-v1.38-multi-chapter-selection-status": 5,
-        "2026-06-08-v1.38-novel-writing-parameterization": 7,
-        "2026-06-09-v1.39-fl-e-auto-chain-engine": 5,
-        "2026-06-09-v1.39-research-stage-wiring": 9,
-        "2026-06-09-v1.39-v138-hardening": 3,
-        "2026-06-09-v1.39-findings-and-review-routing": 6,
-        "2026-06-10-v1.40-hygiene": 17
+        "2026-06-10-v1.40-hygiene": 1
       },
-      "v1.36_added": {
-        "P1": [
-          "R-V136P1-01 (medium)",
-          "R-V136P1-02 (medium)"
-        ],
-        "P2": [
-          "R-V136P2-01 (low)",
-          "R-V136P2-02 (low)",
-          "R-V136P2-03 (low)"
-        ],
-        "P3": [
-          "R-V136P3-01 (low)",
-          "R-V136P3-02 (low)"
-        ],
-        "P4": [
-          "R-V136P4-01 (low — DF-60..DF-67 distill cross-link)"
-        ],
-        "closed_in_v1.36": [
-          "R-V136P2-03 (closed in P3 — T7 finalize-exit.md + llm_judge 五问 gate)",
-          "DF-57 (closed in P2)",
-          "DF-58 V1.36 (closed in P1)"
-        ],
-        "closed_in_v1.37": [
-          "R-V136P1-01 (closed in V1.37 P0 — AddScheduleRequest.input wired)",
-          "R-V136P1-02 (closed in V1.37 P0 — preset gate evaluator with structured error)",
-          "R-V136P3-02 (closed in V1.37 P0 — scaffold atomicity via DB transaction)"
-        ]
-      },
-      "v1.40_hygiene_inventory": "P4 plan 2026-06-10-v1.40-hygiene — 17 residuals with target containing V1.40"
+      "notes": "V1.40 PM-accept residual R-V140P4-W2 (sqlx::query_as! design tradeoff). All V1.40-tagged V1.39 residuals closed."
     },
     "wave_0_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
     "spec_refs": [
@@ -406,7 +358,15 @@
       ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
       ".mstar/knowledge/specs/orchestration-engine.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+    "pr_open": {
+      "repo": "42ch-dev/nexus",
+      "pr_number": 52,
+      "iteration": "v1.40",
+      "head": "iteration/v1.40",
+      "base": "main",
+      "url": "https://github.com/42ch-dev/nexus/pull/52"
+    }
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
