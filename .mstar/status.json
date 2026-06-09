@@ -174,14 +174,14 @@
     "last_integration_branch": "iteration/v1.38",
     "integration_merge_target": "main",
     "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.38",
-    "latest_shipped_at": "2026-06-09T00:30:00+08:00",
+    "latest_shipped_iteration": "v1.39",
+    "latest_shipped_at": "2026-06-09T06:00:00+08:00",
     "latest_active_iteration": "v1.39",
     "latest_active_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-    "integration_branch_retired": "iteration/v1.38 (V1.38 SHIPPED 2026-06-09 via PR #49; integration role handed off to iteration/v1.39 for active V1.39 prepare)",
+    "integration_branch_retired": "iteration/v1.39 SHIPPED 2026-06-09 (P0..P5 all Done; PR to main pending)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-09T04:45:00+08:00",
+      "updated_at": "2026-06-09T06:00:00+08:00",
       "total_open": 65,
       "by_severity": {
         "critical": 0,
