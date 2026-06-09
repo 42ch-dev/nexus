@@ -31,6 +31,7 @@ fn demo_work_fields(stage: &str) -> WorkFields {
         body_path: Some("Works/my-novel/Stories/ch01-ch01.md".to_string()),
         slug: Some("ch01".to_string()),
         research_artifacts_dir: None,
+        workspace_dir: None,
     }
 }
 
