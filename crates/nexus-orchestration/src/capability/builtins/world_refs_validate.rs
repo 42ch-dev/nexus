@@ -7,8 +7,9 @@
 //! - **Outline stage**: invalid entries produce warnings (non-blocking).
 //! - **Finalize stage**: invalid entries produce errors (blocking) unless
 //!   `--force` is provided.
-//! - **Worldless Works**: no `world_id` gate failure; `world_refs` validation
-//!   is warn-only (does not block).
+//! - **Legacy worldless Works** (`world_id == NULL`, V1.39 and earlier):
+//!   warn-only (does not block). V1.40 creation/init must not produce this
+//!   state; the warn-only path exists solely for backward-compatible reads.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -28,7 +29,7 @@ pub struct WorldRefFinding {
 /// Severity of a `world_refs` finding.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum WorldRefSeverity {
-    /// Non-blocking advisory (outline stage or worldless Work).
+    /// Non-blocking advisory (outline stage or legacy worldless Work).
     Warning,
     /// Blocking error (finalize stage, World-bound Work).
     Error,
@@ -118,12 +119,12 @@ pub fn validate_world_refs<S: BuildHasher>(
         if !valid_ids.contains(&trimmed) {
             // Determine severity based on stage and world binding
             let (severity, message) = if !params.is_world_bound {
-                // Worldless Work: always warn-only
+                // Legacy V1.39 worldless Work: always warn-only (backward-compat read).
                 (
                     WorldRefSeverity::Warning,
                     format!(
                         "world_refs entry '{trimmed}' not found in World KB \
-                         (Work is worldless — validation is advisory only)"
+                         (Work is worldless [legacy V1.39] — validation is advisory only)"
                     ),
                 )
             } else if params.stage == ValidationStage::Outline {
@@ -232,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn worldless_work_invalid_ref_only_warns() {
+    fn legacy_v139_worldless_work_invalid_ref_only_warns() {
         let ids = make_valid_ids();
         let refs = vec!["char_unknown".to_string()];
         let params = WorldRefsValidationParams {
@@ -244,10 +245,15 @@ mod tests {
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.findings[0].severity, WorldRefSeverity::Warning);
         assert!(!result.blocks);
+        // Legacy worldless Works produce advisory warnings mentioning legacy
+        assert!(
+            result.findings[0].message.contains("legacy V1.39"),
+            "legacy worldless warning should mention V1.39 legacy"
+        );
     }
 
     #[test]
-    fn worldless_work_empty_refs_no_error() {
+    fn legacy_v139_worldless_work_empty_refs_no_error() {
         let ids = make_valid_ids();
         let refs: Vec<String> = vec![];
         let params = WorldRefsValidationParams {
