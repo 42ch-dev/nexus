@@ -33,6 +33,7 @@ fn demo_work_fields(stage: &str) -> WorkFields {
         research_artifacts_dir: None,
         workspace_dir: None,
         world_kb_block: None,
+        world_id: None,
     }
 }
 
