@@ -839,4 +839,138 @@ mod tests {
         assert_eq!(chapter_label(99), "99");
         assert_eq!(chapter_label(100), "100");
     }
+
+    // ── V1.39 P3: rules reader tests ────────────────────────────────────
+
+    #[test]
+    fn read_rules_layers_returns_layer1_from_embedded() {
+        // Layer 1 is always available from embedded presets
+        let result = read_rules_layers("/nonexistent/workspace", "my-novel");
+        assert!(result.is_some(), "Layer 1 embedded content should always be present");
+        let content = result.expect("content");
+        assert!(
+            content.contains("Layer 1 — Writing Craft Rules"),
+            "should contain Layer 1 header"
+        );
+        assert!(
+            content.contains("Five-Question Gate"),
+            "should contain embedded writing craft content"
+        );
+    }
+
+    #[test]
+    fn read_rules_layers_returns_both_layers_when_layer2_exists() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+
+        // Create Layer 2 file
+        let rules_dir = ws.join("Works").join("test-novel").join("Rules");
+        std::fs::create_dir_all(&rules_dir).expect("mkdir");
+        std::fs::write(
+            rules_dir.join("novel-rules.md"),
+            "# My Rules\n\n- POV: first person\n",
+        )
+        .expect("write");
+
+        let result = read_rules_layers(&ws.to_string_lossy(), "test-novel");
+        assert!(result.is_some());
+        let content = result.expect("content");
+        assert!(
+            content.contains("Layer 1 — Writing Craft Rules"),
+            "should contain Layer 1"
+        );
+        assert!(
+            content.contains("Layer 2 — Novel Rules"),
+            "should contain Layer 2"
+        );
+        assert!(
+            content.contains("POV: first person"),
+            "should contain Layer 2 content"
+        );
+    }
+
+    #[test]
+    fn read_rules_layers_skips_empty_layer2() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+
+        // Create empty Layer 2 file
+        let rules_dir = ws.join("Works").join("empty-novel").join("Rules");
+        std::fs::create_dir_all(&rules_dir).expect("mkdir");
+        std::fs::write(rules_dir.join("novel-rules.md"), "  \n").expect("write");
+
+        let result = read_rules_layers(&ws.to_string_lossy(), "empty-novel");
+        assert!(result.is_some());
+        let content = result.expect("content");
+        assert!(
+            content.contains("Layer 1"),
+            "Layer 1 should still be present"
+        );
+        assert!(
+            !content.contains("Layer 2"),
+            "empty Layer 2 should not appear"
+        );
+    }
+
+    #[test]
+    fn build_preset_input_includes_rules_content_when_workspace_dir_set() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+
+        // Create Layer 2 file
+        let rules_dir = ws.join("Works").join("rules-test").join("Rules");
+        std::fs::create_dir_all(&rules_dir).expect("mkdir");
+        std::fs::write(
+            rules_dir.join("novel-rules.md"),
+            "- Tense: present\n",
+        )
+        .expect("write");
+
+        let fields = WorkFields {
+            work_id: "wrk_test".to_string(),
+            fl_e_stage: "produce".to_string(),
+            creative_brief: "{}".to_string(),
+            inspiration_log: "[]".to_string(),
+            work_ref: Some("rules-test".to_string()),
+            chapter: Some(1),
+            chapter_label: Some("01".to_string()),
+            outline_path: None,
+            body_path: None,
+            slug: None,
+            research_artifacts_dir: None,
+            workspace_dir: Some(ws.to_string_lossy().to_string()),
+        };
+
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("rules_content").is_some(),
+            "rules_content should be present when workspace_dir is set"
+        );
+        let rules = input["rules_content"].as_str().expect("string");
+        assert!(rules.contains("Tense: present"));
+    }
+
+    #[test]
+    fn build_preset_input_omits_rules_content_when_no_workspace_dir() {
+        let fields = WorkFields {
+            work_id: "wrk_test".to_string(),
+            fl_e_stage: "produce".to_string(),
+            creative_brief: "{}".to_string(),
+            inspiration_log: "[]".to_string(),
+            work_ref: Some("my-novel".to_string()),
+            chapter: Some(1),
+            chapter_label: Some("01".to_string()),
+            outline_path: None,
+            body_path: None,
+            slug: None,
+            research_artifacts_dir: None,
+            workspace_dir: None,
+        };
+
+        let input = build_preset_input(&fields);
+        assert!(
+            input.get("rules_content").is_none(),
+            "rules_content should be absent when workspace_dir is None"
+        );
+    }
 }
