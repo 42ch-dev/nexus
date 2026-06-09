@@ -18,8 +18,7 @@
 /// Layer 1 writing-craft rules, compiled into the binary at build time.
 ///
 /// Location: `crates/nexus-orchestration/embedded-rules/writing-craft.md`
-pub const WRITING_CRAFT: &str =
-    include_str!("../embedded-rules/writing-craft.md");
+pub const WRITING_CRAFT: &str = include_str!("../embedded-rules/writing-craft.md");
 
 // ---------------------------------------------------------------------------
 // Tests
