@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-10-v1.40-world-context-prompt-block"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-10"
 ---
 
@@ -99,3 +99,52 @@ generated_at: "2026-06-10"
 **Verdict**: Request Changes
 
 Rationale: the new `world_context.rs` builder is well-factored and its unit tests pass quickly (40 lib tests in ~0.13s), but the orchestration integration is incomplete. The `novel-writing` preset now references `preset.input.world_kb_block` in strict mode without any producer of that key, which causes a deterministic runtime failure for outline/draft tasks and regresses four `e2e_novel_writing` tests that pass on the baseline. In addition, the per-prompt query path is O(n) with multiple linear scans, token-budget truncation is O(n²) and does not reliably bound the static header, and prompt output order is nondeterministic when backed by `InMemoryKbStore`. Formatting and clippy are clean; the crate-level test gate for `nexus-moment-context-assembly` is broken by a pre-existing `cloud-stage` feature mismatch that also needs resolution.
+
+## Revalidation
+
+**Re-review date**: 2026-06-10
+**Revalidation diff**: `c8487149..960efa37`
+**Fix commits reviewed**:
+- `c573646a` — fix(orchestration): QC3-C1 / QC1-C001 — wire world_kb_block into build_preset_input + build_schedule_for_stage
+- `dc50790c` — fix(moment-context-assembly): QC3-W1 — gate runtime_compatibility.rs behind cloud-stage feature
+- `960efa37` — fix(world_context): QC1-W002 + QC3-W3 + QC3-W4 + QC2-W02/W03 — heuristic, truncation, determinism, docs
+
+### Per-finding disposition
+
+| Finding | Status | Evidence |
+|---------|--------|----------|
+| **C-1** `preset.input.world_kb_block` never populated | **Resolved** | `cargo test -p nexus-orchestration --test e2e_novel_writing` now passes 11/11 (was failing 4/11). Commit `c573646a` added `world_kb_block: Option<String>` to `WorkFields`, threaded it through `build_preset_input` (empty string for worldless Works), and populated it in CLI `run.rs` via `build_chapter_kb_block` for World-bound Works. |
+| **W-1** `runtime_compatibility` compile gate | **Resolved** | `cargo test -p nexus-moment-context-assembly` compiles cleanly; `tests/runtime_compatibility.rs` now has `#![cfg(feature = "cloud-stage")]` (commit `dc50790c`). The test target runs 0 tests when the feature is absent, avoiding the previous `E0432` unresolved import. |
+| **W-3** O(n²) token-budget truncation | **Resolved** | `apply_token_budget` (lines 385-426) now uses `estimate_item_chars` (constant-time per-item cost estimate) and only calls `block.to_yaml()` once at start for baseline measurement and once at end for final verification. The inner loops pop items and subtract estimated costs without re-rendering. Complexity is now O(n) in the number of items. |
+| **W-4** YAML determinism | **Resolved** | `build_chapter_kb_block` now sorts `characters`, `locations`, and `active_rules` by `canonical_name` (lines 282-283, 310, 314). New test `output_is_deterministic_regardless_of_insertion_order` passes, verifying bit-for-bit identical YAML across opposite insertion orders in `InMemoryKbStore`. |
+| **QC1-W002** heuristic fallback | **Resolved** (bonus) | Commit `960efa37` also implemented the QC1-W002 fix: when `world_refs` is empty and `chapter_text` is provided, the code scans the text for known character/location canonical names (case-insensitive) to narrow the fallback set. Tests `chapter_text_heuristic_narrows_fallback` and `no_chapter_text_returns_all_in_fallback` pass. |
+| **W-2** KB query linear scans | **Open** (deferred) | No fix attempted. This is a store-layer concern outside the scope of the prompt-block module; acceptable to defer to a future KB-indexing plan. |
+| **S-1..S-4** | **Open** (suggestions) | No changes; remain as optional improvements for future iterations. |
+
+### Whole-crate sanity (post-fix)
+
+```bash
+# Build
+$ cargo build -p nexus-moment-context-assembly -p nexus-orchestration -p nexus-kb -p nexus42 --all-targets
+    Finished dev profile [unoptimized + debuginfo] target(s) in 0.22s
+
+# Tests
+$ cargo test -p nexus-moment-context-assembly -p nexus-orchestration -p nexus-kb -p nexus42
+test result: ok. (all suites pass)
+
+# Clippy
+$ cargo clippy -p nexus-moment-context-assembly -p nexus-orchestration -p nexus-kb -p nexus42 -- -D warnings
+    Finished dev profile [unoptimized + debuginfo] target(s) in 0.23s
+
+# Format
+$ cargo +nightly fmt --all -- --check
+fmt_exit=0
+```
+
+### New findings (post-fix)
+
+None. No new performance or reliability risks introduced by the fix commits.
+
+**Updated Verdict**: Approve
+
+All previously blocking findings (C-1, W-1, W-3, W-4) are resolved with evidence. The remaining open item (W-2) is a store-layer indexing concern that predates this plan and does not block the prompt-block feature. Suggestions S-1 through S-4 remain valid optional improvements.
