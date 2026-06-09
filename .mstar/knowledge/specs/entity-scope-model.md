@@ -150,7 +150,9 @@ The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `blo
 
 **Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KeyBlock.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
 
-**V1.40 P1 implementation:** `nexus-kb::validation` module provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. `InMemoryKbStore` (and by extension `SqliteKbStore`) runs validation on insert/update. See `crates/nexus-kb/src/validation.rs`.
+**V1.40 P1 implementation:** `nexus-kb::validation` module provides `validate_body(block_type, body, ValidationMode)` that enforces `novel_category` presence and validity when `ValidationMode::Novel` is active. Both `InMemoryKbStore` and `SqliteKbStore` run validation on insert/update. Validation errors are structured (`ValidationKind` enum) so callers can produce precise diagnostics without string matching. `canonical_name` is validated for format/safety (no control chars, path separators, shell metacharacters, max 256 chars). Advisory warnings for `novel_category` ↔ `block_type` mismatch are emitted via `tracing::warn!`. See `crates/nexus-kb/src/validation.rs`.
+
+**`canonical_name` grammar (V1.40 P1):** `[^\x00-\x1F\x7F/\\`$;&|><!*?"'(){}\[\]#]{1,256}` — non-empty, no control characters, no path separators, no shell metacharacters, max 256 chars.
 
 Recommended default mapping when ingesting or authoring novel items (P1 validation may require `novel_category` when `profile_hint=novel`):
 
