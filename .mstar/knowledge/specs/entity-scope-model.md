@@ -142,38 +142,43 @@ explicitly declares uniqueness.
 - KB graph insertion/query is a `World` concern and is coordinated with `nexus-narrative`.
 - `nexus-kb` MUST NOT be treated as generic Creator knowledge or User knowledge.
 
-#### 5.1.1 Narrative World KB item taxonomy (V1.37 P2 roadmap → V1.40 implement)
+#### 5.1.1 Narrative World KB item taxonomy (V1.40 grill-me locked)
 
-The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body_json`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2). **V1.40 P1** introduces schema validation / migration for the category vocabulary below. Novel drafting implementations MUST use these `block_type` values (or an equivalent typed enum) so prompt context, `world_refs`, and `kb-extract` agree on item ids. Iteration: [v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md).
+The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2).
 
-Minimum common fields for every World KB item:
+**SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-kb` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
+
+**Novel profile semantics (body layer):** The V1.37 novel “seven categories” (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KeyBlock.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
+
+Recommended default mapping when ingesting or authoring novel items (P1 validation may require `novel_category` when `profile_hint=novel`):
+
+| `novel_category` (body) | Default wire `block_type` | Narrative use |
+| --- | --- | --- |
+| `foundation` | `info_point` | World axioms, cosmology, genre promises |
+| `background` | `event` | Historical / legendary context |
+| `character` | `character` | Named characters |
+| `location` | `scene` | Places and settings |
+| `society` | `organization` | Factions, cultures, institutions |
+| `rules` | `conflict` | Magic/tech/legal constraints |
+| `economy` | `item` | Trade, currency, resources |
+
+`world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). Iteration: [v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md); runtime layering: [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md).
+
+Minimum common `body` shape for novel-profile items (V1.40 P1):
 
 ```json
 {
-  "id": "char_lin_xia",
-  "category": "character",
-  "name": "Lin Xia",
-  "aliases": ["Xia"],
   "summary": "One-line prompt descriptor",
-  "status": "provisional | confirmed | deprecated | merged | deleted",
-  "source_anchors": ["kb_source_anchors[...]"],
-  "updated_at": "ISO-8601 timestamp"
+  "attributes": {
+    "novel_category": "character",
+    "aliases": ["Xia"],
+    "traits": ["..."]
+  },
+  "tags": ["novel"]
 }
 ```
 
-Category-specific minimum viable fields:
-
-| Category (`block_type`) | Narrative use | Expected schema fields | Minimum viable `body_json` for V1.37+ implementation |
-| --- | --- | --- | --- |
-| `foundation` | World-level axioms and cross-volume invariants such as cosmology, physics, genre promises, and non-negotiable canon. | `id`, `name`, `summary`, `axioms`, `invariants`, `scope`, `source_anchors` | `{ id, category: "foundation", name, summary, axioms: [string], invariants: [string] }` |
-| `background` | Historical context, prior ages, legends, wars, disasters, and other world-history context. | `id`, `name`, `summary`, `time_range`, `events`, `source_anchors` | `{ id, category: "background", name, summary, events: [string] }` |
-| `character` | Named characters with prompt-safe identity, traits, relationships, and arc state. | `id`, `name`, `aliases`, `traits`, `arcs`, `relationships`, `first_seen`, `source_anchors` | `{ id, category: "character", name, aliases: [string], traits: [string], arcs: [string] }` |
-| `location` | Physical or virtual places that can appear in scenes. | `id`, `name`, `aliases`, `description`, `parent_location_id`, `sensory_details`, `source_anchors` | `{ id, category: "location", name, aliases: [string], description }` |
-| `society` | Factions, cultures, institutions, political entities, religions, and social groups. | `id`, `name`, `aliases`, `type`, `members`, `values`, `conflicts`, `source_anchors` | `{ id, category: "society", name, type, values: [string] }` |
-| `rules` | Codified magic, technology, legal, tactical, or metaphysical constraints that should not drift. | `id`, `name`, `summary`, `constraints`, `costs`, `exceptions`, `source_anchors` | `{ id, category: "rules", name, summary, constraints: [string] }` |
-| `economy` | Trade, currency, resource flows, scarcity, labor systems, and material incentives. | `id`, `name`, `summary`, `resources`, `currency`, `trade_routes`, `constraints`, `source_anchors` | `{ id, category: "economy", name, summary, resources: [string] }` |
-
-`id` values are stable World KB item ids and are the only valid values for novel chapter `world_refs` when a Work is World-bound. Category names are lowercase and case-sensitive. Future migrations may normalize the category enum into generated contracts, but they MUST preserve this vocabulary or explicitly supersede it in this spec.
+P1 adds validation helpers in `nexus-kb` for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums. No `schemas/` enum change in V1.40 unless a future ADR opts into a wire superset (out of V1.40 scope).
 
 ### 5.2 `nexus-knowledge` — User-scoped global knowledge
 

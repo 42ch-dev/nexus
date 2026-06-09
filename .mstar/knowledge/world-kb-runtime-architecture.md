@@ -76,15 +76,15 @@ job {
 
 **V1.40 ships**: `source_kind=work_chapter`, `profile_hint=novel` only. Schema and CLI accept other kinds as reserved.
 
-Domain path:
+Domain path (extend existing stack — grill-me #13):
 
 ```text
 kb-extract preset (LLM inner_graph)
-  → capability kb.ingest_artifact (thin)
-  → nexus-kb::ingest_from_artifact(job)
+  → capability kb.extract_work (extended input)
+  → nexus-kb validation + KeyBlock upsert + SourceAnchor
 ```
 
-Delete legacy work-entry-only semantics and PascalCase block types from prompts/capability.
+Retire work-entry-only job semantics in V1.40; keep wire `BlockType` from contracts (grill-me #10).
 
 ---
 
@@ -92,14 +92,13 @@ Delete legacy work-entry-only semantics and PascalCase block types from prompts/
 
 ```text
 novel-writing outline/draft
-  → nexus-moment-context-assembly::build_chapter_kb_block(work, chapter)
-  → WorldKbQueryBuilder → KbStore::query (nexus-kb)
+  → refactor of fetch_world_kb → format_chapter_kb_block (moment-context-assembly)
+  → KbStore::query (nexus-kb)
   → compact YAML block in preset template vars
 
 platform context assemble-moment
-  → assemble_moment
-  → WorldKbQueryBuilder::build_moment_kb_slice (wider scope, token budget)
-  → same taxonomy/filter rules as chapter block
+  → assemble_moment → fetch_world_kb (existing)
+  → wider scope / token budget than chapter block
 ```
 
 Do **not** implement a second query implementation inside `nexus-orchestration`.
@@ -111,10 +110,10 @@ Do **not** implement a second query implementation inside `nexus-orchestration`.
 | Slice | Architecture touch |
 | --- | --- |
 | P0.5 | `embedded-rules/` migration; this document |
-| P1 | Taxonomy in `nexus-kb`; retire old kb-extract block types |
-| P2 | `build_chapter_kb_block` in moment-context-assembly |
-| P3 | Refactor `kb-extract` + artifact job model + `ingest_from_artifact` |
-| P3 (tail) | `novel-review-master` optional child schedule → kb-extract |
+| P1 | Wire `BlockType` + novel `body` validation in `nexus-kb` |
+| P2 | Refactor `fetch_world_kb` + `format_chapter_kb_block` |
+| P3 | Extend `kb.extract_work` + artifact jobs + `WorkFields.world_id` |
+| P3 (tail) | `schedule.enqueue_child` + review-master `sync_world_kb` |
 | P4 | Hygiene only — no duplicate P0.5 |
 
 ---
@@ -123,4 +122,5 @@ Do **not** implement a second query implementation inside `nexus-orchestration`.
 
 - Merging `novel-review-master` and `kb-extract` into one preset.
 - World KB logic in `embedded-presets/rules/` or preset-only prompt strings.
-- Backward compatibility with V1.29 work-entry extract taxonomy.
+- Backward compatibility with V1.29 work-entry-only job rows (may wipe in pre-release).
+- Renaming `kb.extract_work` or adding parallel `BlockType` enum.

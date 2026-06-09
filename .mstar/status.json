@@ -64,7 +64,7 @@
         "depends_on": [
           "2026-06-10-v1.40-harness-docs-prepare"
         ],
-        "description": "P0 — creator world create + world_id/world_refs validation",
+        "description": "P0 — align creator world + world_refs validation (reuse existing create)",
         "targets_deferred": [
           "DF-63"
         ],
@@ -89,7 +89,7 @@
         "depends_on": [
           "2026-06-10-v1.40-world-create-and-validation"
         ],
-        "description": "P1 — narrative World KB taxonomy in nexus-kb; retire legacy kb-extract block types",
+        "description": "P1 — wire BlockType + novel body validation in nexus-kb",
         "targets_deferred": [
           "DF-63"
         ],
@@ -111,7 +111,7 @@
         "depends_on": [
           "2026-06-10-v1.40-world-kb-taxonomy"
         ],
-        "description": "P2 — chapter KB block via nexus-moment-context-assembly WorldKbQueryBuilder",
+        "description": "P2 — refactor fetch_world_kb + format_chapter_kb_block",
         "targets_deferred": [
           "DF-63"
         ],
@@ -133,7 +133,7 @@
         "depends_on": [
           "2026-06-10-v1.40-world-context-prompt-block"
         ],
-        "description": "P3 — artifact ingest job + kb-extract refactor + review-master child schedule",
+        "description": "P3 — extend kb.extract_work + jobs + schedule.enqueue_child",
         "targets_deferred": [
           "DF-63"
         ],
