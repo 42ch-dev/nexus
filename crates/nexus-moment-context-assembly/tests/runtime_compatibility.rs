@@ -1,8 +1,12 @@
 //! T6.11: Two-Stage Assembly Mock Tests
 //!
 //! Integration tests for TwoStageAssembly with mocked platform responses.
+//!
+//! These tests require the `cloud-stage` feature because they import
+//! `cloud_stage` module types that are gated behind `#[cfg(feature = "cloud-stage")]`.
+//! Run with: `cargo test -p nexus-moment-context-assembly --features cloud-stage --test runtime_compatibility`
 
-#![allow(clippy::manual_string_new, clippy::doc_markdown)]
+#![cfg(feature = "cloud-stage")]
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_creator_memory::LongTermMemory;
 use nexus_moment_context_assembly::cloud_stage::{

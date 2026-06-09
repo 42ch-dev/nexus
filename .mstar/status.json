@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T23:30:00+08:00",
+  "updated_at": "2026-06-11T00:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.40-harness-docs-prepare",
@@ -166,7 +166,7 @@
     },
     {
       "id": "2026-06-10-v1.40-world-context-prompt-block",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-10-v1.40-world-context-prompt-block.md",
       "working_branch": "feature/v1.40-world-context-prompt-block",
       "merge_target": "iteration/v1.40",
@@ -183,8 +183,29 @@
         "explicitly_out": [
           "multi-volume PK",
           "DF-47"
-        ]
-      }
+        ],
+        "qa": "passed — all 5 ACs green; runtime wiring complete (CLI run.rs → stage_gates.rs); 1612 tests pass; clippy clean; nightly fmt clean",
+        "done_at": "2026-06-11T00:30:00+08:00",
+        "commits": [
+          "e2610a76",
+          "11eb62b0",
+          "5ba65359",
+          "ae925aba",
+          "c8487149",
+          "159cafaa",
+          "c573646a",
+          "dc50790c",
+          "960efa37",
+          "4e78ea59",
+          "69d34f8d",
+          "91e4a40e"
+        ],
+        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10 (with mid-stream QC fix batch for missing data flow)"
+      },
+      "updated_at": "2026-06-10",
+      "notes": [
+        "2026-06-10: implement (e2610a76..5ba65359); QC1/QC2/QC3 Request Changes initial (preset.input.world_kb_block never populated; runtime_compatibility compile gate; chapter_text heuristic); fix 3 commits; QC re-validation Approve; QA Pass → merge to iteration/v1.40"
+      ]
     },
     {
       "id": "2026-06-10-v1.40-world-kb-extract-binding",
@@ -1222,6 +1243,48 @@
         "severity": "low",
         "source": "qc3 S-3 (V1.40 P1 review)",
         "scope": "crates/nexus-kb/benches/ (does not exist)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      }
+    ],
+    "2026-06-10-v1.40-world-context-prompt-block": [
+      {
+        "id": "R-V140P2-S1",
+        "title": "Per-prompt KB queries use linear scans; resolve_active_rules calls query_all() — low risk for small worlds",
+        "severity": "low",
+        "source": "qc3 W-2 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (resolve_active_rules)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41+ optimization"
+      },
+      {
+        "id": "R-V140P2-S2",
+        "title": "No hermetic integration test that renders actual novel-writing prompt with non-empty world_kb_block through full schedule → prompt pipeline",
+        "severity": "low",
+        "source": "qc2 S-04 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-orchestration/tests/ (e2e)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41 (when daemon test infra supports KB seeding)"
+      },
+      {
+        "id": "R-V140P2-S3",
+        "title": "Truncation marker is YAML comment only — not serialized inside the YAML structure; LLM may not programmatically detect truncation",
+        "severity": "info",
+        "source": "qc3 S-3 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (apply_token_budget)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P2-S4",
+        "title": "to_yaml() uses {:?} (Debug format) for string fields — not idiomatic YAML serialization",
+        "severity": "info",
+        "source": "qc1 S-003 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "backlog"
