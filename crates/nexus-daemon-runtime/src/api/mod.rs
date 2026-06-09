@@ -276,6 +276,11 @@ fn works_routes() -> Router<WorkspaceState> {
                 .patch(handlers::findings::update_finding_handler)
                 .delete(handlers::findings::delete_finding_handler),
         )
+        // ── Stale findings banner endpoint (V1.39 P4 T3) ─────────────
+        .route(
+            "/v1/local/findings/stale",
+            get(handlers::findings::list_stale_findings_handler),
+        )
 }
 /// Create the Local API router
 ///

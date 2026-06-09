@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT finding_id as \"finding_id!\", work_id as \"work_id!\",\n                creator_id as \"creator_id!\", severity as \"severity!\",\n                created_at as \"created_at!\"\n         FROM findings\n         WHERE creator_id = ? AND status = 'open' AND created_at < ?\n         ORDER BY created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "finding_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "work_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "severity!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "93b7a68c306cf4845f0c74d216bf2f5fbd1fc3afdc41813b4abf01c33b503f91"
+}

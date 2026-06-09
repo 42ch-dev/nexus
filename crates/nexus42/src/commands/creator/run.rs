@@ -573,6 +573,30 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&resp)?);
             } else {
+                // V1.39 P4 T3: stale findings banner — best-effort, never
+                // fails the status command. Older daemons without this
+                // endpoint will return 404 and the banner is simply skipped.
+                if let Ok(stale) = client
+                    .get::<serde_json::Value>("/v1/local/findings/stale")
+                    .await
+                {
+                    let stale_count = stale
+                        .get("stale_count")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let threshold_secs = stale
+                        .get("threshold_seconds")
+                        .and_then(serde_json::Value::as_i64)
+                        .unwrap_or(96 * 60 * 60);
+                    if stale_count > 0 {
+                        let threshold_hours = threshold_secs / 3600;
+                        println!(
+                            "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — run: nexus42 creator run schedule add --preset novel-review-master --work-id {work_id}"
+                        );
+                        println!();
+                    }
+                }
+
                 let work_status = resp
                     .get("status")
                     .and_then(|v| v.as_str())
