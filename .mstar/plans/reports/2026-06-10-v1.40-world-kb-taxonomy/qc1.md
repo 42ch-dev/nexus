@@ -3,8 +3,8 @@ report_kind: qc_review
 reviewer: "@qc-specialist"
 reviewer_index: 1
 plan_id: "2026-06-10-v1.40-world-kb-taxonomy"
-verdict: "Request Changes"
-generated_at: "2026-06-09T12:00:00Z"
+verdict: "Approve"
+generated_at: "2026-06-10T12:00:00Z"
 ---
 
 # Code Review Report
@@ -96,10 +96,74 @@ generated_at: "2026-06-09T12:00:00Z"
 ## Summary
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 1 |
-| 🟡 Warning | 2 |
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
 | 🟢 Suggestion | 4 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
 **Rationale**: C-001 is blocking — the plan's T3 explicitly requires validation in `SqliteKbStore`, and the production path has zero body validation. W-001 (missing advisory logging) and W-002 (storage format fragility) are non-blocking but should be addressed. The validation module itself (`validation.rs`) is well-structured, follows crate conventions, correctly reuses `nexus_contracts::BlockType` as SSOT, and has thorough test coverage. The prompt update (`extract.md`) correctly uses wire snake_case values. Spec status headers are properly updated. The architecture is sound — the gap is purely in the production wiring.
+
+## Revalidation
+
+### Fix context
+
+This targeted re-review covers the 6 fix commits (`2b0cf8fe..fbd301c4`) addressing the three blocking findings from the initial QC #1 review:
+
+| Finding | Description | Status |
+|---------|-------------|--------|
+| C-001 | SqliteKbStore has no body validation | Resolved |
+| W-001 | Advisory novel_category→block_type mapping not logged | Resolved |
+| W-002 | SqliteKbStore block_type storage format fragility | Resolved |
+
+### Diff since previous review
+
+```
+fbd301c4 docs(specs): QC1 C-001 / QC2 W2 — canonical_name grammar in entity-scope-model §5.1.1
+9e2a5cbc fix(kb): kb_extract_work — parse structured body from LLM response
+41c0d2d8 fix(kb): QC1 C-001 / QC2 C1 — wire validate_body into SqliteKbStore + QC1 W-002 — stable block_type storage
+cf4bea22 fix(kb): wire canonical_name + body validation into InMemoryKbStore
+61d2b060 fix(kb): QC1 W-001 / QC2 W1 — emit tracing::warn! on advisory mismatch + QC2 W2 — canonical_name validation
+706fb605 refactor(kb): QC2 W3 — structured ValidationError with ValidationKind enum
+```
+
+9 files changed, 674 insertions, 45 deletions.
+
+### Re-verification
+
+**C-001 (SqliteKbStore validation) — RESOLVED**
+
+- `SqliteKbStore` now has a `validation_mode: ValidationMode` field (line 104) with two constructors: `new()` (Generic default, line 112) and `with_validation_mode()` (line 121).
+- `insert_key_block()` (lines 222-228) calls `validate_canonical_name()` then `validate_body()` before SQL INSERT.
+- `update_key_block()` (lines 464-470) calls `validate_canonical_name()` then `validate_body()` before SQL UPDATE.
+- `kb_extract_work.rs` (lines 316-325) now parses the LLM response body as structured JSON via `serde_json::from_str`, falling back to plain summary on parse failure.
+- The `validation_err()` helper (lines 202-216) maps `nexus_kb::KbError` variants (including the new structured `ValidationError` with `ValidationKind`) into `KbStoreError::Validation`.
+- Tests at lines 816-943 use `SqliteKbStore::with_validation_mode(pool, ValidationMode::Novel)` to exercise the novel validation path.
+- **Evidence**: `cargo test -p nexus-local-db` — 163 passed, 0 failed. `cargo clippy -p nexus-local-db` — clean.
+
+**W-001 (advisory logging) — RESOLVED**
+
+- `validation.rs` (lines 222-236) now emits `tracing::warn!` when the `novel_category` does not map to the default `block_type`.
+- The `nexus-kb` crate now depends on `tracing` (confirmed in `Cargo.toml`).
+- The advisory message includes `novel_category`, `provided_block_type`, and `default_block_type` fields for structured log consumption.
+- **Evidence**: `grep "tracing::warn!" crates/nexus-kb/src/validation.rs` confirms the single call site at line 225.
+
+**W-002 (block_type storage format) — RESOLVED**
+
+- `SqliteKbStore` now stores `block_type` as snake_case via `serde_json::to_string(&kb.block_type)` at all three call sites (lines 243, 478, 515).
+- `parse_block_type()` (lines 177-193) accepts both snake_case (serde, primary path) and PascalCase (legacy fallback).
+- The wire format, prompt, and storage now all use the same snake_case representation.
+- **Evidence**: `grep "serde_json::to_string(&kb.block_type)" crates/nexus-local-db/src/kb_store.rs` confirms 3 call sites.
+
+### Whole crate sanity
+
+| Check | Result |
+|-------|--------|
+| `cargo build -p nexus-kb -p nexus-local-db -p nexus-orchestration --all-targets` | PASS (1 pre-existing warning in e2e_novel_writing) |
+| `cargo test -p nexus-kb -p nexus-local-db -p nexus-orchestration` | PASS (all tests, 0 failures) |
+| `cargo clippy -p nexus-kb -p nexus-local-db -p nexus-orchestration -- -D warnings` | PASS (clean) |
+| `cargo +nightly fmt --all -- --check` | PASS (fmt_exit=0) |
+
+### Updated verdict
+
+**Approve** — all three blocking findings (C-001, W-001, W-002) are resolved. No new architecture-level findings. The four S-001..S-004 suggestions remain as non-blocking improvements for future iterations.
