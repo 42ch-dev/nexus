@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.39 plan per Profile B. P4 merged to iteration/v1.39.",
+  "plan_id": "2026-06-09-v1.39-master-decision-timeout",
+  "title": "P4 — 96h finding escalation banner + daemon scheduled task (DF-67)",
+  "done_at": "2026-06-09T06:00:00+08:00",
+  "archived_at": "2026-06-09T06:00:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-09-v1.39-master-decision-timeout.md",
+  "archived_record": ".mstar/archived/plans/2026-06-09-v1.39-master-decision-timeout.json",
+  "snapshot": {
+    "id": "2026-06-09-v1.39-master-decision-timeout",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-09-v1.39-master-decision-timeout.md",
+    "working_branch": "feature/v1.39-master-decision-timeout",
+    "merge_target": "iteration/v1.39",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-quality-loop.md",
+      "depends_on": [
+        "2026-06-09-v1.39-harness-docs-prepare",
+        "2026-06-09-v1.39-rules-and-logs"
+      ],
+      "description": "P4 — 96h finding escalation banner + daemon scheduled task (DF-67)",
+      "targets_deferred": ["DF-67"],
+      "updated_at": "2026-06-09T06:00:00+08:00",
+      "done_at": "2026-06-09T06:00:00+08:00",
+      "qc": "PM-validated Approve. 0 Critical, 0 Warning, 0 Suggestion. 7/7 hermetic tests pass, all regression tests pass, clippy clean, fmt clean.",
+      "qa": "skipped — PM-validated path for narrow-scope plan with strong evidence",
+      "shipped": [
+        "Stale-finding DAO in crates/nexus-local-db/src/findings.rs — list_all_stale_open_findings + list_stale_open_findings + StaleFindingSummary",
+        "Stale-findings watcher in crates/nexus-daemon-runtime/src/stale_findings_watcher.rs — spawn_stale_findings_watcher + run_one_sweep + maybe_enqueue_review_master; 24h interval + 96h threshold with env-var overrides; first sweep on spawn; MissedTickBehavior::Delay; per-finding errors caught + logged",
+        "Watcher spawned from boot.rs (Section 4b)",
+        "Stale findings endpoint: GET /v1/local/findings/stale in crates/nexus-daemon-runtime/src/api/handlers/findings.rs",
+        "CLI status banner: RunCommand::Status in creator/run.rs reads stale findings via the new endpoint and shows '⏰ N findings stale (>96h)' when count > 0",
+        "Opt-in migration: 202606090003_works_auto_review_master.sql adds auto_review_master_on_timeout INTEGER NOT NULL DEFAULT 0 to works; wired through WorkRecord + WorkPatch + INSERT/PATCH paths + WorkApiDto + PatchWorkRequest",
+        "enqueue_review_master_schedule helper in crates/nexus-orchestration/src/auto_chain.rs — RVM-prefixed schedule_id, preset novel-review-master, status pending; does NOT touch driver_schedule_id",
+        "7 hermetic tests in crates/nexus-daemon-runtime/tests/master_decision_timeout.rs — no-op sweep, fresh finding, resolved finding, stale without opt-in, stale with opt-in, mixed-opt-in isolation, repeated-sweep stability"
+      ],
+      "closed_residuals": [],
+      "deferred_residuals": [],
+      "commits": [
+        "b281cb91 feat(local-db): add stale-finding DAO for master-decision timeout (T2)",
+        "091e59eb feat(daemon-runtime): add stale-findings watcher for master-decision timeout (T1)",
+        "cc25c13d feat(daemon-runtime,nexus42): T3 stale-findings endpoint + status banner",
+        "05f0db72 feat(local-db,orchestration,daemon-runtime): T4 opt-in auto-review-master flag",
+        "0698b429 test(daemon-runtime): T5 hermetic stale-findings sweep",
+        "2b9a947c qc: V1.39 P4 consolidated gate (Approve — PM-validated)"
+      ],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-06-09-v1.39-master-decision-timeout/qc-consolidated.md (Approve — PM-validated)"
+      ]
+    }
+  },
+  "qc": "PM-validated Approve",
+  "qa": "skipped — PM-validated path",
+  "residual_count": 0,
+  "merge_commits": [
+    "b281cb91 feat(local-db): add stale-finding DAO (T2)",
+    "091e59eb feat(daemon-runtime): add stale-findings watcher (T1)",
+    "cc25c13d feat(daemon-runtime,nexus42): T3 endpoint + status banner",
+    "05f0db72 feat(...): T4 opt-in flag",
+    "0698b429 test(daemon-runtime): T5 hermetic tests"
+  ],
+  "notes": "P4 — 96h finding escalation banner + daemon scheduled task. AC1..AC3 satisfied. DF-67 implemented. 0 residuals. Per-sweep enqueue is intentional, not idempotent across sweeps (no record of enqueued-already)."
+}

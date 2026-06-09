@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-09T05:30:00+08:00",
+  "updated_at": "2026-06-09T06:00:00+08:00",
   "plans": [
     {
       "id": "2026-06-09-v1.39-harness-docs-prepare",
@@ -27,24 +27,6 @@
           "DF-63 World KB",
           "multi-volume PK",
           "product code in prepare session"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-09-v1.39-master-decision-timeout",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-09-v1.39-master-decision-timeout.md",
-      "working_branch": "feature/v1.39-master-decision-timeout",
-      "merge_target": "iteration/v1.39",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
-        "description": "P4 — 96h finding escalation banner + daemon scheduled task",
-        "depends_on": [
-          "2026-06-09-v1.39-rules-and-logs"
-        ],
-        "targets_deferred": [
-          "DF-67"
         ]
       }
     },
