@@ -86,7 +86,8 @@ pub use reference_source::{
 
 // Re-export kb_extract_job types
 pub use kb_extract_job::{
-    claim_job as claim_extract_job, enqueue as enqueue_extract_job, get as get_extract_job,
+    claim_job as claim_extract_job, enqueue as enqueue_extract_job,
+    enqueue_with_artifact as enqueue_extract_job_with_artifact, get as get_extract_job,
     list_by_creator as list_extract_jobs, mark_done as mark_extract_job_done,
     mark_failed as mark_extract_job_failed, mark_running as mark_extract_job_running,
     next_queued as next_queued_extract_job, KbExtractJob,
