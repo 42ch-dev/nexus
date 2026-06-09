@@ -323,7 +323,7 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 | Manage local work files / notes as workspace assets | `nexus42 creator kb ...` (default `--scope work`); preferred alias candidate `nexus42 creator assets ...` | active `creator_id`, active `workspace_slug` | `nexus42` command router + daemon local API / local workspace storage; later storage may move behind local-domain crates | List/search/show/add/remove local work index entries only. Must not create World KeyBlocks or User knowledge rows. |
 | Manage narrative knowledge inside a World | `nexus42 creator kb ... --scope world --world-id <world_id>` or workspace-bound equivalent | active `creator_id`, `workspace_slug`, explicit/resolved `world_id` | `nexus-narrative` + `nexus-kb` | Route to World-scoped narrative KB graph. Must preserve KeyBlock / SourceAnchor provenance and narrative ownership. No silent fallback to work index. |
 | Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
-| Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--name` and `--kind narrative` | `nexus-narrative` + `nexus-kb` | **V1.40 P0**: `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
+| Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title` (`--name` alias) and narrative kind is implicit in V1.40 | `nexus-narrative` + `nexus-kb` | **V1.40 P0**: `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
 | Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
 | Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred (V1.26).** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. It must not call the retired daemon context-assemble Local API. |
 | **Assemble local four-domain Moment snapshot (single SSOT)** | `nexus42 platform context assemble-moment` | optional `--world-id`, `--user-id`, `--branch-id`, `--event-id`; **frozen flags:** `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative, World KB, and User knowledge slices | **Shipped (local, V1.26+).** Single assembly SSOT — replaces the retired `assemble-local` path. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores, while User knowledge reads from SQLite (V1.27+). No platform cloud assembly and no daemon context-assemble route. |
@@ -367,7 +367,7 @@ Rules:
 | Flag | Purpose |
 | --- | --- |
 | `--init-preset <name>` | Run a `work_init` preset before primary preset chain. V1.36 supported value: `novel-project-init` (creates `Works/<work_ref>/` scaffold, seeds `work_chapters`, PATCHes `works`). See [novel-workflow-profile.md §5.4](./novel-workflow-profile.md). |
-| `--world-id <uuid>` | Bind the new Work to an existing World (cross-link [novel-workflow-profile.md §3.5](./novel-workflow-profile.md)). Omit or pass `none` for a worldless Work; future `creator world create` will replace the "create new" grill-me path. |
+| `--world-id <uuid>` | Bind the new Work to an existing World (cross-link [novel-workflow-profile.md §3.5](./novel-workflow-profile.md)). Required for V1.40 Work creation/init unless the init flow creates a new World first; omit/`none` is accepted only for legacy V1.39-and-earlier reads, not new Work creation. |
 | `--force-gates --reason "<text>"` | Bypass `run_intents` / preset admission gates (`orchestration-engine.md` §7.9). `--reason` is **required** when `--force-gates` is passed; the override is audited in `creator_prompt_injections` and surfaced in `creator run status`. |
 
 **V1.36 flags (`creator run stage advance`):**
@@ -419,15 +419,17 @@ Normative World binding: [novel-workflow-profile.md §3.5](./novel-workflow-prof
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator world create --name "<text>" --kind narrative [--description "<text>"]` | Create a World; returns `world_id` (`wld_<uuid>`). Used by `novel-project-init` grill-me "create new World" path. |
+| `nexus42 creator world create --title "<text>" [--name "<text>"] [--slug "<slug>"] [--description "<text>"]` | Create a World; returns `world_id` (`wld_<uuid>`). Used by `novel-project-init` grill-me "create new World" path. `--name` is an alias for `--title` (spec backward-compat). `--kind` deferred to P1 (narrative is implicit default). |
 | `nexus42 creator world list` | List Worlds visible under active `creator_id` + `workspace_slug`. |
-| `nexus42 creator world show <world_id>` | Show World metadata and summary counts (read-only). |
+| `nexus42 creator world show <world_id>` | Show World metadata and summary counts (read-only). Clean not-found with remediation if missing. |
 
 Rules:
 
 - `create` is idempotent by name only when PM/plan defines dedup policy; default is new row per invocation pre-1.0.
 - No local fork or platform merge mutations (PD-01).
-- `creator run start --world-id <uuid>` validates existence via same store as `show`.
+- V1.40 Work creation/init must bind a World: either run `nexus42 creator world create --title "..."` and pass/bind the returned `world_id`, or pick an existing id from `nexus42 creator world list`.
+- `creator run start --world-id <uuid>` validates existence via same store as `show`; missing `world_id` on new Work creation fails closed with remediation to `creator world create --title` or `creator world list` (not skip/stay worldless).
+- `show` for a nonexistent `world_id` prints remediation pointing to `creator world create --title` or `creator world list`.
 
 **Target (V1.40 P0):** plan `2026-06-10-v1.40-world-create-and-validation`.
 

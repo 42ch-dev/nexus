@@ -72,12 +72,75 @@ impl From<sqlx::Error> for NarrativeWriteError {
 /// Result of a successful world creation.
 #[derive(Debug)]
 pub struct CreateWorldResult {
-    /// The newly created `world_id` (prefixed `wld_`).
+    /// The newly created world ID (prefixed `wld_`).
     pub world_id: String,
-    /// The default root branch ID (generated as `fbk_root_<uuid>`).
+    /// The root fork branch ID.
     pub root_fork_branch_id: String,
     /// Timestamp of creation.
     pub created_at: String,
+}
+
+/// Create a new world in the database (transaction variant).
+///
+/// Same as [`create_world`] but operates within a caller-managed transaction,
+/// allowing the INSERT to be committed or rolled back atomically with other
+/// operations (e.g., chapter seeding and work patching in scaffold).
+///
+/// # Errors
+///
+/// Returns `NarrativeWriteError` if:
+/// - The creator FK does not exist
+/// - A database error occurs
+pub async fn create_world_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    owner_creator_id: &str,
+    title: &str,
+    slug: &str,
+    visibility: &str,
+    time_policy: &str,
+) -> Result<CreateWorldResult, NarrativeWriteError> {
+    // Validate creator FK
+    // SAFETY: simple EXISTS query against known table schema
+    let creator_exists: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM creators WHERE creator_id = ?)")
+            .bind(owner_creator_id)
+            .fetch_one(&mut **tx)
+            .await?;
+
+    if creator_exists == 0 {
+        return Err(NarrativeWriteError::FkNotFound {
+            table: "creator".to_string(),
+            id: owner_creator_id.to_string(),
+        });
+    }
+
+    let world_id = generate_world_id();
+    let root_fork_branch_id = generate_root_branch_id();
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    // SAFETY: INSERT matches narrative_worlds DDL in 20260524_narrative_worlds.sql
+    sqlx::query(
+        "INSERT INTO narrative_worlds \
+            (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+             time_policy, root_fork_branch_id, metadata_json, created_at) \
+           VALUES (?, 'wrk_local', ?, ?, ?, 'active', ?, ?, ?, '{}', ?)",
+    )
+    .bind(&world_id)
+    .bind(owner_creator_id)
+    .bind(title)
+    .bind(slug)
+    .bind(visibility)
+    .bind(time_policy)
+    .bind(&root_fork_branch_id)
+    .bind(&created_at)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(CreateWorldResult {
+        world_id,
+        root_fork_branch_id,
+        created_at,
+    })
 }
 
 /// Result of a successful event append.

@@ -360,7 +360,7 @@ fn work_field_remediation(field: &str) -> String {
             "Complete intake via `creator run stage advance --stage intake`.".to_string()
         }
         "world_id" => {
-            "Set world_id via `creator run start --init-preset novel-project-init` or use `--force-gates`.".to_string()
+            "Create the World first via `nexus42 creator world create --title \"...\"` or pick an existing one via `nexus42 creator world list`.".to_string()
         }
         "workspace_slug" => {
             "Ensure the workspace has a valid slug.".to_string()

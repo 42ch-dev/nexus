@@ -205,6 +205,44 @@ pub async fn create_work(
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
         .ok_or(NexusApiError::AuthRequired)?;
 
+    // T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
+    if req.world_id.is_none() {
+        return Err(NexusApiError::BadRequest {
+            code: "WORLD_ID_REQUIRED".to_string(),
+            message: "World binding is required for new Works (V1.40+).\n  \
+                       ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
+                       ↳ List existing Worlds: nexus42 creator world list"
+                .to_string(),
+        });
+    }
+
+    // QC3 W-2: Validate that the provided world_id actually exists in
+    // narrative_worlds AND is owned by the requesting creator.
+    if let Some(ref wid) = req.world_id {
+        let exists: Option<String> = sqlx::query_scalar!(
+            r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
+            wid,
+            creator_id,
+        )
+        .fetch_optional(state.pool())
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("world_id existence check: {e}"),
+        })?;
+        if exists.is_none() {
+            return Err(NexusApiError::BadRequest {
+                code: "INVALID_WORLD_ID".to_string(),
+                message: format!(
+                    "world_id '{wid}' does not exist or is not owned by this creator.\n  \
+                     ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
+                     ↳ List your Worlds:    nexus42 creator world list\n  \
+                     World binding is required for new Works (V1.40+)."
+                ),
+            });
+        }
+    }
+
     let work_id = format!("wrk_{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
     let preset_id = req
@@ -533,6 +571,57 @@ async fn apply_non_stage_fields(
         auto_chain_interrupted: None,
         auto_review_master_on_timeout: req.auto_review_master_on_timeout,
     };
+
+    // QC2 W-03: V1.40 — reject clearing world_id on a novel Work that
+    // already has a non-null world_id binding. This prevents downgrading
+    // a mandatory-bound Work back to worldless via PATCH.
+    if non_stage_patch.world_id == Some(None) {
+        // Check if the Work currently has a non-null world_id.
+        let current = works::get_work(pool, creator_id, work_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+        if current.world_id.is_some() {
+            return Err(NexusApiError::BadRequest {
+                code: "WORLD_CLEAR_FORBIDDEN".to_string(),
+                message: format!(
+                    "Cannot clear world_id on Work '{work_id}' — V1.40 Works require a World binding.\n  \
+                     ↳ To rebind to a different World: PATCH with world_id set to the new World ID\n  \
+                     ↳ List your Worlds: nexus42 creator world list"
+                ),
+            });
+        }
+    }
+
+    // T4: validate world_id FK existence and ownership when PATCHing a non-null world_id.
+    if let Some(Some(ref wid)) = non_stage_patch.world_id {
+        let exists: Option<String> = sqlx::query_scalar!(
+            r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
+            wid,
+            creator_id,
+        )
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("world_id existence check: {e}"),
+        })?;
+        if exists.is_none() {
+            return Err(NexusApiError::BadRequest {
+                code: "INVALID_WORLD_ID".to_string(),
+                message: format!(
+                    "world_id '{wid}' does not exist or is not owned by this creator.\n  \
+                     ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
+                     ↳ List your Worlds:    nexus42 creator world list\n  \
+                     World binding is required for new Works (V1.40+)."
+                ),
+            });
+        }
+    }
+
     works::patch_work(pool, creator_id, work_id, &non_stage_patch, now)
         .await
         .map_err(|e| match &e {
@@ -662,6 +751,29 @@ pub async fn patch_work(
     if req.current_stage.is_some() || req.stage_status.is_some() {
         let updated = patch_work_stage(&state, &creator_id, &work_id, &req, &now).await?;
         return Ok(Json(WorkApiDto::from(updated)));
+    }
+
+    // Non-stage PATCH: validate world_id clear-rejection first
+    // QC2 W-03: V1.40 — reject clearing world_id on a Work that already
+    // has a non-null world_id binding.
+    if req.world_id == Some(None) {
+        let current = works::get_work(state.pool(), &creator_id, &work_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+        if current.world_id.is_some() {
+            return Err(NexusApiError::BadRequest {
+                code: "WORLD_CLEAR_FORBIDDEN".to_string(),
+                message: format!(
+                    "Cannot clear world_id on Work '{work_id}' — V1.40 Works require a World binding.\n  \
+                     ↳ To rebind to a different World: PATCH with world_id set to the new World ID\n  \
+                     ↳ List your Worlds: nexus42 creator world list"
+                ),
+            });
+        }
     }
 
     // Non-stage PATCH: use regular patch
@@ -1021,5 +1133,270 @@ mod tests_fix_d {
             after.title, "Original Title",
             "Fix D: title should NOT be changed when stage advance fails"
         );
+    }
+
+    // ── T0.4: mandatory world_id tests ─────────────────────────────────
+
+    #[tokio::test]
+    async fn create_work_without_world_id_returns_error() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let nexus_home = tmp.path().to_path_buf();
+        let db_path = tmp.path().join("state.db");
+
+        // Write a minimal config.toml with active creator
+        let config = toml::toml! {
+            active_creator_id = "ctr_test"
+            active_workspace_slug_by_creator = { ctr_test = "ws" }
+        };
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            toml::to_string(&config).unwrap(),
+        )
+        .expect("write config");
+
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = CreateWorkRequest {
+            title: "Test Novel".to_string(),
+            long_term_goal: "Write a novel".to_string(),
+            initial_idea: "An idea".to_string(),
+            world_id: None, // missing — should be rejected
+            story_ref: None,
+            primary_preset_id: None,
+            client_request_id: None,
+        };
+
+        let result = create_work(State(state), Json(req)).await;
+
+        assert!(result.is_err(), "POST /works without world_id must fail");
+        let err = result.unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("WORLD_ID_REQUIRED"),
+            "error code should be WORLD_ID_REQUIRED, got: {msg}"
+        );
+        assert!(
+            msg.contains("creator world create") || msg.contains("creator world list"),
+            "error should mention remediation, got: {msg}"
+        );
+
+        // QC1 W-1 regression: WORLD_ID_REQUIRED returns 422 (not 400).
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "WORLD_ID_REQUIRED should return 422 (preset_gates_failed-style), got {}",
+            err.status_code()
+        );
+    }
+
+    // ── QC3 W-2: POST validates world_id existence ────────────────────
+
+    #[tokio::test]
+    async fn create_work_with_nonexistent_world_id_returns_error() {
+        use crate::test_utils;
+
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        let req = CreateWorkRequest {
+            title: "Test Novel".to_string(),
+            long_term_goal: "Write a novel".to_string(),
+            initial_idea: "An idea".to_string(),
+            world_id: Some("wld_nonexistent_12345".to_string()),
+            story_ref: None,
+            primary_preset_id: None,
+            client_request_id: None,
+        };
+
+        let result = create_work(State(state), Json(req)).await;
+        assert!(result.is_err(), "POST with non-existent world_id must fail");
+        let err = result.unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("INVALID_WORLD_ID"),
+            "error code should be INVALID_WORLD_ID, got: {msg}"
+        );
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "INVALID_WORLD_ID should return 422"
+        );
+    }
+
+    // ── QC2 W-02: cross-creator world binding rejection ────────────────
+
+    #[tokio::test]
+    async fn create_work_with_other_creators_world_id_returns_error() {
+        use crate::test_utils;
+
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        // Seed another creator who owns a different world
+        // SAFETY: test-only DML
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('ctr_other', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+
+        // Create a world owned by ctr_other
+        let other_world = nexus_local_db::create_world(
+            state.pool(),
+            "ctr_other",
+            "Other's World",
+            "other-world",
+            "private",
+            "manual",
+        )
+        .await
+        .expect("create other world");
+
+        let req = CreateWorkRequest {
+            title: "Test Novel".to_string(),
+            long_term_goal: "Write a novel".to_string(),
+            initial_idea: "An idea".to_string(),
+            world_id: Some(other_world.world_id.clone()),
+            story_ref: None,
+            primary_preset_id: None,
+            client_request_id: None,
+        };
+
+        let result = create_work(State(state), Json(req)).await;
+        assert!(
+            result.is_err(),
+            "POST with other creator's world_id must fail"
+        );
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "cross-creator world binding should return 422"
+        );
+    }
+
+    // ── QC2 W-03: reject PATCH that clears world_id on novel Work ──────
+
+    #[tokio::test]
+    async fn patch_work_clearing_world_id_on_bound_work_returns_error() {
+        use crate::test_utils;
+
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        // Create a work bound to the seeded world
+        let req = CreateWorkRequest {
+            title: "Bound Novel".to_string(),
+            long_term_goal: "Write a novel".to_string(),
+            initial_idea: "An idea".to_string(),
+            world_id: Some("wld_test_world".to_string()),
+            story_ref: None,
+            primary_preset_id: None,
+            client_request_id: None,
+        };
+
+        let (_, resp) = create_work(State(state.clone()), Json(req))
+            .await
+            .expect("create work should succeed");
+        let work_id = resp.work_id.clone();
+
+        // Try to clear the world_id
+        let patch = PatchWorkRequest {
+            title: None,
+            long_term_goal: None,
+            creative_brief: None,
+            intake_status: None,
+            status: None,
+            world_id: Some(None), // clear world_id
+            story_ref: None,
+            primary_preset_id: None,
+            current_stage: None,
+            stage_status: None,
+            force: None,
+            auto_review_master_on_timeout: None,
+        };
+
+        let result = patch_work(State(state.clone()), Path(work_id.clone()), Json(patch)).await;
+
+        assert!(result.is_err(), "PATCH clearing world_id must be rejected");
+        let err = result.unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains("WORLD_CLEAR_FORBIDDEN"),
+            "error code should be WORLD_CLEAR_FORBIDDEN, got: {msg}"
+        );
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "WORLD_CLEAR_FORBIDDEN should return 422"
+        );
+
+        // Verify world_id is still set
+        let work = works::get_work(state.pool(), "test_creator", &work_id)
+            .await
+            .expect("get_work")
+            .expect("work exists");
+        assert!(
+            work.world_id.is_some(),
+            "world_id should still be set after rejected clear"
+        );
+        drop(tmp);
+    }
+
+    // ── QC2 W-04: adversarial world_id values ──────────────────────────
+
+    #[tokio::test]
+    async fn create_work_with_adversarial_world_ids_returns_error() {
+        use crate::test_utils;
+
+        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        let adversarial_ids: &[&str] = &[
+            "wld_' OR 1=1--",
+            "wld_; DROP TABLE works--",
+            "wld_../etc/passwd",
+            "wld_\x00null",
+            "wld_a very long id that exceeds normal lengths and should still be handled gracefully without panicking or crashing the server",
+            "not_wld_prefix",
+            "",
+        ];
+
+        for bad_id in adversarial_ids {
+            let req = CreateWorkRequest {
+                title: "Adversarial Test".to_string(),
+                long_term_goal: "Test".to_string(),
+                initial_idea: "Test".to_string(),
+                world_id: Some((*bad_id).to_string()),
+                story_ref: None,
+                primary_preset_id: None,
+                client_request_id: None,
+            };
+
+            let result = create_work(State(state.clone()), Json(req)).await;
+            assert!(
+                result.is_err(),
+                "adversarial world_id '{bad_id}' must be rejected"
+            );
+            let err = result.unwrap_err();
+            assert_eq!(
+                err.status_code(),
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "adversarial world_id '{bad_id}' should return 422, got {}",
+                err.status_code()
+            );
+            // Verify no panic, clear remediation
+            let msg = format!("{err:?}");
+            assert!(
+                msg.contains("INVALID_WORLD_ID"),
+                "adversarial world_id '{bad_id}' should produce INVALID_WORLD_ID, got: {msg}"
+            );
+        }
     }
 }
