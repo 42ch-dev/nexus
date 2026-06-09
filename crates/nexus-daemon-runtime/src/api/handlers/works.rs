@@ -1342,6 +1342,7 @@ mod tests_fix_d {
             stage_status: None,
             force: None,
             auto_review_master_on_timeout: None,
+            auto_chain_interrupted: None,
         };
 
         let result = patch_work(State(state.clone()), Path(work_id.clone()), Json(patch)).await;
