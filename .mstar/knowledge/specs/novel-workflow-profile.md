@@ -49,7 +49,7 @@ On `works` table / Work API (additive):
 | `work_ref` | string | yes | Filesystem directory name: `Works/<work_ref>/` |
 | `total_planned_chapters` | integer | no | Target chapter count for completion (default TBD in init preset) |
 | `current_chapter` | integer | no | Latest chapter number in progress |
-| `world_id` | string (FK) | no | Bind to a World (per [entity-scope-model.md](entity-scope-model.md) §5.4). When set, chapter body may reference World KB items. When NULL, the Work is worldless. `novel-project-init` grill-me asks this question (see §3.5). |
+| `world_id` | string (FK) | yes for new V1.40 novel Works | Bind to a World (per [entity-scope-model.md](entity-scope-model.md) §5.4). Required for V1.40 Work creation/init; legacy `NULL` is allowed only when reading V1.39-and-earlier worldless Works. `novel-project-init` grill-me asks whether to create a new World or bind an existing one (see §3.5). |
 | `novel_completion_status` | enum | no | `in_progress` \| `completed` (mirrors Work.status when terminal) |
 
 **Invariant**: `work_ref` is stable for the life of the Work; renaming directory without DB update is unsupported pre-1.0.
@@ -64,7 +64,7 @@ On `works` table / Work API (additive):
 <workspace>/
   Works/
     <work_ref>/
-      README.md                 # human overview; may include brief world setting notes for worldless Works
+      README.md                 # human overview; includes bound world_id for V1.40 Works; legacy worldless Works may include brief world setting notes
       Outlines/
         volume-outline.md       # optional in V1.36 MVP
         chapters/
@@ -80,7 +80,7 @@ On `works` table / Work API (additive):
 
 | Path | Sync chapter? | Purpose |
 | --- | --- | --- |
-| `Works/<work_ref>/README.md` | **No** | Human overview; worldless Works may include world setting notes here |
+| `Works/<work_ref>/README.md` | **No** | Human overview; V1.40 Works include bound `world_id`; legacy worldless Works may include world setting notes here |
 | `Works/<work_ref>/Outlines/chapters/*` | **No** | Per-chapter outline |
 | `Works/<work_ref>/Outlines/foreshadowing.md` | **No** | Cross-chapter foreshadowing index (F### rows) |
 | `Works/<work_ref>/Outlines/event-index.md` | **No** | Cross-chapter event index (E### rows) |
@@ -109,17 +109,17 @@ Non-novel `work_profile` values may use different subtrees under `Works/<work_re
 Therefore:
 
 - **No per-Work `Worldbuilding/` subtree** in V1.36. The reference-system pattern of `{作品目录}/世界设定/` is intentionally rejected for OSS core; world content is the World's job, not the Work's.
-- **`world_id` is the binding**. A novel Work may be **World-bound** (`work.world_id` set) or **worldless** (`work.world_id == NULL`).
-  - **World-bound Work** (`world_id != NULL`): characters, locations, society, rules, events, timelines come from World KB. Chapter body may reference World KB items by id via `world_refs: [char_xxx, loc_yyy]` frontmatter; V1.36 does not validate, V1.37+ may enforce.
-  - **Worldless Work** (`world_id == NULL`): no cross-Work continuity. `README.md` may include a brief inline world setting note (1–2 paragraphs) for LLM context. Character names in the body are pure-prose; no KB.
-- **`novel-project-init` asks the binding question** (grill-me). Three options: bind to existing `world_id` (user picks from list) / create new World (calls `creator world create --name "..." --kind narrative`, which is a **future** CLI command; V1.36 may prompt for the world metadata inline and pass to a future API) / stay worldless (default).
+- **`world_id` is the mandatory binding for new V1.40 novel Works**. New Works must be **World-bound** (`work.world_id` set) at creation/init time.
+  - **World-bound Work** (`world_id != NULL`): characters, locations, society, rules, events, timelines come from World KB. Chapter body may reference World KB items by id via `world_refs: [char_xxx, loc_yyy]` frontmatter; V1.40 validates per §3.5.1.4.
+  - **Legacy worldless Work** (`world_id == NULL`, V1.39 and earlier only): no cross-Work continuity. Existing data remains readable/operable; V1.40 creation/init must not produce this state.
+- **`novel-project-init` asks the binding question** (grill-me). Two valid V1.40 options: bind to existing `world_id` (user picks from `nexus42 creator world list`) / create new World (calls `creator world create --title "..."`, narrative kind implicit). There is no V1.40 "stay worldless" creation option.
 - **Work → World KB promotion** is the **long-term** path: as chapters finalize, `kb-extract` preset (existing, per [creator-workflow.md](creator-workflow.md) `persist` stage) can extract entities / events / rules from chapter body into World KB items. V1.36 documents this path; enforcement is V1.37+.
 
 ### 3.5.1 World KB continuity implement contract (V1.37 P2 roadmap → V1.40 implement)
 
-**Scope of this extension**: V1.37 P2 locked the roadmap; **V1.40** implements it across plans P0–P3 ([v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md)). The `novel-writing` `world_binding` mode remains `optional` for V1.40; worldless Works continue without a World context block. Implement slices: P0 world create + validation; P1 taxonomy; P2 prompt context block; P3 kb-extract binding.
+**Scope of this extension**: V1.37 P2 locked the roadmap; **V1.40** implements it across plans P0–P3 ([v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md)). The `novel-writing` `world_binding` mode is `required` for V1.40 new Work creation/init. Legacy worldless Works from V1.39 and earlier continue to read/operate without a World context block, but no V1.40 init path may create a worldless Work. Implement slices: P0 world create + validation; P1 taxonomy; P2 prompt context block; P3 kb-extract binding.
 
-#### 3.5.1.1 World creation path for `novel-project-init`
+#### 3.5.1.1 Mandatory World binding paths for `novel-project-init`
 
 **V1.40 implement** — CLI contract:
 
@@ -130,28 +130,33 @@ nexus42 creator world create --title "Neon River" --description "Solarpunk noir 
 
 Note: `--kind narrative` is implicit (deferred to P1 taxonomy). `--title` is canonical; `--name` is an alias (see [cli-spec.md §6.2G](cli-spec.md)).
 
-The init grill-me "create new World" path composes with P0 `AddScheduleRequest.input` wiring as follows:
+The init grill-me has exactly two valid V1.40 binding paths:
 
-1. `novel-project-init` records the user's choice as `preset.input.create_world = true` plus `world.name`, `world.kind = narrative`, and optional `world.description`.
-2. The daemon invokes a future `world create` capability owned by `nexus-narrative`/`nexus-kb`, equivalent to the CLI contract above.
-3. The returned `world_id` is bound to the Work and PATCHed via the same atomic scaffold transaction as `work_ref`, `total_planned_chapters`, and `work_chapters` seeding (§5.4.3–§5.4.4).
-4. If world creation fails, the scaffold transaction fails closed: no partial `Works/<work_ref>/` tree, no duplicated `work_chapters`, and no `works.world_id` mutation.
+1. **Create new World** — call `nexus42 creator world create --title "..."` and bind the returned `world_id` to the Work.
+2. **Bind existing World** — pick a visible World from `nexus42 creator world list` and pass/bind its `world_id`.
+
+Both paths compose with P0 `AddScheduleRequest.input` wiring as follows:
+
+1. `novel-project-init` records the user's choice as either `preset.input.create_world = true` plus `world.title` / optional `world.description`, or as `preset.input.world_id = wld_<uuid>` from the existing-World list.
+2. For create-new, the daemon invokes a `world create` capability owned by `nexus-narrative`/`nexus-kb`, equivalent to the CLI contract above; for bind-existing, it validates the selected `world_id` against the same store.
+3. The resulting `world_id` is bound to the Work and PATCHed via the same atomic scaffold transaction as `work_ref`, `total_planned_chapters`, and `work_chapters` seeding (§5.4.3–§5.4.4).
+4. If world creation or existing-World validation fails, the scaffold transaction fails closed: no partial `Works/<work_ref>/` tree, no duplicated `work_chapters`, and no `works.world_id` mutation.
 
 **V1.40 P0** ships this path; until then behavior remains stubbed.
 
 #### 3.5.1.2 `world_id` validation
 
-When a novel Work is created or its `world_id` is PATCHed, `world_id` MUST either be `NULL` (worldless Work) or reference an existing World visible under the active `creator_id` + `workspace_slug` context. Missing Worlds return a structured `preset_gates_failed`-style error with remediation:
+When a novel Work is created/init-scaffolded in V1.40, `world_id` MUST reference an existing World visible under the active `creator_id` + `workspace_slug` context. Missing or omitted `world_id` values return a structured `preset_gates_failed`-style error with remediation. Legacy V1.39-and-earlier Works with `world_id == NULL` remain readable, but that legacy state is not creatable by V1.40 init paths.
 
 ```text
 error: preset_gates_failed
   preset: novel-project-init
   failed_gates:
-    - work_field: world_id must reference an existing World (actual: wld_missing)
-        ↳ Create the World first via `nexus42 creator world create --name "..." --kind narrative` or pick an existing one.
+    - work_field: world_id must reference an existing World (actual: missing or wld_missing)
+        ↳ Create the World first via `nexus42 creator world create --title "..."` or pick an existing one with `nexus42 creator world list`.
 ```
 
-The P0 gate evaluator already supports the `world_id` gate for `novel-writing`; the preset-level toggle remains `world_binding: optional` for V1.37 (§5.3.4). Future iterations may tighten the toggle to `required`, but must preserve explicit worldless behavior until that change ships with migration/remediation guidance.
+The P0 gate evaluator already supports the `world_id` gate for `novel-writing`; the preset-level toggle is `world_binding: required` for V1.40 (§5.3.4). Implementations may keep the `optional` mode internally for back-compat/legacy reads, but new `novel-project-init` creation must fail closed without a valid `world_id`.
 
 #### 3.5.1.3 Prompt-time World context block
 
@@ -177,7 +182,7 @@ active_rules:
     descriptor: "large spells erase recent autobiographical memory"
 ```
 
-`characters_in_chapter` and `locations_referenced` are selected from `world_refs` when available, then from outline/body heuristics if needed. `active_rules` includes high-priority `foundation` and `rules` category items that constrain the scene. For worldless Works (`world_id == NULL`), the block is omitted and prompts use only `Works/<work_ref>/README.md` setting notes, preserving V1.36 behavior.
+`characters_in_chapter` and `locations_referenced` are selected from `world_refs` when available, then from outline/body heuristics if needed. `active_rules` includes high-priority `foundation` and `rules` category items that constrain the scene. For legacy worldless Works (`world_id == NULL`, V1.39 and earlier), the block is omitted and prompts use only `Works/<work_ref>/README.md` setting notes, preserving read-time compatibility.
 
 #### 3.5.1.4 `world_refs` validation
 
@@ -195,17 +200,17 @@ Validation timing:
 - **Outline time**: invalid ids produce warnings and remediation hints, because outlines may introduce provisional entities that have not yet been promoted.
 - **Finalize time** (or transition to `finalized`): invalid ids are errors and block the transition unless the user explicitly overrides with an audit reason.
 
-For worldless Works, `world_refs` is allowed but unused; it may be absent, `NULL`, or an empty array. If present on a worldless Work, implementations should warn but not fail.
+For V1.40 World-bound Works, `world_refs` is required by the validation contract: it may be empty only when the chapter truly references no World KB items, and any non-empty entry must validate under `work.world_id`. For legacy worldless Works (`world_id == NULL`, V1.39 and earlier), `world_refs` is allowed but unused; if present, implementations should warn but not fail.
 
 #### 3.5.1.5 Chapter → World KB extraction and promotion
 
 The `creator-workflow.md` `persist` stage already maps Work → World KB to `creator kb queue-extract` + `kb-extract`. For novel Works, the extraction target is the Work's `world_id` when set:
 
 - **World-bound Work**: `kb-extract` reads finalized chapter body + outline/event/foreshadowing indexes, extracts entities, events, rules, locations, and relationships, then creates or updates World KB items under `work.world_id` with SourceAnchors back to the chapter path and, where available, the timeline event.
-- **Worldless Work**: extraction is skipped or remains local Work scope; it MUST NOT silently create a new World or promote content into an arbitrary World.
+- **Legacy worldless Work** (V1.39 and earlier): extraction is skipped or remains local Work scope; it MUST NOT silently create a new World or promote content into an arbitrary World.
 - **Explicit promotion**: rows in `Outlines/event-index.md` and `Outlines/foreshadowing.md` may be promoted to World KB items only when the Work is World-bound and the agent/user marks the promotion explicitly (e.g. "promote E012 as background" or "promote F007 as rule").
 
-**V1.40 acceptance** (per plan P0–P3): hermetic tests for valid/invalid `world_id`, prompt block presence/absence for World-bound vs worldless Works, `world_refs` warning/error timing, and `kb-extract` target selection. On ship, close DF-63 in [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md).
+**V1.40 acceptance** (per plan P0–P3): hermetic tests for valid/invalid/missing `world_id`, prompt block presence for new World-bound Works, legacy worldless read compatibility, `world_refs` warning/error timing, and `kb-extract` target selection. On ship, close DF-63 in [deferred-features-cross-version-tracker.md](../deferred-features-cross-version-tracker.md).
 
 **Anti-patterns** explicitly rejected:
 
@@ -259,7 +264,7 @@ CREATE INDEX work_chapters_by_status ON work_chapters(status);
 `Works/<work_ref>/README.md` is the only human file. It is **author-edited** and may contain:
 
 - Working title, premise, blurb
-- For **worldless** Works: a brief world setting note (1–2 paragraphs) so the LLM has context
+- For **legacy worldless** Works (V1.39 and earlier): a brief world setting note (1–2 paragraphs) so the LLM has context
 - For **World-bound** Works (§3.5): a one-liner like `world_id: <uuid>` and links to World KB items the Work uses most
 - Optional F### / E### anchors to `Outlines/foreshadowing.md` / `Outlines/event-index.md`
 
@@ -392,7 +397,7 @@ A future implementation plan for this roadmap must include at least these tests:
 
 | Preset | Role | When | Gates (see §5.3) |
 | --- | --- | --- | --- |
-| `novel-project-init` | Interactive grill-me; sets `work_ref`, `total_planned_chapters`, `world_id` (bind to existing / create new / worldless), scaffolds `Works/<work_ref>/` dirs (§5.4), seeds `work_chapters` rows | Before first `novel-writing` if scaffold missing | §5.3.1 |
+| `novel-project-init` | Interactive grill-me; sets `work_ref`, `total_planned_chapters`, required `world_id` (bind to existing / create new), scaffolds `Works/<work_ref>/` dirs (§5.4), seeds `work_chapters` rows | Before first `novel-writing` if scaffold missing | §5.3.1 |
 | `creative-brief-intake` | Structured brief on Work | FL-E `intake` / `creator run start` | (generic; out of novel overlay) |
 | `novel-writing` | Outline → draft → **finalize (gated by `llm_judge`)** → `finalized`; per-chapter transitions update both `work_chapters` row + chapter frontmatter | FL-E `produce` | §5.3.2 |
 | `reflection-loop` | Optional deeper quality pass; **not** in V1.36 default flow | FL-E `review` (optional V1.36) | §5.3.3 |
@@ -417,7 +422,7 @@ When a Work has `world_id != NULL`:
 - The LLM is asked to **name characters / locations exactly as in World KB** unless the chapter is introducing a new one (new ones go to `Outlines/event-index.md` for later `kb-extract` promotion).
 - `world_refs: [char_xxx, loc_yyy]` frontmatter is filled by the agent based on what the chapter references. V1.36 does not validate; V1.37+ may validate.
 
-For **worldless** Works (`world_id == NULL`): no World context block; LLM uses `README.md` setting notes as the only world context.
+For **legacy worldless** Works (`world_id == NULL`, V1.39 and earlier): no World context block; LLM uses `README.md` setting notes as the only world context.
 
 ### 5.3 V1.36 novel preset gates (Draft overlay on orchestration-engine.md §7.9)
 
@@ -507,10 +512,10 @@ preset:
     mode: required                   # required | optional
 ```
 
-- **`required`** (default for `novel-writing`): the `world_id` gate is active; World-bound Works must have `world_id` set. For **worldless** Works (`world_id == NULL`), the user must either set `world_id` before scheduling or use `--force` with audit reason.
-- **`optional`**: the `world_id` gate is skipped; `novel-writing` runs regardless of `world_id`. The prompt still injects World KB context block when `world_id != NULL` (per §5.2).
+- **`required`** (V1.40 default for `novel-writing`): the `world_id` gate is active; new V1.40 Works must have `world_id` set before scheduling. Legacy worldless Works (`world_id == NULL`, V1.39 and earlier) may continue to run only through explicit back-compat handling or audited override paths; V1.40 creation/init must not create them.
+- **`optional`**: retained only as an internal/back-compat mode for legacy reads or older manifests; new V1.40 `novel-project-init` behavior treats it as a no-op and still requires a valid `world_id` at creation.
 
-For V1.36, `novel-writing` ships with `world_binding: optional` (so worldless users aren't blocked). Future iterations may tighten to `required` if the World ecosystem matures.
+Recommendation: keep the toggle in manifests for compatibility with older presets, but default and enforce `required` for V1.40 novel Work creation/init.
 
 #### 5.3.5 Gate failure user experience
 
@@ -538,7 +543,7 @@ This is the **user-visible demo-pain killer**: instead of scheduling `novel-writ
 
 ### 5.4 `novel-project-init` scaffold protocol (file enumeration)
 
-`novel-project-init` is the canonical way to bootstrap a Work's `Works/<work_ref>/` tree. The grill-me collects `work_ref`, `total_planned_chapters`, and the World binding question (§3.5); on success, the preset's **scaffold capability** (or handler) creates the full directory tree, copies template stubs, and seeds `work_chapters` rows. This section enumerates every file/dir so the P1 implementer (and any hand-rolled init script) has a checklist.
+`novel-project-init` is the canonical way to bootstrap a Work's `Works/<work_ref>/` tree. The grill-me collects `work_ref`, `total_planned_chapters`, and the mandatory World binding choice (§3.5); on success, the preset's **scaffold capability** (or handler) creates the full directory tree, copies template stubs, and seeds `work_chapters` rows. This section enumerates every file/dir so the P1 implementer (and any hand-rolled init script) has a checklist.
 
 #### 5.4.1 Directory tree created (all paths relative to workspace root)
 
@@ -568,7 +573,7 @@ All template files live under `crates/nexus-orchestration/embedded-presets/novel
 2. Substitutes preset input vars (`work_ref`, `title`, `world_id`, etc.) using `handlebars-rust` (per [orchestration-engine.md](orchestration-engine.md) §7.3).
 3. Writes to `Works/<work_ref>/...` at the path listed above.
 
-For **World-bound** Works, `README.md` is rendered with a one-line `world_id: <uuid>` header and links to the World KB items the Work will reference most. For **worldless** Works, `README.md` includes a 1–2 paragraph inline world setting note (collected from grill-me, optional).
+For V1.40 Works, `README.md` is rendered with a one-line `world_id: <uuid>` header and links to the World KB items the Work will reference most. Legacy worldless Works from V1.39 and earlier may retain README inline world setting notes, but V1.40 scaffold rendering does not create new worldless README variants.
 
 #### 5.4.3 `work_chapters` row seeding (DB writes)
 
@@ -599,7 +604,7 @@ After scaffold succeeds, the init preset PATCHes the Work record:
 | `work_profile` | `'novel'` (was `null` or previously set) |
 | `work_ref` | the chosen directory name |
 | `total_planned_chapters` | from grill-me |
-| `world_id` | from grill-me (existing / new / NULL) |
+| `world_id` | required from grill-me (existing / new) |
 | `current_chapter` | `0` (reset on fresh init) |
 | `updated_at` | now() |
 
@@ -812,15 +817,15 @@ Sync **must not** upload full正文 by default (cli-spec §5.3 unchanged).
 
 | Command | Novel profile behavior |
 | --- | --- |
-| `creator run start --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path |
+| `creator run start --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path; V1.40 creation/init must obtain a `world_id` via create-new or bind-existing before scaffold completes |
 | `creator run start --idea "..." --world-id <world_id>` | Bind the new Work to an existing World (per §3.5); World KB is injected as context in `novel-writing` prompts |
-| `creator run start --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + World binding question + `work_chapters` seed rows) before intake |
+| `creator run start --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + mandatory World binding question + `work_chapters` seed rows) before intake |
 | `creator run status <work_id>` | Reads from `work_chapters` table; shows `work_ref`, chapter list, completion; **V1.39** adds `daemon`, `chain`, `pending_resume`, `pending_inspiration_count`, `findings` banner per [cli-spec.md](cli-spec.md) |
 | `creator run resume <work_id>` | **V1.39** — resume checkpointed auto-chain after daemon restart |
 | `creator run continue <work_id> --note "..."` | Appends inspiration; does not advance chapter index |
 | `creator run reconcile-chapters <work_id>` | (V1.36 manual) Rebuilds `work_chapters` rows from `Works/<work_ref>/Stories/` filesystem state; per §4.1.2 reconciliation rules |
 
-First-run path unchanged (≤7 steps per cli-spec §7.1); novel init preset may add optional step for greenfield novels. World-bound Works print a one-line `world: <name> (<world_id>)` in the run summary.
+First-run path adds a mandatory World binding step for novel Work creation: create a new World or pick one from `creator world list`. New V1.40 Works print a one-line `world: <name> (<world_id>)` in the run summary.
 
 ### 8.1 Multi-chapter `creator run status` UX (V1.37 extension)
 
@@ -889,7 +894,7 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
 3. Chapter state SSOT is **`work_chapters` table in `state.db`** (§4.1.1); `work-status.md` file is **removed** in V1.36.
 4. Completion §6 reads from `work_chapters`; documented and testable without publish.
 5. `work_profile: novel` fields §2.1 registered in work-experience-model cross-link; `world_id` is the cross-Work binding (§3.5).
-6. `novel-project-init` asks the World binding question (§3.5, §5).
+6. `novel-project-init` asks the mandatory World binding question (§3.5, §5) with only create-new / bind-existing V1.40 paths.
 7. Compass demo path §2 in [v1.36 compass](../../iterations/v1.36-pending-delivery-compass.md) achievable after P1–P3 implement.
 
 ---
@@ -914,9 +919,10 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
   - Multi-chapter `creator run status` output made testable (§8.1).
 - **V1.37 P2 World KB roadmap deltas** (recorded 2026-06-08):
   - **Roadmap-only** decision recorded (§3.5.1): no CLI/API/schema/prompt runtime/validator/`kb-extract` implementation claimed in P2.
-  - Future `creator world create --name ... --kind narrative --description ...` contract defined for the init "create new World" path (§3.5.1.1).
-  - `world_id` existence validation, `world_binding: optional` V1.37 posture, and `preset_gates_failed` remediation documented (§3.5.1.2).
-  - Prompt-time World context block shape documented for World-bound Works, with worldless Works preserving README-only context (§3.5.1.3).
+  - Future `creator world create --title ... --description ...` contract defined for the init "create new World" path (§3.5.1.1); `--name` remains an alias and narrative kind is implicit.
+  - `world_id` existence validation, legacy `world_binding: optional` V1.37 posture, and `preset_gates_failed` remediation documented (§3.5.1.2).
+  - Prompt-time World context block shape documented for World-bound Works, with legacy worldless Works preserving README-only context (§3.5.1.3).
+  - **V1.40 amendment** (recorded 2026-06-10): new novel Work creation/init requires `world_id`; legacy V1.39-and-earlier worldless Works remain readable but cannot be newly created (§2.1, §3.5, §3.5.1, §5.3.4, §5.4).
   - `world_refs` canonicalization and warning/error timing documented (§3.5.1.4).
   - Chapter → World KB extraction and explicit event/foreshadowing promotion path documented (§3.5.1.5).
 - **V1.37 P3 quality-loop roadmap deltas** (recorded 2026-06-08):
