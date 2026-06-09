@@ -87,7 +87,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_finalize_extract_novel() {
-        let store = InMemoryKbStore::new(ValidationMode::Novel);
+        let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let input = ExtractFinalizeInput {
             world_id: "wld_1".to_string(),
             block_type: BlockType::Character,
@@ -104,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_finalize_extract_rejects_empty_canonical_name() {
-        let store = InMemoryKbStore::new(ValidationMode::Novel);
+        let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let input = ExtractFinalizeInput {
             world_id: "wld_1".to_string(),
             block_type: BlockType::Character,
@@ -116,14 +116,14 @@ mod tests {
 
         let err = finalize_extract(&store, input).await.unwrap_err();
         assert!(
-            matches!(err, KbStoreError::ValidationLegacy(msg) if msg.contains("canonical_name")),
+            matches!(&err, KbStoreError::ValidationLegacy(msg) if msg.contains("canonical_name")),
             "expected canonical_name validation error, got: {err:?}"
         );
     }
 
     #[tokio::test]
     async fn test_finalize_extract_rejects_missing_novel_category() {
-        let store = InMemoryKbStore::new(ValidationMode::Novel);
+        let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let body = KeyBlockBody {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({})),
@@ -140,14 +140,14 @@ mod tests {
 
         let err = finalize_extract(&store, input).await.unwrap_err();
         assert!(
-            matches!(err, KbStoreError::ValidationLegacy(msg) if msg.contains("novel_category")),
+            matches!(&err, KbStoreError::ValidationLegacy(msg) if msg.contains("novel_category")),
             "expected novel_category validation error, got: {err:?}"
         );
     }
 
     #[tokio::test]
     async fn test_finalize_extract_generic_mode_no_novel_category_required() {
-        let store = InMemoryKbStore::new(ValidationMode::Generic);
+        let store = InMemoryKbStore::new();
         let body = KeyBlockBody {
             summary: Some("generic entity".to_string()),
             attributes: None,
@@ -168,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_finalize_extract_duplicate_rejected() {
-        let store = InMemoryKbStore::new(ValidationMode::Novel);
+        let store = InMemoryKbStore::with_validation_mode(ValidationMode::Novel);
         let input = ExtractFinalizeInput {
             world_id: "wld_1".to_string(),
             block_type: BlockType::Character,

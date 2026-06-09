@@ -283,12 +283,18 @@ pub fn build_child_kb_extract_schedule(
 
     let mut preset_input = build_preset_input(work_fields);
     // Ensure the kb-extract preset gets the world_id and profile_hint.
-    preset_input
-        .as_object_mut()
-        .map(|o| o.insert("profile_hint".to_string(), serde_json::Value::String("novel".to_string())));
-    preset_input
-        .as_object_mut()
-        .map(|o| o.insert("source_kind".to_string(), serde_json::Value::String("work_chapter".to_string())));
+    preset_input.as_object_mut().map(|o| {
+        o.insert(
+            "profile_hint".to_string(),
+            serde_json::Value::String("novel".to_string()),
+        )
+    });
+    preset_input.as_object_mut().map(|o| {
+        o.insert(
+            "source_kind".to_string(),
+            serde_json::Value::String("work_chapter".to_string()),
+        )
+    });
 
     Some(AddScheduleRequest {
         creator_id: creator_id.to_string(),

@@ -342,7 +342,9 @@ impl Capability for KbExtractWork {
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let source_anchor = if source_locator.is_empty() {
-            nexus_kb::source_anchor::SourceAnchor::from_excerpt(&extract.body.chars().take(256).collect::<String>())
+            nexus_kb::source_anchor::SourceAnchor::from_excerpt(
+                &extract.body.chars().take(256).collect::<String>(),
+            )
         } else {
             nexus_kb::source_anchor::SourceAnchor::from_excerpt(source_locator)
         };

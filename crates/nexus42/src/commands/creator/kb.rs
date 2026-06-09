@@ -187,7 +187,16 @@ pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
             world_id,
             work_id,
             chapter,
-        } => kb_queue_extract(config, &work_entry_id, &world_id, work_id.as_deref(), chapter).await,
+        } => {
+            kb_queue_extract(
+                config,
+                &work_entry_id,
+                &world_id,
+                work_id.as_deref(),
+                chapter,
+            )
+            .await
+        }
         KbCommand::ExtractStatus { job_id } => kb_extract_status(config, job_id.as_deref()).await,
     }
 }
@@ -815,7 +824,11 @@ async fn kb_queue_extract(
         // Best-effort: build a locator from chapter number.
         // The exact path is resolved later by the capability from work_chapters.
         let locator = format!("chapter:{ch_label}");
-        (Some("work_chapter".to_string()), Some(locator), Some("novel".to_string()))
+        (
+            Some("work_chapter".to_string()),
+            Some(locator),
+            Some("novel".to_string()),
+        )
     } else {
         (None, None, None)
     };
