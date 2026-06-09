@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-10-v1.40-world-kb-extract-binding"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-10"
 ---
 
@@ -88,3 +88,61 @@ generated_at: "2026-06-10"
 3. **W-003** (compile-time safety regression): Runtime `sqlx::query_as` replaces compile-time checked queries, violating `nexus-local-db` AGENTS.md rules.
 
 **Positive findings**: Schema migration is additive (ALTER TABLE ADD COLUMN, no drop+recreate). `nexus-kb::extract_finalize` module follows existing patterns (KbStore trait, validation module reuse). `kb.extract_work` capability name preserved per grill-me #13. `WorkFields.world_id` is additive (Option<String>, doesn't break V1.39 callers). CLI `--chapter N` sugar uses standard clap arg pattern. DF-63 tracker correctly marks W5 Shipped. E2E tests cover the happy path (persist → extract → chapter block) and edge cases (worldless skip, idempotency, novel_category validation).
+
+## Revalidation
+
+**Re-review scope**: Fix commits `89dc4519..b02f8828` (5 commits) addressing QC1/2 warnings W-001, W-002, W-003.
+
+**Re-review date**: 2026-06-10
+
+**Evidence collected**:
+- `git log --oneline 22192833..HEAD` (6 commits including QC2 report)
+- `git diff --stat 22192833..HEAD` (22 files, 475+/475-)
+- `cargo build -p nexus-kb -p nexus-orchestration -p nexus-local-db -p nexus42 --all-targets` → ✅ (only pre-existing e2e warning)
+- `cargo test -p nexus-kb -p nexus-orchestration -p nexus-local-db -p nexus42` → ✅ all passed
+- `cargo clippy -p nexus-kb -p nexus-orchestration -p nexus-local-db -p nexus42 -- -D warnings` → ✅ clean
+- `cargo +nightly fmt --all -- --check` → ✅ exit 0
+
+### Per-finding disposition
+
+#### W-001: Dead code — `build_child_kb_extract_schedule` → **RESOLVED**
+
+- **Commit**: `99d3e0c9` — "refactor(orchestration): QC1/2 W-001 — delete dead build_child_kb_extract_schedule"
+- **Evidence**: `git grep build_child_kb_extract_schedule` returns only `.mstar/` documentation references and a historical comment in `preset.yaml` (lines 15-16 documenting the removal). No code definition remains in `stage_gates.rs` (55 lines deleted). `crates/nexus-orchestration/src/stage_gates.rs` grep returns zero matches.
+- **Architecture note**: The `preset.yaml` comment (lines 13-16) explicitly documents the design decision: "The original plan (T8) described a `schedule.enqueue_child` approach with parent dependency, but the shipped design uses direct capability invocation from the preset state machine instead. `build_child_kb_extract_schedule` was removed as dead code per QC1/2 W-001 / W-007." This resolves the plan-vs-implementation confusion.
+
+#### W-002: Worldless guard → **RESOLVED**
+
+- **Commit**: `89dc4519` — "fix(orchestration): QC1/2 W-002,W-007 — guard sync_world_kb for worldless + remove magic auto"
+- **Evidence**: `kb_extract_work.rs` lines 211-218: when `world_id_input.is_empty()`, the capability returns `{"status": "skipped", "reason": "world_id absent — worldless Work, no KB extraction needed"}`. This is a true success no-op — the preset state machine transitions cleanly to `done`.
+- **Preset YAML** (`preset.yaml` lines 99-113): `sync_world_kb` state description updated to "Returns skip no-op for worldless (empty world_id)." The comment block (lines 7-11) documents the guard behavior.
+- **Architecture note**: The guard lives in the capability itself rather than in the preset YAML. This is the right place — it keeps the preset YAML simple and makes the no-op behavior testable at the capability level.
+
+#### W-003: Compile-time sqlx queries → **RESOLVED**
+
+- **Commit**: `b02f8828` — "fix(local-db): QC1/2 W-003 + S-001 — revert to sqlx::query_as! compile-time queries"
+- **Evidence**: All SELECT paths now use `sqlx::query_as!()`:
+  - `fetch_by_id` (line 58), `fetch_optional_by_id` (line 92), `enqueue` idempotency check (line 185), `enqueue_with_artifact` idempotency check (line 252), `next_queued` (line 346), `claim_job` (line 410)
+- All UPDATE paths use `sqlx::query!()`:
+  - `mark_running` (line 382), `claim_job` UPDATE (line 440), `mark_done` (line 467), `mark_failed` (line 488)
+- Two justified exceptions with `// SAFETY:` comments:
+  - `insert_with_retry` (line 137): `sqlx::query` — static INSERT with bind params; UUID retry pattern requires dynamic query building. INSERT doesn't benefit from compile-time column checking the same way SELECT does.
+  - `list_by_creator` (line 329): `sqlx::query_as` — LIMIT interpolated from `u32` (not user-controlled). Well-known sqlx limitation with LIMIT as bind param in SQLite offline mode.
+- The `JOB_COLUMNS` constant has been removed; each query site has its own explicit column list in the macro.
+- **S-001** (Box::pin pattern) also resolved: `enqueue_with_artifact` is now a standard `async fn`.
+
+### New findings
+
+None. The fix wave is surgical — each commit addresses exactly the reported findings without introducing new issues.
+
+### Updated Summary
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
+
+**Verdict**: Approve
+
+**Rationale**: All three blocking warnings (W-001, W-002, W-003) are properly resolved. Build, test, clippy, and fmt all pass clean. No new architecture or maintainability concerns introduced by the fix wave.
