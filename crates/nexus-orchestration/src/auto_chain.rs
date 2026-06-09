@@ -407,6 +407,13 @@ pub async fn enqueue_auto_chain_schedule(
 ///
 /// Must be kept in sync with `embedded-presets/*/preset.yaml` `version:` field.
 /// Returns 1 as fallback for unknown preset IDs.
+///
+/// R-V139P5-W-4: version policy — bump the version number in both this mapping
+/// AND the corresponding `preset.yaml` whenever the state machine undergoes a
+/// breaking change (state additions/removals, transition edge changes, prompt
+/// template modifications that alter the output contract). Non-breaking changes
+/// (comments, optional fields) may keep the same version. The version is stored
+/// in `creator_schedules` at enqueue time and used by the loader for compat checks.
 fn preset_version_for_id(preset_id: &str) -> i64 {
     match preset_id {
         "novel-writing" => 7,
