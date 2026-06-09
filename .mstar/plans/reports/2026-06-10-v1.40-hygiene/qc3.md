@@ -5,6 +5,7 @@ reviewer_index: 3
 plan_id: "2026-06-10-v1.40-hygiene"
 verdict: "Request Changes"
 generated_at: "2026-06-10"
+revalidated_at: "2026-06-10"
 ---
 
 # Code Review Report
@@ -92,6 +93,65 @@ generated_at: "2026-06-10"
 - **W-2 (Warning)**: Regressing from compile-time `sqlx::query_as!` to runtime `sqlx::query_as::<T>()` violates project policy and removes schema safety.
 
 Once C-1 is resolved (migration rewritten using table recreation) and W-1 is fixed (test struct literals updated), the PR can be re-reviewed. W-2 should ideally be addressed by restoring compile-time macros; if the team accepts the runtime tradeoff for pragmatic reasons, it must be explicitly documented in the PR with PM sign-off.
+
+## Revalidation
+
+**Re-validation date**: 2026-06-10  
+**Re-validation range**: `baffa7d8..12b80662` (4 commits since prior QC3 report)  
+**Commits reviewed**:
+- `d37c0691` — refactor(local-db): QC2/3 C-1 — drop unsupported ALTER TABLE ADD CONSTRAINT migration; rely on runtime validation
+- `57e7b854` — fix(daemon-runtime): QC1 C-2 / QC3 W-1 — add auto_chain_interrupted field to 16 PatchWorkRequest test sites
+- `deca8e16` — fix(supervisor): QC1 C-1 — decouple completed_ids from active-schedule query in tick_inner + resume_schedule
+- `12b80662` — test(orchestration): QC1 W-2 — preset_version_for_id mapping in sync with preset.yaml version fields
+
+### C-1: SQLite migration uses unsupported ALTER TABLE ADD CONSTRAINT syntax
+**Status**: ✅ Resolved  
+**Evidence**:
+- Migration file `crates/nexus-local-db/migrations/202606100002_findings_check_constraints.sql` deleted (verified: file no longer exists)
+- `findings.rs` doc comment updated to document runtime validation as the **sole enforcement mechanism** for finding enum fields
+- Runtime `validate_finding_enums()` remains in place on both create and patch paths
+- No new migration files added that use unsupported syntax
+- No reliability regression: the function is called synchronously before DB operations, providing equivalent protection
+
+### W-1: Test compilation broken by new PatchWorkRequest field
+**Status**: ✅ Resolved  
+**Evidence**:
+- 16 struct literals updated across 2 files:
+  - `tests/works_api.rs`: 15 sites added `auto_chain_interrupted: None`
+  - `src/api/handlers/works.rs:1332`: 1 site added `auto_chain_interrupted: None`
+- Compilation errors observed in `cargo build -p nexus-daemon-runtime --tests` are **pre-existing sqlx macro issues** in `pool.rs` and `kb_store.rs` (verified on base branch `iteration/v1.40`); unrelated to W-1
+
+### W-2: sqlx compile-time macros regressed to runtime queries in supervisor
+**Status**: ❌ Still open  
+**Evidence**:
+- `supervisor.rs` still uses `sqlx::query_as::<_, ScheduleRow>()` (2 active-schedule query sites) and `sqlx::query_scalar()` (2 completed_ids query sites)
+- No compile-time `sqlx::query_as!` macros restored
+- No `.sqlx/` metadata updates committed for the new queries
+- SAFETY comments added but still describe "dynamic SQL" for constant WHERE filters
+- The `deca8e16` commit addressed QC1 C-1 (completed_ids logic bug), not QC3 W-2
+- **Impact unchanged**: Loss of compile-time schema validation; drift risk if `creator_schedules` schema changes
+
+### S-1: Build-time verification for preset_version_for_id drift
+**Status**: ✅ Addressed in commit `12b80662`  
+**Evidence**: Added test `preset_version_for_id_matches_embedded_yaml()` that reads `embedded-presets/research/preset.yaml` and asserts the mapping matches. This prevents the drift scenario described in S-1.
+
+### S-2: Consider #[serde(default)] on auto_chain_interrupted for API backward compatibility
+**Status**: Not addressed in this fix round (remains open as suggestion)
+
+### New Findings
+**None** — no new performance or reliability issues identified in the fix commits.
+
+### Sanity Checks
+- `cargo +nightly fmt --all -- --check`: ✅ Pass (exit 0)
+- `cargo clippy --all -- -D warnings`: ✅ Pass
+- `cargo build --all-targets`: ⚠️ Pre-existing sqlx type annotation errors in `nexus-local-db` and `nexus-orchestration` lib tests (exist on base branch `iteration/v1.40`; unrelated to this PR)
+
+**Re-validation Verdict**: Request Changes
+
+**Rationale**:
+- **C-1** and **W-1** are properly resolved.
+- **W-2** remains unresolved: the supervisor.rs queries still use runtime `sqlx::query_as::<T>()` instead of compile-time `sqlx::query_as!` macros, violating project policy and removing schema safety.
+- Per original QC3 report: "W-2 should ideally be addressed by restoring compile-time macros; if the team accepts the runtime tradeoff for pragmatic reasons, it must be explicitly documented in the PR with PM sign-off." No such sign-off has been documented.
 
 ## Checklist (performance + reliability)
 
