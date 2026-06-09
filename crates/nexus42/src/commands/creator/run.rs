@@ -1117,6 +1117,43 @@ fn reject_produce_when_novel_complete(
     Ok(())
 }
 
+/// V1.40 P2 (QC3 C-1 fix): assemble the World KB context block for a Work.
+///
+/// Opens the local workspace KB store, queries all characters/locations/rules
+/// for the given world, and returns the YAML-rendered block string.
+/// Returns empty string on missing data (world has no KB items).
+///
+/// # Errors
+///
+/// Returns an error if the local DB cannot be opened or the KB query fails.
+async fn assemble_world_kb_block(
+    world_id: &str,
+    config: &CliConfig,
+) -> crate::errors::Result<String> {
+    use nexus_moment_context_assembly::{build_chapter_kb_block, ChapterKbBlockParams};
+
+    let db_path = crate::config::resolve_state_db_path(config)?;
+    let pool = crate::db::Schema::init(&db_path).await?;
+    let store = nexus_local_db::kb_store::SqliteKbStore::new(pool);
+
+    let params = ChapterKbBlockParams {
+        world_id: world_id.to_string(),
+        world_name: String::new(), // Populated from KB if available
+        current_timeline: String::new(),
+        world_refs: vec![], // Empty: falls back to all characters/locations
+        chapter_text: None,
+        max_tokens: None,
+    };
+
+    match build_chapter_kb_block(&store, &params).await {
+        Ok(Some(block)) => Ok(block.to_yaml()),
+        Ok(None) => Ok(String::new()),
+        Err(e) => Err(crate::errors::CliError::Other(format!(
+            "World KB query failed for world {world_id}: {e}"
+        ))),
+    }
+}
+
 /// Validates:
 /// 1. Target stage is a known FL-E stage
 /// 2. Target stage is ahead of current stage (unless `--force`)
@@ -1267,6 +1304,34 @@ async fn stage_advance(
     // active (novel complete), refuse to build an empty-chapter schedule.
     reject_produce_when_novel_complete(target_stage, next_chapter, work_id)?;
 
+    // V1.40 P2 (QC3 C-1 fix): build World KB context block for World-bound Works.
+    // When the Work has a world_id, open the local KB store and assemble the
+    // chapter KB block. For worldless Works (world_id == None), the block is
+    // left empty so the template guard `{{#if world_kb_block}}` omits it.
+    let world_id = resp
+        .get("world_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let world_kb_block = if let Some(ref wid) = world_id {
+        // Best-effort: assemble the block. On error (no DB, missing world, etc.),
+        // log a warning and continue with empty block so the schedule still proceeds.
+        match assemble_world_kb_block(wid, config).await {
+            Ok(block) => Some(block),
+            Err(e) => {
+                tracing::warn!(
+                    target: "fl_e.stage",
+                    world_id = %wid,
+                    error = %e,
+                    "Failed to assemble World KB block; proceeding with empty block"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let fields = WorkFields {
         work_id: work_id.to_string(),
         fl_e_stage: target_stage.to_string(),
@@ -1280,6 +1345,7 @@ async fn stage_advance(
         slug,
         research_artifacts_dir: None,
         workspace_dir: None,
+        world_kb_block,
     };
 
     if let Some(mut request) =
