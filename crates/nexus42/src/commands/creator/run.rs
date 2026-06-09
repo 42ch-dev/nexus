@@ -737,12 +737,13 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                             );
                         }
 
-                        // T9: blocked/missing-file hints.
+                        // R-V139P5-N1: blocked/missing-file hints.
                         // Surface warnings for chapters whose body_path might be
                         // missing on disk. The CLI cannot check the filesystem
                         // directly here (no workspace root context), but the
                         // daemon reconcile-chapters operation validates this.
-                        // The DB status remains the selection SSOT per §4.4.
+                        // Waived P4: the daemon is the validation authority; CLI
+                        // status displays body_path for human cross-check only.
 
                         // V1.39 P1 (T5): Findings section per §5.5.6.
                         // Fetch findings for this work and display open count,

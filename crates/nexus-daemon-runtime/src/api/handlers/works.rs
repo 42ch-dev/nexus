@@ -485,6 +485,10 @@ async fn enrich_with_chapters(
     let work_id = &dto.work_id;
 
     // Populate chapter rows
+    // R-V139P5-N2 (deferred): no cap/pagination on list_chapters yet.
+    // Works with 100+ chapters would benefit from server-side pagination.
+    // Currently returns all rows; the CLI status command consumes the full list.
+    // A future slice should add `limit`/`offset` params to the DB query + API.
     match nexus_local_db::work_chapters::list_chapters(state.pool(), work_id).await {
         Ok(chapters) => {
             let chapter_values: Vec<serde_json::Value> = chapters

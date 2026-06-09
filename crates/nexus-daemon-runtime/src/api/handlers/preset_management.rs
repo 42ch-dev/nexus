@@ -281,6 +281,11 @@ pub async fn scaffold_preset(
 /// semantic validation facade (`nexus_orchestration::preset::validate_preset_semantic`)
 /// so the daemon endpoint and the runtime loader reject the same defects.
 ///
+/// R-V139P5-N3 (waived): non-CLI callers (future API, programmatic consumers)
+/// must route preset.input through this endpoint or the schedule enqueue path
+/// (which runs `evaluate_gates`). Both paths validate; no unvalidated preset
+/// input reaches execution.
+///
 /// Asset-path checks (template file existence) run when the path points to a
 /// directory (bundle mode); otherwise only in-memory semantic checks run.
 pub async fn validate_preset(
