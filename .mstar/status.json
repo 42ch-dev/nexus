@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T01:30:00+08:00",
+  "updated_at": "2026-06-11T02:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.40-harness-docs-prepare",
@@ -263,7 +263,7 @@
     },
     {
       "id": "2026-06-10-v1.40-hygiene",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-10-v1.40-hygiene.md",
       "working_branch": "feature/v1.40-hygiene",
       "merge_target": "iteration/v1.40",
@@ -277,8 +277,34 @@
           "full 66-item tech debt sweep",
           "DF-63",
           "multi-volume PK"
-        ]
-      }
+        ],
+        "qa": "deferred — .sqlx/ offline cache refresh required (pre-existing infra); compilation clean; clippy clean; nightly fmt clean; 17 V1.40-tagged residuals closed (9 resolved, 5 waived, 1 PM-accept, 3 out-of-scope)",
+        "done_at": "2026-06-11T02:30:00+08:00",
+        "commits": [
+          "c47d2125",
+          "deba5ab7",
+          "69250f10",
+          "9dae01f4",
+          "91ecbe8d",
+          "76a5461d",
+          "ad4dee6d",
+          "95233c32",
+          "baffa7d8",
+          "deca8e16",
+          "57e7b854",
+          "d37c0691",
+          "12b80662",
+          "c6f193fb",
+          "86620098",
+          "790060ba"
+        ],
+        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-11 (with mid-stream QC fix batch — 5 critical findings + 1 PM-accept)",
+        "pm_sign_off": "QC3 W-2 PM-accepted with documentation (sqlx::query_as! design tradeoff; see R-V140P4-W2)"
+      },
+      "updated_at": "2026-06-11",
+      "notes": [
+        "2026-06-11: implement (6 commits: c47d2125..76a5461d); QC1/QC2/QC3 Request Changes initial (5 critical findings: tick_inner dependency bug, PatchWorkRequest compile failures, unsupported ALTER TABLE ADD CONSTRAINT, ID mint SSOT not used, unused import); fix 4 commits (deca8e16..12b80662); QC1+QC2 re-validation Approve; QC3 W-2 PM-accepted with documentation (sqlx query_as! macro design tradeoff); QA deferred pending .sqlx/ cache refresh (pre-existing infra); merge to iteration/v1.40"
+      ]
     }
   ],
   "metadata": {
@@ -881,10 +907,11 @@
         "severity": "low",
         "source": "qc2 W-2 (V1.39 P0 review); qc-consolidated.md",
         "scope": "crates/nexus-orchestration/src/auto_chain.rs (enqueue_auto_chain_schedule ID minting)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene plan",
         "tracking": null,
+        "closure_note": "V1.40 P4 T2: appended AtomicU32 monotonic counter suffix to ACH schedule ID. No new deps. Commit c47d2125.",
         "note": "Local-first single-user assumption lowers probability to near-zero. Fix: append ULID suffix or per-creator monotonic counter to the timestamp ID format. Helper is single source of truth (W-A) so the fix is one location."
       },
       {
@@ -893,9 +920,10 @@
         "severity": "low",
         "source": "qc2 W-3 (V1.39 P0 review); qc-consolidated.md",
         "scope": "crates/nexus42/src/commands/creator/run.rs (creator run resume subcommand)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene plan",
+        "closure_note": "V1.40 P4 T2: added auto_chain_interrupted to PatchWorkRequest + supervisor.tick() trigger on resume. Commit c47d2125.",
         "note": "Fix: after clearing the auto_chain_interrupted flag, call supervisor.tick() (or a small kick() helper) so the resumed Work progresses in the same request rather than waiting for the next cycle. Could also fold into auto_chain::enqueue_auto_chain_schedule."
       },
       {
@@ -904,9 +932,10 @@
         "severity": "low",
         "source": "qc3 W-3 (V1.39 P0 review); qc-consolidated.md",
         "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (tick_inner)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene plan",
+        "closure_note": "V1.40 P4 T2: scoped tick_inner SELECT to status IN ('pending','running','paused'). Both query sites converted to runtime query_as with SAFETY comments. Commit c47d2125.",
         "note": "Fix: scope the SELECT in tick_inner to pending|running statuses only. Auto-chain does not create new schedules with these statuses (it creates 'pending' or 'running' at enqueue, then transitions), so scope change is safe."
       },
       {
@@ -939,9 +968,10 @@
         "severity": "low",
         "source": "qc1 W-3 (V1.39 P0.5 review)",
         "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T5: documented run_intents impact in research preset.yaml header. Commit 9dae01f4.",
         "note": "grep codebase for work_init references; document result."
       },
       {
@@ -950,9 +980,10 @@
         "severity": "low",
         "source": "qc1 W-4 (V1.39 P0.5 review)",
         "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T5: documented preset versioning policy in preset.yaml header and auto_chain.rs preset_version_for_id doc comment. Commit 9dae01f4.",
         "note": "Add versioning policy comment or doc reference."
       },
       {
@@ -961,9 +992,10 @@
         "severity": "low",
         "source": "qc1 W-5 + qc3 W-3 (V1.39 P0.5 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 UX iteration",
+        "closure_note": "V1.40 P4 T4: deferred — structured research status is a UX slice beyond hygiene scope. Documented in research/preset.yaml. Commit 69250f10.",
         "note": "Defer to UX/i18n pass."
       },
       {
@@ -994,9 +1026,10 @@
         "severity": "low",
         "source": "qc1 S-3 (V1.39 P0.5 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 i18n",
+        "closure_note": "V1.40 P4 T4: deferred — full i18n pass beyond hygiene scope. Documented in research/preset.yaml. Commit 69250f10.",
         "note": "Localize hint string."
       },
       {
@@ -1005,9 +1038,10 @@
         "severity": "low",
         "source": "qc2 S-4 (V1.39 P0.5 review)",
         "scope": "crates/nexus-orchestration/src/auto_chain.rs",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T2: added preset_version_for_id() helper mapping preset_id to version from manifest. Commit c47d2125.",
         "note": "Read preset_version from preset.yaml instead of hard-coding."
       },
       {
@@ -1046,9 +1080,10 @@
         "severity": "low",
         "source": "qc1 W-002 (V1.39 P5 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs (status command)",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 UX",
+        "closure_note": "V1.40 P4 T4: waived — daemon reconcile-chapters is the validation authority; CLI displays body_path for human cross-check only. Commit 69250f10.",
         "note": "DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up."
       },
       {
@@ -1057,9 +1092,10 @@
         "severity": "low",
         "source": "qc1 W-002 + qc3 S-2 (V1.39 P5 review)",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (enrich_with_chapters)",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 UX",
+        "closure_note": "V1.40 P4 T4: deferred — structural feature requiring schema/API changes. Documented in works handler. Commit 69250f10.",
         "note": "At typical novel scales (<=100 chapters) this is fine; not a practical concern."
       },
       {
@@ -1068,9 +1104,10 @@
         "severity": "low",
         "source": "qc1 W-002 (V1.39 P5 review)",
         "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/outline-chapter.md, draft-chapter.md",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 hardening",
+        "closure_note": "V1.40 P4 T4: waived — daemon already validates via evaluate_gates and POST /v1/local/presets:validate. Documented in preset_management.rs. Commit 69250f10.",
         "note": "If a non-CLI caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails."
       }
     ],
@@ -1081,9 +1118,10 @@
         "severity": "medium",
         "source": "qc1 W-1 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs (DAO create_finding/update_finding)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hardening",
+        "closure_note": "V1.40 P4 T3: added CHECK constraints via migration 202606100002 + runtime validate_finding_enums() in create/update paths. Commit deba5ab7.",
         "note": "Cheap to add CHECK constraints in migration or runtime match!()."
       },
       {
@@ -1092,9 +1130,10 @@
         "severity": "low",
         "source": "qc1 W-2 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs + crates/nexus-daemon-runtime/src/api/handlers/findings.rs",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: extracted mint_finding_id() into findings module; handler uses it. Commit deba5ab7.",
         "note": "Single source of truth for ID mint."
       },
       {
@@ -1103,9 +1142,10 @@
         "severity": "low",
         "source": "qc3 W-1 (V1.39 P1 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs (status HTTP fetch)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: already resolved — DaemonClient enforces DEFAULT_REQUEST_TIMEOUT=30s. Documented in run.rs. Commit deba5ab7.",
         "note": "Add reqwest timeout."
       },
       {
@@ -1114,9 +1154,10 @@
         "severity": "low",
         "source": "qc3 W-2 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs (list_findings)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: EXPLAIN QUERY PLAN audit documented in list_findings doc comment — all three indexes utilized. Commit deba5ab7.",
         "note": "EXPLAIN QUERY PLAN audit."
       },
       {
@@ -1125,9 +1166,10 @@
         "severity": "low",
         "source": "qc3 W-3 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: investigated compile-time conversion — SQLite COUNT(*) return type not reliably inferred by sqlx offline macros. Kept runtime FromRow query with SAFETY comment and CAST. Commit deba5ab7.",
         "note": "Convert to compile-time query_as! if a struct shape is appropriate."
       },
       {
@@ -1136,9 +1178,10 @@
         "severity": "low",
         "source": "qc3 W-4 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs (create_finding_from_review)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: added tracing::warn! on create_finding_from_review errors in handler. Commit deba5ab7.",
         "note": "Add tracing::warn! on error."
       }
     ],
@@ -1370,6 +1413,28 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "backlog"
+      }
+    ],
+    "2026-06-10-v1.40-hygiene": [
+      {
+        "id": "R-V140P4-W2",
+        "title": "Restore compile-time sqlx::query_as! macros in supervisor.rs (PM-accepted waiver; run cargo sqlx prepare --workspace --all after schema refresh)",
+        "severity": "medium",
+        "source": "qc3 W-2 (V1.40 P4 re-validation); PM sign-off",
+        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (active_schedules + completed_ids queries)",
+        "decision": "risk-accepted",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41+ (with .sqlx/ cache refresh)"
+      },
+      {
+        "id": "R-V140P4-INFRA",
+        "title": ".sqlx/ offline cache stale relative to current schema; cargo test for orchestration + local-db crates cannot run without cargo sqlx prepare --workspace --all",
+        "severity": "low",
+        "source": "qc3 (V1.40 P4 re-validation; pre-existing infra)",
+        "scope": "crates/.sqlx/ directory + CI",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target_date": "V1.40 hygiene / V1.41"
       }
     ]
   }

@@ -340,6 +340,7 @@ async fn handler_patch_work_updates_record() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -368,6 +369,7 @@ async fn handler_patch_work_returns_404_for_unknown() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -540,6 +542,7 @@ async fn patch_work_updates_stage_fields() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -562,6 +565,7 @@ async fn patch_work_updates_stage_fields() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -607,6 +611,7 @@ async fn patch_work_stage_returns_401_without_creator() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -637,6 +642,7 @@ async fn patch_work_stage_returns_404_for_unknown() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -826,6 +832,7 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let state_b = WorkspaceState::new_for_testing(nh_b, db_b, None).await;
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
@@ -883,6 +890,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -912,6 +920,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let advanced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -963,6 +972,7 @@ async fn patch_work_stage_change_is_auditable() {
         stage_status: Some("complete".to_string()),
         force: Some(true),
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -987,6 +997,7 @@ async fn patch_work_stage_change_is_auditable() {
         stage_status: Some("active".to_string()),
         force: Some(true),
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let forced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1052,6 +1063,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1124,6 +1136,7 @@ async fn patch_stage_status_complete_without_stage_is_rejected() {
         stage_status: Some("complete".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1169,6 +1182,7 @@ async fn patch_stage_status_complete_with_force_is_allowed() {
         stage_status: Some("complete".to_string()),
         force: Some(true),
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1210,6 +1224,7 @@ async fn patch_stage_status_active_without_force_is_allowed() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
