@@ -1284,12 +1284,13 @@ states:
         let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-review-master");
-        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.version, 2);
 
-        // State machine: present → await_decision → done
+        // State machine: present → await_decision → sync_world_kb → done
         assert_eq!(loaded.manifest.preset.initial, "present");
         assert!(loaded.outer_graph.get_task("present").is_some());
         assert!(loaded.outer_graph.get_task("await_decision").is_some());
+        assert!(loaded.outer_graph.get_task("sync_world_kb").is_some());
         assert!(loaded.outer_graph.get_task("done").is_some());
 
         // Verify linear transitions
@@ -1298,7 +1299,11 @@ states:
                 && s.next == Some(manifest::NextTarget::Linear("await_decision".into()))
         }));
         assert!(loaded.manifest.states.iter().any(|s| {
-            s.id == "await_decision" && s.next == Some(manifest::NextTarget::Linear("done".into()))
+            s.id == "await_decision"
+                && s.next == Some(manifest::NextTarget::Linear("sync_world_kb".into()))
+        }));
+        assert!(loaded.manifest.states.iter().any(|s| {
+            s.id == "sync_world_kb" && s.next == Some(manifest::NextTarget::Linear("done".into()))
         }));
 
         // Human-in-loop: exit_when uses manual (not auto-chain)

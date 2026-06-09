@@ -1,7 +1,7 @@
-//! Extract finalize helpers — validate + upsert KeyBlock + SourceAnchor.
+//! Extract finalize helpers — validate + upsert `KeyBlock` + `SourceAnchor`.
 //!
 //! V1.40 P3 (T3): shared domain logic for `kb.extract_work` capability.
-//! Validates P1 rules (canonical_name, body with novel_category), then
+//! Validates P1 rules (`canonical_name`, body with `novel_category`), then
 //! delegates insert to the `KbStore` implementation.
 //!
 //! The caller is responsible for job lifecycle (mark running/done/failed).
@@ -44,7 +44,7 @@ pub struct ExtractFinalizeInput {
 /// Returns [`KbStoreError::Validation`] when P1 rules fail.
 /// Returns [`KbStoreError::Duplicate`] on uniqueness conflict.
 /// Returns other [`KbStoreError`] variants on store failures.
-pub async fn finalize_extract<S: KbStore>(
+pub async fn finalize_extract<S: KbStore + Sync>(
     store: &S,
     input: ExtractFinalizeInput,
 ) -> Result<KbInsertResult, KbStoreError> {

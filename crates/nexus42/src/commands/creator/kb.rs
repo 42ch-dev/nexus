@@ -108,7 +108,7 @@ pub enum KbCommand {
     /// work entry + world combination, returns the existing job.
     ///
     /// Use `--chapter N` to resolve the body path from the work's chapter N
-    /// and set source_kind=work_chapter, profile_hint=novel automatically.
+    /// and set `source_kind=work_chapter`, `profile_hint=novel` automatically.
     #[command(name = "queue-extract")]
     QueueExtract {
         /// Work-scope entry ID to extract from (e.g. `kb_a1b2c3d4`)
@@ -119,7 +119,7 @@ pub enum KbCommand {
         /// Source work ID (parent of the chapter artifact)
         #[arg(long)]
         work_id: Option<String>,
-        /// Chapter number sugar for novel profile (resolves body_path from chapter N)
+        /// Chapter number sugar for novel profile (resolves `body_path` from chapter N)
         #[arg(long)]
         chapter: Option<i32>,
     },
@@ -144,6 +144,8 @@ pub enum KbCommand {
 ///
 /// Returns an error if `active_creator_id` fails validation or the underlying
 /// KB operation fails.
+// CLI entry-point runs on a single-threaded tokio runtime — Send not required.
+#[allow(clippy::future_not_send)]
 pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
     if let Some(cid) = &config.active_creator_id {
         paths::validate_creator_id_safe(cid).map_err(CliError::Other)?;
@@ -798,6 +800,8 @@ async fn kb_remove(
 ///
 /// When `--chapter N` is provided, sets `source_kind=work_chapter`,
 /// `profile_hint=novel`, and resolves the chapter body path.
+// CLI helper — runs on single-threaded tokio; Send not required.
+#[allow(clippy::future_not_send)]
 async fn kb_queue_extract(
     config: &CliConfig,
     work_entry_id: &str,
@@ -819,7 +823,7 @@ async fn kb_queue_extract(
     let pool = crate::db::Schema::init(&db_path).await?;
 
     // Determine artifact locator fields from --chapter sugar.
-    let (source_kind, source_locator, profile_hint) = if let Some(ch) = chapter {
+    let (source_kind, source_locator, profile_hint) = chapter.map_or((None, None, None), |ch| {
         let ch_label = format!("{ch:02}");
         // Best-effort: build a locator from chapter number.
         // The exact path is resolved later by the capability from work_chapters.
@@ -829,9 +833,7 @@ async fn kb_queue_extract(
             Some(locator),
             Some("novel".to_string()),
         )
-    } else {
-        (None, None, None)
-    };
+    });
 
     let job = nexus_local_db::enqueue_extract_job_with_artifact(
         &pool,
