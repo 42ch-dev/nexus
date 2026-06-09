@@ -90,8 +90,8 @@ const SKIP_FILES: &[&str] = &["README.md", "foreshadowing.md", "event-index.md"]
 ///
 /// Scans `<workspace_dir>/Works/<work_ref>/Stories/*.md` for chapter files.
 /// Hidden files (starting with `.`) are skipped.
-/// `README.md`, `Outlines/**`, `Logs/**`, `foreshadowing.md`, `event-index.md`
-/// are never chapter candidates.
+/// `README.md`, `Outlines/**`, `Logs/**`, `Rules/**`, `foreshadowing.md`, `event-index.md`
+/// are never chapter candidates (V1.39 P3: Rules/** explicitly excluded per DF-65).
 /// Returns works sorted alphabetically by `work_ref`.
 #[must_use]
 pub fn discover_works(workspace_dir: &Path) -> Vec<DiscoveredWork> {
@@ -528,5 +528,37 @@ mod tests {
 
         let result = discover_works(workspace.path());
         assert!(result.is_empty(), "work without Stories/ should be skipped");
+    }
+
+    // -----------------------------------------------------------------------
+    // 15. Rules/ and Logs/ subdirs not scanned (V1.39 P3, DF-65/66)
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_discover_works_ignores_rules_and_logs_subdirs() {
+        let workspace = setup_workspace();
+        let work_root = works_dir(workspace.path(), "my-novel");
+        let stories = work_root.join("Stories");
+        let rules = work_root.join("Rules");
+        let logs_write = work_root.join("Logs").join("write");
+        let logs_review = work_root.join("Logs").join("review");
+        fs::create_dir_all(&stories).expect("Stories");
+        fs::create_dir_all(&rules).expect("Rules");
+        fs::create_dir_all(&logs_write).expect("Logs/write");
+        fs::create_dir_all(&logs_review).expect("Logs/review");
+
+        write_file(&stories, "ch01-intro.md", "Chapter 1");
+        // Files in Rules/ and Logs/ that should NOT be discovered as chapters
+        write_file(&rules, "novel-rules.md", "# Rules\n- POV: first");
+        write_file(&rules, "novel-rules-history.md", "| ts | actor | reason |");
+        write_file(&logs_write, "draft-session-1.md", "Draft notes");
+        write_file(&logs_review, "review-notes.md", "Review notes");
+
+        let result = discover_works(workspace.path());
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].chapters,
+            vec!["ch01-intro.md"],
+            "only Stories/*.md should appear — Rules/ and Logs/ excluded"
+        );
     }
 }
