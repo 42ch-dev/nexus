@@ -25,7 +25,7 @@ pub mod source_anchor;
 pub mod store;
 pub mod validation;
 
-pub use errors::KbError;
+pub use errors::{KbError, ValidationError, ValidationKind};
 pub use query::{KbInsertResult, KbQuery, KbQueryResult};
 pub use store::{InMemoryKbStore, KbStore, KbStoreError};
-pub use validation::{validate_body, ValidationMode, NOVEL_CATEGORIES};
+pub use validation::{validate_body, validate_canonical_name, ValidationMode, NOVEL_CATEGORIES};
