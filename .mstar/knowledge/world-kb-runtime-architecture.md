@@ -8,7 +8,7 @@
 
 ## 1. Problem
 
-World KB concerns were split across `nexus-kb`, `nexus-moment-context-assembly`, `nexus-orchestration` presets (`kb-extract`), and misplaced Layer 1 rules under `embedded-presets/rules/`. Taxonomy in spec (§5.1.1) diverged from `kb-extract` prompts (`Character`/`Ability`/…). V1.40 closes DF-63 with a single runtime layering model.
+World KB concerns were split across `nexus-kb`, `nexus-moment-context-assembly`, `nexus-orchestration` presets (`kb-extract`), and Layer 1 rules (now at `embedded-rules/writing-craft.md`). Taxonomy in spec (§5.1.1) diverged from `kb-extract` prompts (`Character`/`Ability`/…). V1.40 closes DF-63 with a single runtime layering model.
 
 ---
 
@@ -121,6 +121,6 @@ Do **not** implement a second query implementation inside `nexus-orchestration`.
 ## 8. Explicit non-goals
 
 - Merging `novel-review-master` and `kb-extract` into one preset.
-- World KB logic in `embedded-presets/rules/` or preset-only prompt strings.
+- World KB logic in `embedded-rules/` or preset-only prompt strings.
 - Backward compatibility with V1.29 work-entry-only job rows (may wipe in pre-release).
 - Renaming `kb.extract_work` or adding parallel `BlockType` enum.

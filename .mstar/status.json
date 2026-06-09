@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T12:00:00+08:00",
+  "updated_at": "2026-06-10T20:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.40-harness-docs-prepare",
@@ -35,7 +35,7 @@
     },
     {
       "id": "2026-06-10-v1.40-architecture-hygiene",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-10-v1.40-architecture-hygiene.md",
       "working_branch": "feature/v1.40-architecture-hygiene",
       "merge_target": "iteration/v1.40",
@@ -49,8 +49,27 @@
         "explicitly_out": [
           "DF-63 W2-W5",
           "P4 hygiene sweep"
-        ]
-      }
+        ],
+        "qa": "passed — all 7 ACs green; clippy clean; nightly fmt clean; byte-identical writing-craft.md",
+        "done_at": "2026-06-10T20:30:00+08:00",
+        "commits": [
+          "8dda000c",
+          "76e14828",
+          "de42f4c9",
+          "dc7f81e7",
+          "14145a06",
+          "d983fae0",
+          "95b7e150",
+          "1dd268ed",
+          "60d95a05",
+          "b40cdf5a"
+        ],
+        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10"
+      },
+      "updated_at": "2026-06-10",
+      "notes": [
+        "2026-06-10: implement (feature/v1.40-architecture-hygiene) → QC1/QC2 Approve, QC3 Approve after re-validation → QA Pass → merge to iteration/v1.40"
+      ]
     },
     {
       "id": "2026-06-10-v1.40-world-create-and-validation",
@@ -1024,6 +1043,38 @@
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
         "note": "Add tracing::warn! on error."
+      }
+    ],
+    "2026-06-10-v1.40-architecture-hygiene": [
+      {
+        "id": "R-V140P0.5-S1",
+        "title": "Stale test comment in stage_gates.rs:854 says \"embedded presets\" but rule now lives in embedded_rules module",
+        "severity": "nit",
+        "source": "qc1 S-1 (V1.40 P0.5 review)",
+        "scope": "crates/nexus-orchestration/src/stage_gates.rs:854",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hygiene wave (P4) or backlog"
+      },
+      {
+        "id": "R-V140P0.5-S2",
+        "title": "stage_gates.rs:850 section header could note V1.40 P0.5 migration for future readers",
+        "severity": "nit",
+        "source": "qc1 S-2 (V1.40 P0.5 review)",
+        "scope": "crates/nexus-orchestration/src/stage_gates.rs:850",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hygiene wave (P4) or backlog"
+      },
+      {
+        "id": "R-V140P0.5-S3",
+        "title": "embedded_rules.rs module docstring could note \"Layer 1 is compile-time constant with no runtime FS dependency\" so future maintainers do not re-introduce a runtime read",
+        "severity": "low",
+        "source": "qc2 suggestion (V1.40 P0.5 review)",
+        "scope": "crates/nexus-orchestration/src/embedded_rules.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "When Layer 0 (~/.nexus42/rules/writing-craft.md user override) is wired"
       }
     ]
   }
