@@ -1346,6 +1346,7 @@ async fn stage_advance(
         research_artifacts_dir: None,
         workspace_dir: None,
         world_kb_block,
+        world_id,
     };
 
     if let Some(mut request) =

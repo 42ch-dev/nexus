@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n                        job_id as \"job_id!\",\n                        creator_id as \"creator_id!\",\n                        workspace_id as \"workspace_id!\",\n                        work_entry_id as \"work_entry_id!\",\n                        world_id as \"world_id!\",\n                        status as \"status!\",\n                        error_text,\n                        created_at as \"created_at!\",\n                        started_at,\n                        finished_at\n                    FROM kb_extract_jobs\n                    WHERE job_id = ?",
+  "query": "SELECT\n            job_id as \"job_id!\",\n            creator_id as \"creator_id!\",\n            workspace_id as \"workspace_id!\",\n            work_entry_id as \"work_entry_id!\",\n            world_id as \"world_id!\",\n            status as \"status!\",\n            error_text,\n            created_at as \"created_at!\",\n            started_at,\n            finished_at,\n            source_kind,\n            source_locator,\n            profile_hint,\n            work_id\n        FROM kb_extract_jobs\n        WHERE creator_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1",
   "describe": {
     "columns": [
       {
@@ -52,6 +52,26 @@
         "name": "finished_at",
         "ordinal": 9,
         "type_info": "Text"
+      },
+      {
+        "name": "source_kind",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_locator",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "profile_hint",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "work_id",
+        "ordinal": 13,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -67,8 +87,12 @@
       true,
       false,
       true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "d462767dbfe6166746b1520bb6b2b17de8732e47fe774688e1af78e8f7c29c2c"
+  "hash": "90736a5cac509557c519b9f99e33fd115d0e542e5b88a19d37d71449fc7155ad"
 }

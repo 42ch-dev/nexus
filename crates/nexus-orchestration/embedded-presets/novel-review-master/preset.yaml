@@ -4,6 +4,17 @@
 # for human master decision. The user reviews each finding and chooses:
 # approve (→ resolved), reject (→ wont_fix), or defer.
 #
+# V1.40 P3 (T8): Added sync_world_kb state after decisions. When the Work
+# is World-bound (preset.input.world_id is set), this state invokes
+# kb.extract_work directly via a capability enter action. The capability
+# itself returns a no-op skip when world_id is empty/absent, so legacy V1.39
+# worldless Works pass through cleanly to done.
+#
+# NOTE: The original plan (T8) described a `schedule.enqueue_child` approach
+# with parent dependency, but the shipped design uses direct capability
+# invocation from the preset state machine instead. `build_child_kb_extract_schedule`
+# was removed as dead code per QC1/2 W-001 / W-007.
+#
 # This preset is interactive — it presents findings to the user and waits
 # for manual input. It does NOT auto-advance.
 #
@@ -12,10 +23,13 @@
 #   work_ref:       Human-readable short reference used as directory name.
 #   topic:          Novel topic or description.
 #   open_findings:  Serialized list of open findings (JSON) with target_executor=master.
+#   world_id:       (V1.40) Bound World ID. When present, enables kb-extract child.
+#   body_path:      (V1.40) Chapter body path for kb-extract artifact locator.
 #
-# State machine: present → await_decision → done
+# State machine: present → await_decision → sync_world_kb → done
 #   - present:        Display all open findings requiring master review with context.
 #   - await_decision: Wait for human to review and decide on each finding.
+#   - sync_world_kb:  (V1.40 P3) Enqueue child kb-extract if World-bound.
 #   - done:           Terminal; decisions written back via P1 findings API.
 #
 # Launch:
@@ -28,9 +42,9 @@
 
 preset:
   id: novel-review-master
-  version: 1
+  version: 2  # V1.40 P3: added sync_world_kb state
   kind: creator
-  description: "Surface open findings for human master review; interactive approval/reject/wont_fix decisions"
+  description: "Surface open findings for human master review; interactive approval/reject/wont_fix decisions; V1.40 syncs World KB after review"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
@@ -80,6 +94,22 @@ states:
             open_findings: "{{preset.input.open_findings}}"
     exit_when:
       kind: manual
+    next: sync_world_kb
+
+  - id: sync_world_kb
+    description: "V1.40 P3: invoke kb.extract_work for World-bound Works. Returns skip no-op for worldless (empty world_id)."
+    enter:
+      - kind: capability
+        name: kb.extract_work
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          work_id: "{{preset.input.work_id}}"
+          world_id: "{{preset.input.world_id}}"
+          profile_hint: "novel"
+          source_kind: "work_chapter"
+          source_locator: "{{preset.input.body_path}}"
+    exit_when:
+      kind: rule
     next: done
 
   - id: done
