@@ -181,6 +181,10 @@ pub struct PatchWorkRequest {
     /// V1.39 P4 T4: opt-in flag — when true the stale-findings watcher
     /// auto-enqueues `novel-review-master` for this Work past the timeout.
     pub auto_review_master_on_timeout: Option<bool>,
+    /// V1.39 §5.7: clear `auto_chain_interrupted` to resume auto-chain.
+    /// R-V139P0-W-C: also triggers a supervisor tick so the resumed Work
+    /// progresses immediately rather than waiting for the next cycle.
+    pub auto_chain_interrupted: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -481,6 +485,10 @@ async fn enrich_with_chapters(
     let work_id = &dto.work_id;
 
     // Populate chapter rows
+    // R-V139P5-N2 (deferred): no cap/pagination on list_chapters yet.
+    // Works with 100+ chapters would benefit from server-side pagination.
+    // Currently returns all rows; the CLI status command consumes the full list.
+    // A future slice should add `limit`/`offset` params to the DB query + API.
     match nexus_local_db::work_chapters::list_chapters(state.pool(), work_id).await {
         Ok(chapters) => {
             let chapter_values: Vec<serde_json::Value> = chapters
@@ -795,7 +803,7 @@ pub async fn patch_work(
         current_chapter: None,
         auto_chain_enabled: None,
         driver_schedule_id: None,
-        auto_chain_interrupted: None,
+        auto_chain_interrupted: req.auto_chain_interrupted,
         auto_review_master_on_timeout: req.auto_review_master_on_timeout,
     };
 
@@ -810,6 +818,21 @@ pub async fn patch_work(
                 message: e.to_string(),
             },
         })?;
+
+    // R-V139P0-W-C: trigger supervisor tick when auto_chain_interrupted
+    // transitions from true to false, so the resumed Work progresses
+    // immediately rather than waiting for the next tick cycle.
+    if req.auto_chain_interrupted == Some(false) {
+        if let Some(supervisor) = state.schedule_supervisor() {
+            if let Err(e) = supervisor.tick().await {
+                tracing::warn!(
+                    work_id = %work_id,
+                    error = %e,
+                    "resume: supervisor tick failed (non-fatal)"
+                );
+            }
+        }
+    }
 
     Ok(Json(WorkApiDto::from(updated)))
 }
@@ -1319,6 +1342,7 @@ mod tests_fix_d {
             stage_status: None,
             force: None,
             auto_review_master_on_timeout: None,
+            auto_chain_interrupted: None,
         };
 
         let result = patch_work(State(state.clone()), Path(work_id.clone()), Json(patch)).await;

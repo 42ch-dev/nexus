@@ -62,7 +62,9 @@ pub use validation::{
 ///
 /// Location: `crates/nexus-orchestration/embedded-presets/`
 /// Structure per §7.1: `<preset-id>/preset.yaml` + `prompts/*.md`
-static EMBEDDED_PRESETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/embedded-presets");
+/// QC1 W-2: pub(crate) so the `preset_version_for_id` sync test in `auto_chain`
+/// can read preset.yaml contents.
+pub(crate) static EMBEDDED_PRESETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/embedded-presets");
 
 /// Load an embedded preset by ID.
 ///
