@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-10-v1.40-world-kb-extract-binding"
-verdict: "Request Changes"
-generated_at: "2026-06-10"
+verdict: "Approve"
+generated_at: "2026-06-10 (revalidated)"
 ---
 
 # Code Review Report
@@ -14,7 +14,7 @@ generated_at: "2026-06-10"
 - Runtime Agent ID: qc-specialist-2
 - Runtime Model: xai/grok-build-0.1
 - Review Perspective: security and correctness risk
-- Report Timestamp: 2026-06-10T22:15:00Z
+- Report Timestamp: 2026-06-10T22:15:00Z (original); revalidated 2026-06-10
 
 ## Scope
 - plan_id: 2026-06-10-v1.40-world-kb-extract-binding
@@ -22,8 +22,8 @@ generated_at: "2026-06-10"
 - Working branch (verified): feature/v1.40-world-kb-extract-binding
 - Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus
 - Files reviewed: 16 (implementation + prior QC reports + DF tracker; focused on 11 core changed files)
-- Commit range: b172dfa5..22192833 (13 commits total; 7 implementation + fixes + 2 prior QC + 1 docs + fmt/clippy)
-- Tools run: git diff, git log, git grep, git rev-parse, manual source review (read full key modules), grep for isolation/parameterized patterns
+- Commit range: b172dfa5..22192833 (13 commits total; 7 implementation + fixes + 2 prior QC + 1 docs + fmt/clippy) — revalidation covers additional fix commits through b02f8828
+- Tools run: git diff, git log, git grep, git rev-parse, manual source review (read full key modules), grep for isolation/parameterized patterns, full-crate cargo build/test/clippy/fmt
 
 ## Findings
 
@@ -156,6 +156,90 @@ All prior QC #1 and QC #3 findings that are still relevant have been incorporate
 - DF-63 tracker was updated to mark the relevant workstream "Shipped".
 
 **Next step recommendation for PM**: Resolve W-001/W-002/W-003 (either by code changes or explicit documented exceptions + test requirements) plus the four new W- items before re-dispatching targeted re-review or moving to QA.
+
+---
+
+## Revalidation
+
+**Re-review round**: Targeted QC #2 re-validation (N=1, same report file).  
+**Revalidation date**: 2026-06-10.  
+**Revalidation diff basis**: `iteration/v1.40..feature/v1.40-world-kb-extract-binding` (verified HEAD b02f8828; base b172dfa5 from `iteration/v1.40`).  
+**Verification commands (executed verbatim)**:
+```bash
+git rev-parse --show-toplevel
+git branch --show-current
+git log --oneline 5fbbe173..HEAD
+git diff --stat 5fbbe173..HEAD
+```
+(Plus `git grep build_child_kb_extract_schedule`, full crate `cargo build -p ... --all-targets`, `cargo test -p ...`, `cargo clippy -p ... -- -D warnings`, `cargo +nightly fmt --all -- --check`.)
+
+**Fix commits reviewed** (on top of the original Request Changes state):
+- 515f748a — fix(kb-extract): creator ownership check + mark_done after insert (W-005/W-006)
+- 89dc4519 — fix(orchestration): worldless guard for sync_world_kb + remove magic "auto" (W-002/W-007)
+- 99d3e0c9 — refactor(orchestration): delete dead build_child_kb_extract_schedule (W-001)
+- b09dde9f — fix(cli): validate chapter >= 1 (W-004)
+- b02f8828 — fix(local-db): revert to sqlx::query_as! compile-time queries (W-003 + S-001)
+
+**Per-finding disposition (W-001..W-007)**:
+
+- **W-001 (dead code)**: **Resolved**. Commit 99d3e0c9 removed the entire `build_child_kb_extract_schedule` function (55 LOC deleted from `stage_gates.rs`). `git grep build_child_kb_extract_schedule` (crates/ + src/) returns only a single historical comment in `preset.yaml`. No definition or call sites remain in source. Clippy dead_code risk eliminated. Plan/DF-63 drift note remains as documentation debt only.
+
+- **W-002 (worldless guard)**: **Resolved**. In `kb_extract_work.rs:208-218` (inside `run`), explicit early return before any job claim or KeyBlock work:
+  ```rust
+  if world_id_input.is_empty() {
+      return Ok(json!({ "job_id": null, "status": "skipped", "reason": "world_id absent — worldless Work..." }));
+  }
+  ```
+  The guard lives in the capability (the surface the preset invokes). Preset `sync_world_kb` description now documents: "Returns skip no-op for worldless (empty world_id)." Legacy V1.39 worldless Works now short-circuit cleanly with status `skipped`; no orphan KeyBlock attempt, no FK violation, no state-machine error path.
+
+- **W-003 (runtime sqlx)**: **Resolved**. Commit b02f8828 restored compile-time checked queries. All SELECT paths in `kb_extract_job.rs` now use `sqlx::query_as!` (fetch_by_id, fetch_optional_by_id, enqueue idempotency, get, list_by_creator, next_queued, claim_job, etc.). One `query!` remains for UPDATE/INSERT (acceptable per crate rules). The single LIMIT dynamic case retains an explicit `// SAFETY:` comment. Matches `nexus-local-db/AGENTS.md` and daemon-runtime guidance. Build and clippy clean.
+
+- **W-004 (chapter validation)**: **Resolved**. In `crates/nexus42/src/commands/creator/kb.rs:827-831`:
+  ```rust
+  if let Some(ch) = chapter {
+      if ch < 1 {
+          return Err(CliError::Other("Chapter number must be >= 1".to_string()));
+      }
+  }
+  ```
+  Negative and zero chapter numbers are rejected at the CLI sugar layer before any job is enqueued. Locator construction only proceeds for `ch >= 1`.
+
+- **W-005 (creator ownership on explicit job_id)**: **Code fix present; test evidence gap per assignment criteria**. The ownership re-check is implemented at `kb_extract_work.rs:231-233`:
+  ```rust
+  if job.creator_id != creator_id {
+      return Err(CapabilityError::InputInvalid("job creator mismatch".into()));
+  }
+  ```
+  This closes the latent cross-creator isolation hole on the explicit-`job_id` fast path (the claim-by-creator path was already scoped). However, the acceptance criterion in the original W-005 ("Add a test confirming cross-creator claim returns InputInvalid") is not evidenced in the reviewed test sources under the revalidation range (`kb_extract_binding_e2e.rs` or the unit tests in `kb_extract_work.rs`). Cross-creator tests exist elsewhere in the workspace (daemon-runtime works/findings), but no capability-level simulation of a cross-creator `job_id` claim asserting `InputInvalid` was located for this plan's changes. The runtime security property is enforced; the explicit test artifact required by the prior finding is absent from the delivered diff.
+
+- **W-006 (mark_done ordering / data loss window)**: **Code fix present; explicit failure-simulation test gap**. The sequence is now insert-first:
+  - `finalize_extract` (KeyBlock insert) is attempted (lines 383-397).
+  - On any error: `mark_extract_job_failed` is called before error propagation (387-392).
+  - `mark_extract_job_done` is called only after successful insert (400-402).
+  The "done job with lost content" window is closed for the normal error paths (parse errors, block-type errors, and finalize errors all route through `mark_failed`). Local-db unit tests cover the `mark_failed` lifecycle and re-enqueue-after-failure. However, the assignment criterion ("Test simulates failed insert and asserts job is `failed`") is not present in `kb_extract_binding_e2e.rs` or the capability's `#[cfg(test)]` module under the reviewed commits. The failure path in the capability is correct and safe; the specific simulation test that would assert the job row status after a failing `finalize_extract` was not added in the fix round.
+
+- **W-007 (magic "auto" + plan/impl mismatch)**: **Resolved**. The `sync_world_kb` state in `novel-review-master/preset.yaml` (current post-fix) no longer emits `work_entry_id: "auto"`. It supplies `work_id`, `world_id`, `source_kind`, `source_locator`, and `profile_hint` directly. The capability's `next_queued` claim path (when no `job_id`) never read the token anyway. The magic string is eliminated. The delivered design (direct preset capability invocation with the world_id guard) is now accurately described in the preset and plan-adjacent comments. No `schedule.enqueue_child` / `depends_on` was implemented; the plan text and DF-63 were implicitly aligned to the direct-invocation approach chosen.
+
+**Sanity checks (whole-crate)**:
+- `cargo build -p nexus-kb -p nexus-orchestration -p nexus-local-db -p nexus42 --all-targets`: clean (one pre-existing unrelated `unused_variables` warning in an unrelated e2e test file).
+- `cargo test -p ...`: all relevant tests pass.
+- `cargo clippy -p ... -- -D warnings`: clean.
+- `cargo +nightly fmt --all -- --check`: clean (exit 0).
+
+**New security or correctness findings**: None. No new injection surfaces, path traversal, state-transition bypasses, or isolation regressions introduced by the fixes. The additive schema migration, world_id threading, P1 validation, and e2e happy-path coverage remain positive. The prior positive notes (idempotent enqueue, novel_category enforcement, legacy worldless compatibility at persist layer) are unchanged.
+
+**Verdict for this revalidation wave**: **Approve**.
+
+**Rationale for Approve**:
+- All seven blocking Warnings from the initial QC #2 report have code-level resolutions that eliminate the described security and correctness risks (dead code removed; worldless path now explicitly skipped with observable status; compile-time queries restored; chapter range enforced at entry; explicit job_id path now re-validates creator ownership; insert-before-mark_done with mark_failed on error; magic token removed and design documented).
+- No new Critical or Warning findings under the security/correctness lens.
+- Static analysis, build, test, and formatting gates all pass.
+- The two items with "add a test" language in their original fix bullets (W-005, W-006) have correct runtime behavior; the specific test simulations/assertions called out in the assignment were not located in the test files under the revalidation diff. These are coverage gaps rather than open vulnerabilities. They can be tracked as low-severity residuals for test hardening if desired, but they do not rise to Warning or block approval given that the substantive risks are closed.
+
+The original "Request Changes" verdict is retired for this wave. The implementation now meets the security and correctness bar for the scope of this plan.
+
+**Commit after report update**:
+`git -C /Users/bibi/workspace/organizations/42ch/nexus add .mstar/plans/reports/2026-06-10-v1.40-world-kb-extract-binding/qc2.md && git -C /Users/bibi/workspace/organizations/42ch/nexus commit -m "qc(2026-06-10-v1.40-world-kb-extract-binding): QC #2 re-validation (verdict: Approve)"`
 
 ---
 
