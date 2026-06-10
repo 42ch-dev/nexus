@@ -2,11 +2,11 @@
 report_kind: qa-verification
 plan_id: 2026-06-10-v1.41-hygiene
 verdict: Request Changes
-generated_at: 2026-06-11T01:42:17+08:00
-review_range: "merge-base: 55689706 → tip: da21b70d"
+generated_at: 2026-06-11T01:48:16+08:00
+review_range: "merge-base: 55689706 → tip: 86b6009b"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
-mode: full
+mode: focused-re-verification
 ---
 
 # QA Verification Report — V1.41 P-last (Aggressive residual convergence)
@@ -269,3 +269,73 @@ No tolerated flakes were encountered during this QA run. The known pre-existing 
 **Request Changes**
 
 **Rationale**: Runtime/static verification is clean and behavior regression checks pass, but AC1 fails in the machine-state residual register: in-scope V1.33/V1.40 rows and the fix-wave P-last rows lack the required lifecycle/closure fields, and three P-last residual decisions are non-canonical.
+
+## Re-verification (PM-side status.json closeout delta: da21b70d..86b6009b)
+
+**Reviewer**: @qa-engineer
+**Re-verification timestamp**: 2026-06-11T01:48:16+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: 86b6009b` (focus delta `da21b70d..86b6009b`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: targeted re-verification of 5 items plus CI sanity (focused; no Rust changed)
+
+### Disposition
+
+| # | Blocker (from initial QA Request Changes) | Status | Evidence |
+|---|-------------------------------------------|--------|----------|
+| 1 | AC1 lifecycle gap (V1.33/V1.40 source rows lacked lifecycle/closure fields) | resolved | `in-scope still open in status.json: []`; archive audit: `Total closed archived: 41`, `Missing fields: []` |
+| 2 | R-V141HYG-01..03 used non-canonical `accept-with-fix` + lacked closure fields | resolved | `in-scope still open in status.json: []`; archive audit includes V1.41 hygiene rows with no missing `lifecycle`, `closed_at`, `closure_note`, or `archived_at` fields |
+| 3 | Canonical `decision` enum in open residuals | unresolved | Non-canonical decisions remain in `.mstar/status.json` outside the 35 closed rows: V1.39 rows still use `resolved`/`waived` values; see full output below |
+| 4 | R-V140P4-W2 preservation | resolved | Preserved open under `2026-06-10-v1.40-hygiene` with `decision: risk-accepted` and no `lifecycle` |
+| 5 | `tech_debt_summary` rollup | resolved | `updated_at: 2026-06-11T13:00:00+08:00`; `total_open: 91`; `by_target: {'v1.41': 31, 'backlog': 60}` |
+
+### Lifecycle + archive evidence
+
+```text
+$ python3 -c "... in_scope residual audit ..."
+in-scope still open in status.json: []
+
+$ python3 -c "... archived residual closure field audit ..."
+Total closed archived: 41
+Missing fields: []
+```
+
+### Canonical decision enum
+
+```text
+$ python3 -c "... canonical decision audit ..."
+Non-canonical decision: [('2026-06-09-v1.39-fl-e-auto-chain-engine', 'R-V139P0-W-B', 'resolved'), ('2026-06-09-v1.39-fl-e-auto-chain-engine', 'R-V139P0-W-C', 'resolved'), ('2026-06-09-v1.39-fl-e-auto-chain-engine', 'R-V139P0-W-F', 'resolved'), ('2026-06-09-v1.39-research-stage-wiring', 'R-V139P5-W-3', 'resolved'), ('2026-06-09-v1.39-research-stage-wiring', 'R-V139P5-W-4', 'resolved'), ('2026-06-09-v1.39-research-stage-wiring', 'R-V139P5-W-5', 'waived'), ('2026-06-09-v1.39-research-stage-wiring', 'R-V139P5-S3', 'waived'), ('2026-06-09-v1.39-research-stage-wiring', 'R-V139P5-S4', 'resolved'), ('2026-06-09-v1.39-research-stage-wiring', 'R-V139P0-SecFix', 'resolved'), ('2026-06-09-v1.39-v138-hardening', 'R-V139P5-N1', 'waived'), ('2026-06-09-v1.39-v138-hardening', 'R-V139P5-N2', 'waived'), ('2026-06-09-v1.39-v138-hardening', 'R-V139P5-N3', 'waived'), ('2026-06-09-v1.39-findings-and-review-routing', 'R-V139P1-W-1', 'resolved'), ('2026-06-09-v1.39-findings-and-review-routing', 'R-V139P1-W-2', 'resolved'), ('2026-06-09-v1.39-findings-and-review-routing', 'R-V139P1-W-3', 'resolved'), ('2026-06-09-v1.39-findings-and-review-routing', 'R-V139P1-W-4', 'resolved'), ('2026-06-09-v1.39-findings-and-review-routing', 'R-V139P1-W-5', 'waived'), ('2026-06-09-v1.39-findings-and-review-routing', 'R-V139P1-W-6', 'resolved')]
+```
+
+### R-V140P4-W2 out-of-scope preservation
+
+```text
+$ python3 -c "... R-V140P4-W2 preservation audit ..."
+R-V140P4-W2 plan: 2026-06-10-v1.40-hygiene decision: risk-accepted lifecycle: (open)
+```
+
+### tech_debt_summary rollup
+
+```text
+$ python3 -c "... tech_debt_summary audit ..."
+updated_at: 2026-06-11T13:00:00+08:00
+total_open: 91
+by_severity: {'critical': 0, 'high': 1, 'medium': 10, 'low': 64, 'nit': 16}
+by_target: {'v1.41': 31, 'backlog': 60}
+```
+
+### CI sanity
+
+```text
+$ cargo clippy --all -- -D warnings 2>&1 | tail -5
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+
+$ cargo +nightly fmt --all -- --check 2>&1 | tail -5
+(no output)
+```
+
+### Final verdict
+
+**Request Changes**
+
+**Rationale**: The PM closeout resolved the originally identified 35 closed residual lifecycle/archive gaps and preserved `R-V140P4-W2`, and CI sanity is clean. However, the assignment's canonical decision audit still fails because open V1.39 residual rows retain non-canonical `decision` values (`resolved` / `waived`) instead of the allowed `defer`, `accept`, or `risk-accepted` enum.
