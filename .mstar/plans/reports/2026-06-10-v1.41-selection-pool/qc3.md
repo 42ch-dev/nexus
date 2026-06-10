@@ -4,9 +4,9 @@ reviewer: "@qc-specialist-3"
 reviewer_index: 3
 focus: performance-reliability
 plan_id: 2026-06-10-v1.41-selection-pool
-verdict: Request Changes
-generated_at: 2026-06-10T22:59:00+08:00
-review_range: "merge-base: 55689706 → tip: 57f573ad"
+verdict: Approve
+generated_at: 2026-06-10T23:59:43+08:00
+review_range: "merge-base: 55689706 → tip: 97470073"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 files_reviewed: 12
@@ -14,7 +14,7 @@ tools_run:
   - cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings
   - cargo +nightly fmt --all -- --check
   - cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db
-  - cargo test -p nexus-daemon-runtime --test master_decision_timeout repeated_sweeps_remain_stable (repeated 3x)
+  - cargo test -p nexus-daemon-runtime --test selection_pool
 ---
 
 # Code Review Report — V1.41 P1 (qc3)
@@ -125,3 +125,73 @@ tools_run:
 **Verdict**: Request Changes
 
 Rationale: there are unresolved Warning-level findings that affect production reliability (CWD-relative MD scaffold, non-atomic inspiration promotion, best-effort pool completion update) and a flaky test that fails CI intermittently. Once W-1 through W-4 are addressed (or explicitly accepted as tracked residuals with PM sign-off), this review can move to Approve.
+
+## Revalidation (fix-wave delta: f5dd727f..97470073)
+
+**Reviewer**: @qc-specialist-3 (qc-specialist-3, reviewer_index: 3)
+**Re-review timestamp**: 2026-06-10T23:59:43+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: 97470073` (focus delta `f5dd727f..97470073`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: cargo clippy, cargo +nightly fmt --check, cargo test, cargo test --test selection_pool, manual review of fix-wave diff
+
+### Disposition
+
+| Finding | Original severity | New severity | Disposition | Evidence |
+|---------|-------------------|--------------|-------------|----------|
+| F-001 (CWD-relative MD scaffold) | warning | resolved | commits 41b1336e + 00394507 (Pool/Ideas/ + nexus-home-layout helper + reject empty) | `crates/nexus-daemon-runtime/src/api/handlers/works.rs:1448-1453` constructs workspace_dir from `state.nexus_home()` (no longer `workspace_path().unwrap_or_default()`); `crates/nexus-local-db/src/inspiration_items.rs:179` writes to `Pool/Ideas/{slug}.md`; test `test_inspiration_add_creates_md_and_db_row_atomically` passes |
+| F-002 (non-atomic promote) | warning | resolved | commit d7ed04de (inspiration_promote_atomic) | `crates/nexus-local-db/src/inspiration_items.rs:265-379` wraps Work insert + pool promote + inspiration update in single tx (`BEGIN` → `COMMIT` at :371); handler at `works.rs:1609` calls it; test `test_promote_inspiration_atomicity_on_step3_failure` passes |
+| F-003 (best-effort pool update) | warning | resolved | commit 8cc1eaba (tracing::error + lock clear) | `crates/nexus-orchestration/src/auto_chain.rs:287-308` logs `tracing::error!` and clears `completion_locked_at` via `WorkPatch` on pool update failure so supervisor retries |
+| F-004 (pre-existing flake) | warning | out-of-scope | confirmed pre-existing R-V141P1-18; V1.41 P-last target | No changes in fix-wave delta; qc-consolidated.md |
+| F-005 (sync I/O in async) | warning | resolved | commit e02b99f5 (spawn_blocking for MD writes) | `crates/nexus-local-db/src/inspiration_items.rs:187` wraps `std::fs::create_dir_all`, `write`, and `rename` in `tokio::task::spawn_blocking`; rollback cleanup at :220 also uses `spawn_blocking` |
+| F-006 (covering index) | warning | resolved | migration 202606100004 + index asserts | `crates/nexus-local-db/migrations/202606100004_v141_pool_inspiration_indexes.sql` creates `novel_pool_entries_by_creator_status` (creator_id, status, updated_at DESC) and `inspiration_items_by_creator_status` (creator_id, status, created_at DESC); note: no explicit runtime test asserts index presence, but migration is committed and list queries pass |
+
+### Suggestions (forward-looking; deferred to V1.42 per qc-consolidated.md residuals)
+
+| ID | Status | Note |
+|----|--------|------|
+| S-1 (list buffering CLI) | resolved | closed by 45cc8d22 (pagination + count) |
+| S-2 (slug collision auto-suffix) | defer | R-V141P1-13 (V1.42 UX) |
+| S-3 (observability tracing) | defer | R-V141P1-15 (V1.41 P-last) |
+| S-4 (CLI help polish) | defer | R-V141P1-14 (V1.42) |
+
+### New findings (if any)
+
+None.
+
+### Tools / verification tails
+
+```
+$ cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
+
+$ cargo +nightly fmt --all -- --check
+(no output)
+
+$ cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db
+... (all passed; 47 + 15 + 2 + 1 + 4 + 2 = 71 tests total)
+
+$ cargo test -p nexus-daemon-runtime --test selection_pool
+running 13 tests
+test test_archive_inspiration_rejects_cross_creator ... ok
+test test_pool_archive_marks_archived ... ok
+test test_completion_demotes_active_pool_row_when_completed ... ok
+test test_archive_pool_rejects_cross_creator ... ok
+test test_pool_list_returns_all_statuses ... ok
+test test_completion_updates_pool_row ... ok
+test test_pool_promote_demotes_prior_active ... ok
+test test_pool_promote_idempotent_on_same_target ... ok
+test test_inspiration_promote_creates_work_and_pool_row ... ok
+test test_inspiration_add_rejects_existing_path ... ok
+test test_inspiration_add_creates_md_and_db_row_atomically ... ok
+test test_promote_inspiration_atomicity_on_step3_failure ... ok
+test test_promote_inspiration_rejects_cross_creator ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+### Updated verdict
+
+Approve
+
+**Rationale**: All 5 actionable Warning findings from the original review are resolved in the fix-wave delta. F-004 remains out-of-scope per qc-consolidated.md. No new Critical or Warning items appear. Clippy, nightly fmt, and all tests pass (including 13 selection_pool integration tests).
