@@ -6,6 +6,8 @@
 //! - `GET    /v1/local/works/{work_id}` — Get one Work
 //! - `PATCH  /v1/local/works/{work_id}` — Partial update
 //! - `POST   /v1/local/works/{work_id}/inspiration` — Append inspiration log entry
+//! - `POST   /v1/local/works/pool` — Set active pool entry (DF-60 §5.3)
+//! - `POST   /v1/local/works/{work_id}/completion-lock/release` — Release completion-lock (DF-60 §3.1)
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -149,6 +151,11 @@ pub struct CreateWorkRequest {
     /// If provided and a Work with the same creator + `client_request_id` exists,
     /// return the existing `work_id` (idempotent).
     pub client_request_id: Option<String>,
+    /// DF-60 §5.2: Parent Work ID for lineage (new Work created from completed Work).
+    pub lineage_from_work_id: Option<String>,
+    /// DF-60 §5.3: If true, after creation, set this Work as pool `active`.
+    #[serde(default)]
+    pub set_pool_active: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -216,6 +223,32 @@ pub struct AppendInspirationRequest {
 pub struct AppendInspirationResponse {
     pub work_id: String,
     pub inspiration_count: usize,
+}
+
+// ─── Pool request / response types (DF-60 §5.3) ────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct SetPoolActiveRequest {
+    pub action: String,
+    pub work_id: String,
+    pub creator_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PoolEntryDto {
+    pub entry_id: String,
+    pub creator_id: String,
+    pub work_id: String,
+    pub status: String,
+    pub promoted_at: String,
+    pub note: Option<String>,
+}
+
+// ─── Completion-lock release types (DF-60 §3.1) ─────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ReleaseCompletionLockRequest {
+    pub reason: String,
 }
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
@@ -308,7 +341,7 @@ pub async fn create_work(
         runtime_lock_acquired_at: None,
         completion_locked_at: None,
         novel_completion_status: None,
-        lineage_from_work_id: None,
+        lineage_from_work_id: req.lineage_from_work_id,
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -330,13 +363,26 @@ pub async fn create_work(
             }),
         )),
         // New Work created (no client_request_id)
-        Err(new) => Ok((
-            StatusCode::CREATED,
-            Json(CreateWorkResponse {
-                work_id: new.work_id,
-                status: new.status,
-            }),
-        )),
+        Err(new) => {
+            // DF-60 §5.3: if set_pool_active was requested, promote in pool
+            if req.set_pool_active == Some(true) {
+                if let Err(e) = set_pool_active_inner(state.pool(), &creator_id, &new.work_id).await
+                {
+                    tracing::warn!(
+                        work_id = %new.work_id,
+                        error = %e,
+                        "set_pool_active after create failed (non-fatal)"
+                    );
+                }
+            }
+            Ok((
+                StatusCode::CREATED,
+                Json(CreateWorkResponse {
+                    work_id: new.work_id,
+                    status: new.status,
+                }),
+            ))
+        }
     }
 }
 
@@ -960,6 +1006,126 @@ pub async fn append_inspiration(
     }))
 }
 
+// ─── Pool handler (DF-60 §5.3) ──────────────────────────────────────────────
+
+/// `POST /v1/local/works/pool` — Set the active pool entry for the creator.
+///
+/// Transactional: demotes any prior `active` row → `queued`, promotes target → `active`.
+pub async fn set_pool_active(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<SetPoolActiveRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let creator_id = req
+        .creator_id
+        .or_else(|| read_active_creator_id(state.nexus_home()))
+        .ok_or(NexusApiError::AuthRequired)?;
+
+    if req.action != "set_pool_active" {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_ACTION".to_string(),
+            message: format!(
+                "unsupported action '{}'; expected 'set_pool_active'",
+                req.action
+            ),
+        });
+    }
+
+    // Verify the work exists and belongs to this creator
+    let _work = works::get_work(state.pool(), &creator_id, &req.work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {}", req.work_id)))?;
+
+    let entry = set_pool_active_inner(state.pool(), &creator_id, &req.work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(entry))
+}
+
+// ─── Completion-lock release handler (DF-60 §3.1) ───────────────────────────
+
+/// `POST /v1/local/works/{work_id}/completion-lock/release`
+///
+/// Releases the completion-lock for a Work:
+/// 1. Clear DB `completion_locked_at` + set `novel_completion_status = 'reopened'`.
+/// 2. Delete `.completion-lock.json` (best-effort; DB is SSOT).
+pub async fn release_completion_lock_handler(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<ReleaseCompletionLockRequest>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Step 1: Look up the Work record
+    let work = works::get_work(state.pool(), &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    // Verify the work is actually completion-locked
+    if work.completion_locked_at.is_none() {
+        return Err(NexusApiError::BadRequest {
+            code: "NOT_LOCKED".to_string(),
+            message: format!("work {work_id} is not completion-locked"),
+        });
+    }
+
+    // Step 2: Clear DB columns (SSOT)
+    let now = chrono::Utc::now().to_rfc3339();
+    let patch = WorkPatch {
+        completion_locked_at: Some(None),
+        novel_completion_status: Some(Some("reopened".to_string())),
+        ..Default::default()
+    };
+
+    let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    // Step 3: Delete on-disk lock file (best-effort; DB is SSOT)
+    if let Some(ref work_ref) = updated.work_ref {
+        let workspace_path = state.workspace_path().unwrap_or_default();
+        if !workspace_path.is_empty() {
+            let workspace_dir = std::path::Path::new(&workspace_path);
+            if let Err(e) = nexus_orchestration::completion_lock::release_completion_lock(
+                workspace_dir,
+                work_ref,
+            ) {
+                tracing::warn!(
+                    work_id = %work_id,
+                    work_ref = %work_ref,
+                    error = %e,
+                    "completion-lock file deletion failed (non-fatal; DB is SSOT)"
+                );
+            }
+        }
+    }
+
+    tracing::info!(
+        target: "novel.completion",
+        work_id = %work_id,
+        creator_id = %creator_id,
+        reason = %req.reason,
+        "completion-lock released"
+    );
+
+    Ok(Json(WorkApiDto::from(updated)))
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Validate `stage_status` transitions to terminal states (R-CURSOR-PR42-03).
@@ -998,6 +1164,69 @@ fn check_stage_status_transition(
     }
 
     Ok(())
+}
+
+/// Shared helper: transactional set-pool-active (DF-60 §5.3).
+///
+/// Demotes any prior `active` row → `queued`, then upserts target → `active`.
+async fn set_pool_active_inner(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+) -> Result<PoolEntryDto, nexus_local_db::LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let entry_id = format!("pool_{}", Uuid::new_v4());
+
+    // Use a transaction for atomicity
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(nexus_local_db::LocalDbError::from)?;
+
+    // Step 1: Demote prior active → queued
+    // SAFETY: dynamic SQL for multi-statement transaction; compile-time macro not applicable.
+    sqlx::query(
+        "UPDATE novel_pool_entries SET status = 'queued' WHERE creator_id = ? AND status = 'active'"
+    )
+    .bind(creator_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::warn!(error = %e, "set_pool_active: demote prior active failed");
+        nexus_local_db::LocalDbError::from(e)
+    })?;
+
+    // Step 2: Upsert target entry → active
+    // SAFETY: dynamic SQL for upsert; compile-time macro not applicable.
+    sqlx::query(
+        "INSERT INTO novel_pool_entries (entry_id, creator_id, work_id, status, promoted_at, note) \
+         VALUES (?, ?, ?, 'active', ?, NULL) \
+         ON CONFLICT(creator_id, work_id) DO UPDATE SET \
+           status = 'active', promoted_at = excluded.promoted_at, note = NULL"
+    )
+    .bind(&entry_id)
+    .bind(creator_id)
+    .bind(work_id)
+    .bind(&now)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::warn!(error = %e, "set_pool_active: upsert target failed");
+        nexus_local_db::LocalDbError::from(e)
+    })?;
+
+    tx.commit()
+        .await
+        .map_err(nexus_local_db::LocalDbError::from)?;
+
+    Ok(PoolEntryDto {
+        entry_id,
+        creator_id: creator_id.to_string(),
+        work_id: work_id.to_string(),
+        status: "active".to_string(),
+        promoted_at: now,
+        note: None,
+    })
 }
 
 /// Read active `creator_id` from CLI config.
@@ -1257,6 +1486,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -1300,6 +1531,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -1357,6 +1590,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -1391,6 +1626,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let (_, resp) = create_work(State(state.clone()), Json(req))
@@ -1471,6 +1708,8 @@ mod tests_fix_d {
                 story_ref: None,
                 primary_preset_id: None,
                 client_request_id: None,
+                lineage_from_work_id: None,
+                set_pool_active: None,
             };
 
             let result = create_work(State(state.clone()), Json(req)).await;

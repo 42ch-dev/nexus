@@ -57,6 +57,8 @@ async fn create_and_patch_work(
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, create_resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),

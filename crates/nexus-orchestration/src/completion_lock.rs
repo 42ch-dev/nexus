@@ -2,20 +2,38 @@
 //!
 //! The lock file lives at `Works/<work_ref>/.completion-lock.json`.
 //! Operations use atomic tmp+rename to avoid partial writes.
+//!
+//! # Source-of-truth (SSOT) declaration
+//!
+//! **DB column `works.completion_locked_at` is the authoritative lock state.**
+//! The `.completion-lock.json` file is a derived artifact for cross-tool
+//! observation. If the file exists but the DB column is NULL, the supervisor
+//! treats the work as unlocked. If the file is missing but the DB column is
+//! set, the supervisor treats the work as locked.
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Current schema version for the completion-lock file.
+const CURRENT_SCHEMA_VERSION: u32 = 1;
+
 /// Completion-lock payload written to disk.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompletionLock {
+    /// Schema version for forward-compatibility. Defaults to 1.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     /// The Work ID this lock protects.
     pub work_id: String,
     /// ISO-8601 timestamp when the lock was applied.
     pub locked_at: String,
     /// Reason for the lock (currently always `"completion"`).
     pub reason: String,
+}
+
+const fn default_schema_version() -> u32 {
+    CURRENT_SCHEMA_VERSION
 }
 
 /// File name used inside the Work directory.
@@ -79,17 +97,43 @@ pub fn read_completion_lock(
     }
 
     let data = std::fs::read_to_string(&path)?;
-    let lock: CompletionLock = serde_json::from_str(&data).map_err(|e| {
+    let mut lock: CompletionLock = serde_json::from_str(&data).map_err(|e| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("invalid completion-lock JSON: {e}"),
         )
     })?;
 
+    // Backward-compat: missing schema_version treated as 1 (via serde default).
+    // Forward-compat: reject unknown future versions.
+    if lock.schema_version > CURRENT_SCHEMA_VERSION {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "completion-lock schema_version {} is newer than supported {}; \
+                 upgrade the CLI to handle this lock file",
+                lock.schema_version, CURRENT_SCHEMA_VERSION
+            ),
+        ));
+    }
+
+    // Normalize missing schema_version (pre-V1.41 lock files) to 1.
+    if lock.schema_version == 0 {
+        lock.schema_version = 1;
+    }
+
     Ok(Some(lock))
 }
 
 /// Remove the completion-lock file.
+///
+/// # SSOT declaration
+///
+/// **DB column `works.completion_locked_at` is the authoritative lock state.**
+/// This function removes the on-disk artifact only. The caller is responsible
+/// for clearing the DB column in a coordinated operation. If the file deletion
+/// fails after the DB column is cleared, the stale file is harmless — the
+/// supervisor gates on the DB column, not the file.
 ///
 /// # Errors
 ///
@@ -125,6 +169,7 @@ mod tests {
         std::fs::create_dir_all(&work_dir).unwrap();
 
         let lock = CompletionLock {
+            schema_version: 1,
             work_id: "wrk_001".to_string(),
             locked_at: "2026-06-10T12:00:00Z".to_string(),
             reason: "completion".to_string(),
@@ -135,6 +180,46 @@ mod tests {
             .unwrap()
             .expect("lock should exist");
         assert_eq!(read, lock);
+    }
+
+    #[test]
+    fn read_missing_schema_version_treated_as_v1() {
+        let dir = TempDir::new().unwrap();
+        let ws = dir.path();
+        let work_dir = ws.join("Works").join("test-novel");
+        std::fs::create_dir_all(&work_dir).unwrap();
+
+        // Write a lock file without schema_version (pre-V1.41 format)
+        let legacy_json =
+            r#"{"work_id":"wrk_old","locked_at":"2026-06-10T10:00:00Z","reason":"completion"}"#;
+        let lock_path = completion_lock_path(ws, "test-novel");
+        std::fs::write(&lock_path, legacy_json).unwrap();
+
+        let lock = read_completion_lock(ws, "test-novel")
+            .unwrap()
+            .expect("lock should parse");
+        assert_eq!(lock.schema_version, 1);
+        assert_eq!(lock.work_id, "wrk_old");
+    }
+
+    #[test]
+    fn read_future_schema_version_returns_error() {
+        let dir = TempDir::new().unwrap();
+        let ws = dir.path();
+        let work_dir = ws.join("Works").join("test-novel");
+        std::fs::create_dir_all(&work_dir).unwrap();
+
+        let future_json = r#"{"schema_version":99,"work_id":"wrk_future","locked_at":"2030-01-01T00:00:00Z","reason":"completion"}"#;
+        let lock_path = completion_lock_path(ws, "test-novel");
+        std::fs::write(&lock_path, future_json).unwrap();
+
+        let result = read_completion_lock(ws, "test-novel");
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("schema_version 99"),
+            "should mention future version: {err_msg}"
+        );
     }
 
     #[test]
@@ -152,6 +237,7 @@ mod tests {
         std::fs::create_dir_all(&work_dir).unwrap();
 
         let lock = CompletionLock {
+            schema_version: 1,
             work_id: "wrk_001".to_string(),
             locked_at: "2026-06-10T12:00:00Z".to_string(),
             reason: "completion".to_string(),

@@ -249,6 +249,8 @@ async fn handler_get_work_returns_record() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (status, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -318,6 +320,8 @@ async fn handler_patch_work_updates_record() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -395,6 +399,8 @@ async fn handler_append_inspiration_returns_count() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -492,6 +498,8 @@ async fn get_work_response_includes_stage_fields() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -520,6 +528,8 @@ async fn patch_work_updates_stage_fields() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -670,6 +680,8 @@ async fn create_work_response_has_parsed_json_fields() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -715,6 +727,8 @@ async fn append_inspiration_response_has_parsed_arrays() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -776,6 +790,8 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state_a), axum::Json(req))
@@ -808,6 +824,8 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state_a), axum::Json(req))
@@ -866,6 +884,8 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -949,6 +969,8 @@ async fn patch_work_stage_change_is_auditable() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1023,6 +1045,8 @@ async fn patch_work_invalid_stage_value_returns_400() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp) =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
@@ -1041,6 +1065,8 @@ async fn patch_work_invalid_stage_value_returns_400() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_, resp2) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1266,6 +1292,8 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
     };
     let (_status, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
