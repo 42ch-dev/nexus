@@ -1,14 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T22:00:00+08:00",
+  "updated_at": "2026-06-10T23:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.41-selection-pool",
       "title": "P1 — DF-61 selection pool",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-10-v1.41-selection-pool.md",
       "working_branch": "feature/v1.41-selection-pool",
-      "merge_target": "iteration/v1.41"
+      "merge_target": "iteration/v1.41",
+      "notes": [
+        "2026-06-10T22:30:00+08:00: P1 implemented (7 commits on feature/v1.41-selection-pool) and merged to iteration/v1.41 as 57f573ad. QC tri-review dispatched; qc-specialist-2 (security/correctness) + qc-specialist-3 (performance/reliability) most relevant for the inspiration MD scaffold + transactional pool DAO + R-V141P1-N06 path resolution concern."
+      ]
     },
     {
       "id": "2026-06-10-v1.41-hygiene",
@@ -37,18 +40,18 @@
     "integration_branch_retired": "iteration/v1.40",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-10T21:30:00+08:00",
-      "total_open": 94,
+      "updated_at": "2026-06-10T23:30:00+08:00",
+      "total_open": 113,
       "by_severity": {
         "critical": 0,
         "high": 1,
-        "medium": 10,
-        "low": 63,
-        "nit": 16
+        "medium": 12,
+        "low": 75,
+        "nit": 21
       },
       "by_target": {
         "v1.40": 0,
-        "v1.41": 41,
+        "v1.41": 60,
         "backlog": 65,
         "v1.38": 0,
         "v1.37": 0,
@@ -76,7 +79,8 @@
         "2026-06-10-v1.40-world-kb-extract-binding": 1,
         "2026-06-10-v1.40-hygiene": 1,
         "2026-06-10-v1.41-hygiene": 1,
-        "2026-06-10-v1.41-multi-work-switch": 12
+        "2026-06-10-v1.41-multi-work-switch": 12,
+        "2026-06-10-v1.41-selection-pool": 19
       },
       "notes": "V1.41 prepare: DF-60/61 in scope; aggressive hygiene targets V1.40 batch (24) + V1.33 P3/P4 medium (5). Exclude R-V140P4-W2 PM-accept. Multi-volume PK deferred V1.42."
     },
@@ -1277,6 +1281,197 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.41 P-last (when sqlx-cli available)"
+      }
+    ],
+    "2026-06-10-v1.41-selection-pool": [
+      {
+        "id": "R-V141P1-01",
+        "title": "PoolEntryDto missing title field — CLI shows ? for title",
+        "severity": "low",
+        "source": "qc1 W-1 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:238-245",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141P1-02",
+        "title": "MD scaffold path hard-coded to Works/_pool/灵感池/<slug>.md — should be {workspace}/Pool/Ideas/<slug>.md via nexus-home-layout",
+        "severity": "medium",
+        "source": "user 2026-06-10 path correction + qc1 W-3 + qc3 F-001 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/src/inspiration_items.rs:140 + 3 spec docs",
+        "decision": "accept-with-fix",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141P1-03",
+        "title": "promote_inspiration not atomic — Work + pool can succeed while inspiration update fails",
+        "severity": "medium",
+        "source": "qc2 W-02 + qc3 F-002 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:1558-1585",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141P1-04",
+        "title": "mark_work_completed pool update is best-effort warn-and-continue — Work completed + pool still active divergence",
+        "severity": "low",
+        "source": "qc2 W-03 + qc3 F-003 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs:279-292 + novel_pool_entries.rs:209",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141P1-05",
+        "title": "list_pool and list_inspiration are unbounded — no LIMIT/OFFSET; memory bomb at 10k+",
+        "severity": "low",
+        "source": "qc2 W-04 + qc3 S-1 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/src/novel_pool_entries.rs:57 + inspiration_items.rs:57 + handlers + CLI",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141P1-06",
+        "title": "Sync I/O in async paths — std::fs::write + rename on runtime thread",
+        "severity": "low",
+        "source": "qc3 F-005 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-local-db/src/inspiration_items.rs:146-168; completion_lock.rs in P-last scope",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave (inspiration) + V1.41 P-last (completion lock)"
+      },
+      {
+        "id": "R-V141P1-07",
+        "title": "Missing covering index (creator_id, status) on novel_pool_entries and inspiration_items",
+        "severity": "low",
+        "source": "qc3 F-006 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "missing migration 202606100004_v141_pool_inspiration_status_index.sql",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141P1-08",
+        "title": "Spec gaps — novel-work-pool.md path still hard-codes Works/_pool/灵感池/; cli-spec.md path missing; inspiration --idea behavior undocumented",
+        "severity": "low",
+        "source": "PM plan re-review (V1.41 P1); qc-consolidated.md",
+        "scope": ".mstar/knowledge/specs/novel-work-pool.md §3.1, §3.3, §5; cli-spec.md §6.2H; deferred-tracker.md DF-61",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141P1-09",
+        "title": "DAO archive functions should accept creator_id explicitly for defense-in-depth",
+        "severity": "low",
+        "source": "qc2 S-02 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "novel_pool_entries.rs:159 + inspiration_items.rs:219 (after fix wave: with creator_id param)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42"
+      },
+      {
+        "id": "R-V141P1-10",
+        "title": "CLI --set-default on pool promote makes 2 round-trips; second can fail independently",
+        "severity": "low",
+        "source": "qc2 S-03 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/works/mod.rs handle_pool_promote",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42"
+      },
+      {
+        "id": "R-V141P1-11",
+        "title": "PoolEntryDto/InspirationItemDto expose creator_id (inconsistent with WorkApiDto contract R-V133P1-10)",
+        "severity": "nit",
+        "source": "qc1 S-1 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "works.rs:240, 1669",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 UX"
+      },
+      {
+        "id": "R-V141P1-12",
+        "title": "title_to_slug for pure-CJK titles produces 'untitled' — UX could be improved with short-id fallback",
+        "severity": "nit",
+        "source": "qc1 S-3 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "inspiration_items.rs:263-327 title_to_slug",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 UX"
+      },
+      {
+        "id": "R-V141P1-13",
+        "title": "Inspiration slug collision returns error instead of auto-suffixing",
+        "severity": "nit",
+        "source": "qc3 S-2 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "inspiration_items.rs:create_inspiration_with_scaffold",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 UX"
+      },
+      {
+        "id": "R-V141P1-14",
+        "title": "creator works pool help text is long — could split per PoolAction",
+        "severity": "low",
+        "source": "qc1 F-004 / S-4 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus42/src/commands/creator/works/mod.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.42"
+      },
+      {
+        "id": "R-V141P1-15",
+        "title": "Add structured tracing::info! spans for pool/inspiration mutations (add/promote/archive)",
+        "severity": "low",
+        "source": "qc3 S-3 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "novel_pool_entries.rs + inspiration_items.rs + handlers",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.41 P-last"
+      },
+      {
+        "id": "R-V141P1-16",
+        "title": ".sqlx/ offline cache not refreshed for inspiration_items + new queries (sqlx-cli unavailable)",
+        "severity": "low",
+        "source": "completion-report §6 (V1.41 P1); qc-consolidated.md",
+        "scope": ".sqlx/ directory",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.41 P-last"
+      },
+      {
+        "id": "R-V141P1-17",
+        "title": "db::pool::tests::pool_config_from_env_reads_valid_values flake (8 == 4) — pre-existing V1.40 V140P0.5 era",
+        "severity": "low",
+        "source": "qc2 S-04 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-daemon-runtime/src/db/pool.rs:319",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "backlog"
+      },
+      {
+        "id": "R-V141P1-18",
+        "title": "master_decision_timeout::repeated_sweeps_remain_stable flake — RVM ID collision, mirror of R-V139P0-W-B ACH fix",
+        "severity": "low",
+        "source": "qc3 F-004 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs:532",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.41 P-last (alongside ACH counter fix)"
+      },
+      {
+        "id": "R-V141P1-19",
+        "title": "PoolEntryDto construction duplicated 3 times — extract From<PoolEntry>",
+        "severity": "nit",
+        "source": "qc1 S-2 (V1.41 P1 review); qc-consolidated.md",
+        "scope": "works.rs:1331-1341, 1374-1381, 1399-1406 (after fix wave: includes title)",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.42"
       }
     ]
   }
