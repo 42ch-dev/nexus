@@ -121,3 +121,77 @@ e27c13e1 feat(local-db): multi-work locks columns + novel_pool_entries migration
 ## 9. Worktree path
 
 `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.41-p0/`
+
+---
+
+## 10. Fix Wave (QC closeout) — 2026-06-10
+
+**Trigger**: qc1 + qc3 = Request Changes (3 Critical + 4 Warning). See `qc-consolidated.md`.
+
+### Fixes completed
+
+| Fix | QC findings resolved | Status |
+|-----|----------------------|--------|
+| Fix 1 — Daemon routes + supervisor lockfile | qc1 F-001, qc1 F-003, qc3 W3 | DONE |
+| Fix 2 — CreateWorkRequest extension | qc1 F-002 | DONE (in Fix 1 commit) |
+| Fix 3 — Lockfile schema_version | qc3 W2 | DONE |
+| Fix 4 — Spec amendment (DB SSOT) | qc1 F-005, qc3 W1 | DONE |
+| Fix 5 — tracing::info! on completion | qc3 W4 | DONE |
+| Fix 6 — runtime_lock_holder TTL (optional) | qc1 F-004 | **SKIPPED** (see residuals) |
+
+### Fix 6 skip rationale
+
+Fix 6 (30-min stale TTL for `runtime_lock_holder`) is explicitly deferred per the assignment's optional clause. Residual `R-V141P0-01` already covers this as a deferral target = V1.41 P-last or V1.42.
+
+### Verification
+
+#### Tests
+
+```
+cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db
+```
+
+Result: **all pass** — zero failures across all suites.
+
+#### Clippy
+
+```
+cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings
+```
+
+Result: **clean** (no warnings, no errors)
+
+#### Formatting
+
+```
+cargo +nightly fmt --all -- --check
+```
+
+Result: **clean** (no diffs)
+
+### New commits
+
+```
+59f41dfd feat(orchestration,docs): mark_work_completed info log + spec amendment (DB SSOT)
+eb309bc0 feat(orchestration): completion_lock schema_version field + read forward-compat
+7c738164 feat(daemon-runtime,orchestration): wire daemon pool + completion-lock release routes + CreateWorkRequest extension + supervisor lockfile write
+```
+
+3 commits on `feature/v1.41-multi-work-switch` since QC base `edf0a621`.
+
+### Git / worktree context
+
+- rev-parse --show-toplevel: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.41-p0/`
+- branch --show-current: `feature/v1.41-multi-work-switch`
+- status: **clean**
+
+### Residuals discovered during fix wave
+
+None new. Existing residuals in `qc-consolidated.md` §Residual register remain unchanged.
+
+### Updated risks / follow-up
+
+- §7 items about missing daemon endpoints for `/v1/local/works/pool` and `/v1/local/works/{work_id}/completion-lock/release` are now **resolved** by Fix 1.
+- §7 item about `lineage_from_work_id` not being persisted is now **resolved** by Fix 2.
+- §7 item about `set_pool_active` being silently dropped at the daemon boundary is now **resolved** by Fix 2.
+- Remaining §7 items (pool list/promote/archive, `repeated_sweeps_remain_stable` flakiness, `.sqlx/` refresh) are unchanged.

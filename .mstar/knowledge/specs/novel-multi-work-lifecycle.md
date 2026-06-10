@@ -81,7 +81,11 @@ Minimum schema:
 2. Enables **`creator run resume`** on the **same** `work_id` (grill-me B).
 3. Does **not** auto-change pool row status (remains `completed` until operator `works use` / promote).
 
-### 3.2 Reopen (resume on completed Work)
+### 3.2 Source-of-truth declaration
+
+DB column `works.completion_locked_at` is the authoritative lock state. The `.completion-lock.json` file is a derived artifact for cross-tool observation. The supervisor gates ticks on the DB column. If the file exists but the DB column is NULL, the supervisor treats the work as unlocked. If the file is missing but the DB column is set, the supervisor treats the work as locked.
+
+### 3.3 Reopen (resume on completed Work)
 
 When `works.status == completed` after lock release:
 
