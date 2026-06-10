@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.40 Shipped** (2026-06-11 via PR #52, MERGEABLE — integration branch retired; DF-63 closed) · **V1.39 Shipped** (2026-06-09 via PR #50) · **V1.38 Shipped** · FL-E **Shipped in V1.34** · Platform **paused** · DF-63 World KB closed (all 5 slices shipped V1.40 P0–P3) · multi-volume PK still deferred beyond V1.40 (V1.41+) · DF-60/61 (auto-switch / selection pool) + DF-56 (conditional routing) + DF-47 (production caller wiring) + DF-59 (platform publish) stay backlog · Tech debt SSOT: [`status.json`](../status.json) — 82 open residuals; 24 are V1.40-tagged carry-forward + 1 PM-accept (R-V140P4-W2) + 1 infra (R-V140P4-INFRA)
+**Quick status**: **V1.41 Active** (prepare 2026-06-10 on `iteration/v1.41` — DF-60 P0 + DF-61 P1) · **V1.40 Shipped** (2026-06-11 PR #52 merged) · **V1.39 Shipped** · FL-E **Shipped in V1.34** · Platform **paused** · DF-63 closed · multi-volume PK **deferred V1.42** · DF-56/47/59 backlog · Tech debt SSOT: [`status.json`](../status.json) — aggressive hygiene targets V1.40 batch (24) + V1.33 P3/P4 medium (5); excludes R-V140P4-W2 PM-accept
 
-**Status**: Active (V1.40 Shipped via PR #52, MERGEABLE — DF-63 closed row 90)  
+**Status**: Active (V1.41 prepare — compass locked; implement Todo)  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-11 (V1.40 closeout: DF-63 fully shipped; row 90 marked closed and append-to-archive; P4 hygiene 17 V1.40-tagged residuals done; integration branch `iteration/v1.40` retired post-PR; V1.41 prep opens)
+**Last updated**: 2026-06-10 (V1.41 prepare: DF-60/61 → V1.41 Active; multi-volume PK → V1.42; integration branch `iteration/v1.41` opened)
 
 ---
 
@@ -84,9 +84,9 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-57 | **Closed in V1.36 P2** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-58 | **Closed in V1.36 P1** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-59 | Platform publish integration for novel正文 | V1.36 prepare | **Backlog** | L | V1.36 | Explicit OUT of V1.36 short-term scope; user may publish manually. See compass §1.2 non-goals |
-| DF-60 | Multi-novel auto-switch ceremony (8-step new-book switch + 2h switch lock) | V1.36 distill | **Backlog (V1.37+)** | L | V1.36 | novels-system pattern: `novel-write` triggers `{小说目录}/.switch-lock.json` on completion; 8 steps to register new InStreet workId, init new `作品目录`, swap `novel:active`, release lock; 2h timeout enforced by all three crons. **OSS deferred** — V1.36 explicit non-goal (compass §6.3). When re-opened: must use local DB lock + `creator run start --continue-from <old_work_id>` to invoke, not Redis |
-| DF-61 | Selection pool / multi-novel idea tracking (`选题库.md` / 灵感池) | V1.36 distill | **Backlog (V1.37+)** | M | V1.36 | novels-system has `小说/选题库.md` (status: 当前在写 / 排队开坑 / 已完结) + `小说/灵感池/`. OSS Work is **single-Work** (work-experience-model §3); multi-novel idea tracking is intentionally OUT. When re-opened: should be a new `work_profile: novel-pool` or a separate CLI command, not Work |
-| DF-62 | Multi-chapter / serial writing (first slice shipped V1.38; multi-volume PK deferred) | V1.36 distill | **V1.38 Shipped (first slice); multi-volume PK deferred V1.40+** | M | V1.36→V1.37→V1.38→V1.39 | **Shipped V1.38** (PR #49): `next_chapter(work_id)`, `current_chapter`, completion/status UX, `novel-writing` chapter parameterization. V1.39 P0 extends via DF-53 auto-chain (chapter outer loop iterates next_chapter); V1.39 P5 closed 7 V1.38 residuals (2 fix + 5 accept-with-doc). Multi-volume PK migration (`(work_id, chapter)` → `(work_id, volume, chapter)`) remains deferred to V1.40+. |
+| DF-60 | Multi-novel lifecycle (Medium: 2-step + completion-lock + runtime lock) | V1.36 distill | **V1.41 P0** | L | V1.36→V1.41 | novels-system 8-step + global switch **OUT**. V1.41: [novel-multi-work-lifecycle.md](specs/novel-multi-work-lifecycle.md) + plan [2026-06-10-v1.41-multi-work-switch.md](../plans/2026-06-10-v1.41-multi-work-switch.md). Extend `mark_work_completed`; `.completion-lock.json`; `works.runtime_lock_holder`; `creator works` IA; `run start --from-work`. **No** `creator work switch`. Concurrent multi-Work OK. |
+| DF-61 | Selection pool / inspiration pool (DB SSOT + MD refs) | V1.36 distill | **V1.41 P1** | M | V1.36→V1.41 | **Not** `work_profile: novel-pool`. [novel-work-pool.md](specs/novel-work-pool.md) + plan [2026-06-10-v1.41-selection-pool.md](../plans/2026-06-10-v1.41-selection-pool.md). `novel_pool_entries` + `inspiration_items` in `state.db`; inspiration files under `Works/_pool/灵感池/`. |
+| DF-62 | Multi-chapter / serial writing (first slice shipped V1.38; multi-volume PK deferred) | V1.36 distill | **V1.38 Shipped (first slice); multi-volume PK deferred V1.42** | M | V1.36→V1.40→V1.41 | **Shipped V1.38/V1.39** for single-volume multi-chapter. Multi-volume PK migration (`(work_id, chapter)` → `(work_id, volume, chapter)`) **deferred V1.42** (grill-me Q1). |
 | DF-63 | **World KB cross-Work unification** (was: Worldbuilding 7 sub-categories schema) | V1.36 distill → V1.36 spec §3.5 refactor | **V1.40 Closed (Shipped P0+P1+P2+P3 all 5 slices W1–W5)** | L | V1.36→V1.37→V1.40 | **Shipped V1.40 P0–P3** (PR #52, MERGEABLE). V1.37 P2 roadmap shipped as spec; V1.40 implements all 5 slices via [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) + [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md). **P0 W1+W4** ([world-create-and-validation plan](../plans/2026-06-10-v1.40-world-create-and-validation.md)) — mandatory world binding per user clarification 2026-06-10; `creator world create/show/list`; `create_world_tx` atomic scaffold; ownership FK + 422 enforcement. **P1 W2** ([world-kb-taxonomy plan](../plans/2026-06-10-v1.40-world-kb-taxonomy.md)) — BlockType + novel_category + canonical_name grammar; SqliteKbStore wired with ValidationMode; structured ValidationError. **P2 W3** ([world-context-prompt-block plan](../plans/2026-06-10-v1.40-world-context-prompt-block.md)) — `{{ world_kb_block }}` template var via `build_chapter_kb_block`; legacy V1.39 worldless Works skip. **P3 W5** ([world-kb-extract-binding plan](../plans/2026-06-10-v1.40-world-kb-extract-binding.md)) — `kb_extract_jobs` artifact locator; `finalize_extract` helper; `kb.extract_work` V1.40 schema; `novel-review-master sync_world_kb`. DF-63 row archived 2026-06-11; full delivery snapshot in [shipped-features-tracker.md](../archived/shipped-features-tracker.md). 24 V1.40-tagged open residuals carry-forward to V1.41 (see [`status.json`](../status.json) `residual_findings`). |
 | DF-64 | Findings lifecycle (review → brainstorm → write coordination; 3-role) | V1.36 distill | **V1.39 P1+P2 Shipped** | L | V1.36→V1.37→V1.39 | V1.37 P3 roadmap; **V1.39** implemented via [novel-quality-loop.md](specs/novel-quality-loop.md) + [2026-06-09-v1.39-findings-and-review-routing.md](../plans/2026-06-09-v1.39-findings-and-review-routing.md) + [2026-06-09-v1.39-novel-review-presets.md](../plans/2026-06-09-v1.39-novel-review-presets.md). `findings` table + DAO + API + review-verdict hook + routing enum + 7 hermetic API tests; `novel-brainstorm` + `novel-review-master` presets with 8 hermetic tests. PR #50 merged ad9725d8. |
 | DF-65 | Three-layer rules architecture | V1.36 distill | **V1.40 P0.5 Shipped** | M | V1.36→V1.37→V1.39→V1.40 | Plan: [2026-06-09-v1.39-rules-and-logs.md](../plans/2026-06-09-v1.39-rules-and-logs.md). V1.39 shipped Layer 1 at `embedded-presets/rules/writing-craft.md` (interim). **V1.40 P0.5** migrated Layer 1 to `embedded-rules/writing-craft.md` per spec §5.5.4; doc path corrected in this tracker and `world-kb-runtime-architecture.md`. |
@@ -171,17 +171,17 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | **Worldbuilding (cross-Work)** | Per-work `世界设定/` (7 sub-types with item templates: foundation/background/character/location/society/rules/economy) | **V1.36 refactor**: World KB (per [entity-scope-model.md](specs/entity-scope-model.md) §5.4) is the cross-Work truth; `world_id` is the binding; `novel-project-init` grill-me; `creator run start --world-id` CLI; `world_refs: [string]` advisory frontmatter. Full KB item schema + `kb-extract` extraction path is V1.37+ | DF-63 |
 | **Logs/** | 4 sub-types (写/迭代/构思/发布) with status machines | In-scope: `Logs/` optional root only; structure OUT (single-role) | DF-66 |
 | **Completion detection** | `currentChapter==totalPlanned` + all chapters `published` | In-scope: `current_chapter>=total` + all `finalized` + `intake==complete` (no publish) | (impl detail) |
-| **完本后同步** | 5-step ceremony (frontmatter/table/Redis×2/selection pool) | In-scope: 2-step reduced (Work.status + work_chapters table); ceremony OUT | DF-60 |
-| **Auto new-book switch** | 8-step + 2h switch lock + 中断恢复 | OUT (V1.36 compass §6.3 explicit non-goal) | DF-60 |
+| **完本后同步** | 5-step ceremony (frontmatter/table/Redis×2/selection pool) | V1.36: 2-step reduced; **V1.41 P0**: completion-lock + pool row update | DF-60 |
+| **Auto new-book switch** | 8-step + 2h switch lock + 中断恢复 | OUT globally; V1.41: `works use` / promote default only (no mutex) | DF-60 |
 | **Quality loop** | review cron + 五问质量检验 + findings lifecycle + 96h 升级 | In-scope: `llm_judge` exit_when on `finalize` (V1.36 quality gate); full review cron + findings OUT | DF-64 / DF-67 |
 | **两轮写作** | 初稿→终稿 (各带日志) | In-scope: outline→draft→finalize; 两轮合一 (no separate terminal/refine) | (impl detail) |
 | **State storage** | Redis (novel:active / novel:{名}:state / novel:review-iteration) | In-scope: local SQLite (state.db); Redis OUT (OSS local-only) | (PD-05) |
 | **Platform publish** | InStreet literary API + workId UUID + chapter post API | OUT (V1.36 compass §1.2) | DF-59 |
-| **Selection pool / 灵感池** | Obsidian 选题库 + 灵感池 | OUT (multi-novel is OSS non-goal) | DF-61 |
+| **Selection pool / 灵感池** | Obsidian 选题库 + 灵感池 | **V1.41 P1** — DB SSOT + `Works/_pool/灵感池/` | DF-61 |
 | **Three-layer rules** | writing-craft-rules.md / novel_rules.md / novel_rules_history.md | OUT (V1.36 ships 五问 inline in finalize prompt; per-work rules file deferred) | DF-65 |
 | **Multi-volume auto-chronology** | per-volume outline + chapter range tracking | OUT (V1.36 single-chapter; `volume: integer` frontmatter is forward-compat) | DF-62 |
 | **Three-cron staggering** | brainstorm 03/09/15/21 / write 04/10/16/22 / review :00/:30 | OUT (V1.36 single-role; multi-role staggering is V1.37+) | (with DF-64) |
-| **Switch lock + 2h timeout** | file-based lock at `{小说目录}/.switch-lock.json` | OUT (V1.36 has no auto-switch) | DF-60 |
+| **Switch lock + 2h timeout** | file-based lock at `{小说目录}/.switch-lock.json` | **V1.41 P0**: `.completion-lock.json` (no 2h cron; no global switch) | DF-60 |
 | **Master-decision timeout (96h)** | finding escalation; surfaced via activity-report cron | OUT (V1.36 no review cycle) | DF-67 |
 
 ##### V1.36 implementation of in-scope items (PM approved 2026-06-07)
@@ -198,6 +198,18 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | **World KB cross-Work binding** | `world_id` FK on `works`; `novel-project-init` grill-me (existing/new/worldless); `--world-id` CLI; `creator run status` shows `world: <name> (<world_id>)`; `novel-writing` injects World KB context block for World-bound Works | novel-workflow-profile §3.5/§5.2/§8; plan P1 T1 (grill-me)/P2 T11 |
 | **`work-status.md` file** | **REMOVED**; chapter state lives in `work_chapters` table; reconciliation via `creator run reconcile-chapters` | novel-workflow-profile §3.1/§4.1; plan P2 T10/T12/T13 |
 | **Per-Work `Worldbuilding/` subtree** | **REMOVED**; world content lives in World KB (per [entity-scope-model.md](specs/entity-scope-model.md) §5.4); worldless Works put setting notes in `README.md` | novel-workflow-profile §3.5/§3.1; plan P1/P2 |
+
+##### V1.41 distill overlay (grill-me 2026-06-10 — supersedes OUT rows above for DF-60/61)
+
+| novels-system pattern | V1.41 OSS mapping | Plan |
+| --- | --- | --- |
+| Redis `novel:active` | `novel_pool_entries.status = active` — **CLI default only**; concurrent multi-Work OK | P1 pool + P0 `works use` |
+| 8-step switch / 2h lock | **OUT** — `.completion-lock.json` per completed Work; no global mutex | P0 lifecycle |
+| `选题库` / `灵感池` | DB SSOT; `Works/_pool/灵感池/*.md` for inspiration files | P1 |
+| CLI | `creator works` (list/status/use/pool); `creator run` single-Work actions; `--from-work` | P0 + P1 |
+| Same-Work concurrent mutate | `works.runtime_lock_holder` (DB SSOT) | P0 |
+
+Normative: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) §0.1.
 
 ##### Re-open instructions for V1.37+ implementers
 
@@ -251,8 +263,8 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.40** (Shipped 2026-06-11 via PR #52, MERGEABLE): [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) — **DF-63 World KB** P0–P3 + P4 hygiene all shipped on `iteration/v1.40` (now retired); 7 plans P-1 + P0.5 + P0–P4 all Done; DF-63 closed; multi-volume PK still OUT (V1.41+); 24 V1.40-tagged open residuals + 1 PM-accept (R-V140P4-W2) + 1 infra (R-V140P4-INFRA) carry-forward to V1.41.
-- **V1.41** (preparing): no compass yet; focus candidates are the carry-forward residuals + multi-volume PK + DF-60/61/56/47/59 backlog review. See `status.json.metadata.latest_active_compass` (null until V1.41 compass lands).
+- **V1.41** (Active — prepare 2026-06-10): [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) — **DF-60 P0 + DF-61 P1** on `iteration/v1.41`; multi-volume PK → V1.42; P-last aggressive hygiene (V1.40 batch + V1.33 P3/P4 medium).
+- **V1.40** (Shipped 2026-06-11 via PR #52 merged): [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) — DF-63 closed; `iteration/v1.40` retired.
 - **V1.39** (Shipped 2026-06-09): [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) — **DF-53 full auto-chain + DF-68 daemon continuation + DF-64/65/66/67 quality loop**; P0..P5 on `iteration/v1.39`; PR #50 merged ad9725d8.
 - **V1.38** (Shipped 2026-06-09): [v1.38-multi-chapter-serial-writing-delivery-compass-v1.md](../iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md) — DF-62 first slice shipped (PR #49).
 - **V1.37** (Shipped 2026-06-08): [v1.37-novel-writing-foundation-delivery-compass-v1.md](../iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md) — **Novel Writing UX foundation-first**: P0 shipped init `preset.input` plumbing, runtime `gates:` evaluation, scaffold atomicity, and first-run remediation; P1/P2/P3 roadmap multi-chapter DF-62, World KB DF-63, and quality-loop DF-64/65/66/67.
@@ -282,4 +294,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-10 (V1.40 Active). Status: **V1.40 Active** on `iteration/v1.40`; V1.39 Shipped. V1.40 targets DF-63 via P0..P3 + hygiene P4. Multi-volume PK deferred beyond V1.40. Platform publish, multi-work switch, and selection pool remain out.*
+*Last updated: 2026-06-10 (V1.41 Active prepare). Status: **V1.41 Active** on `iteration/v1.41`; V1.40 Shipped. V1.41 targets DF-60/61 + hygiene. Multi-volume PK deferred V1.42.*

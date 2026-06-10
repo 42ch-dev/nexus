@@ -1,7 +1,40 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T03:30:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-10T12:00:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-10-v1.41-harness-docs-prepare",
+      "title": "P-1 — V1.41 harness docs prepare",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.41-harness-docs-prepare.md",
+      "working_branch": "iteration/v1.41",
+      "merge_target": "iteration/v1.41"
+    },
+    {
+      "id": "2026-06-10-v1.41-multi-work-switch",
+      "title": "P0 — DF-60 multi-work lifecycle (locks + creator works IA)",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.41-multi-work-switch.md",
+      "working_branch": "feature/v1.41-multi-work-switch",
+      "merge_target": "iteration/v1.41"
+    },
+    {
+      "id": "2026-06-10-v1.41-selection-pool",
+      "title": "P1 — DF-61 selection pool",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.41-selection-pool.md",
+      "working_branch": "feature/v1.41-selection-pool",
+      "merge_target": "iteration/v1.41"
+    },
+    {
+      "id": "2026-06-10-v1.41-hygiene",
+      "title": "P-last — aggressive residual convergence",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-10-v1.41-hygiene.md",
+      "working_branch": "feature/v1.41-hygiene",
+      "merge_target": "iteration/v1.41"
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,18 +42,18 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
+    "integration_branch": "iteration/v1.41",
     "last_integration_branch": "iteration/v1.40",
     "integration_merge_target": "main",
-    "integration_branch_role": "retired",
+    "integration_branch_role": "active",
     "latest_shipped_iteration": "v1.40",
     "latest_shipped_at": "2026-06-11T03:00:00+08:00",
     "latest_active_iteration": "v1.41",
-    "latest_active_compass": null,
+    "latest_active_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md",
     "integration_branch_retired": "iteration/v1.40",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-11T03:30:00+08:00",
+      "updated_at": "2026-06-10T12:00:00+08:00",
       "total_open": 82,
       "by_severity": {
         "critical": 0,
@@ -31,7 +64,7 @@
       },
       "by_target": {
         "v1.40": 0,
-        "v1.41": 0,
+        "v1.41": 29,
         "backlog": 65,
         "v1.38": 0,
         "v1.37": 0,
@@ -57,11 +90,12 @@
         "2026-06-10-v1.40-world-kb-taxonomy": 1,
         "2026-06-10-v1.40-world-context-prompt-block": 1,
         "2026-06-10-v1.40-world-kb-extract-binding": 1,
-        "2026-06-10-v1.40-hygiene": 1
+        "2026-06-10-v1.40-hygiene": 1,
+        "2026-06-10-v1.41-hygiene": 1
       },
-      "notes": "V1.40 PM-accept residual R-V140P4-W2 (sqlx::query_as! design tradeoff). All V1.40-tagged V1.39 residuals closed. Pre-V1.40 backlog residuals preserved as deferred (profile B: open list is canonical; closed entries in archived/residuals/)."
+      "notes": "V1.41 prepare: DF-60/61 in scope; aggressive hygiene targets V1.40 batch (24) + V1.33 P3/P4 medium (5). Exclude R-V140P4-W2 PM-accept. Multi-volume PK deferred V1.42."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
     "spec_refs": [
       ".mstar/knowledge/specs/novel-workflow-profile.md",
       ".mstar/knowledge/specs/entity-scope-model.md",
@@ -75,19 +109,11 @@
       ".mstar/knowledge/specs/preset-conditional-routing.md",
       ".mstar/knowledge/specs/novel-quality-loop.md",
       ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
-      ".mstar/knowledge/specs/orchestration-engine.md"
+      ".mstar/knowledge/specs/orchestration-engine.md",
+      ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
+      ".mstar/knowledge/specs/novel-work-pool.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-    "pr_open": {
-      "repo": "42ch-dev/nexus",
-      "pr_number": 52,
-      "iteration": "v1.40",
-      "head": "iteration/v1.40",
-      "base": "main",
-      "url": "https://github.com/42ch-dev/nexus/pull/52",
-      "status": "OPEN + MERGEABLE",
-      "ci_fix_pushed": "iteration/v1.40 (HEAD beadb230)"
-    }
+    "iteration_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md"
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
@@ -99,8 +125,9 @@
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask min_interval parser)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P3 fix wave",
-        "note": "If a preset specifies 'P1D' or 'P1M' or 'P1Y', the parser returns None (silent); LlmJudgeTask then has no throttle → always re-evaluate. Per ISO 8601 P/P1D should be days. Fix: (a) extend parser to support D/M/Y units, OR (b) explicit log warning + treat unsupported as zero throttle (still bypass), OR (c) error at load time via V1.32 P1 validation. P3 fix wave: (a) for V1.33, (b) as a check."
+        "target_date": "V1.41",
+        "note": "If a preset specifies 'P1D' or 'P1M' or 'P1Y', the parser returns None (silent); LlmJudgeTask then has no throttle → always re-evaluate. Per ISO 8601 P/P1D should be days. Fix: (a) extend parser to support D/M/Y units, OR (b) explicit log warning + treat unsupported as zero throttle (still bypass), OR (c) error at load time via V1.32 P1 validation. P3 fix wave: (a) for V1.33, (b) as a check.",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V133P3-04",
@@ -110,8 +137,9 @@
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask worker handle check)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P3 fix wave (or backlog)",
-        "note": "When no worker is connected, judge.llm returns WorkerUnavailable and LlmJudgeTask maps to NOGO/WaitForInput. An attacker (or just a misconfigured daemon) can prevent workers from connecting and lock the state forever. Document and consider: (a) a max-WaitForInput duration that surfaces as a real error, (b) explicit 'WorkerUnavailable' vs 'LLMUnavailable' signal so the user can tell them apart, (c) operator alert. Pre-1.0 single-user local, so severity medium."
+        "target_date": "V1.41",
+        "note": "When no worker is connected, judge.llm returns WorkerUnavailable and LlmJudgeTask maps to NOGO/WaitForInput. An attacker (or just a misconfigured daemon) can prevent workers from connecting and lock the state forever. Document and consider: (a) a max-WaitForInput duration that surfaces as a real error, (b) explicit 'WorkerUnavailable' vs 'LLMUnavailable' signal so the user can tell them apart, (c) operator alert. Pre-1.0 single-user local, so severity medium.",
+        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-04-v1.33-memory-review-closed-loop": [
@@ -123,8 +151,9 @@
         "scope": "crates/nexus-local-db/src/memory_fragment.rs (list_fragments_filtered function); handler works around at crates/nexus-daemon-runtime/src/api/handlers/memory.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4 fix wave",
-        "note": "list_fragments_filtered uses sqlx::query with 'as \"fragment_id!\"' column aliases — the ! suffix is a compile-time macro hint not valid SQL. SQLite returns the column with the literal ! in the name, causing ColumnNotFound at row.get('fragment_id'). Handler currently uses compile-time list_fragments for no-keyword path; keyword-filtered path is unreachable. Fix: remove the ! suffix from runtime SQL column aliases, OR convert list_fragments_filtered to sqlx::query_as! for consistency with the rest of the module."
+        "target_date": "V1.41",
+        "note": "list_fragments_filtered uses sqlx::query with 'as \"fragment_id!\"' column aliases — the ! suffix is a compile-time macro hint not valid SQL. SQLite returns the column with the literal ! in the name, causing ColumnNotFound at row.get('fragment_id'). Handler currently uses compile-time list_fragments for no-keyword path; keyword-filtered path is unreachable. Fix: remove the ! suffix from runtime SQL column aliases, OR convert list_fragments_filtered to sqlx::query_as! for consistency with the rest of the module.",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V133P4-05",
@@ -134,8 +163,9 @@
         "scope": "Wherever promote_to_long_term writes the LTM file (likely nexus-creator-memory/src/long_term_memory.rs or similar)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4 fix wave",
-        "note": "fs::write is non-atomic; partial write on crash or disk-full leaves truncated LTM file. Fix: write to <file>.tmp first, then rename to <file> (POSIX rename is atomic within a filesystem)."
+        "target_date": "V1.41",
+        "note": "fs::write is non-atomic; partial write on crash or disk-full leaves truncated LTM file. Fix: write to <file>.tmp first, then rename to <file> (POSIX rename is atomic within a filesystem).",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V133P4-06",
@@ -145,8 +175,9 @@
         "scope": "Same path as R-V133P4-03",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.33 P4 fix wave",
-        "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning."
+        "target_date": "V1.41",
+        "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning.",
+        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-04-v1.33-work-model-and-creator-run": [
@@ -875,7 +906,8 @@
         "scope": "crates/nexus-orchestration/src/stage_gates.rs:854",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hygiene wave (P4) or backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P0.5-S2",
@@ -885,7 +917,8 @@
         "scope": "crates/nexus-orchestration/src/stage_gates.rs:850",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hygiene wave (P4) or backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P0.5-S3",
@@ -895,7 +928,8 @@
         "scope": "crates/nexus-orchestration/src/embedded_rules.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "When Layer 0 (~/.nexus42/rules/writing-craft.md user override) is wired"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-10-v1.40-world-create-and-validation": [
@@ -907,7 +941,8 @@
         "scope": "crates/nexus-daemon-runtime/src/api/errors.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P0-S2",
@@ -917,7 +952,8 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.41"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P0-S3",
@@ -927,7 +963,8 @@
         "scope": ".sqlx/ directory + CI pipeline",
         "decision": "defer",
         "owner": "@ops-engineer",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P0-S4",
@@ -937,7 +974,8 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (POST + PATCH)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hardening"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-10-v1.40-world-kb-taxonomy": [
@@ -949,7 +987,8 @@
         "scope": "crates/nexus-kb/src/validation.rs + crates/nexus-orchestration/embedded-presets/kb-extract/prompts/extract.md",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hardening"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P1-S2",
@@ -959,7 +998,8 @@
         "scope": "crates/nexus-kb/src/store.rs (test)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P1-S3",
@@ -969,7 +1009,8 @@
         "scope": "crates/nexus-kb/src/store.rs (test)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.41"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P1-S4",
@@ -979,7 +1020,8 @@
         "scope": ".mstar/knowledge/specs/local-db-schema.md §4.1.2",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hardening"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P1-S5",
@@ -989,7 +1031,8 @@
         "scope": "crates/nexus-kb/src/validation.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P1-S6",
@@ -999,7 +1042,8 @@
         "scope": "crates/nexus-kb/benches/ (does not exist)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-10-v1.40-world-context-prompt-block": [
@@ -1011,7 +1055,8 @@
         "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (resolve_active_rules)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.41+ optimization"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P2-S2",
@@ -1021,7 +1066,8 @@
         "scope": "crates/nexus-orchestration/tests/ (e2e)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.41 (when daemon test infra supports KB seeding)"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P2-S3",
@@ -1031,7 +1077,8 @@
         "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (apply_token_budget)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P2-S4",
@@ -1041,7 +1088,8 @@
         "scope": "crates/nexus-moment-context-assembly/src/world_context.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-10-v1.40-world-kb-extract-binding": [
@@ -1053,7 +1101,8 @@
         "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs (test gap)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hardening"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P3-S2",
@@ -1063,7 +1112,8 @@
         "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs (test gap)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hardening"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P3-S3",
@@ -1073,7 +1123,8 @@
         "scope": "crates/nexus-orchestration/tests/kb_extract_binding_e2e.rs (test gap)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.40 hardening"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P3-S4",
@@ -1083,7 +1134,8 @@
         "scope": "crates/nexus-kb/src/extract_finalize.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       },
       {
         "id": "R-V140P3-S5",
@@ -1093,7 +1145,8 @@
         "scope": "crates/nexus-orchestration/src/capability/builtins/mod.rs:41",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "backlog"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-10-v1.40-hygiene": [
@@ -1115,7 +1168,8 @@
         "scope": "crates/.sqlx/ directory + CI",
         "decision": "defer",
         "owner": "@ops-engineer",
-        "target_date": "V1.40 hygiene / V1.41"
+        "target_date": "V1.41",
+        "target": "V1.41 hygiene"
       }
     ]
   }

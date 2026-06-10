@@ -130,6 +130,8 @@ Rejected examples:
 
 Invalid or rejected fields fail with `INVALID_INPUT` when malformed and `FORBIDDEN` when they would bypass creator/workspace/stage policy.
 
+**V1.41 (DF-60):** `nexus.work.patch` is blocked while `Works/<work_ref>/.completion-lock.json` exists. Mutating patches must acquire the same `works.runtime_lock_holder` path as `creator run continue` (see [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) §5.4).
+
 ---
 
 ## 5. Request / response contract (normative shape)
