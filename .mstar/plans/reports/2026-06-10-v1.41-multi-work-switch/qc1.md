@@ -4,13 +4,14 @@ reviewer: "@qc-specialist"
 reviewer_index: 1
 focus: architecture-coherence-maintainability
 plan_id: 2026-06-10-v1.41-multi-work-switch
-verdict: Request Changes
-generated_at: 2026-06-10T18:30:00+08:00
-review_range: "merge-base: 55689706 → tip: f4b39d42"
+verdict: Approve
+generated_at: 2026-06-10T20:30:00+08:00
+review_range: "merge-base: 55689706 → tip: 9b6627dd"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 files_reviewed: 14
-tools_run: cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings, cargo +nightly fmt --all -- --check, cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db, cargo test -p nexus-orchestration --test multi_work_switch, cargo test -p nexus-daemon-runtime --test multi_work_switch, cargo test -p nexus42 v141_, manual review
+tools_run: cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings, cargo +nightly fmt --all -- --check, cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db, manual review of fix-wave delta edf0a621..9b6627dd
+re_review_of: edf0a621
 ---
 
 # Code Review Report — V1.41 P0 (qc1)
@@ -194,3 +195,50 @@ Three Critical findings (F-001, F-002, F-003) mean that core P0 features — `cr
 The architecture design (separation of `nexus-orchestration` logic from `nexus-daemon-runtime` HTTP layer from `nexus42` CLI surface) is sound and follows the established crate boundaries. The naming is consistent (`CompletionLock`, `completion_lock`, `runtime_lock_holder`, `novel_pool_entries`). The DB migration is well-structured with proper constraints. The test coverage at the unit/hermetic level is good. The issues are purely wiring gaps — missing daemon routes and missing caller invocations — not architectural flaws.
 
 Once F-001, F-002, and F-003 are fixed, the architecture is coherent and maintainable. F-004 (stale lock TTL) and F-005 (dual SSOT) should be addressed or explicitly deferred with tracking.
+
+## Revalidation (fix-wave delta: edf0a621..9b6627dd)
+
+**Reviewer**: @qc-specialist (qc-specialist, reviewer_index: 1)
+**Re-review timestamp**: 2026-06-10T20:30:00+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: 9b6627dd` (focus delta `edf0a621..9b6627dd`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: cargo clippy, cargo +nightly fmt --check, cargo test, manual review of fix-wave diff
+
+### Disposition
+
+| Finding | Original severity | New severity | Disposition | Evidence |
+|---------|-------------------|--------------|-------------|----------|
+| F-001 (missing daemon routes) | critical | resolved | Wired in Fix 1 (commit `7c738164`) | `POST /v1/local/works/pool` route registered at `api/mod.rs:252`; `POST /v1/local/works/{work_id}/completion-lock/release` route registered at `api/mod.rs:264`; `set_pool_active` handler at `handlers/works.rs:1014` with transactional demote-promote; `release_completion_lock_handler` at `handlers/works.rs:1059` with DB-clear + file-delete; hermetic tests pass (0 failures) |
+| F-002 (--from-work / --set-default dropped) | critical | resolved | Wired in Fix 2 (commit `7c738164`) | `CreateWorkRequest` extended with `lineage_from_work_id: Option<String>` (line 92) and `set_pool_active: Option<bool>` (line 158); `create_work` handler populates `WorkRecord.lineage_from_work_id` from request (line 344); `set_pool_active` promotion logic after creation (lines 367–380); all existing tests updated with new fields |
+| F-003 (lockfile never written) | critical | resolved | Wired in Fix 1 (commit `7c738164`) | Supervisor `WorkComplete` path calls `write_completion_lock_if_available` at `supervisor.rs:486` → `write_completion_lock_for_work` at line 513; boot recovery `WorkComplete` path calls `write_completion_lock_for_work` at `boot.rs:331`; both paths are best-effort with warn logs; DB is SSOT |
+| F-004 (runtime_lock TTL) | warning | defer | Optional Fix 6 skipped; residual R-V141P0-01 covers it | `status.json` residual `R-V141P0-01`: severity `high`, decision `defer`, target `V1.41 P-last or V1.42`; consistent with implementer report |
+| F-005 (dual SSOT) | warning | resolved | Spec amendment §3.2 declares DB SSOT (commit `59f41dfd`) | `.mstar/knowledge/specs/novel-multi-work-lifecycle.md` §3.2: "DB column `works.completion_locked_at` is the authoritative lock state. The `.completion-lock.json` file is a derived artifact for cross-tool observation."; `completion_lock.rs` module doc and `release_completion_lock` doc both repeat SSOT declaration; `release_completion_lock_handler` clears DB first, then deletes file (best-effort) |
+
+### New findings
+
+None. The fix-wave delta (5 commits, 11 files, +551/-20 lines) is surgical and addresses exactly the 3 Critical + 2 Warning findings assigned to this reviewer. No new architectural concerns, code duplication, or maintainability risks introduced.
+
+### Tools / verification tails
+
+```
+$ cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+(clean — 0 warnings)
+
+$ cargo +nightly fmt --all -- --check
+(no output — clean)
+
+$ cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db
+test result: ok. 15 passed; 0 failed (nexus42)
+test result: ok. 18 passed; 0 failed (nexus-daemon-runtime)
+test result: ok. 24 passed; 0 failed (nexus-orchestration)
+test result: ok. 12 passed; 0 failed (nexus-local-db)
+(all doc-tests pass; 0 failures across all crates)
+```
+
+### Updated verdict
+
+**Approve**
+
+**Rationale**: All 3 Critical findings (F-001, F-002, F-003) are resolved with daemon routes, handlers, transactional pool logic, and lockfile write callers wired in both supervisor and boot recovery paths. F-005 (dual SSOT) is resolved with a clear spec amendment declaring DB as authoritative. F-004 (runtime_lock TTL) is explicitly deferred as residual R-V141P0-01 with target V1.41 P-last/V1.42. No new Critical or Warning findings. All CI tools pass clean. The architecture remains coherent with established crate boundaries (orchestration logic in `nexus-orchestration`, HTTP layer in `nexus-daemon-runtime`, CLI in `nexus42`).
