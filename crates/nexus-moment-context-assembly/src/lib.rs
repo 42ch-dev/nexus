@@ -27,6 +27,7 @@
 
 pub mod moment;
 pub mod stage0;
+pub mod world_context;
 
 // Cloud-stage types gated behind feature flag
 #[cfg(feature = "cloud-stage")]
@@ -37,3 +38,7 @@ pub mod cloud_stage;
 pub use cloud_stage::TwoStageAssembly;
 pub use moment::{assemble_moment, MomentContext, MomentRequest};
 pub use stage0::Stage0Assembly;
+pub use world_context::{
+    build_chapter_kb_block, ChapterKbBlockParams, WorldContextBlock, WorldContextItem,
+    WorldKbQueryBuilder, DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET,
+};

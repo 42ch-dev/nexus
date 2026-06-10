@@ -66,6 +66,9 @@ async fn seed_novel_writing_preset_input(
     )
     .await;
     ctx.set("preset.input.slug", "ch01").await;
+    // V1.40 P2 (QC1-C001 fix): seed world_kb_block so strict-mode template
+    // rendering does not fail. Worldless e2e tests use empty string.
+    ctx.set("preset.input.world_kb_block", "").await;
 }
 
 async fn start_novel_writing_session(

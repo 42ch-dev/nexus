@@ -151,9 +151,14 @@ impl NexusApiError {
             Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
             Self::BadRequest { code, .. } => {
-                // POLICY_BLOCKED is a policy denial, not a generic bad request
                 match code.as_str() {
                     "POLICY_BLOCKED" => StatusCode::FORBIDDEN,
+                    // V1.40: WORLD_ID_REQUIRED and INVALID_WORLD_ID are semantic
+                    // validation errors → 422 Unprocessable Entity (aligned with
+                    // preset_gates_failed pattern per spec §3.5.1.2).
+                    "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
+                        StatusCode::UNPROCESSABLE_ENTITY
+                    }
                     _ => StatusCode::BAD_REQUEST,
                 }
             }
@@ -190,6 +195,10 @@ impl NexusApiError {
                 // Surface canonical tool-bridge codes (spec §12.4).
                 match code.as_str() {
                     "POLICY_BLOCKED" | "NOT_SUPPORTED" | "INVALID_INPUT" => code.as_str(),
+                    // V1.40: surface world-binding validation codes as-is.
+                    "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
+                        code.as_str()
+                    }
                     _ => "BAD_REQUEST",
                 }
             }

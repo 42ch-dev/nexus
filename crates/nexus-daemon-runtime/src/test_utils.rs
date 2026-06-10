@@ -178,6 +178,34 @@ pub async fn seed_expired_token(
     .expect("INSERT should succeed for test setup");
 }
 
+/// Seed a test creator and a test world in the database so that work
+/// creation (which requires a valid `world_id` FK with ownership check)
+/// succeeds in test contexts.
+///
+/// Call this after `create_test_workspace()` to enable `create_work` tests.
+pub async fn seed_test_creator_and_world(pool: &sqlx::SqlitePool) {
+    // SAFETY: test-only data setup — seeds creators row for FK references.
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES ('test_creator', 'Test Creator', 'active', datetime('now'), '{}')",
+    )
+    .execute(pool)
+    .await
+    .expect("seed test creator");
+
+    // SAFETY: test-only data setup — seeds narrative_worlds row for world_id FK.
+    sqlx::query(
+        "INSERT OR IGNORE INTO narrative_worlds \
+            (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+             time_policy, metadata_json, created_at) \
+           VALUES ('wld_test_world', 'ws', 'test_creator', 'Test World', 'test-world', \
+             'active', 'private', 'manual', '{}', datetime('now'))",
+    )
+    .execute(pool)
+    .await
+    .expect("seed test world");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

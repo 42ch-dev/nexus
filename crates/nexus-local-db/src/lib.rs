@@ -71,7 +71,8 @@ pub use world_stories::{
 
 // Re-export narrative_write types
 pub use narrative_write::{
-    append_event, create_world, AppendEventResult, CreateWorldResult, NarrativeWriteError,
+    append_event, create_world, create_world_tx, AppendEventResult, CreateWorldResult,
+    NarrativeWriteError,
 };
 
 // Re-export knowledge_store types
@@ -85,7 +86,8 @@ pub use reference_source::{
 
 // Re-export kb_extract_job types
 pub use kb_extract_job::{
-    claim_job as claim_extract_job, enqueue as enqueue_extract_job, get as get_extract_job,
+    claim_job as claim_extract_job, enqueue as enqueue_extract_job,
+    enqueue_with_artifact as enqueue_extract_job_with_artifact, get as get_extract_job,
     list_by_creator as list_extract_jobs, mark_done as mark_extract_job_done,
     mark_failed as mark_extract_job_failed, mark_running as mark_extract_job_running,
     next_queued as next_queued_extract_job, KbExtractJob,

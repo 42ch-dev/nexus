@@ -37,6 +37,7 @@ struct TestCtx {
 async fn test_ctx() -> TestCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+    test_utils::seed_test_creator_and_world(state.pool()).await;
     let auth_config = DaemonApiConfig {
         api_key: None,
         auth_mode: AuthMode::KeylessLocalhost,
@@ -123,7 +124,8 @@ fn make_create_body() -> Value {
     json!({
         "title": "Test Novel",
         "long_term_goal": "Write a great novel",
-        "initial_idea": "A sci-fi thriller"
+        "initial_idea": "A sci-fi thriller",
+        "world_id": "wld_test_world"
     })
 }
 
@@ -131,6 +133,7 @@ fn make_create_body() -> Value {
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    test_utils::seed_test_creator_and_world(state.pool()).await;
     (state, tmp)
 }
 
@@ -157,6 +160,7 @@ async fn create_work_idempotent_replay_returns_200() {
         "title": "Test Novel",
         "long_term_goal": "Write a great novel",
         "initial_idea": "A sci-fi thriller",
+        "world_id": "wld_test_world",
         "client_request_id": "crid_replay_test"
     });
 
@@ -241,7 +245,7 @@ async fn handler_get_work_returns_record() {
         title: "Handler Test".into(),
         long_term_goal: "Test goal".into(),
         initial_idea: "Test idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -310,7 +314,7 @@ async fn handler_patch_work_updates_record() {
         title: "Original".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -336,6 +340,7 @@ async fn handler_patch_work_updates_record() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -364,6 +369,7 @@ async fn handler_patch_work_returns_404_for_unknown() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -385,7 +391,7 @@ async fn handler_append_inspiration_returns_count() {
         title: "Inspiration Test".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -482,7 +488,7 @@ async fn get_work_response_includes_stage_fields() {
         title: "Stage Test".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -510,7 +516,7 @@ async fn patch_work_updates_stage_fields() {
         title: "Stage Patch".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -536,6 +542,7 @@ async fn patch_work_updates_stage_fields() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -558,6 +565,7 @@ async fn patch_work_updates_stage_fields() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -603,6 +611,7 @@ async fn patch_work_stage_returns_401_without_creator() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -633,6 +642,7 @@ async fn patch_work_stage_returns_404_for_unknown() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -656,7 +666,7 @@ async fn create_work_response_has_parsed_json_fields() {
         title: "JSON Fields Test".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -701,7 +711,7 @@ async fn append_inspiration_response_has_parsed_arrays() {
         title: "Inspiration Array Test".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -762,7 +772,7 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
         title: "Isolated".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -794,7 +804,7 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         title: "Isolated Patch".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -822,6 +832,7 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let state_b = WorkspaceState::new_for_testing(nh_b, db_b, None).await;
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
@@ -851,7 +862,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         title: "Intake Status Test".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -879,6 +890,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         stage_status: None,
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -908,6 +920,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let advanced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -932,7 +945,7 @@ async fn patch_work_stage_change_is_auditable() {
         title: "Audit Test".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -959,6 +972,7 @@ async fn patch_work_stage_change_is_auditable() {
         stage_status: Some("complete".to_string()),
         force: Some(true),
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -983,6 +997,7 @@ async fn patch_work_stage_change_is_auditable() {
         stage_status: Some("active".to_string()),
         force: Some(true),
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let forced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1004,7 +1019,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         title: "Invalid Stage Test".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -1022,7 +1037,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         title: "Invalid Stage Test 2".into(),
         long_term_goal: "Goal".into(),
         initial_idea: "Idea".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
@@ -1048,6 +1063,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1120,6 +1136,7 @@ async fn patch_stage_status_complete_without_stage_is_rejected() {
         stage_status: Some("complete".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1165,6 +1182,7 @@ async fn patch_stage_status_complete_with_force_is_allowed() {
         stage_status: Some("complete".to_string()),
         force: Some(true),
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1206,6 +1224,7 @@ async fn patch_stage_status_active_without_force_is_allowed() {
         stage_status: Some("active".to_string()),
         force: None,
         auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1243,7 +1262,7 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
         title: "Lazy Promote Test".into(),
         long_term_goal: "All chapters finalized".into(),
         initial_idea: "Idempotency probe".into(),
-        world_id: None,
+        world_id: Some("wld_test_world".to_string()),
         story_ref: None,
         primary_preset_id: None,
         client_request_id: None,
