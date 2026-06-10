@@ -4,13 +4,13 @@ reviewer: "@qc-specialist-2"
 reviewer_index: 2
 focus: security-correctness
 plan_id: 2026-06-10-v1.41-selection-pool
-verdict: Request Changes
-generated_at: 2026-06-10T22:18:00+08:00
-review_range: "merge-base: 55689706 → tip: 57f573ad"
+verdict: Approve
+generated_at: 2026-06-10T23:58:00+08:00
+review_range: "merge-base: 55689706 → tip: 97470073"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
-files_reviewed: 12
-tools_run: cargo clippy (4 crates), cargo +nightly fmt --all -- --check, cargo test (4 crates + 9 new hermetic), git log/diff/stat, manual source review
+files_reviewed: 13
+tools_run: cargo clippy (4 crates), cargo +nightly fmt --all -- --check, cargo test (4 crates), cargo test -p nexus-daemon-runtime --test selection_pool (13 tests), git log/diff f5dd727f..97470073, manual fix-wave delta review (W-01..W-04)
 ---
 
 # Code Review Report — V1.41 P1 (qc2)
@@ -104,3 +104,85 @@ tools_run: cargo clippy (4 crates), cargo +nightly fmt --all -- --check, cargo t
 - [x] Will commit **only** the report path, then emit real `git log -1` in Completion Report.
 
 **Self-check before sign-off (per assignment)**: All 6 items answered YES after the above steps. Report will be committed and the turn will end with the Completion Report v2 (no follow-up questions).
+
+## Revalidation (fix-wave delta: f5dd727f..97470073)
+
+**Reviewer**: @qc-specialist-2 (qc-specialist-2, reviewer_index: 2)
+**Re-review timestamp**: 2026-06-10T23:58:00+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: 97470073` (focus delta `f5dd727f..97470073`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: cargo clippy, cargo +nightly fmt --check, cargo test, cargo test -p nexus-daemon-runtime --test selection_pool, git log/diff on fix-wave, manual review of authz/atomic/pagination/retry changes
+
+### Disposition
+
+| Finding | Original severity | New severity | Disposition | Evidence |
+|---------|-------------------|--------------|-------------|----------|
+| W-01 (authz) | warning | resolved | commit 98d7b499 + 3 new tests | crates/nexus-local-db/src/novel_pool_entries.rs:archive_pool_entry (now takes &creator_id + `AND creator_id = ?`), crates/nexus-daemon-runtime/src/api/handlers/works.rs:archive_pool_entry_handler + promote_inspiration_handler (pass creator_id and validate), tests: test_archive_pool_rejects_cross_creator, test_archive_inspiration_rejects_cross_creator, test_promote_inspiration_rejects_cross_creator (all pass) |
+| W-02 (non-atomic promote) | warning | resolved | commit d7ed04de + 1 new test | crates/nexus-local-db/src/inspiration_items.rs:inspiration_promote_atomic (single tx wrapping Work INSERT + pool upsert + inspiration UPDATE; rolls back on any failure), crates/nexus-daemon-runtime/src/api/handlers/works.rs (now calls the atomic helper), test_promote_inspiration_atomicity_on_step3_failure (proves rollback) |
+| W-03 (best-effort pool update) | warning | resolved (low) | commit 8cc1eaba (tracing::error + lock clear fallback) | crates/nexus-orchestration/src/auto_chain.rs:mark_work_completed (match on mark_pool_entry_completed_for_work; on Err: tracing::error! + WorkPatch to clear completion_locked_at so supervisor can retry on next tick; fallback is now explicit and observable) |
+| W-04 (unbounded list) | warning | resolved | commit 45cc8d22 (limit/offset + count + CLI flags) | crates/nexus-local-db/src/novel_pool_entries.rs + inspiration_items.rs (list_* now take limit/offset, default 200 cap 1000; new count_* helpers), crates/nexus-daemon-runtime/src/api/handlers/works.rs (ListPoolQuery/ListInspirationQuery carry limit/offset + derive Default; ListPoolResponse/ListInspirationResponse include total/limit/offset), CLI works/mod.rs passes through, selection_pool tests updated for pagination |
+
+### Suggestions (forward-looking; deferred to V1.42 per qc-consolidated.md residuals)
+
+| ID | Status | Note |
+|----|--------|------|
+| S-01 (slug UX for non-ASCII titles) | defer | R-V141P1-12 (V1.42 UX) |
+| S-02 (DAO archive functions should take creator_id) | resolved | implemented in 98d7b499 (archive_pool_entry / archive_inspiration now take creator_id + guard) |
+| S-03 (--set-default on pool promote atomicity) | defer | R-V141P1-10 (V1.42) |
+| S-04 (pre-existing flake documentation) | accept | R-V141P1-17 (backlog) |
+
+### New findings (if any)
+
+None.
+
+### Tools / verification tails
+
+```bash
+$ cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings 2>&1 | tail -5
+Blocking waiting for file lock on build directory
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.70s
+# (clean — no warnings emitted)
+```
+
+```bash
+$ cargo +nightly fmt --all -- --check 2>&1 | tail -5
+# (no output — clean)
+```
+
+```bash
+$ cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db 2>&1 | tail -20
+test result: ok. 15 passed; 0 failed; ... (nexus42)
+test result: ok. 1 passed; ... (daemon-runtime doc-tests)
+test result: ok. 2 passed; ... (local-db)
+test result: ok. 1 passed; ... (orchestration)
+# all crates green
+```
+
+```bash
+$ cargo test -p nexus-daemon-runtime --test selection_pool 2>&1 | tail -20
+running 13 tests
+test test_archive_pool_rejects_cross_creator ... ok
+test test_archive_inspiration_rejects_cross_creator ... ok
+test test_promote_inspiration_rejects_cross_creator ... ok
+test test_promote_inspiration_atomicity_on_step3_failure ... ok
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.54s
+# (includes all prior TC1-TC9 + 4 new guard/atomicity tests)
+```
+
+```bash
+$ git log --oneline f5dd727f..97470073
+97470073 merge(v1.41 P1 fix-wave): resolve 9 QC + 11 plan-review findings
+...
+98d7b499 fix(daemon-runtime,local-db): cross-creator guard on archive/promote paths
+d7ed04de fix(daemon-runtime,local-db): promote_inspiration wrapped in single transaction
+8cc1eaba fix(orchestration): mark_work_completed pool update retry with fallback
+45cc8d22 feat(pool): add limit/offset pagination + count to list endpoints
+# (plus supporting fmt/clippy/docs/perf commits)
+```
+
+### Updated verdict
+
+Approve
+
+**Rationale**: All 4 Warnings from the prior qc2 review (W-01 cross-creator authz on archive/promote, W-02 non-atomic 3-write promote, W-03 best-effort non-observable pool update on completion, W-04 unbounded list without pagination/count) are resolved by the fix-wave commits. Each has corresponding DAO/handler changes + new hermetic tests that pass. Static checks (clippy, nightly fmt) and full test suites (including 13/13 selection_pool) are clean. No new Critical or Warning findings appear in the `f5dd727f..97470073` delta. The prior `Request Changes` is lifted.
