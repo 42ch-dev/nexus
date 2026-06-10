@@ -156,7 +156,7 @@ pub async fn register(
     if let Some(parent) = body_abs.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|e| {
             cleanup_row(pool, &reference_source_id);
-            LocalDbError::Io {
+            LocalDbError::IoWithPath {
                 path: parent.display().to_string(),
                 source: e,
             }
@@ -168,7 +168,7 @@ pub async fn register(
         .await
         .map_err(|e| {
             cleanup_row(pool, &reference_source_id);
-            LocalDbError::Io {
+            LocalDbError::IoWithPath {
                 path: body_abs.display().to_string(),
                 source: e,
             }

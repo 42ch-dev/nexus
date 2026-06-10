@@ -28,7 +28,7 @@ impl Schema {
         // Ensure parent directory exists before opening SQLite connection.
         if let Some(parent) = db_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                nexus_local_db::LocalDbError::Io {
+                nexus_local_db::LocalDbError::IoWithPath {
                     path: parent.display().to_string(),
                     source: e,
                 }
