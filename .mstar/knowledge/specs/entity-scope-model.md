@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Active — normative SSOT for entity scope hierarchy, uniqueness, and crate ownership |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (BlockType + novel_category + canonical_name grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-06-08 — V1.37 P2 World KB narrative taxonomy roadmap |
+| **Last updated** | 2026-06-11 — V1.40 P1 World KB taxonomy shipped |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file

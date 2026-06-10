@@ -3,6 +3,7 @@
 **Status**: Normative  
 **Document class**: Master  
 **V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
+**V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).
 
 ## 0. 文档定位
 

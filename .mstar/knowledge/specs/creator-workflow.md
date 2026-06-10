@@ -1,8 +1,9 @@
 # Creator Workflow — Normative Specification
 
-**Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; **V1.39 target** — DF-53 full auto-chain + daemon continuity)  
+**Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; V1.39 — DF-53 full auto-chain + daemon continuity; **V1.40 Shipped** — DF-63 W5 `kb-extract` persistence via `novel-review-master sync_world_kb`: World-bound Works enqueue extract with `work.world_id`, `source_kind=work_chapter`, `source_locator={{preset.input.body_path}}`, `work_id`; worldless Works (legacy V1.39-and-earlier) skip World promotion)  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
+**Last updated**: 2026-06-11 — V1.40 P3 World KB extract binding shipped  
 **Scope**: Staged creator journey on **Work** (`intake → research → produce → review → persist`), built on shipped `creator run` + `run_intents`  
 **Coordinates with**:
 

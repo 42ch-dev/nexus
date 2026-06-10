@@ -2,6 +2,8 @@
 
 **Status**: Normative  
 **Document class**: Master  
+**V1.40 Shipped amendments:** §4.1.2 `kb_key_blocks` validation intent — application-layer validation in `nexus-kb::validation` module (ValidationMode::Novel enforces `body.attributes.novel_category`); `narrative_worlds` rows via `creator world create` (V1.40 P0); `kb_extract_jobs` artifact locator columns (`source_kind`, `source_locator`, `profile_hint`, `work_id`) added V1.40 P3.  
+**Last updated**: 2026-06-11 — V1.40 P1/P3 shipped  
 
 ## 0. 文档定位
 

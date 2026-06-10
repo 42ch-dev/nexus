@@ -1,9 +1,9 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 target** — World KB implement contract (§3.5.1)
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1): mandatory world binding at create/init (per user clarification 2026-06-10), two init paths only (create new / bind existing), legacy V1.39 worldless Works read-only preserved.
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
-**Last updated**: 2026-06-10
+**Last updated**: 2026-06-11 (V1.40 closeout)
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
