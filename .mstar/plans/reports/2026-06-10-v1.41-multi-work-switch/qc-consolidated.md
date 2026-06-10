@@ -1,30 +1,40 @@
 ---
 report_kind: qc-consolidated
 plan_id: 2026-06-10-v1.41-multi-work-switch
-verdict: Request Changes
-generated_at: 2026-06-10T21:30:00+08:00
-review_range: "merge-base: 55689706 → tip: f4b39d42"
+verdict: Approve (after fix-wave re-review)
+generated_at: 2026-06-10T21:50:00+08:00
+initial_review_range: "merge-base: 55689706 → tip: f4b39d42"
+fix_wave_tip: 9b6627dd
+final_review_range: "merge-base: 55689706 → tip: 9b6627dd"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 reviewers:
-  - "@qc-specialist (1, architecture-coherence-maintainability) — Request Changes"
-  - "@qc-specialist-2 (2, security-correctness) — Approve"
-  - "@qc-specialist-3 (3, performance-reliability) — Request Changes"
+  - "@qc-specialist (1, architecture-coherence-maintainability) — initial Request Changes → fix-wave re-review Approve"
+  - "@qc-specialist-2 (2, security-correctness) — initial Approve (no re-review)"
+  - "@qc-specialist-3 (3, performance-reliability) — initial Request Changes → fix-wave re-review Approve"
 ---
 
 # QC Consolidated Gate — V1.41 P0 (DF-60 multi-work lifecycle)
 
-## Verdict
-**Request Changes** — 3 Critical + 4 Warning must be addressed (or explicitly deferred with residual tracking) before Approve.
+## Verdict (final, after fix-wave re-review)
+**Approve** — 3 Critical + 4 Warning blockers addressed in fix wave (5 required fixes dispatched to `@fullstack-dev` on `feature/v1.41-multi-work-switch`; 1 optional fix deferred with residual). Targeted re-review by `qc-specialist` + `qc-specialist-3` both returned Approve.
 
-## Roll-up
+## Roll-up (initial review)
 
-| Reviewer | Verdict | Critical | Warning | Suggestion |
-|----------|---------|----------|---------|------------|
+| Reviewer | Verdict (initial) | Critical | Warning | Suggestion |
+|----------|-------------------|----------|---------|------------|
 | @qc-specialist (1) | Request Changes | 3 | 3 | 4 |
 | @qc-specialist-2 (2) | Approve | 0 | 0 | 6 |
 | @qc-specialist-3 (3) | Request Changes | 0 | 4 | 4 |
-| **Consolidated** | **Request Changes** | **3** | **7** | **14** |
+| **Consolidated (initial)** | **Request Changes** | **3** | **7** | **14** |
+
+## Roll-up (after fix-wave re-review)
+
+| Reviewer | Verdict (re-review) | Disposition |
+|----------|---------------------|-------------|
+| @qc-specialist (1) | **Approve** | F-001/F-002/F-003 resolved; F-004 defer with R-V141P0-01; F-005 resolved via spec amendment §3.2 |
+| @qc-specialist-3 (3) | **Approve** | W1/W2/W3/W4 all resolved; no new findings |
+| **Consolidated (final)** | **Approve** | All blockers closed; 12 residuals registered; ready for QA verification |
 
 ## Blocking findings (must fix or defer-with-tracking this round)
 
@@ -107,10 +117,11 @@ Per `mstar-plan-artifacts/references/status-and-residuals.md`「Residual finding
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| 🔴 Critical | 3 |
-| 🟡 Warning | 7 |
-| 🟢 Suggestion | 14 |
+| Severity | Count (initial) | Count (after re-review) |
+|----------|------------------|------------------------|
+| 🔴 Critical | 3 | 0 (all resolved) |
+| 🟡 Warning | 7 | 0 (5 resolved, 1 defer + 1 accept-with-fix closed) |
+| 🟢 Suggestion | 14 | 14 (forward-looking, tracked in residuals) |
 
-**Verdict**: Request Changes
+**Initial verdict**: Request Changes
+**Final verdict (after fix-wave re-review)**: **Approve**
