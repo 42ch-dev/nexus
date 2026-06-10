@@ -215,6 +215,128 @@ pub async fn promote_inspiration(
         })
 }
 
+/// Atomic inspiration promote: Work insert + pool promote + inspiration update
+/// in a single transaction. Rolls back all three if any step fails (qc2 W-02).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any of the three DB operations fails.
+pub async fn inspiration_promote_atomic(
+    pool: &SqlitePool,
+    work_record: &crate::works::WorkRecord,
+    creator_id: &str,
+    work_id: &str,
+    item_id: &str,
+    now: &str,
+) -> Result<crate::novel_pool_entries::PoolEntry, LocalDbError> {
+    use sqlx::Connection;
+
+    let mut conn = pool.acquire().await?;
+    let mut tx = conn.begin().await?;
+
+    // Step 1: Insert Work
+    // SAFETY: dynamic SQL — compile-time macro not applicable.
+    sqlx::query(
+        "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, long_term_goal,
+         initial_idea, creative_brief, intake_status, world_id, story_ref, inspiration_log,
+         primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
+         work_profile, work_ref, total_planned_chapters, current_chapter,
+         auto_chain_enabled, driver_schedule_id, auto_chain_interrupted,
+         auto_review_master_on_timeout,
+         runtime_lock_holder, runtime_lock_acquired_at, completion_locked_at,
+         novel_completion_status, lineage_from_work_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?,
+                 NULL, NULL, NULL, NULL, NULL)",
+    )
+    .bind(&work_record.work_id)
+    .bind(&work_record.creator_id)
+    .bind(&work_record.workspace_slug)
+    .bind(&work_record.status)
+    .bind(&work_record.title)
+    .bind(&work_record.long_term_goal)
+    .bind(&work_record.initial_idea)
+    .bind(&work_record.creative_brief)
+    .bind(&work_record.intake_status)
+    .bind(&work_record.world_id)
+    .bind(&work_record.story_ref)
+    .bind(&work_record.inspiration_log)
+    .bind(&work_record.primary_preset_id)
+    .bind(&work_record.schedule_ids)
+    .bind(&work_record.created_at)
+    .bind(&work_record.updated_at)
+    .bind(&work_record.current_stage)
+    .bind(&work_record.stage_status)
+    .bind(&work_record.work_profile)
+    .bind(&work_record.work_ref)
+    .bind(&work_record.total_planned_chapters)
+    .bind(work_record.current_chapter)
+    .bind(work_record.auto_chain_enabled)
+    .bind(work_record.auto_chain_interrupted)
+    .bind(work_record.auto_review_master_on_timeout)
+    .bind(&work_record.novel_completion_status)
+    .bind(&work_record.lineage_from_work_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Step 2: Demote prior active pool entry → queued, upsert target → active
+    let entry_id = format!("npe_{}", uuid::Uuid::new_v4());
+    let work_title: Option<String> =
+        sqlx::query_scalar("SELECT title FROM works WHERE work_id = ? AND creator_id = ?")
+            .bind(work_id)
+            .bind(creator_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten();
+    let title = work_title.unwrap_or_default();
+
+    // Demote prior active
+    sqlx::query(
+        "UPDATE novel_pool_entries SET status = 'queued', updated_at = ? \
+         WHERE creator_id = ? AND status = 'active'",
+    )
+    .bind(now)
+    .bind(creator_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Upsert target
+    sqlx::query(
+        "INSERT INTO novel_pool_entries (entry_id, creator_id, work_id, status, promoted_at, note, title, updated_at) \
+         VALUES (?, ?, ?, 'active', ?, NULL, ?, ?) \
+         ON CONFLICT(creator_id, work_id) DO UPDATE SET \
+           status = 'active', promoted_at = excluded.promoted_at, note = NULL, \
+           title = excluded.title, updated_at = excluded.updated_at",
+    )
+    .bind(&entry_id)
+    .bind(creator_id)
+    .bind(work_id)
+    .bind(now)
+    .bind(&title)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
+    // Step 3: Update inspiration item to promoted
+    sqlx::query(
+        "UPDATE inspiration_items SET status = 'promoted', promoted_work_id = ?, promoted_at = ? \
+         WHERE item_id = ?",
+    )
+    .bind(work_id)
+    .bind(now)
+    .bind(item_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    // Fetch the upserted pool entry
+    crate::novel_pool_entries::get_pool_entry_by_work(pool, creator_id, work_id)
+        .await?
+        .ok_or_else(|| LocalDbError::MissingVersionKey {
+            key: format!("novel_pool_entries/{work_id}"),
+        })
+}
+
 /// Archive an inspiration item (set status to `archived`).
 ///
 /// Restricted to the owning `creator_id` — rows belonging to other

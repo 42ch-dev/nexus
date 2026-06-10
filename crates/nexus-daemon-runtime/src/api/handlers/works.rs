@@ -1559,27 +1559,14 @@ pub async fn promote_inspiration_handler(
         lineage_from_work_id: None,
     };
 
-    works::create_work(state.pool(), &record)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    // Insert a pool row for the new Work
-    let pool_entry =
-        nexus_local_db::novel_pool_entries::promote_to_active(state.pool(), &creator_id, &work_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
-
-    // Update the inspiration item to promoted
-    nexus_local_db::inspiration_items::promote_inspiration(
+    // Wrap the three writes (Work create + pool promote + inspiration update)
+    // in a single transaction so a step-3 failure rolls back everything.
+    let pool_entry = nexus_local_db::inspiration_promote_atomic(
         state.pool(),
-        &req.item_id,
+        &record,
+        &creator_id,
         &work_id,
+        &req.item_id,
         &now,
     )
     .await

@@ -125,7 +125,8 @@ pub use novel_pool_entries::{
 // Re-export inspiration_items types
 pub use inspiration_items::{
     archive_inspiration, create_inspiration_row, create_inspiration_with_scaffold, get_inspiration,
-    list_inspiration, promote_inspiration, title_to_slug, InspirationItem,
+    inspiration_promote_atomic, list_inspiration, promote_inspiration, title_to_slug,
+    InspirationItem,
 };
 
 // Re-export work_chapters types
