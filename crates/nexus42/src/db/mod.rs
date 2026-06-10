@@ -103,6 +103,7 @@ mod tests {
         let ref_id = "ref_test";
         let ws_id = "local";
         let src_type = "pdf";
+        let source_mutability = "static";
         let uri = "test.pdf";
         let title = "Test";
         let content = "Extracted text";
@@ -110,9 +111,9 @@ mod tests {
         let created_at = "2026-01-01T00:00:00Z";
         sqlx::query!(
             "INSERT INTO reference_sources
-             (reference_source_id, workspace_id, source_type, uri, title, content, scan_status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ref_id, ws_id, src_type, uri, title, content, scan_status, created_at
+             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, content, scan_status, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ref_id, ws_id, src_type, source_mutability, uri, title, content, scan_status, created_at
         )
         .execute(&pool)
         .await
