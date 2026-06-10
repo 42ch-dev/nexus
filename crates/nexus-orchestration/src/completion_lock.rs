@@ -8,7 +8,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 /// Completion-lock payload written to disk.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompletionLock {
     /// The Work ID this lock protects.
     pub work_id: String,
@@ -24,11 +24,13 @@ const LOCK_FILE_NAME: &str = ".completion-lock.json";
 /// Return the path to the completion-lock file for a given Work.
 ///
 /// ```
+/// # use nexus_orchestration::completion_lock::completion_lock_path;
 /// assert_eq!(
-///     completion_lock_path(Path::new("/ws"), "my-novel"),
-///     Path::new("/ws/Works/my-novel/.completion-lock.json")
+///     completion_lock_path(std::path::Path::new("/ws"), "my-novel"),
+///     std::path::Path::new("/ws/Works/my-novel/.completion-lock.json")
 /// );
 /// ```
+#[must_use]
 pub fn completion_lock_path(workspace_dir: &Path, work_ref: &str) -> std::path::PathBuf {
     workspace_dir
         .join("Works")
@@ -62,6 +64,10 @@ pub fn write_completion_lock(
 ///
 /// Returns `Ok(Some(lock))` if the file exists and parses correctly,
 /// `Ok(None)` if the file does not exist, or `Err` on I/O / parse failure.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if the file exists but cannot be read or parsed.
 pub fn read_completion_lock(
     workspace_dir: &Path,
     work_ref: &str,

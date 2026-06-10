@@ -131,9 +131,14 @@ pub enum NexusApiError {
     #[error("Session expired")]
     SessionExpired,
 
-    /// Resource conflict (e.g., duplicate workspace)
+    /// Resource conflict (e.g., duplicate workspace, completion-lock)
     #[error("Conflict: {0}")]
     Conflict(String),
+
+    /// Resource locked by another process (e.g., `runtime_lock_holder`)
+    /// DF-60 §4: HTTP 423 Locked
+    #[error("Locked: {reason}")]
+    Locked { resource: String, reason: String },
 
     /// Bad request with code and message (e.g., invalid stage value)
     #[error("Bad request: {message}")]
@@ -149,6 +154,7 @@ impl NexusApiError {
     pub fn status_code(&self) -> StatusCode {
         match self {
             Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Locked { .. } => StatusCode::LOCKED,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
             Self::BadRequest { code, .. } => {
                 match code.as_str() {
@@ -204,6 +210,7 @@ impl NexusApiError {
             }
             Self::SessionExpired => "SESSION_EXPIRED",
             Self::Conflict(_) => "CONFLICT",
+            Self::Locked { .. } => "LOCKED",
         }
     }
 
@@ -217,10 +224,12 @@ impl NexusApiError {
                 "field": field,
                 "reason": reason,
             })),
-            Self::Forbidden { resource, reason } => Some(serde_json::json!({
-                "resource": resource,
-                "reason": reason,
-            })),
+            Self::Forbidden { resource, reason } | Self::Locked { resource, reason } => {
+                Some(serde_json::json!({
+                    "resource": resource,
+                    "reason": reason,
+                }))
+            }
             _ => None,
         }
     }

@@ -788,6 +788,33 @@ pub async fn patch_work(
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    // DF-60 §4: guard mutating operations against completion-lock and runtime-lock
+    let current_work = works::get_work(state.pool(), &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    if current_work.completion_locked_at.is_some() {
+        return Err(NexusApiError::Conflict(
+            format!(
+                "work {work_id} is completion-locked since {}; use 'creator works completion-lock release' first",
+                current_work.completion_locked_at.as_deref().unwrap_or("?")
+            ),
+        ));
+    }
+
+    if let Some(ref holder) = current_work.runtime_lock_holder {
+        return Err(NexusApiError::Locked {
+            resource: "work".to_string(),
+            reason: format!(
+                "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
+            ),
+        });
+    }
+
     // Stage changes use gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
     if req.current_stage.is_some() || req.stage_status.is_some() {
         let updated = patch_work_stage(&state, &creator_id, &work_id, &req, &now).await?;
