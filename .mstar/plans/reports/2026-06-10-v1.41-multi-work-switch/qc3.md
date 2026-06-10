@@ -4,9 +4,9 @@ reviewer: "@qc-specialist-3"
 reviewer_index: 3
 focus: performance-reliability
 plan_id: 2026-06-10-v1.41-multi-work-switch
-verdict: Request Changes
-generated_at: 2026-06-10T20:45:00+08:00
-review_range: "merge-base: 55689706 → tip: f4b39d42"
+verdict: Approve
+generated_at: 2026-06-10T21:30:00+08:00
+review_range: "merge-base: 55689706 → tip: 9b6627dd"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 files_reviewed: 15
@@ -92,3 +92,56 @@ tools_run: cargo clippy --all-targets, cargo +nightly fmt --check, cargo test, m
 **Recommended disposition**:
 - If PM wants to defer W1, W2, W3 to DF-61/P1: register them as tracked residuals in `status.json` and re-review.
 - If PM wants to close in P0: W4 is a trivial one-line logging change; W3 requires either hiding `use` or adding the daemon handler; W1 and W2 are small code changes.
+
+## Revalidation (fix-wave delta: edf0a621..9b6627dd)
+
+**Reviewer**: @qc-specialist-3 (qc-specialist-3, reviewer_index: 3)
+**Re-review timestamp**: 2026-06-10T21:30:00+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: 9b6627dd` (focus delta `edf0a621..9b6627dd`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: cargo clippy, cargo +nightly fmt --check, cargo test, manual review of fix-wave diff
+
+### Disposition
+
+| Finding | Original severity | New severity | Disposition | Evidence |
+|---------|-------------------|--------------|-------------|----------|
+| W1 (DB+file non-atomic) | warning | resolved | Fix 4 release handler + spec amendment | `completion_lock.rs` SSOT doc comments; `release_completion_lock_handler` DB-first→file-second with `tracing::warn!` on file-delete failure; supervisor `write_completion_lock_if_available` logs warning on file-write failure |
+| W2 (schema_version missing) | warning | resolved | Fix 3 schema_version field | `completion_lock.rs` struct: `schema_version: u32` with `#[serde(default)]`; backward-compat (missing→1) and forward-compat (future→structured error); unit tests `read_missing_schema_version_treated_as_v1` and `read_future_schema_version_returns_error` |
+| W3 (CLI 404 on /pool) | warning | resolved | Fix 1 daemon routes (same root as qc1 F-001) | `api/mod.rs` lines 251-252: `.route("/v1/local/works/pool", post(...))`; lines 263-264: `.route("/v1/local/works/{work_id}/completion-lock/release", post(...))`; handlers implemented in `handlers/works.rs` |
+| W4 (debug-level tracing) | warning | resolved | Fix 5 info log on mark_work_completed | `auto_chain.rs` lines 289-296: `tracing::info!(target: "novel.completion", work_id = %work_id, creator_id = %creator_id, completion_locked_at = %now, work_ref = ?updated.work_ref, "...")` |
+
+### New findings (if any)
+
+None.
+
+### Tools / verification tails
+
+**cargo clippy** (scoped: nexus42, nexus-daemon-runtime, nexus-orchestration, nexus-local-db):
+```
+Checking nexus-orchestration v0.1.0
+Checking nexus-daemon-runtime v0.1.0
+Checking nexus42 v0.1.0
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.90s
+```
+
+**cargo +nightly fmt --check**:
+```
+(no output — clean)
+```
+
+**cargo test** (scoped):
+```
+nexus-daemon-runtime: 15 passed; 0 failed
+nexus-local-db: 2 passed; 0 failed  
+nexus-orchestration: 1 passed; 0 failed
+nexus42: 1 passed; 0 failed
+```
+
+**Note on pre-existing flake**: `repeated_sweeps_remain_stable` (master_decision_timeout.rs) failed 2/3 runs — same pre-existing timing flake noted in original S2, not introduced by fix-wave. No action needed for P0.
+
+### Updated verdict
+
+Approve
+
+**Rationale**: All four Warning-level findings (W1, W2, W3, W4) are resolved with concrete code changes, unit tests, and documented SSOT contracts. No new Critical or Warning items introduced in the fix-wave delta. CI tools pass. Pre-existing test flake (S2) remains unchanged and was already scoped out of P0.
