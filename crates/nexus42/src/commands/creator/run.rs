@@ -68,6 +68,13 @@ pub enum RunCommand {
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
+        /// Start new Work lineage from a completed Work (DF-60 §5.2).
+        /// Creates a new Work with `lineage_from_work_id` set.
+        #[arg(long)]
+        from_work: Option<String>,
+        /// After start, set pool `active` to new Work (DF-60 §1.1).
+        #[arg(long, default_value_t = false)]
+        set_default: bool,
     },
     /// Append inspiration / direction to an existing Work
     Continue {
@@ -79,22 +86,6 @@ pub enum RunCommand {
         /// Optional preset to run (default: same `primary_preset_id`)
         #[arg(long)]
         preset: Option<String>,
-        /// Emit machine-readable JSON instead of human text
-        #[arg(long, default_value_t = false)]
-        json: bool,
-    },
-    /// List all Works for the active creator
-    List {
-        /// Filter by status
-        #[arg(long)]
-        status: Option<String>,
-        /// Emit machine-readable JSON instead of human text
-        #[arg(long, default_value_t = false)]
-        json: bool,
-    },
-    /// Show details of a single Work
-    Status {
-        work_id: String,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -116,12 +107,26 @@ pub enum RunCommand {
     ///
     /// Re-evaluates the current Work state and enqueues the next auto-chain
     /// step (stage advance or next chapter) if applicable.
+    ///
+    /// On a completed Work (after completion-lock release), requires `--reopen`
+    /// with audited `--reason` (DF-60 §3.2).
     Resume {
         /// Work ID (wrk_...) to resume
         work_id: String,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
+        /// Reopen a completed Work for further writing (DF-60 §3.2).
+        /// Requires --reason. Only valid after completion-lock release.
+        #[arg(long, default_value_t = false)]
+        reopen: bool,
+        /// Audit reason for reopening a completed Work (required with --reopen).
+        #[arg(long)]
+        reason: Option<String>,
+        /// Extend `total_planned_chapters` when reopening (required when §6
+        /// completion criteria still hold after reopen).
+        #[arg(long)]
+        extend_chapters: Option<i32>,
     },
 }
 
@@ -183,6 +188,8 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             reason,
             client_request_id,
             json,
+            from_work,
+            set_default,
         } => {
             // Validate --force-gates requires --reason
             if force_gates && reason.is_none() {
@@ -266,6 +273,23 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         "auto_chain_enabled".to_string(),
                         serde_json::Value::Bool(false),
                     );
+                }
+            }
+
+            // DF-60 §5.2: lineage from completed Work.
+            if let Some(ref fw) = from_work {
+                if let Some(o) = body.as_object_mut() {
+                    o.insert(
+                        "lineage_from_work_id".to_string(),
+                        serde_json::Value::String(fw.clone()),
+                    );
+                }
+            }
+
+            // DF-60 §1.1: set pool `active` after creation.
+            if set_default {
+                if let Some(o) = body.as_object_mut() {
+                    o.insert("set_pool_active".to_string(), serde_json::Value::Bool(true));
                 }
             }
 
@@ -508,373 +532,6 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("Inspiration appended to {work_id}");
             }
         }
-        RunCommand::List { status, json } => {
-            // R-V133P1-07: build query via url::Url to properly encode the
-            // status filter value, preventing query-string injection.
-            let base = "/v1/local/works";
-            let path = status.as_ref().map_or_else(
-                || base.to_string(),
-                |s| {
-                    let mut url = url::Url::parse("http://localhost").expect("valid base");
-                    url.set_path(base);
-                    url.query_pairs_mut().append_pair("status", s);
-                    let q = url.query().unwrap_or("");
-                    format!("{base}?{q}")
-                },
-            );
-
-            let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&resp)?);
-            } else {
-                let works = resp.get("works").and_then(|v| v.as_array());
-                match works {
-                    Some(works) if works.is_empty() => {
-                        println!("No works found.");
-                    }
-                    Some(works) => {
-                        println!(
-                            "{:<36} {:30} {:12} {:12} UPDATED",
-                            "WORK_ID", "TITLE", "STATUS", "INTAKE"
-                        );
-                        for w in works {
-                            let id = w.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
-                            let title = w.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-                            let status = w.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                            let intake = w
-                                .get("intake_status")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("?");
-                            let updated =
-                                w.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
-                            let display_title = if title.len() > 28 {
-                                format!("{}…", &title[..28])
-                            } else {
-                                title.to_string()
-                            };
-                            println!(
-                                "{id:<36} {display_title:30} {status:12} {intake:12} {updated}"
-                            );
-                        }
-                        println!("\n{} work(s)", works.len());
-                    }
-                    None => {
-                        println!("No works found.");
-                    }
-                }
-            }
-        }
-        RunCommand::Status { work_id, json } => {
-            // R-V139P1-W-3: DaemonClient already enforces DEFAULT_REQUEST_TIMEOUT
-            // (30s) on every request; no unbounded wait is possible.
-            let resp: serde_json::Value = client
-                .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
-                .await?;
-
-            if json {
-                println!("{}", serde_json::to_string_pretty(&resp)?);
-            } else {
-                // V1.39 P4 T3: stale findings banner — best-effort, never
-                // fails the status command. Older daemons without this
-                // endpoint will return 404 and the banner is simply skipped.
-                if let Ok(stale) = client
-                    .get::<serde_json::Value>("/v1/local/findings/stale")
-                    .await
-                {
-                    let stale_count = stale
-                        .get("stale_count")
-                        .and_then(serde_json::Value::as_u64)
-                        .unwrap_or(0);
-                    let threshold_secs = stale
-                        .get("threshold_seconds")
-                        .and_then(serde_json::Value::as_i64)
-                        .unwrap_or(96 * 60 * 60);
-                    if stale_count > 0 {
-                        let threshold_hours = threshold_secs / 3600;
-                        println!(
-                            "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — run: nexus42 creator run schedule add --preset novel-review-master --work-id {work_id}"
-                        );
-                        println!();
-                    }
-                }
-
-                let work_status = resp
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(not set)");
-                let title = resp
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(untitled)");
-                let work_profile = resp.get("work_profile").and_then(|v| v.as_str());
-                let work_ref = resp
-                    .get("work_ref")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(no ref)");
-                let intake_status = resp
-                    .get("intake_status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(not set)");
-                let current_chapter = resp
-                    .get("current_chapter")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0);
-                let total_planned = resp
-                    .get("total_planned_chapters")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0);
-                let chapters = resp.get("chapters").and_then(|v| v.as_array());
-                let next_ch_val = resp.get("next_chapter").and_then(serde_json::Value::as_i64);
-
-                // V1.38 P0 (T8): per-chapter status UX per spec §8.1.
-                // For novel profile works, show chapter-centric output.
-                if let (Some("novel"), Some(ch_list)) = (work_profile, chapters) {
-                    let finalized_count = ch_list
-                        .iter()
-                        .filter(|c| c.get("status").and_then(|v| v.as_str()) == Some("finalized"))
-                        .count();
-                    let total = ch_list.len();
-
-                    let profile_tag = " (novel)".to_string();
-
-                    if work_status == "completed" {
-                        let updated_at = resp
-                            .get("updated_at")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("(unknown)");
-                        println!("═══════════════════════════════════════════════════════");
-                        println!("  \"{title}\" — Work {work_id}{profile_tag}");
-                        println!("  COMPLETED at {updated_at}");
-                        println!("  {total}/{total} chapters finalized.");
-                        println!("  No further novel-writing schedules will be enqueued.");
-                        println!();
-                        println!("  To start a new Work, run:");
-                        println!("    nexus42 creator run start \\");
-                        println!("      --init-preset novel-project-init --idea \"...\"");
-                        println!("═══════════════════════════════════════════════════════");
-                    } else {
-                        // Header
-                        println!("Work: {work_id} — {title}{profile_tag}");
-                        println!("work_ref: {work_ref}");
-                        println!("intake: {intake_status}");
-                        println!("progress: {finalized_count} / {total} chapters finalized");
-                        println!("current_chapter: {current_chapter}");
-                        println!("total_planned_chapters: {total_planned}");
-
-                        // V1.39 T7: auto-chain checkpoint fields
-                        let auto_chain = resp
-                            .get("auto_chain_enabled")
-                            .and_then(serde_json::Value::as_bool)
-                            .unwrap_or(true);
-                        let driver = resp
-                            .get("driver_schedule_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("none");
-                        let interrupted = resp
-                            .get("auto_chain_interrupted")
-                            .and_then(serde_json::Value::as_bool)
-                            .unwrap_or(false);
-                        println!(
-                            "auto_chain: {} (driver: {}, interrupted: {})",
-                            if auto_chain { "enabled" } else { "disabled" },
-                            driver,
-                            interrupted
-                        );
-                        println!();
-
-                        // V1.39 P0.5 (T5): research stage hint.
-                        // When the work has passed through the research FL-E stage,
-                        // surface a one-line summary so the user knows research
-                        // artifacts are available for the produce stage.
-                        {
-                            let current_stage = resp
-                                .get("current_stage")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("intake");
-                            let stage_status = resp
-                                .get("stage_status")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("pending");
-
-                            // Show hint when research is the current stage or has completed.
-                            let research_done =
-                                current_stage == "research" && stage_status == "complete";
-                            let past_research =
-                                matches!(current_stage, "produce" | "review" | "persist");
-                            let research_active =
-                                current_stage == "research" && stage_status == "active";
-
-                            if research_active {
-                                println!("research: in progress (stage: research)");
-                            } else if research_done {
-                                println!("research: complete — references ready for produce");
-                            } else if past_research {
-                                println!("research: done (current stage: {current_stage})");
-                            }
-                        }
-
-                        // Per-chapter rows
-                        println!("Chapters:");
-                        for ch in ch_list {
-                            let ch_num = ch
-                                .get("chapter")
-                                .and_then(serde_json::Value::as_i64)
-                                .unwrap_or(0);
-                            let ch_status =
-                                ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                            let words = ch
-                                .get("actual_word_count")
-                                .and_then(serde_json::Value::as_i64);
-                            let body_path =
-                                ch.get("body_path").and_then(|v| v.as_str()).unwrap_or("—");
-                            let words_str = match words {
-                                Some(w) if w > 0 => format!("{w}"),
-                                _ => "—".to_string(),
-                            };
-                            println!(
-                                "  ch{ch_num:02}  {ch_status:<12} words: {words_str:<8} path: {body_path}"
-                            );
-                        }
-
-                        // R-V139P5-N1: blocked/missing-file hints.
-                        // Surface warnings for chapters whose body_path might be
-                        // missing on disk. The CLI cannot check the filesystem
-                        // directly here (no workspace root context), but the
-                        // daemon reconcile-chapters operation validates this.
-                        // Waived P4: the daemon is the validation authority; CLI
-                        // status displays body_path for human cross-check only.
-
-                        // V1.39 P1 (T5): Findings section per §5.5.6.
-                        // Fetch findings for this work and display open count,
-                        // severity breakdown, and top 3 with routing hints.
-                        {
-                            let findings_resp: serde_json::Value = client
-                                .get::<serde_json::Value>(&format!(
-                                    "/v1/local/works/{work_id}/findings?status=open&limit=3"
-                                ))
-                                .await
-                                .unwrap_or_else(|_| serde_json::json!([]));
-
-                            if let Some(findings_list) = findings_resp.as_array() {
-                                if !findings_list.is_empty() {
-                                    println!();
-                                    println!("Findings ({} open):", findings_list.len());
-                                    for f in findings_list {
-                                        let f_title = f
-                                            .get("title")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("(untitled)");
-                                        let f_sev = f
-                                            .get("severity")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("info");
-                                        let hint = f
-                                            .get("routing_hint")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("→ none");
-                                        let f_ch =
-                                            f.get("chapter").and_then(serde_json::Value::as_i64);
-                                        let ch_str =
-                                            f_ch.map_or_else(String::new, |ch| format!(" ch{ch}"));
-                                        println!("  [{f_sev:<7}] {f_title}{ch_str}  {hint}");
-                                    }
-                                }
-                            }
-                        }
-
-                        // Next action hint (§8.1)
-                        println!();
-                        if let Some(nch) = next_ch_val {
-                            // Find the status of the next chapter
-                            let nch_status = ch_list
-                                .iter()
-                                .find(|c| {
-                                    c.get("chapter").and_then(serde_json::Value::as_i64)
-                                        == Some(nch)
-                                })
-                                .and_then(|c| c.get("status").and_then(|v| v.as_str()))
-                                .unwrap_or("unknown");
-
-                            match nch_status {
-                                "not_started" => {
-                                    println!(
-                                        "Next action: Chapter {nch} is not started; \
-                                         run `creator run continue {work_id}` to begin."
-                                    );
-                                }
-                                "outlined" => {
-                                    println!(
-                                        "Next action: Chapter {nch} is outlined; \
-                                         run `creator run continue {work_id}` to start drafting."
-                                    );
-                                }
-                                "draft" => {
-                                    println!(
-                                        "Next action: Chapter {nch} is in draft; \
-                                         run `creator run continue {work_id}` to resume."
-                                    );
-                                }
-                                _ => {
-                                    println!("Next action: run `creator run continue {work_id}`");
-                                }
-                            }
-                        } else {
-                            // No next chapter — check if complete
-                            if work_status == "completed" {
-                                println!(
-                                    "Next action: All chapters finalized; novel Work is complete."
-                                );
-                            } else if intake_status != "complete" {
-                                println!(
-                                    "Next action: Complete intake first via \
-                                     `creator run stage advance {work_id} --stage intake`."
-                                );
-                            } else {
-                                println!("Next action: run `creator run continue {work_id}`");
-                            }
-                        }
-                    }
-                } else if work_status == "completed" {
-                    // Non-novel completed work (V1.36 P4 banner)
-                    let updated_at = resp
-                        .get("updated_at")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(unknown)");
-                    println!("═══════════════════════════════════════════════════════");
-                    println!("  \"{title}\" — Work {work_id}");
-                    println!("  COMPLETED at {updated_at}");
-                    println!("═══════════════════════════════════════════════════════");
-                } else {
-                    // Non-novel work or work without chapters — key-value dump
-                    let fields = [
-                        ("work_id", "work_id"),
-                        ("title", "title"),
-                        ("status", "status"),
-                        ("intake_status", "intake_status"),
-                        ("current_stage", "current_stage"),
-                        ("stage_status", "stage_status"),
-                        ("auto_chain_enabled", "auto_chain_enabled"),
-                        ("driver_schedule_id", "driver_schedule_id"),
-                        ("auto_chain_interrupted", "auto_chain_interrupted"),
-                        ("long_term_goal", "long_term_goal"),
-                        ("initial_idea", "initial_idea"),
-                        ("primary_preset_id", "primary_preset_id"),
-                        ("world_id", "world_id"),
-                        ("story_ref", "story_ref"),
-                        ("created_at", "created_at"),
-                        ("updated_at", "updated_at"),
-                    ];
-                    for (label, key) in &fields {
-                        let val = resp
-                            .get(key)
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("(not set)");
-                        println!("{label:>20}: {val}");
-                    }
-                }
-            }
-        }
         RunCommand::Stage { command } => handle_stage(command, config, &client).await?,
         RunCommand::ReconcileChapters { work_id, json } => {
             let report: serde_json::Value = client
@@ -905,42 +562,95 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("  Preserved: {preserved}");
             }
         }
-        RunCommand::Resume { work_id, json } => {
-            // V1.39 §5.7 (T8): Resume an interrupted auto-chain Work.
-            // This clears auto_chain_interrupted and re-evaluates the next step.
-            let patch = serde_json::json!({
-                "auto_chain_interrupted": false,
-            });
-            let resp: serde_json::Value = client
-                .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
-                .await?;
+        RunCommand::Resume {
+            work_id,
+            json,
+            reopen,
+            reason,
+            extend_chapters,
+        } => {
+            // DF-60 §3.2: reopen a completed Work.
+            if reopen {
+                if reason.is_none() {
+                    return Err(crate::errors::CliError::Config(
+                        "--reopen requires --reason \"<text>\" (audit-logged)".to_string(),
+                    ));
+                }
+                if let Some(ref r) = reason {
+                    if r.len() > 512 {
+                        return Err(crate::errors::CliError::Config(format!(
+                            "--reason exceeds maximum length (512 chars); got {} chars",
+                            r.len()
+                        )));
+                    }
+                }
 
-            if json {
-                println!("{}", serde_json::to_string_pretty(&resp)?);
-            } else {
-                let stage = resp
-                    .get("current_stage")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let status = resp
-                    .get("stage_status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let auto_chain = resp
-                    .get("auto_chain_enabled")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(true);
+                let mut patch = serde_json::json!({
+                    "novel_completion_status": "reopened",
+                    "completion_locked_at": null,
+                });
+                if let Some(ext) = extend_chapters {
+                    if let Some(o) = patch.as_object_mut() {
+                        o.insert(
+                            "total_planned_chapters".to_string(),
+                            serde_json::Value::Number(ext.into()),
+                        );
+                    }
+                }
 
-                if auto_chain {
-                    println!(
-                        "Work {work_id} auto-chain resumed at stage '{stage}' ({status}). \
-                         The daemon will evaluate the next step automatically."
-                    );
+                let resp: serde_json::Value = client
+                    .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
+                    .await?;
+
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&resp)?);
                 } else {
+                    let ext_msg = extend_chapters
+                        .map(|n| format!(" (chapters extended to {n})"))
+                        .unwrap_or_default();
                     println!(
-                        "Work {work_id} auto-chain is disabled. \
-                         Use manual stage advance: nexus42 creator run stage advance {work_id} --stage <stage>"
+                        "Work {work_id} reopened for further writing.{ext_msg}\n\
+                         Reason: {}",
+                        reason.as_deref().unwrap_or("(none)")
                     );
+                }
+            } else {
+                // V1.39 §5.7 (T8): Resume an interrupted auto-chain Work.
+                // This clears auto_chain_interrupted and re-evaluates the next step.
+                let patch = serde_json::json!({
+                    "auto_chain_interrupted": false,
+                });
+                let resp: serde_json::Value = client
+                    .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
+                    .await?;
+
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&resp)?);
+                } else {
+                    let stage = resp
+                        .get("current_stage")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let status = resp
+                        .get("stage_status")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let auto_chain = resp
+                        .get("auto_chain_enabled")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(true);
+
+                    if auto_chain {
+                        println!(
+                            "Work {work_id} auto-chain resumed at stage '{stage}' ({status}). \
+                             The daemon will evaluate the next step automatically."
+                        );
+                    } else {
+                        println!(
+                            "Work {work_id} auto-chain is disabled. \
+                             Use manual stage advance: nexus42 creator run stage advance {work_id} --stage <stage>"
+                        );
+                    }
                 }
             }
         }

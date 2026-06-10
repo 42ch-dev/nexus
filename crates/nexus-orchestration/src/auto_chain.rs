@@ -314,7 +314,10 @@ pub fn write_completion_lock_for_work(
     let work_ref = work.work_ref.as_deref().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("work {} has no work_ref; cannot write completion-lock", work.work_id),
+            format!(
+                "work {} has no work_ref; cannot write completion-lock",
+                work.work_id
+            ),
         )
     })?;
 

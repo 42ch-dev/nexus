@@ -730,12 +730,103 @@ fn v133_creator_run_subcommands() {
         .clone();
 
     let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["start", "continue", "list", "status"] {
+    for subcmd in &["start", "continue"] {
         assert!(
             help_text.contains(subcmd),
             "V1.33 creator run: expected subcommand '{subcmd}'"
         );
     }
+    // DF-60 (V1.41): `list` and `status` moved to `creator works`.
+    // They should not appear as standalone subcommand entries in the Commands: section.
+    // (The word "list" may still appear in other subcommand descriptions, e.g. "list stages".)
+    let lines: Vec<&str> = help_text.lines().collect();
+    let mut found_list_cmd = false;
+    let mut found_status_cmd = false;
+    for line in &lines {
+        // Subcommand lines start with whitespace and the command name
+        let trimmed = line.trim();
+        if trimmed.starts_with("list ") || trimmed == "list" {
+            found_list_cmd = true;
+        }
+        if trimmed.starts_with("status ") || trimmed == "status" {
+            found_status_cmd = true;
+        }
+    }
+    assert!(
+        !found_list_cmd,
+        "V1.41 creator run: 'list' should no longer be a subcommand (moved to `creator works`)"
+    );
+    assert!(
+        !found_status_cmd,
+        "V1.41 creator run: 'status' should no longer be a subcommand (moved to `creator works`)"
+    );
+}
+
+/// Verify `creator works` subcommands exist (DF-60 §6.2H, V1.41).
+#[test]
+fn v141_creator_works_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["list", "status", "use", "completion-lock"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V1.41 creator works: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// Verify `creator run start` includes --from-work and --set-default flags (DF-60, V1.41).
+#[test]
+fn v141_creator_run_start_from_work_flags() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--from-work"),
+        "V1.41 creator run start: must have --from-work flag"
+    );
+    assert!(
+        help_text.contains("--set-default"),
+        "V1.41 creator run start: must have --set-default flag"
+    );
+}
+
+/// Verify `creator run resume` includes --reopen and --extend-chapters flags (DF-60, V1.41).
+#[test]
+fn v141_creator_run_resume_reopen_flags() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "resume", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--reopen"),
+        "V1.41 creator run resume: must have --reopen flag"
+    );
+    assert!(
+        help_text.contains("--extend-chapters"),
+        "V1.41 creator run resume: must have --extend-chapters flag"
+    );
 }
 
 /// Verify `creator run start --help` includes required --idea flag.

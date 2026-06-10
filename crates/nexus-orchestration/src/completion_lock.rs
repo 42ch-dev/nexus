@@ -95,10 +95,7 @@ pub fn read_completion_lock(
 ///
 /// Returns `std::io::Error` if the file exists but cannot be removed.
 /// Returns `Ok(())` if the file does not exist (idempotent).
-pub fn release_completion_lock(
-    workspace_dir: &Path,
-    work_ref: &str,
-) -> Result<(), std::io::Error> {
+pub fn release_completion_lock(workspace_dir: &Path, work_ref: &str) -> Result<(), std::io::Error> {
     let path = completion_lock_path(workspace_dir, work_ref);
 
     if path.exists() {
@@ -117,10 +114,7 @@ mod tests {
     #[test]
     fn completion_lock_path_format() {
         let p = completion_lock_path(Path::new("/ws"), "my-novel");
-        assert_eq!(
-            p,
-            PathBuf::from("/ws/Works/my-novel/.completion-lock.json")
-        );
+        assert_eq!(p, PathBuf::from("/ws/Works/my-novel/.completion-lock.json"));
     }
 
     #[test]
