@@ -156,9 +156,11 @@ pub async fn create_finding_handler(
 ) -> Result<(StatusCode, Json<FindingApiDto>), NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    // R-V139P1-W-2: delegate ID mint to findings module (single source of truth).
+    let finding_id = findings::mint_finding_id();
     let now = chrono::Utc::now().timestamp();
     let f = Finding {
-        finding_id: format!("fnd_{}", uuid::Uuid::new_v4().simple()),
+        finding_id: finding_id.clone(),
         work_id: work_id.clone(),
         chapter: body.chapter,
         severity: body.severity,
@@ -293,7 +295,20 @@ pub async fn create_from_review_handler(
         target_executor: body.target_executor,
         creator_id: creator_id.clone(),
     };
-    let finding_id = findings::create_finding_from_review(state.pool(), &verdict).await?;
+    let finding_id = findings::create_finding_from_review(state.pool(), &verdict)
+        .await
+        .map_err(|e| {
+            // R-V139P1-W-6: explicitly log from-review hook errors for production debugging.
+            tracing::warn!(
+                work_id = %work_id,
+                error = %e,
+                "from-review: failed to create finding"
+            );
+            NexusApiError::Internal {
+                code: "FINDING_CREATE_FAILED".to_string(),
+                message: e.to_string(),
+            }
+        })?;
     let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
         .await?
         .expect("finding must exist after creation");

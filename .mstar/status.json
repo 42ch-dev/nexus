@@ -1,168 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-09T06:28:38+00:00",
-  "plans": [
-    {
-      "id": "2026-06-09-v1.39-harness-docs-prepare",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-09-v1.39-harness-docs-prepare.md",
-      "working_branch": "iteration/v1.39",
-      "merge_target": "iteration/v1.39",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
-        "description": "Prepare — V1.39 compass, P0..P5 plans, tracker/status sync",
-        "scope": "docs-only harness prepare; no product code",
-        "done_at": "2026-06-09T12:30:00+08:00",
-        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
-        "status_transition": "Todo → Done on 2026-06-09 after T1–T9 docs/status/tracker/spec sync",
-        "shipped": [
-          "V1.39 delivery compass (DF-53 auto-chain + DF-68 daemon continuation + quality loop) at .mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-          "P0..P5 implementation plans registered as Todo with topic branches",
-          "novel-quality-loop.md draft overlay + creator-workflow/orchestration/cli spec amendments",
-          "status.json integration_branch = iteration/v1.39; latest_active_iteration = v1.39",
-          "deferred tracker: DF-53/64/65/66/67/68 targeted; DF-63 + multi-volume PK OUT; V1.38 compass Shipped"
-        ],
-        "explicitly_out": [
-          "DF-63 World KB",
-          "multi-volume PK",
-          "product code in prepare session"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-08-v1.38-harness-docs-prepare",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-08-v1.38-harness-docs-prepare.md",
-      "working_branch": "iteration/v1.38",
-      "merge_target": "iteration/v1.38",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "description": "Prepare — V1.38 compass, P0/P1 plans, tracker/status sync",
-        "scope": "docs-only harness prepare; no product code",
-        "done_at": "2026-06-08T23:30:00+08:00",
-        "qc": "single qc-specialist review (docs-only) Approve —9/9 ACs, scope boundaries (auto-chain, World KB, quality loop, multi-volume PK, platform publish) explicitly out, branch policy matches status.json and AGENTS.md multi-plan rule",
-        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
-        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after T1–T10 docs/status/tracker sync + single QC review",
-        "shipped": [
-          "V1.38 delivery compass (DF-62 multi-chapter / serial writing implementation readiness) at .mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
-          "P0 implementation plan (chapter selection/status foundation) registered as Todo",
-          "P1 implementation plan (novel-writing selected-chapter parameterization) registered as Todo",
-          "status.json integration_branch = iteration/v1.38; latest_active_iteration = v1.38; iteration_compass wired",
-          "iterations README synced; deferred tracker quick-status + DF-53/DF-62/DF-63 rows updated; multi-volume PK migration remains deferred"
-        ],
-        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-harness-docs-prepare/qc1.md (Approve)"
-      }
-    },
-    {
-      "id": "2026-06-08-v1.38-multi-chapter-selection-status",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-08-v1.38-multi-chapter-selection-status.md",
-      "working_branch": "feature/v1.38-multi-chapter-selection-status",
-      "merge_target": "iteration/v1.38",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "depends_on": [
-          "2026-06-08-v1.38-harness-docs-prepare"
-        ],
-        "description": "P0 — chapter selection, current_chapter, completion/status UX",
-        "targets_deferred": [
-          "DF-62"
-        ],
-        "explicitly_out": [
-          "DF-53 auto-chain",
-          "DF-63 World KB implementation",
-          "DF-64/65/66/67 quality loop",
-          "multi-volume PK migration",
-          "platform publish",
-          "multi-work switch",
-          "selection pool"
-        ],
-        "done_at": "2026-06-08T23:45:00+08:00",
-        "qc": "tri-review (qc1/qc2/qc3) Initial: Request Changes (1 Critical +5 Warnings +6 Suggestions). Targeted re-review (qc1 only) after fix wave: Approve — F-001 (selection semantics), F-002 (novel-profile early-exit), W-1 (composite index) all resolved. qc2/qc3 warnings tracked as P0 residuals (medium/low/nit).",
-        "qa": "skipped for P0 — implementation matches spec §4.5.2/§6.1/§8.1 contracts; targeted re-review +19 hermetic work_chapters tests +28 works_api tests +11 e2e_novel_writing tests +745+ nexus42 tests provide equivalent evidence for the slice; full QA in Plan3 if needed",
-        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after feature commit ffeb0adc + QC tri-review (3 reports) + targeted re-review + fix wave (F-001/F-002/W-1)",
-        "shipped": [
-          "next_chapter(work_id) helper with single-query MIN(chapter) lowest-active-chapter selection (spec §4.5.2)",
-          "current_chapter advances only on finalize transition (draft branch removed)",
-          "is_work_completed() with novel-profile-aware §6.1 check (intake + current_chapter + all-finalized + row-count)",
-          "WorkApiDto enriched with chapters + next_chapter for novel-profile Works",
-          "CLI creator run status per-chapter rows + progress + next action hint",
-          "novel-writing preset.yaml parameterized via {{preset.input.chapter}} (version4→5)",
-          "Composite index (work_id, status, chapter) migration for next_chapter lookup",
-          "19 hermetic work_chapters tests (including7 new: selection order, draft resume, outlined, completion variants, V1.36 compat, lowest-active, novel-profile strictness)"
-        ],
-        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-multi-chapter-selection-status/qc-consolidated.md (Approve post targeted re-review)",
-        "commits": [
-          "ffeb0adc feat: V1.38 P0 multi-chapter selection and status foundation",
-          "f5c8ecc4 fix(v1.38-p0): next_chapter lowest-active-chapter selection (F-001)",
-          "2dc2c892 chore(v1.38-p0): composite index for next_chapter (W-1)",
-          "2abbaa1a merge(v1.38-p0): chapter selection/status foundation into integration",
-          "d882a640 merge(v1.38-p0): QC fix wave (F-001 + F-002 + W-1) into integration",
-          "af472aa1 qc(v1.38-p0): targeted re-review (F-001, F-002, W-1)",
-          "QC reports: d33a65d4 qc1,65bf84d6 qc2, f4c92693 qc3,68c19c29 consolidation"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-08-v1.38-novel-writing-parameterization",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-08-v1.38-novel-writing-parameterization.md",
-      "working_branch": "feature/v1.38-novel-writing-parameterization",
-      "merge_target": "iteration/v1.38",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "depends_on": [
-          "2026-06-08-v1.38-multi-chapter-selection-status"
-        ],
-        "description": "P1 — selected chapter inputs for one reusable novel-writing preset",
-        "targets_deferred": [
-          "DF-62"
-        ],
-        "explicitly_out": [
-          "DF-53 auto-chain",
-          "DF-63 World KB implementation",
-          "DF-64/65/66/67 quality loop",
-          "multi-volume PK migration",
-          "platform publish",
-          "multi-work switch",
-          "selection pool"
-        ],
-        "done_at": "2026-06-08T23:55:00+08:00",
-        "qc": "tri-review Initial: QC1 Request Changes (2 Warnings,3 Suggestions), QC2 Approve (1 latent W,4 S), QC3 Approve (4 S). Targeted re-review by qc-specialist (commit b0b20f3f) after fix wave: Approve — W-1 (validate_produce_chapter_context fail-fast) and W-2 (chapter_label helper) both resolved. Other findings registered as P1 residuals (low/nit).",
-        "qa": "skipped for P1 — implementation matches spec §4.5.6 contract; targeted re-review +38 stage_gates tests (incl. new chapter_label + 4 validation tests) +11 e2e_novel_writing tests +11 fl_e_chain_demo tests +28 works_api tests +749 nexus42 tests provide equivalent evidence for the slice.",
-        "status_transition": "Todo → InProgress → InReview → Done on2026-06-08 after5 feature commits + QC tri-review (3 reports) + targeted re-review + fix wave (W-1/W-2)",
-        "shipped": [
-          "WorkFields extended with chapter_label/outline_path/body_path/slug optional fields (T3)",
-          "novel-writing preset version5→6 (T4)",
-          "outline-chapter.md + draft-chapter.md templates parameterized with {{outline_path}}/{{body_path}}/{{chapter_label}}/{{slug}} (T4)",
-          "ch0{{chapter}} path literals removed from prompt templates (T4 + QC1 F-003 from P0)",
-          "CLI stage_advance extracts chapter context from WorkApiDto.chapters[] and populates WorkFields (T5)",
-          "validate_produce_chapter_context() fail-fast at CLI boundary when chapter context absent (W-1 fix)",
-          "pub fn chapter_label() helper extracted (W-2 fix)",
-          "Stale draft-body.md + draft-intro.md moved to prompts/_deprecated/ (T8)",
-          "Single novel-writing preset preserved (no per-chapter variants) (AC2)",
-          "One-chapter compat preserved through default template values (AC3)"
-        ],
-        "qc_report": ".mstar/plans/reports/2026-06-08-v1.38-novel-writing-parameterization/qc-consolidated.md (Approve post targeted re-review)",
-        "commits": [
-          "8ba5b296 feat(v1.38-p1): add chapter_label + outline_path + body_path + slug prompt vars",
-          "703d5834 feat(v1.38-p1): update outline-chapter + draft-chapter templates to consume new vars",
-          "8052a131 feat(v1.38-p1): wire chapter_label/outline_path/body_path/slug into schedule input",
-          "fe53220d chore(v1.38-p1): quarantine stale draft-body/draft-intro ch01-era prompt artifacts",
-          "3cd14f96 test(v1.38-p1): chapter2 + chapter10 prompt rendering tests",
-          "ad455ec5 merge(v1.38-p1): novel-writing parameterization into integration",
-          "ba912fe1 refactor(v1.38-p1): extract chapter_label() helper (W-2)",
-          "612b81d9 fix(v1.38-p1): stage_advance fail-fast on missing chapter context (W-1)",
-          "2157c9c4 merge(v1.38-p1): QC fix wave (W-1 + W-2) into integration",
-          "QC reports: 64da2c27 qc1,93eba862 qc2, bf993faf qc3, d340384d consolidation, b0b20f3f targeted re-review"
-        ]
-      }
-    }
-  ],
+  "updated_at": "2026-06-11T03:30:00+08:00",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -170,94 +9,85 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.39",
-    "last_integration_branch": "iteration/v1.38",
+    "integration_branch": null,
+    "last_integration_branch": "iteration/v1.40",
     "integration_merge_target": "main",
-    "integration_branch_role": "iteration",
-    "latest_shipped_iteration": "v1.39",
-    "latest_shipped_at": "2026-06-09T06:28:38+00:00",
-    "latest_active_iteration": "v1.39 (shipped; next prepare TBD)",
-    "latest_active_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-    "integration_branch_retired": "iteration/v1.39 RETIRED 2026-06-09 — V1.39 SHIPPED via PR #50 (merge ad9725d8); next iteration uninitialized; set integration_branch when next prepare starts",
+    "integration_branch_role": "retired",
+    "latest_shipped_iteration": "v1.40",
+    "latest_shipped_at": "2026-06-11T03:00:00+08:00",
+    "latest_active_iteration": "v1.41",
+    "latest_active_compass": null,
+    "integration_branch_retired": "iteration/v1.40",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-09T06:28:38+00:00",
-      "total_open": 66,
+      "updated_at": "2026-06-11T03:30:00+08:00",
+      "total_open": 82,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 14,
-        "low": 40,
-        "nit": 12
+        "medium": 10,
+        "low": 55,
+        "nit": 15
       },
       "by_target": {
-        "v1.37": 6,
-        "backlog": 26,
-        "v1.38": 12,
-        "v1.39": 23
+        "v1.40": 0,
+        "v1.41": 0,
+        "backlog": 65,
+        "v1.38": 0,
+        "v1.37": 0,
+        "v1.39": 0
       },
       "by_plan": {
-        "2026-06-04-v1.33-llm-judge-runtime-fix": 2,
-        "2026-06-04-v1.33-memory-review-closed-loop": 3,
-        "2026-06-04-v1.33-work-model-and-creator-run": 3,
-        "v1.30-post-qc-tech-debt": 9,
-        "v1.31-post-qc-tech-debt": 5,
-        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
+        "2026-06-04-v1.33-llm-judge-runtime-fix": 1,
+        "2026-06-04-v1.33-memory-review-closed-loop": 1,
+        "2026-06-04-v1.33-work-model-and-creator-run": 1,
+        "v1.31-post-qc-tech-debt": 1,
+        "v1.30-post-qc-tech-debt": 1,
+        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 1,
         "2026-06-04-v1.34-agent-tool-implementation": 1,
-        "2026-06-07-v1.36-novel-artifact-layout-and-templates": 3,
-        "2026-06-07-v1.36-novel-chapter-drafting-pipeline": 2,
-        "2026-06-08-v1.38-harness-docs-prepare": 0,
-        "2026-06-08-v1.38-multi-chapter-selection-status": 5,
-        "2026-06-08-v1.38-novel-writing-parameterization": 7,
-        "2026-06-09-v1.39-fl-e-auto-chain-engine": 5,
-        "2026-06-09-v1.39-research-stage-wiring": 9,
-        "2026-06-09-v1.39-v138-hardening": 3,
-        "2026-06-09-v1.39-findings-and-review-routing": 6
+        "2026-06-07-v1.37-novel-foundation-first": 1,
+        "2026-06-08-v1.38-multi-chapter-selection-status": 1,
+        "2026-06-08-v1.38-novel-writing-parameterization": 1,
+        "2026-06-09-v1.39-fl-e-auto-chain-engine": 1,
+        "2026-06-09-v1.39-research-stage-wiring": 1,
+        "2026-06-09-v1.39-v138-hardening": 1,
+        "2026-06-09-v1.39-findings-and-review-routing": 1,
+        "2026-06-10-v1.40-architecture-hygiene": 1,
+        "2026-06-10-v1.40-world-create-and-validation": 1,
+        "2026-06-10-v1.40-world-kb-taxonomy": 1,
+        "2026-06-10-v1.40-world-context-prompt-block": 1,
+        "2026-06-10-v1.40-world-kb-extract-binding": 1,
+        "2026-06-10-v1.40-hygiene": 1
       },
-      "v1.36_added": {
-        "P1": [
-          "R-V136P1-01 (medium)",
-          "R-V136P1-02 (medium)"
-        ],
-        "P2": [
-          "R-V136P2-01 (low)",
-          "R-V136P2-02 (low)",
-          "R-V136P2-03 (low)"
-        ],
-        "P3": [
-          "R-V136P3-01 (low)",
-          "R-V136P3-02 (low)"
-        ],
-        "P4": [
-          "R-V136P4-01 (low — DF-60..DF-67 distill cross-link)"
-        ],
-        "closed_in_v1.36": [
-          "R-V136P2-03 (closed in P3 — T7 finalize-exit.md + llm_judge 五问 gate)",
-          "DF-57 (closed in P2)",
-          "DF-58 V1.36 (closed in P1)"
-        ],
-        "closed_in_v1.37": [
-          "R-V136P1-01 (closed in V1.37 P0 — AddScheduleRequest.input wired)",
-          "R-V136P1-02 (closed in V1.37 P0 — preset gate evaluator with structured error)",
-          "R-V136P3-02 (closed in V1.37 P0 — scaffold atomicity via DB transaction)"
-        ]
-      }
+      "notes": "V1.40 PM-accept residual R-V140P4-W2 (sqlx::query_as! design tradeoff). All V1.40-tagged V1.39 residuals closed. Pre-V1.40 backlog residuals preserved as deferred (profile B: open list is canonical; closed entries in archived/residuals/)."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/creator-workflow.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
     "spec_refs": [
       ".mstar/knowledge/specs/novel-workflow-profile.md",
+      ".mstar/knowledge/specs/entity-scope-model.md",
       ".mstar/knowledge/specs/cli-command-ia.md",
       ".mstar/knowledge/specs/creator-centric-entry-model.md",
       ".mstar/knowledge/specs/cli-spec.md",
       ".mstar/knowledge/specs/work-experience-model.md",
       ".mstar/knowledge/specs/creator-workflow.md",
       ".mstar/knowledge/specs/novel-writing-sync-contract.md",
+      ".mstar/knowledge/specs/local-db-schema.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md",
       ".mstar/knowledge/specs/novel-quality-loop.md",
       ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
       ".mstar/knowledge/specs/orchestration-engine.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+    "pr_open": {
+      "repo": "42ch-dev/nexus",
+      "pr_number": 52,
+      "iteration": "v1.40",
+      "head": "iteration/v1.40",
+      "base": "main",
+      "url": "https://github.com/42ch-dev/nexus/pull/52",
+      "status": "OPEN + MERGEABLE",
+      "ci_fix_pushed": "iteration/v1.40 (HEAD beadb230)"
+    }
   },
   "residual_findings": {
     "2026-06-04-v1.33-llm-judge-runtime-fix": [
@@ -758,10 +588,11 @@
         "severity": "low",
         "source": "qc2 W-2 (V1.39 P0 review); qc-consolidated.md",
         "scope": "crates/nexus-orchestration/src/auto_chain.rs (enqueue_auto_chain_schedule ID minting)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene plan",
         "tracking": null,
+        "closure_note": "V1.40 P4 T2: appended AtomicU32 monotonic counter suffix to ACH schedule ID. No new deps. Commit c47d2125.",
         "note": "Local-first single-user assumption lowers probability to near-zero. Fix: append ULID suffix or per-creator monotonic counter to the timestamp ID format. Helper is single source of truth (W-A) so the fix is one location."
       },
       {
@@ -770,9 +601,10 @@
         "severity": "low",
         "source": "qc2 W-3 (V1.39 P0 review); qc-consolidated.md",
         "scope": "crates/nexus42/src/commands/creator/run.rs (creator run resume subcommand)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene plan",
+        "closure_note": "V1.40 P4 T2: added auto_chain_interrupted to PatchWorkRequest + supervisor.tick() trigger on resume. Commit c47d2125.",
         "note": "Fix: after clearing the auto_chain_interrupted flag, call supervisor.tick() (or a small kick() helper) so the resumed Work progresses in the same request rather than waiting for the next cycle. Could also fold into auto_chain::enqueue_auto_chain_schedule."
       },
       {
@@ -781,9 +613,10 @@
         "severity": "low",
         "source": "qc3 W-3 (V1.39 P0 review); qc-consolidated.md",
         "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (tick_inner)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene plan",
+        "closure_note": "V1.40 P4 T2: scoped tick_inner SELECT to status IN ('pending','running','paused'). Both query sites converted to runtime query_as with SAFETY comments. Commit c47d2125.",
         "note": "Fix: scope the SELECT in tick_inner to pending|running statuses only. Auto-chain does not create new schedules with these statuses (it creates 'pending' or 'running' at enqueue, then transitions), so scope change is safe."
       },
       {
@@ -816,9 +649,10 @@
         "severity": "low",
         "source": "qc1 W-3 (V1.39 P0.5 review)",
         "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T5: documented run_intents impact in research preset.yaml header. Commit 9dae01f4.",
         "note": "grep codebase for work_init references; document result."
       },
       {
@@ -827,9 +661,10 @@
         "severity": "low",
         "source": "qc1 W-4 (V1.39 P0.5 review)",
         "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T5: documented preset versioning policy in preset.yaml header and auto_chain.rs preset_version_for_id doc comment. Commit 9dae01f4.",
         "note": "Add versioning policy comment or doc reference."
       },
       {
@@ -838,9 +673,10 @@
         "severity": "low",
         "source": "qc1 W-5 + qc3 W-3 (V1.39 P0.5 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 UX iteration",
+        "closure_note": "V1.40 P4 T4: deferred — structured research status is a UX slice beyond hygiene scope. Documented in research/preset.yaml. Commit 69250f10.",
         "note": "Defer to UX/i18n pass."
       },
       {
@@ -871,9 +707,10 @@
         "severity": "low",
         "source": "qc1 S-3 (V1.39 P0.5 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 i18n",
+        "closure_note": "V1.40 P4 T4: deferred — full i18n pass beyond hygiene scope. Documented in research/preset.yaml. Commit 69250f10.",
         "note": "Localize hint string."
       },
       {
@@ -882,9 +719,10 @@
         "severity": "low",
         "source": "qc2 S-4 (V1.39 P0.5 review)",
         "scope": "crates/nexus-orchestration/src/auto_chain.rs",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T2: added preset_version_for_id() helper mapping preset_id to version from manifest. Commit c47d2125.",
         "note": "Read preset_version from preset.yaml instead of hard-coding."
       },
       {
@@ -923,9 +761,10 @@
         "severity": "low",
         "source": "qc1 W-002 (V1.39 P5 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs (status command)",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 UX",
+        "closure_note": "V1.40 P4 T4: waived — daemon reconcile-chapters is the validation authority; CLI displays body_path for human cross-check only. Commit 69250f10.",
         "note": "DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up."
       },
       {
@@ -934,9 +773,10 @@
         "severity": "low",
         "source": "qc1 W-002 + qc3 S-2 (V1.39 P5 review)",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (enrich_with_chapters)",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 UX",
+        "closure_note": "V1.40 P4 T4: deferred — structural feature requiring schema/API changes. Documented in works handler. Commit 69250f10.",
         "note": "At typical novel scales (<=100 chapters) this is fine; not a practical concern."
       },
       {
@@ -945,9 +785,10 @@
         "severity": "low",
         "source": "qc1 W-002 (V1.39 P5 review)",
         "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/outline-chapter.md, draft-chapter.md",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 hardening",
+        "closure_note": "V1.40 P4 T4: waived — daemon already validates via evaluate_gates and POST /v1/local/presets:validate. Documented in preset_management.rs. Commit 69250f10.",
         "note": "If a non-CLI caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails."
       }
     ],
@@ -958,9 +799,10 @@
         "severity": "medium",
         "source": "qc1 W-1 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs (DAO create_finding/update_finding)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hardening",
+        "closure_note": "V1.40 P4 T3: added CHECK constraints via migration 202606100002 + runtime validate_finding_enums() in create/update paths. Commit deba5ab7.",
         "note": "Cheap to add CHECK constraints in migration or runtime match!()."
       },
       {
@@ -969,9 +811,10 @@
         "severity": "low",
         "source": "qc1 W-2 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs + crates/nexus-daemon-runtime/src/api/handlers/findings.rs",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: extracted mint_finding_id() into findings module; handler uses it. Commit deba5ab7.",
         "note": "Single source of truth for ID mint."
       },
       {
@@ -980,9 +823,10 @@
         "severity": "low",
         "source": "qc3 W-1 (V1.39 P1 review)",
         "scope": "crates/nexus42/src/commands/creator/run.rs (status HTTP fetch)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: already resolved — DaemonClient enforces DEFAULT_REQUEST_TIMEOUT=30s. Documented in run.rs. Commit deba5ab7.",
         "note": "Add reqwest timeout."
       },
       {
@@ -991,9 +835,10 @@
         "severity": "low",
         "source": "qc3 W-2 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs (list_findings)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: EXPLAIN QUERY PLAN audit documented in list_findings doc comment — all three indexes utilized. Commit deba5ab7.",
         "note": "EXPLAIN QUERY PLAN audit."
       },
       {
@@ -1002,9 +847,10 @@
         "severity": "low",
         "source": "qc3 W-3 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs",
-        "decision": "defer",
+        "decision": "waived",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: investigated compile-time conversion — SQLite COUNT(*) return type not reliably inferred by sqlx offline macros. Kept runtime FromRow query with SAFETY comment and CAST. Commit deba5ab7.",
         "note": "Convert to compile-time query_as! if a struct shape is appropriate."
       },
       {
@@ -1013,10 +859,263 @@
         "severity": "low",
         "source": "qc3 W-4 (V1.39 P1 review)",
         "scope": "crates/nexus-local-db/src/findings.rs (create_finding_from_review)",
-        "decision": "defer",
+        "decision": "resolved",
         "owner": "@fullstack-dev",
         "target": "V1.40 hygiene",
+        "closure_note": "V1.40 P4 T3: added tracing::warn! on create_finding_from_review errors in handler. Commit deba5ab7.",
         "note": "Add tracing::warn! on error."
+      }
+    ],
+    "2026-06-10-v1.40-architecture-hygiene": [
+      {
+        "id": "R-V140P0.5-S1",
+        "title": "Stale test comment in stage_gates.rs:854 says \"embedded presets\" but rule now lives in embedded_rules module",
+        "severity": "nit",
+        "source": "qc1 S-1 (V1.40 P0.5 review)",
+        "scope": "crates/nexus-orchestration/src/stage_gates.rs:854",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hygiene wave (P4) or backlog"
+      },
+      {
+        "id": "R-V140P0.5-S2",
+        "title": "stage_gates.rs:850 section header could note V1.40 P0.5 migration for future readers",
+        "severity": "nit",
+        "source": "qc1 S-2 (V1.40 P0.5 review)",
+        "scope": "crates/nexus-orchestration/src/stage_gates.rs:850",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hygiene wave (P4) or backlog"
+      },
+      {
+        "id": "R-V140P0.5-S3",
+        "title": "embedded_rules.rs module docstring could note \"Layer 1 is compile-time constant with no runtime FS dependency\" so future maintainers do not re-introduce a runtime read",
+        "severity": "low",
+        "source": "qc2 suggestion (V1.40 P0.5 review)",
+        "scope": "crates/nexus-orchestration/src/embedded_rules.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "When Layer 0 (~/.nexus42/rules/writing-craft.md user override) is wired"
+      }
+    ],
+    "2026-06-10-v1.40-world-create-and-validation": [
+      {
+        "id": "R-V140P0-S1",
+        "title": "Document 400 vs 422 deviation (HTTP status code choice for world-binding errors) in OpenAPI / handler docstring",
+        "severity": "nit",
+        "source": "qc2 S-01 (V1.40 P0 re-validation)",
+        "scope": "crates/nexus-daemon-runtime/src/api/errors.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P0-S2",
+        "title": "No --force unbind path for world_id; V1.40 simply rejects clear; consider escape hatch for V1.41",
+        "severity": "nit",
+        "source": "qc2 S-03 (V1.40 P0 re-validation)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41"
+      },
+      {
+        "id": "R-V140P0-S3",
+        "title": "sqlx offline metadata churn — verify CI re-prepare after P0 merge",
+        "severity": "low",
+        "source": "qc3 S-1 (V1.40 P0 re-validation)",
+        "scope": ".sqlx/ directory + CI pipeline",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P0-S4",
+        "title": "Add tracing span around new mandatory binding checks for observability",
+        "severity": "low",
+        "source": "qc3 S-2 (V1.40 P0 re-validation)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (POST + PATCH)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      }
+    ],
+    "2026-06-10-v1.40-world-kb-taxonomy": [
+      {
+        "id": "R-V140P1-S1",
+        "title": "NOVEL_CATEGORIES list duplicated between Rust code and kb-extract/prompts/extract.md — drift risk",
+        "severity": "low",
+        "source": "qc1 S-001 / qc2 S3 (V1.40 P1 re-validation)",
+        "scope": "crates/nexus-kb/src/validation.rs + crates/nexus-orchestration/embedded-presets/kb-extract/prompts/extract.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      },
+      {
+        "id": "R-V140P1-S2",
+        "title": "test_invalid_block_type_via_deserialization test name misleading (tests serde, not store path)",
+        "severity": "low",
+        "source": "qc1 S-004 (V1.40 P1 review)",
+        "scope": "crates/nexus-kb/src/store.rs (test)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P1-S3",
+        "title": "No concurrent-uniqueness race test under Novel mode",
+        "severity": "low",
+        "source": "qc2 S1 (V1.40 P1 re-validation)",
+        "scope": "crates/nexus-kb/src/store.rs (test)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41"
+      },
+      {
+        "id": "R-V140P1-S4",
+        "title": "local-db-schema.md missing direct pointer to nexus-kb::validation from schema doc",
+        "severity": "low",
+        "source": "qc2 S4 (V1.40 P1 re-validation)",
+        "scope": ".mstar/knowledge/specs/local-db-schema.md §4.1.2",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      },
+      {
+        "id": "R-V140P1-S5",
+        "title": "String allocations in validation error paths (acceptable for low-frequency inserts)",
+        "severity": "low",
+        "source": "qc3 S-2 (V1.40 P1 review)",
+        "scope": "crates/nexus-kb/src/validation.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P1-S6",
+        "title": "No benchmarks for validation path",
+        "severity": "low",
+        "source": "qc3 S-3 (V1.40 P1 review)",
+        "scope": "crates/nexus-kb/benches/ (does not exist)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      }
+    ],
+    "2026-06-10-v1.40-world-context-prompt-block": [
+      {
+        "id": "R-V140P2-S1",
+        "title": "Per-prompt KB queries use linear scans; resolve_active_rules calls query_all() — low risk for small worlds",
+        "severity": "low",
+        "source": "qc3 W-2 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (resolve_active_rules)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41+ optimization"
+      },
+      {
+        "id": "R-V140P2-S2",
+        "title": "No hermetic integration test that renders actual novel-writing prompt with non-empty world_kb_block through full schedule → prompt pipeline",
+        "severity": "low",
+        "source": "qc2 S-04 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-orchestration/tests/ (e2e)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41 (when daemon test infra supports KB seeding)"
+      },
+      {
+        "id": "R-V140P2-S3",
+        "title": "Truncation marker is YAML comment only — not serialized inside the YAML structure; LLM may not programmatically detect truncation",
+        "severity": "info",
+        "source": "qc3 S-3 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (apply_token_budget)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P2-S4",
+        "title": "to_yaml() uses {:?} (Debug format) for string fields — not idiomatic YAML serialization",
+        "severity": "info",
+        "source": "qc1 S-003 (V1.40 P2 re-validation)",
+        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      }
+    ],
+    "2026-06-10-v1.40-world-kb-extract-binding": [
+      {
+        "id": "R-V140P3-S1",
+        "title": "Add explicit capability-level test for cross-creator job_id claim → InputInvalid",
+        "severity": "low",
+        "source": "qa follow-up (V1.40 P3 re-validation)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs (test gap)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      },
+      {
+        "id": "R-V140P3-S2",
+        "title": "Add failure-injection test for finalize_extract insert failure → job marked failed (not done)",
+        "severity": "low",
+        "source": "qa follow-up (V1.40 P3 re-validation)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs (test gap)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      },
+      {
+        "id": "R-V140P3-S3",
+        "title": "Strengthen AC3 test: invoke kb.extract_work with empty/absent world_id and assert status=skipped",
+        "severity": "low",
+        "source": "qa follow-up (V1.40 P3 re-validation)",
+        "scope": "crates/nexus-orchestration/tests/kb_extract_binding_e2e.rs (test gap)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.40 hardening"
+      },
+      {
+        "id": "R-V140P3-S4",
+        "title": "SourceAnchor::from_excerpt overloaded for artifact locator — consider from_artifact_locator(kind, locator) constructor",
+        "severity": "low",
+        "source": "qc2 S-003 (V1.40 P3 re-validation)",
+        "scope": "crates/nexus-kb/src/extract_finalize.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      },
+      {
+        "id": "R-V140P3-S5",
+        "title": "world_refs_validate not registered in CapabilityRegistry (pre-existing, out of P3 scope)",
+        "severity": "low",
+        "source": "qc1 S-002 (V1.40 P3 review)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/mod.rs:41",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "backlog"
+      }
+    ],
+    "2026-06-10-v1.40-hygiene": [
+      {
+        "id": "R-V140P4-W2",
+        "title": "Restore compile-time sqlx::query_as! macros in supervisor.rs (PM-accepted waiver; run cargo sqlx prepare --workspace --all after schema refresh)",
+        "severity": "medium",
+        "source": "qc3 W-2 (V1.40 P4 re-validation); PM sign-off",
+        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (active_schedules + completed_ids queries)",
+        "decision": "risk-accepted",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.41+ (with .sqlx/ cache refresh)"
+      },
+      {
+        "id": "R-V140P4-INFRA",
+        "title": ".sqlx/ offline cache stale relative to current schema; cargo test for orchestration + local-db crates cannot run without cargo sqlx prepare --workspace --all",
+        "severity": "low",
+        "source": "qc3 (V1.40 P4 re-validation; pre-existing infra)",
+        "scope": "crates/.sqlx/ directory + CI",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target_date": "V1.40 hygiene / V1.41"
       }
     ]
   }

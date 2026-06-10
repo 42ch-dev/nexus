@@ -6,6 +6,25 @@
 #
 # {$run_id} is derived from the session ID or a timestamp-based identifier.
 # The output structure is created by the preset workflow, not by CLI commands.
+#
+# R-V139P5-W-3: run_intents are set per-state below. When adding new states,
+# check that run_intent matches the intended daemon behavior (the daemon reads
+# this to decide context assembly strategy).
+#
+# R-V139P5-W-5 (deferred): structured research status hint. Currently the
+# research preset reports progress through session log events only. A future
+# slice may add structured intermediate status (e.g., "scanning references",
+# "extracting content", "generating report") surfaced via the Works status API.
+#
+# R-V139P5-S3 (deferred): i18n hint structure. The description and prompt
+# fields use English prose. A future i18n pass may externalize these strings.
+#
+# R-V139P5-W-4: preset versioning policy — the `version` field below must be
+# bumped on any breaking change to the state machine (adding/removing states,
+# changing transition edges, modifying prompt templates that alter output
+# contract). Non-breaking additions (new optional fields, comment changes)
+# may keep the same version. The version is stored in creator_schedules at
+# enqueue time and used by the loader to select compatible templates.
 
 preset:
   id: research

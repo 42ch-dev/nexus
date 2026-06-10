@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n            job_id as \"job_id!\",\n            creator_id as \"creator_id!\",\n            workspace_id as \"workspace_id!\",\n            work_entry_id as \"work_entry_id!\",\n            world_id as \"world_id!\",\n            status as \"status!\",\n            error_text,\n            created_at as \"created_at!\",\n            started_at,\n            finished_at\n        FROM kb_extract_jobs\n        WHERE creator_id = ?\n          AND status = 'queued'\n        ORDER BY created_at ASC\n        LIMIT 1",
+  "query": "SELECT\n            job_id as \"job_id!\",\n            creator_id as \"creator_id!\",\n            workspace_id as \"workspace_id!\",\n            work_entry_id as \"work_entry_id!\",\n            world_id as \"world_id!\",\n            status as \"status!\",\n            error_text,\n            created_at as \"created_at!\",\n            started_at,\n            finished_at,\n            source_kind,\n            source_locator,\n            profile_hint,\n            work_id\n        FROM kb_extract_jobs\n        WHERE job_id = ?",
   "describe": {
     "columns": [
       {
@@ -52,6 +52,26 @@
         "name": "finished_at",
         "ordinal": 9,
         "type_info": "Text"
+      },
+      {
+        "name": "source_kind",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_locator",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "profile_hint",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "work_id",
+        "ordinal": 13,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -67,8 +87,12 @@
       true,
       false,
       true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "ac52cab9b8343ddfeb92b715ac5033421011055f46164e5a4c6736f94528cd54"
+  "hash": "66d3c92baf1e36b5ae4fcc9488f7ec03fb01e9780b4f9d41cdd1f154ba596a7f"
 }

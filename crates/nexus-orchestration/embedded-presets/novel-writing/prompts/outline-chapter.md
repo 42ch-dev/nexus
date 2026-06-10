@@ -8,6 +8,7 @@ vars:
   chapter_label: { type: string, default: "01" }
   outline_path: { type: string, required: true }
   slug: { type: string, default: "ch01" }
+  world_kb_block: { type: string, default: "" }
 max_tokens: 3000
 ---
 
@@ -22,6 +23,16 @@ about **{{preset.input.topic}}** with a **{{preset.input.vibe}}** vibe.
 `{{outline_path}}`
 
 If the directory `Works/{{work_ref}}/Outlines/chapters/` does not exist, create it first.
+
+{{#if world_kb_block}}
+## World Context
+
+The following World context block provides characters, locations, and active rules from the World KB. Honor these when planning the chapter:
+
+```yaml
+{{world_kb_block}}
+```
+{{/if}}
 
 ## Required Sections
 

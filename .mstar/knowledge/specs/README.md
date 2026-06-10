@@ -61,7 +61,7 @@ All spec files live **flat** in this directory (kebab-case, no version suffix). 
 | Document | Class | Status |
 | --- | --- | --- |
 | [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active |
-| [entity-scope-model.md](entity-scope-model.md) | Master | Normative |
+| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1 (taxonomy + canonical_name grammar) |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative |
 
@@ -72,14 +72,14 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | Document | Class | Status |
 | --- | --- | --- |
 | [daemon-runtime.md](daemon-runtime.md) | Master | Normative |
-| [local-db-schema.md](local-db-schema.md) | Master | Normative |
+| [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 
 ### CLI product surface
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [cli-spec.md](cli-spec.md) | Master | Normative |
+| [cli-spec.md](cli-spec.md) | Master | Normative — V1.40 Shipped §6.2G (creator world mandatory binding) + §creator kb queue-extract --chapter N |
 | [cli-command-ia.md](cli-command-ia.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 | [creator-centric-entry-model.md](creator-centric-entry-model.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 
@@ -98,9 +98,9 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | Document | Class | Status |
 | --- | --- | --- |
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
-| [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34) |
-| [novel-workflow-profile.md](novel-workflow-profile.md) | Draft overlay | **Shipped (V1.36)** |
-| [novel-quality-loop.md](novel-quality-loop.md) | Draft overlay | **Draft (V1.39)** |
+| [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
+| [novel-workflow-profile.md](novel-workflow-profile.md) | Draft overlay | **Shipped (V1.36 → V1.40)** — World KB implement contract §3.5.1 (mandatory world binding; legacy V1.39 worldless Works read-only) |
+| [novel-quality-loop.md](novel-quality-loop.md) | Draft overlay | **Shipped (V1.39 → V1.40)** — full quality loop + V1.40 P3 extract persistence |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration
@@ -157,12 +157,14 @@ When specs disagree, higher row wins:
 
 ## Hygiene schedule (consolidation policy)
 
-| Trigger | Required action |
-| --- | --- |
-| **Post-V1.35 CLI changes** | Update cli-spec §6–§7 first; update shipped supplements only when rationale, acceptance, or migration history changes |
-| **FL-D compass locks implement** | Promote preset-conditional-routing; update orchestration-engine §7.5 |
-| **ACP spec hygiene plan** | Evaluate merging skills-export-compatibility into acp-client-tech-spec appendix |
-| **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract |
+| Trigger | Required action | Status |
+| --- | --- | --- |
+| **Post-V1.35 CLI changes** | Update cli-spec §6–§7 first; update shipped supplements only when rationale, acceptance, or migration history changes | V1.36-V1.40 amendments folded into Master (no follow-up merge needed yet) |
+| **FL-D compass locks implement** | Promote preset-conditional-routing; update orchestration-engine §7.5 | Deferred (FL-D still out of scope) |
+| **ACP spec hygiene plan** | Evaluate merging skills-export-compatibility into acp-client-tech-spec appendix | Backlog |
+| **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract | Module still shipped (V1.36+); sync contract retained |
+| **V1.40 shipped (DF-63 closed)** | Mark `entity-scope-model.md` §5.1.1 + `cli-spec.md` §6.2G + `creator-workflow.md` persist + `local-db-schema.md` §4.1.2 + `novel-workflow-profile.md` §3.5.1 as Shipped V1.40 in their headers | **Done 2026-06-11** (see headers + this index) |
+| **V1.41 prep** | Decide which V1.40-tagged open residuals (`status.json.residual_findings`) to address in V1.41 hygiene; re-evaluate DF-60/61/56/47/59 targets | Pending V1.41 compass |
 
 **Retained splits (do not merge):** creator-schedule-and-core-context (schedule domain); ACP cluster (independent evolution cadence).
 

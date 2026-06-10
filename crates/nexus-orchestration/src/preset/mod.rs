@@ -62,7 +62,9 @@ pub use validation::{
 ///
 /// Location: `crates/nexus-orchestration/embedded-presets/`
 /// Structure per §7.1: `<preset-id>/preset.yaml` + `prompts/*.md`
-static EMBEDDED_PRESETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/embedded-presets");
+/// QC1 W-2: pub(crate) so the `preset_version_for_id` sync test in `auto_chain`
+/// can read preset.yaml contents.
+pub(crate) static EMBEDDED_PRESETS: Dir = include_dir!("$CARGO_MANIFEST_DIR/embedded-presets");
 
 /// Load an embedded preset by ID.
 ///
@@ -229,7 +231,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 6); // V1.38 P1: chapter_label/outline_path/body_path/slug prompt vars
+        assert_eq!(loaded.version, 7); // V1.40 P2: world_kb_block template var for World context prompt injection
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
@@ -1284,12 +1286,13 @@ states:
         let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-review-master");
-        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.version, 2);
 
-        // State machine: present → await_decision → done
+        // State machine: present → await_decision → sync_world_kb → done
         assert_eq!(loaded.manifest.preset.initial, "present");
         assert!(loaded.outer_graph.get_task("present").is_some());
         assert!(loaded.outer_graph.get_task("await_decision").is_some());
+        assert!(loaded.outer_graph.get_task("sync_world_kb").is_some());
         assert!(loaded.outer_graph.get_task("done").is_some());
 
         // Verify linear transitions
@@ -1298,7 +1301,11 @@ states:
                 && s.next == Some(manifest::NextTarget::Linear("await_decision".into()))
         }));
         assert!(loaded.manifest.states.iter().any(|s| {
-            s.id == "await_decision" && s.next == Some(manifest::NextTarget::Linear("done".into()))
+            s.id == "await_decision"
+                && s.next == Some(manifest::NextTarget::Linear("sync_world_kb".into()))
+        }));
+        assert!(loaded.manifest.states.iter().any(|s| {
+            s.id == "sync_world_kb" && s.next == Some(manifest::NextTarget::Linear("done".into()))
         }));
 
         // Human-in-loop: exit_when uses manual (not auto-chain)

@@ -32,6 +32,8 @@ fn demo_work_fields(stage: &str) -> WorkFields {
         slug: Some("ch01".to_string()),
         research_artifacts_dir: None,
         workspace_dir: None,
+        world_kb_block: None,
+        world_id: None,
     }
 }
 

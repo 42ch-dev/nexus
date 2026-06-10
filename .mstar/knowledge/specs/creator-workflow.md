@@ -1,8 +1,9 @@
 # Creator Workflow — Normative Specification
 
-**Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; **V1.39 target** — DF-53 full auto-chain + daemon continuity)  
+**Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; V1.39 — DF-53 full auto-chain + daemon continuity; **V1.40 Shipped** — DF-63 W5 `kb-extract` persistence via `novel-review-master sync_world_kb`: World-bound Works enqueue extract with `work.world_id`, `source_kind=work_chapter`, `source_locator={{preset.input.body_path}}`, `work_id`; worldless Works (legacy V1.39-and-earlier) skip World promotion)  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
+**Last updated**: 2026-06-11 — V1.40 P3 World KB extract binding shipped  
 **Scope**: Staged creator journey on **Work** (`intake → research → produce → review → persist`), built on shipped `creator run` + `run_intents`  
 **Coordinates with**:
 
@@ -103,7 +104,7 @@ creator run status <work_id>    # includes current_stage + stage_status
 | `research` | `research` | May append references to Work context |
 | `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log`; novel profile writes to `Works/<work_ref>/` per [novel-workflow-profile.md](novel-workflow-profile.md) |
 | `review` | `reflection-loop` | `llm_judge` gates per orchestration-engine |
-| `persist` | `kb-extract` (via queue) + CLI memory review | No dedicated persist-only preset required |
+| `persist` | `kb-extract` (via queue) + CLI memory review | **V1.40 P3**: World-bound novel Works enqueue extract with `work.world_id`; worldless Works skip World promotion. See [novel-workflow-profile.md §3.5.1.5](novel-workflow-profile.md). |
 
 P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
 
@@ -122,8 +123,10 @@ creator run stage advance --stage produce
 creator run stage advance --stage review
 creator run stage advance --stage persist
 creator memory review <id>
-creator kb queue-extract  # when applicable
+creator kb queue-extract --world-id <work.world_id>  # World-bound novel Works (V1.40 P3)
 ```
+
+For **World-bound** novel Works (`work.world_id != NULL`), the auto-chain `persist` stage MUST enqueue extraction targeting `work.world_id`. For **worldless** Works, persist skips World KB promotion.
 
 ### 5.2 Inspiration without stage change
 

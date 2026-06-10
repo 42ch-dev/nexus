@@ -141,13 +141,13 @@ fn novel_brainstorm_happy_path_state_flow() {
     assert!(done.next.is_none());
 }
 
-/// Happy path: review-master state machine flows present → await_decision → done.
+/// Happy path: review-master state machine flows present → await_decision → sync_world_kb → done.
 #[test]
 fn novel_review_master_happy_path_state_flow() {
     let caps = CapabilityRegistry::with_builtins();
     let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
-    // Verify the graph is wired: present → await_decision → done
+    // Verify the graph is wired: present → await_decision → sync_world_kb → done
     let present = loaded
         .manifest
         .states
@@ -167,6 +167,17 @@ fn novel_review_master_happy_path_state_flow() {
         .expect("await_decision");
     assert_eq!(
         await_decision.next,
+        Some(manifest::NextTarget::Linear("sync_world_kb".into()))
+    );
+
+    let sync_world_kb = loaded
+        .manifest
+        .states
+        .iter()
+        .find(|s| s.id == "sync_world_kb")
+        .expect("sync_world_kb");
+    assert_eq!(
+        sync_world_kb.next,
         Some(manifest::NextTarget::Linear("done".into()))
     );
 

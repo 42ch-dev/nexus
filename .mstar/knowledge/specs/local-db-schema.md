@@ -2,6 +2,8 @@
 
 **Status**: Normative  
 **Document class**: Master  
+**V1.40 Shipped amendments:** §4.1.2 `kb_key_blocks` validation intent — application-layer validation in `nexus-kb::validation` module (ValidationMode::Novel enforces `body.attributes.novel_category`); `narrative_worlds` rows via `creator world create` (V1.40 P0); `kb_extract_jobs` artifact locator columns (`source_kind`, `source_locator`, `profile_hint`, `work_id`) added V1.40 P3.  
+**Last updated**: 2026-06-11 — V1.40 P1/P3 shipped  
 
 ## 0. 文档定位
 
@@ -101,6 +103,8 @@ New code MUST write canonical body text to `content_path` on disk instead of `co
 #### 4.1.2 Narrative + World KB persistence (V1.26 draft)
 
 These tables live in the same workspace `state.db` as `reference_sources` and support the V1.26 persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
+
+**V1.40 P1 migration intent** ([`2026-06-10-v1.40-world-kb-taxonomy`](../plans/2026-06-10-v1.40-world-kb-taxonomy.md)): add validation for narrative `block_type` vocabulary (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) on `kb_key_blocks.block_type` — via CHECK constraint, application-layer enum, or companion lookup table. Minimum `body_json` shape per category is enforced in `nexus-kb`, not in raw SQL. **V1.40 P1 shipped**: application-layer validation in `nexus-kb::validation` module; `ValidationMode::Novel` enforces `body.attributes.novel_category` on insert/update. **V1.40 P0** may add `narrative_worlds` rows via `creator world create` without altering `kb_key_blocks` DDL beyond existing indexes.
 
 `workspace_id` is retained on `narrative_worlds` as the logical workspace binding. The current local schema has no `workspaces` catalog table, so this draft does **not** add a physical workspace FK. If a workspace catalog is introduced later, `narrative_worlds.workspace_id` should become the FK target without changing child table ownership.
 
