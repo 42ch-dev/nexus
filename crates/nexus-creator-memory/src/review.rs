@@ -640,6 +640,7 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
 
     // R-V133P4-06: Size guard — cap raw_digest before summarization to prevent
     // unbounded LTM file growth. 256 KiB is generous for a session digest.
+    // R-V141HYG-01: Use floor_char_boundary to avoid panicking on multi-byte content.
     const MAX_DIGEST_BYTES: usize = 256 * 1024;
     let raw_digest = if record.raw_digest.len() > MAX_DIGEST_BYTES {
         tracing::warn!(
@@ -648,7 +649,13 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
             max = MAX_DIGEST_BYTES,
             "raw_digest exceeds max_digest_bytes; truncating before summarization"
         );
-        &record.raw_digest[..MAX_DIGEST_BYTES]
+        let mut end = MAX_DIGEST_BYTES;
+        // SAFETY: floor_char_boundary walks backward to the nearest char boundary.
+        // Available since Rust 1.79; our MSRV is well past that.
+        while !record.raw_digest.is_char_boundary(end) {
+            end -= 1;
+        }
+        &record.raw_digest[..end]
     } else {
         &record.raw_digest
     };
@@ -1064,6 +1071,67 @@ mod tests {
         };
         let decision = classify_pending_review(&input);
         assert_eq!(decision.action, ReviewAction::PromoteToLongTerm);
+    }
+
+    /// R-V141HYG-01: UTF-8-safe truncation — boundary must not land mid-character.
+    #[tokio::test]
+    async fn promote_truncates_oversized_raw_digest_at_utf8_boundary() {
+        let home = PathBuf::from("/tmp/test_promotion_utf8_boundary");
+        let _ = std::fs::remove_dir_all(&home);
+
+        struct Passthrough;
+        #[allow(async_fn_in_trait)]
+        impl SessionDigestSummarizer for Passthrough {
+            async fn summarize(
+                &self,
+                _: &str,
+                _: &str,
+                raw_digest: &str,
+                _: Option<&str>,
+            ) -> Result<String, MemoryError> {
+                Ok(raw_digest.to_string())
+            }
+        }
+
+        // Each CJK char is 3 bytes in UTF-8. Fill to just over 256 KiB so that the
+        // byte boundary at MAX_DIGEST_BYTES lands mid-character.
+        // 256*1024 / 3 = 87381.33... → 87382 chars = 262146 bytes (> 256 KiB).
+        let cjk_char = '\u{4E16}'; // '世'
+        let mut big_digest = String::with_capacity(256 * 1024 + 10);
+        for _ in 0..87382 {
+            big_digest.push(cjk_char);
+        }
+        assert!(
+            big_digest.len() > 256 * 1024,
+            "digest must exceed MAX_DIGEST_BYTES"
+        );
+
+        let input = PendingReviewInput {
+            pending_id: "p_utf8".into(),
+            session_id: "s_utf8".into(),
+            creator_id: "ctr_test".into(),
+            world_id: None,
+            task_kind: "brainstorm".into(),
+            raw_digest: big_digest,
+            created_at: "2026-04-15T00:00:00Z".into(),
+        };
+
+        // Must not panic — the old code did &string[..256*1024] which panics here.
+        let memory = promote_to_long_term(&home, "ctr_test", &input, &Passthrough)
+            .await
+            .expect("promotion should succeed with UTF-8-safe truncation");
+
+        // The body must be valid UTF-8 and <= MAX_DIGEST_BYTES
+        assert!(
+            memory.body.len() <= 256 * 1024,
+            "body should be truncated to max_digest_bytes, got {} bytes",
+            memory.body.len()
+        );
+        // Verify the truncated string is valid UTF-8 (no panic above proves it,
+        // but explicitly assert for clarity).
+        assert!(memory.body.is_char_boundary(memory.body.len()));
+
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// R-V133P4-06: Size guard truncates oversized raw_digest before summarization.
