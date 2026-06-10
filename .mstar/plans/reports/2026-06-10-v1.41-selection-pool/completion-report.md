@@ -119,6 +119,7 @@ crates/nexus-daemon-runtime/src/api/mod.rs                  | +27
 | R-V141P1-N03 | low | `mark_work_completed` | Pool row demote is correct only for the **prior active** that was THIS work. Multi-creator (impossible per partial unique index) or unusual admin scenarios not exercised. |
 | R-V141P1-N04 | low | MD scaffold `Works/_pool/灵感池/` | Slug collision: two distinct titles that slug to the same string — second add returns error; UX could be improved with auto-append numeric suffix. |
 | R-V141P1-N05 | nit | CLI `creator works pool` | Help text is long; subcommand tree could be split into nested help per PoolAction. |
+| R-V141P1-N06 | medium | MD scaffold path resolution | `inspiration_items.rs:140` hard-codes `Works/_pool/灵感池/{slug}.md` relative to process CWD. In production the daemon layer should resolve via `nexus-home-layout` (`~/.nexus42/Works/_pool/灵感池/...`); tests use CWD-relative, which leaks test artifacts into the source tree. **Fix recommended this round** — wire `nexus-home-layout` path resolution into the DAO or have the daemon layer pass the resolved path. |
 
 ## 7. Risks / follow-up
 
