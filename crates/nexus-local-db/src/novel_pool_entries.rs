@@ -113,10 +113,7 @@ pub async fn count_pool_entries(
         query = query.bind(s);
     }
 
-    let count: i64 = query
-        .fetch_one(pool)
-        .await?
-        .get(0);
+    let count: i64 = query.fetch_one(pool).await?.get(0);
     Ok(u32::try_from(count).unwrap_or(0))
 }
 
@@ -406,7 +403,9 @@ mod tests {
             .unwrap();
         }
 
-        let entries = list_pool_entries(&pool, "ctr_test", None, None, None).await.unwrap();
+        let entries = list_pool_entries(&pool, "ctr_test", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(entries.len(), 2);
         // Active comes first
         assert_eq!(entries[0].status, "active");
@@ -431,7 +430,9 @@ mod tests {
             .unwrap();
         assert_eq!(entry2.status, "active");
 
-        let entries = list_pool_entries(&pool, "ctr_test", None, None, None).await.unwrap();
+        let entries = list_pool_entries(&pool, "ctr_test", None, None, None)
+            .await
+            .unwrap();
         let active: Vec<_> = entries.iter().filter(|e| e.status == "active").collect();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].work_id, Some("wrk_002".to_string()));
@@ -445,7 +446,9 @@ mod tests {
         let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
             .await
             .unwrap();
-        let archived = archive_pool_entry(&pool, &entry.entry_id, "ctr_test").await.unwrap();
+        let archived = archive_pool_entry(&pool, &entry.entry_id, "ctr_test")
+            .await
+            .unwrap();
         assert_eq!(archived.status, "archived");
     }
 

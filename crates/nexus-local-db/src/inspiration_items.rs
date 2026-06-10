@@ -113,10 +113,7 @@ pub async fn count_inspiration(
         query = query.bind(s);
     }
 
-    let count: i64 = query
-        .fetch_one(pool)
-        .await?
-        .get(0);
+    let count: i64 = query.fetch_one(pool).await?.get(0);
     Ok(u32::try_from(count).unwrap_or(0))
 }
 
@@ -185,8 +182,7 @@ pub async fn create_inspiration_with_scaffold(
     // File I/O is blocking; run on a blocking thread to avoid stalling
     // the async runtime (qc-consolidated F-08).
     let abs_path = workspace_dir.join(&rel_path);
-    let frontmatter =
-        format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
+    let frontmatter = format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
 
     tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, LocalDbError> {
         if let Some(parent) = abs_path.parent() {
@@ -221,8 +217,7 @@ pub async fn create_inspiration_with_scaffold(
         Err(e) => {
             // Roll back MD file on DB failure
             let rollback_path = workspace_dir.join(&rel_path);
-            let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(rollback_path))
-                .await;
+            let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(rollback_path)).await;
             Err(e)
         }
     }
@@ -314,7 +309,7 @@ pub async fn inspiration_promote_atomic(
     .bind(&work_record.stage_status)
     .bind(&work_record.work_profile)
     .bind(&work_record.work_ref)
-    .bind(&work_record.total_planned_chapters)
+    .bind(work_record.total_planned_chapters)
     .bind(work_record.current_chapter)
     .bind(work_record.auto_chain_enabled)
     .bind(work_record.auto_chain_interrupted)

@@ -297,7 +297,9 @@ pub async fn mark_work_completed(
                 ..Default::default()
             };
             let retry_now = chrono::Utc::now().to_rfc3339();
-            if let Err(clear_err) = works::patch_work(pool, creator_id, work_id, &clear_lock, &retry_now).await {
+            if let Err(clear_err) =
+                works::patch_work(pool, creator_id, work_id, &clear_lock, &retry_now).await
+            {
                 tracing::error!(
                     target: "novel.completion",
                     work_id = %work_id,
