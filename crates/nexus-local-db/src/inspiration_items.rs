@@ -181,40 +181,48 @@ pub async fn create_inspiration_with_scaffold(
     let slug = title_to_slug(title);
     let rel_path = format!("Pool/Ideas/{slug}.md");
 
-    // Step 1: Write MD file (tmp + rename) — fail if exists
+    // Step 1: Write MD file (tmp + rename) — fail if exists.
+    // File I/O is blocking; run on a blocking thread to avoid stalling
+    // the async runtime (qc-consolidated F-08).
     let abs_path = workspace_dir.join(&rel_path);
+    let frontmatter =
+        format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
 
-    // Ensure parent directory exists
-    if let Some(parent) = abs_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| LocalDbError::Io(e.to_string()))?;
-    }
+    tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, LocalDbError> {
+        if let Some(parent) = abs_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| LocalDbError::Io(e.to_string()))?;
+        }
 
-    if abs_path.exists() {
-        return Err(LocalDbError::ConstraintViolation {
-            table: "inspiration_items".to_string(),
-            constraint: format!(
-                "inspiration file already exists at {rel_path} — use a different title or archive the existing one"
-            ),
-        });
-    }
+        if abs_path.exists() {
+            return Err(LocalDbError::ConstraintViolation {
+                table: "inspiration_items".to_string(),
+                constraint: format!(
+                    "inspiration file already exists at {} — use a different title or archive the existing one",
+                    abs_path.display()
+                ),
+            });
+        }
 
-    let frontmatter = format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
+        let tmp_path = abs_path.with_extension("md.tmp");
+        std::fs::write(&tmp_path, &frontmatter).map_err(|e| LocalDbError::Io(e.to_string()))?;
+        std::fs::rename(&tmp_path, &abs_path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp_path);
+            LocalDbError::Io(e.to_string())
+        })?;
 
-    // Write via tmp + rename for atomicity
-    let tmp_path = abs_path.with_extension("md.tmp");
-    std::fs::write(&tmp_path, &frontmatter).map_err(|e| LocalDbError::Io(e.to_string()))?;
-    std::fs::rename(&tmp_path, &abs_path).map_err(|e| {
-        // Clean up tmp file on rename failure
-        let _ = std::fs::remove_file(&tmp_path);
-        LocalDbError::Io(e.to_string())
-    })?;
+        Ok(abs_path)
+    })
+    .await
+    .map_err(|e| LocalDbError::Io(e.to_string()))??;
 
     // Step 2: Insert DB row
     match create_inspiration_row(pool, item_id, creator_id, &rel_path, title, created_at).await {
         Ok(item) => Ok(item),
         Err(e) => {
             // Roll back MD file on DB failure
-            let _ = std::fs::remove_file(&abs_path);
+            let rollback_path = workspace_dir.join(&rel_path);
+            let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(rollback_path))
+                .await;
             Err(e)
         }
     }
