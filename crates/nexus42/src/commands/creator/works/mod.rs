@@ -1,6 +1,7 @@
-//! `nexus42 creator works` — Work management and pool (DF-60 §6.2H).
+//! `nexus42 creator works` — Work management and pool (DF-60 §6.2H, DF-61).
 //!
 //! Migrated from `creator run list` / `creator run status` in V1.41.
+//! P1 adds selection pool + inspiration pool subcommands (DF-61).
 //! Single-Work actions (start, continue, stage, resume) remain under `creator run`.
 
 use crate::errors::Result;
@@ -47,6 +48,11 @@ pub enum WorksCommand {
         #[command(subcommand)]
         command: CompletionLockCommand,
     },
+    /// Manage the selection pool — promote, archive, list entries (DF-61).
+    Pool {
+        #[command(subcommand)]
+        action: PoolAction,
+    },
 }
 
 /// Completion lock subcommands.
@@ -64,6 +70,76 @@ pub enum CompletionLockCommand {
     },
 }
 
+/// Selection pool subcommands (DF-61).
+#[derive(Debug, Subcommand)]
+pub enum PoolAction {
+    /// List pool entries for the active creator.
+    List {
+        /// Filter by status (active, queued, completed, archived)
+        #[arg(long)]
+        status: Option<String>,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Promote a Work to `active` in the pool (demotes prior active).
+    Promote {
+        /// Work ID (wrk_...) to promote
+        work_id: String,
+        /// Also set as CLI default via `works use`
+        #[arg(long, default_value_t = false)]
+        set_default: bool,
+    },
+    /// Archive a pool entry.
+    Archive {
+        /// Pool entry ID (npe_...) to archive
+        entry_id: String,
+    },
+    /// Manage the inspiration pool (DF-61 §4).
+    Inspiration {
+        #[command(subcommand)]
+        action: InspirationAction,
+    },
+}
+
+/// Inspiration pool subcommands (DF-61 §4).
+#[derive(Debug, Subcommand)]
+pub enum InspirationAction {
+    /// Add a new inspiration item (creates MD scaffold + DB row).
+    Add {
+        /// Title for the inspiration item
+        title: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// List inspiration items.
+    List {
+        /// Filter by status (idea, promoted, archived)
+        #[arg(long)]
+        status: Option<String>,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Promote an inspiration item — creates a Work + pool row.
+    Promote {
+        /// Inspiration item ID (npi_...) to promote
+        item_id: String,
+        /// Optional idea override for the new Work's initial_idea
+        #[arg(long)]
+        idea: Option<String>,
+        /// Also set as CLI default via `works use`
+        #[arg(long, default_value_t = false)]
+        set_default: bool,
+    },
+    /// Archive an inspiration item.
+    Archive {
+        /// Inspiration item ID (npi_...) to archive
+        item_id: String,
+    },
+}
+
 /// Dispatch `creator works` subcommands.
 ///
 /// # Errors
@@ -77,6 +153,7 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         WorksCommand::Status { work_id, json } => handle_status(&client, work_id, json).await,
         WorksCommand::Use { work_id } => handle_use(&client, &work_id).await,
         WorksCommand::CompletionLock { command } => handle_completion_lock(&client, command).await,
+        WorksCommand::Pool { action } => handle_pool(&client, action).await,
     }
 }
 
@@ -403,6 +480,271 @@ async fn handle_completion_lock(client: &DaemonClient, cmd: CompletionLockComman
             }
         }
     }
+
+    Ok(())
+}
+
+// ── Selection pool handlers (DF-61) ────────────────────────────────────
+
+async fn handle_pool(client: &DaemonClient, action: PoolAction) -> Result<()> {
+    match action {
+        PoolAction::List { status, json } => handle_pool_list(client, status, json).await,
+        PoolAction::Promote {
+            work_id,
+            set_default,
+        } => handle_pool_promote(client, &work_id, set_default).await,
+        PoolAction::Archive { entry_id } => handle_pool_archive(client, &entry_id).await,
+        PoolAction::Inspiration { action } => handle_inspiration(client, action).await,
+    }
+}
+
+async fn handle_pool_list(client: &DaemonClient, status: Option<String>, json: bool) -> Result<()> {
+    let base = "/v1/local/works/pool";
+    let path = status.as_ref().map_or_else(
+        || base.to_string(),
+        |s| {
+            let mut url = url::Url::parse("http://localhost").expect("valid base");
+            url.set_path(base);
+            url.query_pairs_mut().append_pair("status", s);
+            let q = url.query().unwrap_or("");
+            format!("{base}?{q}")
+        },
+    );
+
+    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        let entries = resp.get("entries").and_then(|v| v.as_array());
+        match entries {
+            Some(entries) if entries.is_empty() => {
+                println!("No pool entries found.");
+            }
+            Some(entries) => {
+                println!(
+                    "{:<36} {:36} {:12} {:30} PROMOTED",
+                    "ENTRY_ID", "WORK_ID", "STATUS", "TITLE"
+                );
+                for e in entries {
+                    let eid = e.get("entry_id").and_then(|v| v.as_str()).unwrap_or("?");
+                    let wid = e
+                        .get("work_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(none)");
+                    let st = e.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                    let title = e.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                    let promoted = e.get("promoted_at").and_then(|v| v.as_str()).unwrap_or("-");
+                    let display_title = if title.len() > 28 {
+                        format!("{}…", &title[..28])
+                    } else {
+                        title.to_string()
+                    };
+                    println!("{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}");
+                }
+                println!("\n{} pool entry/entries", entries.len());
+            }
+            None => {
+                println!("No pool entries found.");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_pool_promote(
+    client: &DaemonClient,
+    work_id: &str,
+    set_default: bool,
+) -> Result<()> {
+    let body = serde_json::json!({
+        "work_id": work_id,
+        "set_default": set_default,
+    });
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/works/pool/promote", &body)
+        .await?;
+
+    let entry_id = resp.get("entry_id").and_then(|v| v.as_str()).unwrap_or("?");
+    println!("Promoted {work_id} to active (entry {entry_id})");
+
+    if set_default {
+        // T5: also wire as CLI default via `works use`
+        let use_body = serde_json::json!({
+            "action": "set_pool_active",
+            "work_id": work_id,
+        });
+        let _use_resp: serde_json::Value = client
+            .post::<serde_json::Value, _>("/v1/local/works/pool", &use_body)
+            .await?;
+        println!("Also set as CLI default work.");
+    }
+
+    Ok(())
+}
+
+async fn handle_pool_archive(client: &DaemonClient, entry_id: &str) -> Result<()> {
+    let body = serde_json::json!({ "entry_id": entry_id });
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/works/pool/archive", &body)
+        .await?;
+
+    let status = resp
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("archived");
+    println!("Entry {entry_id} → {status}");
+
+    Ok(())
+}
+
+// ── Inspiration pool handlers (DF-61 §4) ───────────────────────────────
+
+async fn handle_inspiration(client: &DaemonClient, action: InspirationAction) -> Result<()> {
+    match action {
+        InspirationAction::Add { title, json } => {
+            handle_inspiration_add(client, &title, json).await
+        }
+        InspirationAction::List { status, json } => {
+            handle_inspiration_list(client, status, json).await
+        }
+        InspirationAction::Promote {
+            item_id,
+            idea,
+            set_default,
+        } => handle_inspiration_promote(client, &item_id, idea, set_default).await,
+        InspirationAction::Archive { item_id } => {
+            handle_inspiration_archive(client, &item_id).await
+        }
+    }
+}
+
+async fn handle_inspiration_add(client: &DaemonClient, title: &str, json: bool) -> Result<()> {
+    let body = serde_json::json!({ "title": title });
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/works/pool/inspiration", &body)
+        .await?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        let item_id = resp.get("item_id").and_then(|v| v.as_str()).unwrap_or("?");
+        let rel_path = resp.get("rel_path").and_then(|v| v.as_str()).unwrap_or("?");
+        println!("Inspiration added: {item_id}");
+        println!("  scaffold: {rel_path}");
+    }
+
+    Ok(())
+}
+
+async fn handle_inspiration_list(
+    client: &DaemonClient,
+    status: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let base = "/v1/local/works/pool/inspiration";
+    let path = status.as_ref().map_or_else(
+        || base.to_string(),
+        |s| {
+            let mut url = url::Url::parse("http://localhost").expect("valid base");
+            url.set_path(base);
+            url.query_pairs_mut().append_pair("status", s);
+            let q = url.query().unwrap_or("");
+            format!("{base}?{q}")
+        },
+    );
+
+    let resp: serde_json::Value = client.get::<serde_json::Value>(&path).await?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        let items = resp.get("items").and_then(|v| v.as_array());
+        match items {
+            Some(items) if items.is_empty() => {
+                println!("No inspiration items found.");
+            }
+            Some(items) => {
+                println!(
+                    "{:<36} {:40} {:12} {:30} CREATED",
+                    "ITEM_ID", "TITLE", "STATUS", "REL_PATH"
+                );
+                for i in items {
+                    let iid = i.get("item_id").and_then(|v| v.as_str()).unwrap_or("?");
+                    let title = i.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+                    let st = i.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                    let rp = i.get("rel_path").and_then(|v| v.as_str()).unwrap_or("?");
+                    let created = i.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
+                    let display_title = if title.len() > 38 {
+                        format!("{}…", &title[..38])
+                    } else {
+                        title.to_string()
+                    };
+                    let display_rp = if rp.len() > 28 {
+                        format!("{}…", &rp[..28])
+                    } else {
+                        rp.to_string()
+                    };
+                    println!("{iid:<36} {display_title:40} {st:<12} {display_rp:<30} {created}");
+                }
+                println!("\n{} inspiration item(s)", items.len());
+            }
+            None => {
+                println!("No inspiration items found.");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_inspiration_promote(
+    client: &DaemonClient,
+    item_id: &str,
+    idea: Option<String>,
+    set_default: bool,
+) -> Result<()> {
+    let mut body = serde_json::json!({
+        "item_id": item_id,
+        "set_default": set_default,
+    });
+    if let Some(ref idea) = idea {
+        body["idea"] = serde_json::Value::String(idea.clone());
+    }
+
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/works/pool/inspiration/promote", &body)
+        .await?;
+
+    let work_id = resp.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
+    let pool_entry_id = resp
+        .get("pool_entry_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    println!("Inspiration {item_id} promoted → Work {work_id} (pool entry {pool_entry_id})");
+
+    if set_default {
+        let use_body = serde_json::json!({
+            "action": "set_pool_active",
+            "work_id": work_id,
+        });
+        let _use_resp: serde_json::Value = client
+            .post::<serde_json::Value, _>("/v1/local/works/pool", &use_body)
+            .await?;
+        println!("Also set as CLI default work.");
+    }
+
+    Ok(())
+}
+
+async fn handle_inspiration_archive(client: &DaemonClient, item_id: &str) -> Result<()> {
+    let body = serde_json::json!({ "item_id": item_id });
+    let _resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/works/pool/inspiration/archive", &body)
+        .await?;
+
+    println!("Inspiration item {item_id} archived.");
 
     Ok(())
 }
