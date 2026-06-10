@@ -51,6 +51,8 @@ pub fn row_to_inspiration_item(r: &sqlx::sqlite::SqliteRow) -> InspirationItem {
 
 /// List inspiration items for a creator, optionally filtered by status.
 ///
+/// `limit` defaults to 200 when `None`; capped at 1000.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
@@ -58,18 +60,25 @@ pub async fn list_inspiration(
     pool: &SqlitePool,
     creator_id: &str,
     status_filter: Option<&str>,
+    limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<InspirationItem>, LocalDbError> {
+    let effective_limit = limit.unwrap_or(200).min(1000);
+    let effective_offset = offset.unwrap_or(0);
+
     let sql = if status_filter.is_some() {
         format!(
             "SELECT {INSPIRATION_COLUMNS} FROM inspiration_items \
              WHERE creator_id = ? AND status = ? \
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC \
+             LIMIT ? OFFSET ?"
         )
     } else {
         format!(
             "SELECT {INSPIRATION_COLUMNS} FROM inspiration_items \
              WHERE creator_id = ? \
-             ORDER BY created_at DESC"
+             ORDER BY created_at DESC \
+             LIMIT ? OFFSET ?"
         )
     };
 
@@ -77,9 +86,38 @@ pub async fn list_inspiration(
     if let Some(s) = status_filter {
         query = query.bind(s);
     }
+    query = query.bind(effective_limit).bind(effective_offset);
 
     let rows = query.fetch_all(pool).await?;
     Ok(rows.iter().map(row_to_inspiration_item).collect())
+}
+
+/// Count inspiration items for a creator, optionally filtered by status.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn count_inspiration(
+    pool: &SqlitePool,
+    creator_id: &str,
+    status_filter: Option<&str>,
+) -> Result<u32, LocalDbError> {
+    let sql = if status_filter.is_some() {
+        "SELECT COUNT(*) FROM inspiration_items WHERE creator_id = ? AND status = ?"
+    } else {
+        "SELECT COUNT(*) FROM inspiration_items WHERE creator_id = ?"
+    };
+
+    let mut query = sqlx::query(sql).bind(creator_id);
+    if let Some(s) = status_filter {
+        query = query.bind(s);
+    }
+
+    let count: i64 = query
+        .fetch_one(pool)
+        .await?
+        .get(0);
+    Ok(u32::try_from(count).unwrap_or(0))
 }
 
 /// Create a new inspiration item — inserts DB row only.

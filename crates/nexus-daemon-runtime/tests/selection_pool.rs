@@ -85,7 +85,7 @@ async fn test_pool_list_returns_all_statuses() {
     // List all entries
     let resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None }),
+        Query(ListPoolQuery { status: None, ..Default::default() }),
     )
     .await
     .unwrap();
@@ -138,7 +138,7 @@ async fn test_pool_promote_demotes_prior_active() {
     // Verify only one active
     let resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None }),
+        Query(ListPoolQuery { status: None, ..Default::default() }),
     )
     .await
     .unwrap();
@@ -185,7 +185,7 @@ async fn test_pool_promote_idempotent_on_same_target() {
     // Should have exactly one entry
     let resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None }),
+        Query(ListPoolQuery { status: None, ..Default::default() }),
     )
     .await
     .unwrap();
@@ -249,7 +249,7 @@ async fn test_inspiration_add_creates_md_and_db_row_atomically() {
     // Verify DB row exists
     let list_resp = nexus_daemon_runtime::api::handlers::works::list_inspiration(
         State(state.clone()),
-        Query(ListInspirationQuery { status: None }),
+        Query(ListInspirationQuery { status: None, ..Default::default() }),
     )
     .await
     .unwrap();
@@ -334,7 +334,7 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     // Verify pool entry is active
     let pool_resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None }),
+        Query(ListPoolQuery { status: None, ..Default::default() }),
     )
     .await
     .unwrap();
@@ -348,9 +348,10 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     // Verify inspiration item is promoted
     let insp_resp = nexus_daemon_runtime::api::handlers::works::list_inspiration(
         State(state.clone()),
-        Query(ListInspirationQuery {
-            status: Some("promoted".to_string()),
-        }),
+         Query(ListInspirationQuery {
+             status: Some("promoted".to_string()),
+             ..Default::default()
+         }),
     )
     .await
     .unwrap();
