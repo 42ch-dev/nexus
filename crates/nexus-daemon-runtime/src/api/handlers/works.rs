@@ -1340,7 +1340,23 @@ pub async fn list_pool(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
+    let limit = query.limit;
+    let offset = query.offset;
+
     let entries = nexus_local_db::novel_pool_entries::list_pool_entries(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let total = nexus_local_db::novel_pool_entries::count_pool_entries(
         state.pool(),
         &creator_id,
         query.status.as_deref(),
@@ -1353,7 +1369,12 @@ pub async fn list_pool(
 
     let items: Vec<PoolEntryDto> = entries.into_iter().map(PoolEntryDto::from).collect();
 
-    Ok(Json(ListPoolResponse { entries: items }))
+    Ok(Json(ListPoolResponse {
+        entries: items,
+        total,
+        limit: limit.unwrap_or(200),
+        offset: offset.unwrap_or(0),
+    }))
 }
 
 /// `POST /v1/local/works/pool/promote` — Promote a pool entry to active.
@@ -1464,7 +1485,23 @@ pub async fn list_inspiration(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
+    let limit = query.limit;
+    let offset = query.offset;
+
     let items = nexus_local_db::inspiration_items::list_inspiration(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let total = nexus_local_db::inspiration_items::count_inspiration(
         state.pool(),
         &creator_id,
         query.status.as_deref(),
@@ -1477,7 +1514,12 @@ pub async fn list_inspiration(
 
     let dtos: Vec<InspirationItemDto> = items.into_iter().map(InspirationItemDto::from).collect();
 
-    Ok(Json(ListInspirationResponse { items: dtos }))
+    Ok(Json(ListInspirationResponse {
+        items: dtos,
+        total,
+        limit: limit.unwrap_or(200),
+        offset: offset.unwrap_or(0),
+    }))
 }
 
 /// `POST /v1/local/works/pool/inspiration/promote` — Promote an inspiration item to a Work.
@@ -1605,14 +1647,19 @@ pub async fn archive_inspiration_handler(
 
 // ─── P1 Request / Response types ────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ListPoolQuery {
     pub status: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ListPoolResponse {
     pub entries: Vec<PoolEntryDto>,
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1639,14 +1686,19 @@ pub struct AddInspirationResponse {
     pub rel_path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ListInspirationQuery {
     pub status: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ListInspirationResponse {
     pub items: Vec<InspirationItemDto>,
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
 }
 
 #[derive(Debug, Serialize)]
