@@ -296,7 +296,12 @@ pub async fn create_work(
         .ok_or(NexusApiError::AuthRequired)?;
 
     // T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
+    // R-V140P0-S1: Uses BadRequest (400) rather than UnprocessableEntity (422) for
+    // missing required field. This is consistent with other "field missing" errors
+    // in this handler. Semantic 422 is used only for preset_gates_failed.
+    // R-V140P0-S4: tracing span for mandatory binding check observability.
     if req.world_id.is_none() {
+        tracing::info!(creator_id = %creator_id, "create_work rejected: missing world_id binding");
         return Err(NexusApiError::BadRequest {
             code: "WORLD_ID_REQUIRED".to_string(),
             message: "World binding is required for new Works (V1.40+).\n  \
@@ -692,6 +697,7 @@ async fn apply_non_stage_fields(
     // QC2 W-03: V1.40 — reject clearing world_id on a novel Work that
     // already has a non-null world_id binding. This prevents downgrading
     // a mandatory-bound Work back to worldless via PATCH.
+    // R-V140P0-S4: tracing for mandatory binding check observability.
     if non_stage_patch.world_id == Some(None) {
         // Check if the Work currently has a non-null world_id.
         let current = works::get_work(pool, creator_id, work_id)
@@ -702,6 +708,7 @@ async fn apply_non_stage_fields(
             })?
             .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
         if current.world_id.is_some() {
+            tracing::info!(work_id = %work_id, "patch_work: rejected world_id clear (non-stage path)");
             return Err(NexusApiError::BadRequest {
                 code: "WORLD_CLEAR_FORBIDDEN".to_string(),
                 message: format!(
@@ -855,6 +862,9 @@ async fn patch_work_stage(
     Ok(final_record)
 }
 
+// R-V140P0-S4: Pre-existing — function exceeds 100-line clippy threshold.
+// Refactoring into smaller helpers deferred to V1.42.
+#[allow(clippy::too_many_lines)]
 pub async fn patch_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -909,6 +919,8 @@ pub async fn patch_work(
             })?
             .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
         if current.world_id.is_some() {
+            // R-V140P0-S4: tracing for mandatory binding check observability.
+            tracing::info!(work_id = %work_id, "patch_work_stage: rejected world_id clear (stage path)");
             return Err(NexusApiError::BadRequest {
                 code: "WORLD_CLEAR_FORBIDDEN".to_string(),
                 message: format!(

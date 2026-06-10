@@ -837,8 +837,10 @@ mod tests {
     // (BlockType is a Rust enum — unknown strings fail at deserialization,
     //  which is a structured parse error before reaching the store.
     //  This test confirms the validation path surfaces KbStoreError::Validation.)
+    // R-V140P1-S2: renamed from test_invalid_block_type_via_deserialization —
+    // the test exercises serde BlockType enum rejection, not the store path.
     #[tokio::test]
-    async fn test_invalid_block_type_via_deserialization() {
+    async fn test_block_type_enum_rejects_unknown_variant() {
         let json = r#"{"block_type": "unknown_type"}"#;
         let result = serde_json::from_str::<serde_json::Value>(json);
         // The value parses as raw JSON but BlockType deserialization would fail.

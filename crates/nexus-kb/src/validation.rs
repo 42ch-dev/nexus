@@ -23,6 +23,10 @@ use std::fmt;
 /// | `society`          | `organization`            |
 /// | `rules`            | `conflict`                |
 /// | `economy`          | `item`                    |
+///
+/// **DRIFT RISK (R-V140P1-S1):** This list is duplicated in the kb-extract prompt
+/// (`embedded-presets/kb-extract/prompts/extract.md`). When updating, update both
+/// locations to prevent validation-vs-prompt drift.
 pub const NOVEL_CATEGORIES: &[&str] = &[
     "foundation",
     "background",
