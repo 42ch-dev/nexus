@@ -1,7 +1,7 @@
 //! Inspiration items DAO (DF-61 selection pool).
 //!
 //! Manages the `inspiration_items` table — creator-scoped inspiration
-//! items with optional markdown file scaffold under `Works/_pool/灵感池/`.
+//! items with optional markdown file scaffold under `{workspace}/Pool/Ideas/`.
 //!
 //! Spec: novel-work-pool.md §3, local-db-schema.md §4.1.5.
 
@@ -124,6 +124,10 @@ pub async fn create_inspiration_row(
 /// The MD file is written via tmp+rename for atomicity. If the MD file
 /// already exists, returns an error without modifying the DB.
 ///
+/// `workspace_dir` must be the resolved operational workspace directory
+/// (per `nexus_home_layout::operational_workspace_dir`). The scaffold is
+/// written to `{workspace_dir}/Pool/Ideas/<slug>.md`.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails, the file cannot be
@@ -137,7 +141,7 @@ pub async fn create_inspiration_with_scaffold(
     created_at: &str,
 ) -> Result<InspirationItem, LocalDbError> {
     let slug = title_to_slug(title);
-    let rel_path = format!("Works/_pool/灵感池/{slug}.md");
+    let rel_path = format!("Pool/Ideas/{slug}.md");
 
     // Step 1: Write MD file (tmp + rename) — fail if exists
     let abs_path = workspace_dir.join(&rel_path);
