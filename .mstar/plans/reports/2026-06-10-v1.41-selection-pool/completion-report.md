@@ -204,3 +204,37 @@ Pre-fix-wave plan review identified 11 findings beyond the QC consolidated list:
 | P-11 | INFO | `nexus_home_layout` helper `creator_inspiration_dir` added for future use | Committed in Fix 1a |
 
 All findings resolved within this fix wave or deferred to V1.42 (per QC consolidated residual table).
+
+---
+
+## §12 QA Blocker Fix (2026-06-11)
+
+QA returned Request Changes with 3 small release-gating items. All fixed.
+
+### Fixes
+
+| # | Item | Commit | Description |
+|---|------|--------|-------------|
+| 1 | AC5 help documentation gap | `3b2b3a17` | Added `about` + `long_about` doc comments to `InspirationAction` enum and all 4 variants (`Add`, `List`, `Promote`, `Archive`) explicitly stating pool-level items are distinct from per-Work `works.inspiration_log`. Added contract test `v141_pool_inspiration_help_disambiguates_from_work_log` asserting `inspiration_log` appears in `creator works pool inspiration add --help`. |
+| 2 | Spec amendment incomplete | `c7410c5c` | Updated `.mstar/knowledge/deferred-features-cross-version-tracker.md` line 208 from `` `Works/_pool/灵感池/*.md` `` to `` `{workspace}/Pool/Ideas/*.md` ``. No other occurrences found. |
+| 3 | R-V141P1-02 missing `owner` | `1c11c0d3` | Added `"owner": "@fullstack-dev"` to `R-V141P1-02` in `.mstar/status.json` `residual_findings["2026-06-10-v1.41-selection-pool"]`. Verified consistent with sibling residuals. |
+
+### Verification
+
+```
+$ cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db
+   → all passed (0 failed)
+
+$ cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings
+   → clean (no warnings)
+
+$ cargo +nightly fmt --all -- --check
+   → clean (no diff)
+
+$ git status
+   → nothing to commit, working tree clean
+```
+
+### Status
+
+**Ready for PM closeout + QA re-verify.**
