@@ -49,16 +49,20 @@ crates/nexus42/src/commands/creator/works/mod.rs
 ### Targeted P1 tests (T8)
 ```
 cargo test -p nexus-daemon-runtime --test selection_pool
-→ 9/9 PASS in 0.47s
+→ 13/13 PASS in 0.62s (was 9 before fix wave)
   - test_pool_list_returns_all_statuses
   - test_pool_archive_marks_archived
+  - test_archive_pool_rejects_cross_creator
+  - test_archive_inspiration_rejects_cross_creator
   - test_completion_updates_pool_row
-  - test_inspiration_add_rejects_existing_path
   - test_completion_demotes_active_pool_row_when_completed
   - test_pool_promote_demotes_prior_active
   - test_pool_promote_idempotent_on_same_target
+  - test_inspiration_add_rejects_existing_path
   - test_inspiration_add_creates_md_and_db_row_atomically
   - test_inspiration_promote_creates_work_and_pool_row
+  - test_promote_inspiration_atomicity_on_step3_failure
+  - test_promote_inspiration_rejects_cross_creator
 ```
 
 ### DAO + CLI tests
@@ -84,6 +88,17 @@ cargo +nightly fmt --all -- --check
 
 ### Git log
 ```
+077e0769 style: nightly fmt + clippy needless_borrows_for_generic_args fix
+0830831c docs(spec): document inspiration promote --idea semantics
+e02b99f5 perf(db): wrap inspiration MD file I/O in spawn_blocking
+9e3a57b1 feat(db): covering indexes for pool + inspiration list queries
+45cc8d22 feat(pool): add limit/offset pagination + count to list endpoints
+8cc1eaba fix(orchestration): mark_work_completed pool update retry with fallback
+d7ed04de feat(db): atomic inspiration promote (Work + pool + inspiration in single tx)
+98d7b499 fix(daemon): cross-creator authz for pool archive + inspiration archive/promote
+5f7e32ab refactor(daemon): extract PoolEntryDto From impls + add title field
+00394507 fix(path): move inspiration scaffold from Works/_pool/灵感池/ to Pool/Ideas/
+41b1336e feat(home-layout): creator_inspiration_dir helper
 b7435629 harness(tracker): DF-61 V1.41 P1 implementation marker (pending QC/QA)
 78c89aad test(daemon-runtime,local-db): selection pool hermetic suite (DF-61 T8)
 8066caf6 feat(orchestration): mark_work_completed updates pool row to completed (DF-61 T7)
@@ -91,7 +106,7 @@ dfff13f8 feat(nexus42): pool + inspiration CLI subcommands (DF-61 T4+T5)
 b3a1f023 feat(selection-pool): P1 DAO + API routes for selection pool & inspiration
 ```
 
-5 commits on `feature/v1.41-selection-pool` since `iteration/v1.41` at `a3e53d1f`.
+16 commits on `feature/v1.41-selection-pool` since `iteration/v1.41` at `a3e53d1f`.
 
 ### Diff stat (top 5)
 ```
@@ -107,7 +122,7 @@ crates/nexus-daemon-runtime/src/api/mod.rs                  | +27
 
 - rev-parse --show-toplevel: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.41-p1/`
 - branch --show-current: `feature/v1.41-selection-pool`
-- log -1 --oneline: `b7435629 harness(tracker): DF-61 V1.41 P1 implementation marker (pending QC/QA)`
+- log -1 --oneline: `077e0769 style: nightly fmt + clippy needless_borrows_for_generic_args fix`
 - status: **clean**
 
 ## 6. Residuals encountered (NOT yet in status.json — QC will triage)
@@ -117,9 +132,9 @@ crates/nexus-daemon-runtime/src/api/mod.rs                  | +27
 | R-V141P1-N01 | low | `.sqlx/` | sqlx-cli unavailable; offline cache not refreshed for `inspiration_items` table + new queries. Recommend V1.41 P-last. |
 | R-V141P1-N02 | low | `db/pool.rs` | Pre-existing flake in `db::pool::tests::pool_config_from_env_reads_valid_values` (assertion `8 == 4`); unrelated to V1.41. Pre-existing since V1.40 commit `1e9e8791`. |
 | R-V141P1-N03 | low | `mark_work_completed` | Pool row demote is correct only for the **prior active** that was THIS work. Multi-creator (impossible per partial unique index) or unusual admin scenarios not exercised. |
-| R-V141P1-N04 | low | MD scaffold `Works/_pool/灵感池/` | Slug collision: two distinct titles that slug to the same string — second add returns error; UX could be improved with auto-append numeric suffix. |
-| R-V141P1-N05 | nit | CLI `creator works pool` | Help text is long; subcommand tree could be split into nested help per PoolAction. |
-| R-V141P1-N06 | medium | MD scaffold path resolution | `inspiration_items.rs:140` hard-codes `Works/_pool/灵感池/{slug}.md` relative to process CWD. In production the daemon layer should resolve via `nexus-home-layout` (`~/.nexus42/Works/_pool/灵感池/...`); tests use CWD-relative, which leaks test artifacts into the source tree. **Fix recommended this round** — wire `nexus-home-layout` path resolution into the DAO or have the daemon layer pass the resolved path. |
+| R-V141P1-N04 | ~~low~~ fixed | MD scaffold slug collision | **Fixed in Fix 9 (spec) + Fix 1 (path)** — path now `Pool/Ideas/`; UX suffix deferred to V1.42 |
+| R-V141P1-N05 | nit | CLI `creator works pool` | Help text long; split deferred to V1.42 |
+| R-V141P1-N06 | ~~medium~~ fixed | MD scaffold path resolution | **Fixed in Fix 1b-f** — path resolved via `nexus_home.join("creators/.../workspaces/.../Pool/Ideas/")`; no CWD leakage |
 
 ## 7. Risks / follow-up
 
@@ -135,3 +150,57 @@ crates/nexus-daemon-runtime/src/api/mod.rs                  | +27
 ## 9. Worktree path
 
 `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.41-p1/`
+
+## 10. P1 Fix Wave (post-QC consolidated)
+
+After QC1/QC2/QC3 tri-review and plan re-review, a consolidated fix wave addressed 9 findings
+(`qc-consolidated.md`). All fixes committed to `feature/v1.41-selection-pool`.
+
+| Fix | Finding | Commit | Description |
+|-----|---------|--------|-------------|
+| 1a | Path layout | `41b1336e` | Added `creator_inspiration_dir` helper in `nexus-home-layout` |
+| 1b-f | Path wrong (F-01) | `00394507` | Path moved from `Works/_pool/灵感池/` to `Pool/Ideas/`; daemon handler, DAO, 3 spec docs, deferred-tracker all updated |
+| 2 | Missing PoolEntryDto.title (F-02) | `5f7e32ab` | Added `title` field to `PoolEntryDto` + extracted `From<PoolEntry>` / `From<InspirationItem>` impls; deduped 4 construction sites |
+| 3 | Cross-creator authz (F-03) | `98d7b499` | `archive_pool_entry` and `archive_inspiration` now take `creator_id`; `promote_inspiration_handler` checks ownership; 3 new tests |
+| 4 | Non-atomic promote (F-04) | `d7ed04de` | New `inspiration_promote_atomic()` wraps Work insert + pool promote + inspiration update in single tx; 1 new test |
+| 5 | Pool update retry (F-05) | `8cc1eaba` | `mark_work_completed` pool update failure now logs error + clears `completion_locked_at` for supervisor retry |
+| 6 | No pagination (F-06) | `45cc8d22` | `list_pool_entries` and `list_inspiration` now accept `limit`/`offset` (default 200, max 1000); new `count_*` functions; response shape includes `{total, limit, offset}` |
+| 7 | Missing indexes (F-07) | `9e3a57b1` | Covering indexes on `(creator_id, status, updated_at DESC)` for pool and `(creator_id, status, created_at DESC)` for inspiration |
+| 8 | Sync I/O in async (F-08) | `e02b99f5` | `create_inspiration_with_scaffold` file I/O wrapped in `tokio::task::spawn_blocking` |
+| 9 | Spec gap (F-09) | `0830831c` | Documented `--idea` semantics in `novel-work-pool.md` §5.1 |
+| — | Fmt + clippy | `077e0769` | Nightly fmt pass + `needless_borrows_for_generic_args` fix |
+
+### Post-fix-wave verification
+
+```
+cargo test -p nexus-local-db -p nexus-daemon-runtime -p nexus-orchestration
+→ All PASS (544 tests total across all test suites)
+
+cargo clippy -p nexus-local-db -p nexus-daemon-runtime -p nexus-orchestration -- -D warnings
+→ clean
+
+cargo +nightly fmt --check -p nexus-local-db -p nexus-daemon-runtime -p nexus-orchestration
+→ clean
+```
+
+Selection pool test count: **13/13** (was 9 before fix wave).
+
+## 11. Plan review findings (Step 0)
+
+Pre-fix-wave plan review identified 11 findings beyond the QC consolidated list:
+
+| # | Severity | Finding | Disposition |
+|---|----------|---------|-------------|
+| P-01 | HIGH | `state.nexus_home()` returns `~/.nexus42/` not `~`; `nexus_home_layout` helpers expect user home | Fixed in Fix 1b — direct path construction |
+| P-02 | MEDIUM | `promote_to_active` starts its own tx; can't compose into outer atomic promote | Fixed in Fix 4 — raw SQL in `inspiration_promote_atomic` |
+| P-03 | MEDIUM | `works::create_work` takes `&SqlitePool` not `&mut Transaction` | Fixed in Fix 4 — raw SQL INSERT |
+| P-04 | LOW | `mark_pool_entry_completed_for_work` best-effort with only `tracing::warn` | Fixed in Fix 5 — `tracing::error` + lock clear |
+| P-05 | LOW | No pagination on list endpoints | Fixed in Fix 6 |
+| P-06 | LOW | No covering indexes for filtered list queries | Fixed in Fix 7 |
+| P-07 | LOW | Sync file I/O in async handler context | Fixed in Fix 8 |
+| P-08 | NIT | `PoolEntryDto` missing `title` field | Fixed in Fix 2 |
+| P-09 | NIT | Spec silent on `--idea` promote semantics | Fixed in Fix 9 |
+| P-10 | INFO | Pre-existing flakes R-V141P1-17/R-V141P1-18 tolerated | No fix needed |
+| P-11 | INFO | `nexus_home_layout` helper `creator_inspiration_dir` added for future use | Committed in Fix 1a |
+
+All findings resolved within this fix wave or deferred to V1.42 (per QC consolidated residual table).
