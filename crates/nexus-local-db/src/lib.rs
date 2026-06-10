@@ -13,12 +13,14 @@
 pub mod findings;
 pub mod force_gates_audit;
 pub mod identity;
+pub mod inspiration_items;
 pub mod kb_extract_job;
 pub mod kb_store;
 pub mod knowledge_store;
 pub mod memory_fragment;
 pub mod narrative_gateway;
 pub mod narrative_write;
+pub mod novel_pool_entries;
 pub mod pending_review;
 pub mod prompt_injection;
 pub mod reference_source;
@@ -111,6 +113,19 @@ pub use works::{
     advance_work_stage_atomic, append_inspiration, count_works, create_work,
     find_work_by_client_request_id, get_work, has_active_fl_e_schedule, list_works, patch_work,
     record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
+};
+
+// Re-export novel_pool_entries types
+pub use novel_pool_entries::{
+    archive_pool_entry, get_active_pool_entry, get_pool_entry, get_pool_entry_by_work,
+    list_pool_entries, mark_pool_entry_completed, mark_pool_entry_completed_for_work,
+    promote_to_active, PoolEntry,
+};
+
+// Re-export inspiration_items types
+pub use inspiration_items::{
+    archive_inspiration, create_inspiration_row, create_inspiration_with_scaffold, get_inspiration,
+    list_inspiration, promote_inspiration, title_to_slug, InspirationItem,
 };
 
 // Re-export work_chapters types
