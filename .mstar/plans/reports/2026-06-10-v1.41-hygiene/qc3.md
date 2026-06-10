@@ -4,13 +4,13 @@ reviewer: "@qc-specialist-3"
 reviewer_index: 3
 focus: performance-reliability
 plan_id: 2026-06-10-v1.41-hygiene
-verdict: Request Changes
-generated_at: 2026-06-11T01:08:07+08:00
-review_range: "merge-base: 55689706 → tip: f4d72a86"
+verdict: Approve
+generated_at: 2026-06-11T11:40:00+08:00
+review_range: "merge-base: 55689706 → tip: da21b70d"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 files_reviewed: 9
-tools_run: cargo clippy --all -D warnings, cargo +nightly fmt --all -- --check, cargo test -p nexus-creator-memory -p nexus-orchestration -p nexus-kb -p nexus-moment-context-assembly -p nexus-daemon-runtime, git log/diff/show on 5 P-last commits, manual source review
+tools_run: cargo clippy --all -D warnings, cargo +nightly fmt --all -- --check, cargo test -p nexus-creator-memory -p nexus-orchestration -p nexus-kb -p nexus-moment-context-assembly -p nexus-daemon-runtime, git log/diff/show on fix-wave delta f4d72a86..da21b70d, manual source review
 ---
 
 # Code Review Report — V1.41 P-last (qc3)
@@ -65,3 +65,71 @@ tools_run: cargo clippy --all -D warnings, cargo +nightly fmt --all -- --check, 
 **Verdict**: Request Changes
 
 (The UTF-8 boundary panic in the size guard is a runtime reliability defect that must be fixed before closeout. qc2 independently identified the same issue, confirming the finding.)
+
+## Revalidation (fix-wave delta: f4d72a86..da21b70d)
+
+**Reviewer**: @qc-specialist-3 (qc-specialist-3, reviewer_index: 3)
+**Re-review timestamp**: 2026-06-11T11:40:00+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: da21b70d` (focus delta `f4d72a86..da21b70d`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: cargo clippy, cargo +nightly fmt --check, cargo test, manual review of fix-wave diff
+
+### Disposition
+
+| Finding | Original severity | New severity | Disposition | Evidence |
+|---------|-------------------|--------------|-------------|----------|
+| W-1 (UTF-8 truncation panic) = qc2 W-01 | warning | resolved | commit 5be7e5d6 | `crates/nexus-creator-memory/src/review.rs:649-655` (char-boundary walk) + test `promote_truncates_oversized_raw_digest_at_utf8_boundary` (passing) |
+
+### Suggestions (forward-looking; deferred to V1.42 per qc-consolidated.md residuals)
+
+| ID | Status | Note |
+|----|--------|------|
+| S-1 (env-driven MAX_DIGEST_BYTES) | defer | R-V141HYG-04 (V1.42) |
+| S-2 (real YAML emitter) | defer | R-V141HYG-06 (V1.42) |
+| S-3 (13 waived residuals reviewed) | accept | R-V141HYG-05 covered by fix wave commit 36890233 |
+| S-4 (7 deferred residuals reviewed) | accept | none safety-critical |
+| S-5 (excluded items untouched) | accept | R-V140P4-W2 + R-V140P4-INFRA confirmed untouched |
+
+### New findings (if any)
+
+None.
+
+### Tools / verification tails
+
+**cargo clippy --all -- -D warnings**
+```
+Checking nexus42 v0.1.0 (...)
+Finished dev profile [unoptimized + debuginfo] target(s) in 12.45s
+```
+(clean — 0 warnings)
+
+**cargo +nightly fmt --all -- --check**
+```
+(no output)
+```
+(clean)
+
+**cargo test -p nexus-creator-memory -p nexus-moment-context-assembly -p nexus-orchestration -p nexus-kb -p nexus-daemon-runtime**
+```
+Doc-tests nexus_creator_memory: 4 passed
+Doc-tests nexus_daemon_runtime: 1 passed, 1 ignored
+Doc-tests nexus_kb: 0 passed
+Doc-tests nexus_moment_context_assembly: 0 passed
+Doc-tests nexus_orchestration: 1 passed, 3 ignored
+```
+(all pass)
+
+**cargo test -p nexus-creator-memory promote_truncates**
+```
+running 2 tests
+test review::tests::promote_truncates_oversized_raw_digest ... ok
+test review::tests::promote_truncates_oversized_raw_digest_at_utf8_boundary ... ok
+```
+(both pass)
+
+### Updated verdict
+
+**Approve**
+
+**Rationale**: W-1 (UTF-8 truncation panic) is resolved by commit `5be7e5d6` with char-boundary-aware slicing and a CJK-specific regression test. All CI tools pass cleanly. No new Critical or Warning findings in the fix-wave delta.
