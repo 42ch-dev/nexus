@@ -393,6 +393,15 @@ impl ScheduleSupervisor {
             return;
         }
 
+        // DF-60 §6: skip auto-chain on completion-locked Works
+        if work.completion_locked_at.is_some() {
+            tracing::debug!(
+                work_id = %work.work_id,
+                "auto-chain: skipping completion-locked work"
+            );
+            return;
+        }
+
         // Read latest WorkRecord from DB (SSOT, not cached state)
         let work =
             match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await {
