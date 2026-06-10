@@ -5,6 +5,10 @@
 //! stages (e.g., novel-writing craft rules).  Unlike presets, rules are not
 //! state machines — they are pure content layers read by preset templates.
 //!
+//! **Layer 1 is a compile-time constant with no runtime filesystem dependency.**
+//! All rule content is embedded via `include_str!` at compile time, making it
+//! always available without requiring any files on disk at runtime.
+//!
 //! Layout on disk (relative to `crates/nexus-orchestration/`):
 //!
 //! ```text

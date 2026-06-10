@@ -65,12 +65,12 @@ impl WorldContextBlock {
     /// Output shape:
     /// ```yaml
     /// world_id: wld_123
-    /// world_name: "Neon River"
-    /// current_timeline: "chapter 3: after the river-market fire"
+    /// world_name: Neon River
+    /// current_timeline: chapter 3: after the river-market fire
     /// characters_in_chapter:
     ///   - id: char_lin_xia
-    ///     name: "Lin Xia"
-    ///     descriptor: "ex-cartographer hiding a forbidden river map"
+    ///     name: Lin Xia
+    ///     descriptor: ex-cartographer hiding a forbidden river map
     /// locations_referenced:
     ///   - ...
     /// active_rules:
@@ -78,12 +78,15 @@ impl WorldContextBlock {
     /// ```
     ///
     /// Empty sections are rendered as `[]`.
+    ///
+    /// R-V140P2-S4: String fields use `{}` (Display) not `{:?}` (Debug).
+    /// Debug format adds unnecessary quotes around strings.
     #[must_use]
     pub fn to_yaml(&self) -> String {
         let mut lines = Vec::new();
         lines.push(format!("world_id: {}", self.world_id));
-        lines.push(format!("world_name: {:?}", self.world_name));
-        lines.push(format!("current_timeline: {:?}", self.current_timeline));
+        lines.push(format!("world_name: {}", self.world_name));
+        lines.push(format!("current_timeline: {}", self.current_timeline));
 
         lines.push("characters_in_chapter:".to_string());
         if self.characters_in_chapter.is_empty() {
@@ -91,8 +94,8 @@ impl WorldContextBlock {
         } else {
             for item in &self.characters_in_chapter {
                 lines.push(format!("  - id: {}", item.id));
-                lines.push(format!("    name: {:?}", item.name));
-                lines.push(format!("    descriptor: {:?}", item.descriptor));
+                lines.push(format!("    name: {}", item.name));
+                lines.push(format!("    descriptor: {}", item.descriptor));
             }
         }
 
@@ -102,8 +105,8 @@ impl WorldContextBlock {
         } else {
             for item in &self.locations_referenced {
                 lines.push(format!("  - id: {}", item.id));
-                lines.push(format!("    name: {:?}", item.name));
-                lines.push(format!("    descriptor: {:?}", item.descriptor));
+                lines.push(format!("    name: {}", item.name));
+                lines.push(format!("    descriptor: {}", item.descriptor));
             }
         }
 
@@ -113,8 +116,8 @@ impl WorldContextBlock {
         } else {
             for item in &self.active_rules {
                 lines.push(format!("  - id: {}", item.id));
-                lines.push(format!("    name: {:?}", item.name));
-                lines.push(format!("    descriptor: {:?}", item.descriptor));
+                lines.push(format!("    name: {}", item.name));
+                lines.push(format!("    descriptor: {}", item.descriptor));
             }
         }
 
@@ -516,7 +519,7 @@ mod tests {
         // Verify YAML output contains required fields
         let yaml = block.to_yaml();
         assert!(yaml.contains("world_id: wld_1"));
-        assert!(yaml.contains("world_name: \"Neon River\""));
+        assert!(yaml.contains("world_name: Neon River"));
         assert!(yaml.contains("characters_in_chapter:"));
         assert!(yaml.contains("locations_referenced:"));
         assert!(yaml.contains("active_rules:"));
@@ -801,14 +804,14 @@ mod tests {
 
         let yaml = block.to_yaml();
 
-        // Verify exact format per §3.5.1.3
+        // Verify exact format per §3.5.1.3 (R-V140P2-S4: Display format, no Debug quotes)
         assert!(yaml.starts_with("world_id: wld_123\n"));
-        assert!(yaml.contains("world_name: \"Neon River\""));
-        assert!(yaml.contains("current_timeline: \"chapter 3: after the river-market fire\""));
+        assert!(yaml.contains("world_name: Neon River"));
+        assert!(yaml.contains("current_timeline: chapter 3: after the river-market fire"));
         assert!(yaml.contains("characters_in_chapter:"));
         assert!(yaml.contains("  - id: kb_abc"));
-        assert!(yaml.contains("    name: \"Lin Xia\""));
-        assert!(yaml.contains("    descriptor: \"ex-cartographer hiding a forbidden river map\""));
+        assert!(yaml.contains("    name: Lin Xia"));
+        assert!(yaml.contains("    descriptor: ex-cartographer hiding a forbidden river map"));
         assert!(yaml.contains("locations_referenced:"));
         assert!(yaml.contains("  - id: kb_def"));
         assert!(yaml.contains("active_rules:"));
