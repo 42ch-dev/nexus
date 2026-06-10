@@ -1,14 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T01:00:00+08:00",
+  "updated_at": "2026-06-11T11:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-10-v1.41-hygiene",
       "title": "P-last — aggressive residual convergence",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-10-v1.41-hygiene.md",
       "working_branch": "feature/v1.41-hygiene",
-      "merge_target": "iteration/v1.41"
+      "merge_target": "iteration/v1.41",
+      "notes": [
+        "2026-06-11T01:30:00+08:00: P-last implemented (5 commits on feature/v1.41-hygiene) and merged to iteration/v1.41 as f4d72a86. 10 fixes + 13 waives + 7 defer-V1.42 + 2 prior-resolved. QC tri-review dispatched."
+      ]
     }
   ],
   "metadata": {
@@ -29,18 +32,18 @@
     "integration_branch_retired": "iteration/v1.40",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-10T23:30:00+08:00",
-      "total_open": 113,
+      "updated_at": "2026-06-11T11:30:00+08:00",
+      "total_open": 120,
       "by_severity": {
         "critical": 0,
         "high": 1,
-        "medium": 12,
-        "low": 75,
-        "nit": 21
+        "medium": 13,
+        "low": 76,
+        "nit": 26
       },
       "by_target": {
         "v1.40": 0,
-        "v1.41": 60,
+        "v1.41": 67,
         "backlog": 65,
         "v1.38": 0,
         "v1.37": 0,
@@ -67,7 +70,7 @@
         "2026-06-10-v1.40-world-context-prompt-block": 1,
         "2026-06-10-v1.40-world-kb-extract-binding": 1,
         "2026-06-10-v1.40-hygiene": 1,
-        "2026-06-10-v1.41-hygiene": 1,
+        "2026-06-10-v1.41-hygiene": 7,
         "2026-06-10-v1.41-multi-work-switch": 12,
         "2026-06-10-v1.41-selection-pool": 19
       },
@@ -1460,6 +1463,78 @@
         "source": "qc1 S-2 (V1.41 P1 review); qc-consolidated.md",
         "scope": "works.rs:1331-1341, 1374-1381, 1399-1406 (after fix wave: includes title)",
         "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.42"
+      }
+    ],
+    "2026-06-10-v1.41-hygiene": [
+      {
+        "id": "R-V141HYG-01",
+        "title": "promote_to_long_term size guard truncation can panic on multi-byte UTF-8 boundary",
+        "severity": "medium",
+        "source": "qc2 W-01 + qc3 W-1 (cross-validated) (V1.41 P-last); qc-consolidated.md",
+        "scope": "crates/nexus-creator-memory/src/review.rs:651 (R-V133P4-06 fix)",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141HYG-02",
+        "title": "to_yaml Display format regression — user string fields with YAML-significant chars produce invalid YAML",
+        "severity": "low",
+        "source": "qc2 W-02 (V1.41 P-last); qc-consolidated.md",
+        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs to_yaml (R-V140P2-S4 fix)",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141HYG-03",
+        "title": "Missing WAIVER/SAFETY call-site comments for 13 waived residuals — maintainers must hunt plan history",
+        "severity": "nit",
+        "source": "qc2 W-03 (V1.41 P-last); qc-consolidated.md",
+        "scope": "13 waived residual call sites across orchestration/daemon/kb/etc.",
+        "decision": "accept-with-fix",
+        "owner": "@fullstack-dev",
+        "target": "this fix wave"
+      },
+      {
+        "id": "R-V141HYG-04",
+        "title": "MAX_DIGEST_BYTES hardcoded const — precedent exists for env-driven limits",
+        "severity": "nit",
+        "source": "qc3 S-1 (V1.41 P-last); qc-consolidated.md",
+        "scope": "crates/nexus-creator-memory/src/review.rs MAX_DIGEST_BYTES",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42"
+      },
+      {
+        "id": "R-V141HYG-05",
+        "title": "13 waived residuals lack inline WAIVER/SAFETY comments at call sites",
+        "severity": "nit",
+        "source": "qc1 S-002 (V1.41 P-last); qc-consolidated.md",
+        "scope": "covered by R-V141HYG-03 fix wave; remaining work in V1.42 if more accrue",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 (deferred)"
+      },
+      {
+        "id": "R-V141HYG-06",
+        "title": "YAML escaping should be done by a real YAML emitter (overkill for V1.41)",
+        "severity": "nit",
+        "source": "qc3 S-2 (V1.41 P-last); qc-consolidated.md",
+        "scope": "covered by R-V141HYG-02 fix wave; full YAML emitter defer",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42"
+      },
+      {
+        "id": "R-V141HYG-07",
+        "title": "Floor char boundary helper could be extracted for reuse",
+        "severity": "nit",
+        "source": "qc1 S-001 (V1.41 P-last); qc-consolidated.md",
+        "scope": "covered by R-V141HYG-01 fix wave; full helper extraction defer",
+        "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.42"
       }
