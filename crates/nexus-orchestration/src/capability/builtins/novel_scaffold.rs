@@ -593,6 +593,11 @@ impl Capability for NovelProjectScaffold {
                 driver_schedule_id: None,
                 auto_chain_interrupted: None,
                 auto_review_master_on_timeout: None,
+                runtime_lock_holder: None,
+                runtime_lock_acquired_at: None,
+                completion_locked_at: None,
+                novel_completion_status: None,
+                lineage_from_work_id: None,
             };
             works::patch_work_tx(&mut tx, &inp.creator_id, &inp.work_id, &patch, &now)
                 .await

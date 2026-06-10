@@ -73,6 +73,21 @@ pub struct WorkApiDto {
     /// Opt-in: stale-findings watcher auto-enqueues `novel-review-master`
     /// for this Work after the timeout threshold (V1.39 P4 T4, default false).
     pub auto_review_master_on_timeout: bool,
+    /// Runtime lock holder (V1.41 DF-60 §4, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_lock_holder: Option<String>,
+    /// When the runtime lock was acquired (V1.41 DF-60 §4, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_lock_acquired_at: Option<String>,
+    /// When completion-lock was applied (V1.41 DF-60 §3, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_locked_at: Option<String>,
+    /// Novel completion status (V1.41 DF-60 §2, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub novel_completion_status: Option<String>,
+    /// Parent Work ID when created via lineage (V1.41 DF-60 §5.2, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage_from_work_id: Option<String>,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -114,6 +129,11 @@ impl From<WorkRecord> for WorkApiDto {
             driver_schedule_id: r.driver_schedule_id,
             auto_chain_interrupted: r.auto_chain_interrupted,
             auto_review_master_on_timeout: r.auto_review_master_on_timeout,
+            runtime_lock_holder: r.runtime_lock_holder,
+            runtime_lock_acquired_at: r.runtime_lock_acquired_at,
+            completion_locked_at: r.completion_locked_at,
+            novel_completion_status: r.novel_completion_status,
+            lineage_from_work_id: r.lineage_from_work_id,
         }
     }
 }
@@ -200,6 +220,9 @@ pub struct AppendInspirationResponse {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
+/// rationale: multi-column INSERT + validation + response construction;
+/// splitting would harm readability without reducing actual complexity.
+#[allow(clippy::too_many_lines)]
 pub async fn create_work(
     State(state): State<WorkspaceState>,
     Json(req): Json<CreateWorkRequest>,
@@ -281,6 +304,11 @@ pub async fn create_work(
         driver_schedule_id: None,
         auto_chain_interrupted: false,
         auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -578,6 +606,11 @@ async fn apply_non_stage_fields(
         driver_schedule_id: None,
         auto_chain_interrupted: None,
         auto_review_master_on_timeout: req.auto_review_master_on_timeout,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
     };
 
     // QC2 W-03: V1.40 — reject clearing world_id on a novel Work that
@@ -805,6 +838,11 @@ pub async fn patch_work(
         driver_schedule_id: None,
         auto_chain_interrupted: req.auto_chain_interrupted,
         auto_review_master_on_timeout: req.auto_review_master_on_timeout,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
@@ -1101,6 +1139,11 @@ mod tests_fix_d {
             driver_schedule_id: Some("sch_active_driver".to_string()),
             auto_chain_interrupted: false,
             auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
         }
     }
 
