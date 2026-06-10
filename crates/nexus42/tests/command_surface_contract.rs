@@ -884,6 +884,26 @@ fn v141_resume_reopen_without_reason_rejects() {
     );
 }
 
+/// AC5 (V1.41 QA blocker): `creator works pool inspiration add --help` must document
+/// that the pool is distinct from per-Work `works.inspiration_log`.
+#[test]
+fn v141_pool_inspiration_help_disambiguates_from_work_log() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "pool", "inspiration", "add", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("inspiration_log"),
+        "AC5: 'creator works pool inspiration add --help' must mention 'inspiration_log' to disambiguate from per-Work log"
+    );
+}
+
 /// Verify `creator run start --help` includes required --idea flag.
 #[test]
 fn v133_creator_run_start_requires_idea() {
