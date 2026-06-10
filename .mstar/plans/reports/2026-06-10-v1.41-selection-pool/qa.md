@@ -1,12 +1,12 @@
 ---
 report_kind: qa-verification
 plan_id: 2026-06-10-v1.41-selection-pool
-verdict: Request Changes
-generated_at: 2026-06-11T00:12:34+08:00
-review_range: "merge-base: 55689706 → tip: 97470073"
+verdict: Approve
+generated_at: 2026-06-11T00:32:44+08:00
+review_range: "merge-base: 55689706 → tip: 7f3eb3f7"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
-mode: full
+mode: focused-re-verification
 ---
 
 # QA Verification Report — V1.41 P1 (DF-61 selection pool + inspiration)
@@ -148,3 +148,58 @@ $ cargo test --workspace 2>&1 | tail -30
 **Request Changes**
 
 **Rationale**: Core API behavior and the canonical test/static-analysis battery are green, but QA found three release-gating documentation/disposition gaps: AC5 is not documented in CLI help, one residual row is missing a canonical `owner`, and the deferred tracker still contains the old `Works/_pool/灵感池/` path. These must be corrected before PM marks the plan `Done`.
+
+
+## Re-verification (post-QA-blocker-fix delta: 97470073..7f3eb3f7)
+
+**Reviewer**: @qa-engineer
+**Re-verification timestamp**: 2026-06-11T00:32:44+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: 7f3eb3f7` (focus delta `97470073..7f3eb3f7`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: targeted re-verification of 3 items; full CI battery
+
+### Disposition
+
+| # | Blocker | Status | Evidence |
+|---|---------|--------|----------|
+| 1 | AC5 help documentation gap | resolved | `cargo run -p nexus42 -- creator works pool inspiration add --help 2>&1 \| grep -iE "inspiration_log\|distinct"` → `Pool-level item; distinct from per-Work works.inspiration_log.`; `cargo test -p nexus42 --test command_surface_contract v141_pool_inspiration_help_disambiguates_from_work_log` → `test v141_pool_inspiration_help_disambiguates_from_work_log ... ok`; `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 1.54s`. |
+| 2 | R-V141P1-02 missing `owner` | resolved | `python3 -c "import json; d=json.load(open('.mstar/status.json')); r=[x for x in d['residual_findings']['2026-06-10-v1.41-selection-pool'] if x['id']=='R-V141P1-02'][0]; print('owner:', r.get('owner')); assert r.get('owner'), 'owner missing'"` → `owner: @fullstack-dev`. |
+| 3 | Spec amendment line 208 | resolved | `grep -n "Works/_pool/灵感池" .mstar/knowledge/deferred-features-cross-version-tracker.md && echo "STILL PRESENT" || echo "ABSENT (fixed)"` → `ABSENT (fixed)`; `grep -n "Pool/Ideas" .mstar/knowledge/deferred-features-cross-version-tracker.md \| head -5` → lines `88`, `180`, and `208`, including line 208: V1.41 distill overlay now uses `{workspace}/Pool/Ideas/*.md` for inspiration files. |
+
+### CI / static analysis
+
+```text
+$ set -o pipefail; cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db 2>&1 | tail -20
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+   Doc-tests nexus_orchestration
+
+running 4 tests
+test crates/nexus-orchestration/src/preset/mod.rs - preset::load_embedded_preset (line 84) ... ignored
+test crates/nexus-orchestration/src/worker/registry.rs - worker::registry::MockSpawner (line 229) ... ignored
+test crates/nexus-orchestration/src/worker/registry.rs - worker::registry::WorkerManagerSpawner (line 43) ... ignored
+test crates/nexus-orchestration/src/completion_lock.rs - completion_lock::completion_lock_path (line 44) ... ok
+
+test result: ok. 1 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+   Doc-tests nexus42
+
+running 2 tests
+test crates/nexus42/src/domain/runtime_guard.rs - domain::runtime_guard (line 7) ... ignored
+test crates/nexus42/src/challenge/mod.rs - challenge::solve_challenge (line 128) ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+$ set -o pipefail; cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings 2>&1 | tail -10
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+
+$ set -o pipefail; cargo +nightly fmt --all -- --check 2>&1 | tail -5
+(no output)
+```
+
+### Final verdict
+
+**Approve**
+
+**Rationale**: The three PM-mandated release-gating blockers are resolved with targeted evidence, and the canonical test/clippy/nightly-fmt battery is clean. No new findings were observed in the focused re-verification scope.
