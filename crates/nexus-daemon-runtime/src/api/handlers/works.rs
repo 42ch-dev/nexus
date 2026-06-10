@@ -240,8 +240,38 @@ pub struct PoolEntryDto {
     pub creator_id: String,
     pub work_id: String,
     pub status: String,
+    pub title: String,
     pub promoted_at: String,
     pub note: Option<String>,
+}
+
+impl From<nexus_local_db::novel_pool_entries::PoolEntry> for PoolEntryDto {
+    fn from(e: nexus_local_db::novel_pool_entries::PoolEntry) -> Self {
+        Self {
+            entry_id: e.entry_id,
+            creator_id: e.creator_id,
+            work_id: e.work_id.unwrap_or_default(),
+            status: e.status,
+            title: e.title,
+            promoted_at: e.promoted_at,
+            note: e.note,
+        }
+    }
+}
+
+impl From<nexus_local_db::inspiration_items::InspirationItem> for InspirationItemDto {
+    fn from(i: nexus_local_db::inspiration_items::InspirationItem) -> Self {
+        Self {
+            item_id: i.item_id,
+            creator_id: i.creator_id,
+            rel_path: i.rel_path,
+            title: i.title,
+            status: i.status,
+            promoted_work_id: i.promoted_work_id,
+            created_at: i.created_at,
+            promoted_at: i.promoted_at,
+        }
+    }
 }
 
 // ─── Completion-lock release types (DF-60 §3.1) ─────────────────────────────
@@ -1178,14 +1208,7 @@ async fn set_pool_active_inner(
     let entry =
         nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id).await?;
 
-    Ok(PoolEntryDto {
-        entry_id: entry.entry_id,
-        creator_id: entry.creator_id,
-        work_id: entry.work_id.unwrap_or_default(),
-        status: entry.status,
-        promoted_at: entry.promoted_at,
-        note: entry.note,
-    })
+    Ok(PoolEntryDto::from(entry))
 }
 
 /// Read active `creator_id` from CLI config.
@@ -1328,17 +1351,7 @@ pub async fn list_pool(
         message: e.to_string(),
     })?;
 
-    let items: Vec<PoolEntryDto> = entries
-        .into_iter()
-        .map(|e| PoolEntryDto {
-            entry_id: e.entry_id,
-            creator_id: e.creator_id,
-            work_id: e.work_id.unwrap_or_default(),
-            status: e.status,
-            promoted_at: e.promoted_at,
-            note: e.note,
-        })
-        .collect();
+    let items: Vec<PoolEntryDto> = entries.into_iter().map(PoolEntryDto::from).collect();
 
     Ok(Json(ListPoolResponse { entries: items }))
 }
@@ -1371,14 +1384,7 @@ pub async fn promote_pool_entry(
         message: e.to_string(),
     })?;
 
-    Ok(Json(PoolEntryDto {
-        entry_id: entry.entry_id,
-        creator_id: entry.creator_id,
-        work_id: entry.work_id.unwrap_or_default(),
-        status: entry.status,
-        promoted_at: entry.promoted_at,
-        note: entry.note,
-    }))
+    Ok(Json(PoolEntryDto::from(entry)))
 }
 
 /// `POST /v1/local/works/pool/archive` — Archive a pool entry.
@@ -1396,14 +1402,7 @@ pub async fn archive_pool_entry_handler(
             message: e.to_string(),
         })?;
 
-    Ok(Json(PoolEntryDto {
-        entry_id: entry.entry_id,
-        creator_id: entry.creator_id,
-        work_id: entry.work_id.unwrap_or_default(),
-        status: entry.status,
-        promoted_at: entry.promoted_at,
-        note: entry.note,
-    }))
+    Ok(Json(PoolEntryDto::from(entry)))
 }
 
 /// `POST /v1/local/works/pool/inspiration` — Add an inspiration item.
@@ -1475,19 +1474,7 @@ pub async fn list_inspiration(
         message: e.to_string(),
     })?;
 
-    let dtos: Vec<InspirationItemDto> = items
-        .into_iter()
-        .map(|i| InspirationItemDto {
-            item_id: i.item_id,
-            creator_id: i.creator_id,
-            rel_path: i.rel_path,
-            title: i.title,
-            status: i.status,
-            promoted_work_id: i.promoted_work_id,
-            created_at: i.created_at,
-            promoted_at: i.promoted_at,
-        })
-        .collect();
+    let dtos: Vec<InspirationItemDto> = items.into_iter().map(InspirationItemDto::from).collect();
 
     Ok(Json(ListInspirationResponse { items: dtos }))
 }
@@ -1613,16 +1600,7 @@ pub async fn archive_inspiration_handler(
             message: e.to_string(),
         })?;
 
-    Ok(Json(InspirationItemDto {
-        item_id: item.item_id,
-        creator_id: item.creator_id,
-        rel_path: item.rel_path,
-        title: item.title,
-        status: item.status,
-        promoted_work_id: item.promoted_work_id,
-        created_at: item.created_at,
-        promoted_at: item.promoted_at,
-    }))
+    Ok(Json(InspirationItemDto::from(item)))
 }
 
 // ─── P1 Request / Response types ────────────────────────────────────────────
