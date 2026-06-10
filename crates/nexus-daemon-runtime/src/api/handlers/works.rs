@@ -1169,63 +1169,22 @@ fn check_stage_status_transition(
 /// Shared helper: transactional set-pool-active (DF-60 §5.3).
 ///
 /// Demotes any prior `active` row → `queued`, then upserts target → `active`.
+/// Uses `nexus_local_db::novel_pool_entries::promote_to_active` for the core logic.
 async fn set_pool_active_inner(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
     work_id: &str,
 ) -> Result<PoolEntryDto, nexus_local_db::LocalDbError> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let entry_id = format!("pool_{}", Uuid::new_v4());
-
-    // Use a transaction for atomicity
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(nexus_local_db::LocalDbError::from)?;
-
-    // Step 1: Demote prior active → queued
-    // SAFETY: dynamic SQL for multi-statement transaction; compile-time macro not applicable.
-    sqlx::query(
-        "UPDATE novel_pool_entries SET status = 'queued' WHERE creator_id = ? AND status = 'active'"
-    )
-    .bind(creator_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        tracing::warn!(error = %e, "set_pool_active: demote prior active failed");
-        nexus_local_db::LocalDbError::from(e)
-    })?;
-
-    // Step 2: Upsert target entry → active
-    // SAFETY: dynamic SQL for upsert; compile-time macro not applicable.
-    sqlx::query(
-        "INSERT INTO novel_pool_entries (entry_id, creator_id, work_id, status, promoted_at, note) \
-         VALUES (?, ?, ?, 'active', ?, NULL) \
-         ON CONFLICT(creator_id, work_id) DO UPDATE SET \
-           status = 'active', promoted_at = excluded.promoted_at, note = NULL"
-    )
-    .bind(&entry_id)
-    .bind(creator_id)
-    .bind(work_id)
-    .bind(&now)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        tracing::warn!(error = %e, "set_pool_active: upsert target failed");
-        nexus_local_db::LocalDbError::from(e)
-    })?;
-
-    tx.commit()
-        .await
-        .map_err(nexus_local_db::LocalDbError::from)?;
+    let entry =
+        nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id).await?;
 
     Ok(PoolEntryDto {
-        entry_id,
-        creator_id: creator_id.to_string(),
-        work_id: work_id.to_string(),
-        status: "active".to_string(),
-        promoted_at: now,
-        note: None,
+        entry_id: entry.entry_id,
+        creator_id: entry.creator_id,
+        work_id: entry.work_id.unwrap_or_default(),
+        status: entry.status,
+        promoted_at: entry.promoted_at,
+        note: entry.note,
     })
 }
 
@@ -1346,6 +1305,395 @@ fn is_valid_work_ref(s: &str) -> bool {
     }
     s.chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+// ─── P1: Pool + Inspiration handlers (DF-61) ────────────────────────────────
+
+/// `GET /v1/local/works/pool` — List pool entries for the active creator.
+pub async fn list_pool(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListPoolQuery>,
+) -> Result<Json<ListPoolResponse>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let entries = nexus_local_db::novel_pool_entries::list_pool_entries(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let items: Vec<PoolEntryDto> = entries
+        .into_iter()
+        .map(|e| PoolEntryDto {
+            entry_id: e.entry_id,
+            creator_id: e.creator_id,
+            work_id: e.work_id.unwrap_or_default(),
+            status: e.status,
+            promoted_at: e.promoted_at,
+            note: e.note,
+        })
+        .collect();
+
+    Ok(Json(ListPoolResponse { entries: items }))
+}
+
+/// `POST /v1/local/works/pool/promote` — Promote a pool entry to active.
+pub async fn promote_pool_entry(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromotePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Verify the work exists and belongs to this creator
+    let _work = works::get_work(state.pool(), &creator_id, &req.work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {}", req.work_id)))?;
+
+    let entry = nexus_local_db::novel_pool_entries::promote_to_active(
+        state.pool(),
+        &creator_id,
+        &req.work_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    Ok(Json(PoolEntryDto {
+        entry_id: entry.entry_id,
+        creator_id: entry.creator_id,
+        work_id: entry.work_id.unwrap_or_default(),
+        status: entry.status,
+        promoted_at: entry.promoted_at,
+        note: entry.note,
+    }))
+}
+
+/// `POST /v1/local/works/pool/archive` — Archive a pool entry.
+pub async fn archive_pool_entry_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchivePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let _creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(state.pool(), &req.entry_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(PoolEntryDto {
+        entry_id: entry.entry_id,
+        creator_id: entry.creator_id,
+        work_id: entry.work_id.unwrap_or_default(),
+        status: entry.status,
+        promoted_at: entry.promoted_at,
+        note: entry.note,
+    }))
+}
+
+/// `POST /v1/local/works/pool/inspiration` — Add an inspiration item.
+pub async fn add_inspiration(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<AddInspirationRequest>,
+) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let item_id = format!("npi_{}", Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let workspace_path_str = state.workspace_path().unwrap_or_default();
+    let workspace_dir = std::path::Path::new(&workspace_path_str);
+
+    let item = nexus_local_db::inspiration_items::create_inspiration_with_scaffold(
+        state.pool(),
+        &item_id,
+        &creator_id,
+        &req.title,
+        workspace_dir,
+        &now,
+    )
+    .await
+    .map_err(|e| match &e {
+        nexus_local_db::LocalDbError::ConstraintViolation { .. } => NexusApiError::Conflict(
+            format!("inspiration item with this path already exists: {e}"),
+        ),
+        _ => NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        },
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AddInspirationResponse {
+            item_id: item.item_id,
+            rel_path: item.rel_path,
+        }),
+    ))
+}
+
+/// `GET /v1/local/works/pool/inspiration` — List inspiration items.
+pub async fn list_inspiration(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListInspirationQuery>,
+) -> Result<Json<ListInspirationResponse>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let items = nexus_local_db::inspiration_items::list_inspiration(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let dtos: Vec<InspirationItemDto> = items
+        .into_iter()
+        .map(|i| InspirationItemDto {
+            item_id: i.item_id,
+            creator_id: i.creator_id,
+            rel_path: i.rel_path,
+            title: i.title,
+            status: i.status,
+            promoted_work_id: i.promoted_work_id,
+            created_at: i.created_at,
+            promoted_at: i.promoted_at,
+        })
+        .collect();
+
+    Ok(Json(ListInspirationResponse { items: dtos }))
+}
+
+/// `POST /v1/local/works/pool/inspiration/promote` — Promote an inspiration item to a Work.
+pub async fn promote_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromoteInspirationRequest>,
+) -> Result<Json<PromoteInspirationResponse>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Look up the inspiration item
+    let item = nexus_local_db::inspiration_items::get_inspiration(state.pool(), &req.item_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("inspiration item {}", req.item_id)))?;
+
+    if item.status != "idea" {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_STATUS".to_string(),
+            message: format!(
+                "inspiration item {} has status '{}' — only 'idea' items can be promoted",
+                req.item_id, item.status
+            ),
+        });
+    }
+
+    // Create a new Work from the inspiration
+    let work_id = format!("wrk_{}", Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
+        .ok_or(NexusApiError::AuthRequired)?;
+
+    let idea = req.idea.as_deref().unwrap_or(&item.title);
+
+    // For inspiration promote, we create a Work without world_id (the user
+    // can bind a world later). This is a lighter-weight flow than `run start`.
+    let record = WorkRecord {
+        work_id: work_id.clone(),
+        creator_id: creator_id.clone(),
+        workspace_slug,
+        status: "draft".to_string(),
+        title: item.title.clone(),
+        long_term_goal: idea.to_string(),
+        initial_idea: idea.to_string(),
+        creative_brief: None,
+        intake_status: "pending".to_string(),
+        world_id: None,
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        current_stage: "intake".to_string(),
+        stage_status: "pending".to_string(),
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: 0,
+        auto_chain_enabled: true,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+
+    works::create_work(state.pool(), &record)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    // Insert a pool row for the new Work
+    let pool_entry =
+        nexus_local_db::novel_pool_entries::promote_to_active(state.pool(), &creator_id, &work_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+
+    // Update the inspiration item to promoted
+    nexus_local_db::inspiration_items::promote_inspiration(
+        state.pool(),
+        &req.item_id,
+        &work_id,
+        &now,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    Ok(Json(PromoteInspirationResponse {
+        work_id: work_id.clone(),
+        pool_entry_id: pool_entry.entry_id,
+    }))
+}
+
+/// `POST /v1/local/works/pool/inspiration/archive` — Archive an inspiration item.
+pub async fn archive_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchiveInspirationRequest>,
+) -> Result<Json<InspirationItemDto>, NexusApiError> {
+    let _creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let item = nexus_local_db::inspiration_items::archive_inspiration(state.pool(), &req.item_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(InspirationItemDto {
+        item_id: item.item_id,
+        creator_id: item.creator_id,
+        rel_path: item.rel_path,
+        title: item.title,
+        status: item.status,
+        promoted_work_id: item.promoted_work_id,
+        created_at: item.created_at,
+        promoted_at: item.promoted_at,
+    }))
+}
+
+// ─── P1 Request / Response types ────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ListPoolQuery {
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListPoolResponse {
+    pub entries: Vec<PoolEntryDto>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromotePoolRequest {
+    pub work_id: String,
+    /// If true, also set as pool active (redundant since promote always sets active).
+    #[serde(default)]
+    pub set_default: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArchivePoolRequest {
+    pub entry_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddInspirationRequest {
+    pub title: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddInspirationResponse {
+    pub item_id: String,
+    pub rel_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListInspirationQuery {
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListInspirationResponse {
+    pub items: Vec<InspirationItemDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InspirationItemDto {
+    pub item_id: String,
+    pub creator_id: String,
+    pub rel_path: String,
+    pub title: String,
+    pub status: String,
+    pub promoted_work_id: Option<String>,
+    pub created_at: String,
+    pub promoted_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromoteInspirationRequest {
+    pub item_id: String,
+    /// Optional idea override for the new Work's `initial_idea`.
+    pub idea: Option<String>,
+    /// If true, set as pool active after creation.
+    #[serde(default)]
+    pub set_default: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromoteInspirationResponse {
+    pub work_id: String,
+    pub pool_entry_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArchiveInspirationRequest {
+    pub item_id: String,
 }
 
 #[cfg(test)]

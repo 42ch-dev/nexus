@@ -248,9 +248,32 @@ fn works_routes() -> Router<WorkspaceState> {
             "/v1/local/works",
             post(handlers::works::create_work).get(handlers::works::list_works),
         )
+        // P0 pool route (DF-60 §5.3)
         .route(
             "/v1/local/works/pool",
-            post(handlers::works::set_pool_active),
+            post(handlers::works::set_pool_active).get(handlers::works::list_pool),
+        )
+        // P1 selection pool routes (DF-61)
+        .route(
+            "/v1/local/works/pool/promote",
+            post(handlers::works::promote_pool_entry),
+        )
+        .route(
+            "/v1/local/works/pool/archive",
+            post(handlers::works::archive_pool_entry_handler),
+        )
+        // P1 inspiration pool routes (DF-61)
+        .route(
+            "/v1/local/works/pool/inspiration",
+            post(handlers::works::add_inspiration).get(handlers::works::list_inspiration),
+        )
+        .route(
+            "/v1/local/works/pool/inspiration/promote",
+            post(handlers::works::promote_inspiration_handler),
+        )
+        .route(
+            "/v1/local/works/pool/inspiration/archive",
+            post(handlers::works::archive_inspiration_handler),
         )
         .route(
             "/v1/local/works/{work_id}",

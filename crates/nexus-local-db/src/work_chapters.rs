@@ -348,10 +348,12 @@ fn verify_stories_dir_in_workspace(
     if !stories_dir.exists() {
         return Ok(());
     }
-    let canonical = stories_dir.canonicalize().map_err(|e| LocalDbError::Io {
-        path: stories_dir.to_string_lossy().to_string(),
-        source: e,
-    })?;
+    let canonical = stories_dir
+        .canonicalize()
+        .map_err(|e| LocalDbError::IoWithPath {
+            path: stories_dir.to_string_lossy().to_string(),
+            source: e,
+        })?;
     let expected_prefix = workspace_root
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf())
@@ -409,7 +411,7 @@ pub async fn reconcile_from_filesystem(
     let mut updated: u32 = 0;
     let mut preserved: u32 = 0;
 
-    let entries = std::fs::read_dir(&stories_dir).map_err(|e| LocalDbError::Io {
+    let entries = std::fs::read_dir(&stories_dir).map_err(|e| LocalDbError::IoWithPath {
         path: stories_dir.to_string_lossy().to_string(),
         source: e,
     })?;
