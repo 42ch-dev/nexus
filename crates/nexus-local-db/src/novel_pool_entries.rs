@@ -51,6 +51,8 @@ pub fn row_to_pool_entry(r: &sqlx::sqlite::SqliteRow) -> PoolEntry {
 
 /// List pool entries for a creator, optionally filtered by status.
 ///
+/// `limit` defaults to 200 when `None`; capped at 1000.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
@@ -58,18 +60,25 @@ pub async fn list_pool_entries(
     pool: &SqlitePool,
     creator_id: &str,
     status_filter: Option<&str>,
+    limit: Option<u32>,
+    offset: Option<u32>,
 ) -> Result<Vec<PoolEntry>, LocalDbError> {
+    let effective_limit = limit.unwrap_or(200).min(1000);
+    let effective_offset = offset.unwrap_or(0);
+
     let sql = if status_filter.is_some() {
         format!(
             "SELECT {POOL_ENTRY_COLUMNS} FROM novel_pool_entries \
              WHERE creator_id = ? AND status = ? \
-             ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, updated_at DESC"
+             ORDER BY updated_at DESC \
+             LIMIT ? OFFSET ?"
         )
     } else {
         format!(
             "SELECT {POOL_ENTRY_COLUMNS} FROM novel_pool_entries \
              WHERE creator_id = ? \
-             ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, updated_at DESC"
+             ORDER BY updated_at DESC \
+             LIMIT ? OFFSET ?"
         )
     };
 
@@ -77,9 +86,35 @@ pub async fn list_pool_entries(
     if let Some(s) = status_filter {
         query = query.bind(s);
     }
+    query = query.bind(effective_limit).bind(effective_offset);
 
     let rows = query.fetch_all(pool).await?;
     Ok(rows.iter().map(row_to_pool_entry).collect())
+}
+
+/// Count pool entries for a creator, optionally filtered by status.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn count_pool_entries(
+    pool: &SqlitePool,
+    creator_id: &str,
+    status_filter: Option<&str>,
+) -> Result<u32, LocalDbError> {
+    let sql = if status_filter.is_some() {
+        "SELECT COUNT(*) FROM novel_pool_entries WHERE creator_id = ? AND status = ?"
+    } else {
+        "SELECT COUNT(*) FROM novel_pool_entries WHERE creator_id = ?"
+    };
+
+    let mut query = sqlx::query(sql).bind(creator_id);
+    if let Some(s) = status_filter {
+        query = query.bind(s);
+    }
+
+    let count: i64 = query.fetch_one(pool).await?.get(0);
+    Ok(u32::try_from(count).unwrap_or(0))
 }
 
 /// Promote a pool entry to `active`, demoting any prior `active` entry to `queued`.
@@ -153,23 +188,36 @@ pub async fn promote_to_active(
 
 /// Archive a pool entry (set status to `archived`).
 ///
+/// Restricted to the owning `creator_id` — rows belonging to other
+/// creators are silently unaffected (0 rows updated → `MissingVersionKey`).
+///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails or the entry is not found.
+/// Returns `LocalDbError` if the database query fails or the entry is not found
+/// (or does not belong to the given `creator_id`).
 pub async fn archive_pool_entry(
     pool: &SqlitePool,
     entry_id: &str,
+    creator_id: &str,
 ) -> Result<PoolEntry, LocalDbError> {
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.
-    sqlx::query(
-        "UPDATE novel_pool_entries SET status = 'archived', updated_at = ? WHERE entry_id = ?",
+    let result = sqlx::query(
+        "UPDATE novel_pool_entries SET status = 'archived', updated_at = ? \
+         WHERE entry_id = ? AND creator_id = ?",
     )
     .bind(&now)
     .bind(entry_id)
+    .bind(creator_id)
     .execute(pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(LocalDbError::MissingVersionKey {
+            key: format!("novel_pool_entries/{entry_id} (creator {creator_id})"),
+        });
+    }
 
     get_pool_entry(pool, entry_id)
         .await?
@@ -355,7 +403,9 @@ mod tests {
             .unwrap();
         }
 
-        let entries = list_pool_entries(&pool, "ctr_test", None).await.unwrap();
+        let entries = list_pool_entries(&pool, "ctr_test", None, None, None)
+            .await
+            .unwrap();
         assert_eq!(entries.len(), 2);
         // Active comes first
         assert_eq!(entries[0].status, "active");
@@ -380,7 +430,9 @@ mod tests {
             .unwrap();
         assert_eq!(entry2.status, "active");
 
-        let entries = list_pool_entries(&pool, "ctr_test", None).await.unwrap();
+        let entries = list_pool_entries(&pool, "ctr_test", None, None, None)
+            .await
+            .unwrap();
         let active: Vec<_> = entries.iter().filter(|e| e.status == "active").collect();
         assert_eq!(active.len(), 1);
         assert_eq!(active[0].work_id, Some("wrk_002".to_string()));
@@ -394,7 +446,9 @@ mod tests {
         let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
             .await
             .unwrap();
-        let archived = archive_pool_entry(&pool, &entry.entry_id).await.unwrap();
+        let archived = archive_pool_entry(&pool, &entry.entry_id, "ctr_test")
+            .await
+            .unwrap();
         assert_eq!(archived.status, "archived");
     }
 

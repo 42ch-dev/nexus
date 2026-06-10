@@ -452,7 +452,7 @@ Normative: [novel-multi-work-lifecycle.md](./novel-multi-work-lifecycle.md), [no
 | `nexus42 creator works pool list` | List selection pool entries (DB SSOT) |
 | `nexus42 creator works pool promote <entry_id> [--set-default]` | `queued` → scaffold/bind Work; optional `--set-default` → `works use` |
 | `nexus42 creator works pool archive <entry_id>` | Mark pool entry `completed` |
-| `nexus42 creator works pool inspiration add --title "<text>"` | Create `Works/_pool/灵感池/<slug>.md` + DB row |
+| `nexus42 creator works pool inspiration add --title "<text>"` | Create `{workspace}/Pool/Ideas/<slug>.md` + DB row |
 | `nexus42 creator works pool inspiration list` | List inspiration items |
 | `nexus42 creator works pool inspiration promote <item_id> [--set-default]` | Read MD → `run start --idea`; pool `queued` row; item → `promoted` |
 

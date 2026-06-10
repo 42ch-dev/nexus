@@ -117,14 +117,15 @@ pub use works::{
 
 // Re-export novel_pool_entries types
 pub use novel_pool_entries::{
-    archive_pool_entry, get_active_pool_entry, get_pool_entry, get_pool_entry_by_work,
-    list_pool_entries, mark_pool_entry_completed, mark_pool_entry_completed_for_work,
-    promote_to_active, PoolEntry,
+    archive_pool_entry, count_pool_entries, get_active_pool_entry, get_pool_entry,
+    get_pool_entry_by_work, list_pool_entries, mark_pool_entry_completed,
+    mark_pool_entry_completed_for_work, promote_to_active, PoolEntry,
 };
 
 // Re-export inspiration_items types
 pub use inspiration_items::{
-    archive_inspiration, create_inspiration_row, create_inspiration_with_scaffold, get_inspiration,
+    archive_inspiration, count_inspiration, create_inspiration_row,
+    create_inspiration_with_scaffold, get_inspiration, inspiration_promote_atomic,
     list_inspiration, promote_inspiration, title_to_slug, InspirationItem,
 };
 

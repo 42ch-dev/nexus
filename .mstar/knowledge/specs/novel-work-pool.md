@@ -69,9 +69,13 @@ Authors track multiple novel ideas and one **default** writing target for CLI co
 Each inspiration item has:
 
 1. **DB row** in `inspiration_items` (SSOT for listing, promotion, archive).
-2. **Markdown file** at `Works/_pool/灵感池/<slug>.md` referenced by `rel_path`.
+2. **Markdown file** at `{workspace_root}/Pool/Ideas/<slug>.md` where `workspace_root` is the operational workspace directory (per `nexus-home-layout::operational_workspace_dir`), referenced by `rel_path`.
 
 **Not** per-Work `works.inspiration_log`.
+
+### 3.4 Why `Pool/Ideas/` not `Works/_pool/`
+
+Inspiration items are **creator-scoped**, not Work-scoped. An idea can outlive any single Work and may inspire multiple Works over time. The pool directory lives at the workspace root level (alongside `Works/`), not nested under any Work. See [`work-experience-model.md`](work-experience-model.md) — pool is not a Work profile.
 
 ### 3.2 Table `inspiration_items` (intent)
 
@@ -90,7 +94,7 @@ Each inspiration item has:
 On `creator works pool inspiration add --title "..."`:
 
 1. Insert DB row.
-2. Create `Works/_pool/灵感池/<slug>.md` with frontmatter `title`, `created`, empty body.
+2. Create `{workspace_root}/Pool/Ideas/<slug>.md` with frontmatter `title`, `created`, empty body.
 
 ---
 
@@ -103,7 +107,7 @@ On `creator works pool inspiration add --title "..."`:
 | `creator works use <work_id>` | Upsert pool row if needed; demote prior `active` → `queued`; set target `active` |
 | `creator works pool list` | List pool entries |
 | `creator works pool promote <entry_id> [--set-default]` | `queued` → `active`; prior `active` → `queued`; bind/scaffold `work_id` if missing |
-| `creator works pool inspiration promote <item_id> [--set-default]` | Read MD title/body → `run start --idea`; pool `queued` row; item → `promoted` |
+| `creator works pool inspiration promote <item_id> [--set-default] [--idea <text>]` | Read MD title/body → `run start --idea`; pool `queued` row; item → `promoted` |
 | `creator works pool archive <entry_id>` | Entry → `completed` |
 | `creator works pool inspiration add/list` | CRUD inspiration pool |
 | `creator works completion-lock release <work_id>` | See lifecycle spec §3.1 |
@@ -120,6 +124,16 @@ When `pool promote` targets `queued`:
 4. **Does not** pause auto-chain on other Works.
 
 CLI may **warn** when prior `active` Work still has running schedules (informational only).
+
+### 5.1 Inspiration promote `--idea` semantics
+
+When `pool inspiration promote <item_id>` is invoked:
+
+- If `--idea <text>` is supplied, the new Work's `initial_idea` = `--idea` text.
+- If `--idea` is omitted, the new Work's `initial_idea` = the inspiration item's `title`.
+- The new Work's `title` always equals the inspiration item's `title` (not affected by `--idea`).
+
+This makes the behavior explicit and CLI-help-testable.
 
 ---
 
