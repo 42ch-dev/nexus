@@ -32,47 +32,34 @@
     "integration_branch_retired": "iteration/v1.40",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-11T11:30:00+08:00",
-      "total_open": 120,
+      "updated_at": "2026-06-11T13:00:00+08:00",
+      "total_open": 91,
       "by_severity": {
         "critical": 0,
         "high": 1,
-        "medium": 13,
-        "low": 76,
-        "nit": 26
+        "medium": 10,
+        "low": 64,
+        "nit": 16
       },
       "by_target": {
-        "v1.40": 0,
-        "v1.41": 67,
-        "backlog": 65,
-        "v1.38": 0,
-        "v1.37": 0,
-        "v1.39": 0
+        "v1.41": 31,
+        "backlog": 60
       },
       "by_plan": {
-        "2026-06-04-v1.33-llm-judge-runtime-fix": 1,
-        "2026-06-04-v1.33-memory-review-closed-loop": 1,
-        "2026-06-04-v1.33-work-model-and-creator-run": 1,
-        "v1.31-post-qc-tech-debt": 1,
-        "v1.30-post-qc-tech-debt": 1,
-        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 1,
-        "2026-06-04-v1.34-agent-tool-implementation": 1,
-        "2026-06-07-v1.37-novel-foundation-first": 1,
-        "2026-06-08-v1.38-multi-chapter-selection-status": 1,
-        "2026-06-08-v1.38-novel-writing-parameterization": 1,
-        "2026-06-09-v1.39-fl-e-auto-chain-engine": 1,
-        "2026-06-09-v1.39-research-stage-wiring": 1,
-        "2026-06-09-v1.39-v138-hardening": 1,
-        "2026-06-09-v1.39-findings-and-review-routing": 1,
-        "2026-06-10-v1.40-architecture-hygiene": 1,
-        "2026-06-10-v1.40-world-create-and-validation": 1,
-        "2026-06-10-v1.40-world-kb-taxonomy": 1,
-        "2026-06-10-v1.40-world-context-prompt-block": 1,
-        "2026-06-10-v1.40-world-kb-extract-binding": 1,
-        "2026-06-10-v1.40-hygiene": 1,
-        "2026-06-10-v1.41-hygiene": 7,
-        "2026-06-10-v1.41-multi-work-switch": 12,
-        "2026-06-10-v1.41-selection-pool": 19
+        "creator-run": 3,
+        "tech-debt": 9,
+        "and-stages": 5,
+        "tool-implementation": 1,
+        "foundation-first": 1,
+        "selection-status": 5,
+        "writing-parameterization": 7,
+        "chain-engine": 5,
+        "stage-wiring": 9,
+        "v138-hardening": 3,
+        "review-routing": 6,
+        "v1.40-hygiene": 1,
+        "work-switch": 12,
+        "selection-pool": 19
       },
       "notes": "V1.41 prepare: DF-60/61 in scope; aggressive hygiene targets V1.40 batch (24) + V1.33 P3/P4 medium (5). Exclude R-V140P4-W2 PM-accept. Multi-volume PK deferred V1.42."
     },
@@ -97,70 +84,6 @@
     "iteration_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md"
   },
   "residual_findings": {
-    "2026-06-04-v1.33-llm-judge-runtime-fix": [
-      {
-        "id": "R-V133P3-03",
-        "title": "min_interval ISO-8601 duration parser silently returns None for unsupported units (P1D, months, years) — throttle bypassed, no log",
-        "severity": "medium",
-        "source": "qc2 W-P3-02 (V1.33 P3 review); implementer Completion Report §7 nuance #3",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask min_interval parser)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "note": "If a preset specifies 'P1D' or 'P1M' or 'P1Y', the parser returns None (silent); LlmJudgeTask then has no throttle → always re-evaluate. Per ISO 8601 P/P1D should be days. Fix: (a) extend parser to support D/M/Y units, OR (b) explicit log warning + treat unsupported as zero throttle (still bypass), OR (c) error at load time via V1.32 P1 validation. P3 fix wave: (a) for V1.33, (b) as a check.",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V133P3-04",
-        "title": "WorkerUnavailable → NOGO/WaitForInput is a denial-of-service vector: attacker can lock states in NOGO by denying worker connection",
-        "severity": "medium",
-        "source": "qc2 W-P3-04 (V1.33 P3 review); implementer Completion Report §7 nuance #2",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmJudgeTask worker handle check)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "note": "When no worker is connected, judge.llm returns WorkerUnavailable and LlmJudgeTask maps to NOGO/WaitForInput. An attacker (or just a misconfigured daemon) can prevent workers from connecting and lock the state forever. Document and consider: (a) a max-WaitForInput duration that surfaces as a real error, (b) explicit 'WorkerUnavailable' vs 'LLMUnavailable' signal so the user can tell them apart, (c) operator alert. Pre-1.0 single-user local, so severity medium.",
-        "target": "V1.41 hygiene"
-      }
-    ],
-    "2026-06-04-v1.33-memory-review-closed-loop": [
-      {
-        "id": "R-V133P4-04",
-        "title": "list_fragments_filtered runtime sqlx uses ! column alias suffix — invalid for runtime queries; handler works around but P4 implementer noted the underlying bug remains",
-        "severity": "medium",
-        "source": "qc2 W-P4-05 (V1.33 P4 review); also implementer Completion Report §7 nuance #1",
-        "scope": "crates/nexus-local-db/src/memory_fragment.rs (list_fragments_filtered function); handler works around at crates/nexus-daemon-runtime/src/api/handlers/memory.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "note": "list_fragments_filtered uses sqlx::query with 'as \"fragment_id!\"' column aliases — the ! suffix is a compile-time macro hint not valid SQL. SQLite returns the column with the literal ! in the name, causing ColumnNotFound at row.get('fragment_id'). Handler currently uses compile-time list_fragments for no-keyword path; keyword-filtered path is unreachable. Fix: remove the ! suffix from runtime SQL column aliases, OR convert list_fragments_filtered to sqlx::query_as! for consistency with the rest of the module.",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V133P4-05",
-        "title": "save_memory uses non-atomic fs::write — corruption risk on crash/disk-full (P4 review)",
-        "severity": "medium",
-        "source": "qc3 W-P4-01 (V1.33 P4 review)",
-        "scope": "Wherever promote_to_long_term writes the LTM file (likely nexus-creator-memory/src/long_term_memory.rs or similar)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "note": "fs::write is non-atomic; partial write on crash or disk-full leaves truncated LTM file. Fix: write to <file>.tmp first, then rename to <file> (POSIX rename is atomic within a filesystem).",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V133P4-06",
-        "title": "PassthroughSummarizer has no size guard — unbounded LTM file growth if raw_digest is large",
-        "severity": "medium",
-        "source": "qc3 W-P4-02 (V1.33 P4 review)",
-        "scope": "Same path as R-V133P4-03",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "note": "LTM file size grows with raw_digest size; no cap. Could OOM the storage or fill disk. Fix: add a configurable max_digest_bytes (e.g. 256 KiB) at review time; if exceeded, truncate to max + log warning.",
-        "target": "V1.41 hygiene"
-      }
-    ],
     "2026-06-04-v1.33-work-model-and-creator-run": [
       {
         "id": "R-V133P1-03",
@@ -878,258 +801,6 @@
         "note": "Add tracing::warn! on error."
       }
     ],
-    "2026-06-10-v1.40-architecture-hygiene": [
-      {
-        "id": "R-V140P0.5-S1",
-        "title": "Stale test comment in stage_gates.rs:854 says \"embedded presets\" but rule now lives in embedded_rules module",
-        "severity": "nit",
-        "source": "qc1 S-1 (V1.40 P0.5 review)",
-        "scope": "crates/nexus-orchestration/src/stage_gates.rs:854",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P0.5-S2",
-        "title": "stage_gates.rs:850 section header could note V1.40 P0.5 migration for future readers",
-        "severity": "nit",
-        "source": "qc1 S-2 (V1.40 P0.5 review)",
-        "scope": "crates/nexus-orchestration/src/stage_gates.rs:850",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P0.5-S3",
-        "title": "embedded_rules.rs module docstring could note \"Layer 1 is compile-time constant with no runtime FS dependency\" so future maintainers do not re-introduce a runtime read",
-        "severity": "low",
-        "source": "qc2 suggestion (V1.40 P0.5 review)",
-        "scope": "crates/nexus-orchestration/src/embedded_rules.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      }
-    ],
-    "2026-06-10-v1.40-world-create-and-validation": [
-      {
-        "id": "R-V140P0-S1",
-        "title": "Document 400 vs 422 deviation (HTTP status code choice for world-binding errors) in OpenAPI / handler docstring",
-        "severity": "nit",
-        "source": "qc2 S-01 (V1.40 P0 re-validation)",
-        "scope": "crates/nexus-daemon-runtime/src/api/errors.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P0-S2",
-        "title": "No --force unbind path for world_id; V1.40 simply rejects clear; consider escape hatch for V1.41",
-        "severity": "nit",
-        "source": "qc2 S-03 (V1.40 P0 re-validation)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P0-S3",
-        "title": "sqlx offline metadata churn — verify CI re-prepare after P0 merge",
-        "severity": "low",
-        "source": "qc3 S-1 (V1.40 P0 re-validation)",
-        "scope": ".sqlx/ directory + CI pipeline",
-        "decision": "defer",
-        "owner": "@ops-engineer",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P0-S4",
-        "title": "Add tracing span around new mandatory binding checks for observability",
-        "severity": "low",
-        "source": "qc3 S-2 (V1.40 P0 re-validation)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (POST + PATCH)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      }
-    ],
-    "2026-06-10-v1.40-world-kb-taxonomy": [
-      {
-        "id": "R-V140P1-S1",
-        "title": "NOVEL_CATEGORIES list duplicated between Rust code and kb-extract/prompts/extract.md — drift risk",
-        "severity": "low",
-        "source": "qc1 S-001 / qc2 S3 (V1.40 P1 re-validation)",
-        "scope": "crates/nexus-kb/src/validation.rs + crates/nexus-orchestration/embedded-presets/kb-extract/prompts/extract.md",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P1-S2",
-        "title": "test_invalid_block_type_via_deserialization test name misleading (tests serde, not store path)",
-        "severity": "low",
-        "source": "qc1 S-004 (V1.40 P1 review)",
-        "scope": "crates/nexus-kb/src/store.rs (test)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P1-S3",
-        "title": "No concurrent-uniqueness race test under Novel mode",
-        "severity": "low",
-        "source": "qc2 S1 (V1.40 P1 re-validation)",
-        "scope": "crates/nexus-kb/src/store.rs (test)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P1-S4",
-        "title": "local-db-schema.md missing direct pointer to nexus-kb::validation from schema doc",
-        "severity": "low",
-        "source": "qc2 S4 (V1.40 P1 re-validation)",
-        "scope": ".mstar/knowledge/specs/local-db-schema.md §4.1.2",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P1-S5",
-        "title": "String allocations in validation error paths (acceptable for low-frequency inserts)",
-        "severity": "low",
-        "source": "qc3 S-2 (V1.40 P1 review)",
-        "scope": "crates/nexus-kb/src/validation.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P1-S6",
-        "title": "No benchmarks for validation path",
-        "severity": "low",
-        "source": "qc3 S-3 (V1.40 P1 review)",
-        "scope": "crates/nexus-kb/benches/ (does not exist)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      }
-    ],
-    "2026-06-10-v1.40-world-context-prompt-block": [
-      {
-        "id": "R-V140P2-S1",
-        "title": "Per-prompt KB queries use linear scans; resolve_active_rules calls query_all() — low risk for small worlds",
-        "severity": "low",
-        "source": "qc3 W-2 (V1.40 P2 re-validation)",
-        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (resolve_active_rules)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P2-S2",
-        "title": "No hermetic integration test that renders actual novel-writing prompt with non-empty world_kb_block through full schedule → prompt pipeline",
-        "severity": "low",
-        "source": "qc2 S-04 (V1.40 P2 re-validation)",
-        "scope": "crates/nexus-orchestration/tests/ (e2e)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P2-S3",
-        "title": "Truncation marker is YAML comment only — not serialized inside the YAML structure; LLM may not programmatically detect truncation",
-        "severity": "info",
-        "source": "qc3 S-3 (V1.40 P2 re-validation)",
-        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs (apply_token_budget)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P2-S4",
-        "title": "to_yaml() uses {:?} (Debug format) for string fields — not idiomatic YAML serialization",
-        "severity": "info",
-        "source": "qc1 S-003 (V1.40 P2 re-validation)",
-        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      }
-    ],
-    "2026-06-10-v1.40-world-kb-extract-binding": [
-      {
-        "id": "R-V140P3-S1",
-        "title": "Add explicit capability-level test for cross-creator job_id claim → InputInvalid",
-        "severity": "low",
-        "source": "qa follow-up (V1.40 P3 re-validation)",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs (test gap)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P3-S2",
-        "title": "Add failure-injection test for finalize_extract insert failure → job marked failed (not done)",
-        "severity": "low",
-        "source": "qa follow-up (V1.40 P3 re-validation)",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs (test gap)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P3-S3",
-        "title": "Strengthen AC3 test: invoke kb.extract_work with empty/absent world_id and assert status=skipped",
-        "severity": "low",
-        "source": "qa follow-up (V1.40 P3 re-validation)",
-        "scope": "crates/nexus-orchestration/tests/kb_extract_binding_e2e.rs (test gap)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P3-S4",
-        "title": "SourceAnchor::from_excerpt overloaded for artifact locator — consider from_artifact_locator(kind, locator) constructor",
-        "severity": "low",
-        "source": "qc2 S-003 (V1.40 P3 re-validation)",
-        "scope": "crates/nexus-kb/src/extract_finalize.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      },
-      {
-        "id": "R-V140P3-S5",
-        "title": "world_refs_validate not registered in CapabilityRegistry (pre-existing, out of P3 scope)",
-        "severity": "low",
-        "source": "qc1 S-002 (V1.40 P3 review)",
-        "scope": "crates/nexus-orchestration/src/capability/builtins/mod.rs:41",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
-      }
-    ],
     "2026-06-10-v1.40-hygiene": [
       {
         "id": "R-V140P4-W2",
@@ -1140,17 +811,6 @@
         "decision": "risk-accepted",
         "owner": "@fullstack-dev",
         "target_date": "V1.41+ (with .sqlx/ cache refresh)"
-      },
-      {
-        "id": "R-V140P4-INFRA",
-        "title": ".sqlx/ offline cache stale relative to current schema; cargo test for orchestration + local-db crates cannot run without cargo sqlx prepare --workspace --all",
-        "severity": "low",
-        "source": "qc3 (V1.40 P4 re-validation; pre-existing infra)",
-        "scope": "crates/.sqlx/ directory + CI",
-        "decision": "defer",
-        "owner": "@ops-engineer",
-        "target_date": "V1.41",
-        "target": "V1.41 hygiene"
       }
     ],
     "2026-06-10-v1.41-multi-work-switch": [
@@ -1220,7 +880,7 @@
         "severity": "low",
         "source": "qc2 S4 (V1.41 P0 review); qc-consolidated.md",
         "scope": "crates/nexus-orchestration/src/completion_lock.rs (release + reconciliation path)",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave"
       },
@@ -1282,7 +942,7 @@
         "severity": "low",
         "source": "qc1 W-1 (V1.41 P1 review); qc-consolidated.md",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:238-245",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave"
       },
@@ -1292,7 +952,7 @@
         "severity": "medium",
         "source": "user 2026-06-10 path correction + qc1 W-3 + qc3 F-001 (V1.41 P1 review); qc-consolidated.md",
         "scope": "crates/nexus-local-db/src/inspiration_items.rs:140 + 3 spec docs",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "target": "this fix wave",
         "owner": "@fullstack-dev"
       },
@@ -1302,7 +962,7 @@
         "severity": "medium",
         "source": "qc2 W-02 + qc3 F-002 (V1.41 P1 review); qc-consolidated.md",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:1558-1585",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave"
       },
@@ -1312,7 +972,7 @@
         "severity": "low",
         "source": "qc2 W-03 + qc3 F-003 (V1.41 P1 review); qc-consolidated.md",
         "scope": "crates/nexus-orchestration/src/auto_chain.rs:279-292 + novel_pool_entries.rs:209",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave"
       },
@@ -1322,7 +982,7 @@
         "severity": "low",
         "source": "qc2 W-04 + qc3 S-1 (V1.41 P1 review); qc-consolidated.md",
         "scope": "crates/nexus-local-db/src/novel_pool_entries.rs:57 + inspiration_items.rs:57 + handlers + CLI",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave"
       },
@@ -1332,7 +992,7 @@
         "severity": "low",
         "source": "qc3 F-005 (V1.41 P1 review); qc-consolidated.md",
         "scope": "crates/nexus-local-db/src/inspiration_items.rs:146-168; completion_lock.rs in P-last scope",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave (inspiration) + V1.41 P-last (completion lock)"
       },
@@ -1342,7 +1002,7 @@
         "severity": "low",
         "source": "qc3 F-006 (V1.41 P1 review); qc-consolidated.md",
         "scope": "missing migration 202606100004_v141_pool_inspiration_status_index.sql",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave"
       },
@@ -1352,7 +1012,7 @@
         "severity": "low",
         "source": "PM plan re-review (V1.41 P1); qc-consolidated.md",
         "scope": ".mstar/knowledge/specs/novel-work-pool.md §3.1, §3.3, §5; cli-spec.md §6.2H; deferred-tracker.md DF-61",
-        "decision": "accept-with-fix",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "this fix wave"
       },
@@ -1463,78 +1123,6 @@
         "source": "qc1 S-2 (V1.41 P1 review); qc-consolidated.md",
         "scope": "works.rs:1331-1341, 1374-1381, 1399-1406 (after fix wave: includes title)",
         "decision": "accept",
-        "owner": "@fullstack-dev",
-        "target": "V1.42"
-      }
-    ],
-    "2026-06-10-v1.41-hygiene": [
-      {
-        "id": "R-V141HYG-01",
-        "title": "promote_to_long_term size guard truncation can panic on multi-byte UTF-8 boundary",
-        "severity": "medium",
-        "source": "qc2 W-01 + qc3 W-1 (cross-validated) (V1.41 P-last); qc-consolidated.md",
-        "scope": "crates/nexus-creator-memory/src/review.rs:651 (R-V133P4-06 fix)",
-        "decision": "accept-with-fix",
-        "owner": "@fullstack-dev",
-        "target": "this fix wave"
-      },
-      {
-        "id": "R-V141HYG-02",
-        "title": "to_yaml Display format regression — user string fields with YAML-significant chars produce invalid YAML",
-        "severity": "low",
-        "source": "qc2 W-02 (V1.41 P-last); qc-consolidated.md",
-        "scope": "crates/nexus-moment-context-assembly/src/world_context.rs to_yaml (R-V140P2-S4 fix)",
-        "decision": "accept-with-fix",
-        "owner": "@fullstack-dev",
-        "target": "this fix wave"
-      },
-      {
-        "id": "R-V141HYG-03",
-        "title": "Missing WAIVER/SAFETY call-site comments for 13 waived residuals — maintainers must hunt plan history",
-        "severity": "nit",
-        "source": "qc2 W-03 (V1.41 P-last); qc-consolidated.md",
-        "scope": "13 waived residual call sites across orchestration/daemon/kb/etc.",
-        "decision": "accept-with-fix",
-        "owner": "@fullstack-dev",
-        "target": "this fix wave"
-      },
-      {
-        "id": "R-V141HYG-04",
-        "title": "MAX_DIGEST_BYTES hardcoded const — precedent exists for env-driven limits",
-        "severity": "nit",
-        "source": "qc3 S-1 (V1.41 P-last); qc-consolidated.md",
-        "scope": "crates/nexus-creator-memory/src/review.rs MAX_DIGEST_BYTES",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42"
-      },
-      {
-        "id": "R-V141HYG-05",
-        "title": "13 waived residuals lack inline WAIVER/SAFETY comments at call sites",
-        "severity": "nit",
-        "source": "qc1 S-002 (V1.41 P-last); qc-consolidated.md",
-        "scope": "covered by R-V141HYG-03 fix wave; remaining work in V1.42 if more accrue",
-        "decision": "accept",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 (deferred)"
-      },
-      {
-        "id": "R-V141HYG-06",
-        "title": "YAML escaping should be done by a real YAML emitter (overkill for V1.41)",
-        "severity": "nit",
-        "source": "qc3 S-2 (V1.41 P-last); qc-consolidated.md",
-        "scope": "covered by R-V141HYG-02 fix wave; full YAML emitter defer",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42"
-      },
-      {
-        "id": "R-V141HYG-07",
-        "title": "Floor char boundary helper could be extracted for reuse",
-        "severity": "nit",
-        "source": "qc1 S-001 (V1.41 P-last); qc-consolidated.md",
-        "scope": "covered by R-V141HYG-01 fix wave; full helper extraction defer",
-        "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.42"
       }

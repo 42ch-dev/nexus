@@ -1,0 +1,40 @@
+{
+  "plan_id": "2026-06-10-v1.40-world-create-and-validation",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V140P0-S1",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Documented 400 vs 422 deviation for world-binding errors in code comment.",
+      "closure_evidence": "commit d65851d7",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P0-S2",
+      "severity": "nit",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "Pre-1.0 feature: --force unbind not needed for local-first single-user. V1.42 UX if requested.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P0-S3",
+      "severity": "low",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "sqlx offline metadata churn: ops-engineer scoped. sqlx-cli now available for future refresh; cross-listed with R-V140P4-INFRA in deferred-tracker.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P0-S4",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Added tracing::info! spans around mandatory world_id binding checks (POST + PATCH paths).",
+      "closure_evidence": "commit d65851d7",
+      "archived_at": "2026-06-11"
+    }
+  ]
+}

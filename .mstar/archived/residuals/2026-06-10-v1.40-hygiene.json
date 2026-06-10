@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-10-v1.40-hygiene",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V140P4-INFRA",
+      "severity": "low",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": ".sqlx/ offline cache refresh: ops-engineer scoped. sqlx-cli now available. V1.42.",
+      "archived_at": "2026-06-11"
+    }
+  ]
+}
