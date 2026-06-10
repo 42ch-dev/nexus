@@ -9,9 +9,7 @@
 
 use axum::extract::{Path, State};
 use nexus_daemon_runtime::api::errors::NexusApiError;
-use nexus_daemon_runtime::api::handlers::works::{
-    CreateWorkRequest, PatchWorkRequest,
-};
+use nexus_daemon_runtime::api::handlers::works::{CreateWorkRequest, PatchWorkRequest};
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_local_db::works;
@@ -80,9 +78,15 @@ async fn create_and_patch_work(
         patch.runtime_lock_acquired_at = Some(Some("2026-06-10T12:00:00Z".to_string()));
     }
     if completion_locked.is_some() || runtime_lock_holder.is_some() {
-        works::patch_work(state.pool(), "test_creator", &work_id, &patch, "2026-06-10T12:00:00Z")
-            .await
-            .unwrap();
+        works::patch_work(
+            state.pool(),
+            "test_creator",
+            &work_id,
+            &patch,
+            "2026-06-10T12:00:00Z",
+        )
+        .await
+        .unwrap();
     }
 
     work_id
@@ -161,7 +165,10 @@ async fn test_completion_ceremony_blocks_subsequent_patch() {
         }),
     )
     .await;
-    assert!(result.is_ok(), "first PATCH on unlocked work should succeed");
+    assert!(
+        result.is_ok(),
+        "first PATCH on unlocked work should succeed"
+    );
 
     // Now apply completion-lock via DB (simulating mark_work_completed)
     let completion_patch = works::WorkPatch {
