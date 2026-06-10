@@ -4,9 +4,9 @@ reviewer: "@qc-specialist"
 reviewer_index: 1
 focus: architecture-coherence-maintainability
 plan_id: 2026-06-10-v1.41-selection-pool
-verdict: Request Changes
-generated_at: 2026-06-10T15:30:00+08:00
-review_range: "merge-base: 55689706 → tip: 57f573ad"
+verdict: Approve
+generated_at: 2026-06-11T01:20:00+08:00
+review_range: "merge-base: 55689706 → tip: 97470073"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 files_reviewed: 11
@@ -91,3 +91,59 @@ Route paths are consistent: P0's `/v1/local/works/pool` (action-based) coexists 
 - `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings` → **clean** (0 warnings, 0 errors)
 - `cargo +nightly fmt --all -- --check` → **clean**
 - `cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db` → **all pass** (no flakes encountered)
+
+## Revalidation (fix-wave delta: f5dd727f..97470073)
+
+**Reviewer**: @qc-specialist (qc-specialist, reviewer_index: 1)
+**Re-review timestamp**: 2026-06-11T01:20:00+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: 97470073` (focus delta `f5dd727f..97470073`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: cargo clippy, cargo +nightly fmt --check, cargo test, manual review of fix-wave diff
+
+### Disposition
+
+| Finding | Original severity | New severity | Disposition | Evidence |
+|---------|-------------------|--------------|-------------|----------|
+| W-1 (PoolEntryDto title) | warning | resolved | `feat(daemon-runtime): PoolEntryDto title field + From<T> extraction` (5f7e32ab) | works.rs:243 `pub title: String` added; works.rs:248–260 `From<PoolEntry>` impl includes `title: e.title`; all 4 construction sites use `PoolEntryDto::from()` (lines 1211, 1370, 1408, 1430); 13 selection_pool tests pass |
+| W-2 (cross-creator archive/promote) | warning | resolved | `fix(daemon-runtime,local-db): cross-creator guard on archive/promote paths` (98d7b499) | novel_pool_entries.rs:198–202 `archive_pool_entry` accepts `creator_id` with `AND creator_id = ?` WHERE clause + rows_affected check; inspiration_items.rs:390–394 `archive_inspiration` same pattern; works.rs:1546–1552 `promote_inspiration_handler` returns `NotFound` on `item.creator_id != creator_id`; 3 new hermetic tests pass: `test_archive_pool_rejects_cross_creator`, `test_archive_inspiration_rejects_cross_creator`, `test_promote_inspiration_rejects_cross_creator` |
+| W-3 (MD scaffold path) | warning | resolved | `41b1336e` + `00394507` (Pool/Ideas/ + nexus-home-layout helper) | lib.rs:106–115 `creator_inspiration_dir` helper → `{workspace}/Pool/Ideas/`; inspiration_items.rs:179 `rel_path = "Pool/Ideas/{slug}.md"`; works.rs:1416–1427 handler resolves workspace_dir via `nexus_home/creators/<id>/workspaces/<slug>`; 3 spec docs amended (novel-work-pool.md §3.1/§3.3/§3.4, cli-spec.md §6.2H, local-db-schema.md §4.1.5, deferred-tracker DF-61); 13 selection_pool tests pass; home-layout unit test `creator_inspiration_dir_layout` passes |
+
+### Suggestions (forward-looking; deferred to V1.42 per qc-consolidated.md residuals)
+
+| ID | Status | Note |
+|----|--------|------|
+| S-1 (creator_id DTO exposure) | defer | R-V141P1-11 (V1.42 UX) — tracked in status.json |
+| S-2 (DTO construction dedup) | resolved | bonus `From<PoolEntry>` and `From<InspirationItem>` impls in commit 5f7e32ab; all 6 construction sites now use `.from()` / `::from()` |
+| S-3 (CJK slug → "untitled") | defer | R-V141P1-12 (V1.42 UX) — tracked in status.json |
+
+### New findings (if any)
+
+None.
+
+### Architecture coherence assessment (fix-wave delta)
+
+The fix-wave delta is well-structured: each commit addresses a specific finding cluster with minimal cross-cutting. The `From<T>` impls (5f7e32ab) are idiomatic Rust and eliminate 4 duplicated construction sites — a clean maintainability win. The cross-creator guards (98d7b499) use the correct pattern (DAO-level `AND creator_id = ?` + rows_affected check) and are consistent with existing ownership patterns in `works::get_work`. The `inspiration_promote_atomic` (d7ed04de) correctly wraps 3 writes in a single transaction — the right approach for this multi-step mutation. The `mark_work_completed` retry (8cc1eaba) properly clears `completion_locked_at` on pool-update failure, enabling supervisor retry. The pagination additions (45cc8d22, 9e3a57b1) and `spawn_blocking` for MD I/O (e02b99f5) are sensible performance improvements. No new architectural concerns introduced.
+
+### Tools / verification tails
+
+```
+$ cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.47s
+→ clean (0 warnings, 0 errors)
+
+$ cargo +nightly fmt --all -- --check
+→ clean (no output)
+
+$ cargo test -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db
+→ all pass (47 nexus42, 15 regression, 13 selection_pool, + doc-tests)
+
+$ cargo test -p nexus-daemon-runtime --test selection_pool
+→ 13 passed; 0 failed; 0 ignored
+```
+
+### Updated verdict
+
+Approve
+
+**Rationale**: All 3 Warning findings from the original review are resolved with clear evidence (diff, tests, spec docs). No new Critical or Warning findings in the fix-wave delta. S-2 is resolved via bonus `From` impls. S-1 and S-3 are deferred to V1.42 with registered residuals in status.json.
