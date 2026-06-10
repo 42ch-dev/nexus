@@ -76,6 +76,11 @@ async fn seed_work(state: &WorkspaceState) -> String {
         driver_schedule_id: None,
         auto_chain_interrupted: false,
         auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
     };
     works::create_work_atomic(state.pool(), &record, None)
         .await
