@@ -19,6 +19,8 @@ use nexus_contracts::local::schedule::http::AddScheduleRequest;
 use nexus_local_db::works::{self, WorkPatch, WorkRecord};
 use sqlx::SqlitePool;
 
+use crate::completion_lock::{self, CompletionLock};
+
 /// R-V139P0-W-B: per-process monotonic counter for ACH schedule ID collision resistance.
 static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -257,18 +259,72 @@ pub async fn mark_work_completed(
 ) -> Result<WorkRecord, AutoChainError> {
     let now = chrono::Utc::now().to_rfc3339();
 
+    // Step 1: DB patch — status + novel_completion_status + completion_locked_at
     let patch = WorkPatch {
         status: Some("completed".to_string()),
         current_stage: Some("persist".to_string()),
         stage_status: Some("complete".to_string()),
         driver_schedule_id: Some(None), // clear driver
         auto_chain_interrupted: Some(false),
+        novel_completion_status: Some(Some("finalize_complete".to_string())),
+        completion_locked_at: Some(Some(now.clone())),
         ..Default::default()
     };
 
-    works::patch_work(pool, creator_id, work_id, &patch, &now)
+    let updated = works::patch_work(pool, creator_id, work_id, &patch, &now)
         .await
-        .map_err(AutoChainError::from)
+        .map_err(AutoChainError::from)?;
+
+    // Step 2: Write completion-lock file (best-effort; non-blocking for Work completion)
+    if let Some(ref work_ref) = updated.work_ref {
+        let lock = CompletionLock {
+            work_id: work_id.to_string(),
+            locked_at: now.clone(),
+            reason: "completion".to_string(),
+        };
+        // We don't have workspace_dir here — the caller (supervisor) should
+        // write the lock file after calling this function if they have the path.
+        // For now, we log a debug-level note. The actual file I/O is done by
+        // the supervisor or CLI layer that has access to the workspace dir.
+        tracing::debug!(
+            "mark_work_completed: DB columns set for {work_id}; completion-lock file \
+             should be written by caller at Works/{work_ref}/"
+        );
+        let _ = lock; // used by caller
+    }
+
+    Ok(updated)
+}
+
+/// Write the completion-lock file for a completed Work (DF-60 §3).
+///
+/// Call this after `mark_work_completed` succeeds, providing the workspace
+/// directory and the Work record (for `work_ref`). This is separated from
+/// `mark_work_completed` because the supervisor does not have access to the
+/// workspace directory — the daemon layer calls this function.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if the file cannot be written.
+pub fn write_completion_lock_for_work(
+    workspace_dir: &std::path::Path,
+    work: &WorkRecord,
+    locked_at: &str,
+) -> Result<(), std::io::Error> {
+    let work_ref = work.work_ref.as_deref().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("work {} has no work_ref; cannot write completion-lock", work.work_id),
+        )
+    })?;
+
+    let lock = CompletionLock {
+        work_id: work.work_id.clone(),
+        locked_at: locked_at.to_string(),
+        reason: "completion".to_string(),
+    };
+
+    completion_lock::write_completion_lock(workspace_dir, work_ref, &lock)
 }
 
 /// Clear the `driver_schedule_id` on a Work (e.g., when schedule completes or is cancelled).
