@@ -242,6 +242,12 @@ impl Capability for KbExtractWork {
             job
         } else {
             // Claim next queued job for this creator
+            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S1
+            // — cross-creator job_id claim test gap: claim path only tested for
+            // same-creator; cross-creator race condition not exercised in CI.
+            // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S2
+            // — failure-injection test gap: no integration test exercises the
+            // insert-key-block failure path in the extract pipeline.
             nexus_local_db::next_queued_extract_job(pool, creator_id)
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("Failed to claim job: {e}")))?

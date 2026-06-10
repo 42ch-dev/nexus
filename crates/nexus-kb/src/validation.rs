@@ -90,6 +90,10 @@ pub fn is_valid_novel_category(category: &str) -> bool {
 
 /// Validate `canonical_name` format and safety.
 ///
+/// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P1-S5
+/// — String allocations in validation error paths (format! per error) are
+/// acceptable for non-hot-path validation; optimization deferred.
+///
 /// Rejects:
 /// - Empty strings
 /// - Control characters (codepoints 0x00–0x1F, 0x7F)
