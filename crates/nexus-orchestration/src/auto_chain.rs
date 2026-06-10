@@ -16,6 +16,7 @@
 
 use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
+use nexus_local_db::novel_pool_entries;
 use nexus_local_db::works::{self, WorkPatch, WorkRecord};
 use sqlx::SqlitePool;
 
@@ -274,6 +275,21 @@ pub async fn mark_work_completed(
     let updated = works::patch_work(pool, creator_id, work_id, &patch, &now)
         .await
         .map_err(AutoChainError::from)?;
+
+    // Step 1.5: Update pool entry to `completed` (DF-61 §5.4).
+    // Best-effort — the pool row may not exist if the Work was created
+    // outside the selection pool (e.g., `creator run start`).
+    if let Err(e) =
+        novel_pool_entries::mark_pool_entry_completed_for_work(pool, creator_id, work_id).await
+    {
+        tracing::warn!(
+            target: "novel.completion",
+            work_id = %work_id,
+            creator_id = %creator_id,
+            error = %e,
+            "mark_work_completed: failed to update pool entry to completed (non-fatal)"
+        );
+    }
 
     // Step 2: Write completion-lock file (best-effort; non-blocking for Work completion)
     if let Some(ref _work_ref) = updated.work_ref {
