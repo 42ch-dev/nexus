@@ -942,13 +942,10 @@ mod tests {
             let mapping_version = preset_version_for_id(preset_id);
 
             // Find the embedded preset
-            let preset_dir = EMBEDDED_PRESETS
-                .get_dir(preset_id)
-                .unwrap_or_else(|| panic!("embedded preset '{preset_id}' not found"));
-
-            let yaml_bytes = preset_dir
-                .get_file("preset.yaml")
-                .unwrap_or_else(|| panic!("preset.yaml missing for '{preset_id}'"));
+            let yaml_path = format!("{preset_id}/preset.yaml");
+            let yaml_bytes = EMBEDDED_PRESETS
+                .get_file(&yaml_path)
+                .unwrap_or_else(|| panic!("preset.yaml missing for '{preset_id}' at '{yaml_path}'"));
             let yaml_str = std::str::from_utf8(yaml_bytes.contents())
                 .unwrap_or_else(|e| panic!("preset.yaml for '{preset_id}' is not UTF-8: {e}"));
 
