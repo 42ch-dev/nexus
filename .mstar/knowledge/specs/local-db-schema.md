@@ -283,7 +283,7 @@ Partial unique index: one row per `(creator_id, work_id)` where `work_id IS NOT 
 | --- | --- | --- | --- |
 | `item_id` | `TEXT` | yes | PK; `npi_` prefix |
 | `creator_id` | `TEXT` | yes | |
-| `rel_path` | `TEXT` | yes | Path to `Works/_pool/灵感池/<slug>.md` |
+| `rel_path` | `TEXT` | yes | Path to `{workspace}/Pool/Ideas/<slug>.md` |
 | `title` | `TEXT` | yes | |
 | `status` | `TEXT` | yes | `open` \| `promoted` \| `archived` |
 | `promoted_work_id` | `TEXT` | no | |

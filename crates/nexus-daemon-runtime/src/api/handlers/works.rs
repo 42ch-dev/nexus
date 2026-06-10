@@ -1413,19 +1413,27 @@ pub async fn add_inspiration(
 ) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
+        .ok_or(NexusApiError::AuthRequired)?;
 
     let item_id = format!("npi_{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
 
-    let workspace_path_str = state.workspace_path().unwrap_or_default();
-    let workspace_dir = std::path::Path::new(&workspace_path_str);
+    // Route through nexus-home-layout — resolve operational workspace dir
+    // from nexus_home (~/.nexus42), not user home directly.
+    let workspace_dir = state
+        .nexus_home()
+        .join("creators")
+        .join(&creator_id)
+        .join("workspaces")
+        .join(&workspace_slug);
 
     let item = nexus_local_db::inspiration_items::create_inspiration_with_scaffold(
         state.pool(),
         &item_id,
         &creator_id,
         &req.title,
-        workspace_dir,
+        &workspace_dir,
         &now,
     )
     .await

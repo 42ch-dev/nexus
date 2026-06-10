@@ -69,9 +69,13 @@ Authors track multiple novel ideas and one **default** writing target for CLI co
 Each inspiration item has:
 
 1. **DB row** in `inspiration_items` (SSOT for listing, promotion, archive).
-2. **Markdown file** at `Works/_pool/灵感池/<slug>.md` referenced by `rel_path`.
+2. **Markdown file** at `{workspace_root}/Pool/Ideas/<slug>.md` where `workspace_root` is the operational workspace directory (per `nexus-home-layout::operational_workspace_dir`), referenced by `rel_path`.
 
 **Not** per-Work `works.inspiration_log`.
+
+### 3.4 Why `Pool/Ideas/` not `Works/_pool/`
+
+Inspiration items are **creator-scoped**, not Work-scoped. An idea can outlive any single Work and may inspire multiple Works over time. The pool directory lives at the workspace root level (alongside `Works/`), not nested under any Work. See [`work-experience-model.md`](work-experience-model.md) — pool is not a Work profile.
 
 ### 3.2 Table `inspiration_items` (intent)
 
@@ -90,7 +94,7 @@ Each inspiration item has:
 On `creator works pool inspiration add --title "..."`:
 
 1. Insert DB row.
-2. Create `Works/_pool/灵感池/<slug>.md` with frontmatter `title`, `created`, empty body.
+2. Create `{workspace_root}/Pool/Ideas/<slug>.md` with frontmatter `title`, `created`, empty body.
 
 ---
 
