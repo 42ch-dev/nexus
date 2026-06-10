@@ -1392,10 +1392,11 @@ pub async fn archive_pool_entry_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchivePoolRequest>,
 ) -> Result<Json<PoolEntryDto>, NexusApiError> {
-    let _creator_id =
+    let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
-    let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(state.pool(), &req.entry_id)
+    let entry =
+        nexus_local_db::novel_pool_entries::archive_pool_entry(state.pool(), &req.entry_id, &creator_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1496,6 +1497,14 @@ pub async fn promote_inspiration_handler(
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("inspiration item {}", req.item_id)))?;
 
+    // Cross-creator guard: only the owning creator can promote their items
+    if item.creator_id != creator_id {
+        return Err(NexusApiError::NotFound(format!(
+            "inspiration item {}",
+            req.item_id
+        )));
+    }
+
     if item.status != "idea" {
         return Err(NexusApiError::BadRequest {
             code: "INVALID_STATUS".to_string(),
@@ -1590,10 +1599,14 @@ pub async fn archive_inspiration_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchiveInspirationRequest>,
 ) -> Result<Json<InspirationItemDto>, NexusApiError> {
-    let _creator_id =
+    let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
-    let item = nexus_local_db::inspiration_items::archive_inspiration(state.pool(), &req.item_id)
+    let item = nexus_local_db::inspiration_items::archive_inspiration(
+        state.pool(),
+        &req.item_id,
+        &creator_id,
+    )
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),

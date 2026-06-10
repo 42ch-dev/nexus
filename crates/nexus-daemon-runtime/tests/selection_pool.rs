@@ -10,8 +10,8 @@
 
 use axum::extract::{Query, State};
 use nexus_daemon_runtime::api::handlers::works::{
-    AddInspirationRequest, ArchivePoolRequest, CreateWorkRequest, ListInspirationQuery,
-    ListPoolQuery, PromoteInspirationRequest, PromotePoolRequest,
+    AddInspirationRequest, ArchiveInspirationRequest, ArchivePoolRequest, CreateWorkRequest,
+    ListInspirationQuery, ListPoolQuery, PromoteInspirationRequest, PromotePoolRequest,
 };
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::workspace::WorkspaceState;
@@ -445,4 +445,127 @@ async fn test_completion_demotes_active_pool_row_when_completed() {
     .unwrap()
     .expect("completed pool entry should still exist");
     assert_eq!(completed_entry.status, "completed");
+}
+
+// ─── TC10: Cross-creator archive guard — pool ───────────────────────────
+
+#[tokio::test]
+async fn test_archive_pool_rejects_cross_creator() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_test_work(&state, "Owned Novel").await;
+
+    // Promote to create a pool entry
+    let entry = nexus_daemon_runtime::api::handlers::works::promote_pool_entry(
+        State(state.clone()),
+        axum::Json(PromotePoolRequest {
+            work_id: work_id.clone(),
+            set_default: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Overwrite config to simulate a different creator
+    let config_path = state.nexus_home().join("config.toml");
+    let other_creator = "other_creator";
+    std::fs::write(
+        &config_path,
+        format!(
+            "active_creator_id = \"{other_creator}\"\n[active_workspace_slug_by_creator]\n\"{other_creator}\" = \"default\""
+        ),
+    )
+    .unwrap();
+
+    // Other creator tries to archive — should fail (NotFound because 0 rows updated)
+    let result = nexus_daemon_runtime::api::handlers::works::archive_pool_entry_handler(
+        State(state.clone()),
+        axum::Json(ArchivePoolRequest {
+            entry_id: entry.entry_id.clone(),
+        }),
+    )
+    .await;
+    assert!(result.is_err(), "Cross-creator archive should be rejected");
+}
+
+// ─── TC11: Cross-creator archive guard — inspiration ────────────────────
+
+#[tokio::test]
+#[serial]
+async fn test_archive_inspiration_rejects_cross_creator() {
+    let (state, _tmp) = handler_state().await;
+
+    let (_status, resp) = nexus_daemon_runtime::api::handlers::works::add_inspiration(
+        State(state.clone()),
+        axum::Json(AddInspirationRequest {
+            title: "TC11 Creator Idea".to_string(),
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Switch to other creator
+    let config_path = state.nexus_home().join("config.toml");
+    let other_creator = "other_creator";
+    std::fs::write(
+        &config_path,
+        format!(
+            "active_creator_id = \"{other_creator}\"\n[active_workspace_slug_by_creator]\n\"{other_creator}\" = \"default\""
+        ),
+    )
+    .unwrap();
+
+    use nexus_daemon_runtime::api::handlers::works::ArchiveInspirationRequest;
+    let result = nexus_daemon_runtime::api::handlers::works::archive_inspiration_handler(
+        State(state.clone()),
+        axum::Json(ArchiveInspirationRequest {
+            item_id: resp.item_id.clone(),
+        }),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "Cross-creator inspiration archive should be rejected"
+    );
+}
+
+// ─── TC12: Cross-creator promote guard — inspiration ────────────────────
+
+#[tokio::test]
+#[serial]
+async fn test_promote_inspiration_rejects_cross_creator() {
+    let (state, _tmp) = handler_state().await;
+
+    let (_status, add_resp) = nexus_daemon_runtime::api::handlers::works::add_inspiration(
+        State(state.clone()),
+        axum::Json(AddInspirationRequest {
+            title: "TC12 Creator Idea".to_string(),
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Switch to other creator
+    let config_path = state.nexus_home().join("config.toml");
+    let other_creator = "other_creator";
+    std::fs::write(
+        &config_path,
+        format!(
+            "active_creator_id = \"{other_creator}\"\n[active_workspace_slug_by_creator]\n\"{other_creator}\" = \"default\""
+        ),
+    )
+    .unwrap();
+
+    let result = nexus_daemon_runtime::api::handlers::works::promote_inspiration_handler(
+        State(state.clone()),
+        axum::Json(PromoteInspirationRequest {
+            item_id: add_resp.item_id.clone(),
+            idea: None,
+            set_default: None,
+        }),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "Cross-creator inspiration promote should be rejected"
+    );
 }

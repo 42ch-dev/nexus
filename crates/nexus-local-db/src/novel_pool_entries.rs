@@ -153,23 +153,36 @@ pub async fn promote_to_active(
 
 /// Archive a pool entry (set status to `archived`).
 ///
+/// Restricted to the owning `creator_id` — rows belonging to other
+/// creators are silently unaffected (0 rows updated → `MissingVersionKey`).
+///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails or the entry is not found.
+/// Returns `LocalDbError` if the database query fails or the entry is not found
+/// (or does not belong to the given `creator_id`).
 pub async fn archive_pool_entry(
     pool: &SqlitePool,
     entry_id: &str,
+    creator_id: &str,
 ) -> Result<PoolEntry, LocalDbError> {
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.
-    sqlx::query(
-        "UPDATE novel_pool_entries SET status = 'archived', updated_at = ? WHERE entry_id = ?",
+    let result = sqlx::query(
+        "UPDATE novel_pool_entries SET status = 'archived', updated_at = ? \
+         WHERE entry_id = ? AND creator_id = ?",
     )
     .bind(&now)
     .bind(entry_id)
+    .bind(creator_id)
     .execute(pool)
     .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(LocalDbError::MissingVersionKey {
+            key: format!("novel_pool_entries/{entry_id} (creator {creator_id})"),
+        });
+    }
 
     get_pool_entry(pool, entry_id)
         .await?
@@ -394,7 +407,7 @@ mod tests {
         let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
             .await
             .unwrap();
-        let archived = archive_pool_entry(&pool, &entry.entry_id).await.unwrap();
+        let archived = archive_pool_entry(&pool, &entry.entry_id, "ctr_test").await.unwrap();
         assert_eq!(archived.status, "archived");
     }
 
