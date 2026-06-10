@@ -1,15 +1,17 @@
 ---
 report_kind: qc-consolidated
 plan_id: 2026-06-10-v1.41-hygiene
-verdict: Request Changes
-generated_at: 2026-06-11T11:30:00+08:00
-review_range: "merge-base: 55689706 → tip: f4d72a86"
+verdict: Approve (after fix-wave re-review)
+generated_at: 2026-06-11T12:10:00+08:00
+initial_review_range: "merge-base: 55689706 → tip: f4d72a86"
+fix_wave_tip: da21b70d
+final_review_range: "merge-base: 55689706 → tip: da21b70d"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 reviewers:
-  - "@qc-specialist (1, architecture-coherence-maintainability) — Approve (ca2d6db4)"
-  - "@qc-specialist-2 (2, security-correctness) — Request Changes (c4b0708b)"
-  - "@qc-specialist-3 (3, performance-reliability) — Request Changes (6d72da5c)"
+  - "@qc-specialist (1, architecture-coherence-maintainability) — initial Approve (ca2d6db4) [no re-review needed]"
+  - "@qc-specialist-2 (2, security-correctness) — initial Request Changes (c4b0708b) → fix-wave re-review Approve (84733a7b)"
+  - "@qc-specialist-3 (3, performance-reliability) — initial Request Changes (6d72da5c) → fix-wave re-review Approve (1db2301a)"
 ---
 
 # QC Consolidated Gate — V1.41 P-last (Aggressive residual convergence)
@@ -17,14 +19,22 @@ reviewers:
 ## Verdict
 **Request Changes** — 0 Critical, 3 Warning (2 cross-validated). Two regressions introduced by the hygiene fixes themselves must be addressed before Approve.
 
-## Roll-up
+## Roll-up (initial review)
 
-| Reviewer | Verdict | Critical | Warning | Suggestion |
-|----------|---------|----------|---------|------------|
+| Reviewer | Verdict (initial) | Critical | Warning | Suggestion |
+|----------|-------------------|----------|---------|------------|
 | @qc-specialist (1, architecture) | Approve | 0 | 0 | 2 |
 | @qc-specialist-2 (2, security+correctness) | Request Changes | 0 | 3 | 5 |
 | @qc-specialist-3 (3, performance+reliability) | Request Changes | 0 | 1 | 5 |
 | **Consolidated (initial)** | **Request Changes** | **0** | **3 (2 deduped)** | **12** |
+
+## Roll-up (after fix-wave re-review)
+
+| Reviewer | Verdict (re-review) | Commit | Disposition |
+|----------|---------------------|--------|-------------|
+| @qc-specialist-2 (2) | **Approve** | 84733a7b | W-01/W-02/W-03 all resolved (TDD evidence; CI clean) |
+| @qc-specialist-3 (3) | **Approve** | 1db2301a | W-1 (UTF-8 truncation panic = qc2 W-01 cross-validated) resolved |
+| **Consolidated (final)** | **Approve** | — | All blockers closed; 7 residuals registered; ready for QA verification |
 
 ## Cross-validated Warning
 
@@ -79,4 +89,4 @@ Reviewer Assignment: `QC re-review: targeted — reviewers: qc-specialist-2, qc-
 | 🟢 Suggestion | 12 | 12 (forward-looking; tracked in residuals) |
 
 **Initial verdict**: Request Changes
-**Final verdict (after fix-wave re-review)**: TBD
+**Final verdict (after fix-wave re-review)**: **Approve**
