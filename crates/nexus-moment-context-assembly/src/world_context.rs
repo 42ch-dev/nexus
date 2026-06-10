@@ -27,6 +27,10 @@ pub const DEFAULT_WORLD_CONTEXT_TOKEN_BUDGET: usize = 1500;
 const CHARS_PER_TOKEN: usize = 4;
 
 /// Maximum characters before truncation marker is appended.
+///
+/// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P2-S3
+/// — truncation marker is a YAML comment only; downstream prompt consumers
+/// treat it as opaque text; formal YAML structure-aware truncation deferred.
 const TRUNCATION_MARKER: &str = "\n# [... truncated]";
 
 /// A single item in the World context block (character, location, or rule).
@@ -149,6 +153,10 @@ pub struct ChapterKbBlockParams {
 }
 
 /// Shared KB query builder for World-scoped queries.
+///
+/// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P2-S1
+/// — per-prompt KB queries use linear scan via InMemoryKbStore; acceptable
+/// for single-user local daemon with bounded KB size; index when needed.
 ///
 /// Encapsulates the filter/taxonomy logic used by both the chapter KB block
 /// and the generic `fetch_world_kb` in `moment.rs`.
