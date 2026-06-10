@@ -1,15 +1,17 @@
 ---
 report_kind: qc-consolidated
 plan_id: 2026-06-10-v1.41-selection-pool
-verdict: Request Changes
-generated_at: 2026-06-10T23:30:00+08:00
-review_range: "merge-base: 55689706 → tip: 57f573ad"
+verdict: Approve (after fix-wave re-review)
+generated_at: 2026-06-11T01:30:00+08:00
+initial_review_range: "merge-base: 55689706 → tip: 57f573ad"
+fix_wave_tip: 97470073
+final_review_range: "merge-base: 55689706 → tip: 97470073"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
 reviewers:
-  - "@qc-specialist (1, architecture-coherence-maintainability) — Request Changes (3 Warning)"
-  - "@qc-specialist-2 (2, security-correctness) — Request Changes (4 Warning)"
-  - "@qc-specialist-3 (3, performance-reliability) — Request Changes (6 Warning; 1 confirmed pre-existing flake documented as out-of-scope)"
+  - "@qc-specialist (1, architecture-coherence-maintainability) — initial Request Changes → fix-wave re-review Approve (da5b3ab5)"
+  - "@qc-specialist-2 (2, security-correctness) — initial Request Changes → fix-wave re-review Approve (b1b3e690)"
+  - "@qc-specialist-3 (3, performance-reliability) — initial Request Changes → fix-wave re-review Approve (55847038)"
 plan_review:
   reviewer: "@project-manager"
   scope: "Plan-vs-spec re-read + plan-vs-implementation completion audit"
@@ -22,18 +24,27 @@ plan_review:
 
 # QC Consolidated Gate — V1.41 P1 (DF-61 selection pool + inspiration)
 
-## Verdict
-**Request Changes** — 0 Critical, 13 Warning (10 actionable + 3 acceptance/forward-looking), 1 pre-existing flake confirmed out-of-scope. **Plan-vs-spec also has gaps** that should be addressed in the same fix wave (spec amendment + user path correction).
+## Verdict (final, after fix-wave re-review)
+**Approve** — 0 Critical, 13 Warning blockers addressed in fix wave (9 actionable + 4 plan-review; user 2026-06-10 path correction included). All 3 QC reviewers returned Approve after targeted re-review.
 
-## Roll-up
+## Roll-up (initial review)
 
-| Reviewer | Verdict | Critical | Warning | Suggestion |
-|----------|---------|----------|---------|------------|
+| Reviewer | Verdict (initial) | Critical | Warning | Suggestion |
+|----------|-------------------|----------|---------|------------|
 | @qc-specialist (1, architecture) | Request Changes | 0 | 3 | 3 |
 | @qc-specialist-2 (2, security+correctness) | Request Changes | 0 | 4 | 4 |
 | @qc-specialist-3 (3, performance+reliability) | Request Changes | 0 | 6 | 4 |
 | PM plan re-review | Request Changes | 0 | 3 (spec gaps + 1 user path) | — |
-| **Consolidated (initial)** | **Request Changes** | **0** | **13 + 3 (plan)** | **11** |
+| **Consolidated (initial)** | **Request Changes** | **0** | **16 (13 + 3 plan)** | **11** |
+
+## Roll-up (after fix-wave re-review)
+
+| Reviewer | Verdict (re-review) | Commit | Disposition |
+|----------|---------------------|--------|-------------|
+| @qc-specialist (1) | **Approve** | da5b3ab5 | W-1/W-2/W-3 all resolved; S-2 resolved via bonus `From<T>` impls; S-1/S-3 deferred to V1.42 |
+| @qc-specialist-2 (2) | **Approve** | b1b3e690 | W-01/W-02/W-03/W-04 all resolved; S-02 resolved (creator_id in DAOs) |
+| @qc-specialist-3 (3) | **Approve** | 55847038 | F-001/F-002/F-003/F-005/F-006 all resolved; F-004 stays out-of-scope (P-last) |
+| **Consolidated (final)** | **Approve** | — | All blockers closed; 19 residuals registered; ready for QA verification |
 
 ## Consolidated findings (deduped; mapped to fix wave)
 
@@ -168,12 +179,13 @@ Reviewer Assignment: `QC re-review: targeted — reviewers: qc-specialist, qc-sp
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| 🔴 Critical | 0 |
-| 🟡 Warning (actionable) | 10 (1 from user feedback) |
-| 🟡 Warning (spec gaps) | 3 |
-| 🟢 Suggestion | 11 |
-| Out-of-scope pre-existing | 2 |
+| Severity | Count (initial) | Count (after re-review) |
+|----------|------------------|------------------------|
+| 🔴 Critical | 0 | 0 (all resolved) |
+| 🟡 Warning (actionable) | 10 (1 from user feedback) | 0 (all resolved) |
+| 🟡 Warning (spec gaps) | 3 | 0 (all resolved via Fix 1 + Fix 9) |
+| 🟢 Suggestion | 11 | 11 (forward-looking; tracked in residuals) |
+| Out-of-scope pre-existing | 2 | 2 (F-004/R-V141P1-17/18 stay out-of-scope; V1.41 P-last) |
 
-**Verdict**: Request Changes (fix wave required before Approve)
+**Initial verdict**: Request Changes
+**Final verdict (after fix-wave re-review)**: **Approve**
