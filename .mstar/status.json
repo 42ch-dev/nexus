@@ -1,15 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T12:00:00+08:00",
+  "updated_at": "2026-06-10T17:45:00+08:00",
   "plans": [
-    {
-      "id": "2026-06-10-v1.41-harness-docs-prepare",
-      "title": "P-1 — V1.41 harness docs prepare",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-10-v1.41-harness-docs-prepare.md",
-      "working_branch": "iteration/v1.41",
-      "merge_target": "iteration/v1.41"
-    },
     {
       "id": "2026-06-10-v1.41-multi-work-switch",
       "title": "P0 — DF-60 multi-work lifecycle (locks + creator works IA)",
