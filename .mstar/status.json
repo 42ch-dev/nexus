@@ -1301,7 +1301,8 @@
         "source": "user 2026-06-10 path correction + qc1 W-3 + qc3 F-001 (V1.41 P1 review); qc-consolidated.md",
         "scope": "crates/nexus-local-db/src/inspiration_items.rs:140 + 3 spec docs",
         "decision": "accept-with-fix",
-        "target": "this fix wave"
+        "target": "this fix wave",
+        "owner": "@fullstack-dev"
       },
       {
         "id": "R-V141P1-03",
