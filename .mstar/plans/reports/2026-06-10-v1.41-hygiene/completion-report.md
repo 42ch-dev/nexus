@@ -163,3 +163,45 @@ nothing to commit, working tree clean
 ## 10. Worktree Path
 
 `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.41-hygiene/`
+
+---
+
+## §10 Fix Wave (P-last, post QC tri-review)
+
+**Trigger**: QC tri-review returned Approve (qc1) + Request Changes (qc2 + qc3). 3 actionable findings (2 cross-validated).
+
+### Fixes
+
+| # | Finding | Residual(s) | Commit | Description |
+|---|---------|-------------|--------|-------------|
+| 1 | W-truncation-utf8-panic (qc2 W-01 = qc3 W-1) | R-V141HYG-01 | `5be7e5d6` | UTF-8-safe truncation in `promote_to_long_term` — walk backward from byte boundary to nearest char boundary before slicing. Added TDD test with CJK-only digest >256 KiB. |
+| 2 | W-yaml-display-regression (qc2 W-02) | R-V141HYG-02 | `3c6d8b4b` | Revert `to_yaml` string fields from `{}` (Display) to `{:?}` (Debug) — Debug produces valid YAML double-quoted scalars with proper escaping. Added TDD test with metacharacters. Updated existing test assertions. |
+| 3 | W-waiver-doc-hygiene-gap (qc2 W-03) | R-V141HYG-03 | `36890233` | Added inline WAIVER/SAFETY comments at call sites for all 13 waived residuals (10 from V1.40 + 3 from V1.33). |
+
+### Verification
+
+```
+$ cargo test -p nexus-creator-memory -p nexus-moment-context-assembly -p nexus-orchestration -p nexus-kb -p nexus-daemon-runtime
+   → all passed (pre-existing flakes R-V141P1-17/R-V141P1-18 not encountered)
+
+$ cargo clippy --all -- -D warnings
+   → clean
+
+$ cargo +nightly fmt --all -- --check
+   → clean
+
+$ git status
+   → nothing to commit, working tree clean
+```
+
+### Commits on branch (since iteration/v1.41)
+
+```
+36890233 chore(harness): add WAIVER/SAFETY comments at call sites for 13 waived residuals
+3c6d8b4b fix(moment-context-assembly): YAML-safe string serialization in to_yaml
+5be7e5d6 fix(creator-memory): UTF-8-safe truncation in promote_to_long_term size guard
+```
+
+### New residuals
+
+None surfaced during this fix wave.
