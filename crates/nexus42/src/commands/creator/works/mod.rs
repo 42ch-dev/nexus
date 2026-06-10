@@ -126,7 +126,7 @@ pub enum InspirationAction {
     Promote {
         /// Inspiration item ID (npi_...) to promote
         item_id: String,
-        /// Optional idea override for the new Work's initial_idea
+        /// Optional idea override for the new Work's ``initial_idea``
         #[arg(long)]
         idea: Option<String>,
         /// Also set as CLI default via `works use`
