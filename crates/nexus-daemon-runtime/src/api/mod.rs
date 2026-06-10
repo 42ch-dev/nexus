@@ -249,12 +249,20 @@ fn works_routes() -> Router<WorkspaceState> {
             post(handlers::works::create_work).get(handlers::works::list_works),
         )
         .route(
+            "/v1/local/works/pool",
+            post(handlers::works::set_pool_active),
+        )
+        .route(
             "/v1/local/works/{work_id}",
             get(handlers::works::get_work).patch(handlers::works::patch_work),
         )
         .route(
             "/v1/local/works/{work_id}/inspiration",
             post(handlers::works::append_inspiration),
+        )
+        .route(
+            "/v1/local/works/{work_id}/completion-lock/release",
+            post(handlers::works::release_completion_lock_handler),
         )
         .route(
             "/v1/local/works/{work_id}/reconcile-chapters",
