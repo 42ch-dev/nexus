@@ -276,19 +276,25 @@ pub async fn mark_work_completed(
         .map_err(AutoChainError::from)?;
 
     // Step 2: Write completion-lock file (best-effort; non-blocking for Work completion)
-    if let Some(ref work_ref) = updated.work_ref {
+    if let Some(ref _work_ref) = updated.work_ref {
         let lock = CompletionLock {
+            schema_version: 1,
             work_id: work_id.to_string(),
             locked_at: now.clone(),
             reason: "completion".to_string(),
         };
         // We don't have workspace_dir here — the caller (supervisor) should
         // write the lock file after calling this function if they have the path.
-        // For now, we log a debug-level note. The actual file I/O is done by
+        // For now, we log an info-level note. The actual file I/O is done by
         // the supervisor or CLI layer that has access to the workspace dir.
-        tracing::debug!(
-            "mark_work_completed: DB columns set for {work_id}; completion-lock file \
-             should be written by caller at Works/{work_ref}/"
+        tracing::info!(
+            target: "novel.completion",
+            work_id = %work_id,
+            creator_id = %creator_id,
+            completion_locked_at = %now,
+            work_ref = ?updated.work_ref,
+            "mark_work_completed: DB columns set; completion-lock file \
+             should be written by caller"
         );
         let _ = lock; // used by caller
     }
@@ -322,6 +328,7 @@ pub fn write_completion_lock_for_work(
     })?;
 
     let lock = CompletionLock {
+        schema_version: 1,
         work_id: work.work_id.clone(),
         locked_at: locked_at.to_string(),
         reason: "completion".to_string(),
