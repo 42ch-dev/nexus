@@ -638,12 +638,27 @@ pub async fn promote_to_long_term<S: SessionDigestSummarizer>(
         )));
     }
 
+    // R-V133P4-06: Size guard — cap raw_digest before summarization to prevent
+    // unbounded LTM file growth. 256 KiB is generous for a session digest.
+    const MAX_DIGEST_BYTES: usize = 256 * 1024;
+    let raw_digest = if record.raw_digest.len() > MAX_DIGEST_BYTES {
+        tracing::warn!(
+            session_id = %record.session_id,
+            digest_len = record.raw_digest.len(),
+            max = MAX_DIGEST_BYTES,
+            "raw_digest exceeds max_digest_bytes; truncating before summarization"
+        );
+        &record.raw_digest[..MAX_DIGEST_BYTES]
+    } else {
+        &record.raw_digest
+    };
+
     // 2. Call summarizer to generate content
     let body = summarizer
         .summarize(
             &record.session_id,
             &record.task_kind,
-            &record.raw_digest,
+            raw_digest,
             record.world_id.as_deref(),
         )
         .await?;
@@ -694,6 +709,7 @@ fn task_kind_to_memory_kind(task_kind: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn sample_input(task_kind: &str, raw_digest: &str) -> PendingReviewInput {
         PendingReviewInput {
@@ -1048,5 +1064,51 @@ mod tests {
         };
         let decision = classify_pending_review(&input);
         assert_eq!(decision.action, ReviewAction::PromoteToLongTerm);
+    }
+
+    /// R-V133P4-06: Size guard truncates oversized raw_digest before summarization.
+    #[tokio::test]
+    async fn promote_truncates_oversized_raw_digest() {
+        let home = PathBuf::from("/tmp/test_promotion_size_guard");
+        let _ = std::fs::remove_dir_all(&home);
+
+        struct Passthrough;
+        #[allow(async_fn_in_trait)]
+        impl SessionDigestSummarizer for Passthrough {
+            async fn summarize(
+                &self,
+                _: &str,
+                _: &str,
+                raw_digest: &str,
+                _: Option<&str>,
+            ) -> Result<String, MemoryError> {
+                // Return raw_digest as body — simulates PassthroughSummarizer
+                Ok(raw_digest.to_string())
+            }
+        }
+
+        // Create a digest larger than 256 KiB
+        let big_digest = "x".repeat(300 * 1024);
+        let input = PendingReviewInput {
+            pending_id: "p_trunc".into(),
+            session_id: "s_trunc".into(),
+            creator_id: "ctr_test".into(),
+            world_id: None,
+            task_kind: "brainstorm".into(),
+            raw_digest: big_digest,
+            created_at: "2026-04-15T00:00:00Z".into(),
+        };
+
+        let memory = promote_to_long_term(&home, "ctr_test", &input, &Passthrough)
+            .await
+            .expect("promotion should succeed");
+        // The body should be truncated to 256 KiB, not the full 300 KiB input
+        assert!(
+            memory.body.len() <= 256 * 1024,
+            "body should be truncated to max_digest_bytes, got {} bytes",
+            memory.body.len()
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
