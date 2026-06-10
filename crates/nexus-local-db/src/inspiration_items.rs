@@ -217,18 +217,32 @@ pub async fn promote_inspiration(
 
 /// Archive an inspiration item (set status to `archived`).
 ///
+/// Restricted to the owning `creator_id` — rows belonging to other
+/// creators are silently unaffected (0 rows updated → `MissingVersionKey`).
+///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails or the item is not found.
+/// Returns `LocalDbError` if the database query fails or the item is not found
+/// (or does not belong to the given `creator_id`).
 pub async fn archive_inspiration(
     pool: &SqlitePool,
     item_id: &str,
+    creator_id: &str,
 ) -> Result<InspirationItem, LocalDbError> {
     // SAFETY: dynamic SQL — compile-time macro not applicable.
-    sqlx::query("UPDATE inspiration_items SET status = 'archived' WHERE item_id = ?")
-        .bind(item_id)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE inspiration_items SET status = 'archived' WHERE item_id = ? AND creator_id = ?",
+    )
+    .bind(item_id)
+    .bind(creator_id)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(LocalDbError::MissingVersionKey {
+            key: format!("inspiration_items/{item_id} (creator {creator_id})"),
+        });
+    }
 
     get_inspiration(pool, item_id)
         .await?
