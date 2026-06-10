@@ -4,8 +4,8 @@ reviewer: "@qc-specialist-2"
 reviewer_index: 2
 focus: security-correctness
 plan_id: 2026-06-10-v1.41-hygiene
-verdict: Request Changes
-generated_at: 2026-06-11T11:20:00+08:00
+verdict: Approve
+generated_at: 2026-06-11T12:00:00+08:00
 review_range: "merge-base: 55689706 → tip: f4d72a86"
 working_branch_verified: iteration/v1.41
 review_cwd_verified: /Users/bibi/workspace/organizations/42ch/nexus
@@ -75,5 +75,45 @@ tools_run: cargo clippy --all -D warnings, cargo +nightly fmt --all -- --check, 
 
 (The two correctness issues — unsafe byte truncation in a size guard and loss of YAML validity guarantee — are real regressions in the fixes for R-V133P4-06 and R-V140P2-S4. They must be addressed before the hygiene closeout can be considered complete. The documentation hygiene gap for waived items is a maintainability concern that should be tightened.)
 
-## Revalidation Notes (if targeted re-review)
-N/A — initial qc2 review.
+## Revalidation (fix-wave delta: f4d72a86..da21b70d)
+
+**Reviewer**: @qc-specialist-2 (qc-specialist-2, reviewer_index: 2)
+**Re-review timestamp**: 2026-06-11T12:00:00+08:00
+**Re-review range**: `merge-base: 55689706` → `tip: da21b70d` (focus delta `f4d72a86..da21b70d`)
+**Working branch (verified)**: iteration/v1.41
+**Review cwd (verified)**: /Users/bibi/workspace/organizations/42ch/nexus
+**Tools run**: cargo clippy, cargo +nightly fmt --check, cargo test, manual review of fix-wave diff
+
+### Disposition
+
+| Finding | Original severity | New severity | Disposition | Evidence |
+|---------|-------------------|--------------|-------------|----------|
+| W-01 (UTF-8 truncation panic) | warning | resolved | commit 5be7e5d6 (TDD: CJK panic test fails before, passes after) | review.rs:649-655 + new test promote_truncates_oversized_raw_digest_at_utf8_boundary |
+| W-02 (YAML Display regression) | warning | resolved | commit 3c6d8b4b (revert to {:?}, TDD: metachar test) | world_context.rs toyaml + new metachar test |
+| W-03 (waiver doc-hygiene gap) | warning | resolved | commit 36890233 (13 WAIVER/SAFETY comments) | grep count confirmed |
+
+### Suggestions (forward-looking; deferred to V1.42 per qc-consolidated.md residuals)
+
+| ID | Status | Note |
+|----|--------|------|
+| S-01 (tracing levels appropriate) | accept | R-V141HYG-03-style fix |
+| S-02 (UTF-8 boundary test added) | resolved | covered by 5be7e5d6 |
+| S-03 (test rename accurate) | accept | R-V140P1-S2 |
+| S-04 (excluded residuals untouched) | accept | confirmed |
+| S-05 (commits narrowly scoped) | accept | confirmed |
+
+### New findings (if any)
+
+None.
+
+### Tools / verification tails
+
+- cargo clippy: clean (0 warnings, 0 errors)
+- cargo +nightly fmt --check: clean (no output)
+- cargo test -p nexus-creator-memory promote_truncates: 2 passed
+
+### Updated verdict
+
+**Approve**
+
+**Rationale**: All 3 Warnings (W-01 truncation panic, W-02 YAML regression, W-03 waiver doc-hygiene gap) are resolved with concrete code changes and TDD evidence. CI tools pass clean. No new Critical or Warning findings in the fix-wave delta.
