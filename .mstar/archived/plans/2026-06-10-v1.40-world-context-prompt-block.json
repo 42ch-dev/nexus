@@ -1,0 +1,43 @@
+{
+  "id": "2026-06-10-v1.40-world-context-prompt-block",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-10-v1.40-world-context-prompt-block.md",
+  "working_branch": "feature/v1.40-world-context-prompt-block",
+  "merge_target": "iteration/v1.40",
+  "metadata": {
+    "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+    "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+    "depends_on": [
+      "2026-06-10-v1.40-world-kb-taxonomy"
+    ],
+    "description": "P2 — refactor fetch_world_kb + format_chapter_kb_block",
+    "targets_deferred": [
+      "DF-63"
+    ],
+    "explicitly_out": [
+      "multi-volume PK",
+      "DF-47"
+    ],
+    "qa": "passed — all 5 ACs green; runtime wiring complete (CLI run.rs → stage_gates.rs); 1612 tests pass; clippy clean; nightly fmt clean",
+    "done_at": "2026-06-11T00:30:00+08:00",
+    "commits": [
+      "e2610a76",
+      "11eb62b0",
+      "5ba65359",
+      "ae925aba",
+      "c8487149",
+      "159cafaa",
+      "c573646a",
+      "dc50790c",
+      "960efa37",
+      "4e78ea59",
+      "69d34f8d",
+      "91e4a40e"
+    ],
+    "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10 (with mid-stream QC fix batch for missing data flow)"
+  },
+  "updated_at": "2026-06-10",
+  "notes": [
+    "2026-06-10: implement (e2610a76..5ba65359); QC1/QC2/QC3 Request Changes initial (preset.input.world_kb_block never populated; runtime_compatibility compile gate; chapter_text heuristic); fix 3 commits; QC re-validation Approve; QA Pass → merge to iteration/v1.40"
+  ]
+}

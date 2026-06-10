@@ -1,312 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T03:00:00+08:00",
-  "plans": [
-    {
-      "id": "2026-06-10-v1.40-harness-docs-prepare",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-10-v1.40-harness-docs-prepare.md",
-      "working_branch": "iteration/v1.40",
-      "merge_target": "iteration/v1.40",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "description": "Prepare — V1.40 compass, P0..P4 plans, tracker/status sync",
-        "scope": "docs-only harness prepare; no product code",
-        "explicitly_out": [
-          "multi-volume PK",
-          "DF-60",
-          "DF-61",
-          "DF-59",
-          "DF-56",
-          "product code in prepare session"
-        ],
-        "done_at": "2026-06-10T12:00:00+08:00",
-        "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
-        "status_transition": "Todo → Done on 2026-06-10 after T1–T10 docs/status/tracker/spec sync",
-        "shipped": [
-          "V1.40 delivery compass (DF-63 World KB + P4 hygiene) at .mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-          "P0..P4 implementation plans registered as Todo with topic branches",
-          "novel-workflow-profile/entity-scope-model/cli-spec/creator-workflow/local-db-schema spec amendments",
-          "status.json integration_branch = iteration/v1.40; latest_active_iteration = v1.40",
-          "deferred tracker: DF-63 targeted V1.40; multi-volume PK OUT"
-        ]
-      }
-    },
-    {
-      "id": "2026-06-10-v1.40-architecture-hygiene",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-10-v1.40-architecture-hygiene.md",
-      "working_branch": "feature/v1.40-architecture-hygiene",
-      "merge_target": "iteration/v1.40",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "depends_on": [
-          "2026-06-10-v1.40-harness-docs-prepare"
-        ],
-        "description": "P0.5 — embedded-rules relocation + world-kb-runtime-architecture doc",
-        "explicitly_out": [
-          "DF-63 W2-W5",
-          "P4 hygiene sweep"
-        ],
-        "qa": "passed — all 7 ACs green; clippy clean; nightly fmt clean; byte-identical writing-craft.md",
-        "done_at": "2026-06-10T20:30:00+08:00",
-        "commits": [
-          "8dda000c",
-          "76e14828",
-          "de42f4c9",
-          "dc7f81e7",
-          "14145a06",
-          "d983fae0",
-          "95b7e150",
-          "1dd268ed",
-          "60d95a05",
-          "b40cdf5a"
-        ],
-        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10"
-      },
-      "updated_at": "2026-06-10",
-      "notes": [
-        "2026-06-10: implement (feature/v1.40-architecture-hygiene) → QC1/QC2 Approve, QC3 Approve after re-validation → QA Pass → merge to iteration/v1.40"
-      ]
-    },
-    {
-      "id": "2026-06-10-v1.40-world-create-and-validation",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-10-v1.40-world-create-and-validation.md",
-      "working_branch": "feature/v1.40-world-create-and-validation",
-      "merge_target": "iteration/v1.40",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "depends_on": [
-          "2026-06-10-v1.40-harness-docs-prepare"
-        ],
-        "description": "P0 — align creator world + world_refs validation (reuse existing create)",
-        "targets_deferred": [
-          "DF-63"
-        ],
-        "explicitly_out": [
-          "multi-volume PK",
-          "DF-60",
-          "DF-61",
-          "DF-59",
-          "DF-56"
-        ],
-        "qa": "passed — all 6 ACs green; HTTP 422 confirmed; atomicity confirmed; ownership FK confirmed; nightly fmt clean",
-        "done_at": "2026-06-10T22:30:00+08:00",
-        "commits": [
-          "a903efd8",
-          "464d0fba",
-          "b76c5c1d",
-          "68e4a807",
-          "abaf514e",
-          "ae12b9f1",
-          "9564918f",
-          "9511e31c",
-          "d3a18d14",
-          "ec726e3a",
-          "20626228",
-          "16fe33d2"
-        ],
-        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10 (with mandatory-binding spec amendment mid-stream)",
-        "mandatory_binding_locked": true
-      },
-      "updated_at": "2026-06-10",
-      "notes": [
-        "2026-06-10: spec amendment (464d0fba) made world_id mandatory per user clarification; implement (a903efd8, b76c5c1d, 68e4a807, abaf514e); QC1/QC2/QC3 Request Changes initial; fix d3a18d14 addressed 8 blocking findings; QC re-validation Approve; QA Pass → merge to iteration/v1.40"
-      ]
-    },
-    {
-      "id": "2026-06-10-v1.40-world-kb-taxonomy",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-10-v1.40-world-kb-taxonomy.md",
-      "working_branch": "feature/v1.40-world-kb-taxonomy",
-      "merge_target": "iteration/v1.40",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/entity-scope-model.md",
-        "depends_on": [
-          "2026-06-10-v1.40-world-create-and-validation"
-        ],
-        "description": "P1 — wire BlockType + novel body validation in nexus-kb",
-        "targets_deferred": [
-          "DF-63"
-        ],
-        "explicitly_out": [
-          "multi-volume PK",
-          "DF-47"
-        ],
-        "qa": "passed — all 5 ACs green; SqliteKbStore now wires validate_body + validate_canonical_name; backward-compat PascalCase preserved; nightly fmt clean",
-        "done_at": "2026-06-10T23:30:00+08:00",
-        "commits": [
-          "7e897c9a",
-          "fb9d9aa3",
-          "f711c802",
-          "8f9a5efc",
-          "2b0cf8fe",
-          "31b4736b",
-          "17e2bf8e",
-          "706fb605",
-          "61d2b060",
-          "cf4bea22",
-          "41c0d2d8",
-          "9e2a5cbc",
-          "fbd301c4",
-          "c3d6cbb1",
-          "2f5cc6c3"
-        ],
-        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10 (with mid-stream QC fix batch)"
-      },
-      "updated_at": "2026-06-10",
-      "notes": [
-        "2026-06-10: implement (7e897c9a..8f9a5efc); QC1/QC2 Request Changes initial (SqliteKbStore validation, advisory, structured errors); fix fbd301c4 + 6 fix commits; QC re-validation Approve; QA Pass → merge to iteration/v1.40"
-      ]
-    },
-    {
-      "id": "2026-06-10-v1.40-world-context-prompt-block",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-10-v1.40-world-context-prompt-block.md",
-      "working_branch": "feature/v1.40-world-context-prompt-block",
-      "merge_target": "iteration/v1.40",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "depends_on": [
-          "2026-06-10-v1.40-world-kb-taxonomy"
-        ],
-        "description": "P2 — refactor fetch_world_kb + format_chapter_kb_block",
-        "targets_deferred": [
-          "DF-63"
-        ],
-        "explicitly_out": [
-          "multi-volume PK",
-          "DF-47"
-        ],
-        "qa": "passed — all 5 ACs green; runtime wiring complete (CLI run.rs → stage_gates.rs); 1612 tests pass; clippy clean; nightly fmt clean",
-        "done_at": "2026-06-11T00:30:00+08:00",
-        "commits": [
-          "e2610a76",
-          "11eb62b0",
-          "5ba65359",
-          "ae925aba",
-          "c8487149",
-          "159cafaa",
-          "c573646a",
-          "dc50790c",
-          "960efa37",
-          "4e78ea59",
-          "69d34f8d",
-          "91e4a40e"
-        ],
-        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-10 (with mid-stream QC fix batch for missing data flow)"
-      },
-      "updated_at": "2026-06-10",
-      "notes": [
-        "2026-06-10: implement (e2610a76..5ba65359); QC1/QC2/QC3 Request Changes initial (preset.input.world_kb_block never populated; runtime_compatibility compile gate; chapter_text heuristic); fix 3 commits; QC re-validation Approve; QA Pass → merge to iteration/v1.40"
-      ]
-    },
-    {
-      "id": "2026-06-10-v1.40-world-kb-extract-binding",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-10-v1.40-world-kb-extract-binding.md",
-      "working_branch": "feature/v1.40-world-kb-extract-binding",
-      "merge_target": "iteration/v1.40",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/creator-workflow.md",
-        "depends_on": [
-          "2026-06-10-v1.40-world-context-prompt-block"
-        ],
-        "description": "P3 — extend kb.extract_work + jobs + schedule.enqueue_child",
-        "targets_deferred": [
-          "DF-63"
-        ],
-        "explicitly_out": [
-          "multi-volume PK",
-          "DF-60",
-          "DF-61",
-          "DF-59"
-        ],
-        "qa": "passed — all 6 ACs green; DF-63 W5 Shipped (row closeable); 1739 tests pass; clippy clean; nightly fmt clean",
-        "done_at": "2026-06-11T01:30:00+08:00",
-        "commits": [
-          "6fdd21d7",
-          "85a34811",
-          "fa3e46b7",
-          "105bee3e",
-          "a32cec4c",
-          "b91d72da",
-          "7ef7c72e",
-          "61d0c379",
-          "3b4e2ab3",
-          "5c3b4c01",
-          "22192833",
-          "5fbbe173",
-          "9acaf33d",
-          "99d3e0c9",
-          "89dc4519",
-          "515f748a",
-          "b09dde9f",
-          "b02f8828",
-          "392b3372",
-          "a50600d3"
-        ],
-        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-11 (with mid-stream QC fix batch — 7 blocking findings)",
-        "df63_closed": true
-      },
-      "updated_at": "2026-06-11",
-      "notes": [
-        "2026-06-11: implement T1-T9 (6fdd21d7..61d0c379); QC1/QC2 Request Changes initial (7 blocking findings: dead code, worldless guard, runtime sqlx, chapter validation, ownership check, mark_done order, magic auto); fix 5 commits (515f748a..b02f8828); QC re-validation Approve; QA Pass → merge to iteration/v1.40"
-      ]
-    },
-    {
-      "id": "2026-06-10-v1.40-hygiene",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-10-v1.40-hygiene.md",
-      "working_branch": "feature/v1.40-hygiene",
-      "merge_target": "iteration/v1.40",
-      "metadata": {
-        "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-        "depends_on": [
-          "2026-06-10-v1.40-world-kb-extract-binding"
-        ],
-        "description": "P4 — V1.39 QC residual convergence (V1.40-tagged only)",
-        "explicitly_out": [
-          "full 66-item tech debt sweep",
-          "DF-63",
-          "multi-volume PK"
-        ],
-        "qa": "deferred — .sqlx/ offline cache refresh required (pre-existing infra); compilation clean; clippy clean; nightly fmt clean; 17 V1.40-tagged residuals closed (9 resolved, 5 waived, 1 PM-accept, 3 out-of-scope)",
-        "done_at": "2026-06-11T02:30:00+08:00",
-        "commits": [
-          "c47d2125",
-          "deba5ab7",
-          "69250f10",
-          "9dae01f4",
-          "91ecbe8d",
-          "76a5461d",
-          "ad4dee6d",
-          "95233c32",
-          "baffa7d8",
-          "deca8e16",
-          "57e7b854",
-          "d37c0691",
-          "12b80662",
-          "c6f193fb",
-          "86620098",
-          "790060ba"
-        ],
-        "status_transition": "Todo → InProgress → InReview → Done on 2026-06-11 (with mid-stream QC fix batch — 5 critical findings + 1 PM-accept)",
-        "pm_sign_off": "QC3 W-2 PM-accepted with documentation (sqlx::query_as! design tradeoff; see R-V140P4-W2)"
-      },
-      "updated_at": "2026-06-11",
-      "notes": [
-        "2026-06-11: implement (6 commits: c47d2125..76a5461d); QC1/QC2/QC3 Request Changes initial (5 critical findings: tick_inner dependency bug, PatchWorkRequest compile failures, unsupported ALTER TABLE ADD CONSTRAINT, ID mint SSOT not used, unused import); fix 4 commits (deca8e16..12b80662); QC1+QC2 re-validation Approve; QC3 W-2 PM-accepted with documentation (sqlx query_as! macro design tradeoff); QA deferred pending .sqlx/ cache refresh (pre-existing infra); merge to iteration/v1.40"
-      ]
-    }
-  ],
+  "updated_at": "2026-06-11T03:30:00+08:00",
+  "plans": [],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -314,33 +9,57 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.40",
-    "last_integration_branch": "iteration/v1.39",
+    "integration_branch": null,
+    "last_integration_branch": "iteration/v1.40",
     "integration_merge_target": "main",
-    "integration_branch_role": "iteration",
+    "integration_branch_role": "retired",
     "latest_shipped_iteration": "v1.40",
     "latest_shipped_at": "2026-06-11T03:00:00+08:00",
-    "latest_active_iteration": "v1.40",
-    "latest_active_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-    "integration_branch_retired": null,
+    "latest_active_iteration": "v1.41",
+    "latest_active_compass": null,
+    "integration_branch_retired": "iteration/v1.40",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-11T03:00:00+08:00",
-      "total_open": 0,
+      "updated_at": "2026-06-11T03:30:00+08:00",
+      "total_open": 82,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 0,
-        "nit": 0
+        "medium": 10,
+        "low": 55,
+        "nit": 15
       },
       "by_target": {
-        "v1.40": 1
+        "v1.40": 0,
+        "v1.41": 0,
+        "backlog": 65,
+        "v1.38": 0,
+        "v1.37": 0,
+        "v1.39": 0
       },
       "by_plan": {
+        "2026-06-04-v1.33-llm-judge-runtime-fix": 1,
+        "2026-06-04-v1.33-memory-review-closed-loop": 1,
+        "2026-06-04-v1.33-work-model-and-creator-run": 1,
+        "v1.31-post-qc-tech-debt": 1,
+        "v1.30-post-qc-tech-debt": 1,
+        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 1,
+        "2026-06-04-v1.34-agent-tool-implementation": 1,
+        "2026-06-07-v1.37-novel-foundation-first": 1,
+        "2026-06-08-v1.38-multi-chapter-selection-status": 1,
+        "2026-06-08-v1.38-novel-writing-parameterization": 1,
+        "2026-06-09-v1.39-fl-e-auto-chain-engine": 1,
+        "2026-06-09-v1.39-research-stage-wiring": 1,
+        "2026-06-09-v1.39-v138-hardening": 1,
+        "2026-06-09-v1.39-findings-and-review-routing": 1,
+        "2026-06-10-v1.40-architecture-hygiene": 1,
+        "2026-06-10-v1.40-world-create-and-validation": 1,
+        "2026-06-10-v1.40-world-kb-taxonomy": 1,
+        "2026-06-10-v1.40-world-context-prompt-block": 1,
+        "2026-06-10-v1.40-world-kb-extract-binding": 1,
         "2026-06-10-v1.40-hygiene": 1
       },
-      "notes": "V1.40 PM-accept residual R-V140P4-W2 (sqlx::query_as! design tradeoff). All V1.40-tagged V1.39 residuals closed."
+      "notes": "V1.40 PM-accept residual R-V140P4-W2 (sqlx::query_as! design tradeoff). All V1.40-tagged V1.39 residuals closed. Pre-V1.40 backlog residuals preserved as deferred (profile B: open list is canonical; closed entries in archived/residuals/)."
     },
     "wave_0_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
     "spec_refs": [
@@ -365,7 +84,9 @@
       "iteration": "v1.40",
       "head": "iteration/v1.40",
       "base": "main",
-      "url": "https://github.com/42ch-dev/nexus/pull/52"
+      "url": "https://github.com/42ch-dev/nexus/pull/52",
+      "status": "OPEN + MERGEABLE",
+      "ci_fix_pushed": "iteration/v1.40 (HEAD beadb230)"
     }
   },
   "residual_findings": {
