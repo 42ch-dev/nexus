@@ -1416,13 +1416,16 @@ pub async fn archive_pool_entry_handler(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
-    let entry =
-        nexus_local_db::novel_pool_entries::archive_pool_entry(state.pool(), &req.entry_id, &creator_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(
+        state.pool(),
+        &req.entry_id,
+        &creator_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
 
     Ok(Json(PoolEntryDto::from(entry)))
 }
@@ -1636,11 +1639,11 @@ pub async fn archive_inspiration_handler(
         &req.item_id,
         &creator_id,
     )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
 
     Ok(Json(InspirationItemDto::from(item)))
 }

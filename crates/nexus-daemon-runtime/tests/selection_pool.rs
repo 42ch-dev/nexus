@@ -85,7 +85,10 @@ async fn test_pool_list_returns_all_statuses() {
     // List all entries
     let resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None, ..Default::default() }),
+        Query(ListPoolQuery {
+            status: None,
+            ..Default::default()
+        }),
     )
     .await
     .unwrap();
@@ -138,7 +141,10 @@ async fn test_pool_promote_demotes_prior_active() {
     // Verify only one active
     let resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None, ..Default::default() }),
+        Query(ListPoolQuery {
+            status: None,
+            ..Default::default()
+        }),
     )
     .await
     .unwrap();
@@ -185,7 +191,10 @@ async fn test_pool_promote_idempotent_on_same_target() {
     // Should have exactly one entry
     let resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None, ..Default::default() }),
+        Query(ListPoolQuery {
+            status: None,
+            ..Default::default()
+        }),
     )
     .await
     .unwrap();
@@ -249,7 +258,10 @@ async fn test_inspiration_add_creates_md_and_db_row_atomically() {
     // Verify DB row exists
     let list_resp = nexus_daemon_runtime::api::handlers::works::list_inspiration(
         State(state.clone()),
-        Query(ListInspirationQuery { status: None, ..Default::default() }),
+        Query(ListInspirationQuery {
+            status: None,
+            ..Default::default()
+        }),
     )
     .await
     .unwrap();
@@ -334,7 +346,10 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     // Verify pool entry is active
     let pool_resp = nexus_daemon_runtime::api::handlers::works::list_pool(
         State(state.clone()),
-        Query(ListPoolQuery { status: None, ..Default::default() }),
+        Query(ListPoolQuery {
+            status: None,
+            ..Default::default()
+        }),
     )
     .await
     .unwrap();
@@ -348,10 +363,10 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     // Verify inspiration item is promoted
     let insp_resp = nexus_daemon_runtime::api::handlers::works::list_inspiration(
         State(state.clone()),
-         Query(ListInspirationQuery {
-             status: Some("promoted".to_string()),
-             ..Default::default()
-         }),
+        Query(ListInspirationQuery {
+            status: Some("promoted".to_string()),
+            ..Default::default()
+        }),
     )
     .await
     .unwrap();
@@ -607,11 +622,10 @@ async fn test_promote_inspiration_atomicity_on_step3_failure() {
     .unwrap();
 
     // Verify Work exists
-    let work =
-        works::get_work(state.pool(), "test_creator", &promote_resp.work_id)
-            .await
-            .unwrap()
-            .unwrap();
+    let work = works::get_work(state.pool(), "test_creator", &promote_resp.work_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(work.status, "draft");
 
     // Verify pool entry is active
@@ -626,13 +640,13 @@ async fn test_promote_inspiration_atomicity_on_step3_failure() {
     assert_eq!(pool_entry.status, "active");
 
     // Verify inspiration is promoted
-    let item = nexus_local_db::inspiration_items::get_inspiration(
-        state.pool(),
-        &add_resp.item_id,
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let item = nexus_local_db::inspiration_items::get_inspiration(state.pool(), &add_resp.item_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(item.status, "promoted");
-    assert_eq!(item.promoted_work_id.as_deref(), Some(promote_resp.work_id.as_str()));
+    assert_eq!(
+        item.promoted_work_id.as_deref(),
+        Some(promote_resp.work_id.as_str())
+    );
 }
