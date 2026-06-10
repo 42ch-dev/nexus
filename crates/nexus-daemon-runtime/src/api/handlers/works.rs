@@ -240,8 +240,38 @@ pub struct PoolEntryDto {
     pub creator_id: String,
     pub work_id: String,
     pub status: String,
+    pub title: String,
     pub promoted_at: String,
     pub note: Option<String>,
+}
+
+impl From<nexus_local_db::novel_pool_entries::PoolEntry> for PoolEntryDto {
+    fn from(e: nexus_local_db::novel_pool_entries::PoolEntry) -> Self {
+        Self {
+            entry_id: e.entry_id,
+            creator_id: e.creator_id,
+            work_id: e.work_id.unwrap_or_default(),
+            status: e.status,
+            title: e.title,
+            promoted_at: e.promoted_at,
+            note: e.note,
+        }
+    }
+}
+
+impl From<nexus_local_db::inspiration_items::InspirationItem> for InspirationItemDto {
+    fn from(i: nexus_local_db::inspiration_items::InspirationItem) -> Self {
+        Self {
+            item_id: i.item_id,
+            creator_id: i.creator_id,
+            rel_path: i.rel_path,
+            title: i.title,
+            status: i.status,
+            promoted_work_id: i.promoted_work_id,
+            created_at: i.created_at,
+            promoted_at: i.promoted_at,
+        }
+    }
 }
 
 // ─── Completion-lock release types (DF-60 §3.1) ─────────────────────────────
@@ -1178,14 +1208,7 @@ async fn set_pool_active_inner(
     let entry =
         nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id).await?;
 
-    Ok(PoolEntryDto {
-        entry_id: entry.entry_id,
-        creator_id: entry.creator_id,
-        work_id: entry.work_id.unwrap_or_default(),
-        status: entry.status,
-        promoted_at: entry.promoted_at,
-        note: entry.note,
-    })
+    Ok(PoolEntryDto::from(entry))
 }
 
 /// Read active `creator_id` from CLI config.
@@ -1317,7 +1340,23 @@ pub async fn list_pool(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
+    let limit = query.limit;
+    let offset = query.offset;
+
     let entries = nexus_local_db::novel_pool_entries::list_pool_entries(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let total = nexus_local_db::novel_pool_entries::count_pool_entries(
         state.pool(),
         &creator_id,
         query.status.as_deref(),
@@ -1328,19 +1367,14 @@ pub async fn list_pool(
         message: e.to_string(),
     })?;
 
-    let items: Vec<PoolEntryDto> = entries
-        .into_iter()
-        .map(|e| PoolEntryDto {
-            entry_id: e.entry_id,
-            creator_id: e.creator_id,
-            work_id: e.work_id.unwrap_or_default(),
-            status: e.status,
-            promoted_at: e.promoted_at,
-            note: e.note,
-        })
-        .collect();
+    let items: Vec<PoolEntryDto> = entries.into_iter().map(PoolEntryDto::from).collect();
 
-    Ok(Json(ListPoolResponse { entries: items }))
+    Ok(Json(ListPoolResponse {
+        entries: items,
+        total,
+        limit: limit.unwrap_or(200),
+        offset: offset.unwrap_or(0),
+    }))
 }
 
 /// `POST /v1/local/works/pool/promote` — Promote a pool entry to active.
@@ -1371,14 +1405,7 @@ pub async fn promote_pool_entry(
         message: e.to_string(),
     })?;
 
-    Ok(Json(PoolEntryDto {
-        entry_id: entry.entry_id,
-        creator_id: entry.creator_id,
-        work_id: entry.work_id.unwrap_or_default(),
-        status: entry.status,
-        promoted_at: entry.promoted_at,
-        note: entry.note,
-    }))
+    Ok(Json(PoolEntryDto::from(entry)))
 }
 
 /// `POST /v1/local/works/pool/archive` — Archive a pool entry.
@@ -1386,24 +1413,21 @@ pub async fn archive_pool_entry_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchivePoolRequest>,
 ) -> Result<Json<PoolEntryDto>, NexusApiError> {
-    let _creator_id =
+    let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
-    let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(state.pool(), &req.entry_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(
+        state.pool(),
+        &req.entry_id,
+        &creator_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
 
-    Ok(Json(PoolEntryDto {
-        entry_id: entry.entry_id,
-        creator_id: entry.creator_id,
-        work_id: entry.work_id.unwrap_or_default(),
-        status: entry.status,
-        promoted_at: entry.promoted_at,
-        note: entry.note,
-    }))
+    Ok(Json(PoolEntryDto::from(entry)))
 }
 
 /// `POST /v1/local/works/pool/inspiration` — Add an inspiration item.
@@ -1413,19 +1437,27 @@ pub async fn add_inspiration(
 ) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
+        .ok_or(NexusApiError::AuthRequired)?;
 
     let item_id = format!("npi_{}", Uuid::new_v4());
     let now = chrono::Utc::now().to_rfc3339();
 
-    let workspace_path_str = state.workspace_path().unwrap_or_default();
-    let workspace_dir = std::path::Path::new(&workspace_path_str);
+    // Route through nexus-home-layout — resolve operational workspace dir
+    // from nexus_home (~/.nexus42), not user home directly.
+    let workspace_dir = state
+        .nexus_home()
+        .join("creators")
+        .join(&creator_id)
+        .join("workspaces")
+        .join(&workspace_slug);
 
     let item = nexus_local_db::inspiration_items::create_inspiration_with_scaffold(
         state.pool(),
         &item_id,
         &creator_id,
         &req.title,
-        workspace_dir,
+        &workspace_dir,
         &now,
     )
     .await
@@ -1456,7 +1488,23 @@ pub async fn list_inspiration(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
+    let limit = query.limit;
+    let offset = query.offset;
+
     let items = nexus_local_db::inspiration_items::list_inspiration(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let total = nexus_local_db::inspiration_items::count_inspiration(
         state.pool(),
         &creator_id,
         query.status.as_deref(),
@@ -1467,21 +1515,14 @@ pub async fn list_inspiration(
         message: e.to_string(),
     })?;
 
-    let dtos: Vec<InspirationItemDto> = items
-        .into_iter()
-        .map(|i| InspirationItemDto {
-            item_id: i.item_id,
-            creator_id: i.creator_id,
-            rel_path: i.rel_path,
-            title: i.title,
-            status: i.status,
-            promoted_work_id: i.promoted_work_id,
-            created_at: i.created_at,
-            promoted_at: i.promoted_at,
-        })
-        .collect();
+    let dtos: Vec<InspirationItemDto> = items.into_iter().map(InspirationItemDto::from).collect();
 
-    Ok(Json(ListInspirationResponse { items: dtos }))
+    Ok(Json(ListInspirationResponse {
+        items: dtos,
+        total,
+        limit: limit.unwrap_or(200),
+        offset: offset.unwrap_or(0),
+    }))
 }
 
 /// `POST /v1/local/works/pool/inspiration/promote` — Promote an inspiration item to a Work.
@@ -1500,6 +1541,14 @@ pub async fn promote_inspiration_handler(
             message: e.to_string(),
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("inspiration item {}", req.item_id)))?;
+
+    // Cross-creator guard: only the owning creator can promote their items
+    if item.creator_id != creator_id {
+        return Err(NexusApiError::NotFound(format!(
+            "inspiration item {}",
+            req.item_id
+        )));
+    }
 
     if item.status != "idea" {
         return Err(NexusApiError::BadRequest {
@@ -1555,27 +1604,14 @@ pub async fn promote_inspiration_handler(
         lineage_from_work_id: None,
     };
 
-    works::create_work(state.pool(), &record)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-
-    // Insert a pool row for the new Work
-    let pool_entry =
-        nexus_local_db::novel_pool_entries::promote_to_active(state.pool(), &creator_id, &work_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
-
-    // Update the inspiration item to promoted
-    nexus_local_db::inspiration_items::promote_inspiration(
+    // Wrap the three writes (Work create + pool promote + inspiration update)
+    // in a single transaction so a step-3 failure rolls back everything.
+    let pool_entry = nexus_local_db::inspiration_promote_atomic(
         state.pool(),
-        &req.item_id,
+        &record,
+        &creator_id,
         &work_id,
+        &req.item_id,
         &now,
     )
     .await
@@ -1595,38 +1631,38 @@ pub async fn archive_inspiration_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchiveInspirationRequest>,
 ) -> Result<Json<InspirationItemDto>, NexusApiError> {
-    let _creator_id =
+    let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
 
-    let item = nexus_local_db::inspiration_items::archive_inspiration(state.pool(), &req.item_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    let item = nexus_local_db::inspiration_items::archive_inspiration(
+        state.pool(),
+        &req.item_id,
+        &creator_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
 
-    Ok(Json(InspirationItemDto {
-        item_id: item.item_id,
-        creator_id: item.creator_id,
-        rel_path: item.rel_path,
-        title: item.title,
-        status: item.status,
-        promoted_work_id: item.promoted_work_id,
-        created_at: item.created_at,
-        promoted_at: item.promoted_at,
-    }))
+    Ok(Json(InspirationItemDto::from(item)))
 }
 
 // ─── P1 Request / Response types ────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ListPoolQuery {
     pub status: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ListPoolResponse {
     pub entries: Vec<PoolEntryDto>,
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1653,14 +1689,19 @@ pub struct AddInspirationResponse {
     pub rel_path: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ListInspirationQuery {
     pub status: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ListInspirationResponse {
     pub items: Vec<InspirationItemDto>,
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
 }
 
 #[derive(Debug, Serialize)]

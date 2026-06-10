@@ -277,18 +277,37 @@ pub async fn mark_work_completed(
         .map_err(AutoChainError::from)?;
 
     // Step 1.5: Update pool entry to `completed` (DF-61 §5.4).
-    // Best-effort — the pool row may not exist if the Work was created
-    // outside the selection pool (e.g., `creator run start`).
-    if let Err(e) =
-        novel_pool_entries::mark_pool_entry_completed_for_work(pool, creator_id, work_id).await
-    {
-        tracing::warn!(
-            target: "novel.completion",
-            work_id = %work_id,
-            creator_id = %creator_id,
-            error = %e,
-            "mark_work_completed: failed to update pool entry to completed (non-fatal)"
-        );
+    // The pool row may not exist if the Work was created outside the
+    // selection pool (e.g., `creator run start`).
+    match novel_pool_entries::mark_pool_entry_completed_for_work(pool, creator_id, work_id).await {
+        Ok(()) => {}
+        Err(e) => {
+            // Pool update failed — clear completion_locked_at so the
+            // supervisor retries on the next tick (qc2 W-03, qc3 F-003).
+            tracing::error!(
+                target: "novel.completion",
+                work_id = %work_id,
+                creator_id = %creator_id,
+                error = %e,
+                "mark_work_completed: pool entry update FAILED — \
+                 clearing completion_locked_at for supervisor retry"
+            );
+            let clear_lock = WorkPatch {
+                completion_locked_at: Some(None),
+                ..Default::default()
+            };
+            let retry_now = chrono::Utc::now().to_rfc3339();
+            if let Err(clear_err) =
+                works::patch_work(pool, creator_id, work_id, &clear_lock, &retry_now).await
+            {
+                tracing::error!(
+                    target: "novel.completion",
+                    work_id = %work_id,
+                    error = %clear_err,
+                    "mark_work_completed: failed to clear completion_locked_at after pool update failure"
+                );
+            }
+        }
     }
 
     // Step 2: Write completion-lock file (best-effort; non-blocking for Work completion)
