@@ -1,18 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T23:30:00+08:00",
+  "updated_at": "2026-06-11T01:00:00+08:00",
   "plans": [
-    {
-      "id": "2026-06-10-v1.41-selection-pool",
-      "title": "P1 — DF-61 selection pool",
-      "status": "InReview",
-      "file": ".mstar/plans/2026-06-10-v1.41-selection-pool.md",
-      "working_branch": "feature/v1.41-selection-pool",
-      "merge_target": "iteration/v1.41",
-      "notes": [
-        "2026-06-10T22:30:00+08:00: P1 implemented (7 commits on feature/v1.41-selection-pool) and merged to iteration/v1.41 as 57f573ad. QC tri-review dispatched; qc-specialist-2 (security/correctness) + qc-specialist-3 (performance/reliability) most relevant for the inspiration MD scaffold + transactional pool DAO + R-V141P1-N06 path resolution concern."
-      ]
-    },
     {
       "id": "2026-06-10-v1.41-hygiene",
       "title": "P-last — aggressive residual convergence",
