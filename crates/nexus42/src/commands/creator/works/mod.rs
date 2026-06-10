@@ -103,9 +103,14 @@ pub enum PoolAction {
 }
 
 /// Inspiration pool subcommands (DF-61 §4).
+///
+/// Pool-level inspiration items (DB SSOT in `inspiration_items` table);
+/// distinct from per-Work `works.inspiration_log`.
 #[derive(Debug, Subcommand)]
 pub enum InspirationAction {
     /// Add a new inspiration item (creates MD scaffold + DB row).
+    ///
+    /// Pool-level item; distinct from per-Work `works.inspiration_log`.
     Add {
         /// Title for the inspiration item
         title: String,
@@ -114,6 +119,8 @@ pub enum InspirationAction {
         json: bool,
     },
     /// List inspiration items.
+    ///
+    /// Pool-level items; distinct from per-Work `works.inspiration_log`.
     List {
         /// Filter by status (idea, promoted, archived)
         #[arg(long)]
@@ -123,6 +130,8 @@ pub enum InspirationAction {
         json: bool,
     },
     /// Promote an inspiration item — creates a Work + pool row.
+    ///
+    /// Pool-level item; distinct from per-Work `works.inspiration_log`.
     Promote {
         /// Inspiration item ID (npi_...) to promote
         item_id: String,
@@ -134,6 +143,8 @@ pub enum InspirationAction {
         set_default: bool,
     },
     /// Archive an inspiration item.
+    ///
+    /// Pool-level item; distinct from per-Work `works.inspiration_log`.
     Archive {
         /// Inspiration item ID (npi_...) to archive
         item_id: String,

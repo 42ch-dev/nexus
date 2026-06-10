@@ -205,7 +205,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | --- | --- | --- |
 | Redis `novel:active` | `novel_pool_entries.status = active` — **CLI default only**; concurrent multi-Work OK | P1 pool + P0 `works use` |
 | 8-step switch / 2h lock | **OUT** — `.completion-lock.json` per completed Work; no global mutex | P0 lifecycle |
-| `选题库` / `灵感池` | DB SSOT; `Works/_pool/灵感池/*.md` for inspiration files | P1 |
+| `选题库` / `灵感池` | DB SSOT; `{workspace}/Pool/Ideas/*.md` for inspiration files | P1 |
 | CLI | `creator works` (list/status/use/pool); `creator run` single-Work actions; `--from-work` | P0 + P1 |
 | Same-Work concurrent mutate | `works.runtime_lock_holder` (DB SSOT) | P0 |
 
