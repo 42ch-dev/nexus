@@ -107,7 +107,7 @@ On `creator works pool inspiration add --title "..."`:
 | `creator works use <work_id>` | Upsert pool row if needed; demote prior `active` → `queued`; set target `active` |
 | `creator works pool list` | List pool entries |
 | `creator works pool promote <entry_id> [--set-default]` | `queued` → `active`; prior `active` → `queued`; bind/scaffold `work_id` if missing |
-| `creator works pool inspiration promote <item_id> [--set-default]` | Read MD title/body → `run start --idea`; pool `queued` row; item → `promoted` |
+| `creator works pool inspiration promote <item_id> [--set-default] [--idea <text>]` | Read MD title/body → `run start --idea`; pool `queued` row; item → `promoted` |
 | `creator works pool archive <entry_id>` | Entry → `completed` |
 | `creator works pool inspiration add/list` | CRUD inspiration pool |
 | `creator works completion-lock release <work_id>` | See lifecycle spec §3.1 |
@@ -124,6 +124,16 @@ When `pool promote` targets `queued`:
 4. **Does not** pause auto-chain on other Works.
 
 CLI may **warn** when prior `active` Work still has running schedules (informational only).
+
+### 5.1 Inspiration promote `--idea` semantics
+
+When `pool inspiration promote <item_id>` is invoked:
+
+- If `--idea <text>` is supplied, the new Work's `initial_idea` = `--idea` text.
+- If `--idea` is omitted, the new Work's `initial_idea` = the inspiration item's `title`.
+- The new Work's `title` always equals the inspiration item's `title` (not affected by `--idea`).
+
+This makes the behavior explicit and CLI-help-testable.
 
 ---
 
