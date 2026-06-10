@@ -1,19 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T21:30:00+08:00",
+  "updated_at": "2026-06-10T22:00:00+08:00",
   "plans": [
-    {
-      "id": "2026-06-10-v1.41-multi-work-switch",
-      "title": "P0 — DF-60 multi-work lifecycle (locks + creator works IA)",
-      "status": "InReview",
-      "file": ".mstar/plans/2026-06-10-v1.41-multi-work-switch.md",
-      "working_branch": "feature/v1.41-multi-work-switch",
-      "merge_target": "iteration/v1.41",
-      "notes": [
-        "2026-06-10T21:30:00+08:00: 7 commits implemented on feature/v1.41-multi-work-switch (e27c13e1 + aeae5bd3 + b7b6d03e + ba50e27b + 336b7857 + e38ebf89 + edc96c1b). PM merged into iteration/v1.41 as f4b39d42.",
-        "2026-06-10T21:30:00+08:00: QC tri-review dispatched. qc1 + qc3 = Request Changes (3 Critical, 7 Warning). qc2 = Approve. Consolidated verdict = Request Changes. 12 residuals registered. Fix wave dispatched, then targeted re-review on qc1 + qc3."
-      ]
-    },
     {
       "id": "2026-06-10-v1.41-selection-pool",
       "title": "P1 — DF-61 selection pool",
