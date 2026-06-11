@@ -607,6 +607,21 @@ impl StateCompositeTask {
         }
         self
     }
+
+    /// Determine the `NextAction` after judge evaluation.
+    ///
+    /// When `next` is `GoNogo`, both GO and NOGO advance via `Continue`
+    /// (the conditional edge routes to the correct target).
+    /// When `next` is `Linear` or `None`, GO advances but NOGO waits.
+    // Clippy wants const but this borrows self.next; suppress.
+    #[allow(clippy::missing_const_for_fn)]
+    fn judge_next_action(&self, judge_result: bool) -> NextAction {
+        match &self.next {
+            Some(NextTarget::GoNogo(_)) => NextAction::Continue,
+            _ if judge_result => NextAction::Continue,
+            _ => NextAction::WaitForInput,
+        }
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -803,10 +818,8 @@ impl Task for StateCompositeTask {
                                             Some(format!("judge (throttled): {prev_reason}")),
                                             if self.terminal {
                                                 NextAction::End
-                                            } else if prev_result {
-                                                NextAction::Continue
                                             } else {
-                                                NextAction::WaitForInput
+                                                self.judge_next_action(prev_result)
                                             },
                                         ));
                                     }
@@ -830,11 +843,10 @@ impl Task for StateCompositeTask {
                     context.set("_judge_result", result).await;
                     context.set("_judge_reason", reason.clone()).await;
 
-                    if result {
-                        NextAction::Continue
-                    } else {
-                        NextAction::WaitForInput
-                    }
+                    // V1.42 P2: when next is GoNogo, both GO and NOGO advance
+                    // (the conditional edge routes to the correct target).
+                    // When next is Linear/None, GO advances but NOGO waits.
+                    self.judge_next_action(result)
                 }
             }
             Some(ExitWhen::GraphComplete) => {
