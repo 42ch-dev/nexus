@@ -81,6 +81,9 @@ mod tests {
         }
     }
 
+    // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S4
+    // — SourceAnchor::from_excerpt is overloaded (excerpt vs chapter locator);
+    // acceptable while only one variant exists; refactor when multi-source anchors needed.
     fn chapter_anchor() -> SourceAnchor {
         SourceAnchor::from_excerpt("Chapter 3 body excerpt")
     }

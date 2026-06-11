@@ -104,6 +104,10 @@ async fn test_worldless_work_skips_world_promotion() {
     // This test verifies the enqueue still works (no FK violation) and
     // that finalize_extract uses Generic validation mode.
 
+    // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S3
+    // — AC3 empty/absent world_id test gap: this test uses a present world_id
+    // in Generic mode; a dedicated test for truly empty/absent world_id is deferred.
+
     let store = InMemoryKbStore::new();
     let body = KeyBlockBody {
         summary: Some("A generic knowledge item".to_string()),

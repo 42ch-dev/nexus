@@ -48,6 +48,8 @@ pub struct ScheduleSupervisor {
     inner: Mutex<Inner>,
     /// Re-entrancy guard: prevents concurrent `tick()` execution.
     tick_in_progress: AtomicBool,
+    /// Optional workspace directory for on-disk operations (completion-lock write).
+    workspace_dir: Arc<Option<std::path::PathBuf>>,
 }
 
 struct Inner {
@@ -62,12 +64,25 @@ impl ScheduleSupervisor {
     /// `creator_schedules` table).
     #[must_use]
     pub fn new(pool: Arc<SqlitePool>) -> Self {
+        Self::new_with_workspace(pool, None)
+    }
+
+    /// Create a new supervisor with an optional workspace directory.
+    ///
+    /// When provided, the supervisor can write completion-lock files to disk
+    /// after marking a Work as completed (DF-60 §3).
+    #[must_use]
+    pub fn new_with_workspace(
+        pool: Arc<SqlitePool>,
+        workspace_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         Self {
             pool,
             inner: Mutex::new(Inner {
                 running_by_creator: HashMap::new(),
             }),
             tick_in_progress: AtomicBool::new(false),
+            workspace_dir: Arc::new(workspace_dir),
         }
     }
 
@@ -393,6 +408,15 @@ impl ScheduleSupervisor {
             return;
         }
 
+        // DF-60 §6: skip auto-chain on completion-locked Works
+        if work.completion_locked_at.is_some() {
+            tracing::debug!(
+                work_id = %work.work_id,
+                "auto-chain: skipping completion-locked work"
+            );
+            return;
+        }
+
         // Read latest WorkRecord from DB (SSOT, not cached state)
         let work =
             match nexus_local_db::works::get_work(&self.pool, creator_id, &work.work_id).await {
@@ -459,6 +483,8 @@ impl ScheduleSupervisor {
                         "auto-chain: failed to mark work completed"
                     );
                 } else {
+                    self.write_completion_lock_if_available(creator_id, work_id)
+                        .await;
                     tracing::info!(
                         work_id = %work_id,
                         "auto-chain: work completed"
@@ -466,6 +492,34 @@ impl ScheduleSupervisor {
                 }
             }
             ChainAction::NoAction => {}
+        }
+    }
+
+    /// Write completion-lock file for a completed Work (DF-60 §3, best-effort).
+    ///
+    /// DB is SSOT; the file is a derived on-disk artifact for cross-tool observation.
+    /// Failures are logged as warnings but do not propagate.
+    async fn write_completion_lock_if_available(&self, creator_id: &str, work_id: &str) {
+        use crate::auto_chain;
+
+        let Some(ref ws_dir) = *self.workspace_dir else {
+            return;
+        };
+
+        if let Ok(Some(work)) =
+            nexus_local_db::works::get_work(&self.pool, creator_id, work_id).await
+        {
+            if let Some(ref locked_at) = work.completion_locked_at {
+                if let Err(e) = auto_chain::write_completion_lock_for_work(ws_dir, &work, locked_at)
+                {
+                    tracing::warn!(
+                        work_id = %work_id,
+                        work_ref = ?work.work_ref,
+                        error = %e,
+                        "completion-lock file write failed (non-fatal; DB is SSOT)"
+                    );
+                }
+            }
         }
     }
 

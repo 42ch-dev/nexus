@@ -199,7 +199,10 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 anyhow::bail!("Failed to open database pool for schedule supervisor: {e}");
             }
         };
-    let schedule_supervisor = Arc::new(ScheduleSupervisor::new(Arc::new(schedule_pool)));
+    let schedule_supervisor = Arc::new(ScheduleSupervisor::new_with_workspace(
+        Arc::new(schedule_pool),
+        state.workspace_path().map(std::path::PathBuf::from),
+    ));
     state.set_schedule_supervisor(schedule_supervisor.clone());
 
     match schedule_supervisor
@@ -310,10 +313,43 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                     )
                                     .await
                                     {
-                                        Ok(_) => tracing::info!(
-                                            work_id = %work_id,
-                                            "auto-chain boot resume: work completed"
-                                        ),
+                                        Ok(_) => {
+                                            // Write completion-lock file (best-effort; DB is SSOT)
+                                            if let Some(ws_path) = state.workspace_path() {
+                                                if let Ok(Some(refreshed)) =
+                                                    nexus_local_db::works::get_work(
+                                                        recovery_pool,
+                                                        &latest.creator_id,
+                                                        work_id,
+                                                    )
+                                                    .await
+                                                {
+                                                    if let Some(ref locked_at) =
+                                                        refreshed.completion_locked_at
+                                                    {
+                                                        if let Err(e) =
+                                                            nexus_orchestration::auto_chain::write_completion_lock_for_work(
+                                                                std::path::Path::new(&ws_path),
+                                                                &refreshed,
+                                                                locked_at,
+                                                            )
+                                                        {
+                                                            tracing::warn!(
+                                                                work_id = %work_id,
+                                                                error = %e,
+                                                                "auto-chain boot resume: \
+                                                                 completion-lock file write failed \
+                                                                 (non-fatal; DB is SSOT)"
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            tracing::info!(
+                                                work_id = %work_id,
+                                                "auto-chain boot resume: work completed"
+                                            );
+                                        }
                                         Err(e) => tracing::warn!(
                                             work_id = %work_id,
                                             error = %e,

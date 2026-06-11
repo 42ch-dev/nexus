@@ -899,11 +899,12 @@ mod tests {
         assert_eq!(chapter_label(100), "100");
     }
 
-    // ── V1.39 P3: rules reader tests ────────────────────────────────────
+    // ── V1.39 P3 → V1.40 P0.5: rules reader tests ──────────────────────
+    // (V1.40 P0.5 migrated rules from embedded-presets/ to embedded_rules.rs)
 
     #[test]
     fn read_rules_layers_returns_layer1_from_embedded() {
-        // Layer 1 is always available from embedded presets
+        // Layer 1 is always available from embedded_rules module (compile-time include_str!)
         let result = read_rules_layers("/nonexistent/workspace", "my-novel");
         assert!(
             result.is_some(),

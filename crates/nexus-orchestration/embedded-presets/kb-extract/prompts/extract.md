@@ -32,6 +32,7 @@ that would be useful as world-building knowledge.
 2. The `canonical_name` must be unique and descriptive (prefer `snake_case` like `char_lin_xia`, `loc_neon_city`).
 3. The `body` must be a JSON object with `summary`, `attributes`, and `tags` fields.
 4. For novel works, include `novel_category` in `body.attributes`. Valid values: `foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`.
+   **NOTE:** This list must match `nexus-kb::validation::NOVEL_CATEGORIES` exactly. If updating, update both locations.
 5. Set `source_work_entry_id` to "{{work_entry_id}}".
 
 ## Novel category → block_type mapping (default, may override)

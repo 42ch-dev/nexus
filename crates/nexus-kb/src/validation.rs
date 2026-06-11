@@ -23,6 +23,10 @@ use std::fmt;
 /// | `society`          | `organization`            |
 /// | `rules`            | `conflict`                |
 /// | `economy`          | `item`                    |
+///
+/// **DRIFT RISK (R-V140P1-S1):** This list is duplicated in the kb-extract prompt
+/// (`embedded-presets/kb-extract/prompts/extract.md`). When updating, update both
+/// locations to prevent validation-vs-prompt drift.
 pub const NOVEL_CATEGORIES: &[&str] = &[
     "foundation",
     "background",
@@ -85,6 +89,10 @@ pub fn is_valid_novel_category(category: &str) -> bool {
 }
 
 /// Validate `canonical_name` format and safety.
+///
+/// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P1-S5
+/// — String allocations in validation error paths (format! per error) are
+/// acceptable for non-hot-path validation; optimization deferred.
 ///
 /// Rejects:
 /// - Empty strings

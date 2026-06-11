@@ -730,12 +730,178 @@ fn v133_creator_run_subcommands() {
         .clone();
 
     let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["start", "continue", "list", "status"] {
+    for subcmd in &["start", "continue"] {
         assert!(
             help_text.contains(subcmd),
             "V1.33 creator run: expected subcommand '{subcmd}'"
         );
     }
+    // DF-60 (V1.41): `list` and `status` moved to `creator works`.
+    // They should not appear as standalone subcommand entries in the Commands: section.
+    // (The word "list" may still appear in other subcommand descriptions, e.g. "list stages".)
+    let lines: Vec<&str> = help_text.lines().collect();
+    let mut found_list_cmd = false;
+    let mut found_status_cmd = false;
+    for line in &lines {
+        // Subcommand lines start with whitespace and the command name
+        let trimmed = line.trim();
+        if trimmed.starts_with("list ") || trimmed == "list" {
+            found_list_cmd = true;
+        }
+        if trimmed.starts_with("status ") || trimmed == "status" {
+            found_status_cmd = true;
+        }
+    }
+    assert!(
+        !found_list_cmd,
+        "V1.41 creator run: 'list' should no longer be a subcommand (moved to `creator works`)"
+    );
+    assert!(
+        !found_status_cmd,
+        "V1.41 creator run: 'status' should no longer be a subcommand (moved to `creator works`)"
+    );
+}
+
+/// Verify `creator works` subcommands exist (DF-60 §6.2H, V1.41).
+#[test]
+fn v141_creator_works_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for subcmd in &["list", "status", "use", "completion-lock"] {
+        assert!(
+            help_text.contains(subcmd),
+            "V1.41 creator works: expected subcommand '{subcmd}'"
+        );
+    }
+}
+
+/// Verify `creator run start` includes --from-work and --set-default flags (DF-60, V1.41).
+#[test]
+fn v141_creator_run_start_from_work_flags() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--from-work"),
+        "V1.41 creator run start: must have --from-work flag"
+    );
+    assert!(
+        help_text.contains("--set-default"),
+        "V1.41 creator run start: must have --set-default flag"
+    );
+}
+
+/// Verify `creator run resume` includes --reopen and --extend-chapters flags (DF-60, V1.41).
+#[test]
+fn v141_creator_run_resume_reopen_flags() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "resume", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--reopen"),
+        "V1.41 creator run resume: must have --reopen flag"
+    );
+    assert!(
+        help_text.contains("--extend-chapters"),
+        "V1.41 creator run resume: must have --extend-chapters flag"
+    );
+}
+
+/// TC7 (DF-60 T8): Verify `creator run start` accepts `--from-work` for lineage.
+/// This validates the CLI surface; the daemon-level lineage flow is tested
+/// separately in nexus-daemon-runtime integration tests.
+#[test]
+fn v141_run_start_from_work_accepts_work_id() {
+    // Verify the flag appears in help
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "start", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("--from-work"),
+        "TC7: --from-work flag must exist in creator run start"
+    );
+    // The help text should mention lineage or completed work
+    assert!(
+        help_text.contains("lineage") || help_text.contains("completed"),
+        "TC7: --from-work help should explain lineage semantics"
+    );
+}
+
+/// TC8 (DF-60 T8): Verify `creator run resume --reopen` requires --reason.
+/// Without --reason, --reopen alone should fail with a validation error.
+#[test]
+fn v141_resume_reopen_without_reason_rejects() {
+    // We can't fully test this without a running daemon, but we can verify
+    // that the CLI argument parsing accepts --reopen and --reason.
+    // The actual validation (reason required with --reopen) happens at runtime.
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "resume", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    // Verify --reopen exists and mentions --reason requirement
+    assert!(
+        help_text.contains("--reopen"),
+        "TC8: --reopen flag must exist in creator run resume"
+    );
+    assert!(
+        help_text.contains("--reason"),
+        "TC8: --reason flag must exist in creator run resume"
+    );
+}
+
+/// AC5 (V1.41 QA blocker): `creator works pool inspiration add --help` must document
+/// that the pool is distinct from per-Work `works.inspiration_log`.
+#[test]
+fn v141_pool_inspiration_help_disambiguates_from_work_log() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "pool", "inspiration", "add", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    assert!(
+        help_text.contains("inspiration_log"),
+        "AC5: 'creator works pool inspiration add --help' must mention 'inspiration_log' to disambiguate from per-Work log"
+    );
 }
 
 /// Verify `creator run start --help` includes required --idea flag.

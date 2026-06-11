@@ -3,6 +3,7 @@
 
 pub mod auto_chain;
 pub mod capability;
+pub mod completion_lock;
 pub mod embedded_rules;
 pub mod embedded_skills;
 pub mod engine;
