@@ -4,7 +4,7 @@ reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-11-v1.42-agent-tool-production-wiring"
 verdict: "Approve"
-generated_at: "2026-06-11"
+generated_at: "2026-06-12"
 ---
 
 # Code Review Report
@@ -90,20 +90,92 @@ generated_at: "2026-06-11"
 
 The test gaps (W-01, W-02) are real and should be addressed in a follow-up hygiene increment or the next time the test module is touched, but they do not block the narrow DF-47 P3 scope (one read-only tool, production caller wiring proven E2E). Lint and the required test binaries are clean/green. Report committed on the review branch per assignment.
 
-## Revalidation (if targeted re-review)
-N/A — initial wave.
+## Revalidation
 
-## Evidence Appendix (QC verification commands)
+**Targeted re-review (qc2 lane only)**: Fix-wave delta addressing the two Warnings originally raised by this reviewer (W-01 weak FORBIDDEN assertion; W-02 no completion-lock test in the DF-47 E2E suite). Review range for revalidation: `merge-base: b122db77` (PM consolidated pre-fix) + `tip: HEAD` (`8cda43c9`) on the QC worktree `.worktrees/v1.42-p3-reqc` (detached). Equivalent to `git diff b122db77...HEAD`. The delta consists of exactly two commits:
+- `aa0574cc` fix(v1.42 P3): QC fix wave — wire production path + hot-path + test strengthening
+- `8cda43c9` merge(v1.42 P3 fix-wave): PM merge of fix-wave
+
+qc1's original Approve stands; qc3 re-reviews in parallel (different lane). No code changes by this reviewer; only report update + evidence capture.
+
+### W-01 (cross-creator FORBIDDEN test assertion is weak) — Resolved
+- **Initial finding**: The test `agent_tool_e2e_cross_creator_forbidden_via_adapter` only asserted that the error string contained `"daemon tool dispatch failed"`. It did not assert that the underlying error was the `FORBIDDEN` code returned by the handler via `works::get_work`.
+- **Fix evidence** (from `aa0574cc`):
+  - Added `CapabilityError::Forbidden` variant in the orchestration capability layer.
+  - `DaemonToolDispatchAdapter::dispatch_tool` (host_tool_executor.rs) now pattern-matches on `NexusApiError::Forbidden` and emits `CapabilityError::Forbidden(...)` (preserving the error code); all other errors remain `Internal`.
+  - Strengthened the test assertion to match the variant directly:
+    ```rust
+    match &err {
+        nexus_orchestration::capability::CapabilityError::Forbidden(msg) => {
+            assert!(msg.contains("daemon tool dispatch failed"), ...);
+        }
+        other => panic!("expected CapabilityError::Forbidden, got: {:?}", other),
+    }
+    ```
+- **Commands / artifacts**:
+  - `git show aa0574cc -- crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs | head -100` (shows the match arm for Forbidden vs fallback Internal).
+  - `cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring` now runs 6 tests (the cross-creator test is still present and now variant-asserting).
+- **Disposition**: Closed for this wave. The security invariant (cross-creator boundary returns a distinguishable FORBIDDEN code through the schedule/adapter path) is now directly asserted in the regression test.
+
+### W-02 (no explicit completion-lock demonstration in the new production-wiring E2E suite) — Resolved
+- **Initial finding**: Plan AC #2 and the test header claimed "read-only tool respects completion-lock", but none of the 5 new E2E tests seeded a `WorkRecord` with `completion_locked_at` and verified that the read-only `nexus.orchestration.schedule_status` still succeeds through the adapter / `HostToolCallTask` path.
+- **Fix evidence** (from `aa0574cc`):
+  - New helper: `seed_work_completion_locked(state)` — seeds a work then uses `works::patch_work` to set `completion_locked_at` (the INSERT path hardcodes NULL, so patch is required).
+  - New test: `agent_tool_e2e_read_only_tool_succeeds_under_completion_lock`:
+    - Seeds a completion-locked work.
+    - Verifies `record.completion_locked_at.is_some()`.
+    - Dispatches `nexus.orchestration.schedule_status` via `DaemonToolDispatchAdapter`.
+    - Asserts success and correct output (`work_id`, `count: 1`) despite the lock.
+  - This directly exercises the production adapter path for a read-only schedule tool under the lock condition required by spec §4 / §7.4.
+- **Commands / artifacts**:
+  - `git show aa0574cc -- crates/nexus-daemon-runtime/tests/agent_tool_production_wiring.rs | head -120` (shows the new helper + full new test).
+  - `cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring` (6 passed, including the new lock test; the prior 5 + this one).
+- **Disposition**: Closed for this wave. The "respects completion-lock for read-only tools" claim is now hermetically proven from the DF-47 production-wiring test module itself.
+
+### Suggestions remain non-blocking (defer)
+The two Suggestions noted in the initial wave (S-01: broad `WorkspaceState` clone held by the adapter; S-02: error code information lost at adapter boundary for future graph conditional logic) were explicitly non-blocking and outside the fix-wave scope (T8/T9 targeted only the two Warnings). They are tracked as residuals (see `status.json` and consolidated report) and deferred to a later hygiene increment or the next touch of the relevant modules. No new Suggestions or findings were raised from the security/correctness review of the fix delta. qc1's four Suggestions and any qc3-lane items are also out of this reviewer's scope.
+
+### Static checks on the revalidation snapshot (detached HEAD @ 8cda43c9)
+- `cargo +nightly fmt --all --check` → clean (no output)
+- `cargo clippy -p nexus-daemon-runtime -p nexus-orchestration -p nexus-agent-host -- -D warnings` → clean (no warnings emitted for the changed crates)
+- `cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring --test agent_tool_api` → 32 total passed (6 + 26); the new completion-lock test is present and green.
+
+**Revalidation verdict**: Approve
+
+**Rationale (revalidation)**: Both Warnings originally raised by qc2 have been addressed with targeted, minimal, testable changes in the fix wave. The production adapter path now surfaces `CapabilityError::Forbidden` distinctly, and the cross-creator regression test asserts the variant. A direct completion-lock test for the read-only schedule tool (via the adapter) has been added and passes. No Critical or new Warning findings under the security/correctness lens on the delta. The two prior Suggestions remain deferred (non-blocking). Lint, fmt, and the required test binaries are clean/green on the post-fix snapshot. This satisfies the acceptance criteria for the targeted re-review of qc2's items.
+
+## Evidence Appendix (QC verification commands) (revalidation run)
 ```bash
-# Worktree / branch / range alignment
-cd /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-p3
-git rev-parse --show-toplevel   # /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-p3
-git branch --show-current       # feature/v1.42-agent-tool-wiring
-git log 11f8079a..4798ff64 --oneline  # 4 commits, matches Assignment
+# QC worktree / branch / range alignment (revalidation snapshot)
+cd /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-p3-reqc
+git rev-parse --show-toplevel         # /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-p3-reqc
+git rev-parse --abbrev-ref HEAD       # HEAD (detached)
+git log -1 --oneline                  # 8cda43c9 merge(v1.42 P3 fix-wave)...
+git log b122db77..HEAD --oneline      # exactly 2 commits (aa0574cc + 8cda43c9)
+git diff b122db77..HEAD --stat        # 10 files, +248/-21 (matches fix wave)
 
-# Lint / tests (required by Assignment)
-cargo +nightly fmt --all -- --check          # (no output = clean)
-cargo clippy -p nexus-daemon-runtime -p nexus-orchestration -p nexus-agent-host -- -D warnings  # clean (1 pre-existing warning in unrelated test)
-cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring --test agent_tool_api  # 31 passed (5+26)
+# Lint / tests (required evidence for revalidation)
+cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring 2>&1 | tail -40
+#   6 passed (the new completion-lock test + prior 5)
+cargo test -p nexus-daemon-runtime --test agent_tool_api 2>&1 | tail -40
+#   26 passed (plus 1 pre-existing unused-import warning in test; not from this delta)
+cargo clippy -p nexus-daemon-runtime -p nexus-orchestration -p nexus-agent-host -- -D warnings 2>&1 | tail -40
+#   clean (no warnings from changed crates)
+cargo +nightly fmt --all --check 2>&1 | tail -20
+#   (no output = clean)
+
+# W-01 evidence (FORBIDDEN code preservation + strengthened test)
+git show aa0574cc -- crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs | head -100
+#   shows match arm: NexusApiError::Forbidden → CapabilityError::Forbidden; fallback Internal
+
+# W-02 evidence (completion-lock test + seed helper)
+git show aa0574cc -- crates/nexus-daemon-runtime/tests/agent_tool_production_wiring.rs | head -120
+#   shows seed_work_completion_locked + agent_tool_e2e_read_only_tool_succeeds_under_completion_lock
+
+# Report commit (after edit + git add of only this path)
+git log -1 --oneline .mstar/plans/reports/2026-06-11-v1.42-agent-tool-production-wiring/qc2.md
 ```
-All commands executed from the Assignment-specified `Review cwd` on the exact `Review range`.
+All commands executed from the Assignment-specified QC worktree (detached HEAD at the post-merge fix-wave tip) using the exact `Review range / Diff basis` (`b122db77..HEAD`). Working tree clean after the report-only commit.
+
+## Prior Evidence Appendix (initial wave, retained for traceability)
+(Original commands from the initial qc2 review on the topic branch are preserved above for audit continuity; the revalidation run supersedes the runtime evidence for the fix delta.)
