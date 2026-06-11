@@ -127,9 +127,11 @@ Rules:
 
 Daemon Local API and `nexus.work.patch` **must** use the same acquire/release paths as CLI.
 
-### 4.2 Production acquire contract (V1.42 P0)
+### 4.2 Production acquire contract (V1.42 P0 — Implemented)
 
-**Gap (PR #53 security re-review)**: V1.41 shipped DB columns and spec rules but **production paths do not yet acquire** `runtime_lock_holder`.
+~~**Gap (PR #53 security re-review)**: V1.41 shipped DB columns and spec rules but **production paths do not yet acquire** `runtime_lock_holder`.~~
+
+**Resolved (V1.42 P0)**: All mutating paths now acquire/release `runtime_lock_holder` via `RuntimeLockGuard` RAII + `nexus_local_db::runtime_lock` module. See plan `2026-06-11-v1.42-runtime-lock-and-hygiene`.
 
 | Path | Acquire before mutate | Release |
 | --- | --- | --- |
