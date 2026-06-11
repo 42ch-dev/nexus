@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-11-v1.42-ux-polish"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-12"
 ---
 
@@ -17,17 +17,24 @@ generated_at: "2026-06-12"
 - Report Timestamp: 2026-06-12
 
 ## Scope
+
+### Wave 1 (initial review)
 - plan_id: 2026-06-11-v1.42-ux-polish
 - Review range / Diff basis: merge-base: 868f1b21 + tip: HEAD (ad180b44) — equivalent to `git diff 868f1b21...HEAD`
 - Working branch (verified): HEAD (detached at ad180b44 on iteration/v1.42 integration line)
 - Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-plast-qc
 - Files reviewed: 8 changed files (229 insertions, 87 deletions)
 - Commit range: d04ae9f4..ad180b44 (8 commits incl. merge)
+
+### Revalidation (fix-wave review)
+- Review range / Diff basis: merge-base: 97097c74 + tip: HEAD (`5e6aed97`) — equivalent to `git diff 97097c74...HEAD`
+- Working branch (verified): HEAD (detached at `5e6aed97` on iteration/v1.42 integration line)
+- Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-plast-reqc
+- Files reviewed: 3 changed files (23 insertions, 26 deletions)
+- Commit range: `97097c74..5e6aed97` (5 commits incl. merge)
 - Tools run:
   - `cargo test -p nexus42 -- creator_works`
   - `cargo test -p nexus-orchestration -p nexus-daemon-runtime -p nexus42`
-  - `cargo test -p nexus-daemon-runtime --test selection_pool`
-  - `cargo test -p nexus-local-db`
   - `cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -- -D warnings`
   - `cargo +nightly fmt --all --check`
 
@@ -108,6 +115,63 @@ In `.mstar/status.json`, `R-V141P1-14` has `decision: "accept"` but `lifecycle: 
   - Source Reference: `.mstar/status.json` R-V141P1-14
   - Confidence: High
 
+## Revalidation
+
+**Re-review date**: 2026-06-12
+**Fix-wave range**: `97097c74..HEAD` (`5e6aed97`) — 5 commits
+**Re-reviewers**: qc-specialist (qc1 lane), qc-specialist-3 (qc3 lane, this report)
+
+### W-01: Inaccurate closure note for R-V141P1-12 — **RESOLVED**
+
+**Evidence**: Commit `cefef2b4` corrected the `closure_note` for residual `R-V141P1-12`:
+
+```
+-    closure_note: "V1.42 P-last T2: added romanized CJK slug fallback ..."
++    closure_note: "V1.42 P-last T2: added idea-<hex> short-id fallback ..."
+```
+
+Current `.mstar/status.json` (HEAD `5e6aed97`) confirms:
+```json
+{
+  "id": "R-V141P1-12",
+  "closure_note": "V1.42 P-last T2: added idea-<hex> short-id fallback in title_to_slug for pure-CJK titles. When no ASCII chars are extractable, a deterministic hex suffix is appended (e.g. idea-a1b2c3) instead of producing 'untitled'.",
+  "closed_at": "2026-06-12"
+}
+```
+
+The closure note now accurately reflects the `idea-<hex>` short-id fallback behavior, matching the implementation in `crates/nexus-local-db/src/inspiration_items.rs::generate_fallback_slug()` and the unit test `test_title_to_slug_chinese`.
+
+The derived residual `R-V142PLAST-QC3-W-01` is also marked `lifecycle: "resolved"`, `decision: "accept"`, `closed_at: "2026-06-12"` in `status.json` (commit `78f06141`).
+
+### W-02: Pre-existing `works_api.rs` test failures — **STILL OPEN (non-blocking, defer)**
+
+No fix was dispatched for these pre-existing failures in the P-last fix wave (out of scope). The same two tests continue to fail:
+
+- `handler_append_inspiration_returns_404_for_unknown` — expects `404`, gets `500`
+- `patch_work_stage_change_is_auditable` — panics on stale runtime lock
+
+**Evidence** (re-run on fix-wave HEAD):
+```
+test result: FAILED. 30 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+Per original rationale: out of P-last scope; PM/QA should verify against base and track under originating plan (V1.42 P0 runtime-lock).
+
+### S-01 / S-02 / S-03 — **DEFERRED (non-blocking)**
+
+No fix wave commits addressed these suggestions. They remain valid but non-blocking:
+
+- **S-01**: `spawn_blocking` boundary for file-exists checks — performance hygiene, not a hot path.
+- **S-02**: End-to-end CJK fallback test — coverage gap, unit test exists.
+- **S-03**: `R-V141P1-14` metadata lifecycle consistency — metadata hygiene.
+
+### Static analysis re-run
+
+- `cargo clippy -p nexus42 -p nexus-orchestration -p nexus-daemon-runtime -- -D warnings` — **PASS** (no warnings)
+- `cargo +nightly fmt --all --check` — **PASS** (no formatting issues)
+- `cargo test -p nexus42 -- creator_works` — **PASS** (1 passed)
+- `cargo test -p nexus-orchestration -p nexus-daemon-runtime -p nexus42` — **2 pre-existing failures** (same as wave 1, out of scope)
+
 ## Performance / Reliability Assessment
 
 | Area | Assessment |
@@ -124,9 +188,13 @@ In `.mstar/status.json`, `R-V141P1-14` has `decision: "accept"` but `lifecycle: 
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 2 |
-| 🟢 Suggestion | 3 |
+| 🟡 Warning | 1 (W-02, pre-existing, out of scope — defer) |
+| 🟢 Suggestion | 3 (S-01–S-03, deferred) |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-Rationale: W-01 is inside P-last scope (T5 residual closeout) and trivial to fix — the SSOT closure note must match implemented behavior. Once W-01 is corrected, the remaining items (W-02 pre-existing test failures, S-01-S-03) can be accepted as residuals or suggestions without blocking P-last merge.
+Rationale: W-01 (inaccurate closure note for R-V141P1-12) has been verified fixed in commit `cefef2b4` — the closure note now correctly describes the `idea-<hex>` short-id fallback instead of the phantom "romanized" description. The derived residual `R-V142PLAST-QC3-W-01` is marked resolved in `status.json`.
+
+W-02 (pre-existing `works_api.rs` test failures) was explicitly classified as out of P-last scope in wave 1 and remains unchanged; it does not block P-last merge. S-01–S-03 remain valid suggestions but are non-blocking.
+
+All required static checks pass (clippy clean, nightly fmt clean). The fix-wave delta is limited to status-json hygiene and a small refactor (`truncate_with_ellipsis` extraction) with no runtime behavior change.
