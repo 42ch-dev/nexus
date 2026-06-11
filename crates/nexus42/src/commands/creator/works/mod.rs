@@ -378,30 +378,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 if let Some(locked_at) = resp.get("completion_locked_at").and_then(|v| v.as_str()) {
                     println!("completion_locked_at: {locked_at}");
                     // V1.42 P-last (R-V141P0-06): missing-file hint.
-                    // Best-effort check: if work_ref is known, verify the lock file
-                    // exists on disk. DB is SSOT, but a missing file is actionable.
-                    if !work_ref.starts_with('(') {
-                        if let Ok(cfg) = crate::config::CliConfig::load() {
-                            if let Some(creator_id) = &cfg.active_creator_id {
-                                let ws_slug = cfg.active_workspace_slug_by_creator
-                                    .get(creator_id);
-                                if let Some(ws_slug) = ws_slug {
-                                    let home = dirs::home_dir().unwrap_or_default();
-                                    let ws_dir = nexus_home_layout::operational_workspace_dir(
-                                        &home, creator_id, ws_slug,
-                                    );
-                                    let lock_path = ws_dir
-                                        .join("Works")
-                                        .join(work_ref)
-                                        .join(".completion-lock.json");
-                                    if !lock_path.exists() {
-                                        println!("⚠ completion-lock file missing (DB says locked but file not found)");
-                                        println!("  Run: nexus42 creator run reconcile-chapters {resolved_id}");
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    print_completion_lock_hint(work_ref, &resolved_id);
                 }
                 if let Some(lock_holder) = resp.get("runtime_lock_holder").and_then(|v| v.as_str())
                 {
@@ -409,29 +386,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 }
 
                 // Per-chapter table
-                println!();
-                println!(
-                    "{:<5} {:<30} {:<14} {:<14}",
-                    "CH", "TITLE", "STATUS", "UPDATED"
-                );
-                for ch in ch_list {
-                    let num = ch
-                        .get("chapter_number")
-                        .and_then(serde_json::Value::as_i64)
-                        .unwrap_or(0);
-                    let ch_title = ch
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("(untitled)");
-                    let ch_status = ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let ch_updated = ch.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
-                    let display_title = if ch_title.len() > 28 {
-                        format!("{}…", &ch_title[..28])
-                    } else {
-                        ch_title.to_string()
-                    };
-                    println!("{num:<5} {display_title:<30} {ch_status:<14} {ch_updated:<14}");
-                }
+                print_chapter_table(ch_list);
             }
         } else {
             // Non-novel or generic work display
@@ -790,4 +745,67 @@ async fn handle_inspiration_archive(client: &DaemonClient, item_id: &str) -> Res
     println!("Inspiration item {item_id} archived.");
 
     Ok(())
+}
+
+// ── Shared display helpers (V1.42 P-last R-V141P0-02 dedup) ───────────
+
+/// Print per-chapter status table for novel works.
+fn print_chapter_table(chapters: &[serde_json::Value]) {
+    println!();
+    println!(
+        "{:<5} {:<30} {:<14} {:<14}",
+        "CH", "TITLE", "STATUS", "UPDATED"
+    );
+    for ch in chapters {
+        let num = ch
+            .get("chapter_number")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let ch_title = ch
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(untitled)");
+        let ch_status = ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+        let ch_updated = ch.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
+        let display_title = truncate_with_ellipsis(ch_title, 28);
+        println!("{num:<5} {display_title:<30} {ch_status:<14} {ch_updated:<14}");
+    }
+}
+
+/// V1.42 P-last (R-V141P0-06): best-effort on-disk completion-lock file check.
+///
+/// DB `completion_locked_at` is the authoritative lock state. The
+/// `.completion-lock.json` file is a derived artifact. When the file is
+/// missing, surface a hint to the user.
+fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
+    if work_ref.starts_with('(') {
+        return;
+    }
+    if let Ok(cfg) = crate::config::CliConfig::load() {
+        if let Some(creator_id) = &cfg.active_creator_id {
+            if let Some(ws_slug) = cfg.active_workspace_slug_by_creator.get(creator_id) {
+                let home = dirs::home_dir().unwrap_or_default();
+                let ws_dir = nexus_home_layout::operational_workspace_dir(
+                    &home, creator_id, ws_slug,
+                );
+                let lock_path = ws_dir
+                    .join("Works")
+                    .join(work_ref)
+                    .join(".completion-lock.json");
+                if !lock_path.exists() {
+                    println!("⚠ completion-lock file missing (DB says locked but file not found)");
+                    println!("  Run: nexus42 creator run reconcile-chapters {work_id}");
+                }
+            }
+        }
+    }
+}
+
+/// Truncate a string to `max_len` characters, appending `…` if truncated.
+fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
+    if s.len() > max_len {
+        format!("{}…", &s[..max_len])
+    } else {
+        s.to_string()
+    }
 }
