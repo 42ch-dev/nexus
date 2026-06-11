@@ -371,6 +371,7 @@ mod tests {
                         args.as_ref()?.get("prompt_file")?.as_str()
                     }
                     manifest::EnterAction::InnerGraph { .. } => None,
+                    manifest::EnterAction::HostTool { .. } => None,
                 })
             })
             .collect();

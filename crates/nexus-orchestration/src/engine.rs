@@ -526,6 +526,8 @@ pub struct GraphFlowEngine {
     state: Arc<EngineSharedState>,
     /// Shared capability registry (propagated to composite tasks at runtime).
     caps: Arc<CapabilityRegistry>,
+    /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
 }
 
 impl Clone for GraphFlowEngine {
@@ -533,6 +535,7 @@ impl Clone for GraphFlowEngine {
         Self {
             state: self.state.clone(),
             caps: self.caps.clone(),
+            daemon_tool_dispatch: self.daemon_tool_dispatch.clone(),
         }
     }
 }
@@ -550,7 +553,19 @@ impl GraphFlowEngine {
         Self {
             state: Arc::new(EngineSharedState::new(storage)),
             caps,
+            daemon_tool_dispatch: None,
         }
+    }
+
+    /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).
+    ///
+    /// Must be called before any session starts if preset graphs contain
+    /// `host_tool` enter actions. Typically called once during daemon boot.
+    pub fn set_daemon_tool_dispatch(
+        &mut self,
+        dispatch: Arc<dyn crate::capability::DaemonToolDispatch>,
+    ) {
+        self.daemon_tool_dispatch = Some(dispatch);
     }
 
     /// Recover persisted sessions into the in-memory tracker (WS2 R1 + R6).
@@ -609,8 +624,12 @@ impl GraphFlowEngine {
             state: self.state.clone(),
         });
         let engine_proxy: Arc<dyn OrchestrationEngine> = proxy;
-        let wired =
-            crate::preset::loader::build_wired_outer_graph(&loaded, &engine_proxy, &self.caps);
+        let wired = crate::preset::loader::build_wired_outer_graph(
+            &loaded,
+            &engine_proxy,
+            &self.caps,
+            self.daemon_tool_dispatch.clone(),
+        );
 
         // Step 3: Create FlowRunner with the wired graph and existing storage.
         // The storage already contains the persisted session data, so the
@@ -869,7 +888,12 @@ impl OrchestrationEngine for GraphFlowEngine {
         let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
-        let wired = crate::preset::loader::build_wired_outer_graph(loaded, &proxy, &self.caps);
+        let wired = crate::preset::loader::build_wired_outer_graph(
+            loaded,
+            &proxy,
+            &self.caps,
+            self.daemon_tool_dispatch.clone(),
+        );
         self.start_session(&loaded.id, Arc::new(wired)).await
     }
 
@@ -881,7 +905,12 @@ impl OrchestrationEngine for GraphFlowEngine {
         let proxy: Arc<dyn OrchestrationEngine> = Arc::new(EngineProxy {
             state: self.state.clone(),
         });
-        let wired = crate::preset::loader::build_wired_outer_graph(loaded, &proxy, &self.caps);
+        let wired = crate::preset::loader::build_wired_outer_graph(
+            loaded,
+            &proxy,
+            &self.caps,
+            self.daemon_tool_dispatch.clone(),
+        );
         self.start_session_with_creator(&loaded.id, Arc::new(wired), Some(creator_id))
             .await
     }

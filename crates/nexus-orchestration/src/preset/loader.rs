@@ -567,6 +567,11 @@ fn validate_manifest(
                         });
                     }
                 }
+                crate::preset::manifest::EnterAction::HostTool { .. } => {
+                    // HostTool actions are dispatched through the daemon's
+                    // unified registry, not the capability registry. No
+                    // static validation needed.
+                }
             }
         }
 
@@ -885,22 +890,33 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
 
 /// Build the outer graph with engine + inner graph references wired into
 /// composite tasks (for `start_session_with_preset`).
+///
+/// `daemon_tool_dispatch` is passed by value because it's cloned into each
+/// composite task that contains `HostTool` enter actions.
+#[allow(clippy::needless_pass_by_value)]
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
 ) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
 
     let graph = graph_flow::Graph::new(&loaded.id);
 
     for state in &loaded.manifest.states {
-        let task = StateCompositeTask::from_manifest(state)
+        let mut task = StateCompositeTask::from_manifest(state)
             .with_resolved_template(&loaded.id)
             .with_engine(engine.clone())
             .with_inner_graphs(loaded.inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())
             .with_registry(caps.clone());
+
+        // Wire daemon tool dispatch for HostTool enter actions (DF-47, V1.42 P3).
+        if let Some(ref dispatch) = daemon_tool_dispatch {
+            task = task.with_daemon_tool_dispatch(dispatch.clone());
+        }
+
         graph.add_task(std::sync::Arc::new(task));
     }
 
