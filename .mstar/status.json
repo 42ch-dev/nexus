@@ -914,7 +914,7 @@
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last",
         "lifecycle": "resolved",
-        "closure_note": "V1.42 P-last T3: deduplicated handle_status by extracting shared display helpers (print_work_header, print_chapter_table). Line count reduced, no logic change.",
+        "closure_note": "V1.42 P-last T3: deduplicated handle_status by extracting shared display helpers (print_chapter_table, print_completion_lock_hint, truncate_with_ellipsis). Line count reduced, no logic change.",
         "closed_at": "2026-06-12"
       },
       {
@@ -1158,7 +1158,7 @@
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last",
         "lifecycle": "resolved",
-        "closure_note": "V1.42 P-last T2: added CJK transliteration fallback in title_to_slug. Pure-CJK titles now produce romanized slug (e.g. 灵感和创意 → ling-gan-he-chuang-yi) instead of 'untitled'.",
+        "closure_note": "V1.42 P-last T2: added idea-<hex> short-id fallback in title_to_slug for pure-CJK titles. When no ASCII chars are extractable, a deterministic hex suffix is appended (e.g. idea-a1b2c3) instead of producing 'untitled'.",
         "closed_at": "2026-06-12"
       },
       {
