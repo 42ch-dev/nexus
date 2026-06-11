@@ -9,6 +9,8 @@ use clap::Subcommand;
 
 use crate::api::DaemonClient;
 use crate::config::CliConfig;
+// V1.42 P-last (R-V141P0-06): completion-lock file path check
+use nexus_home_layout;
 
 /// Work management subcommands (DF-60 §6.2H).
 #[derive(Debug, Subcommand)]
@@ -194,7 +196,7 @@ async fn handle_list(client: &DaemonClient, status: Option<String>, json: bool) 
             }
             Some(works) => {
                 println!(
-                    "{:<36} {:30} {:12} {:12} UPDATED",
+                    "{:<36} {:30} {:12} {:12} LOCK UPDATED",
                     "WORK_ID", "TITLE", "STATUS", "INTAKE"
                 );
                 for w in works {
@@ -206,12 +208,17 @@ async fn handle_list(client: &DaemonClient, status: Option<String>, json: bool) 
                         .and_then(|v| v.as_str())
                         .unwrap_or("?");
                     let updated = w.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
+                    let locked = w
+                        .get("completion_locked_at")
+                        .and_then(|v| v.as_str())
+                        .is_some();
+                    let lock_icon = if locked { "🔒" } else { " " };
                     let display_title = if title.len() > 28 {
                         format!("{}…", &title[..28])
                     } else {
                         title.to_string()
                     };
-                    println!("{id:<36} {display_title:30} {ws:12} {intake:12} {updated}");
+                    println!("{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}");
                 }
                 println!("\n{} work(s)", works.len());
             }
@@ -370,6 +377,31 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 }
                 if let Some(locked_at) = resp.get("completion_locked_at").and_then(|v| v.as_str()) {
                     println!("completion_locked_at: {locked_at}");
+                    // V1.42 P-last (R-V141P0-06): missing-file hint.
+                    // Best-effort check: if work_ref is known, verify the lock file
+                    // exists on disk. DB is SSOT, but a missing file is actionable.
+                    if !work_ref.starts_with('(') {
+                        if let Ok(cfg) = crate::config::CliConfig::load() {
+                            if let Some(creator_id) = &cfg.active_creator_id {
+                                let ws_slug = cfg.active_workspace_slug_by_creator
+                                    .get(creator_id);
+                                if let Some(ws_slug) = ws_slug {
+                                    let home = dirs::home_dir().unwrap_or_default();
+                                    let ws_dir = nexus_home_layout::operational_workspace_dir(
+                                        &home, creator_id, ws_slug,
+                                    );
+                                    let lock_path = ws_dir
+                                        .join("Works")
+                                        .join(work_ref)
+                                        .join(".completion-lock.json");
+                                    if !lock_path.exists() {
+                                        println!("⚠ completion-lock file missing (DB says locked but file not found)");
+                                        println!("  Run: nexus42 creator run reconcile-chapters {resolved_id}");
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 if let Some(lock_holder) = resp.get("runtime_lock_holder").and_then(|v| v.as_str())
                 {
