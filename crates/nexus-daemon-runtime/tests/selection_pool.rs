@@ -650,3 +650,157 @@ async fn test_promote_inspiration_atomicity_on_step3_failure() {
         Some(promote_resp.work_id.as_str())
     );
 }
+
+// ─── TC14: set_pool_active IDOR — body creator_id must not override active ─
+
+/// Verify that `set_pool_active` rejects a request where the body `creator_id`
+/// does not match the active creator from config.toml. This is the IDOR fix:
+/// a caller with daemon API access must not be able to switch another
+/// creator's active pool work.
+#[tokio::test]
+async fn test_set_pool_active_rejects_mismatched_creator_id() {
+    use nexus_daemon_runtime::api::handlers::works::SetPoolActiveRequest;
+
+    let (state, _tmp) = handler_state().await;
+
+    // Create a Work owned by test_creator (the active creator)
+    let work_id = create_test_work(&state, "IDOR Target Novel").await;
+
+    // Promote it via the legitimate promote handler
+    let _entry = nexus_daemon_runtime::api::handlers::works::promote_pool_entry(
+        State(state.clone()),
+        axum::Json(PromotePoolRequest {
+            work_id: work_id.clone(),
+            set_default: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Verify it's active before the attack
+    let active_before =
+        nexus_local_db::novel_pool_entries::get_active_pool_entry(state.pool(), "test_creator")
+            .await
+            .unwrap();
+    assert!(
+        active_before.is_some(),
+        "pre-condition: should have an active pool entry"
+    );
+
+    // Attack: send set_pool_active with a forged creator_id
+    let result = nexus_daemon_runtime::api::handlers::works::set_pool_active(
+        State(state.clone()),
+        axum::Json(SetPoolActiveRequest {
+            action: "set_pool_active".to_string(),
+            work_id: work_id.clone(),
+            creator_id: Some("ctr_attacker".to_string()),
+        }),
+    )
+    .await;
+
+    // Must be rejected as 403 Forbidden
+    assert!(result.is_err(), "IDOR request must be rejected");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::FORBIDDEN,
+        "Expected 403 Forbidden for IDOR, got {} ({:?})",
+        err.status_code(),
+        err
+    );
+
+    // Pool must remain unchanged (attack had no effect)
+    let active_after =
+        nexus_local_db::novel_pool_entries::get_active_pool_entry(state.pool(), "test_creator")
+            .await
+            .unwrap();
+    assert!(
+        active_after.is_some(),
+        "active pool entry must remain after rejected IDOR"
+    );
+    assert_eq!(
+        active_after.unwrap().work_id,
+        Some(work_id),
+        "active work_id must be unchanged after rejected IDOR"
+    );
+}
+
+/// Verify that `set_pool_active` succeeds when body `creator_id` matches the
+/// active creator (legitimate use).
+#[tokio::test]
+async fn test_set_pool_active_allows_matching_creator_id() {
+    use nexus_daemon_runtime::api::handlers::works::SetPoolActiveRequest;
+
+    let (state, _tmp) = handler_state().await;
+    let work_id_1 = create_test_work(&state, "First Novel").await;
+    let work_id_2 = create_test_work(&state, "Second Novel").await;
+
+    // Promote work 1 first
+    let _ = nexus_daemon_runtime::api::handlers::works::promote_pool_entry(
+        State(state.clone()),
+        axum::Json(PromotePoolRequest {
+            work_id: work_id_1.clone(),
+            set_default: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Now set work 2 as active via set_pool_active with matching creator_id
+    let result = nexus_daemon_runtime::api::handlers::works::set_pool_active(
+        State(state.clone()),
+        axum::Json(SetPoolActiveRequest {
+            action: "set_pool_active".to_string(),
+            work_id: work_id_2.clone(),
+            creator_id: Some("test_creator".to_string()),
+        }),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "Matching creator_id should succeed: {:?}",
+        result.err()
+    );
+    let entry = result.unwrap();
+    assert_eq!(entry.work_id, work_id_2);
+    assert_eq!(entry.status, "active");
+}
+
+/// Verify that `set_pool_active` works without body `creator_id` (existing
+/// callers that omit the field).
+#[tokio::test]
+async fn test_set_pool_active_works_without_body_creator_id() {
+    use nexus_daemon_runtime::api::handlers::works::SetPoolActiveRequest;
+
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_test_work(&state, "No Body Creator").await;
+
+    // Promote first so it has a pool entry
+    let _ = nexus_daemon_runtime::api::handlers::works::promote_pool_entry(
+        State(state.clone()),
+        axum::Json(PromotePoolRequest {
+            work_id: work_id.clone(),
+            set_default: None,
+        }),
+    )
+    .await
+    .unwrap();
+
+    // Call set_pool_active without creator_id (should use active creator)
+    let result = nexus_daemon_runtime::api::handlers::works::set_pool_active(
+        State(state.clone()),
+        axum::Json(SetPoolActiveRequest {
+            action: "set_pool_active".to_string(),
+            work_id: work_id.clone(),
+            creator_id: None,
+        }),
+    )
+    .await;
+
+    assert!(
+        result.is_ok(),
+        "Omitting creator_id should succeed: {:?}",
+        result.err()
+    );
+}
