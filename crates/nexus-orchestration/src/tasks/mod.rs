@@ -1759,6 +1759,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockGoProvider)),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1797,6 +1798,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockNogoProvider)),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1889,6 +1891,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(provider),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1934,6 +1937,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(provider),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
