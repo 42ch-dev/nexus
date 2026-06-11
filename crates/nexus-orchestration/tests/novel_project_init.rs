@@ -884,3 +884,216 @@ async fn t7g_db_failure_rolls_back_filesystem_scaffold() {
     // harness or pre-existing — only the work_ref subtree is owned by
     // this invocation.
 }
+
+// ---------------------------------------------------------------------------
+// T6: V1.42 multi-volume tests (AC1–AC3)
+// ---------------------------------------------------------------------------
+
+/// AC1: Single-volume regression — existing Works get volume=1 without user action.
+#[tokio::test]
+async fn t6_ac1_single_volume_regression_volume_defaults_to_1() {
+    let (pool, dir) = fresh_pool().await;
+    insert_test_work(&pool, "wrk_t6_ac1").await;
+    let works_root = dir.path().join("Works");
+    let cap = make_cap(pool.clone(), &works_root);
+
+    // Insert a World for FK validation
+    let _world_id = insert_test_world(&pool, "wld_t6_ac1").await;
+
+    // Single-volume (default total_volumes=1) — no explicit volume in input
+    let input = scaffold_input(
+        "wrk_t6_ac1",
+        "ac1-regression",
+        "AC1 Regression",
+        Some("wld_t6_ac1"),
+        3,
+    );
+    let out = cap.run(input).await.expect("scaffold should succeed");
+
+    // All chapters must have volume=1
+    let chapters = nexus_local_db::work_chapters::list_chapters(&pool, "wrk_t6_ac1")
+        .await
+        .expect("list chapters");
+    assert_eq!(chapters.len(), 3, "should have 3 chapters");
+    for ch in &chapters {
+        assert_eq!(
+            ch.volume,
+            Some(1),
+            "all chapters must have volume=1, got {:?}",
+            ch.volume
+        );
+    }
+
+    // next_chapter_volume_aware returns (1, 1) for fresh Work
+    let next = nexus_local_db::work_chapters::next_chapter_volume_aware(&pool, "wrk_t6_ac1")
+        .await
+        .expect("next chapter volume aware");
+    assert_eq!(
+        next,
+        Some((1, 1)),
+        "next chapter should be (volume=1, chapter=1), got {:?}",
+        next
+    );
+
+    let _ = out;
+}
+
+/// AC2: Two-volume happy path — init → finalize → auto-chain picks next.
+#[tokio::test]
+async fn t6_ac2_two_volume_happy_path() {
+    let (pool, dir) = fresh_pool().await;
+    insert_test_work(&pool, "wrk_t6_ac2").await;
+    let works_root = dir.path().join("Works");
+    let cap = make_cap(pool.clone(), &works_root);
+
+    let _world_id = insert_test_world(&pool, "wld_t6_ac2").await;
+
+    // Two-volume, 6 chapters each = 12 total
+    let mut input = scaffold_input(
+        "wrk_t6_ac2",
+        "ac2-twovol",
+        "AC2 Two Volume",
+        Some("wld_t6_ac2"),
+        12,
+    );
+    input["total_volumes"] = serde_json::Value::Number(2.into());
+
+    let _out = cap.run(input).await.expect("scaffold should succeed");
+
+    // Verify chapters are seeded across both volumes
+    let chapters = nexus_local_db::work_chapters::list_chapters(&pool, "wrk_t6_ac2")
+        .await
+        .expect("list chapters");
+    assert_eq!(
+        chapters.len(),
+        12,
+        "should have 12 chapters (2 volumes × 6)"
+    );
+
+    let vol1_count = chapters.iter().filter(|c| c.volume == Some(1)).count();
+    let vol2_count = chapters.iter().filter(|c| c.volume == Some(2)).count();
+    assert_eq!(vol1_count, 6, "volume 1 should have 6 chapters");
+    assert_eq!(vol2_count, 6, "volume 2 should have 6 chapters");
+
+    // next_chapter_volume_aware returns (1, 1) — first non-finalized
+    let next = nexus_local_db::work_chapters::next_chapter_volume_aware(&pool, "wrk_t6_ac2")
+        .await
+        .expect("next chapter volume aware");
+    assert_eq!(
+        next,
+        Some((1, 1)),
+        "initial next should be vol 1, ch 1, got {:?}",
+        next
+    );
+
+    // Finalize volume 1 chapters 1-6
+    let now = "2026-06-11T12:00:00Z";
+    for ch in 1..=6 {
+        nexus_local_db::work_chapters::update_status(
+            &pool,
+            "wrk_t6_ac2",
+            ch,
+            1,
+            "finalized",
+            Some(4000),
+            now,
+        )
+        .await
+        .expect("update_status");
+    }
+
+    // After finalizing all vol 1, next should be vol 2, ch 1
+    let next_after_vol1 =
+        nexus_local_db::work_chapters::next_chapter_volume_aware(&pool, "wrk_t6_ac2")
+            .await
+            .expect("next chapter after vol1 complete");
+    assert_eq!(
+        next_after_vol1,
+        Some((2, 1)),
+        "after vol 1 finalized, next should be vol 2, ch 1, got {:?}",
+        next_after_vol1
+    );
+
+    // Verify volume-outline.md exists with multi-volume structure
+    let vol_outline =
+        std::fs::read_to_string(works_root.join("ac2-twovol/Outlines/volume-outline.md"))
+            .expect("volume-outline.md should exist");
+    assert!(
+        vol_outline.contains("volume: 1"),
+        "should have volume: 1 section"
+    );
+    assert!(
+        vol_outline.contains("volume: 2"),
+        "should have volume: 2 section"
+    );
+    assert!(
+        vol_outline.contains("chapter_range"),
+        "should have chapter_range"
+    );
+}
+
+/// AC3: Volume-aware status — chapter rows include volume column.
+#[tokio::test]
+async fn t6_ac3_status_api_volume_aware_rows() {
+    let (pool, _dir) = fresh_pool().await;
+    insert_test_work(&pool, "wrk_t6_ac3").await;
+
+    // Seed multi-volume chapters directly
+    nexus_local_db::work_chapters::seed_chapters_multi_volume(
+        &pool,
+        "wrk_t6_ac3",
+        "ac3-status",
+        2,
+        3,
+        "2026-06-11T10:00:00Z",
+    )
+    .await
+    .expect("seed multi-volume");
+
+    let chapters = nexus_local_db::work_chapters::list_chapters(&pool, "wrk_t6_ac3")
+        .await
+        .expect("list chapters");
+
+    // Every chapter row must have volume populated
+    for ch in &chapters {
+        assert!(
+            ch.volume.is_some(),
+            "chapter {} must have volume, got None",
+            ch.chapter
+        );
+    }
+
+    // Verify correct volume distribution: vol 1 = ch 1-3, vol 2 = ch 1-3
+    let vol1: Vec<_> = chapters.iter().filter(|c| c.volume == Some(1)).collect();
+    let vol2: Vec<_> = chapters.iter().filter(|c| c.volume == Some(2)).collect();
+    assert_eq!(vol1.len(), 3, "volume 1 should have 3 chapters");
+    assert_eq!(vol2.len(), 3, "volume 2 should have 3 chapters");
+
+    // Verify ordering: volume ascending, then chapter ascending
+    for (i, ch) in chapters.iter().enumerate() {
+        if i > 0 {
+            let prev = &chapters[i - 1];
+            assert!(
+                (prev.volume, prev.chapter) <= (ch.volume, ch.chapter),
+                "chapters should be ordered by (volume, chapter), got prev={:?} curr={:?}",
+                (prev.volume, prev.chapter),
+                (ch.volume, ch.chapter)
+            );
+        }
+    }
+}
+
+/// Helper: insert a test World row via the shared seed helper.
+async fn insert_test_world(pool: &sqlx::SqlitePool, world_id: &str) -> String {
+    nexus_local_db::narrative_gateway::seed::world(
+        pool,
+        world_id,
+        "ctr_test",
+        "Test World",
+        "test-world",
+        "private",
+        "single",
+    )
+    .await;
+    world_id.to_string()
+}
