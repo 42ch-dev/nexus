@@ -469,6 +469,7 @@ impl ScheduleSupervisor {
             ChainAction::NextChapter {
                 ref work_id,
                 ref next_chapter,
+                next_volume: _,
             } => {
                 // Next chapter starts at produce stage
                 if let Err(e) = self
