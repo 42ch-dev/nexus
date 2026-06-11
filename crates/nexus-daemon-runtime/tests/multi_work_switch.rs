@@ -77,7 +77,9 @@ async fn create_and_patch_work(
     }
     if let Some(holder) = runtime_lock_holder {
         patch.runtime_lock_holder = Some(Some(holder.to_string()));
-        patch.runtime_lock_acquired_at = Some(Some("2026-06-10T12:00:00Z".to_string()));
+        // V1.42 P0: use current timestamp so lock is NOT stale (within 2h TTL).
+        // Stale locks are force-cleared by RuntimeLockGuard::acquire.
+        patch.runtime_lock_acquired_at = Some(Some(chrono::Utc::now().to_rfc3339()));
     }
     if completion_locked.is_some() || runtime_lock_holder.is_some() {
         works::patch_work(
