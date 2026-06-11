@@ -1024,16 +1024,20 @@ pub async fn patch_work(
     }
 
     if let Some(ref holder) = current_work.runtime_lock_holder {
-        return Err(NexusApiError::Locked {
-            resource: "work".to_string(),
-            reason: format!(
-                "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
-            ),
-        });
+        // V1.42 P0: allow stale locks to be force-cleared by acquire below.
+        let ttl = nexus_local_db::ttl_from_env();
+        if !nexus_local_db::is_lock_stale(&current_work, ttl) {
+            return Err(NexusApiError::Locked {
+                resource: "work".to_string(),
+                reason: format!(
+                    "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
+                ),
+            });
+        }
     }
 
     // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
-    let _lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
 
     // Stage changes use gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
     if req.current_stage.is_some() || req.stage_status.is_some() {
@@ -1122,7 +1126,7 @@ pub async fn patch_work(
     }
 
     // V1.42 P0 (T2): Release runtime lock before returning.
-    _lock.release().await;
+    lock.release().await;
 
     Ok(Json(WorkApiDto::from(updated)))
 }
@@ -1154,7 +1158,7 @@ pub async fn append_inspiration(
     }
 
     // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
-    let _lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
 
     // Build JSON for inspiration entry
     let entry = serde_json::json!({
@@ -1183,7 +1187,7 @@ pub async fn append_inspiration(
         .unwrap_or(0);
 
     // V1.42 P0 (T2): Release runtime lock before returning.
-    _lock.release().await;
+    lock.release().await;
 
     Ok(Json(AppendInspirationResponse {
         work_id,
@@ -1461,7 +1465,7 @@ pub async fn reconcile_chapters(
     }
 
     // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
-    let _lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
 
     // Resolve workspace root from state
     let workspace_path_str = state.workspace_path().unwrap_or_default();
@@ -1482,7 +1486,7 @@ pub async fn reconcile_chapters(
     })?;
 
     // V1.42 P0 (T2): Release runtime lock before returning.
-    _lock.release().await;
+    lock.release().await;
 
     Ok((StatusCode::OK, Json(report)))
 }

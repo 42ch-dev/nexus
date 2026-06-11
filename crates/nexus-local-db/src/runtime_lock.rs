@@ -64,11 +64,11 @@ pub async fn acquire_runtime_lock(
     ttl_secs: i64,
     force_stale: bool,
 ) -> Result<AcquireResult, LocalDbError> {
-    let work = get_work(pool, creator_id, work_id)
-        .await?
-        .ok_or_else(|| LocalDbError::MissingVersionKey {
+    let work = get_work(pool, creator_id, work_id).await?.ok_or_else(|| {
+        LocalDbError::MissingVersionKey {
             key: format!("works/{work_id}"),
-        })?;
+        }
+    })?;
 
     if let Some(ref existing) = work.runtime_lock_holder {
         // Lock is present. Check if we should force-clear a stale one.
@@ -91,7 +91,8 @@ pub async fn acquire_runtime_lock(
     let now = chrono::Utc::now().to_rfc3339();
     // SAFETY: Dynamic SQL required for conditional lock acquire.
     // All values are bound parameters.
-    let sql = "UPDATE works SET runtime_lock_holder = ?, runtime_lock_acquired_at = ?, updated_at = ? \
+    let sql =
+        "UPDATE works SET runtime_lock_holder = ?, runtime_lock_acquired_at = ?, updated_at = ? \
                WHERE work_id = ? AND creator_id = ?";
     sqlx::query(sql)
         .bind(holder)
@@ -181,11 +182,11 @@ pub async fn clear_stale_lock(
     work_id: &str,
     ttl_secs: i64,
 ) -> Result<bool, LocalDbError> {
-    let work = get_work(pool, creator_id, work_id)
-        .await?
-        .ok_or_else(|| LocalDbError::MissingVersionKey {
+    let work = get_work(pool, creator_id, work_id).await?.ok_or_else(|| {
+        LocalDbError::MissingVersionKey {
             key: format!("works/{work_id}"),
-        })?;
+        }
+    })?;
 
     if !is_lock_stale(&work, ttl_secs) {
         return Ok(false);
@@ -344,22 +345,22 @@ mod tests {
             runtime_lock_acquired_at: Some(Some(three_hours_ago)),
             ..Default::default()
         };
-        works::patch_work(&pool, "ctr_test", "wrk_lock_04", &patch, &chrono::Utc::now().to_rfc3339())
-            .await
-            .unwrap();
-
-        // Acquire with force_stale=true should succeed
-        let new_holder = cli_holder("new_caller");
-        let result = acquire_runtime_lock(
+        works::patch_work(
             &pool,
             "ctr_test",
             "wrk_lock_04",
-            &new_holder,
-            7200,
-            true,
+            &patch,
+            &chrono::Utc::now().to_rfc3339(),
         )
         .await
         .unwrap();
+
+        // Acquire with force_stale=true should succeed
+        let new_holder = cli_holder("new_caller");
+        let result =
+            acquire_runtime_lock(&pool, "ctr_test", "wrk_lock_04", &new_holder, 7200, true)
+                .await
+                .unwrap();
 
         match result {
             AcquireResult::Acquired { holder: h } => assert_eq!(h, new_holder),
@@ -370,7 +371,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(work.runtime_lock_holder.as_deref(), Some(new_holder.as_str()));
+        assert_eq!(
+            work.runtime_lock_holder.as_deref(),
+            Some(new_holder.as_str())
+        );
     }
 
     #[tokio::test]
@@ -390,9 +394,15 @@ mod tests {
             runtime_lock_acquired_at: Some(Some(five_hours_ago)),
             ..Default::default()
         };
-        works::patch_work(&pool, "ctr_test", "wrk_lock_05", &patch, &chrono::Utc::now().to_rfc3339())
-            .await
-            .unwrap();
+        works::patch_work(
+            &pool,
+            "ctr_test",
+            "wrk_lock_05",
+            &patch,
+            &chrono::Utc::now().to_rfc3339(),
+        )
+        .await
+        .unwrap();
 
         let cleared = clear_stale_lock(&pool, "ctr_test", "wrk_lock_05", 7200)
             .await
@@ -448,19 +458,17 @@ mod tests {
         let holder_b = schedule_holder("SCH20260611120000");
 
         // First acquire succeeds
-        let result_a = acquire_runtime_lock(
-            &pool, "ctr_test", "wrk_concurrent", &holder_a, 7200, false,
-        )
-        .await
-        .unwrap();
+        let result_a =
+            acquire_runtime_lock(&pool, "ctr_test", "wrk_concurrent", &holder_a, 7200, false)
+                .await
+                .unwrap();
         assert!(matches!(result_a, AcquireResult::Acquired { .. }));
 
         // Second acquire fails with holder hint
-        let result_b = acquire_runtime_lock(
-            &pool, "ctr_test", "wrk_concurrent", &holder_b, 7200, false,
-        )
-        .await
-        .unwrap();
+        let result_b =
+            acquire_runtime_lock(&pool, "ctr_test", "wrk_concurrent", &holder_b, 7200, false)
+                .await
+                .unwrap();
         match result_b {
             AcquireResult::Locked { holder, .. } => {
                 assert_eq!(holder, holder_a);
