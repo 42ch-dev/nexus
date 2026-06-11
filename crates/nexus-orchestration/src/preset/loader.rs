@@ -2484,18 +2484,30 @@ states:
         let ctx = graph_flow::Context::new();
         ctx.set_sync("_judge_result", true);
         let next = loaded.outer_graph.find_next_task("judge_state", &ctx);
-        assert_eq!(next.as_deref(), Some("go_state"), "GO path: expected go_state, got {next:?}");
+        assert_eq!(
+            next.as_deref(),
+            Some("go_state"),
+            "GO path: expected go_state, got {next:?}"
+        );
 
         // When _judge_result is false, find_next_task should return nogo_state.
         let ctx2 = graph_flow::Context::new();
         ctx2.set_sync("_judge_result", false);
         let next2 = loaded.outer_graph.find_next_task("judge_state", &ctx2);
-        assert_eq!(next2.as_deref(), Some("nogo_state"), "NOGO path: expected nogo_state, got {next2:?}");
+        assert_eq!(
+            next2.as_deref(),
+            Some("nogo_state"),
+            "NOGO path: expected nogo_state, got {next2:?}"
+        );
 
         // When _judge_result is absent, find_next_task should return nogo_state (fallback).
         let ctx3 = graph_flow::Context::new();
         let next3 = loaded.outer_graph.find_next_task("judge_state", &ctx3);
-        assert_eq!(next3.as_deref(), Some("nogo_state"), "No judge result: expected nogo_state fallback, got {next3:?}");
+        assert_eq!(
+            next3.as_deref(),
+            Some("nogo_state"),
+            "No judge result: expected nogo_state fallback, got {next3:?}"
+        );
     }
 
     #[test]

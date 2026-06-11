@@ -2600,10 +2600,7 @@ mod tests {
     #[test]
     fn judge_next_action_linear_go_advances() {
         let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
-        assert!(matches!(
-            task.judge_next_action(true),
-            NextAction::Continue
-        ));
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
     }
 
     #[test]
@@ -2618,10 +2615,7 @@ mod tests {
     #[test]
     fn judge_next_action_none_go_advances() {
         let task = make_composite_with_next(None);
-        assert!(matches!(
-            task.judge_next_action(true),
-            NextAction::Continue
-        ));
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
     }
 
     #[test]
@@ -2639,10 +2633,7 @@ mod tests {
             go: "go_state".to_string(),
             nogo: "nogo_state".to_string(),
         })));
-        assert!(matches!(
-            task.judge_next_action(true),
-            NextAction::Continue
-        ));
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
     }
 
     #[test]
