@@ -245,8 +245,27 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                         .await;
 
                         if let Ok(Some(latest)) = fresh {
-                            let action =
-                                nexus_orchestration::auto_chain::evaluate_next_step(&latest);
+                            // V1.42 F-001: When the persist stage just completed,
+                            // use the volume-aware evaluator to correctly handle
+                            // cross-volume auto-chain (Plan Goal 4 / AC2). For all
+                            // other stages, the flat evaluator suffices.
+                            let action = if latest.current_stage == "persist"
+                                && latest.stage_status == "complete"
+                            {
+                                match nexus_orchestration::auto_chain::evaluate_after_persist_volume_aware(recovery_pool, &latest).await {
+                                        Ok(vol_action) => vol_action,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                work_id = %latest.work_id,
+                                                error = %e,
+                                                "auto-chain boot resume: volume-aware eval failed, falling back to flat"
+                                            );
+                                            nexus_orchestration::auto_chain::evaluate_next_step(&latest)
+                                        }
+                                    }
+                            } else {
+                                nexus_orchestration::auto_chain::evaluate_next_step(&latest)
+                            };
 
                             match action {
                                 nexus_orchestration::auto_chain::ChainAction::AdvanceStage {
@@ -279,7 +298,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                 nexus_orchestration::auto_chain::ChainAction::NextChapter {
                                     ref work_id,
                                     ref next_chapter,
-                                    next_volume: _,
+                                    next_volume,
                                 } => {
                                     match resume_auto_chain_work(
                                         recovery_pool,
@@ -294,8 +313,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         Ok(sid) => tracing::info!(
                                             work_id = %work_id,
                                             chapter = *next_chapter,
+                                            volume = next_volume,
                                             schedule_id = %sid,
-                                            "auto-chain boot resume: enqueued next chapter"
+                                            "auto-chain boot resume: enqueued next chapter (volume-aware)"
                                         ),
                                         Err(e) => tracing::warn!(
                                             work_id = %work_id,
