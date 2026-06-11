@@ -274,11 +274,11 @@ async fn test_inspiration_add_creates_md_and_db_row_atomically() {
 
 #[tokio::test]
 #[serial]
-async fn test_inspiration_add_rejects_existing_path() {
+async fn test_inspiration_add_auto_suffixes_on_collision() {
     let (state, _tmp) = handler_state().await;
 
     // First add succeeds
-    let _ = nexus_daemon_runtime::api::handlers::works::add_inspiration(
+    let (_status, resp1) = nexus_daemon_runtime::api::handlers::works::add_inspiration(
         State(state.clone()),
         axum::Json(AddInspirationRequest {
             title: "TC6 Duplicate Idea".to_string(),
@@ -287,15 +287,32 @@ async fn test_inspiration_add_rejects_existing_path() {
     .await
     .unwrap();
 
-    // Second add with same title should fail (slug collision → constraint violation)
-    let result = nexus_daemon_runtime::api::handlers::works::add_inspiration(
+    // V1.42 P-last (R-V141P1-13): second add with same title now auto-suffixes
+    // instead of returning an error.
+    let (_status, resp2) = nexus_daemon_runtime::api::handlers::works::add_inspiration(
         State(state.clone()),
         axum::Json(AddInspirationRequest {
             title: "TC6 Duplicate Idea".to_string(),
         }),
     )
-    .await;
-    assert!(result.is_err(), "Duplicate inspiration should be rejected");
+    .await
+    .unwrap();
+
+    // Both items should have different IDs and different paths
+    let id1 = resp1.item_id.as_str();
+    let id2 = resp2.item_id.as_str();
+    assert_ne!(id1, id2, "Duplicate inspiration should get a new item ID");
+
+    let path1 = resp1.rel_path.as_str();
+    let path2 = resp2.rel_path.as_str();
+    assert_ne!(
+        path1, path2,
+        "Duplicate inspiration should get auto-suffixed path"
+    );
+    assert!(
+        path2.contains("tc6-duplicate-idea-"),
+        "Auto-suffixed path should contain -2, -3, etc."
+    );
 }
 
 // ─── TC7: Inspiration promote creates Work and pool row ─────────────────

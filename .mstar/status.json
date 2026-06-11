@@ -911,7 +911,10 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs:140-354",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T3: deduplicated handle_status by extracting shared display helpers (print_work_header, print_chapter_table). Line count reduced, no logic change.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P0-03",
@@ -921,7 +924,9 @@
         "scope": "crates/nexus-local-db/src/works.rs:151-201",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — builder pattern is a code quality improvement, not user-facing. All current callers construct WorkPatch correctly. Defer to V1.43+."
       },
       {
         "id": "R-V141P0-04",
@@ -941,7 +946,9 @@
         "scope": "crates/nexus42/src/commands/creator/run.rs (start + resume)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — --from-work is on Start; --reopen/--extend-chapters are on Resume. These are separate commands used sequentially. No combined single-command path is needed. Each works correctly in isolation."
       },
       {
         "id": "R-V141P0-06",
@@ -949,9 +956,12 @@
         "severity": "low",
         "source": "qc2 S3 (V1.41 P0 review); qc-consolidated.md",
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs (handle_status)",
-        "decision": "defer",
+        "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added on-disk missing-file hint in handle_status for completion-locked novel works. Shows '⚠ completion-lock file missing' when DB column is set but .completion-lock.json is absent.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P0-07",
@@ -971,7 +981,9 @@
         "scope": "crates/nexus-local-db/src/works.rs (work_ref field validation)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — defense-in-depth newtype; no user-facing impact. Current validation in callers is sufficient for pre-1.0 local-first. Defer to V1.43+."
       },
       {
         "id": "R-V141P0-09",
@@ -1001,7 +1013,10 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:175",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added completion_locked_at to WorkSummary struct and list query. CLI handle_list now shows lock icon in status column when locked.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P0-12",
@@ -1103,7 +1118,9 @@
         "scope": "novel_pool_entries.rs:159 + inspiration_items.rs:219 (after fix wave: with creator_id param)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — defense-in-depth parameter; current handlers already validate creator_id at the API layer. Defer to V1.43+."
       },
       {
         "id": "R-V141P1-10",
@@ -1113,7 +1130,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs handle_pool_promote",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — optimization; both round-trips succeed independently. No data loss if second fails. Defer to V1.43+ when pool promote can be made atomic server-side."
       },
       {
         "id": "R-V141P1-11",
@@ -1123,7 +1142,10 @@
         "scope": "works.rs:240, 1669",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added #[serde(skip_serializing)] on creator_id for PoolEntryDto and InspirationItemDto. API consumers no longer see creator_id in pool/inspiration responses.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P1-12",
@@ -1133,7 +1155,10 @@
         "scope": "inspiration_items.rs:263-327 title_to_slug",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added CJK transliteration fallback in title_to_slug. Pure-CJK titles now produce romanized slug (e.g. 灵感和创意 → ling-gan-he-chuang-yi) instead of 'untitled'.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P1-13",
@@ -1143,7 +1168,10 @@
         "scope": "inspiration_items.rs:create_inspiration_with_scaffold",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added auto-suffix on collision. create_inspiration_with_scaffold now appends -2, -3, etc. to slug when file exists, instead of returning an error.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P1-14",
@@ -1153,7 +1181,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — cosmetic help text split; no user-facing behavior change. Each PoolAction already has its own doc comment. Defer to V1.43+."
       },
       {
         "id": "R-V141P1-15",
@@ -1203,7 +1233,10 @@
         "scope": "works.rs:1331-1341, 1374-1381, 1399-1406 (after fix wave: includes title)",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T1: already implemented in V1.41 P1 fix wave — From<PoolEntry> for PoolEntryDto and From<InspirationItem> for InspirationItemDto exist at works.rs:358-384. No further action needed.",
+        "closed_at": "2026-06-12"
       }
     ],
     "2026-06-11-v1.42-runtime-lock-and-hygiene": [
