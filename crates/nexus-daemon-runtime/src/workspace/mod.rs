@@ -57,7 +57,7 @@ pub struct WorkspaceState {
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
     /// Daemon-side tool dispatch for nexus.* tools (DF-47, V1.42 P3).
-    /// Set at daemon boot so schedule-executed HostToolCallTask can invoke tools.
+    /// Set at daemon boot so schedule-executed `HostToolCallTask` can invoke tools.
     daemon_tool_dispatch: Arc<Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>>,
 }
 

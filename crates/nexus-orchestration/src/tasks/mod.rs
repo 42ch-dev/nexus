@@ -1434,6 +1434,13 @@ fn insert_nested(
 // HostToolCallTask — invoke a nexus.* tool from a schedule tick (DF-47, V1.42 P3)
 // ---------------------------------------------------------------------------
 
+/// Type alias for the dispatch slot used by `HostToolCallTask`.
+/// Wraps an `Arc<Mutex<Option<Arc<dyn DaemonToolDispatch>>>>` for interior
+/// mutability without consuming the dispatch on use.
+type DaemonDispatchSlot = std::sync::Arc<
+    std::sync::Mutex<Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>>,
+>;
+
 /// A task that calls a `nexus.*` host tool through the daemon's unified registry.
 ///
 /// Production wiring for DF-47: the schedule executor can invoke read-only
@@ -1445,7 +1452,7 @@ fn insert_nested(
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 pub struct HostToolCallTask {
     /// Daemon-side tool dispatch provider.
-    dispatch: Option<std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>>>>,
+    dispatch: Option<DaemonDispatchSlot>,
     /// Tool name, e.g. `"nexus.orchestration.schedule_status"`.
     tool_name: String,
     /// Tool parameters (may contain template references rendered at runtime).
@@ -1463,7 +1470,7 @@ impl HostToolCallTask {
     /// `args`: tool parameters (JSON object, may contain template placeholders).
     #[must_use]
     pub fn new(
-        dispatch: Option<std::sync::Arc<std::sync::Mutex<Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>>>>,
+        dispatch: Option<DaemonDispatchSlot>,
         task_id: impl Into<String>,
         tool_name: impl Into<String>,
         args: serde_json::Value,
@@ -1521,12 +1528,14 @@ impl Task for HostToolCallTask {
                         "daemon tool dispatch lock: {e}"
                     ))
                 })?;
-                guard.as_ref().ok_or_else(|| {
-                    graph_flow::GraphError::TaskExecutionFailed(
-                        "daemon tool dispatch not available".into(),
-                    )
-                })?
-                .clone()
+                guard
+                    .as_ref()
+                    .ok_or_else(|| {
+                        graph_flow::GraphError::TaskExecutionFailed(
+                            "daemon tool dispatch not available".into(),
+                        )
+                    })?
+                    .clone()
             };
 
             dispatch
@@ -1551,9 +1560,7 @@ impl Task for HostToolCallTask {
         // Store the result in context for downstream nodes.
         let context_key = format!("host_tool.{}.result", self.task_id);
         context.set(&context_key, &result_value).await;
-        context
-            .set("_last_host_tool_result", &result_value)
-            .await;
+        context.set("_last_host_tool_result", &result_value).await;
 
         tracing::info!(
             tool_name = %self.tool_name,
@@ -1562,10 +1569,7 @@ impl Task for HostToolCallTask {
         );
 
         Ok(TaskResult::new(
-            Some(format!(
-                "host_tool_call:{}:ok",
-                self.tool_name
-            )),
+            Some(format!("host_tool_call:{}:ok", self.tool_name)),
             NextAction::Continue,
         ))
     }
