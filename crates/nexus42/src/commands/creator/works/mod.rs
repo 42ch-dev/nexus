@@ -218,7 +218,9 @@ async fn handle_list(client: &DaemonClient, status: Option<String>, json: bool) 
                     } else {
                         title.to_string()
                     };
-                    println!("{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}");
+                    println!(
+                        "{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}"
+                    );
                 }
                 println!("\n{} work(s)", works.len());
             }
@@ -785,9 +787,8 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
         if let Some(creator_id) = &cfg.active_creator_id {
             if let Some(ws_slug) = cfg.active_workspace_slug_by_creator.get(creator_id) {
                 let home = dirs::home_dir().unwrap_or_default();
-                let ws_dir = nexus_home_layout::operational_workspace_dir(
-                    &home, creator_id, ws_slug,
-                );
+                let ws_dir =
+                    nexus_home_layout::operational_workspace_dir(&home, creator_id, ws_slug);
                 let lock_path = ws_dir
                     .join("Works")
                     .join(work_ref)

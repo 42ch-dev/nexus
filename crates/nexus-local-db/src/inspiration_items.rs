@@ -515,7 +515,7 @@ fn generate_fallback_slug() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    format!("idea-{:06x}", (now.subsec_nanos() >> 4) & 0xFFFFFF)
+    format!("idea-{:06x}", (now.subsec_nanos() >> 4) & 0x00FF_FFFF)
 }
 
 #[cfg(test)]
