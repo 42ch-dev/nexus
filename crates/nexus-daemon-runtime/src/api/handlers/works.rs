@@ -1053,14 +1053,31 @@ pub async fn append_inspiration(
 /// `POST /v1/local/works/pool` — Set the active pool entry for the creator.
 ///
 /// Transactional: demotes any prior `active` row → `queued`, promotes target → `active`.
+///
+/// # IDOR protection (PR #53 review fix)
+///
+/// The body `creator_id` field is accepted for backward compatibility but is
+/// **validated** against the active creator from `config.toml`. If it does not
+/// match, the request is rejected with 403 Forbidden. The actual operation
+/// always uses the active creator, never the body value.
 pub async fn set_pool_active(
     State(state): State<WorkspaceState>,
     Json(req): Json<SetPoolActiveRequest>,
 ) -> Result<Json<PoolEntryDto>, NexusApiError> {
-    let creator_id = req
-        .creator_id
-        .or_else(|| read_active_creator_id(state.nexus_home()))
-        .ok_or(NexusApiError::AuthRequired)?;
+    // IDOR fix: read active creator from config, reject body mismatch.
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    if req.creator_id.is_some() && req.creator_id != Some(active_creator.clone()) {
+        return Err(NexusApiError::Forbidden {
+            resource: "pool".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                req.creator_id.as_deref().unwrap_or("?"),
+                active_creator
+            ),
+        });
+    }
+    let creator_id = active_creator;
 
     if req.action != "set_pool_active" {
         return Err(NexusApiError::BadRequest {
