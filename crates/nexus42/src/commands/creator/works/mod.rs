@@ -213,11 +213,7 @@ async fn handle_list(client: &DaemonClient, status: Option<String>, json: bool) 
                         .and_then(|v| v.as_str())
                         .is_some();
                     let lock_icon = if locked { "🔒" } else { " " };
-                    let display_title = if title.len() > 28 {
-                        format!("{}…", &title[..28])
-                    } else {
-                        title.to_string()
-                    };
+                    let display_title = truncate_with_ellipsis(title, 28);
                     println!(
                         "{id:<36} {display_title:30} {ws:12} {intake:12} {lock_icon}   {updated}"
                     );
@@ -535,11 +531,7 @@ async fn handle_pool_list(client: &DaemonClient, status: Option<String>, json: b
                     let st = e.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                     let title = e.get("title").and_then(|v| v.as_str()).unwrap_or("?");
                     let promoted = e.get("promoted_at").and_then(|v| v.as_str()).unwrap_or("-");
-                    let display_title = if title.len() > 28 {
-                        format!("{}…", &title[..28])
-                    } else {
-                        title.to_string()
-                    };
+                    let display_title = truncate_with_ellipsis(title, 28);
                     println!("{eid:<36} {wid:<36} {st:<12} {display_title:<30} {promoted}");
                 }
                 println!("\n{} pool entry/entries", entries.len());
@@ -676,11 +668,7 @@ async fn handle_inspiration_list(
                     let st = i.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                     let rp = i.get("rel_path").and_then(|v| v.as_str()).unwrap_or("?");
                     let created = i.get("created_at").and_then(|v| v.as_str()).unwrap_or("-");
-                    let display_title = if title.len() > 38 {
-                        format!("{}…", &title[..38])
-                    } else {
-                        title.to_string()
-                    };
+                    let display_title = truncate_with_ellipsis(title, 38);
                     let display_rp = if rp.len() > 28 {
                         format!("{}…", &rp[..28])
                     } else {
