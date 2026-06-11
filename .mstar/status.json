@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T20:24:31+0800",
+  "updated_at": "2026-06-11T23:40:53+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -61,13 +61,16 @@
     {
       "plan_id": "2026-06-11-v1.42-agent-tool-production-wiring",
       "title": "P3 — DF-47 one E2E agent tool upcall",
-      "status": "InProgress",
+      "status": "InReview",
       "working_branch": "feature/v1.42-agent-tool-wiring",
       "merge_target": "iteration/v1.42",
       "plan_file": ".mstar/plans/2026-06-11-v1.42-agent-tool-production-wiring.md",
       "depends_on": "2026-06-11-v1.42-conditional-routing",
       "notes": [
-        "2026-06-11T20:24:31+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p3 (topic branch feature/v1.42-agent-tool-wiring from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; minimal slice: ONE tool wired). Primary spec: agent-nexus-tool-bridge.md (DF-47 production caller). Implement dispatch to follow."
+        "2026-06-11T20:24:31+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p3 (topic branch feature/v1.42-agent-tool-wiring from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; minimal slice: ONE tool wired). Primary spec: agent-nexus-tool-bridge.md (DF-47 production caller). Implement dispatch to follow.",
+        "2026-06-11T20:35:00+0800 — Implement complete (4 commits 4798ff64 / c8a0f840 / eb56d7a2 / b6e33d2a on feature/v1.42-agent-tool-wiring). 11 files +547/-16. PM verification: cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring --test agent_tool_api = 31/31 pass; cargo clippy -p nexus-daemon-runtime -p nexus-orchestration -p nexus-agent-host -- -D warnings = clean; cargo +nightly fmt --all --check = clean. AC1 (one tool callable from running schedule via HostToolCallTask + nexus.orchestration.schedule_status), AC2 (read-only tool respects completion-lock via adapter + authz), AC3 (E2E hermetic test: 5 tests in agent_tool_production_wiring.rs covering stub mode, cross-creator FORBIDDEN, schedule_status round-trip, HostToolCallTask round-trip, Schedule vs HTTP equivalence). Spec agent-nexus-tool-bridge.md §7.3 (DF-47: OPEN → NARROWED) + §7.4 (Shipped) updated in T5 commit 4798ff64. Deferred tracker DF-47 row: Active → Narrowed. PM next: dispatch QC tri-review (N=3) on integration HEAD with same Review cwd + plan_id + Review range.",
+        "2026-06-11T23:40:53+0800 — QC tri-review complete (N=3): 2 Approve + 1 Request Changes. qc1 (238fb1e6, architecture) Approve; qc2 (146eae00, security/correctness) Approve (2 non-blocking warnings); qc3 (01c9f4c8, perf/reliability) Request Changes (W-01 production path is dead code — AC1 not met). PM consolidated verdict: Request Changes. 4 blocking residuals registered (qc3 W-01 + W-02; qc2 W-01 + W-02). PM next: dispatch fix wave to fullstack-dev for the 4 blocking items. qc1 Approve stands.",
+        "2026-06-11T23:40:53+0800 — Process note: P3 work was done primarily by the Cursor agent (Auto.Wood) in parallel with the PM dispatch. The dispatched fullstack-dev task was cancelled (likely work overlap or recursion attempt caught by the system). User has accepted the autonomous work pattern. Same process gap as P0/P1/P2 — risk-accepted per R-V142P0-PROC."
       ]
     },
     {
@@ -1309,6 +1312,56 @@
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last or future (non-blocking; recommend follow-up enhancement)",
         "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]"
+      }
+    ],
+    "2026-06-11-v1.42-agent-tool-production-wiring": [
+      {
+        "id": "R-V142P3-QC3-W-01",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "Production path incomplete — HostToolCallTask is dead code in production (not invoked from schedule tick)",
+        "source": "qc3.md W-01 (qc-specialist-3, performance and reliability risk)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (HostToolCallTask definition, no production call sites); preset/loader.rs (build_wired_outer_graph does not reference HostToolCallTask); schedule/supervisor.rs (tick_inner never creates tool tasks); capability/mod.rs (CapabilityRuntimeDeps.daemon_tool_dispatch declared but not consumed)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P3 fix wave (blocking) — must be resolved before Approve",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
+      },
+      {
+        "id": "R-V142P3-QC3-W-02",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "Hot-path overhead — HostToolCallTask::run serializes full Context to JSON + handlebars on every invocation",
+        "source": "qc3.md W-02 (qc-specialist-3)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs HostToolCallTask::run (build_nested_payload + render_value_templates)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P3 fix wave (recommended; not strictly blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
+      },
+      {
+        "id": "R-V142P3-QC2-W-01",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "Cross-creator FORBIDDEN test assertion is weak — only checks error string, not the NexusApiError::FORBIDDEN code",
+        "source": "qc2.md W-01 (qc-specialist-2, security and correctness risk)",
+        "scope": "crates/nexus-daemon-runtime/tests/agent_tool_production_wiring.rs:192 (agent_tool_e2e_cross_creator_forbidden_via_adapter); host_tool_executor.rs:788 (FORBIDDEN return)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P3 fix wave (blocking) — strengthen assertion to check FORBIDDEN code",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
+      },
+      {
+        "id": "R-V142P3-QC2-W-02",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "No explicit completion-lock demonstration in the new E2E suite — no test sets completion_locked_at and verifies the read-only tool still works",
+        "source": "qc2.md W-02 (qc-specialist-2)",
+        "scope": "crates/nexus-daemon-runtime/tests/agent_tool_production_wiring.rs (new E2E suite; no completion-locked WorkRecord seed); spec novel-multi-work-lifecycle.md §3 (completion-lock rule for read-only tools)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P3 fix wave (blocking) — add a minimal test case for completion-lock",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
       }
     ]
   }
