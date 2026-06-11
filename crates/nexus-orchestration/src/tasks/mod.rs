@@ -1533,6 +1533,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::preset::manifest::GoNogoNext;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -2578,5 +2579,82 @@ mod tests {
         // Verify identity injection still works after template rendering
         assert_eq!(cap_input["_creator_id"], "ctr_test");
         assert_eq!(cap_input["_session_id"], "sess_test");
+    }
+
+    // ── V1.42 P2 T4: judge_next_action unit tests ──────────────────────
+
+    fn make_composite_with_next(next: Option<NextTarget>) -> StateCompositeTask {
+        StateCompositeTask {
+            id: "test_judge".to_string(),
+            terminal: false,
+            enter_actions: vec![],
+            exit_when: None,
+            next,
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
+            registry: None,
+        }
+    }
+
+    #[test]
+    fn judge_next_action_linear_go_advances() {
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        assert!(matches!(
+            task.judge_next_action(true),
+            NextAction::Continue
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_linear_nogo_waits() {
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::WaitForInput
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_none_go_advances() {
+        let task = make_composite_with_next(None);
+        assert!(matches!(
+            task.judge_next_action(true),
+            NextAction::Continue
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_none_nogo_waits() {
+        let task = make_composite_with_next(None);
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::WaitForInput
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_gonogo_go_advances() {
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "go_state".to_string(),
+            nogo: "nogo_state".to_string(),
+        })));
+        assert!(matches!(
+            task.judge_next_action(true),
+            NextAction::Continue
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_gonogo_nogo_also_advances() {
+        // Key V1.42 behavior: NOGO with GoNogo next → Continue (edge routes to nogo target).
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "go_state".to_string(),
+            nogo: "nogo_state".to_string(),
+        })));
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::Continue
+        ));
     }
 }
