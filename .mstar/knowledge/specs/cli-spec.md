@@ -3,7 +3,8 @@
 **Status**: Normative  
 **Document class**: Master  
 **V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
-**V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).
+**V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).  
+**V1.41 Draft amendments:** §6.2H `creator works` (list/status/use/pool); `creator run` single-Work actions only; `creator run start --from-work`; completion-lock + runtime lock (DF-60/61).
 
 ## 0. 文档定位
 
@@ -348,22 +349,25 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 ### 6.2D `nexus42 creator run` (Work experience — V1.33 target)
 
-High-level **user-facing** entry for narrative Work lifecycle. Hides `daemon schedule` details for the default product path. Normative model: [work-experience-model.md](./work-experience-model.md).
+**Single-Work actions** on the active or specified Work. Hides `daemon schedule` details for the default product path. Normative model: [work-experience-model.md](./work-experience-model.md). Work **management** (`list`, `status`, pool, default pointer) lives under **`creator works`** (§6.2H).
 
 | Command | Purpose |
 | --- | --- |
 | `nexus42 creator run start --idea "<text>"` | Create a **Work** (`work_id`), run Creative Brief Intake, then primary preset (default `novel-writing`) |
-| `nexus42 creator run continue <work_id> [--note "<text>"]` | Append inspiration/direction; optionally resume/attach `work_continue` preset |
-| `nexus42 creator run list` | List Works in active workspace |
-| `nexus42 creator run status <work_id>` | Work status, intake, linked schedules, world binding |
+| `nexus42 creator run continue [<work_id>] [--note "<text>"]` | Append inspiration/direction on **same** Work; optional `work_id` defaults to pool `active` |
+| `nexus42 creator run stage …` | FL-E stage list/advance (see §6.2E) |
+| `nexus42 creator run resume [<work_id>]` | Resume checkpointed auto-chain |
+| `nexus42 creator run reconcile-chapters <work_id>` | Rebuild `work_chapters` from filesystem |
 
 Rules:
 
 - Only presets declaring `run_intents` including `work_init` may be used as the **first** run on a new Work (see [orchestration-engine.md](./orchestration-engine.md) §7.7).
 - `work_continue` presets require completed intake unless `--force` (audited).
 - `creator run` creates/updates schedules via daemon Local API; it does **not** replace `daemon schedule` for power users.
+- When `work_id` is optional and omitted, resolve [novel-work-pool.md](./novel-work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
+- Multiple Works may run concurrently; runtime lock prevents **same** Work mutation from two processes (lifecycle spec §4).
 
-**Shipped (V1.33 P1 + P2):** `creator run start / continue / list / status` are wired in `crates/nexus42/src/commands/creator/run.rs`. `creator run start --idea "..."` creates a Work (`work_id`), auto-schedules Creative Brief Intake, and chains novel-writing (or runs directly with `--chain-novel-writing --skip-intake`). Implementation tracked by plan `2026-06-04-v1.33-work-model-and-creator-run` (Done) + `2026-06-04-v1.33-creative-brief-intake-preset` (Done).
+**Shipped (V1.33 P1 + P2):** `creator run start / continue` wired in `crates/nexus42/src/commands/creator/run.rs`. **V1.41:** `list` / `status` **hard-removed** from `creator run` → `creator works` (§6.2H); **no** deprecated alias (grill-me).
 
 **V1.36 flags (`creator run start` — novel project init):**
 
@@ -371,7 +375,7 @@ Rules:
 | --- | --- |
 | `--init-preset <name>` | Run a `work_init` preset before primary preset chain. V1.36 supported value: `novel-project-init` (creates `Works/<work_ref>/` scaffold, seeds `work_chapters`, PATCHes `works`). See [novel-workflow-profile.md §5.4](./novel-workflow-profile.md). |
 | `--world-id <uuid>` | Bind the new Work to an existing World (cross-link [novel-workflow-profile.md §3.5](./novel-workflow-profile.md)). Required for V1.40 Work creation/init unless the init flow creates a new World first; omit/`none` is accepted only for legacy V1.39-and-earlier reads, not new Work creation. |
-| `--force-gates --reason "<text>"` | Bypass `run_intents` / preset admission gates (`orchestration-engine.md` §7.9). `--reason` is **required** when `--force-gates` is passed; the override is audited in `creator_prompt_injections` and surfaced in `creator run status`. |
+| `--force-gates --reason "<text>"` | Bypass `run_intents` / preset admission gates (`orchestration-engine.md` §7.9). `--reason` is **required** when `--force-gates` is passed; the override is audited in `creator_prompt_injections` and surfaced in `creator works status`. |
 
 **V1.36 flags (`creator run stage advance`):**
 
@@ -387,9 +391,8 @@ Normative stage model: [creator-workflow.md](./creator-workflow.md).
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator run stage list <work_id>` | List FL-E stages and `stage_status` for the Work |
-| `nexus42 creator run stage advance <work_id> --stage <id>` | Start the preset chain for stage `research` \| `produce` \| `review` \| `persist` |
-| `nexus42 creator run status <work_id>` | **Extended** — includes `current_stage` and per-stage status |
+| `nexus42 creator run stage list [<work_id>]` | List FL-E stages and `stage_status` for the Work |
+| `nexus42 creator run stage advance [<work_id>] --stage <id>` | Start the preset chain for stage `research` \| `produce` \| `review` \| `persist` |
 
 Rules:
 
@@ -402,19 +405,17 @@ Rules:
 | --- | --- |
 | `--auto-chain` | Default **true**. Full FL-E stage chain + novel chapter outer loop while daemon online. |
 | `--no-auto-chain` | Opt out of automatic stage/chapter enqueue; checkpoint still written. |
-| `creator run resume <work_id>` | Resume checkpointed auto-chain after daemon restart or manual pause. |
+| `creator run resume [<work_id>] [--reopen --reason "<text>" [--extend-chapters N]]` | Resume auto-chain; on `works.status=completed`, requires `--reopen` + audited `--reason` after completion-lock release; if §6 still satisfied, `--extend-chapters` required (lifecycle spec §3.2). |
 
-**V1.39 `creator run status` extensions (novel + auto-chain):**
+**V1.41 `creator run start` extension:**
 
-| Field | Meaning |
+| Flag | Purpose |
 | --- | --- |
-| `daemon` | `online` \| `offline` (CLI reachability to local daemon) |
-| `chain` | `running` \| `paused_at_<stage>_ch<N>` \| `completed` |
-| `pending_resume` | Whether boot auto-resume is pending or user action needed |
-| `pending_inspiration_count` | Unmerged `--note` entries awaiting next state transition |
-| `findings` | Open findings summary (V1.39 P1+); 96h banner when applicable (P4) |
+| `--from-work <completed_work_id>` | Start new Work lineage after completed Work (see [novel-multi-work-lifecycle.md](./novel-multi-work-lifecycle.md) §5.2). Distinct from `continue` (same-Work inspiration). |
+| `--set-default` | After start, set pool `active` to new Work (`works use` equivalent). |
+| `--no-pool-row` | Skip auto-insert of `novel_pool_entries` row on start (power user). |
 
-**Shipped (V1.34 P1):** stage commands in `crates/nexus42/src/commands/creator/run.rs`. **Shipped (V1.39 P0):** auto-chain and resume surfaces per plan `2026-06-09-v1.39-fl-e-auto-chain-engine`.
+**Shipped (V1.34 P1):** stage commands in `crates/nexus42/src/commands/creator/run.rs`. **Shipped (V1.39 P0):** auto-chain and resume surfaces per plan `2026-06-09-v1.39-fl-e-auto-chain-engine`. **V1.41:** status UX fields moved to `creator works status` (§6.2H).
 
 ### 6.2G `nexus42 creator world` (V1.40 — DF-63 P0)
 
@@ -435,6 +436,43 @@ Rules:
 - `show` for a nonexistent `world_id` prints remediation pointing to `creator world create --title` or `creator world list`.
 
 **Target (V1.40 P0):** plan `2026-06-10-v1.40-world-create-and-validation`.
+
+### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
+
+Normative: [novel-multi-work-lifecycle.md](./novel-multi-work-lifecycle.md), [novel-work-pool.md](./novel-work-pool.md).
+
+**Tier:** Primary for multi-book operators; complements **`creator run`** (single-Work actions).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator works list` | List Works in active workspace (**migrated from** `creator run list`) |
+| `nexus42 creator works status [<work_id>]` | Work status, intake, schedules, world, auto-chain, findings (**migrated from** `creator run status`) |
+| `nexus42 creator works use <work_id>` | Set pool `active` row → CLI default `work_id` (does **not** pause other Works) |
+| `nexus42 creator works completion-lock release <work_id>` | Release `.completion-lock.json`; enables `run resume` on same Work |
+| `nexus42 creator works pool list` | List selection pool entries (DB SSOT) |
+| `nexus42 creator works pool promote <entry_id> [--set-default]` | `queued` → scaffold/bind Work; optional `--set-default` → `works use` |
+| `nexus42 creator works pool archive <entry_id>` | Mark pool entry `completed` |
+| `nexus42 creator works pool inspiration add --title "<text>"` | Create `{workspace}/Pool/Ideas/<slug>.md` + DB row |
+| `nexus42 creator works pool inspiration list` | List inspiration items |
+| `nexus42 creator works pool inspiration promote <item_id> [--set-default]` | Read MD → `run start --idea`; pool `queued` row; item → `promoted` |
+
+**`creator works status` extensions (novel + auto-chain — migrated from V1.39 `creator run status`):**
+
+| Field | Meaning |
+| --- | --- |
+| `daemon` | `online` \| `offline` (CLI reachability to local daemon) |
+| `chain` | `running` \| `paused_at_<stage>_ch<N>` \| `completed` |
+| `pending_resume` | Whether boot auto-resume is pending or user action needed |
+| `pending_inspiration_count` | Unmerged `--note` entries awaiting next state transition |
+| `findings` | Open findings summary (V1.39 P1+); 96h banner when applicable (P4) |
+| `completion_lock` | Whether `.completion-lock.json` is present |
+| `runtime_lock_holder` | Current mutating holder, if any |
+
+**OUT V1.41:** `creator work switch` / global switch mutex (grill-me 2026-06-10).
+
+**Entry path pointer (no standalone quickstart in V1.41):** multi-book flow extends [creator-centric-entry-model.md](./creator-centric-entry-model.md) §3.1 step 7 — see compass [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) §2.
+
+**Target (V1.41):** plans `2026-06-10-v1.41-multi-work-switch`, `2026-06-10-v1.41-selection-pool`.
 
 ### 6.3A Preset management and validation surfaces
 

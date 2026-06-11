@@ -14,6 +14,7 @@ pub mod memory;
 pub mod reference;
 pub mod run;
 pub mod soul;
+pub mod works;
 pub mod world;
 
 use crate::auth;
@@ -439,13 +440,23 @@ fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
     // ── Primary tier (first-run and daily use) ──────────────────────
-    /// Work lifecycle — start, continue, list, and inspect Works
+    /// Work lifecycle — start, continue, stage, and resume Works
     ///
     /// Primary entry for creative Work. Start a new Work with an idea,
-    /// continue an existing Work with new direction, or inspect progress.
+    /// continue an existing Work with new direction, or manage stage progression.
+    /// For listing and inspecting Works, use `creator works`.
     Run {
         #[command(subcommand)]
         command: run::RunCommand,
+    },
+
+    /// Work management and pool (DF-60 §6.2H).
+    ///
+    /// List, inspect, and manage Works and the selection pool.
+    /// `creator run` handles single-Work actions (start, continue, stage, resume).
+    Works {
+        #[command(subcommand)]
+        command: works::WorksCommand,
     },
 
     /// Register a new Creator entity
@@ -680,6 +691,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
         CreatorCommand::Run { command } => run::handle_run(command, config).await,
+        CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
         CreatorCommand::Logout => logout_creator(config).await,
     }

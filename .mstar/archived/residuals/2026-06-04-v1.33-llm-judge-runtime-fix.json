@@ -39,6 +39,22 @@
       "archived_at": "2026-06-07T12:30:00+08:00",
       "lifecycle": "resolved",
       "closure_note": "Resolved per closure_evidence: commit c604a2d on feature/v1.33-work-experience-loop; presets novel-writing, reflection-loop, research updated.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    },
+    {
+      "id": "R-V133P3-03",
+      "severity": "medium",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "Pre-1.0 local-first: P1D/P7D already work (D unit supported); P1M/P1Y correctly returns None (no throttle); calendar durations cannot be precisely converted to chrono::Duration. Single-user invariant documented in code.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V133P3-04",
+      "severity": "medium",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "Pre-1.0 local-first single-user: attacker model does not apply. Single-user invariant documented in code.",
+      "archived_at": "2026-06-11"
     }
   ]
 }

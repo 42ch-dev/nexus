@@ -245,6 +245,50 @@ Column notes:
 - `kb_source_anchors` is required because `KbStore::attach_source_anchor` permits multiple anchors per KeyBlock; `kb_key_blocks.source_anchor_json` remains the optional embedded `KeyBlock.source_anchor` value.
 - The partial unique index on `kb_key_blocks` implements the existing active uniqueness rule: one active `(world_id, canonical_name, block_type)` tuple, while `deleted`, `merged`, and `deprecated` rows no longer block replacement.
 
+#### 4.1.4 `works` lifecycle lock columns (V1.41 Draft — DF-60)
+
+Additive columns on existing `works` table. Normative: [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md).
+
+| Column | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `novel_completion_status` | `TEXT` | no | `completed` when §6 criteria met (V1.38 residual) |
+| `completion_locked_at` | `TEXT` | no | DB mirror of `.completion-lock.json` |
+| `runtime_lock_holder` | `TEXT` | no | `pid:<pid>:<uuid>` while mutating command holds Work |
+| `runtime_lock_acquired_at` | `TEXT` | no | ISO-8601 |
+| `lineage_from_work_id` | `TEXT` | no | Set on new Work from `creator run start --from-work` |
+
+#### 4.1.5 Novel work pool tables (V1.41 Draft — DF-61)
+
+Creator-scoped; not Work rows. Normative: [novel-work-pool.md](novel-work-pool.md). Validation rules for KB taxonomy: see [nexus-kb::validation](../../../crates/nexus-kb/src/validation.rs) (World KB — separate concern).
+
+**`novel_pool_entries`**
+
+| Column | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `entry_id` | `TEXT` | yes | PK; `npe_` prefix |
+| `creator_id` | `TEXT` | yes | FK to creator scope |
+| `work_id` | `TEXT` | no | Bound after scaffold |
+| `title` | `TEXT` | yes | Display title |
+| `status` | `TEXT` | yes | `active` \| `queued` \| `completed` |
+| `created_at` | `TEXT` | yes | ISO-8601 |
+| `updated_at` | `TEXT` | yes | ISO-8601 |
+
+Partial unique index: one `active` row per `creator_id`.
+
+Partial unique index: one row per `(creator_id, work_id)` where `work_id IS NOT NULL`.
+
+**`inspiration_items`**
+
+| Column | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `item_id` | `TEXT` | yes | PK; `npi_` prefix |
+| `creator_id` | `TEXT` | yes | |
+| `rel_path` | `TEXT` | yes | Path to `{workspace}/Pool/Ideas/<slug>.md` |
+| `title` | `TEXT` | yes | |
+| `status` | `TEXT` | yes | `open` \| `promoted` \| `archived` |
+| `promoted_work_id` | `TEXT` | no | |
+| `created_at` | `TEXT` | yes | |
+
 ### 4.2 Daemon-only tables（由 daemon profile 管理）
 
 | Table | 作用 | Owner |

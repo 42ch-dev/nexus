@@ -467,12 +467,12 @@ impl LlmJudgeTask {
                 // Log and return NOGO so the state waits rather than advancing
                 // without evaluation (safe default).
                 //
-                // R-V133P3-04 (deferred, documented): This creates a liveness/
-                // DoS vector — an attacker who controls worker connectivity can
-                // lock states in NOGO. Acceptable for V1.33 local-only single-user
-                // daemon where the attacker model is the user themselves. For
-                // multi-user or networked deployments, add a circuit-breaker,
-                // timeout, or rule-based fallback.
+                // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V133P3-04
+                // — WorkerUnavailable → NOGO creates a liveness/DoS vector: an attacker
+                // who controls worker connectivity can lock states in NOGO. Acceptable
+                // for local-only single-user daemon where the attacker model is the user
+                // themselves. For multi-user or networked deployments, add a
+                // circuit-breaker, timeout, or rule-based fallback.
                 tracing::warn!(
                     capability = %self.capability_name,
                     "judge capability unavailable (no worker); returning NOGO"
@@ -1424,6 +1424,11 @@ fn insert_nested(
 ///
 /// Supports days (D), hours (H), minutes (M after T), and seconds (S).
 /// Returns `None` for unparseable inputs, logging a warning.
+///
+/// WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V133P3-03
+/// — P1D/P1M/P1Y date-only forms with M/Y units return None silently;
+/// only P<n>D (days) and PT<n>H/M/S (time) are supported. Months/years
+/// require calendar-aware parsing; deferred until multi-tenant scheduling.
 fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
     let s = s.trim();
     if !s.starts_with('P') {

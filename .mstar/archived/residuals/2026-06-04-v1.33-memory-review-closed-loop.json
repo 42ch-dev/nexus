@@ -75,6 +75,33 @@
       "archived_at": "2026-06-07T12:30:00+08:00",
       "lifecycle": "resolved",
       "closure_note": "Resolved per closure_evidence: commit fb390c2 on feature/v1.33-work-experience-loop; qc1-wave2 caught the gap and reported it; P4 implementer applied same fix to all 4 handlers.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    },
+    {
+      "id": "R-V133P4-04",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "! column alias suffix already removed in prior wave (V1.33 closeout); code has SAFETY comment.",
+      "closure_evidence": "V1.33 closeout commit",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V133P4-05",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "save_memory already uses atomic tmp+rename pattern (V1.33 closeout).",
+      "closure_evidence": "V1.33 closeout commit",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V133P4-06",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Added MAX_DIGEST_BYTES (256 KiB) size guard in promote_to_long_term. Test: promote_truncates_oversized_raw_digest. Hygiene wave Fix 1 also added UTF-8 boundary safety.",
+      "closure_evidence": "commit 90c3f78f + 5be7e5d6",
+      "archived_at": "2026-06-11"
     }
   ]
 }

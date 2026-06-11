@@ -91,7 +91,7 @@ CLI:
 ```text
 creator run stage list <work_id>
 creator run stage advance <work_id> --stage <stage_id> [--force]
-creator run status <work_id>    # includes current_stage + stage_status
+creator works status [<work_id>]    # includes current_stage + stage_status (V1.41; default = pool active)
 ```
 
 ---
@@ -157,7 +157,7 @@ Insertions during an active auto-chain **must not** fork or cancel the driver sc
 
 | Insertion | Behavior |
 | --- | --- |
-| `creator run continue --note` | Appends `inspiration_log`; visible in status; merged into prompt context at **next** preset state transition |
+| `creator run continue --note` | Appends `inspiration_log`; visible in `creator works status`; merged into prompt context at **next** preset state transition |
 | `nexus.work.patch` (agent) | Same append-only inspiration surface per agent-nexus-tool-bridge |
 | Research stage side effects | KB/reference artifacts written during chain; consumed by downstream produce/review via existing assembly (P0.5) |
 
@@ -174,7 +174,12 @@ Invariant: at most one active FL-E stage driver schedule per Work remains enforc
 | Conditional routing | **Not** used for stage selection (DF-56) |
 | `--auto-chain` | **V1.39 target (DF-53)**: default true for full FL-E chain + chapter outer loop; `--no-auto-chain` opt-out; manual `stage advance` still valid for power users |
 | Novel project init | Separate preset `novel-project-init` (DF-58); **not** part of `novel-writing` auto-chain |
-| Novel completion | Work `status == completed` stops further `novel-writing`; no auto new-project switch (DF-59) |
+| Novel completion | Work `status == completed` stops further `novel-writing`; V1.41 extends `mark_work_completed` per [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) (DF-60) |
+| Completion-lock | While `.completion-lock.json` exists, auto-chain **must not** tick that Work; after release, `resume --reopen` may resume same `work_id` (V1.41 P0) |
+| Runtime lock | `works.runtime_lock_holder` blocks concurrent mutating CLI/API on same Work (V1.41 P0) |
+| Multi-Work concurrency | Multiple Works may auto-chain concurrently; pool `active` is CLI default only (DF-60/61) |
+| Selection pool | `creator works pool` + `works use` via [novel-work-pool.md](novel-work-pool.md); not a Work profile (DF-61) |
+| CLI IA | `creator run` = single-Work actions; `creator works` = list/status/use/pool (V1.41) |
 | Platform cloud assemble | Not part of this workflow; see agent-nexus-tool-bridge `policy_blocked` |
 
 ---

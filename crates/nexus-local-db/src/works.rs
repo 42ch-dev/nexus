@@ -14,7 +14,9 @@ pub const WORKS_COLUMNS: &str = "\
     initial_idea, creative_brief, intake_status, world_id, story_ref, \
     inspiration_log, primary_preset_id, schedule_ids, created_at, updated_at, \
     current_stage, stage_status, work_profile, work_ref, total_planned_chapters, current_chapter, \
-    auto_chain_enabled, driver_schedule_id, auto_chain_interrupted, auto_review_master_on_timeout";
+    auto_chain_enabled, driver_schedule_id, auto_chain_interrupted, auto_review_master_on_timeout, \
+    runtime_lock_holder, runtime_lock_acquired_at, completion_locked_at, \
+    novel_completion_status, lineage_from_work_id";
 
 /// Map a sqlx row to [`WorkRecord`].
 #[must_use]
@@ -46,6 +48,11 @@ pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
         driver_schedule_id: r.get("driver_schedule_id"),
         auto_chain_interrupted: r.get("auto_chain_interrupted"),
         auto_review_master_on_timeout: r.get("auto_review_master_on_timeout"),
+        runtime_lock_holder: r.get("runtime_lock_holder"),
+        runtime_lock_acquired_at: r.get("runtime_lock_acquired_at"),
+        completion_locked_at: r.get("completion_locked_at"),
+        novel_completion_status: r.get("novel_completion_status"),
+        lineage_from_work_id: r.get("lineage_from_work_id"),
     }
 }
 
@@ -106,6 +113,16 @@ pub struct WorkRecord {
     /// `novel-review-master` for this Work after the timeout threshold
     /// (V1.39 P4 T4, default false).
     pub auto_review_master_on_timeout: bool,
+    /// Runtime lock holder (V1.41 DF-60 §4): `cli:<pid>:<uuid>` or `daemon:schedule:<id>`.
+    pub runtime_lock_holder: Option<String>,
+    /// When the runtime lock was acquired (V1.41 DF-60 §4, ISO-8601, nullable).
+    pub runtime_lock_acquired_at: Option<String>,
+    /// When completion-lock was applied (V1.41 DF-60 §3, ISO-8601, nullable).
+    pub completion_locked_at: Option<String>,
+    /// Novel completion status (V1.41 DF-60 §2): `finalize_complete` | `reopened` | NULL.
+    pub novel_completion_status: Option<String>,
+    /// Parent Work ID when created via `run start --from-work` (V1.41 DF-60 §5.2, nullable).
+    pub lineage_from_work_id: Option<String>,
 }
 
 /// Inspiration log entry — `{at, note}`.
@@ -171,6 +188,16 @@ pub struct WorkPatch {
     pub auto_chain_interrupted: Option<bool>,
     /// New `auto_review_master_on_timeout` opt-in flag (V1.39 P4 T4).
     pub auto_review_master_on_timeout: Option<bool>,
+    /// New `runtime_lock_holder` (V1.41 DF-60 §4, nullable).
+    pub runtime_lock_holder: Option<Option<String>>,
+    /// New `runtime_lock_acquired_at` (V1.41 DF-60 §4, nullable).
+    pub runtime_lock_acquired_at: Option<Option<String>>,
+    /// New `completion_locked_at` (V1.41 DF-60 §3, nullable).
+    pub completion_locked_at: Option<Option<String>>,
+    /// New `novel_completion_status` (V1.41 DF-60 §2, nullable).
+    pub novel_completion_status: Option<Option<String>>,
+    /// New `lineage_from_work_id` (V1.41 DF-60 §5.2, nullable).
+    pub lineage_from_work_id: Option<Option<String>>,
 }
 
 /// Create a new Work (simple, non-transactional).
@@ -190,8 +217,11 @@ pub async fn create_work(pool: &SqlitePool, record: &WorkRecord) -> Result<(), L
          primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
          work_profile, work_ref, total_planned_chapters, current_chapter,
          auto_chain_enabled, driver_schedule_id, auto_chain_interrupted,
-         auto_review_master_on_timeout)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+         auto_review_master_on_timeout,
+         runtime_lock_holder, runtime_lock_acquired_at, completion_locked_at,
+         novel_completion_status, lineage_from_work_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?,
+                 NULL, NULL, NULL, NULL, NULL)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -236,8 +266,11 @@ async fn insert_work_tx(
          primary_preset_id, schedule_ids, created_at, updated_at, current_stage, stage_status,
          work_profile, work_ref, total_planned_chapters, current_chapter,
          auto_chain_enabled, driver_schedule_id, auto_chain_interrupted,
-         auto_review_master_on_timeout)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+         auto_review_master_on_timeout,
+         runtime_lock_holder, runtime_lock_acquired_at, completion_locked_at,
+         novel_completion_status, lineage_from_work_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?,
+                 NULL, NULL, NULL, NULL, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -264,6 +297,7 @@ async fn insert_work_tx(
     .bind(record.auto_chain_enabled)
     .bind(record.auto_chain_interrupted)
     .bind(record.auto_review_master_on_timeout)
+    .bind(&record.lineage_from_work_id)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -654,6 +688,21 @@ pub async fn patch_work(
     if patch.auto_review_master_on_timeout.is_some() {
         set_clauses.push("auto_review_master_on_timeout = ?");
     }
+    if patch.runtime_lock_holder.is_some() {
+        set_clauses.push("runtime_lock_holder = ?");
+    }
+    if patch.runtime_lock_acquired_at.is_some() {
+        set_clauses.push("runtime_lock_acquired_at = ?");
+    }
+    if patch.completion_locked_at.is_some() {
+        set_clauses.push("completion_locked_at = ?");
+    }
+    if patch.novel_completion_status.is_some() {
+        set_clauses.push("novel_completion_status = ?");
+    }
+    if patch.lineage_from_work_id.is_some() {
+        set_clauses.push("lineage_from_work_id = ?");
+    }
 
     if set_clauses.is_empty() {
         // Nothing to update — just return current record.
@@ -751,6 +800,36 @@ pub async fn patch_work(
     if let Some(v) = patch.auto_review_master_on_timeout {
         query = query.bind(v);
     }
+    if let Some(ref opt_val) = patch.runtime_lock_holder {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.runtime_lock_acquired_at {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.completion_locked_at {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.novel_completion_status {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.lineage_from_work_id {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
 
     query = query.bind(now).bind(work_id).bind(creator_id);
 
@@ -846,6 +925,21 @@ pub async fn patch_work_tx(
     if patch.auto_review_master_on_timeout.is_some() {
         set_clauses.push("auto_review_master_on_timeout = ?");
     }
+    if patch.runtime_lock_holder.is_some() {
+        set_clauses.push("runtime_lock_holder = ?");
+    }
+    if patch.runtime_lock_acquired_at.is_some() {
+        set_clauses.push("runtime_lock_acquired_at = ?");
+    }
+    if patch.completion_locked_at.is_some() {
+        set_clauses.push("completion_locked_at = ?");
+    }
+    if patch.novel_completion_status.is_some() {
+        set_clauses.push("novel_completion_status = ?");
+    }
+    if patch.lineage_from_work_id.is_some() {
+        set_clauses.push("lineage_from_work_id = ?");
+    }
 
     if set_clauses.is_empty() {
         return Ok(false);
@@ -938,6 +1032,36 @@ pub async fn patch_work_tx(
     }
     if let Some(v) = patch.auto_review_master_on_timeout {
         query = query.bind(v);
+    }
+    if let Some(ref opt_val) = patch.runtime_lock_holder {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.runtime_lock_acquired_at {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.completion_locked_at {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.novel_completion_status {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
+    }
+    if let Some(ref opt_val) = patch.lineage_from_work_id {
+        match opt_val {
+            Some(v) => query = query.bind(v),
+            None => query = query.bind(Option::<String>::None),
+        }
     }
 
     query = query.bind(now).bind(work_id).bind(creator_id);
@@ -1226,6 +1350,11 @@ mod tests {
             driver_schedule_id: None,
             auto_chain_interrupted: false,
             auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
         }
     }
 

@@ -1,0 +1,59 @@
+{
+  "plan_id": "2026-06-10-v1.40-world-kb-taxonomy",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V140P1-S1",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Added cross-reference comments in NOVEL_CATEGORIES (Rust) and extract.md (prompt) flagging drift risk.",
+      "closure_evidence": "commit 974c6854",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P1-S2",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Renamed misleading test to test_block_type_enum_rejects_unknown_variant.",
+      "closure_evidence": "commit 974c6854",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P1-S3",
+      "severity": "low",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "Concurrent-uniqueness race test: single-user local-first assumption documented in code. Nonblocking pre-1.0.",
+      "closure_evidence": "commit 36890233 (WAIVER comment added)",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P1-S4",
+      "severity": "low",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "Schema doc pointer: local-db-schema.md is a knowledge doc, not runtime code. Documented in validation.rs.",
+      "closure_evidence": "commit 36890233 (WAIVER comment added)",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P1-S5",
+      "severity": "low",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "String allocations in validation error paths: acceptable for low-frequency inserts. Pre-1.0 acceptable.",
+      "closure_evidence": "commit 36890233 (WAIVER comment added)",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P1-S6",
+      "severity": "low",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": "No benchmarks for validation path: low priority, no perf concern at current scale. V1.42.",
+      "archived_at": "2026-06-11"
+    }
+  ]
+}

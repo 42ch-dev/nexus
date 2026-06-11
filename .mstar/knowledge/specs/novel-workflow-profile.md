@@ -1,6 +1,6 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1): mandatory world binding at create/init (per user clarification 2026-06-10), two init paths only (create new / bind existing), legacy V1.39 worldless Works read-only preserved.
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Draft** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md).
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
 **Last updated**: 2026-06-11 (V1.40 closeout)
@@ -792,11 +792,24 @@ The V1.36 single-chapter case (`total_planned_chapters == 1`) is a strict subset
 
 **Note**: V1.36 single-chapter MVP completion means `ch01` reached `finalized` after the `llm_judge` GO (§5.1). V1.37 supersedes the chapter-1-only interpretation by extending the same rule across all seeded `work_chapters` rows; it does not change behavior for a one-chapter Work.
 
-### 6.3 Explicit non-goals
+### 6.3 Explicit non-goals (through V1.40)
 
-- No automatic creation of next novel Work
+- No automatic creation of next novel Work **without** explicit switch/pool commands (V1.41 adds opt-in ceremony — §6.4)
 - No platform publish on completion
-- No "完本后切换" automation (reference-system pattern explicitly rejected for OSS core)
+- No novels-system 8-step / Redis switch (rejected for OSS core)
+
+### 6.4 Multi-work completion extension (V1.41 Draft)
+
+When [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) ships (V1.41 P0):
+
+1. §6.1–§6.2 completion criteria unchanged.
+2. Extend `auto_chain::mark_work_completed`: write `Works/<work_ref>/.completion-lock.json`; stop auto-chain on **that** Work only (lifecycle spec §3).
+3. Clear pool `active` when bound pool row completes; no automatic next Work.
+4. Next Work via `creator works use`, `creator works pool promote`, or `creator run start --from-work` — not implicit scaffold.
+5. **Reopen** same Work: `completion-lock release` then `creator run resume --reopen --reason` (grill-me B); distinct from `--from-work` new Work.
+6. Pool integration: [novel-work-pool.md](novel-work-pool.md). **OUT:** `creator work switch`.
+
+**OUT V1.41**: multi-volume PK (§4.5.4) remains V1.42.
 
 ---
 
@@ -820,16 +833,17 @@ Sync **must not** upload full正文 by default (cli-spec §5.3 unchanged).
 | `creator run start --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path; V1.40 creation/init must obtain a `world_id` via create-new or bind-existing before scaffold completes |
 | `creator run start --idea "..." --world-id <world_id>` | Bind the new Work to an existing World (per §3.5); World KB is injected as context in `novel-writing` prompts |
 | `creator run start --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + mandatory World binding question + `work_chapters` seed rows) before intake |
-| `creator run status <work_id>` | Reads from `work_chapters` table; shows `work_ref`, chapter list, completion; **V1.39** adds `daemon`, `chain`, `pending_resume`, `pending_inspiration_count`, `findings` banner per [cli-spec.md](cli-spec.md) |
+| `creator works status [<work_id>]` | **V1.41** — migrated from `creator run status`; reads `work_chapters`; shows `work_ref`, chapter list, completion; **V1.39** fields + completion/runtime lock per [cli-spec.md](cli-spec.md) §6.2H |
+| `creator works list` | **V1.41** — migrated from `creator run list` |
 | `creator run resume <work_id>` | **V1.39** — resume checkpointed auto-chain after daemon restart |
 | `creator run continue <work_id> --note "..."` | Appends inspiration; does not advance chapter index |
 | `creator run reconcile-chapters <work_id>` | (V1.36 manual) Rebuilds `work_chapters` rows from `Works/<work_ref>/Stories/` filesystem state; per §4.1.2 reconciliation rules |
 
 First-run path adds a mandatory World binding step for novel Work creation: create a new World or pick one from `creator world list`. New V1.40 Works print a one-line `world: <name> (<world_id>)` in the run summary.
 
-### 8.1 Multi-chapter `creator run status` UX (V1.37 extension)
+### 8.1 Multi-chapter `creator works status` UX (V1.37 extension; V1.41 command path)
 
-`creator run status <work_id>` is the same command for single- and multi-chapter Works. The output format scales with the number of `work_chapters` rows and remains sourced from the DB SSOT.
+`creator works status [<work_id>]` is the same command for single- and multi-chapter Works (default `work_id` = pool `active`). The output format scales with the number of `work_chapters` rows and remains sourced from the DB SSOT.
 
 Minimum multi-chapter output:
 

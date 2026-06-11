@@ -6,6 +6,8 @@
 //! - `GET    /v1/local/works/{work_id}` — Get one Work
 //! - `PATCH  /v1/local/works/{work_id}` — Partial update
 //! - `POST   /v1/local/works/{work_id}/inspiration` — Append inspiration log entry
+//! - `POST   /v1/local/works/pool` — Set active pool entry (DF-60 §5.3)
+//! - `POST   /v1/local/works/{work_id}/completion-lock/release` — Release completion-lock (DF-60 §3.1)
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -73,6 +75,21 @@ pub struct WorkApiDto {
     /// Opt-in: stale-findings watcher auto-enqueues `novel-review-master`
     /// for this Work after the timeout threshold (V1.39 P4 T4, default false).
     pub auto_review_master_on_timeout: bool,
+    /// Runtime lock holder (V1.41 DF-60 §4, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_lock_holder: Option<String>,
+    /// When the runtime lock was acquired (V1.41 DF-60 §4, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_lock_acquired_at: Option<String>,
+    /// When completion-lock was applied (V1.41 DF-60 §3, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_locked_at: Option<String>,
+    /// Novel completion status (V1.41 DF-60 §2, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub novel_completion_status: Option<String>,
+    /// Parent Work ID when created via lineage (V1.41 DF-60 §5.2, nullable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage_from_work_id: Option<String>,
 }
 
 impl From<WorkRecord> for WorkApiDto {
@@ -114,6 +131,11 @@ impl From<WorkRecord> for WorkApiDto {
             driver_schedule_id: r.driver_schedule_id,
             auto_chain_interrupted: r.auto_chain_interrupted,
             auto_review_master_on_timeout: r.auto_review_master_on_timeout,
+            runtime_lock_holder: r.runtime_lock_holder,
+            runtime_lock_acquired_at: r.runtime_lock_acquired_at,
+            completion_locked_at: r.completion_locked_at,
+            novel_completion_status: r.novel_completion_status,
+            lineage_from_work_id: r.lineage_from_work_id,
         }
     }
 }
@@ -129,6 +151,15 @@ pub struct CreateWorkRequest {
     /// If provided and a Work with the same creator + `client_request_id` exists,
     /// return the existing `work_id` (idempotent).
     pub client_request_id: Option<String>,
+    /// DF-60 §5.2: Parent Work ID for lineage (new Work created from completed Work).
+    ///
+    /// If provided, the referenced Work must exist and belong to the active
+    /// creator. A nonexistent or cross-creator reference is rejected with 400.
+    /// An empty string is also rejected (use `None` / omit the field instead).
+    pub lineage_from_work_id: Option<String>,
+    /// DF-60 §5.3: If true, after creation, set this Work as pool `active`.
+    #[serde(default)]
+    pub set_pool_active: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -198,8 +229,67 @@ pub struct AppendInspirationResponse {
     pub inspiration_count: usize,
 }
 
+// ─── Pool request / response types (DF-60 §5.3) ────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct SetPoolActiveRequest {
+    pub action: String,
+    pub work_id: String,
+    pub creator_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PoolEntryDto {
+    pub entry_id: String,
+    pub creator_id: String,
+    pub work_id: String,
+    pub status: String,
+    pub title: String,
+    pub promoted_at: String,
+    pub note: Option<String>,
+}
+
+impl From<nexus_local_db::novel_pool_entries::PoolEntry> for PoolEntryDto {
+    fn from(e: nexus_local_db::novel_pool_entries::PoolEntry) -> Self {
+        Self {
+            entry_id: e.entry_id,
+            creator_id: e.creator_id,
+            work_id: e.work_id.unwrap_or_default(),
+            status: e.status,
+            title: e.title,
+            promoted_at: e.promoted_at,
+            note: e.note,
+        }
+    }
+}
+
+impl From<nexus_local_db::inspiration_items::InspirationItem> for InspirationItemDto {
+    fn from(i: nexus_local_db::inspiration_items::InspirationItem) -> Self {
+        Self {
+            item_id: i.item_id,
+            creator_id: i.creator_id,
+            rel_path: i.rel_path,
+            title: i.title,
+            status: i.status,
+            promoted_work_id: i.promoted_work_id,
+            created_at: i.created_at,
+            promoted_at: i.promoted_at,
+        }
+    }
+}
+
+// ─── Completion-lock release types (DF-60 §3.1) ─────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ReleaseCompletionLockRequest {
+    pub reason: String,
+}
+
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
+/// rationale: multi-column INSERT + validation + response construction;
+/// splitting would harm readability without reducing actual complexity.
+#[allow(clippy::too_many_lines)]
 pub async fn create_work(
     State(state): State<WorkspaceState>,
     Json(req): Json<CreateWorkRequest>,
@@ -210,7 +300,12 @@ pub async fn create_work(
         .ok_or(NexusApiError::AuthRequired)?;
 
     // T0.4: V1.40 mandatory world_id — reject Work creation without a World binding.
+    // R-V140P0-S1: Uses BadRequest (400) rather than UnprocessableEntity (422) for
+    // missing required field. This is consistent with other "field missing" errors
+    // in this handler. Semantic 422 is used only for preset_gates_failed.
+    // R-V140P0-S4: tracing span for mandatory binding check observability.
     if req.world_id.is_none() {
+        tracing::info!(creator_id = %creator_id, "create_work rejected: missing world_id binding");
         return Err(NexusApiError::BadRequest {
             code: "WORLD_ID_REQUIRED".to_string(),
             message: "World binding is required for new Works (V1.40+).\n  \
@@ -242,6 +337,31 @@ pub async fn create_work(
                      ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
                      ↳ List your Worlds:    nexus42 creator world list\n  \
                      World binding is required for new Works (V1.40+)."
+                ),
+            });
+        }
+    }
+
+    // PR #53 review: validate lineage_from_work_id if present.
+    // The referenced Work must exist, belong to the active creator, and be non-empty.
+    if let Some(ref lineage_id) = req.lineage_from_work_id {
+        if lineage_id.is_empty() {
+            return Err(NexusApiError::BadRequest {
+                code: "INVALID_LINEAGE".to_string(),
+                message: "lineage_from_work_id must not be empty; omit the field if no lineage is intended.".to_string(),
+            });
+        }
+        let lineage_work = works::get_work(state.pool(), &creator_id, lineage_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("lineage_from_work_id lookup: {e}"),
+            })?;
+        if lineage_work.is_none() {
+            return Err(NexusApiError::BadRequest {
+                code: "INVALID_LINEAGE".to_string(),
+                message: format!(
+                    "lineage_from_work_id '{lineage_id}' does not exist or is not owned by this creator."
                 ),
             });
         }
@@ -281,6 +401,11 @@ pub async fn create_work(
         driver_schedule_id: None,
         auto_chain_interrupted: false,
         auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: req.lineage_from_work_id,
     };
 
     // R-V133P1-01: Atomic create + idempotency in single transaction
@@ -302,13 +427,26 @@ pub async fn create_work(
             }),
         )),
         // New Work created (no client_request_id)
-        Err(new) => Ok((
-            StatusCode::CREATED,
-            Json(CreateWorkResponse {
-                work_id: new.work_id,
-                status: new.status,
-            }),
-        )),
+        Err(new) => {
+            // DF-60 §5.3: if set_pool_active was requested, promote in pool
+            if req.set_pool_active == Some(true) {
+                if let Err(e) = set_pool_active_inner(state.pool(), &creator_id, &new.work_id).await
+                {
+                    tracing::warn!(
+                        work_id = %new.work_id,
+                        error = %e,
+                        "set_pool_active after create failed (non-fatal)"
+                    );
+                }
+            }
+            Ok((
+                StatusCode::CREATED,
+                Json(CreateWorkResponse {
+                    work_id: new.work_id,
+                    status: new.status,
+                }),
+            ))
+        }
     }
 }
 
@@ -578,11 +716,17 @@ async fn apply_non_stage_fields(
         driver_schedule_id: None,
         auto_chain_interrupted: None,
         auto_review_master_on_timeout: req.auto_review_master_on_timeout,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
     };
 
     // QC2 W-03: V1.40 — reject clearing world_id on a novel Work that
     // already has a non-null world_id binding. This prevents downgrading
     // a mandatory-bound Work back to worldless via PATCH.
+    // R-V140P0-S4: tracing for mandatory binding check observability.
     if non_stage_patch.world_id == Some(None) {
         // Check if the Work currently has a non-null world_id.
         let current = works::get_work(pool, creator_id, work_id)
@@ -593,6 +737,7 @@ async fn apply_non_stage_fields(
             })?
             .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
         if current.world_id.is_some() {
+            tracing::info!(work_id = %work_id, "patch_work: rejected world_id clear (non-stage path)");
             return Err(NexusApiError::BadRequest {
                 code: "WORLD_CLEAR_FORBIDDEN".to_string(),
                 message: format!(
@@ -746,6 +891,9 @@ async fn patch_work_stage(
     Ok(final_record)
 }
 
+// R-V140P0-S4: Pre-existing — function exceeds 100-line clippy threshold.
+// Refactoring into smaller helpers deferred to V1.42.
+#[allow(clippy::too_many_lines)]
 pub async fn patch_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -754,6 +902,33 @@ pub async fn patch_work(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
+
+    // DF-60 §4: guard mutating operations against completion-lock and runtime-lock
+    let current_work = works::get_work(state.pool(), &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    if current_work.completion_locked_at.is_some() {
+        return Err(NexusApiError::Conflict(
+            format!(
+                "work {work_id} is completion-locked since {}; use 'creator works completion-lock release' first",
+                current_work.completion_locked_at.as_deref().unwrap_or("?")
+            ),
+        ));
+    }
+
+    if let Some(ref holder) = current_work.runtime_lock_holder {
+        return Err(NexusApiError::Locked {
+            resource: "work".to_string(),
+            reason: format!(
+                "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
+            ),
+        });
+    }
 
     // Stage changes use gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
     if req.current_stage.is_some() || req.stage_status.is_some() {
@@ -773,6 +948,8 @@ pub async fn patch_work(
             })?
             .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
         if current.world_id.is_some() {
+            // R-V140P0-S4: tracing for mandatory binding check observability.
+            tracing::info!(work_id = %work_id, "patch_work_stage: rejected world_id clear (stage path)");
             return Err(NexusApiError::BadRequest {
                 code: "WORLD_CLEAR_FORBIDDEN".to_string(),
                 message: format!(
@@ -805,6 +982,11 @@ pub async fn patch_work(
         driver_schedule_id: None,
         auto_chain_interrupted: req.auto_chain_interrupted,
         auto_review_master_on_timeout: req.auto_review_master_on_timeout,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
     };
 
     let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
@@ -895,6 +1077,143 @@ pub async fn append_inspiration(
     }))
 }
 
+// ─── Pool handler (DF-60 §5.3) ──────────────────────────────────────────────
+
+/// `POST /v1/local/works/pool` — Set the active pool entry for the creator.
+///
+/// Transactional: demotes any prior `active` row → `queued`, promotes target → `active`.
+///
+/// # IDOR protection (PR #53 review fix)
+///
+/// The body `creator_id` field is accepted for backward compatibility but is
+/// **validated** against the active creator from `config.toml`. If it does not
+/// match, the request is rejected with 403 Forbidden. The actual operation
+/// always uses the active creator, never the body value.
+pub async fn set_pool_active(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<SetPoolActiveRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    // IDOR fix: read active creator from config, reject body mismatch.
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    if req.creator_id.is_some() && req.creator_id != Some(active_creator.clone()) {
+        return Err(NexusApiError::Forbidden {
+            resource: "pool".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                req.creator_id.as_deref().unwrap_or("?"),
+                active_creator
+            ),
+        });
+    }
+    let creator_id = active_creator;
+
+    if req.action != "set_pool_active" {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_ACTION".to_string(),
+            message: format!(
+                "unsupported action '{}'; expected 'set_pool_active'",
+                req.action
+            ),
+        });
+    }
+
+    // Verify the work exists and belongs to this creator
+    let _work = works::get_work(state.pool(), &creator_id, &req.work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {}", req.work_id)))?;
+
+    let entry = set_pool_active_inner(state.pool(), &creator_id, &req.work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(entry))
+}
+
+// ─── Completion-lock release handler (DF-60 §3.1) ───────────────────────────
+
+/// `POST /v1/local/works/{work_id}/completion-lock/release`
+///
+/// Releases the completion-lock for a Work:
+/// 1. Clear DB `completion_locked_at` + set `novel_completion_status = 'reopened'`.
+/// 2. Delete `.completion-lock.json` (best-effort; DB is SSOT).
+pub async fn release_completion_lock_handler(
+    State(state): State<WorkspaceState>,
+    Path(work_id): Path<String>,
+    Json(req): Json<ReleaseCompletionLockRequest>,
+) -> Result<Json<WorkApiDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Step 1: Look up the Work record
+    let work = works::get_work(state.pool(), &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
+    // Verify the work is actually completion-locked
+    if work.completion_locked_at.is_none() {
+        return Err(NexusApiError::BadRequest {
+            code: "NOT_LOCKED".to_string(),
+            message: format!("work {work_id} is not completion-locked"),
+        });
+    }
+
+    // Step 2: Clear DB columns (SSOT)
+    let now = chrono::Utc::now().to_rfc3339();
+    let patch = WorkPatch {
+        completion_locked_at: Some(None),
+        novel_completion_status: Some(Some("reopened".to_string())),
+        ..Default::default()
+    };
+
+    let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    // Step 3: Delete on-disk lock file (best-effort; DB is SSOT)
+    if let Some(ref work_ref) = updated.work_ref {
+        let workspace_path = state.workspace_path().unwrap_or_default();
+        if !workspace_path.is_empty() {
+            let workspace_dir = std::path::Path::new(&workspace_path);
+            if let Err(e) = nexus_orchestration::completion_lock::release_completion_lock(
+                workspace_dir,
+                work_ref,
+            ) {
+                tracing::warn!(
+                    work_id = %work_id,
+                    work_ref = %work_ref,
+                    error = %e,
+                    "completion-lock file deletion failed (non-fatal; DB is SSOT)"
+                );
+            }
+        }
+    }
+
+    tracing::info!(
+        target: "novel.completion",
+        work_id = %work_id,
+        creator_id = %creator_id,
+        reason = %req.reason,
+        "completion-lock released"
+    );
+
+    Ok(Json(WorkApiDto::from(updated)))
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /// Validate `stage_status` transitions to terminal states (R-CURSOR-PR42-03).
@@ -933,6 +1252,21 @@ fn check_stage_status_transition(
     }
 
     Ok(())
+}
+
+/// Shared helper: transactional set-pool-active (DF-60 §5.3).
+///
+/// Demotes any prior `active` row → `queued`, then upserts target → `active`.
+/// Uses `nexus_local_db::novel_pool_entries::promote_to_active` for the core logic.
+async fn set_pool_active_inner(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+) -> Result<PoolEntryDto, nexus_local_db::LocalDbError> {
+    let entry =
+        nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id).await?;
+
+    Ok(PoolEntryDto::from(entry))
 }
 
 /// Read active `creator_id` from CLI config.
@@ -1054,6 +1388,413 @@ fn is_valid_work_ref(s: &str) -> bool {
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+// ─── P1: Pool + Inspiration handlers (DF-61) ────────────────────────────────
+
+/// `GET /v1/local/works/pool` — List pool entries for the active creator.
+pub async fn list_pool(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListPoolQuery>,
+) -> Result<Json<ListPoolResponse>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let limit = query.limit;
+    let offset = query.offset;
+
+    let entries = nexus_local_db::novel_pool_entries::list_pool_entries(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let total = nexus_local_db::novel_pool_entries::count_pool_entries(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let items: Vec<PoolEntryDto> = entries.into_iter().map(PoolEntryDto::from).collect();
+
+    Ok(Json(ListPoolResponse {
+        entries: items,
+        total,
+        limit: limit.unwrap_or(200),
+        offset: offset.unwrap_or(0),
+    }))
+}
+
+/// `POST /v1/local/works/pool/promote` — Promote a pool entry to active.
+pub async fn promote_pool_entry(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromotePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Verify the work exists and belongs to this creator
+    let _work = works::get_work(state.pool(), &creator_id, &req.work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {}", req.work_id)))?;
+
+    let entry = nexus_local_db::novel_pool_entries::promote_to_active(
+        state.pool(),
+        &creator_id,
+        &req.work_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    Ok(Json(PoolEntryDto::from(entry)))
+}
+
+/// `POST /v1/local/works/pool/archive` — Archive a pool entry.
+pub async fn archive_pool_entry_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchivePoolRequest>,
+) -> Result<Json<PoolEntryDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let entry = nexus_local_db::novel_pool_entries::archive_pool_entry(
+        state.pool(),
+        &req.entry_id,
+        &creator_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    Ok(Json(PoolEntryDto::from(entry)))
+}
+
+/// `POST /v1/local/works/pool/inspiration` — Add an inspiration item.
+pub async fn add_inspiration(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<AddInspirationRequest>,
+) -> Result<(StatusCode, Json<AddInspirationResponse>), NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
+        .ok_or(NexusApiError::AuthRequired)?;
+
+    let item_id = format!("npi_{}", Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Route through nexus-home-layout — resolve operational workspace dir
+    // from nexus_home (~/.nexus42), not user home directly.
+    let workspace_dir = state
+        .nexus_home()
+        .join("creators")
+        .join(&creator_id)
+        .join("workspaces")
+        .join(&workspace_slug);
+
+    let item = nexus_local_db::inspiration_items::create_inspiration_with_scaffold(
+        state.pool(),
+        &item_id,
+        &creator_id,
+        &req.title,
+        &workspace_dir,
+        &now,
+    )
+    .await
+    .map_err(|e| match &e {
+        nexus_local_db::LocalDbError::ConstraintViolation { .. } => NexusApiError::Conflict(
+            format!("inspiration item with this path already exists: {e}"),
+        ),
+        _ => NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        },
+    })?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(AddInspirationResponse {
+            item_id: item.item_id,
+            rel_path: item.rel_path,
+        }),
+    ))
+}
+
+/// `GET /v1/local/works/pool/inspiration` — List inspiration items.
+pub async fn list_inspiration(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<ListInspirationQuery>,
+) -> Result<Json<ListInspirationResponse>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let limit = query.limit;
+    let offset = query.offset;
+
+    let items = nexus_local_db::inspiration_items::list_inspiration(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+        limit,
+        offset,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let total = nexus_local_db::inspiration_items::count_inspiration(
+        state.pool(),
+        &creator_id,
+        query.status.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let dtos: Vec<InspirationItemDto> = items.into_iter().map(InspirationItemDto::from).collect();
+
+    Ok(Json(ListInspirationResponse {
+        items: dtos,
+        total,
+        limit: limit.unwrap_or(200),
+        offset: offset.unwrap_or(0),
+    }))
+}
+
+/// `POST /v1/local/works/pool/inspiration/promote` — Promote an inspiration item to a Work.
+pub async fn promote_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<PromoteInspirationRequest>,
+) -> Result<Json<PromoteInspirationResponse>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // Look up the inspiration item
+    let item = nexus_local_db::inspiration_items::get_inspiration(state.pool(), &req.item_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("inspiration item {}", req.item_id)))?;
+
+    // Cross-creator guard: only the owning creator can promote their items
+    if item.creator_id != creator_id {
+        return Err(NexusApiError::NotFound(format!(
+            "inspiration item {}",
+            req.item_id
+        )));
+    }
+
+    if item.status != "idea" {
+        return Err(NexusApiError::BadRequest {
+            code: "INVALID_STATUS".to_string(),
+            message: format!(
+                "inspiration item {} has status '{}' — only 'idea' items can be promoted",
+                req.item_id, item.status
+            ),
+        });
+    }
+
+    // Create a new Work from the inspiration
+    let work_id = format!("wrk_{}", Uuid::new_v4());
+    let now = chrono::Utc::now().to_rfc3339();
+    let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
+        .ok_or(NexusApiError::AuthRequired)?;
+
+    let idea = req.idea.as_deref().unwrap_or(&item.title);
+
+    // For inspiration promote, we create a Work without world_id (the user
+    // can bind a world later). This is a lighter-weight flow than `run start`.
+    let record = WorkRecord {
+        work_id: work_id.clone(),
+        creator_id: creator_id.clone(),
+        workspace_slug,
+        status: "draft".to_string(),
+        title: item.title.clone(),
+        long_term_goal: idea.to_string(),
+        initial_idea: idea.to_string(),
+        creative_brief: None,
+        intake_status: "pending".to_string(),
+        world_id: None,
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+        current_stage: "intake".to_string(),
+        stage_status: "pending".to_string(),
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: 0,
+        auto_chain_enabled: true,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+
+    // Wrap the three writes (Work create + pool promote + inspiration update)
+    // in a single transaction so a step-3 failure rolls back everything.
+    let pool_entry = nexus_local_db::inspiration_promote_atomic(
+        state.pool(),
+        &record,
+        &creator_id,
+        &work_id,
+        &req.item_id,
+        &now,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    Ok(Json(PromoteInspirationResponse {
+        work_id: work_id.clone(),
+        pool_entry_id: pool_entry.entry_id,
+    }))
+}
+
+/// `POST /v1/local/works/pool/inspiration/archive` — Archive an inspiration item.
+pub async fn archive_inspiration_handler(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ArchiveInspirationRequest>,
+) -> Result<Json<InspirationItemDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    let item = nexus_local_db::inspiration_items::archive_inspiration(
+        state.pool(),
+        &req.item_id,
+        &creator_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    Ok(Json(InspirationItemDto::from(item)))
+}
+
+// ─── P1 Request / Response types ────────────────────────────────────────────
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ListPoolQuery {
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListPoolResponse {
+    pub entries: Vec<PoolEntryDto>,
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromotePoolRequest {
+    pub work_id: String,
+    /// If true, also set as pool active (redundant since promote always sets active).
+    #[serde(default)]
+    pub set_default: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArchivePoolRequest {
+    pub entry_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddInspirationRequest {
+    pub title: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AddInspirationResponse {
+    pub item_id: String,
+    pub rel_path: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ListInspirationQuery {
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListInspirationResponse {
+    pub items: Vec<InspirationItemDto>,
+    pub total: u32,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InspirationItemDto {
+    pub item_id: String,
+    pub creator_id: String,
+    pub rel_path: String,
+    pub title: String,
+    pub status: String,
+    pub promoted_work_id: Option<String>,
+    pub created_at: String,
+    pub promoted_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromoteInspirationRequest {
+    pub item_id: String,
+    /// Optional idea override for the new Work's `initial_idea`.
+    pub idea: Option<String>,
+    /// If true, set as pool active after creation.
+    #[serde(default)]
+    pub set_default: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromoteInspirationResponse {
+    pub work_id: String,
+    pub pool_entry_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArchiveInspirationRequest {
+    pub item_id: String,
+}
+
 #[cfg(test)]
 mod tests_fix_d {
     use super::*;
@@ -1101,6 +1842,11 @@ mod tests_fix_d {
             driver_schedule_id: Some("sch_active_driver".to_string()),
             auto_chain_interrupted: false,
             auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
         }
     }
 
@@ -1187,6 +1933,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -1230,6 +1978,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -1287,6 +2037,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -1321,6 +2073,8 @@ mod tests_fix_d {
             story_ref: None,
             primary_preset_id: None,
             client_request_id: None,
+            lineage_from_work_id: None,
+            set_pool_active: None,
         };
 
         let (_, resp) = create_work(State(state.clone()), Json(req))
@@ -1401,6 +2155,8 @@ mod tests_fix_d {
                 story_ref: None,
                 primary_preset_id: None,
                 client_request_id: None,
+                lineage_from_work_id: None,
+                set_pool_active: None,
             };
 
             let result = create_work(State(state.clone()), Json(req)).await;
