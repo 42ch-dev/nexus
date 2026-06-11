@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T19:06:18+0800",
+  "updated_at": "2026-06-11T19:24:31+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -35,7 +35,8 @@
       "depends_on": "2026-06-11-v1.42-runtime-lock-and-hygiene",
       "notes": [
         "2026-06-11T18:01:00+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p1 (topic branch feature/v1.42-multi-volume from iteration/v1.42). PM Task Board = plan §5 T1–T7. Routing: fullstack-dev single-stream (sequential T1→T6; T1 schema migration must complete before T2–T5). Primary specs: novel-workflow-profile.md §4.5.4–§4.5.7 + local-db-schema.md work_chapters PK migration. Implement dispatch to follow.",
-        "2026-06-11T18:48:10+0800 — Implement complete. PM merged 7 commits into iteration/v1.42 (merge SHA above). All 4 AC verified per dev Completion Report. Working tree clean. Known carry-forward: .sqlx/ regeneration deferred (R-V140P4-INFRA pattern). PM next: dispatch QC tri-review (N=3) on integrated HEAD."
+        "2026-06-11T18:48:10+0800 — Implement complete. PM merged 7 commits into iteration/v1.42 (merge SHA above). All 4 AC verified per dev Completion Report. Working tree clean. Known carry-forward: .sqlx/ regeneration deferred (R-V140P4-INFRA pattern). PM next: dispatch QC tri-review (N=3) on integrated HEAD.",
+        "2026-06-11T19:24:31+0800 — Fix wave complete. PM merged 4 fix-wave commits (1a873632 F-001, 28d842ab W-01, c9a8ff35 W-02, 9525f4a9 plan checkboxes). All 3 blocking QC findings addressed: F-001 evaluate_after_persist_volume_aware wired into supervisor + boot; W-01 migration DROP TABLE IF EXISTS guard; W-02 composite index idx_work_chapters_next_volume_aware. 4 new supervisor_cross_volume tests + 2 new migration fix tests pass. cargo test + clippy + nightly fmt all clean. PM next: targeted QC re-review of qc1 + qc3 (N=2, same turn)."
       ]
     },
     {
