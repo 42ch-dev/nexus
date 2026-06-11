@@ -502,6 +502,28 @@ fn validate_manifest(
                         });
                     }
                 }
+                NextTarget::GoNogo(go_nogo) => {
+                    // V1.42 P2: GoNogo is only valid on llm_judge states.
+                    if !matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. })) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next"),
+                            error: "go/nogo conditional next is only valid on llm_judge states"
+                                .to_string(),
+                        });
+                    }
+                    if !state_ids.contains(go_nogo.go.as_str()) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next.go"),
+                            error: format!("unknown state: '{}'", go_nogo.go),
+                        });
+                    }
+                    if !state_ids.contains(go_nogo.nogo.as_str()) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next.nogo"),
+                            error: format!("unknown state: '{}'", go_nogo.nogo),
+                        });
+                    }
+                }
                 NextTarget::Conditional(_) => {
                     problems.push(ValidationProblem {
                         path: format!("{state_path}.next"),
@@ -838,10 +860,23 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
         graph.add_task(std::sync::Arc::new(task));
     }
 
-    // Wire edges from state.next (linear only; conditional already rejected by validation).
+    // Wire edges from state.next.
     for state in &manifest.states {
-        if let Some(NextTarget::Linear(ref next_id)) = state.next {
-            graph.add_edge(&state.id, next_id);
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => {
+                graph.add_edge(&state.id, next_id);
+            }
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                // V1.42 P2: conditional edge reads _judge_result from context.
+                // `go` branch when true; `nogo` branch when false or absent.
+                graph.add_conditional_edge(
+                    &state.id,
+                    |ctx| ctx.get_sync::<bool>("_judge_result").unwrap_or(false),
+                    &go_nogo.go,
+                    &go_nogo.nogo,
+                );
+            }
+            Some(NextTarget::Conditional(_)) | None => {}
         }
     }
 
@@ -871,8 +906,19 @@ pub fn build_wired_outer_graph(
 
     // Wire edges.
     for state in &loaded.manifest.states {
-        if let Some(NextTarget::Linear(ref next_id)) = state.next {
-            graph.add_edge(&state.id, next_id);
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => {
+                graph.add_edge(&state.id, next_id);
+            }
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                graph.add_conditional_edge(
+                    &state.id,
+                    |ctx| ctx.get_sync::<bool>("_judge_result").unwrap_or(false),
+                    &go_nogo.go,
+                    &go_nogo.nogo,
+                );
+            }
+            Some(NextTarget::Conditional(_)) | None => {}
         }
     }
 

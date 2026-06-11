@@ -16,7 +16,7 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
-use crate::preset::manifest::{EnterAction, ExitWhen, StateDefinition};
+use crate::preset::manifest::{EnterAction, ExitWhen, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
@@ -514,6 +514,8 @@ pub struct StateCompositeTask {
     terminal: bool,
     enter_actions: Vec<EnterAction>,
     exit_when: Option<ExitWhen>,
+    /// Transition target (linear, go/nogo, or conditional).
+    next: Option<NextTarget>,
     /// Orchestration engine reference (for spawning child sessions).
     engine: Option<Arc<dyn OrchestrationEngine>>,
     /// Named inner graphs keyed by name.
@@ -535,6 +537,7 @@ impl StateCompositeTask {
             terminal: state.terminal,
             enter_actions: state.enter.clone(),
             exit_when: state.exit_when.clone(),
+            next: state.next.clone(),
             engine: None,
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
