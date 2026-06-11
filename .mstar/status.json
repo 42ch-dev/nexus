@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11",
+  "updated_at": "2026-06-11T17:26:06+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -1180,27 +1180,16 @@
     ],
     "2026-06-11-v1.42-runtime-lock-and-hygiene": [
       {
-        "id": "R-V142P0-01",
-        "severity": "medium",
-        "lifecycle": "fixed",
-        "title": "patch_work early-exit lock check did not respect TTL staleness — stale locks rejected instead of force-cleared",
-        "fix_note": "Added is_lock_stale() check before early-exit Locked error; stale locks now fall through to RuntimeLockGuard::acquire with force_stale=true",
-        "fixed_in_commit": "e44c8fda"
-      },
-      {
-        "id": "R-V142P0-DEFER7-DISPOSITION",
-        "severity": "info",
-        "lifecycle": "closed",
-        "title": "V1.41 P-last defer-7 carry-forward disposition: all 7 items remain waived/deferred (test-only, non-surgical)",
-        "disposition": {
-          "R-V140P0-S3": "waived (sqlx metadata churn; sqlx-cli now available)",
-          "R-V140P1-S6": "defer (validation benchmarks; no perf concern)",
-          "R-V140P2-S2": "defer (E2E world_kb_block integration test; non-surgical)",
-          "R-V140P3-S1": "defer (cross-creator job_id claim test; test-only)",
-          "R-V140P3-S2": "defer (failure-injection test; test-only)",
-          "R-V140P3-S3": "defer (AC3 empty world_id test; test-only)",
-          "R-V140P4-INFRA": "defer (.sqlx/ refresh; no schema touched in V1.42 P0)"
-        }
+        "id": "R-V142P0-PROC",
+        "severity": "high",
+        "lifecycle": "open",
+        "title": "Process violation: Cursor (Auto.Wood) direct-committed to integration branch and marked P0 Done without QC/QA gates; integration HEAD had no code until PM merge",
+        "source": "cursor-parallel-agent (Auto.Wood <hk@btang.cn>; Co-authored-by: Cursor)",
+        "scope": ".mstar/status.json (plans[1].status flip Todo→Done), .mstar/knowledge/specs/novel-multi-work-lifecycle.md (§4.2 stamp: gap→Implemented), .mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md (status: Todo→Done), .mstar/knowledge/specs/README.md (status line update)",
+        "decision": "risk-accepted",
+        "owner": "@project-manager",
+        "target": "V1.42 P0 closeout — process gap accepted per user directive (Option B); QC tri-review (N=3) + PM merge now in progress to restore gate discipline",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
       }
     ]
   }

@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-06-11-v1.42-runtime-lock-and-hygiene",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V142P0-01",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "patch_work early-exit lock check did not respect TTL staleness — stale locks rejected instead of force-cleared. Added is_lock_stale() check before early-exit Locked error; stale locks now fall through to RuntimeLockGuard::acquire with force_stale=true. TDD: hermetic test for stale holder cleared after TTL.",
+      "closure_evidence": "commit e44c8fda (feat(runtime-lock): T4 stale recovery + T5 integration tests)",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V142P0-DEFER7-DISPOSITION",
+      "severity": "low",
+      "lifecycle": "closed",
+      "closed_at": "2026-06-11",
+      "closure_note": "V1.41 P-last defer-7 carry-forward disposition: all 7 items remain waived/deferred (test-only, non-surgical). Per-item: R-V140P0-S3 waived (sqlx metadata churn; sqlx-cli now available); R-V140P1-S6 defer (validation benchmarks; no perf concern); R-V140P2-S2 defer (E2E world_kb_block integration test; non-surgical); R-V140P3-S1 defer (cross-creator job_id claim test; test-only); R-V140P3-S2 defer (failure-injection test; test-only); R-V140P3-S3 defer (AC3 empty world_id test; test-only); R-V140P4-INFRA defer (.sqlx/ refresh; no schema touched in V1.42 P0).",
+      "closure_evidence": "plan-2026-06-11-v1.42-runtime-lock-and-hygiene T6; cursor-closeout-29179b2e; pm-residual-fix-post-merge",
+      "archived_at": "2026-06-11"
+    }
+  ]
+}
