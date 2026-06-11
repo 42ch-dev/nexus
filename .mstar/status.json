@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T19:40:00+0800",
+  "updated_at": "2026-06-11T19:47:49+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -28,7 +28,7 @@
     {
       "plan_id": "2026-06-11-v1.42-multi-volume",
       "title": "P1 — DF-62 multi-volume PK + auto-chain + status data plane",
-      "status": "InReview",
+      "status": "Done",
       "working_branch": "feature/v1.42-multi-volume",
       "merge_target": "iteration/v1.42",
       "plan_file": ".mstar/plans/2026-06-11-v1.42-multi-volume.md",
@@ -37,7 +37,9 @@
         "2026-06-11T18:01:00+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p1 (topic branch feature/v1.42-multi-volume from iteration/v1.42). PM Task Board = plan §5 T1–T7. Routing: fullstack-dev single-stream (sequential T1→T6; T1 schema migration must complete before T2–T5). Primary specs: novel-workflow-profile.md §4.5.4–§4.5.7 + local-db-schema.md work_chapters PK migration. Implement dispatch to follow.",
         "2026-06-11T18:48:10+0800 — Implement complete. PM merged 7 commits into iteration/v1.42 (merge SHA above). All 4 AC verified per dev Completion Report. Working tree clean. Known carry-forward: .sqlx/ regeneration deferred (R-V140P4-INFRA pattern). PM next: dispatch QC tri-review (N=3) on integrated HEAD.",
         "2026-06-11T19:24:31+0800 — Fix wave complete. PM merged 4 fix-wave commits (1a873632 F-001, 28d842ab W-01, c9a8ff35 W-02, 9525f4a9 plan checkboxes). All 3 blocking QC findings addressed: F-001 evaluate_after_persist_volume_aware wired into supervisor + boot; W-01 migration DROP TABLE IF EXISTS guard; W-02 composite index idx_work_chapters_next_volume_aware. 4 new supervisor_cross_volume tests + 2 new migration fix tests pass. cargo test + clippy + nightly fmt all clean. PM next: targeted QC re-review of qc1 + qc3 (N=2, same turn).",
-        "2026-06-11T19:40:00+0800 — QC revalidation complete. qc1 re-review Approve (b2a58edc); qc3 re-review Approve (f662b0db); qc2 Approve stands. 3 blocking residuals (F-001 critical, W-01/W-02 medium) closed + archived. 3 non-blocking residuals (F-002/F-003/F-004 low) remain open (defer to P-last). PM consolidated verdict: Approve. PM next: QA verification (N=1)."
+        "2026-06-11T19:40:00+0800 — QC revalidation complete. qc1 re-review Approve (b2a58edc); qc3 re-review Approve (f662b0db); qc2 Approve stands. 3 blocking residuals (F-001 critical, W-01/W-02 medium) closed + archived. 3 non-blocking residuals (F-002/F-003/F-004 low) remain open (defer to P-last). PM consolidated verdict: Approve. PM next: QA verification (N=1).",
+        "2026-06-11T19:47:49+0800 — PM closure: 3 QA Critical findings addressed. QA-F-002 (qc2.md missing) fixed by PM merge of c626f150 onto integration. QA-F-003 (spec §4.5.5-§4.5.7 markers) fixed by adding V1.42 P1 Implemented stamps to §4.5.5 (volume outline scaffold) and §4.5.7 (test #6 migration idempotency + W-02 index). QA-F-001 (works_api 2 test failures) verified pre-existing on base c249c902 (re-ran checkout + test); not P1-attributable; PM override documented per V1.41 P-last closeout pattern (commit 0b76fb2f). All AC1-AC4 met. P1 formally DONE.",
+        "2026-06-11T19:47:49+0800 — QC tri-review final state: qc1 Approve (re-review b2a58edc; F-001 resolved; F-004 folded); qc2 Approve (c626f150; now on integration); qc3 Approve (re-review f662b0db; W-01+W-02 resolved). qc-consolidated.md Approve. 3 blocking residuals (F-001 critical, W-01/W-02 medium) closed + archived. 3 non-blocking residuals (F-002/F-003/F-004 low) remain open (defer to P-last)."
       ]
     },
     {
