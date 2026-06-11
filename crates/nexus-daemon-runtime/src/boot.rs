@@ -134,8 +134,12 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     state.set_daemon_tool_dispatch(tool_dispatch.clone());
     tracing::info!("Daemon tool dispatch adapter wired");
 
-    let concrete_engine =
+    let mut concrete_engine =
         GraphFlowEngine::new_with_storage(sqlite_storage.clone(), capabilities.clone());
+
+    // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
+    // HostTool enter actions in preset graphs can invoke nexus.* tools.
+    concrete_engine.set_daemon_tool_dispatch(tool_dispatch.clone());
 
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
     match sqlite_storage.list_non_terminal_sessions().await {
@@ -168,6 +172,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             &entry.loaded,
             &engine_ref.clone(),
             &capabilities.clone(),
+            Some(tool_dispatch.clone()),
         );
         let graph = Arc::new(graph);
 
