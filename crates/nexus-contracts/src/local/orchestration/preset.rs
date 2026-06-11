@@ -193,6 +193,19 @@ pub enum EnterAction {
         /// Name of the inner graph (must match `inner_graphs.<name>`).
         name: String,
     },
+    /// Invoke a daemon-side `nexus.*` host tool (DF-47, V1.42 P3).
+    ///
+    /// The tool is dispatched in-process through `HostToolExecutor::dispatch_for_schedule`
+    /// — no worker IPC round-trip. Designed for read-only tools like
+    /// `nexus.orchestration.schedule_status`.
+    #[serde(rename = "host_tool")]
+    HostTool {
+        /// Tool name, e.g. `nexus.orchestration.schedule_status`.
+        tool_name: String,
+        /// Tool arguments (JSON object; may contain template placeholders).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<serde_json::Value>,
+    },
 }
 
 // ---------------------------------------------------------------------------

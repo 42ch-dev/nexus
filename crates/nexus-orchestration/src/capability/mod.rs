@@ -28,6 +28,8 @@ pub enum CapabilityError {
     AcpSessionLost,
     #[error("cancelled")]
     Cancelled,
+    #[error("forbidden: {0}")]
+    Forbidden(String),
     #[error("internal error: {0}")]
     Internal(String),
 }
