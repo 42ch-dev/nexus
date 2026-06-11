@@ -167,6 +167,9 @@ pub struct WorkApiDto {
     /// Next chapter to work on per §4.5.2 selection (V1.38 P0 — populated for novel profile).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_chapter: Option<i32>,
+    /// V1.42: volume of the next chapter to work on (cross-volume aware).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_chapter_volume: Option<i32>,
     /// Auto-chain enabled flag (V1.39 §5.4).
     pub auto_chain_enabled: bool,
     /// Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
@@ -227,8 +230,9 @@ impl From<WorkRecord> for WorkApiDto {
             work_ref: r.work_ref,
             total_planned_chapters: r.total_planned_chapters,
             current_chapter: r.current_chapter,
-            chapters: None,     // populated by enrich_with_chapters()
-            next_chapter: None, // populated by enrich_with_chapters()
+            chapters: None,            // populated by enrich_with_chapters()
+            next_chapter: None,        // populated by enrich_with_chapters()
+            next_chapter_volume: None, // populated by enrich_with_chapters()
             auto_chain_enabled: r.auto_chain_enabled,
             driver_schedule_id: r.driver_schedule_id,
             auto_chain_interrupted: r.auto_chain_interrupted,
@@ -758,15 +762,21 @@ async fn enrich_with_chapters(
         }
     }
 
-    // Populate next_chapter (§4.5.2 selection)
-    match nexus_local_db::work_chapters::next_chapter(state.pool(), work_id).await {
-        Ok(ch) => dto.next_chapter = ch,
+    // Populate next_chapter (§4.5.2 selection) and next_chapter_volume (V1.42)
+    match nexus_local_db::work_chapters::next_chapter_volume_aware(state.pool(), work_id).await {
+        Ok(Some((volume, chapter))) => {
+            dto.next_chapter = Some(chapter);
+            dto.next_chapter_volume = Some(volume);
+        }
+        Ok(None) => {
+            // No more chapters to work on
+        }
         Err(e) => {
             tracing::warn!(
                 target: "novel.chapters",
                 work_id = %work_id,
                 error = %e,
-                "Failed to compute next_chapter"
+                "Failed to compute next_chapter (volume-aware)"
             );
         }
     }

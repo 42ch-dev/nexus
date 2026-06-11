@@ -35,7 +35,12 @@ pub enum ChainAction {
     /// Advance to the next FL-E stage for the current chapter.
     AdvanceStage { work_id: String, next_stage: String },
     /// Start the produce stage for the next chapter (chapter outer loop).
-    NextChapter { work_id: String, next_chapter: i32 },
+    /// V1.42: includes volume for cross-volume chaining.
+    NextChapter {
+        work_id: String,
+        next_chapter: i32,
+        next_volume: i32,
+    },
     /// The Work is complete — all chapters finalized.
     WorkComplete { work_id: String },
 }
@@ -139,6 +144,10 @@ pub fn evaluate_next_step(work: &WorkRecord) -> ChainAction {
 /// This handles the chapter outer loop:
 /// - If more chapters remain → start produce for chapter N+1
 /// - If all chapters done → mark work as completed
+///
+/// For single-volume Works (the common case), uses the flat `current_chapter`
+/// comparison. For multi-volume Works, callers should use
+/// [`evaluate_after_persist_volume_aware`] instead.
 fn evaluate_after_persist(work: &WorkRecord) -> ChainAction {
     let total_chapters = work.total_planned_chapters.unwrap_or(0);
     let current_chapter = work.current_chapter;
@@ -157,12 +166,50 @@ fn evaluate_after_persist(work: &WorkRecord) -> ChainAction {
         ChainAction::NextChapter {
             work_id: work.work_id.clone(),
             next_chapter,
+            next_volume: 1, // V1.42: single-volume path defaults to 1
         }
     } else {
         // All chapters finalized
         ChainAction::WorkComplete {
             work_id: work.work_id.clone(),
         }
+    }
+}
+
+/// V1.42 volume-aware version of [`evaluate_after_persist`].
+///
+/// Queries the DB for the next non-finalized chapter across all volumes.
+/// Falls back to the flat `evaluate_after_persist` logic if the volume-aware
+/// query returns `None` (e.g. all chapters finalized).
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the DB query fails.
+pub async fn evaluate_after_persist_volume_aware(
+    pool: &SqlitePool,
+    work: &WorkRecord,
+) -> Result<ChainAction, AutoChainError> {
+    let total_chapters = work.total_planned_chapters.unwrap_or(0);
+
+    if total_chapters <= 0 {
+        return Ok(ChainAction::WorkComplete {
+            work_id: work.work_id.clone(),
+        });
+    }
+
+    // Try volume-aware next chapter selection
+    let next =
+        nexus_local_db::work_chapters::next_chapter_volume_aware(pool, &work.work_id).await?;
+
+    match next {
+        Some((volume, chapter)) => Ok(ChainAction::NextChapter {
+            work_id: work.work_id.clone(),
+            next_chapter: chapter,
+            next_volume: volume,
+        }),
+        None => Ok(ChainAction::WorkComplete {
+            work_id: work.work_id.clone(),
+        }),
     }
 }
 
@@ -754,6 +801,7 @@ mod tests {
             ChainAction::NextChapter {
                 work_id: "wrk_test".to_string(),
                 next_chapter: 2,
+                next_volume: 1,
             }
         );
     }
@@ -855,6 +903,7 @@ mod tests {
             ChainAction::NextChapter {
                 work_id: "wrk_test".to_string(),
                 next_chapter: 6,
+                next_volume: 1,
             }
         );
     }
