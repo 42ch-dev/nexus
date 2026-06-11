@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-11-v1.42-agent-tool-production-wiring"
-verdict: "Request Changes"
-generated_at: "2026-06-11"
+verdict: "Approve"
+generated_at: "2026-06-12"
 ---
 
 # Code Review Report
@@ -12,9 +12,9 @@ generated_at: "2026-06-11"
 ## Reviewer Metadata
 - Reviewer: @qc-specialist-3
 - Runtime Agent ID: qc-specialist-3
-- Runtime Model: xai/grok-build-0.1
+- Runtime Model: kimi-for-coding/k2p6
 - Review Perspective: Performance and reliability risk (DF-47 production caller wiring, hot-path overhead, async executor safety, resource lifecycle)
-- Report Timestamp: 2026-06-11T21:30:00Z
+- Report Timestamp: 2026-06-12T00:00:00Z
 
 ## Scope
 - plan_id: 2026-06-11-v1.42-agent-tool-production-wiring
@@ -117,24 +117,83 @@ generated_at: "2026-06-11"
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 3 |
+| 🟡 Warning | 0 |
 | 🟢 Suggestion | 3 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-**Rationale**: No Critical findings. Three Warnings, two of which (W-02, W-03) are performance/reliability anti-patterns in the hot-path code that would execute on every schedule tick. However, the primary reason for `Request Changes` is **W-01**: the stated production path (schedule tick → `HostToolCallTask`) is not actually wired in production. The task type exists and is tested, but no preset loader, schedule executor, or capability registry entry invokes it. This means the plan's acceptance criterion "One tool callable from a running schedule without manual CLI invocation" is not met by the code under review.
+**Rationale**: No Critical findings remain. The original W-01 (production caller gap) and W-02 (hot-path overhead) findings were addressed by the fix wave, as detailed in `## Revalidation` below. W-03 is mitigated on the production path. The three Suggestion-level items from the initial review remain recorded but are non-blocking. Lint and the relevant integration tests are clean.
 
 The infrastructure is sound:
 - `dispatch_for_schedule` correctly creates a `ToolExecuteRequest` with `caller_kind=Schedule` and delegates to the same `HostToolExecutor::execute` used by HTTP (single dispatch table invariant per spec §7.1).
-- `DaemonToolDispatchAdapter` is correctly wired at boot before any schedule tick can run; the field is behind `Arc<Option<...>>` with a one-time `set_` at startup.
+- `DaemonToolDispatchAdapter` is correctly wired at boot before any schedule tick can run.
 - `HostToolCallTask` propagates `dispatch_tool` errors as `TaskExecutionFailed` (no silent swallow).
-- The 5 new hermetic E2E tests cover round-trip, stub mode, graph-flow context integration, cross-creator rejection, and Schedule-vs-HTTP result equivalence.
-- All 26 existing tests in `agent_tool_api.rs` continue to pass.
+- The 6 hermetic E2E tests in `agent_tool_production_wiring` cover round-trip, stub mode, graph-flow context integration, cross-creator rejection, Schedule-vs-HTTP result equivalence, and completion-lock read-only behavior.
+- All existing tests in `agent_tool_api.rs` continue to pass.
 
-But until `HostToolCallTask` is actually invoked by the schedule executor or preset engine, the DF-47 production caller gap is not closed. Lint and tests are clean. Report committed on the review branch per assignment.
+The DF-47 production caller gap is now closed in the preset-graph path. Lint and tests are clean. Report committed on the review branch per assignment.
 
-## Revalidation (if targeted re-review)
-N/A — initial wave.
+## Revalidation
+
+Targeted re-review of the fix wave `b122db77..HEAD` (`aa0574cc`, `8cda43c9`) on the QC worktree at `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-p3-reqc` (detached HEAD at `8cda43c9`).
+
+### W-01: Production path incomplete — RESOLVED
+
+The fix closes the production caller gap identified in the initial review:
+
+- `EnterAction::HostTool` variant added to the wire/preset manifest (`crates/nexus-contracts/src/local/orchestration/preset.rs:193`).
+- `StateCompositeTask` gained a `daemon_tool_dispatch` slot and a `with_daemon_tool_dispatch()` builder, and its `EnterAction` handler now constructs and runs a `HostToolCallTask` for `HostTool` actions (`crates/nexus-orchestration/src/tasks/mod.rs:748`).
+- `HostToolCallTask::from_dispatch()` creates the task with a direct `Arc<dyn DaemonToolDispatch>` production path, avoiding the `Mutex<Option<...>>` wrapper used only by tests (`tasks/mod.rs:1525`).
+- `GraphFlowEngine` stores the dispatch and passes it into `build_wired_outer_graph()`; the loader injects it into every `StateCompositeTask` (`engine.rs:563`, `preset/loader.rs:915`).
+- Daemon boot wires the `DaemonToolDispatchAdapter` into `WorkspaceState` and into the engine (`crates/nexus-daemon-runtime/src/boot.rs:134`, `172`).
+
+The full production chain is now: preset manifest `host_tool` enter action → `StateCompositeTask` → `HostToolCallTask::from_dispatch` → `DaemonToolDispatchAdapter::dispatch_tool` → `HostToolExecutor::dispatch_for_schedule` → handler.
+
+### W-02: Hot-path overhead — RESOLVED
+
+`HostToolCallTask::run()` now short-circuits expensive context serialization and handlebars rendering when `self.args` contains no `{{` placeholders (`tasks/mod.rs:1579`). A new recursive `value_contains_template()` helper checks objects, arrays, and strings. For `nexus.orchestration.schedule_status` calls with a trivial `{"work_id":"..."}` object, the task now pays only a shallow JSON traversal instead of `build_nested_payload` + `render_value_templates`.
+
+### W-03: `std::sync::Mutex` in async context — MITIGATED
+
+The production path introduced by `HostToolCallTask::from_dispatch()` stores the dispatch as a direct `Arc<dyn DaemonToolDispatch>` and never acquires the test-only `Mutex<Option<...>>` slot. The legacy test constructor still uses the mutex, which is acceptable because it is set once and uncontended, but the hot production path no longer exercises it.
+
+### Verification commands
+
+```bash
+# Worktree / range alignment
+cd /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-p3-reqc
+git rev-parse --show-toplevel   # /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.42-p3-reqc
+git rev-parse --abbrev-ref HEAD # HEAD (detached)
+git log b122db77..HEAD --oneline
+# 8cda43c9 merge(v1.42 P3 fix-wave): production path wiring + hot-path + test strengthening
+# aa0574cc fix(v1.42 P3): QC fix wave — wire production path + hot-path + test strengthening
+
+# Lint / format
+cargo +nightly fmt --all --check          # (no output = clean)
+cargo clippy -p nexus-daemon-runtime -p nexus-orchestration -p nexus-agent-host -- -D warnings  # clean
+
+# Production-path integration tests
+cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring
+# 6 passed; 0 failed (new tests: schedule_status through adapter, HostToolCallTask round-trip,
+# cross-creator Forbidden variant, completion-lock read-only path, dispatch/execute equivalence,
+# stub mode without adapter)
+
+# The Assignment-listed target `cargo test -p nexus-orchestration --test supervisor`
+# does not exist in this worktree; the production-path coverage is provided by the
+# `agent_tool_production_wiring` integration test above.
+```
+
+### Updated Summary
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 3 |
+
+**Verdict**: Approve
+
+The qc3 findings that originally drove `Request Changes` (W-01 production caller gap and W-02 hot-path overhead) are resolved. Lint and the relevant integration tests are clean. Outstanding Suggestions (S-01, S-02, S-03 from the initial wave) remain recorded but are non-blocking.
 
 ## Evidence Appendix (QC verification commands)
 
