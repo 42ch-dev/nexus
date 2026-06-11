@@ -134,6 +134,7 @@ async fn ac2_persist_chapter1_starts_chapter2() {
         ChainAction::NextChapter {
             work_id: "wrk_ac2".to_string(),
             next_chapter: 2,
+            next_volume: 1,
         }
     );
 }
@@ -150,6 +151,7 @@ async fn ac2_persist_penultimate_chapter_starts_last() {
         ChainAction::NextChapter {
             work_id: "wrk_ac2b".to_string(),
             next_chapter: 5,
+            next_volume: 1,
         }
     );
 }

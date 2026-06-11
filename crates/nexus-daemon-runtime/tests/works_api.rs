@@ -1327,7 +1327,7 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
         .await
         .unwrap();
     for ch in 1..=2 {
-        work_chapters::update_status(state.pool(), &work_id, ch, "finalized", Some(4000), now)
+        work_chapters::update_status(state.pool(), &work_id, ch, 1, "finalized", Some(4000), now)
             .await
             .unwrap();
     }

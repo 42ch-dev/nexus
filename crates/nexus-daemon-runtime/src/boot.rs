@@ -279,6 +279,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                 nexus_orchestration::auto_chain::ChainAction::NextChapter {
                                     ref work_id,
                                     ref next_chapter,
+                                    next_volume: _,
                                 } => {
                                     match resume_auto_chain_work(
                                         recovery_pool,
