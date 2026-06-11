@@ -1,6 +1,6 @@
 # Novel Multi-Work Lifecycle — Normative Specification v1
 
-**Status**: Draft (V1.41 — grill-me locked)  
+**Status**: Shipped (V1.41 — PR #53; post-merge `156e669d` / `12753eb8`)  
 **Document class**: Feature line (profile overlay extension)  
 **Created**: 2026-06-10  
 **Scope**: Creator-scoped **multi-novel Work completion**, **runtime/concurrency locks**, and **CLI default Work** — DF-60 Medium ceremony  
@@ -13,7 +13,8 @@
 - [work-experience-model.md](work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
 
-**Iteration compass**: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md)
+**Iteration compass**: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) (Shipped)  
+**V1.42 amend**: §4.2 production acquire gap — [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) P0
 
 ---
 
@@ -126,6 +127,18 @@ Rules:
 
 Daemon Local API and `nexus.work.patch` **must** use the same acquire/release paths as CLI.
 
+### 4.2 Production acquire contract (V1.42 P0)
+
+**Gap (PR #53 security re-review)**: V1.41 shipped DB columns and spec rules but **production paths do not yet acquire** `runtime_lock_holder`.
+
+| Path | Acquire before mutate | Release |
+| --- | --- | --- |
+| `creator run` mutating subcommands | **Required** (P0) | On command return (RAII) |
+| Daemon `patch_work` / schedule enqueue | **Required** (P0) | On schedule terminal |
+| Auto-chain tick | Skip if foreign holder | N/A |
+
+**Stale recovery (R-V141P0-01)**: If `runtime_lock_acquired_at` older than **2h** (default; env/config override allowed), daemon **may** clear holder before new acquire. Hermetic tests required.
+
 ---
 
 ## 5. CLI surfaces (summary)
@@ -141,6 +154,7 @@ Full flags in [cli-spec.md](cli-spec.md) §6.2D / §6.2H.
 ### 5.2 `creator run start --from-work <completed_work_id>`
 
 - Creates **new** Work; sets `works.lineage_from_work_id` on the new row.
+- **Validation (shipped `12753eb8`)**: `completed_work_id` must exist, belong to the active creator, and be in `completed` status; otherwise **422** before INSERT.
 - Copies optional `creative_brief` defaults from completed Work metadata (not filesystem tree).
 - Does **not** mutate or resume the completed Work.
 
@@ -177,4 +191,4 @@ Full flags in [cli-spec.md](cli-spec.md) §6.2D / §6.2H.
 
 ---
 
-*Draft for V1.41 P0 implement. Promote to Shipped (V1.41) at iteration close.*
+*Shipped V1.41. §4.2 production wiring is V1.42 P0.*

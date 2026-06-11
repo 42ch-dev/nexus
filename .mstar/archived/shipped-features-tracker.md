@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-03
+**Last updated**: 2026-06-11
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -64,6 +64,8 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~TD-10~~ | Device flow OAuth — production auth deferred; stub `verify_device_code` only | V1.10 | Low severity. Replaced by real Device Flow Login (WS-A). |
 | ~~DF-57~~ | `Works/<work_ref>/` artifact layout + sync scan migration | **V1.36 P2** (Shipped 2026-06-07) | Pre-1.0: no legacy `Stories/<story_ref>/` shims. Plan `2026-06-07-v1.36-novel-artifact-layout-and-templates`; `sync_module` rewritten to scan only `Works/<work_ref>/Stories/*.md`; per-chapter metadata derived from `work_chapters` table; 5 novel-writing templates (chapter-outline / chapter-body / volume-outline / foreshadowing / event-index). |
 | ~~DF-58 (V1.36)~~ | Interactive novel project init preset (`novel-project-init`) | **V1.36 P1** (Shipped 2026-06-07) | Separate grill-me preset; not embedded in `novel-writing` auto-chain. Plan `2026-06-07-v1.36-novel-project-init-preset`; 10 prompts (init-intro, init-title, init-genre, init-chapters, init-work-ref, init-world + 3 branches, init-summary) + 4 templates (README, foreshadowing, event-index, volume-outline); `novel.project_scaffold` capability with atomic FS+DB transaction (ScaffoldTransaction with Drop rollback) + sanitization (`validate_work_ref` / `validate_slug` / `validate_total_chapters` 1..=100) + world_id FK existence check. |
+| ~~DF-60~~ | Multi-novel lifecycle (2-step completion + completion-lock + runtime lock columns + `creator works` IA) | **V1.41 P0** (Shipped 2026-06-11) | PR [#53](https://github.com/42ch-dev/nexus/pull/53) merged to `main`; post-merge `12753eb8` lineage validation. Plan [2026-06-10-v1.41-multi-work-switch.md](../plans/2026-06-10-v1.41-multi-work-switch.md). Spec [novel-multi-work-lifecycle.md](../knowledge/specs/novel-multi-work-lifecycle.md). **Note:** production `runtime_lock_holder` acquire deferred V1.42 P0. |
+| ~~DF-61~~ | Selection pool + inspiration pool (DB SSOT + `Pool/Ideas/` MD) | **V1.41 P1** (Shipped 2026-06-11) | PR #53; post-merge `156e669d` `set_pool_active` creator_id authz. Plan [2026-06-10-v1.41-selection-pool.md](../plans/2026-06-10-v1.41-selection-pool.md). Spec [novel-work-pool.md](../knowledge/specs/novel-work-pool.md). |
 
 ### Cancelled / Superseded
 

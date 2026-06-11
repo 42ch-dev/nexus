@@ -1,6 +1,6 @@
 # Novel Work Pool — Normative Specification v1
 
-**Status**: Draft (V1.41 — grill-me locked)  
+**Status**: Shipped (V1.41 — PR #53; post-merge `156e669d`)  
 **Document class**: Feature line  
 **Created**: 2026-06-10  
 **Scope**: DF-61 selection pool + inspiration pool — **DB SSOT** with markdown inspiration files  
@@ -11,7 +11,7 @@
 - [cli-spec.md](cli-spec.md) — `creator works` command group
 - [local-db-schema.md](local-db-schema.md) — table definitions
 
-**Iteration compass**: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md)
+**Iteration compass**: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) (Shipped)
 
 ---
 
@@ -98,7 +98,19 @@ On `creator works pool inspiration add --title "..."`:
 
 ---
 
-## 4. CLI surface (summary)
+## 4. API authz (daemon)
+
+### 4.1 `set_pool_active` creator binding (shipped `156e669d`)
+
+Local API `set_pool_active` (and CLI `creator works use` / `pool promote --set-default`):
+
+- Request body **`creator_id` must match** the authenticated/active creator context.
+- Mismatch → **403 Forbidden** (not silent demote on wrong creator).
+- Cross-reference [cli-spec.md](cli-spec.md) §6.2D.
+
+---
+
+## 5. CLI surface (summary)
 
 | Command | Effect |
 | --- | --- |
@@ -114,7 +126,7 @@ On `creator works pool inspiration add --title "..."`:
 
 ---
 
-## 5. Promote flow (no switch)
+## 6. Promote flow (no switch)
 
 When `pool promote` targets `queued`:
 
@@ -125,7 +137,7 @@ When `pool promote` targets `queued`:
 
 CLI may **warn** when prior `active` Work still has running schedules (informational only).
 
-### 5.1 Inspiration promote `--idea` semantics
+### 6.1 Inspiration promote `--idea` semantics
 
 When `pool inspiration promote <item_id>` is invoked:
 
@@ -137,7 +149,7 @@ This makes the behavior explicit and CLI-help-testable.
 
 ---
 
-## 6. Completion integration
+## 7. Completion integration
 
 On Work completion (lifecycle spec §2):
 
@@ -147,7 +159,7 @@ On Work completion (lifecycle spec §2):
 
 ---
 
-## 7. Implement split
+## 8. Implement split
 
 | Phase | Deliverable |
 | --- | --- |
@@ -156,7 +168,7 @@ On Work completion (lifecycle spec §2):
 
 ---
 
-## 8. Acceptance (spec-level)
+## 9. Acceptance (spec-level)
 
 1. DB SSOT; markdown derivative for 选题库 export only.
 2. One `active` per creator; unique `(creator_id, work_id)`.
@@ -165,4 +177,4 @@ On Work completion (lifecycle spec §2):
 
 ---
 
-*Draft for V1.41. Promote to Shipped (V1.41) at iteration close.*
+*Shipped V1.41. Pool promote bypassing completion-lock is by-design (grill-me §0.1 row 19).*

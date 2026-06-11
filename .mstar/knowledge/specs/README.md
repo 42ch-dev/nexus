@@ -91,7 +91,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [orchestration-engine.md](orchestration-engine.md) | Master | Active |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
-| [preset-conditional-routing.md](preset-conditional-routing.md) | Exploration | Exploration |
+| [preset-conditional-routing.md](preset-conditional-routing.md) | Draft overlay | **Draft (V1.42 P2)** — DF-56 minimal `llm_judge` slice |
 
 ### Creator product lines
 
@@ -100,8 +100,8 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
 | [novel-workflow-profile.md](novel-workflow-profile.md) | Draft overlay | **Shipped (V1.36 → V1.40)** — World KB §3.5.1; V1.41 §6.4 multi-work cross-refs |
-| [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) | Feature line | **Draft (V1.41)** — DF-60 completion-lock, runtime lock, concurrent multi-Work |
-| [novel-work-pool.md](novel-work-pool.md) | Feature line | **Draft (V1.41)** — DF-61 pool DB SSOT + `creator works` |
+| [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) | Feature line | **Shipped (V1.41)** — §4.2 runtime_lock production wiring → V1.42 P0 |
+| [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
 | [novel-quality-loop.md](novel-quality-loop.md) | Draft overlay | **Shipped (V1.39 → V1.40)** — full quality loop + V1.40 P3 extract persistence |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

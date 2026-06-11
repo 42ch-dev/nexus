@@ -1,7 +1,62 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T07:00:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-11T16:14:57+08:00",
+  "plans": [
+    {
+      "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
+      "title": "P-1 — V1.42 compass, plans, specs, tracker, status (docs-only)",
+      "status": "Todo",
+      "working_branch": "iteration/v1.42",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-harness-docs-prepare.md",
+      "compass": ".mstar/iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-runtime-lock-and-hygiene",
+      "title": "P0 — runtime_lock production acquire + V1.41 P-last defer-7",
+      "status": "Todo",
+      "working_branch": "feature/v1.42-runtime-lock-and-hygiene",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md",
+      "depends_on": "2026-06-11-v1.42-harness-docs-prepare"
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-multi-volume",
+      "title": "P1 — DF-62 multi-volume PK + auto-chain + status data plane",
+      "status": "Todo",
+      "working_branch": "feature/v1.42-multi-volume",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-multi-volume.md",
+      "depends_on": "2026-06-11-v1.42-runtime-lock-and-hygiene"
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-conditional-routing",
+      "title": "P2 — DF-56 llm_judge GO/NOGO conditional next",
+      "status": "Todo",
+      "working_branch": "feature/v1.42-conditional-routing",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-conditional-routing.md",
+      "depends_on": "2026-06-11-v1.42-multi-volume"
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-agent-tool-production-wiring",
+      "title": "P3 — DF-47 one E2E agent tool upcall",
+      "status": "Todo",
+      "working_branch": "feature/v1.42-agent-tool-wiring",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-agent-tool-production-wiring.md",
+      "depends_on": "2026-06-11-v1.42-conditional-routing"
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-ux-polish",
+      "title": "P-last — V1.41 UX carry-forward (14 residuals)",
+      "status": "Todo",
+      "working_branch": "feature/v1.42-ux-polish",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-ux-polish.md",
+      "depends_on": "2026-06-11-v1.42-agent-tool-production-wiring"
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,18 +64,18 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
+    "integration_branch": "iteration/v1.42",
     "last_integration_branch": "iteration/v1.41",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
     "latest_shipped_iteration": "v1.41",
     "latest_shipped_at": "2026-06-11T07:00:00+08:00",
-    "latest_active_iteration": null,
-    "latest_active_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md",
+    "latest_active_iteration": "v1.42",
+    "latest_active_compass": ".mstar/iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md",
     "integration_branch_retired": "iteration/v1.41",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-11T07:00:00+08:00",
+      "updated_at": "2026-06-11T16:14:57+08:00",
       "total_open": 91,
       "by_severity": {
         "critical": 0,
@@ -30,8 +85,9 @@
         "nit": 16
       },
       "by_target": {
-        "v1.41": 31,
-        "backlog": 60
+        "v1.42": 14,
+        "v1.41": 7,
+        "backlog": 70
       },
       "by_plan": {
         "creator-run": 3,
@@ -49,9 +105,9 @@
         "work-switch": 12,
         "selection-pool": 19
       },
-      "notes": "V1.41 prepare: DF-60/61 in scope; aggressive hygiene targets V1.40 batch (24) + V1.33 P3/P4 medium (5). Exclude R-V140P4-W2 PM-accept. Multi-volume PK deferred V1.42."
+      "notes": "V1.42 prepare: P0 runtime_lock + defer-7 hygiene; P1 DF-62 multi-volume; P2 DF-56; P3 DF-47; P-last 14 UX residuals. Exclude R-V140P4-W2 PM-accept."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
     "spec_refs": [
       ".mstar/knowledge/specs/novel-workflow-profile.md",
       ".mstar/knowledge/specs/entity-scope-model.md",
@@ -69,7 +125,7 @@
       ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
       ".mstar/knowledge/specs/novel-work-pool.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md"
   },
   "residual_findings": {
     "2026-06-04-v1.33-work-model-and-creator-run": [
@@ -810,7 +866,7 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work guard); works.runtime_lock_holder column",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.41 P-last or V1.42"
+        "target": "V1.42 P0"
       },
       {
         "id": "R-V141P0-02",
@@ -820,7 +876,7 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs:140-354",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 refactor"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P0-03",
@@ -830,7 +886,7 @@
         "scope": "crates/nexus-local-db/src/works.rs:151-201",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P0-04",
@@ -850,7 +906,7 @@
         "scope": "crates/nexus42/src/commands/creator/run.rs (start + resume)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P0-06",
@@ -860,7 +916,7 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs (handle_status)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P0-07",
@@ -880,7 +936,7 @@
         "scope": "crates/nexus-local-db/src/works.rs (work_ref field validation)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P0-09",
@@ -910,7 +966,7 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:175",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P0-12",
@@ -1012,7 +1068,7 @@
         "scope": "novel_pool_entries.rs:159 + inspiration_items.rs:219 (after fix wave: with creator_id param)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P1-10",
@@ -1022,7 +1078,7 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs handle_pool_promote",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P1-11",
@@ -1032,7 +1088,7 @@
         "scope": "works.rs:240, 1669",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P1-12",
@@ -1042,7 +1098,7 @@
         "scope": "inspiration_items.rs:263-327 title_to_slug",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P1-13",
@@ -1052,7 +1108,7 @@
         "scope": "inspiration_items.rs:create_inspiration_with_scaffold",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P1-14",
@@ -1062,7 +1118,7 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last"
       },
       {
         "id": "R-V141P1-15",
@@ -1112,7 +1168,7 @@
         "scope": "works.rs:1331-1341, 1374-1381, 1399-1406 (after fix wave: includes title)",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last"
       }
     ]
   }

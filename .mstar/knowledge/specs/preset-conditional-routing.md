@@ -1,6 +1,6 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Exploration (pre-normative — **not shipped**)  
+**Status**: Draft (V1.42 P2 — minimal slice locked; full DF-56 roadmap in deferred tracker §3.6.3)  
 **Document class**: Exploration  
 **Created**: 2026-06-06  
 **Tracker**: DF-56 (conditional routing / branching engine)  
@@ -25,7 +25,7 @@ Today:
 - Shipped creator workflow uses linear stage enum + explicit `creator run stage advance` (DF-53 auto-chain still open).
 - V1.32 validator catches invalid preset graphs at load time for **linear** graphs only.
 
-This spec holds **design axes and dependencies** until a future locked compass authorizes implement. It does **not** authorize code changes while Status remains Exploration.
+**V1.42 P2** authorizes a **minimal implement slice** only: `llm_judge` GO/NOGO conditional `next` (see [2026-06-11-v1.42-conditional-routing.md](../../plans/2026-06-11-v1.42-conditional-routing.md)). Broader routing remains deferred per tracker DF-56 §3.6.3.
 
 ---
 

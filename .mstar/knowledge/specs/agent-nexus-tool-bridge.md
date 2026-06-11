@@ -219,6 +219,18 @@ Per §7 rule above, this is "partial" unification: the registry adapter is compl
 
 DF-47 row in the deferred tracker is retained. Production caller wiring belongs to a future plan (P5 or V1.34+ hygiene plan).
 
+### 7.4 Production caller wiring (V1.42 P3)
+
+**Plan**: [2026-06-11-v1.42-agent-tool-production-wiring.md](../../plans/2026-06-11-v1.42-agent-tool-production-wiring.md)
+
+**Scope (grill-me minimal slice)**:
+
+1. Wire orchestration → `dispatch_from_worker` → daemon `HostToolExecutor` for **one** chosen read-only or low-risk `nexus.*` tool on a real schedule tick.
+2. Hermetic E2E test proving request/response round-trip.
+3. Mutating tools must respect completion-lock and `runtime_lock_holder` (P0).
+
+**Non-goals**: full DF-46 capability parity; CLI subprocess bridge (DF-48).
+
 ---
 
 ## 8. Skills export (L1)
