@@ -57,6 +57,26 @@ pub trait WorkerHandleProvider: Send + Sync {
     ) -> Result<Value, CapabilityError>;
 }
 
+/// Provider trait for daemon-side `nexus.*` tool dispatch (DF-47 production wiring).
+///
+/// Implemented by `nexus-daemon-runtime` using `HostToolExecutor::dispatch_from_worker`.
+/// Injected into `HostToolCallTask` so the orchestration engine can invoke
+/// `nexus.*` tools on a schedule tick without worker IPC round-trip.
+///
+/// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
+#[async_trait]
+pub trait DaemonToolDispatch: Send + Sync {
+    /// Dispatch a `nexus.*` tool call through the daemon's unified registry.
+    ///
+    /// Returns the tool result JSON on success, or a `CapabilityError` on failure.
+    async fn dispatch_tool(
+        &self,
+        tool_name: &str,
+        args: &serde_json::Value,
+        request_id: &str,
+    ) -> Result<serde_json::Value, CapabilityError>;
+}
+
 /// Runtime dependencies injected through `CapabilityRegistry::with_runtime_deps`.
 ///
 /// Groups pool and worker provider so daemon boot can construct a single
@@ -67,6 +87,8 @@ pub struct CapabilityRuntimeDeps {
     /// Worker handle provider for LLM-backed capabilities (`judge.llm`,
     /// `context.summarize`, `acp.prompt`).
     pub worker_provider: Option<std::sync::Arc<dyn WorkerHandleProvider>>,
+    /// Daemon-side tool dispatch for `nexus.*` tools (DF-47, V1.42 P3).
+    pub daemon_tool_dispatch: Option<std::sync::Arc<dyn DaemonToolDispatch>>,
 }
 
 // ---------------------------------------------------------------------------
