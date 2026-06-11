@@ -496,6 +496,38 @@ pub async fn enqueue_auto_chain_schedule(
     // Update the Work checkpoint to point at the new driver schedule.
     set_driver(pool, creator_id, work_id, &schedule_id, stage).await?;
 
+    // V1.42 P0 (T3): Acquire runtime lock for this schedule.
+    // Holder format: `daemon:schedule:<schedule_id>`.
+    let holder = nexus_local_db::runtime_lock::schedule_holder(&schedule_id);
+    let ttl = nexus_local_db::runtime_lock::ttl_from_env();
+    match nexus_local_db::acquire_runtime_lock(
+        pool, creator_id, work_id, &holder, ttl, true, // force_stale=true for daemon
+    )
+    .await
+    {
+        Ok(nexus_local_db::AcquireResult::Acquired { .. }) => {}
+        Ok(nexus_local_db::AcquireResult::Locked {
+            holder: existing, ..
+        }) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                existing_holder = %existing,
+                "runtime_lock: could not acquire for auto-chain (locked by another process)"
+            );
+            // Continue — auto-chain will skip if Work is locked at next tick.
+        }
+        Err(e) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                error = %e,
+                "runtime_lock: failed to acquire for auto-chain"
+            );
+            // Non-fatal — the schedule was already enqueued.
+        }
+    }
+
     tracing::info!(
         work_id = %work_id,
         schedule_id = %schedule_id,
@@ -597,12 +629,14 @@ pub async fn enqueue_review_master_schedule(
 /// Returns `AutoChainError::Database` if the database query fails.
 pub async fn find_resumable_works(pool: &SqlitePool) -> Result<Vec<WorkRecord>, AutoChainError> {
     // SAFETY: dynamic SQL — complex multi-table join for boot recovery.
+    // V1.42 P0: skip Works with a foreign runtime_lock_holder.
     let rows = sqlx::query(&format!(
         "SELECT {0} FROM works w
          WHERE w.auto_chain_enabled = 1
            AND w.driver_schedule_id IS NOT NULL
            AND w.auto_chain_interrupted = 0
            AND w.status != 'completed'
+           AND w.runtime_lock_holder IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM creator_schedules cs
                WHERE cs.schedule_id = w.driver_schedule_id
