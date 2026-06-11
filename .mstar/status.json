@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T17:26:06+0800",
+  "updated_at": "2026-06-11T17:50:20+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -21,7 +21,8 @@
       "depends_on": "2026-06-11-v1.42-harness-docs-prepare",
       "notes": [
         "2026-06-11T16:30:55+0800 — Pre-Implement Gate Check GO. PM created worktree .worktrees/v1.42-p0 (topic branch feature/v1.42-runtime-lock-and-hygiene from iteration/v1.42). PM Task Board = plan §5 T1–T7. Routing: fullstack-dev single-stream (not >=2 independent units). Single batch assignment covers T1–T7. Implement dispatch to follow.",
-        "2026-06-11 — T1–T7 Done. Commits: 1dad80fe (T1+T2), e8993870 (T2+T3), e44c8fda (T4+T5+stale fix). R-V141P0-01 fixed. Defer-7 disposition: all waived/deferred (test-only). No schema touched → T7 no-op. AC1+AC2+AC4+AC5 verified; AC3 (spec stamp) pending PM review."
+        "2026-06-11 — T1–T7 Done. Commits: 1dad80fe (T1+T2), e8993870 (T2+T3), e44c8fda (T4+T5+stale fix). R-V141P0-01 fixed. Defer-7 disposition: all waived/deferred (test-only). No schema touched → T7 no-op. AC1+AC2+AC4+AC5 verified; AC3 (spec stamp) pending PM review.",
+        "2026-06-11T17:50:20+0800 — QC tri-review completed (N=3, all Approve). qc1 (ff7d7304, qc-specialist, architecture/maintainability) 0C/2W/3S; qc2 (248cba38, qc-specialist-2, security/correctness) 0C/1W/3S; qc3 (4c78c8ae, qc-specialist-3, perf/reliability) 0C/0W/5S. All 3 reports committed to integration via 10fa2c09 + bfa82c68. PM consolidated verdict: Approve with 4 open residuals (R-V142P0-PROC high risk-accepted; R-V142P0-QC-W-01 medium defer; R-V142P0-QC-W-02 low defer; R-V142P0-QC-W-001 medium defer). QA verification dispatch to follow."
       ]
     },
     {
@@ -1185,10 +1186,46 @@
         "lifecycle": "open",
         "title": "Process violation: Cursor (Auto.Wood) direct-committed to integration branch and marked P0 Done without QC/QA gates; integration HEAD had no code until PM merge",
         "source": "cursor-parallel-agent (Auto.Wood <hk@btang.cn>; Co-authored-by: Cursor)",
-        "scope": ".mstar/status.json (plans[1].status flip Todo→Done), .mstar/knowledge/specs/novel-multi-work-lifecycle.md (§4.2 stamp: gap→Implemented), .mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md (status: Todo→Done), .mstar/knowledge/specs/README.md (status line update)",
+        "scope": ".mstar/status.json (plans[1].status flip Todo→Done), .mstar/knowledge/specs/novel-multi-work-lifecycle.md (§4.2 stamp: gap→Implemented), .mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md (status: Todo→Done), .mstar/knowledge/specs/README.md (status line update), .mstar/archived/plans-done.json (Profile B migration: object-array → id catalog + delete misplaced archived/plans/plans-done.json)",
         "decision": "risk-accepted",
         "owner": "@project-manager",
         "target": "V1.42 P0 closeout — process gap accepted per user directive (Option B); QC tri-review (N=3) + PM merge now in progress to restore gate discipline",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      },
+      {
+        "id": "R-V142P0-QC-W-01",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "RuntimeLockGuard Drop is best-effort; panic or cancellation leaks lock until TTL",
+        "source": "qc1.md W-01 (qc-specialist, architecture coherence and maintainability risk)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs RuntimeLockGuard Drop impl (lines 108-123); production acquire contract spec novel-multi-work-lifecycle.md §4.2",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future hardening plan (V1.43+)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      },
+      {
+        "id": "R-V142P0-QC-W-02",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "patch_work handler complexity — pre-existing too_many_lines suppression now carries additional lock logic",
+        "source": "qc1.md W-02 (qc-specialist)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs patch_work handler (lines 998-1132)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "Future refactor plan (V1.43+ or P-last); not blocking",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      },
+      {
+        "id": "R-V142P0-QC-W-001",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "Stale-recovery concurrent-acquire race on force_stale=true path — check-then-act on holder column without prior-holder predicate",
+        "source": "qc2.md W-001 (qc-specialist-2, security and correctness risk)",
+        "scope": "crates/nexus-local-db/src/runtime_lock.rs (acquire_runtime_lock force-clear path + early-exit check in patch_work); spec novel-multi-work-lifecycle.md §4.2 (single-writer model)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "Harden if single-writer assumption is ever relaxed; current local-only model makes impact low",
         "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
       }
     ]
