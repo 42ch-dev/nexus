@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T20:07:27+0800",
+  "updated_at": "2026-06-11T20:19:48+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -52,7 +52,8 @@
       "depends_on": "2026-06-11-v1.42-multi-volume",
       "notes": [
         "2026-06-11T19:48:48+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p2 (topic branch feature/v1.42-conditional-routing from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; minimal slice). Primary spec: preset-conditional-routing.md (DF-56 Draft V1.42 minimal). Implement dispatch to follow.",
-        "2026-06-11T20:07:27+0800 — Implement complete. PM merged 5 implementation commits (5467eaa2 T1, e81412e6 T2, c8b1cb5c T3, 3153a7bd T4, de99587b T5) into iteration/v1.42. All 4 AC verified. 555 tests pass; clippy clean; nightly fmt clean. PM next: dispatch QC tri-review (N=3)."
+        "2026-06-11T20:07:27+0800 — Implement complete. PM merged 5 implementation commits (5467eaa2 T1, e81412e6 T2, c8b1cb5c T3, 3153a7bd T4, de99587b T5) into iteration/v1.42. All 4 AC verified. 555 tests pass; clippy clean; nightly fmt clean. PM next: dispatch QC tri-review (N=3).",
+        "2026-06-11T20:19:48+0800 — QC tri-review complete (N=3, all Approve). qc1 (5eb9af84) 0C/1W/2S; qc2 (8a590df5) 0C/0W/1S; qc3 (2f2a92b1) 0C/1W/1S. PM consolidated verdict: Approve. 2 non-blocking warnings (W-001 qc1, W-QC3-01 qc3) + 4 suggestions registered as open residuals (decision: defer to P-last or future). All 4 AC verified. PM next: dispatch QA verification (N=1)."
       ]
     },
     {
@@ -1277,6 +1278,32 @@
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last or future (non-blocking)",
         "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      }
+    ],
+    "2026-06-11-v1.42-conditional-routing": [
+      {
+        "id": "R-V142P2-QC1-W-001",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "_judge_result / _judge_reason context keys as bare string literals across two modules — maintainability risk (non-blocking)",
+        "source": "qc1.md W-001 (qc-specialist, architecture coherence and maintainability risk)",
+        "scope": "crates/nexus-orchestration/src/preset/loader.rs (lines using _judge_result/_judge_reason); crates/nexus-orchestration/src/tasks/mod.rs (judge_next_action)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future hygiene (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]"
+      },
+      {
+        "id": "R-V142P2-QC3-W-QC3-01",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "Observability gap in conditional edge branch selection — no tracing for which go/nogo branch is taken (non-blocking)",
+        "source": "qc3.md W-QC3-01 (qc-specialist-3, performance and reliability risk)",
+        "scope": "crates/nexus-orchestration/src/preset/loader.rs (add_conditional_edge); crates/nexus-orchestration/src/tasks/mod.rs (executor branch selection)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future (non-blocking; recommend follow-up enhancement)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]"
       }
     ]
   }
