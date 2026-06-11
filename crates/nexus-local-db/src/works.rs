@@ -1309,6 +1309,45 @@ pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 /// Returns the index of a stage in the FL-E linear order — re-exported from `nexus_contracts`.
 pub use nexus_contracts::local::orchestration::stage_index;
 
+/// Shared test helper — creates a minimal [`WorkRecord`] for unit tests.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn sample_work_for_test(work_id: &str) -> WorkRecord {
+    WorkRecord {
+        work_id: work_id.to_string(),
+        creator_id: "ctr_test".to_string(),
+        workspace_slug: "default".to_string(),
+        status: "draft".to_string(),
+        title: "My Novel".to_string(),
+        long_term_goal: "Write a great novel".to_string(),
+        initial_idea: "A sci-fi thriller".to_string(),
+        creative_brief: None,
+        intake_status: "pending".to_string(),
+        world_id: None,
+        story_ref: None,
+        inspiration_log: "[]".to_string(),
+        primary_preset_id: "novel-writing".to_string(),
+        schedule_ids: "[]".to_string(),
+        created_at: "2026-06-04T10:00:00Z".to_string(),
+        updated_at: "2026-06-04T10:00:00Z".to_string(),
+        current_stage: "intake".to_string(),
+        stage_status: "pending".to_string(),
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: 0,
+        auto_chain_enabled: true,
+        driver_schedule_id: None,
+        auto_chain_interrupted: false,
+        auto_review_master_on_timeout: false,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1323,39 +1362,7 @@ mod tests {
     }
 
     fn sample_work(work_id: &str) -> WorkRecord {
-        WorkRecord {
-            work_id: work_id.to_string(),
-            creator_id: "ctr_test".to_string(),
-            workspace_slug: "default".to_string(),
-            status: "draft".to_string(),
-            title: "My Novel".to_string(),
-            long_term_goal: "Write a great novel".to_string(),
-            initial_idea: "A sci-fi thriller".to_string(),
-            creative_brief: None,
-            intake_status: "pending".to_string(),
-            world_id: None,
-            story_ref: None,
-            inspiration_log: "[]".to_string(),
-            primary_preset_id: "novel-writing".to_string(),
-            schedule_ids: "[]".to_string(),
-            created_at: "2026-06-04T10:00:00Z".to_string(),
-            updated_at: "2026-06-04T10:00:00Z".to_string(),
-            current_stage: "intake".to_string(),
-            stage_status: "pending".to_string(),
-            work_profile: None,
-            work_ref: None,
-            total_planned_chapters: None,
-            current_chapter: 0,
-            auto_chain_enabled: true,
-            driver_schedule_id: None,
-            auto_chain_interrupted: false,
-            auto_review_master_on_timeout: false,
-            runtime_lock_holder: None,
-            runtime_lock_acquired_at: None,
-            completion_locked_at: None,
-            novel_completion_status: None,
-            lineage_from_work_id: None,
-        }
+        super::sample_work_for_test(work_id)
     }
 
     #[tokio::test]
