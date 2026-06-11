@@ -660,6 +660,53 @@ pub async fn seed_chapters_multi_volume(
     Ok(())
 }
 
+/// Seed multi-volume chapter rows inside an existing transaction (V1.42 T3).
+///
+/// Same logic as [`seed_chapters_multi_volume`] but uses a caller-provided
+/// transaction so the seed can be atomic with `patch_work_tx`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any insert fails. The caller decides whether
+/// to commit or roll back the transaction.
+pub async fn seed_chapters_multi_volume_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    work_id: &str,
+    work_ref: &str,
+    total_volumes: i32,
+    chapters_per_volume: i32,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    for vol in 1..=total_volumes {
+        for ch in 1..=chapters_per_volume {
+            let ch_nn = format!("ch{ch:02}");
+            let outline_path =
+                format!("Works/{work_ref}/Outlines/chapters/v{vol:02}-{ch_nn}-outline.md");
+            let slug = format!("v{vol:02}-{ch_nn}");
+            let body_path = format!("Works/{work_ref}/Stories/v{vol:02}-{ch_nn}-{slug}.md");
+
+            // SAFETY: INSERT OR IGNORE — idempotent seeding on PK conflict.
+            sqlx::query(
+                "INSERT OR IGNORE INTO work_chapters
+                 (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
+                  status, outline_path, body_path, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+            )
+            .bind(work_id)
+            .bind(ch)
+            .bind(vol)
+            .bind(&slug)
+            .bind(&outline_path)
+            .bind(&body_path)
+            .bind(now)
+            .bind(now)
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Check whether a Work is completed per novel-workflow-profile §6.1.
 ///
 /// For **novel-profile** Works (`work_profile == 'novel'`): always runs the
