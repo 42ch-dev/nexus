@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-12T00:15:21+0800",
+  "updated_at": "2026-06-12T00:40:54+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -79,13 +79,14 @@
     {
       "plan_id": "2026-06-11-v1.42-ux-polish",
       "title": "P-last — V1.41 UX carry-forward (14 residuals)",
-      "status": "InProgress",
+      "status": "InReview",
       "working_branch": "feature/v1.42-ux-polish",
       "merge_target": "iteration/v1.42",
       "plan_file": ".mstar/plans/2026-06-11-v1.42-ux-polish.md",
       "depends_on": "2026-06-11-v1.42-agent-tool-production-wiring",
       "notes": [
-        "2026-06-12T00:15:21+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-plast (topic branch feature/v1.42-ux-polish from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; 14 V1.41 UX residuals triage). 5 UX items (must fix), 4 defer items, 3 refactor items, 1 nit per plan §2 residual table. Implement dispatch to follow."
+        "2026-06-12T00:15:21+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-plast (topic branch feature/v1.42-ux-polish from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; 14 V1.41 UX residuals triage). 5 UX items (must fix), 4 defer items, 3 refactor items, 1 nit per plan §2 residual table. Implement dispatch to follow.",
+        "2026-06-12T00:40:54+0800 — Implement complete. PM merged 5 commits (d04ae9f4 T1 triage, 3c40474f T2 CLI, f5d994a9 T3 dedup, 8a3350eb T4 flags, 42850bc3 T5 closeout). 6 UX items fixed; 8 rows waived/deferred; iteration Shipped markers updated. Working tree clean. PM next: dispatch QC tri-review (N=3) on integrated HEAD."
       ]
     }
   ],
