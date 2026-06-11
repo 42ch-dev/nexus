@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T23:40:53+0800",
+  "updated_at": "2026-06-12T00:08:24+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -1314,55 +1314,6 @@
         "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]"
       }
     ],
-    "2026-06-11-v1.42-agent-tool-production-wiring": [
-      {
-        "id": "R-V142P3-QC3-W-01",
-        "severity": "medium",
-        "lifecycle": "open",
-        "title": "Production path incomplete — HostToolCallTask is dead code in production (not invoked from schedule tick)",
-        "source": "qc3.md W-01 (qc-specialist-3, performance and reliability risk)",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (HostToolCallTask definition, no production call sites); preset/loader.rs (build_wired_outer_graph does not reference HostToolCallTask); schedule/supervisor.rs (tick_inner never creates tool tasks); capability/mod.rs (CapabilityRuntimeDeps.daemon_tool_dispatch declared but not consumed)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 P3 fix wave (blocking) — must be resolved before Approve",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
-      },
-      {
-        "id": "R-V142P3-QC3-W-02",
-        "severity": "low",
-        "lifecycle": "open",
-        "title": "Hot-path overhead — HostToolCallTask::run serializes full Context to JSON + handlebars on every invocation",
-        "source": "qc3.md W-02 (qc-specialist-3)",
-        "scope": "crates/nexus-orchestration/src/tasks/mod.rs HostToolCallTask::run (build_nested_payload + render_value_templates)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 P3 fix wave (recommended; not strictly blocking)",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
-      },
-      {
-        "id": "R-V142P3-QC2-W-01",
-        "severity": "medium",
-        "lifecycle": "open",
-        "title": "Cross-creator FORBIDDEN test assertion is weak — only checks error string, not the NexusApiError::FORBIDDEN code",
-        "source": "qc2.md W-01 (qc-specialist-2, security and correctness risk)",
-        "scope": "crates/nexus-daemon-runtime/tests/agent_tool_production_wiring.rs:192 (agent_tool_e2e_cross_creator_forbidden_via_adapter); host_tool_executor.rs:788 (FORBIDDEN return)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 P3 fix wave (blocking) — strengthen assertion to check FORBIDDEN code",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
-      },
-      {
-        "id": "R-V142P3-QC2-W-02",
-        "severity": "medium",
-        "lifecycle": "open",
-        "title": "No explicit completion-lock demonstration in the new E2E suite — no test sets completion_locked_at and verifies the read-only tool still works",
-        "source": "qc2.md W-02 (qc-specialist-2)",
-        "scope": "crates/nexus-daemon-runtime/tests/agent_tool_production_wiring.rs (new E2E suite; no completion-locked WorkRecord seed); spec novel-multi-work-lifecycle.md §3 (completion-lock rule for read-only tools)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 P3 fix wave (blocking) — add a minimal test case for completion-lock",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-agent-tool-production-wiring]"
-      }
-    ]
+    "2026-06-11-v1.42-agent-tool-production-wiring": []
   }
 }
