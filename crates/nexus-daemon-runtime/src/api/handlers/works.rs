@@ -296,6 +296,9 @@ pub struct WorkSummary {
     pub intake_status: String,
     pub primary_preset_id: String,
     pub updated_at: String,
+    /// V1.42 P-last (R-V141P0-11): lock state at a glance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_locked_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -347,6 +350,8 @@ pub struct SetPoolActiveRequest {
 #[derive(Debug, Serialize)]
 pub struct PoolEntryDto {
     pub entry_id: String,
+    /// V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
+    #[serde(skip_serializing)]
     pub creator_id: String,
     pub work_id: String,
     pub status: String,
@@ -600,6 +605,7 @@ pub async fn list_works(
             intake_status: r.intake_status,
             primary_preset_id: r.primary_preset_id,
             updated_at: r.updated_at,
+            completion_locked_at: r.completion_locked_at,
         })
         .collect();
 
@@ -1899,6 +1905,8 @@ pub struct ListInspirationResponse {
 #[derive(Debug, Serialize)]
 pub struct InspirationItemDto {
     pub item_id: String,
+    /// V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
+    #[serde(skip_serializing)]
     pub creator_id: String,
     pub rel_path: String,
     pub title: String,
