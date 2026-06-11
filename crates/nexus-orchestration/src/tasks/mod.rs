@@ -1431,6 +1431,151 @@ fn insert_nested(
 }
 
 // ---------------------------------------------------------------------------
+// HostToolCallTask — invoke a nexus.* tool from a schedule tick (DF-47, V1.42 P3)
+// ---------------------------------------------------------------------------
+
+/// Type alias for the dispatch slot used by `HostToolCallTask`.
+/// Wraps an `Arc<Mutex<Option<Arc<dyn DaemonToolDispatch>>>>` for interior
+/// mutability without consuming the dispatch on use.
+type DaemonDispatchSlot = std::sync::Arc<
+    std::sync::Mutex<Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>>,
+>;
+
+/// A task that calls a `nexus.*` host tool through the daemon's unified registry.
+///
+/// Production wiring for DF-47: the schedule executor can invoke read-only
+/// (or mutating) `nexus.*` tools on a configured stage without worker IPC.
+/// The call goes directly through [`crate::capability::DaemonToolDispatch`]
+/// which is implemented in `nexus-daemon-runtime` using
+/// `HostToolExecutor::dispatch_from_worker`.
+///
+/// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
+pub struct HostToolCallTask {
+    /// Daemon-side tool dispatch provider.
+    dispatch: Option<DaemonDispatchSlot>,
+    /// Tool name, e.g. `"nexus.orchestration.schedule_status"`.
+    tool_name: String,
+    /// Tool parameters (may contain template references rendered at runtime).
+    args: serde_json::Value,
+    /// Unique task id for logging.
+    task_id: String,
+}
+
+impl HostToolCallTask {
+    /// Create a new `HostToolCallTask`.
+    ///
+    /// `dispatch`: the daemon-side tool dispatch provider. `None` for test stub mode.
+    /// `task_id`: unique identifier for this task instance.
+    /// `tool_name`: the `nexus.*` tool to invoke.
+    /// `args`: tool parameters (JSON object, may contain template placeholders).
+    #[must_use]
+    pub fn new(
+        dispatch: Option<DaemonDispatchSlot>,
+        task_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            dispatch,
+            task_id: task_id.into(),
+            tool_name: tool_name.into(),
+            args,
+        }
+    }
+
+    /// Create in stub mode (no daemon dispatch, for testing).
+    #[must_use]
+    pub fn new_stub(
+        task_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            dispatch: None,
+            task_id: task_id.into(),
+            tool_name: tool_name.into(),
+            args,
+        }
+    }
+}
+
+#[async_trait]
+impl Task for HostToolCallTask {
+    fn id(&self) -> &str {
+        &self.task_id
+    }
+
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
+        // Render template placeholders in args using context.
+        let payload = build_nested_payload(&context);
+        let rendered_args = render_value_templates(&self.args, &payload)?;
+
+        // Generate a request_id for traceability.
+        let request_id = format!(
+            "host_tool_{}_{}",
+            self.tool_name.replace('.', "_"),
+            uuid::Uuid::new_v4()
+        );
+
+        let result_value = if let Some(ref dispatch_arc) = self.dispatch {
+            // Production path: call through daemon dispatch.
+            let dispatch = {
+                let guard = dispatch_arc.lock().map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "daemon tool dispatch lock: {e}"
+                    ))
+                })?;
+                guard
+                    .as_ref()
+                    .ok_or_else(|| {
+                        graph_flow::GraphError::TaskExecutionFailed(
+                            "daemon tool dispatch not available".into(),
+                        )
+                    })?
+                    .clone()
+            };
+
+            dispatch
+                .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
+                .await
+                .map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "daemon tool dispatch failed for {}: {e}",
+                        self.tool_name
+                    ))
+                })?
+        } else {
+            // Stub mode: return a synthetic result.
+            serde_json::json!({
+                "stub": true,
+                "tool_name": self.tool_name,
+                "args": rendered_args,
+                "request_id": request_id,
+            })
+        };
+
+        // Store the result in context for downstream nodes.
+        let context_key = format!("host_tool.{}.result", self.task_id);
+        context.set(&context_key, &result_value).await;
+        context.set("_last_host_tool_result", &result_value).await;
+
+        tracing::info!(
+            tool_name = %self.tool_name,
+            request_id = %request_id,
+            "HostToolCallTask completed"
+        );
+
+        Ok(TaskResult::new(
+            Some(format!("host_tool_call:{}:ok", self.tool_name)),
+            NextAction::Continue,
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1614,6 +1759,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockGoProvider)),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1652,6 +1798,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockNogoProvider)),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1744,6 +1891,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(provider),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1789,6 +1937,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(provider),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 

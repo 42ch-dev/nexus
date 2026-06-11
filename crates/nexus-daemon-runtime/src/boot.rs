@@ -123,6 +123,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     let capabilities = Arc::new(CapabilityRegistry::with_builtins());
 
+    // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
+    // Stored in WorkspaceState so schedule-executed HostToolCallTask instances
+    // can invoke nexus.* tools directly through HostToolExecutor::dispatch_for_schedule.
+    let tool_dispatch = Arc::new(
+        crate::api::handlers::host_tool_executor::DaemonToolDispatchAdapter::new(
+            WorkspaceState::clone(&state),
+        ),
+    );
+    state.set_daemon_tool_dispatch(tool_dispatch.clone());
+    tracing::info!("Daemon tool dispatch adapter wired");
+
     let concrete_engine =
         GraphFlowEngine::new_with_storage(sqlite_storage.clone(), capabilities.clone());
 
