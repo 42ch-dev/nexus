@@ -80,7 +80,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.39 P0 Shipped** | S | V1.34→V1.35→V1.36→V1.37→V1.38→V1.39 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce). V1.38 shipped multi-chapter foundation **without** auto-reenqueue. **V1.39 P0** implements full `intake → research → produce → review → persist` auto-chain (default true), chapter outer loop, side-input lane, boot recovery, `--no-auto-chain` opt-out, `creator run resume` command. Core: `nexus-orchestration::auto_chain` module with `evaluate_next_step` + 15 unit tests + 14 integration tests. Plan: [2026-06-09-v1.39-fl-e-auto-chain-engine.md](../plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md). **Tri-review + targeted re-review all Approve; final consolidated gate Approve. PR #50 merged ad9725d8.** |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
-| DF-56 | Conditional routing / branching engine | V1.33 | **V1.42 P2 Active** | L | V1.33→V1.34→V1.42 | **V1.42 P2** minimal slice: `llm_judge` GO/NOGO → two `next` edges. **Post-V1.42 full roadmap** (stage-level branches, `registry.refresh` linkage, arbitrary expression routing): see §3.6.3 below. Plan: [2026-06-11-v1.42-conditional-routing.md](../plans/2026-06-11-v1.42-conditional-routing.md). Spec: [preset-conditional-routing.md](specs/preset-conditional-routing.md). |
+| DF-56 | Conditional routing / branching engine | V1.33 | **V1.42 P2 Shipped** | L | V1.33→V1.34→V1.42 | **V1.42 P2 shipped**: `llm_judge` GO/NOGO → two `next` edges (commits `5467eaa2` T1, `e81412e6` T2, `c8b1cb5c` T3, `3153a7bd` T4). Plan: [2026-06-11-v1.42-conditional-routing.md](../plans/2026-06-11-v1.42-conditional-routing.md). Spec: [preset-conditional-routing.md](specs/preset-conditional-routing.md). **Post-V1.42 full roadmap**: see §3.6.3. |
 | DF-57 | **Closed in V1.36 P2** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-58 | **Closed in V1.36 P1** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-59 | Platform publish integration for novel正文 | V1.36 prepare | **Backlog** | L | V1.36 | Explicit OUT of V1.36 short-term scope; user may publish manually. See compass §1.2 non-goals |
@@ -235,11 +235,16 @@ When V1.37+ picks up multi-chapter or multi-novel work:
 
 #### 3.6.3 DF-56 post-V1.42 P2 roadmap (grill-me 2026-06-11)
 
-**Shipped in V1.42 P2 (minimal)**:
+**Shipped in V1.42 P2 (minimal slice)** — commits on `feature/v1.42-conditional-routing`:
 
-- `llm_judge` node with GO/NOGO evaluator selecting one of two `next` edges
-- Loader accepts conditional `next` on judge nodes only
-- Hermetic tests with synthetic preset fixture
+| Task | Commit | Description |
+|------|--------|-------------|
+| T1 | `5467eaa2` | Spec promoted from Exploration to Draft V1.42 |
+| T2 | `e81412e6` | `GoNogoNext` struct + `NextTarget::GoNogo` variant; loader validation; `add_conditional_edge` wiring; reachability via both branches |
+| T3 | `c8b1cb5c` | `StateCompositeTask::judge_next_action` — GoNogo returns `Continue` for both GO and NOGO; Linear/None preserves existing behavior |
+| T4 | `3153a7bd` | 12 hermetic tests (6 loader + 6 executor); reachability validator traverses GoNogo edges |
+
+Runtime behavior: `_judge_result` in `graph_flow::Context` drives the conditional edge. `true` → `go` target; `false` or absent → `nogo` target (safe fallback).
 
 **Deferred Post-V1.42** (remain open under DF-56 until a future compass reopens):
 

@@ -16,7 +16,7 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
-use crate::preset::manifest::{EnterAction, ExitWhen, StateDefinition};
+use crate::preset::manifest::{EnterAction, ExitWhen, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
@@ -514,6 +514,8 @@ pub struct StateCompositeTask {
     terminal: bool,
     enter_actions: Vec<EnterAction>,
     exit_when: Option<ExitWhen>,
+    /// Transition target (linear, go/nogo, or conditional).
+    next: Option<NextTarget>,
     /// Orchestration engine reference (for spawning child sessions).
     engine: Option<Arc<dyn OrchestrationEngine>>,
     /// Named inner graphs keyed by name.
@@ -535,6 +537,7 @@ impl StateCompositeTask {
             terminal: state.terminal,
             enter_actions: state.enter.clone(),
             exit_when: state.exit_when.clone(),
+            next: state.next.clone(),
             engine: None,
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
@@ -603,6 +606,21 @@ impl StateCompositeTask {
             }
         }
         self
+    }
+
+    /// Determine the `NextAction` after judge evaluation.
+    ///
+    /// When `next` is `GoNogo`, both GO and NOGO advance via `Continue`
+    /// (the conditional edge routes to the correct target).
+    /// When `next` is `Linear` or `None`, GO advances but NOGO waits.
+    // Clippy wants const but this borrows self.next; suppress.
+    #[allow(clippy::missing_const_for_fn)]
+    fn judge_next_action(&self, judge_result: bool) -> NextAction {
+        match &self.next {
+            Some(NextTarget::GoNogo(_)) => NextAction::Continue,
+            _ if judge_result => NextAction::Continue,
+            _ => NextAction::WaitForInput,
+        }
     }
 }
 
@@ -800,10 +818,8 @@ impl Task for StateCompositeTask {
                                             Some(format!("judge (throttled): {prev_reason}")),
                                             if self.terminal {
                                                 NextAction::End
-                                            } else if prev_result {
-                                                NextAction::Continue
                                             } else {
-                                                NextAction::WaitForInput
+                                                self.judge_next_action(prev_result)
                                             },
                                         ));
                                     }
@@ -827,11 +843,10 @@ impl Task for StateCompositeTask {
                     context.set("_judge_result", result).await;
                     context.set("_judge_reason", reason.clone()).await;
 
-                    if result {
-                        NextAction::Continue
-                    } else {
-                        NextAction::WaitForInput
-                    }
+                    // V1.42 P2: when next is GoNogo, both GO and NOGO advance
+                    // (the conditional edge routes to the correct target).
+                    // When next is Linear/None, GO advances but NOGO waits.
+                    self.judge_next_action(result)
                 }
             }
             Some(ExitWhen::GraphComplete) => {
@@ -1518,6 +1533,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::preset::manifest::GoNogoNext;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -2563,5 +2579,73 @@ mod tests {
         // Verify identity injection still works after template rendering
         assert_eq!(cap_input["_creator_id"], "ctr_test");
         assert_eq!(cap_input["_session_id"], "sess_test");
+    }
+
+    // ── V1.42 P2 T4: judge_next_action unit tests ──────────────────────
+
+    fn make_composite_with_next(next: Option<NextTarget>) -> StateCompositeTask {
+        StateCompositeTask {
+            id: "test_judge".to_string(),
+            terminal: false,
+            enter_actions: vec![],
+            exit_when: None,
+            next,
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
+            registry: None,
+        }
+    }
+
+    #[test]
+    fn judge_next_action_linear_go_advances() {
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
+    }
+
+    #[test]
+    fn judge_next_action_linear_nogo_waits() {
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::WaitForInput
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_none_go_advances() {
+        let task = make_composite_with_next(None);
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
+    }
+
+    #[test]
+    fn judge_next_action_none_nogo_waits() {
+        let task = make_composite_with_next(None);
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::WaitForInput
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_gonogo_go_advances() {
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "go_state".to_string(),
+            nogo: "nogo_state".to_string(),
+        })));
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
+    }
+
+    #[test]
+    fn judge_next_action_gonogo_nogo_also_advances() {
+        // Key V1.42 behavior: NOGO with GoNogo next → Continue (edge routes to nogo target).
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "go_state".to_string(),
+            nogo: "nogo_state".to_string(),
+        })));
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::Continue
+        ));
     }
 }
