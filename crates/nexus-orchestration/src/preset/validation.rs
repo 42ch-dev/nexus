@@ -206,13 +206,24 @@ fn check_initial_to_terminal_reachability(
 ) {
     let state_ids: HashSet<&str> = manifest.states.iter().map(|s| s.id.as_str()).collect();
 
-    // Build adjacency list from next edges (linear only — conditional already rejected).
+    // Build adjacency list from next edges (linear + GoNogo branches).
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for state in &manifest.states {
-        if let Some(crate::preset::manifest::NextTarget::Linear(target)) = &state.next {
-            if state_ids.contains(target.as_str()) {
-                adj.entry(&state.id).or_default().push(target.as_str());
+        match &state.next {
+            Some(crate::preset::manifest::NextTarget::Linear(target)) => {
+                if state_ids.contains(target.as_str()) {
+                    adj.entry(&state.id).or_default().push(target.as_str());
+                }
             }
+            Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) => {
+                if state_ids.contains(gonogo.go.as_str()) {
+                    adj.entry(&state.id).or_default().push(gonogo.go.as_str());
+                }
+                if state_ids.contains(gonogo.nogo.as_str()) {
+                    adj.entry(&state.id).or_default().push(gonogo.nogo.as_str());
+                }
+            }
+            _ => {}
         }
     }
 

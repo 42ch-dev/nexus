@@ -2423,4 +2423,224 @@ states:
             "expected '..' path safety error from A3 surface on system_prompt_file: {problems:?}"
         );
     }
+
+    // ── V1.42 P2 T4: GoNogo conditional next tests ──────────────────────
+
+    /// Helper YAML for a preset with llm_judge + GoNogo next.
+    fn gonogo_yaml() -> &'static str {
+        r#"
+preset:
+  id: gonogo-test
+  version: 1
+  kind: creator
+  description: test gonogo conditional
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: judge_state
+  terminal: end
+states:
+  - id: judge_state
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      go: go_state
+      nogo: nogo_state
+  - id: go_state
+    enter: []
+    exit_when: { kind: manual }
+    next: end
+  - id: nogo_state
+    enter: []
+    exit_when: { kind: manual }
+    next: end
+  - id: end
+    terminal: true
+"#
+    }
+
+    #[test]
+    fn gonogo_next_loads_successfully_on_llm_judge() {
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(gonogo_yaml(), &caps);
+        assert!(loaded.is_ok(), "expected valid preset: {loaded:?}");
+        let preset = loaded.unwrap();
+        assert_eq!(preset.id, "gonogo-test");
+    }
+
+    #[test]
+    fn gonogo_next_wires_conditional_edge() {
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(gonogo_yaml(), &caps).unwrap();
+
+        // Verify outer graph has tasks for all four states.
+        assert!(loaded.outer_graph.get_task("judge_state").is_some());
+        assert!(loaded.outer_graph.get_task("go_state").is_some());
+        assert!(loaded.outer_graph.get_task("nogo_state").is_some());
+        assert!(loaded.outer_graph.get_task("end").is_some());
+
+        // When _judge_result is true, find_next_task should return go_state.
+        let ctx = graph_flow::Context::new();
+        ctx.set_sync("_judge_result", true);
+        let next = loaded.outer_graph.find_next_task("judge_state", &ctx);
+        assert_eq!(next.as_deref(), Some("go_state"), "GO path: expected go_state, got {next:?}");
+
+        // When _judge_result is false, find_next_task should return nogo_state.
+        let ctx2 = graph_flow::Context::new();
+        ctx2.set_sync("_judge_result", false);
+        let next2 = loaded.outer_graph.find_next_task("judge_state", &ctx2);
+        assert_eq!(next2.as_deref(), Some("nogo_state"), "NOGO path: expected nogo_state, got {next2:?}");
+
+        // When _judge_result is absent, find_next_task should return nogo_state (fallback).
+        let ctx3 = graph_flow::Context::new();
+        let next3 = loaded.outer_graph.find_next_task("judge_state", &ctx3);
+        assert_eq!(next3.as_deref(), Some("nogo_state"), "No judge result: expected nogo_state fallback, got {next3:?}");
+    }
+
+    #[test]
+    fn reject_gonogo_on_non_llm_judge_state() {
+        let yaml = r#"
+preset:
+  id: bad-gonogo
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next:
+      go: b
+      nogo: c
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+    next: c
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.error.contains("go/nogo") && p.error.contains("llm_judge")),
+            "expected 'go/nogo only valid on llm_judge' problem: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_gonogo_with_unknown_go_target() {
+        let yaml = r#"
+preset:
+  id: bad-gonogo-go
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      go: nonexistent
+      nogo: c
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("next.go") && p.error.contains("unknown state")),
+            "expected 'unknown state' on next.go: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_gonogo_with_unknown_nogo_target() {
+        let yaml = r#"
+preset:
+  id: bad-gonogo-nogo
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      go: c
+      nogo: nonexistent
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("next.nogo") && p.error.contains("unknown state")),
+            "expected 'unknown state' on next.nogo: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn expression_conditional_still_rejected() {
+        // Ensure the expression-based Conditional form is still rejected.
+        let yaml = r#"
+preset:
+  id: expr-cond
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      kind: conditional
+      rules:
+        - when: "true"
+          to: b
+      default: c
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+    next: c
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.error.contains("ConditionalNotYetSupported")),
+            "expected 'ConditionalNotYetSupported': {problems:?}"
+        );
+    }
 }
