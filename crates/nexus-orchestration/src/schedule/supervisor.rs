@@ -365,6 +365,22 @@ impl ScheduleSupervisor {
             }
         }
 
+        // V1.42 P0 (T3): Release runtime lock held by this schedule.
+        // The holder format is `daemon:schedule:<schedule_id>`.
+        // Look up the Work that was driven by this schedule and release its lock.
+        if let Some(ref creator_id) = &row {
+            let holder = format!("daemon:schedule:{schedule_id}");
+            // Best-effort: if the schedule wasn't a Work driver, this is a no-op.
+            if let Err(e) = release_daemon_schedule_lock(&self.pool, creator_id, &holder).await {
+                tracing::warn!(
+                    schedule_id,
+                    holder = %holder,
+                    error = %e,
+                    "runtime_lock: failed to release daemon schedule lock on terminal"
+                );
+            }
+        }
+
         // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
         // Only on success — failed/cancelled schedules do not trigger auto-chain.
         if terminal_status == ScheduleStatus::Completed {
@@ -1079,6 +1095,36 @@ impl ScheduleRow {
             terminated_at: self.terminated_at.map(|t| t.to_string()),
         }
     }
+}
+
+/// Release a daemon schedule holder from any Work that holds it.
+///
+/// Looks up the Work where `runtime_lock_holder = <holder>` and clears it.
+/// Returns `Ok(false)` if no Work was locked with this holder (not an error).
+async fn release_daemon_schedule_lock(
+    pool: &SqlitePool,
+    creator_id: &str,
+    holder: &str,
+) -> Result<bool, sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    // SAFETY: Dynamic SQL for conditional lock release — matches holder string.
+    let result = sqlx::query(
+        "UPDATE works SET runtime_lock_holder = NULL, runtime_lock_acquired_at = NULL, updated_at = ? \
+         WHERE creator_id = ? AND runtime_lock_holder = ?",
+    )
+    .bind(&now)
+    .bind(creator_id)
+    .bind(holder)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() > 0 {
+        tracing::info!(
+            holder = %holder,
+            "runtime_lock: released daemon schedule lock"
+        );
+    }
+    Ok(result.rows_affected() > 0)
 }
 
 #[cfg(test)]
