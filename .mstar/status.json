@@ -1236,42 +1236,6 @@
     ],
     "2026-06-11-v1.42-multi-volume": [
       {
-        "id": "R-V142P1-QC1-F-001",
-        "severity": "critical",
-        "lifecycle": "open",
-        "title": "evaluate_after_persist_volume_aware is dead code — never wired into supervisor or boot auto-chain paths; multi-volume auto-chain will not cross volume boundaries in production",
-        "source": "qc1.md F-001 (qc-specialist, architecture coherence and maintainability risk)",
-        "scope": "crates/nexus-orchestration/src/auto_chain.rs evaluate_after_persist_volume_aware (dead); supervisor NextChapter match arm; boot auto-chain wiring",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 P1 fix wave (blocking) — must be resolved before Approve",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
-      },
-      {
-        "id": "R-V142P1-QC3-W-01",
-        "severity": "medium",
-        "lifecycle": "open",
-        "title": "Migration DDL lacks DROP TABLE IF EXISTS guard for idempotent retry; re-running migration on already-migrated DB will fail or lose data",
-        "source": "qc3.md W-01 (qc-specialist-3, performance and reliability risk)",
-        "scope": "crates/nexus-local-db/migrations/202606110001_v142_multi_volume_pk.sql",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 P1 fix wave (blocking) — must be resolved before Approve",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
-      },
-      {
-        "id": "R-V142P1-QC3-W-02",
-        "severity": "medium",
-        "lifecycle": "open",
-        "title": "next_chapter_volume_aware query may filesort due to missing volume in index; add (work_id, status, volume, chapter) covering index",
-        "source": "qc3.md W-02 (qc-specialist-3, performance and reliability risk)",
-        "scope": "crates/nexus-local-db/migrations/202606110001_v142_multi_volume_pk.sql (index section); crates/nexus-local-db/src/work_chapters.rs (index check)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.42 P1 fix wave (blocking) — must be resolved before Approve",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
-      },
-      {
         "id": "R-V142P1-QC1-F-002",
         "severity": "low",
         "lifecycle": "open",
