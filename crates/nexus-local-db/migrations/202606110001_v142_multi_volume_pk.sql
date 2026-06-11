@@ -7,7 +7,15 @@
 -- 3. Recreate the table with the new composite PK (work_id, volume, chapter).
 --    SQLite does not support ALTER TABLE … ALTER CONSTRAINT; we must
 --    recreate the table. Data is preserved via INSERT INTO … SELECT.
--- 4. Recreate indexes.
+-- 4. Recreate indexes (including volume-aware index for next_chapter query).
+--
+-- Idempotency: DROP IF EXISTS for the legacy table at the top ensures
+-- re-running on an already-migrated DB is a no-op (the RENAME will
+-- fail harmlessly because work_chapters_legacy already doesn't exist,
+-- but we guard it anyway).
+
+-- Pre-guard: drop legacy table from any prior partial run (idempotency, W-01).
+DROP TABLE IF EXISTS work_chapters_legacy;
 
 -- Step 1: Backfill implicit volume = 1 for all existing rows.
 UPDATE work_chapters SET volume = 1 WHERE volume IS NULL;
@@ -46,3 +54,7 @@ DROP TABLE work_chapters_legacy;
 CREATE INDEX IF NOT EXISTS work_chapters_by_status ON work_chapters(status);
 CREATE INDEX IF NOT EXISTS work_chapters_by_work_status_chapter
     ON work_chapters(work_id, status, chapter);
+-- W-02: Composite index for volume-aware next-chapter query
+-- (`WHERE work_id = ? AND status IN (...) ORDER BY volume, chapter LIMIT 1`).
+CREATE INDEX IF NOT EXISTS idx_work_chapters_next_volume_aware
+    ON work_chapters(work_id, status, volume, chapter);
