@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T18:48:10+0800",
+  "updated_at": "2026-06-11T19:06:18+0800",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -1231,6 +1231,80 @@
         "owner": "@fullstack-dev",
         "target": "Harden if single-writer assumption is ever relaxed; current local-only model makes impact low",
         "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      }
+    ],
+    "2026-06-11-v1.42-multi-volume": [
+      {
+        "id": "R-V142P1-QC1-F-001",
+        "severity": "critical",
+        "lifecycle": "open",
+        "title": "evaluate_after_persist_volume_aware is dead code — never wired into supervisor or boot auto-chain paths; multi-volume auto-chain will not cross volume boundaries in production",
+        "source": "qc1.md F-001 (qc-specialist, architecture coherence and maintainability risk)",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs evaluate_after_persist_volume_aware (dead); supervisor NextChapter match arm; boot auto-chain wiring",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P1 fix wave (blocking) — must be resolved before Approve",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      },
+      {
+        "id": "R-V142P1-QC3-W-01",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "Migration DDL lacks DROP TABLE IF EXISTS guard for idempotent retry; re-running migration on already-migrated DB will fail or lose data",
+        "source": "qc3.md W-01 (qc-specialist-3, performance and reliability risk)",
+        "scope": "crates/nexus-local-db/migrations/202606110001_v142_multi_volume_pk.sql",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P1 fix wave (blocking) — must be resolved before Approve",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      },
+      {
+        "id": "R-V142P1-QC3-W-02",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "next_chapter_volume_aware query may filesort due to missing volume in index; add (work_id, status, volume, chapter) covering index",
+        "source": "qc3.md W-02 (qc-specialist-3, performance and reliability risk)",
+        "scope": "crates/nexus-local-db/migrations/202606110001_v142_multi_volume_pk.sql (index section); crates/nexus-local-db/src/work_chapters.rs (index check)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P1 fix wave (blocking) — must be resolved before Approve",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      },
+      {
+        "id": "R-V142P1-QC1-F-002",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "is_work_completed uses flat current_chapter comparison — correct under current invariants but architecturally fragile",
+        "source": "qc1.md F-002 (qc-specialist)",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs is_work_completed (current_chapter flat comparison vs per-volume)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future refactor (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      },
+      {
+        "id": "R-V142P1-QC1-F-003",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "reconcile_from_filesystem hardcodes volume=1 — multi-volume chapter files silently skipped",
+        "source": "qc1.md F-003 (qc-specialist)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/novel_scaffold.rs (or similar) reconcile_from_filesystem",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      },
+      {
+        "id": "R-V142P1-QC1-F-004",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "Supervisor NextChapter match arm ignores next_volume — volume context lost before schedule enqueue",
+        "source": "qc1.md F-004 (qc-specialist)",
+        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs NextChapter match arm",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
       }
     ]
   }
