@@ -431,7 +431,7 @@ pub struct DaemonToolDispatchAdapter {
 impl DaemonToolDispatchAdapter {
     /// Create a new adapter bound to the given workspace state.
     #[must_use]
-    pub fn new(state: WorkspaceState) -> Self {
+    pub const fn new(state: WorkspaceState) -> Self {
         Self { state }
     }
 }
