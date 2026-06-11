@@ -1359,38 +1359,44 @@
       {
         "id": "R-V142PLAST-QC1-W-1",
         "severity": "medium",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "Closure note for R-V141P0-02 references phantom function print_work_header that does not exist in code",
         "source": "qc1.md W-1 (qc-specialist, architecture coherence and maintainability risk)",
         "scope": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish] closure_note for R-V141P0-02 (mentions print_work_header which doesn't exist; actual helpers are print_chapter_table, print_completion_lock_hint, truncate_with_ellipsis)",
-        "decision": "defer",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last fix wave (blocking) — correct closure note to match actual extracted helpers",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish]"
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish]",
+        "closure_note": "Fixed: closure_note updated to list actual helpers (print_chapter_table, print_completion_lock_hint, truncate_with_ellipsis).",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V142PLAST-QC1-W-2",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "truncate_with_ellipsis only used in 1 of 4 eligible locations — incomplete helper extraction",
         "source": "qc1.md W-2 (qc-specialist)",
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs (truncate_with_ellipsis defined but only 1 use site; 3 other candidates)",
-        "decision": "defer",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last fix wave (blocking) — apply truncate_with_ellipsis to remaining eligible locations",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish]"
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish]",
+        "closure_note": "Fixed: truncate_with_ellipsis now used in 4 locations (handle_list, handle_pool_list, handle_inspiration_list title, print_chapter_table). No behavior change.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V142PLAST-QC3-W-01",
         "severity": "medium",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "Closure note for R-V141P1-12 incorrectly claims romanized CJK slug; actual behavior is idea-<hex> fallback",
         "source": "qc3.md W-01 (qc-specialist-3, performance and reliability risk)",
         "scope": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish] closure_note for R-V141P1-12 (says romanized; actual is idea-<hex> short-id per dev's Completion Report)",
-        "decision": "defer",
+        "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last fix wave (blocking) — correct closure note to match actual behavior",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish]"
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-ux-polish]",
+        "closure_note": "Fixed: closure_note updated to reflect idea-<hex> short-id fallback (not romanized CJK).",
+        "closed_at": "2026-06-12"
       }
     ]
   }
