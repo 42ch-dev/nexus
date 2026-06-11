@@ -524,6 +524,8 @@ pub struct StateCompositeTask {
     output_bindings: std::collections::HashMap<String, String>,
     /// Shared capability registry (injected by the engine; falls back to builtins if None).
     registry: Option<std::sync::Arc<CapabilityRegistry>>,
+    /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
 }
 
 impl StateCompositeTask {
@@ -542,6 +544,7 @@ impl StateCompositeTask {
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
             registry: None,
+            daemon_tool_dispatch: None,
         }
     }
 
@@ -576,6 +579,16 @@ impl StateCompositeTask {
     #[must_use]
     pub fn with_registry(mut self, registry: std::sync::Arc<CapabilityRegistry>) -> Self {
         self.registry = Some(registry);
+        self
+    }
+
+    /// Set the daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
+    #[must_use]
+    pub fn with_daemon_tool_dispatch(
+        mut self,
+        dispatch: std::sync::Arc<dyn crate::capability::DaemonToolDispatch>,
+    ) -> Self {
+        self.daemon_tool_dispatch = Some(dispatch);
         self
     }
 
@@ -733,6 +746,26 @@ impl Task for StateCompositeTask {
                                 "no engine reference available",
                             )
                             .await;
+                    }
+                }
+                EnterAction::HostTool { tool_name, args } => {
+                    // DF-47 (V1.42 P3): invoke daemon-side nexus.* tool.
+                    // The dispatch slot is injected by the engine at graph
+                    // construction time via `with_daemon_tool_dispatch`.
+                    let dispatch = self.daemon_tool_dispatch.as_ref();
+                    if let Some(dispatch) = dispatch {
+                        let host_tool_task = HostToolCallTask::from_dispatch(
+                            dispatch.clone(),
+                            format!("{}_host_tool_{}", self.id, tool_name.replace('.', "_")),
+                            tool_name.clone(),
+                            args.clone()
+                                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+                        );
+                        host_tool_task.run(context.clone()).await?;
+                    } else {
+                        return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                            "HostTool action requires daemon_tool_dispatch but none is configured (tool: {tool_name})"
+                        )));
                     }
                 }
             }
@@ -1346,6 +1379,19 @@ fn render_strict_template(template: &str, payload: &serde_json::Value) -> anyhow
 ///
 /// # Errors
 ///
+/// Check whether a JSON value contains any handlebars template placeholder (`{{`).
+///
+/// Used to short-circuit the expensive `build_nested_payload` + `render_value_templates`
+/// path when no placeholders exist (T7, qc3 W-02 hot-path fix).
+fn value_contains_template(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(s) => s.contains("{{"),
+        serde_json::Value::Object(map) => map.values().any(value_contains_template),
+        serde_json::Value::Array(arr) => arr.iter().any(value_contains_template),
+        _ => false,
+    }
+}
+
 /// Returns an error if any string value contains a template placeholder that
 /// fails to render (e.g. `{{nonexistent.key}}`). This is fail-closed: the
 /// capability is NOT called with literal "{{...}}" placeholders.
@@ -1451,8 +1497,10 @@ type DaemonDispatchSlot = std::sync::Arc<
 ///
 /// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
 pub struct HostToolCallTask {
-    /// Daemon-side tool dispatch provider.
+    /// Daemon-side tool dispatch provider (test-oriented, wraps Arc<Mutex<Option<...>>>).
     dispatch: Option<DaemonDispatchSlot>,
+    /// Direct dispatch reference (production path, no Mutex overhead).
+    direct_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
     /// Tool name, e.g. `"nexus.orchestration.schedule_status"`.
     tool_name: String,
     /// Tool parameters (may contain template references rendered at runtime).
@@ -1477,6 +1525,27 @@ impl HostToolCallTask {
     ) -> Self {
         Self {
             dispatch,
+            direct_dispatch: None,
+            task_id: task_id.into(),
+            tool_name: tool_name.into(),
+            args,
+        }
+    }
+
+    /// Create with a direct dispatch reference (production path from `StateCompositeTask`).
+    ///
+    /// This avoids the `Mutex<Option<...>>` wrapper used by the test-oriented `new()`.
+    /// The dispatch is stored directly; `run()` skips the lock/unlock overhead.
+    #[must_use]
+    pub fn from_dispatch(
+        dispatch: std::sync::Arc<dyn crate::capability::DaemonToolDispatch>,
+        task_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            dispatch: None,
+            direct_dispatch: Some(dispatch),
             task_id: task_id.into(),
             tool_name: tool_name.into(),
             args,
@@ -1492,6 +1561,7 @@ impl HostToolCallTask {
     ) -> Self {
         Self {
             dispatch: None,
+            direct_dispatch: None,
             task_id: task_id.into(),
             tool_name: tool_name.into(),
             args,
@@ -1509,9 +1579,15 @@ impl Task for HostToolCallTask {
         &self,
         context: graph_flow::Context,
     ) -> Result<TaskResult, graph_flow::GraphError> {
-        // Render template placeholders in args using context.
-        let payload = build_nested_payload(&context);
-        let rendered_args = render_value_templates(&self.args, &payload)?;
+        // T7 (qc3 W-02): short-circuit template rendering when args contain no
+        // placeholders. Avoids serializing the full context + handlebars walk
+        // for trivial calls like `{"work_id": "..."}`.
+        let rendered_args = if value_contains_template(&self.args) {
+            let payload = build_nested_payload(&context);
+            render_value_templates(&self.args, &payload)?
+        } else {
+            self.args.clone()
+        };
 
         // Generate a request_id for traceability.
         let request_id = format!(
@@ -1520,8 +1596,19 @@ impl Task for HostToolCallTask {
             uuid::Uuid::new_v4()
         );
 
-        let result_value = if let Some(ref dispatch_arc) = self.dispatch {
-            // Production path: call through daemon dispatch.
+        let result_value = if let Some(ref dispatch_ref) = self.direct_dispatch {
+            // Production path (direct): call through injected dispatch.
+            dispatch_ref
+                .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
+                .await
+                .map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "daemon tool dispatch failed for {}: {e}",
+                        self.tool_name
+                    ))
+                })?
+        } else if let Some(ref dispatch_arc) = self.dispatch {
+            // Test-oriented path: call through Mutex-wrapped dispatch slot.
             let dispatch = {
                 let guard = dispatch_arc.lock().map_err(|e| {
                     graph_flow::GraphError::TaskExecutionFailed(format!(
@@ -2743,6 +2830,7 @@ mod tests {
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
             registry: None,
+            daemon_tool_dispatch: None,
         }
     }
 

@@ -76,6 +76,23 @@ async fn seed_work(state: &WorkspaceState) -> String {
     work_id
 }
 
+/// Seed a work record and then lock it via patch (completion_lock).
+async fn seed_work_completion_locked(state: &WorkspaceState) -> String {
+    let work_id = seed_work(state).await;
+
+    // The INSERT hardcodes completion_locked_at = NULL, so we must patch it.
+    let now = chrono::Utc::now().to_rfc3339();
+    let patch = works::WorkPatch {
+        completion_locked_at: Some(Some(now.clone())),
+        ..Default::default()
+    };
+    works::patch_work(state.pool(), "test_creator", &work_id, &patch, &now)
+        .await
+        .expect("patch_work should succeed");
+
+    work_id
+}
+
 // ─── E2E Test: DaemonToolDispatchAdapter round-trip ─────────────────────────
 
 #[tokio::test]
@@ -207,11 +224,23 @@ async fn agent_tool_e2e_cross_creator_forbidden_via_adapter() {
 
     assert!(result.is_err(), "cross-creator should fail");
     let err = result.unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("daemon tool dispatch failed"),
-        "error should mention dispatch failure: {msg}"
-    );
+    // T8 (qc2 W-01): assert the specific CapabilityError::Forbidden variant,
+    // not just the error message string. The adapter maps NexusApiError::Forbidden
+    // to CapabilityError::Forbidden (preserving the error code).
+    match &err {
+        nexus_orchestration::capability::CapabilityError::Forbidden(msg) => {
+            assert!(
+                msg.contains("daemon tool dispatch failed"),
+                "FORBIDDEN error should mention dispatch failure: {msg}"
+            );
+        }
+        other => {
+            panic!(
+                "expected CapabilityError::Forbidden, got: {:?} ({})",
+                other, other
+            );
+        }
+    }
 }
 
 // ─── E2E Test: dispatch_for_schedule vs execute have same result ────────────
@@ -250,4 +279,38 @@ async fn agent_tool_e2e_schedule_dispatch_matches_execute() {
         schedule_result, execute_result,
         "schedule and HTTP dispatch must produce same tool result"
     );
+}
+
+// ─── E2E Test: Read-only tool succeeds under completion-lock (AC #2) ────────
+
+#[tokio::test]
+async fn agent_tool_e2e_read_only_tool_succeeds_under_completion_lock() {
+    // T9 (qc2 W-02): prove that the read-only schedule_status tool respects
+    // completion-lock — it should succeed even when the work is locked.
+    let ctx = test_ctx().await;
+    let work_id = seed_work_completion_locked(&ctx.state).await;
+
+    // Verify the work has completion_locked_at set
+    let record = works::get_work(ctx.state.pool(), "test_creator", &work_id)
+        .await
+        .expect("db query should succeed")
+        .expect("work should exist");
+    assert!(
+        record.completion_locked_at.is_some(),
+        "work should be completion-locked"
+    );
+
+    // The read-only schedule_status tool should succeed despite the lock.
+    let adapter = DaemonToolDispatchAdapter::new(ctx.state);
+    let result = adapter
+        .dispatch_tool(
+            "nexus.orchestration.schedule_status",
+            &json!({ "work_id": work_id }),
+            "e2e-lock-001",
+        )
+        .await;
+
+    let output = result.expect("read-only schedule_status should succeed under completion-lock");
+    assert_eq!(output["work_id"].as_str(), Some(work_id.as_str()));
+    assert_eq!(output["count"].as_u64(), Some(1));
 }

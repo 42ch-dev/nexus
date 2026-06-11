@@ -446,10 +446,15 @@ impl nexus_orchestration::capability::DaemonToolDispatch for DaemonToolDispatchA
     ) -> Result<serde_json::Value, nexus_orchestration::capability::CapabilityError> {
         HostToolExecutor::dispatch_for_schedule(tool_name, args, request_id, &self.state)
             .await
-            .map_err(|e| {
-                nexus_orchestration::capability::CapabilityError::Internal(format!(
+            .map_err(|e| match &e {
+                NexusApiError::Forbidden { .. } => {
+                    nexus_orchestration::capability::CapabilityError::Forbidden(format!(
+                        "daemon tool dispatch failed for {tool_name}: {e}"
+                    ))
+                }
+                _ => nexus_orchestration::capability::CapabilityError::Internal(format!(
                     "daemon tool dispatch failed for {tool_name}: {e}"
-                ))
+                )),
             })
     }
 }
