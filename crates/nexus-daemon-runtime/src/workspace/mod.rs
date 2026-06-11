@@ -56,6 +56,9 @@ pub struct WorkspaceState {
     /// Shutdown notification — fired when the daemon enters Stopping state.
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
+    /// Daemon-side tool dispatch for nexus.* tools (DF-47, V1.42 P3).
+    /// Set at daemon boot so schedule-executed HostToolCallTask can invoke tools.
+    daemon_tool_dispatch: Arc<Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>>,
 }
 
 impl WorkspaceState {
@@ -92,6 +95,7 @@ impl WorkspaceState {
             agent_host: Arc::new(None),
             narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
+            daemon_tool_dispatch: Arc::new(None),
         }
     }
 
@@ -145,6 +149,7 @@ impl WorkspaceState {
             agent_host: Arc::new(None),
             narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
+            daemon_tool_dispatch: Arc::new(None),
         })
     }
 
@@ -179,6 +184,22 @@ impl WorkspaceState {
     /// Called from boot.rs after constructing the agent host subsystem.
     pub fn set_agent_host(&mut self, host: Arc<dyn nexus_agent_host::HostFacade>) {
         self.agent_host = Arc::new(Some(host));
+    }
+
+    /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).
+    pub fn set_daemon_tool_dispatch(
+        &mut self,
+        dispatch: Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>,
+    ) {
+        self.daemon_tool_dispatch = Arc::new(Some(dispatch));
+    }
+
+    /// Get the daemon-side tool dispatch adapter, if set (DF-47, V1.42 P3).
+    #[must_use]
+    pub fn daemon_tool_dispatch(
+        &self,
+    ) -> Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>> {
+        self.daemon_tool_dispatch.as_ref().clone()
     }
 
     /// Get the agent host facade, if set.
