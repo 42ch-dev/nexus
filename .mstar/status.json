@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
       "title": "P-1 — V1.42 compass, plans, specs, tracker, status (docs-only)",
-      "status": "Todo",
+      "status": "Done",
       "working_branch": "iteration/v1.42",
       "merge_target": "iteration/v1.42",
       "plan_file": ".mstar/plans/2026-06-11-v1.42-harness-docs-prepare.md",
