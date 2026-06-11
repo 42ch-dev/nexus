@@ -270,7 +270,7 @@ async fn insert_work_tx(
          runtime_lock_holder, runtime_lock_acquired_at, completion_locked_at,
          novel_completion_status, lineage_from_work_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?,
-                 NULL, NULL, NULL, NULL, NULL)",
+                 NULL, NULL, NULL, NULL, ?)",
     )
     .bind(&record.work_id)
     .bind(&record.creator_id)
@@ -297,6 +297,7 @@ async fn insert_work_tx(
     .bind(record.auto_chain_enabled)
     .bind(record.auto_chain_interrupted)
     .bind(record.auto_review_master_on_timeout)
+    .bind(&record.lineage_from_work_id)
     .execute(&mut **tx)
     .await?;
     Ok(())
