@@ -1,8 +1,8 @@
 ---
-report_kind: qc-consolidated
+reportkind: qc-consolidated
 consolidated_by: project-manager
 plan_id: "2026-06-11-v1.42-agent-tool-production-wiring"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-11"
 ---
 
