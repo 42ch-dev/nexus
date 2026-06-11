@@ -403,6 +403,10 @@ impl ScheduleSupervisor {
     ///
     /// Errors are logged but do not propagate — auto-chain failure should not block
     /// the terminal transition.
+    // V1.42 F-001: volume-aware evaluator adds ~15 lines to the persist-complete
+    // branch; total is a flat match-based dispatcher where each arm is independent.
+    // Splitting would introduce artificial indirection without reducing complexity.
+    #[allow(clippy::too_many_lines)]
     async fn process_auto_chain_after_terminal(&self, schedule_id: &str, creator_id: &str) {
         use crate::auto_chain::{self, ChainAction};
 
@@ -448,7 +452,25 @@ impl ScheduleSupervisor {
                 }
             };
 
-        let action = auto_chain::evaluate_next_step(&work);
+        // V1.42 F-001: When the persist stage just completed, use the
+        // volume-aware evaluator to correctly handle cross-volume auto-chain
+        // (Plan Goal 4 / AC2). For all other stages, the flat evaluator suffices.
+        let action = if work.current_stage == "persist" && work.stage_status == "complete" {
+            match auto_chain::evaluate_after_persist_volume_aware(&self.pool, &work).await {
+                Ok(vol_action) => vol_action,
+                Err(e) => {
+                    tracing::warn!(
+                        work_id = %work.work_id,
+                        error = %e,
+                        "auto-chain: volume-aware evaluation failed, falling back to flat"
+                    );
+                    auto_chain::evaluate_next_step(&work)
+                }
+            }
+        } else {
+            auto_chain::evaluate_next_step(&work)
+        };
+
         match action {
             ChainAction::AdvanceStage {
                 ref work_id,
@@ -469,8 +491,19 @@ impl ScheduleSupervisor {
             ChainAction::NextChapter {
                 ref work_id,
                 ref next_chapter,
-                next_volume: _,
+                next_volume,
             } => {
+                // V1.42: log cross-volume transitions for observability.
+                let is_cross_volume =
+                    next_volume > 1 || (next_volume == 1 && work.current_chapter > 0);
+                if is_cross_volume {
+                    tracing::info!(
+                        work_id = %work_id,
+                        next_chapter = *next_chapter,
+                        next_volume,
+                        "auto-chain: next chapter (volume-aware)"
+                    );
+                }
                 // Next chapter starts at produce stage
                 if let Err(e) = self
                     .enqueue_auto_chain_step(
@@ -485,6 +518,7 @@ impl ScheduleSupervisor {
                     tracing::warn!(
                         work_id = %work_id,
                         next_chapter = *next_chapter,
+                        next_volume,
                         error = %e,
                         "auto-chain: failed to enqueue next chapter"
                     );
