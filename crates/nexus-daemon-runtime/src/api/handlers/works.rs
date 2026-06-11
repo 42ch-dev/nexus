@@ -152,6 +152,10 @@ pub struct CreateWorkRequest {
     /// return the existing `work_id` (idempotent).
     pub client_request_id: Option<String>,
     /// DF-60 §5.2: Parent Work ID for lineage (new Work created from completed Work).
+    ///
+    /// If provided, the referenced Work must exist and belong to the active
+    /// creator. A nonexistent or cross-creator reference is rejected with 400.
+    /// An empty string is also rejected (use `None` / omit the field instead).
     pub lineage_from_work_id: Option<String>,
     /// DF-60 §5.3: If true, after creation, set this Work as pool `active`.
     #[serde(default)]
@@ -333,6 +337,31 @@ pub async fn create_work(
                      ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
                      ↳ List your Worlds:    nexus42 creator world list\n  \
                      World binding is required for new Works (V1.40+)."
+                ),
+            });
+        }
+    }
+
+    // PR #53 review: validate lineage_from_work_id if present.
+    // The referenced Work must exist, belong to the active creator, and be non-empty.
+    if let Some(ref lineage_id) = req.lineage_from_work_id {
+        if lineage_id.is_empty() {
+            return Err(NexusApiError::BadRequest {
+                code: "INVALID_LINEAGE".to_string(),
+                message: "lineage_from_work_id must not be empty; omit the field if no lineage is intended.".to_string(),
+            });
+        }
+        let lineage_work = works::get_work(state.pool(), &creator_id, lineage_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("lineage_from_work_id lookup: {e}"),
+            })?;
+        if lineage_work.is_none() {
+            return Err(NexusApiError::BadRequest {
+                code: "INVALID_LINEAGE".to_string(),
+                message: format!(
+                    "lineage_from_work_id '{lineage_id}' does not exist or is not owned by this creator."
                 ),
             });
         }

@@ -1384,3 +1384,130 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
     assert_eq!(dto3.status, "completed");
     assert_eq!(dto3.updated_at, updated_at_after_first);
 }
+
+// ─── PR #53 review: lineage_from_work_id validation ───────────────────────
+
+/// Work B with a valid lineage_from_work_id (pointing to an existing Work A
+/// owned by the same creator) succeeds and persists the lineage reference.
+#[tokio::test]
+async fn create_work_with_valid_lineage_succeeds() {
+    let (state, _tmp) = handler_state().await;
+
+    // Create Work A (no lineage)
+    let req_a = CreateWorkRequest {
+        title: "Parent Novel".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
+    };
+    let (_, resp_a) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req_a),
+    )
+    .await
+    .unwrap();
+    let work_id_a = resp_a.work_id.clone();
+
+    // Create Work B with lineage_from_work_id = A
+    let req_b = CreateWorkRequest {
+        title: "Child Novel".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+        lineage_from_work_id: Some(work_id_a.clone()),
+        set_pool_active: None,
+    };
+    let (status_b, resp_b) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req_b),
+    )
+    .await
+    .unwrap();
+    assert_eq!(status_b, axum::http::StatusCode::CREATED);
+
+    // Verify lineage is persisted
+    let work_b = nexus_daemon_runtime::api::handlers::works::get_work(
+        State(state),
+        Path(resp_b.work_id.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        work_b.lineage_from_work_id.as_deref(),
+        Some(work_id_a.as_str()),
+        "lineage_from_work_id must be persisted"
+    );
+}
+
+/// Work creation with a nonexistent lineage_from_work_id is rejected with 400.
+#[tokio::test]
+async fn create_work_with_nonexistent_lineage_returns_400() {
+    let (state, _tmp) = handler_state().await;
+
+    let req = CreateWorkRequest {
+        title: "Bad Lineage".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+        lineage_from_work_id: Some("wrk_nonexistent_12345".to_string()),
+        set_pool_active: None,
+    };
+    let result =
+        nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
+            .await;
+
+    assert!(result.is_err(), "Nonexistent lineage should be rejected");
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::BAD_REQUEST,
+        "Expected 400 for nonexistent lineage, got {} ({:?})",
+        err.status_code(),
+        err
+    );
+}
+
+/// Work creation with an empty lineage_from_work_id is rejected with 400
+/// (empty string is not a valid work_id — treated as invalid input).
+#[tokio::test]
+async fn create_work_with_empty_lineage_returns_400() {
+    let (state, _tmp) = handler_state().await;
+
+    let req = CreateWorkRequest {
+        title: "Empty Lineage".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+        lineage_from_work_id: Some(String::new()),
+        set_pool_active: None,
+    };
+    let result =
+        nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
+            .await;
+
+    assert!(
+        result.is_err(),
+        "Empty lineage_from_work_id should be rejected"
+    );
+    let err = result.unwrap_err();
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::BAD_REQUEST,
+        "Expected 400 for empty lineage, got {}",
+        err.status_code()
+    );
+}
