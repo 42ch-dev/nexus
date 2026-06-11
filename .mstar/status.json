@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T13:30:00+08:00",
+  "updated_at": "2026-06-11T07:00:00+08:00",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -9,18 +9,18 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.41",
-    "last_integration_branch": "iteration/v1.40",
+    "integration_branch": null,
+    "last_integration_branch": "iteration/v1.41",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
-    "latest_shipped_iteration": "v1.40",
-    "latest_shipped_at": "2026-06-11T03:00:00+08:00",
-    "latest_active_iteration": "v1.41",
+    "latest_shipped_iteration": "v1.41",
+    "latest_shipped_at": "2026-06-11T07:00:00+08:00",
+    "latest_active_iteration": null,
     "latest_active_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md",
-    "integration_branch_retired": "iteration/v1.40",
+    "integration_branch_retired": "iteration/v1.41",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-11T13:00:00+08:00",
+      "updated_at": "2026-06-11T07:00:00+08:00",
       "total_open": 91,
       "by_severity": {
         "critical": 0,
