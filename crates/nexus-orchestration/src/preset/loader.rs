@@ -194,6 +194,11 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
+    // 0c. Unknown top-level key check (R-V137P0-01).
+    //     serde silently ignores unknown keys; warn so mis-placed sections
+    //     (e.g. `gates:` at root instead of under `preset:`) are surfaced.
+    warn_unknown_top_level_keys(&yaml_value);
+
     // 1. Deserialize from the already-parsed Value (avoids double-parse that widens
     //    the stack-overflow attack surface — QC3 W-002).
     let manifest: PresetManifest =
@@ -1038,6 +1043,42 @@ pub fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
             1 + child_depth
         }
         _ => 1,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unknown top-level key check (R-V137P0-01)
+// ---------------------------------------------------------------------------
+
+/// Known top-level keys in `preset.yaml` per the `PresetManifest` schema.
+const KNOWN_TOP_LEVEL_KEYS: &[&str] = &["preset", "states", "inner_graphs", "signals", "roles"];
+
+/// Warn via `tracing::warn!` if the YAML document contains top-level keys
+/// not recognized by [`PresetManifest`].
+///
+/// Catches mis-placed sections (e.g. `gates:` at root instead of under
+/// `preset:`) that serde would silently ignore. The check is intentionally
+/// **non-fatal** — existing embedded presets must not break. Callers that
+/// want stricter behavior can promote the warnings to errors in a
+/// follow-up iteration.
+// Allow: first paragraph intentionally lists the purpose in full for
+// single-reading callers of this helper; splitting would reduce clarity.
+#[allow(clippy::too_long_first_doc_paragraph)]
+pub fn warn_unknown_top_level_keys(yaml_value: &serde_yaml::Value) {
+    let Some(mapping) = yaml_value.as_mapping() else {
+        return;
+    };
+    for key in mapping.keys() {
+        if let Some(key_str) = key.as_str() {
+            if !KNOWN_TOP_LEVEL_KEYS.contains(&key_str) {
+                tracing::warn!(
+                    key = key_str,
+                    "preset.yaml contains unknown top-level key — \
+                     serde will silently ignore it; \
+                     did you mean to nest it under `preset:`?"
+                );
+            }
+        }
     }
 }
 
@@ -2669,6 +2710,87 @@ states:
                 .iter()
                 .any(|p| p.error.contains("ConditionalNotYetSupported")),
             "expected 'ConditionalNotYetSupported': {problems:?}"
+        );
+    }
+
+    // R-V137P0-01: unknown top-level key detection.
+    #[test]
+    fn warn_unknown_top_level_keys_detects_misplaced_gates() {
+        use std::sync::{Arc, Mutex};
+
+        // Capturing layer to assert that tracing::warn! is actually emitted.
+        #[derive(Clone)]
+        struct CaptureLayer {
+            messages: Arc<Mutex<Vec<String>>>,
+        }
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if event.metadata().level() == &tracing::Level::WARN {
+                    let mut visitor = CaptureVisitor(String::new());
+                    event.record(&mut visitor);
+                    let mut msgs = self.messages.lock().unwrap();
+                    msgs.push(visitor.0);
+                }
+            }
+        }
+        struct CaptureVisitor(String);
+        impl tracing::field::Visit for CaptureVisitor {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                use std::fmt::Write;
+                let _ = write!(&mut self.0, "{}={:?} ", field.name(), value);
+            }
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                use std::fmt::Write;
+                let _ = write!(&mut self.0, "{}={} ", field.name(), value);
+            }
+        }
+
+        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let layer = CaptureLayer {
+            messages: captured.clone(),
+        };
+        let subscriber =
+            <tracing_subscriber::Registry as tracing_subscriber::layer::SubscriberExt>::with(
+                tracing_subscriber::registry::Registry::default(),
+                layer,
+            );
+
+        tracing::subscriber::with_default(subscriber, || {
+            let yaml = r#"
+preset:
+  id: stray-keys-test
+  version: 1
+  kind: creator
+  description: test
+  initial: start
+  terminal: done
+states:
+  - id: start
+    next: done
+  - id: done
+    terminal: true
+gates:
+  - kind: file_exists
+    path: Works/{{work_ref}}/README.md
+"#;
+            let caps = test_capability_registry();
+            // Should NOT fail — unknown keys are warnings only.
+            let loaded = load_preset_from_str(yaml, &caps).unwrap();
+            assert_eq!(loaded.id, "stray-keys-test");
+
+            // Also call the helper directly to ensure the warn path fires.
+            let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+            super::warn_unknown_top_level_keys(&yaml_value);
+        });
+
+        let messages = captured.lock().unwrap();
+        assert!(
+            messages.iter().any(|m| m.contains("gates")),
+            "expected tracing::warn! mentioning 'gates', got: {messages:?}"
         );
     }
 }
