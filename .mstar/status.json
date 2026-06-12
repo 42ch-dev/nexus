@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-13T00:30:00+08:00",
+  "updated_at": "2026-06-12T23:45:00+08:00",
   "plans": [],
   "v1_43_iteration_complete": true,
   "metadata": {
@@ -10,18 +10,18 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.43",
-    "last_integration_branch": "iteration/v1.42",
+    "integration_branch": null,
+    "last_integration_branch": "iteration/v1.43",
     "integration_merge_target": "main",
-    "integration_branch_role": "active",
-    "latest_shipped_iteration": "v1.42",
-    "latest_shipped_at": "2026-06-12T12:46:58+08:00",
-    "latest_active_iteration": "v1.43",
-    "latest_active_compass": ".mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md",
-    "integration_branch_retired": null,
+    "integration_branch_role": "retired",
+    "latest_shipped_iteration": "v1.43",
+    "latest_shipped_at": "2026-06-12T23:39:10+08:00",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
+    "integration_branch_retired": "iteration/v1.43",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-13T00:30:00+08:00",
+      "updated_at": "2026-06-12T23:45:00+08:00",
       "total_open": 86,
       "by_severity": {
         "critical": 0,
