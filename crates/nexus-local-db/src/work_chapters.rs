@@ -460,27 +460,34 @@ pub async fn reconcile_from_filesystem(
             continue;
         };
 
-        // Parse frontmatter for status and word_count
+        // Parse frontmatter for status, word_count, and volume.
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };
         let fm = parse_frontmatter(&content);
         let fm_status = fm.get("status").cloned();
         let fm_word_count: Option<i32> = fm.get("word_count").and_then(|v| v.parse().ok());
+        // R-V142P1-F-003: parse volume from frontmatter; default to 1 for
+        // single-volume works or files without the field.
+        let fm_volume: i32 = fm
+            .get("volume")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1);
 
-        // Check if row exists (V1.42: single-volume reconcile defaults to volume 1)
-        let existing = get_chapter(pool, work_id, ch_num, 1).await?;
+        // Check if row exists (volume-aware: use frontmatter volume).
+        let existing = get_chapter(pool, work_id, ch_num, fm_volume).await?;
 
         match existing {
             None => {
-                // New chapter — insert
+                // New chapter — insert with defaults, then apply frontmatter
+                // status if available (insert_chapter defaults to 'not_started').
                 let body_path = format!("Works/{work_ref}/Stories/{fname}");
                 insert_chapter(
                     pool,
                     &InsertChapterParams {
                         work_id,
                         chapter: ch_num,
-                        volume: Some(1), // V1.42: single-volume reconcile defaults to 1
+                        volume: Some(fm_volume),
                         slug: None,
                         planned_word_count: 4000,
                         outline_path: None,
@@ -489,6 +496,19 @@ pub async fn reconcile_from_filesystem(
                     },
                 )
                 .await?;
+                // Apply frontmatter status + word_count if present.
+                if fm_status.as_deref() != Some("not_started") || fm_word_count.is_some() {
+                    update_status(
+                        pool,
+                        work_id,
+                        ch_num,
+                        fm_volume,
+                        fm_status.as_deref().unwrap_or("not_started"),
+                        fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
+                        now,
+                    )
+                    .await?;
+                }
                 created += 1;
             }
             Some(row) => {
@@ -502,7 +522,7 @@ pub async fn reconcile_from_filesystem(
                         pool,
                         work_id,
                         ch_num,
-                        1, // V1.42: single-volume reconcile defaults to volume 1
+                        fm_volume,
                         fm_status.as_deref().unwrap_or(&db_status),
                         fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
                         now,
@@ -1296,6 +1316,61 @@ mod tests {
         .unwrap();
         assert_eq!(report2.updated, 0);
         assert_eq!(report2.preserved, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V142P1-F-003: Volume-aware reconcile
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_reconcile_volume_aware_from_frontmatter() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_recon_vol").await;
+
+        // Create workspace with multi-volume chapter files.
+        let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
+        std::fs::create_dir_all(&stories_dir).unwrap();
+
+        // Volume 1 chapter (no volume field → defaults to 1)
+        std::fs::write(
+            stories_dir.join("ch01-intro.md"),
+            "---\ntitle: Intro\nchapter: 1\nstatus: draft\n---\nContent",
+        )
+        .unwrap();
+
+        // Volume 2 chapter (explicit volume: 2 in frontmatter)
+        std::fs::write(
+            stories_dir.join("ch01-v2-opening.md"),
+            "---\ntitle: Opening\nchapter: 1\nvolume: 2\nstatus: not_started\n---\nContent V2",
+        )
+        .unwrap();
+
+        let report = reconcile_from_filesystem(
+            &pool,
+            "wrk_recon_vol",
+            "my-novel",
+            dir.path(),
+            "2026-06-12T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.created, 2);
+
+        // Verify volume 1 chapter 1
+        let ch_v1 = get_chapter(&pool, "wrk_recon_vol", 1, 1)
+            .await
+            .unwrap()
+            .expect("v1 ch1");
+        assert_eq!(ch_v1.status, "draft");
+        assert_eq!(ch_v1.volume, Some(1));
+
+        // Verify volume 2 chapter 1
+        let ch_v2 = get_chapter(&pool, "wrk_recon_vol", 1, 2)
+            .await
+            .unwrap()
+            .expect("v2 ch1");
+        assert_eq!(ch_v2.status, "not_started");
+        assert_eq!(ch_v2.volume, Some(2));
     }
 
     // =======================================================================
