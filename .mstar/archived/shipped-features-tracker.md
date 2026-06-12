@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-11
+**Last updated**: 2026-06-12
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -66,6 +66,7 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~DF-58 (V1.36)~~ | Interactive novel project init preset (`novel-project-init`) | **V1.36 P1** (Shipped 2026-06-07) | Separate grill-me preset; not embedded in `novel-writing` auto-chain. Plan `2026-06-07-v1.36-novel-project-init-preset`; 10 prompts (init-intro, init-title, init-genre, init-chapters, init-work-ref, init-world + 3 branches, init-summary) + 4 templates (README, foreshadowing, event-index, volume-outline); `novel.project_scaffold` capability with atomic FS+DB transaction (ScaffoldTransaction with Drop rollback) + sanitization (`validate_work_ref` / `validate_slug` / `validate_total_chapters` 1..=100) + world_id FK existence check. |
 | ~~DF-60~~ | Multi-novel lifecycle (2-step completion + completion-lock + runtime lock columns + `creator works` IA) | **V1.41 P0** (Shipped 2026-06-11) | PR [#53](https://github.com/42ch-dev/nexus/pull/53) merged to `main`; post-merge `12753eb8` lineage validation. Plan [2026-06-10-v1.41-multi-work-switch.md](../plans/2026-06-10-v1.41-multi-work-switch.md). Spec [novel-multi-work-lifecycle.md](../knowledge/specs/novel-multi-work-lifecycle.md). **Note:** production `runtime_lock_holder` acquire deferred V1.42 P0. |
 | ~~DF-61~~ | Selection pool + inspiration pool (DB SSOT + `Pool/Ideas/` MD) | **V1.41 P1** (Shipped 2026-06-11) | PR #53; post-merge `156e669d` `set_pool_active` creator_id authz. Plan [2026-06-10-v1.41-selection-pool.md](../plans/2026-06-10-v1.41-selection-pool.md). Spec [novel-work-pool.md](../knowledge/specs/novel-work-pool.md). |
+| ~~BL-10~~ | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | **V1.43 P0** (Shipped 2026-06-12) | Shipped on `iteration/v1.43` (merge `340423e5`, 2026-06-12). Plan [2026-06-12-v1.43-novel-writing-quickstart.md](../plans/2026-06-12-v1.43-novel-writing-quickstart.md). Spec [novel-author-experience.md](../knowledge/specs/novel-author-experience.md). QC tri-review Approve (qc1 `efc8cfda`, qc2 `84e28acf`, qc3 `16953b9a` reval #2); QA Pass with residuals (`2709506a`). New file `docs/novel-writing-quickstart.md` (280 lines; Part I §1–§6 ongoing serial + Part II A/B/C optional/advanced) + 1-line cross-link in `docs/ARCHITECTURE.md`. 2 open residuals carry-forward to P-last hygiene plan `2026-06-12-v1.43-hygiene-and-residuals`: **R-V143P0-001** (spec overlay `novel-author-experience.md` §2 row 4 references stale `creator run status`; should be `creator works status` per V1.41 cli-spec.md §6.2H) + **R-V143P0-002** (spec/CLI drift: `novel-workflow-profile.md` §5.5.3 + `novel-quality-loop.md` §6 reference future `creator run review-master <work_id>` surface, not yet implemented in current CLI; quickstart line 168 has an inline note for readers). |
 
 ### Cancelled / Superseded
 

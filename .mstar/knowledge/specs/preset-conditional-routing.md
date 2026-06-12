@@ -1,8 +1,9 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Draft V1.42 (minimal slice shipped — `llm_judge` GO/NOGO → two `next` edges; full DF-56 roadmap in deferred tracker §3.6.3)  
-**Document class**: Draft overlay (V1.42 P2 minimal slice)  
+**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; full DF-56 roadmap in deferred tracker §3.6.3)  
+**Document class**: Feature line (conditional routing — minimal slice)  
 **Created**: 2026-06-06  
+**Last updated**: 2026-06-12 (V1.43 P-last — promoted from Draft overlay to Shipped Feature line)
 **Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (future iteration)  
 **Coordinates with**:

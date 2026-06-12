@@ -14,7 +14,7 @@ This document separates **Cargo dependency wiring** (what compiles and links) fr
 | CLI + libraries | `crates/*` | Rust workspace (see below) |
 | Codegen / validation | `tooling/` | `pnpm run codegen`, schema checks |
 | Normative OSS specs | `.mstar/knowledge/specs/` | CLI, daemon, orchestration, sync contracts |
-| End-user docs | `docs/` | Install, contributing, this file |
+| End-user docs | `docs/` | Install, contributing, [novel-writing quickstart](novel-writing-quickstart.md), this file |
 
 ## Truth source: JSON Schema
 

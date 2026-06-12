@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.43 plan per Profile B. P-1 docs-only prepare wave on iteration/v1.43.",
+  "plan_id": "2026-06-12-v1.43-harness-docs-prepare",
+  "title": "P-1 — V1.43 compass, plans, specs, tracker, status (docs-only)",
+  "done_at": "2026-06-12T21:00:00+08:00",
+  "archived_at": "2026-06-12T21:00:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-12-v1.43-harness-docs-prepare.md",
+  "archived_record": ".mstar/archived/plans/2026-06-12-v1.43-harness-docs-prepare.json",
+  "snapshot": {
+    "id": "2026-06-12-v1.43-harness-docs-prepare",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-12-v1.43-harness-docs-prepare.md",
+    "working_branch": "iteration/v1.43",
+    "merge_target": "iteration/v1.43",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-author-experience.md",
+      "depends_on": [],
+      "description": "P-1 — V1.43 harness docs prepare (grill-me closure; BL-10 → Active P0)",
+      "targets_deferred": ["BL-10"],
+      "updated_at": "2026-06-12T21:00:00+08:00",
+      "done_at": "2026-06-12T21:00:00+08:00",
+      "qc": "skipped — docs-only prepare wave per compass §0.1 row 10",
+      "qa": "skipped — docs-only prepare wave; no behavior change to verify",
+      "shipped": [
+        "V1.43 delivery compass at .mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md (grill-me 7 decisions locked)",
+        "P0 plan: .mstar/plans/2026-06-12-v1.43-novel-writing-quickstart.md (BL-10 quickstart)",
+        "P1 plan: .mstar/plans/2026-06-12-v1.43-cli-first-run-copy.md",
+        "P2 plan: .mstar/plans/2026-06-12-v1.43-author-visibility.md",
+        "P-last plan: .mstar/plans/2026-06-12-v1.43-hygiene-and-residuals.md",
+        "Draft spec: .mstar/knowledge/specs/novel-author-experience.md",
+        "status.json activated for V1.43; V1.42 Done plans compacted Profile B",
+        "Deferred tracker: BL-10 → V1.43 P0 Active; V1.43 active iteration",
+        "iterations/README.md + knowledge/specs/README.md sync"
+      ],
+      "closed_residuals": [],
+      "deferred_residuals": [],
+      "commits": [
+        "e8ca03e6 harness(v1.43): open Novel Author Experience iteration (prepare docs-only)"
+      ],
+      "qc_reports": []
+    }
+  },
+  "qc": "skipped — docs-only prepare wave",
+  "qa": "skipped — docs-only prepare wave",
+  "residual_count": 0,
+  "merge_commits": [
+    "e8ca03e6 harness(v1.43): open Novel Author Experience iteration (prepare docs-only)"
+  ],
+  "notes": "P-1 docs-only prepare per V1.43 compass §1.4. Grill-me closure (author UX + selective P-last). Opened iteration/v1.43 from main after v1.42.1 hotfix (PR #55). Profile B archive removes row from status.json plans[]."
+}

@@ -577,10 +577,12 @@ V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = pau
 
 ### 7.1 UX 原则
 
-- 面向非专业创作者，文案优先讲“本地助手”和“连接你的 AI 工具”
+- 面向非专业创作者，文案优先讲"本地助手"和"连接你的 AI 工具"
 - 不在 first-run 流程里堆协议名词
 - 错误提示优先给行动建议，而不是只给报错文本
 - 如果检测到可用 ACP Registry agent，应优先引导用户选择默认 agent
+
+> **V1.43 Implemented (P1):** §7.1 UX principles are now enforced by CLI copy: daemon-not-reachable, `preset_gates_failed`, missing scaffold, work-completed, and open-findings errors all produce actionable one-line next steps citing `docs/novel-writing-quickstart.md` §1–§6 per `novel-author-experience.md` §3 remediation table. Help-text for `creator run` / `creator works` uses quickstart vocabulary per §7.1.
 
 ---
 
