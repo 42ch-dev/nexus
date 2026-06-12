@@ -1,51 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-12T21:00:00+08:00",
+  "updated_at": "2026-06-12T22:30:00+08:00",
   "plans": [
-    {
-      "plan_id": "2026-06-12-v1.43-novel-writing-quickstart",
-      "title": "P0 — BL-10 docs/novel-writing-quickstart.md",
-      "status": "InReview",
-      "working_branch": "feature/v1.43-novel-writing-quickstart",
-      "merge_target": "iteration/v1.43",
-      "plan_file": ".mstar/plans/2026-06-12-v1.43-novel-writing-quickstart.md",
-      "depends_on": "2026-06-12-v1.43-harness-docs-prepare",
-      "compass": ".mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md",
-      "implementation": {
-        "owner": "@writing-specialist",
-        "branch": "feature/v1.43-novel-writing-quickstart",
-        "head_commit": "e2029fa7",
-        "initial_commit": "23dac267",
-        "fix_commit": "e2029fa7",
-        "review_range": "ae7c9415..e2029fa7",
-        "fix_range": "23dac267..e2029fa7",
-        "worktree": ".worktrees/v1.43-p0",
-        "completed_at": "2026-06-12T21:00:00+08:00",
-        "files_changed": [
-          "docs/ARCHITECTURE.md (+1/-1 cross-link only)",
-          "docs/novel-writing-quickstart.md (new + 3-fix wave, +8/-6 in fix commit)"
-        ],
-        "verification": "test -f pass; rg key terms hit; git status clean; cargo +nightly fmt --all --check pass; fix-wave rg checks pass"
-      },
-      "qc_initial_wave": {
-        "dispatched_at": "2026-06-12T21:00:00+08:00",
-        "consolidated_verdict": "Request Changes (qc1 2W/3S, qc2 Approve 0W/3S, qc3 2W/1S)",
-        "blocking_warnings": [
-          { "id": "qc1-W-001", "owner": "qc-specialist", "summary": "creator works pool → pool list", "fixed_in": "e2029fa7" },
-          { "id": "qc3-F-001", "owner": "qc-specialist-3", "summary": "96h banner remediation command → review-master", "fixed_in": "e2029fa7" },
-          { "id": "qc3-F-002", "owner": "qc-specialist-3", "summary": "Part II C disambiguation from creator-scoped Inspiration Pool", "fixed_in": "e2029fa7" }
-        ],
-        "spec_hygiene_residual": {
-          "id": "R-V143P0-001",
-          "summary": "novel-author-experience.md §2 row references stale 'creator run status' (CLI has 'creator works status' per V1.41); register for P-last spec amendment",
-          "owner": "@fullstack-dev (P-last)",
-          "source": "qc1-W-002"
-        },
-        "qc1_commit": "5112a7c3",
-        "qc2_commit": "84e28acf",
-        "qc3_commit": "f9c3f908"
-      }
-    },
     {
       "plan_id": "2026-06-12-v1.43-cli-first-run-copy",
       "title": "P1 — CLI first-run copy aligned to quickstart",
@@ -158,32 +114,6 @@
     }
   },
   "residual_findings": {
-    "2026-06-12-v1.43-novel-writing-quickstart": [
-      {
-        "id": "R-V143P0-001",
-        "title": "Spec overlay novel-author-experience.md §2 row 4 references stale 'creator run status' (CLI has 'creator works status' per V1.41 cli-spec.md §6.2H); quickstart correctly uses the live command; P-last spec amendment needed",
-        "severity": "low",
-        "source": "qc1-W-002 (qc1.md initial wave); see also writing-specialist Completion Report §7 spec discrepancy note",
-        "scope": ".mstar/knowledge/specs/novel-author-experience.md §2 (Draft overlay V1.43)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.43 P-last (2026-06-12-v1.43-hygiene-and-residuals)",
-        "tracking": null,
-        "note": "Quickstart already correct. P-last plan should amend the §2 row 4 wording from 'creator run status' to 'creator works status' (and the §2 description to match V1.41 cli-spec.md §6.2H). Spec overlay is still Draft (V1.43) so no Master edit required; just an overlay amendment before P5 promotion."
-      },
-      {
-        "id": "R-V143P0-002",
-        "title": "Spec/CLI drift: novel-workflow-profile.md §5.5.3 and novel-quality-loop.md §6 reference the future 'review-master' surface (creator run review-master <work_id>), but the current CLI does not implement it; quickstart uses 'stage advance --stage review' as the available remediation path; P-last spec/CLI convergence",
-        "severity": "low",
-        "source": "QA verification (qa.md) AC1 fail; see also writing-specialist fix wave 2 Completion Report §9",
-        "scope": ".mstar/knowledge/specs/novel-workflow-profile.md §5.5.3 + .mstar/knowledge/specs/novel-quality-loop.md §6 + nexus-daemon-runtime CLI subcommand surface",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.43 P-last (2026-06-12-v1.43-hygiene-and-residuals) or later",
-        "tracking": null,
-        "note": "The spec describes a future 'review-master' surface consolidating the master-decision review flow. The CLI has not implemented it; the user-facing remediation path is 'creator run stage advance <work_id> --stage review'. P-last should either (a) implement the 'review-master' subcommand in the CLI, or (b) update the spec to match the implemented surface, or (c) keep both with explicit notes. Quickstart already cites the spec and provides the available CLI remediation; non-blocking for P0 ship."
-      }
-    ],
     "2026-06-04-v1.33-work-model-and-creator-run": [
       {
         "id": "R-V133P1-03",

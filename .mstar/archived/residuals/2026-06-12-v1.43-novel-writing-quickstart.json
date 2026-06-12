@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-12-v1.43-novel-writing-quickstart",
+  "archived_at": "2026-06-12",
+  "entries": [
+    {
+      "id": "R-V143P0-001",
+      "title": "Spec overlay novel-author-experience.md §2 row 4 references stale 'creator run status' (CLI has 'creator works status' per V1.41 cli-spec.md §6.2H); quickstart correctly uses the live command; P-last spec amendment needed",
+      "severity": "low",
+      "source": "qc1-W-002 (qc1.md initial wave); see also writing-specialist Completion Report §7 spec discrepancy note",
+      "scope": ".mstar/knowledge/specs/novel-author-experience.md §2 (Draft overlay V1.43)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.43 P-last (2026-06-12-v1.43-hygiene-and-residuals)",
+      "tracking": null,
+      "lifecycle": "defer",
+      "closure_note": "Quickstart already correct (uses 'creator works status'). P-last plan should amend the §2 row 4 wording from 'creator run status' to 'creator works status' (and the §2 description to match V1.41 cli-spec.md §6.2H). Spec overlay is still Draft (V1.43) so no Master edit required; just an overlay amendment before P5 promotion. Tracked in P-last plan §2 'Hygiene — Promote V1.42 spec overlays'.",
+      "archived_at": "2026-06-12"
+    },
+    {
+      "id": "R-V143P0-002",
+      "title": "Spec/CLI drift: novel-workflow-profile.md §5.5.3 and novel-quality-loop.md §6 reference the future 'review-master' surface (creator run review-master <work_id>), but the current CLI does not implement it; quickstart uses 'stage advance --stage review' as the available remediation path; P-last spec/CLI convergence",
+      "severity": "low",
+      "source": "QA verification (qa.md) AC1 fail; see also writing-specialist fix wave 2 Completion Report §9",
+      "scope": ".mstar/knowledge/specs/novel-workflow-profile.md §5.5.3 + .mstar/knowledge/specs/novel-quality-loop.md §6 + nexus-daemon-runtime CLI subcommand surface",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.43 P-last (2026-06-12-v1.43-hygiene-and-residuals) or later",
+      "tracking": null,
+      "lifecycle": "defer",
+      "closure_note": "The spec describes a future 'review-master' surface consolidating the master-decision review flow. The CLI has not implemented it; the user-facing remediation path is 'creator run stage advance <work_id> --stage review'. P-last should either (a) implement the 'review-master' subcommand in the CLI, or (b) update the spec to match the implemented surface, or (c) keep both with explicit notes. Quickstart already cites the spec and provides the available CLI remediation; non-blocking for P0 ship. Quickstart line 168 has an inline note explaining the gap to readers.",
+      "archived_at": "2026-06-12"
+    }
+  ]
+}
