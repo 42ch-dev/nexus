@@ -278,8 +278,12 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 .unwrap_or(96 * 60 * 60);
             if stale_count > 0 {
                 let threshold_hours = threshold_secs / 3600;
+                // V1.43 (P1 §3 remediation — open findings blocking progress):
+                // cite quickstart §5.
                 println!(
-                    "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — run: nexus42 creator run schedule add --preset novel-review-master --work-id {resolved_id}"
+                    "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
+                     address open findings or run a review pass; \
+                     see docs/novel-writing-quickstart.md §5"
                 );
                 println!();
             }
@@ -328,11 +332,14 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                     .get("updated_at")
                     .and_then(|v| v.as_str())
                     .unwrap_or("(unknown)");
+                // V1.43 (P1 §3 remediation — work completed): cite quickstart §6.
                 println!("═══════════════════════════════════════════════════════");
                 println!("  \"{title}\" — Work {resolved_id}{profile_tag}");
                 println!("  COMPLETED at {updated_at}");
                 println!("  {total}/{total} chapters finalized.");
                 println!("  No further novel-writing schedules will be enqueued.");
+                println!();
+                println!("  This Work is complete; see docs/novel-writing-quickstart.md §6");
                 println!();
                 println!("  To start a new Work, run:");
                 println!("    nexus42 creator run start \\");
