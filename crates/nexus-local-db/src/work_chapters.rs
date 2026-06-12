@@ -476,7 +476,18 @@ pub async fn reconcile_from_filesystem(
         let fm_word_count: Option<i32> = fm.get("word_count").and_then(|v| v.parse().ok());
         // R-V142P1-F-003: parse volume from frontmatter; default to 1 for
         // single-volume works or files without the field.
-        let fm_volume: i32 = fm.get("volume").and_then(|v| v.parse().ok()).unwrap_or(1);
+        // R-V143P0-fix: reject negative/zero volume — default to 1 with a warn.
+        let raw_volume: i32 = fm.get("volume").and_then(|v| v.parse().ok()).unwrap_or(1);
+        let fm_volume: i32 = if raw_volume >= 1 {
+            raw_volume
+        } else {
+            tracing::warn!(
+                path = %path.display(),
+                volume = raw_volume,
+                "chapter frontmatter has invalid volume (< 1); defaulting to 1"
+            );
+            1
+        };
 
         // Check if row exists (volume-aware: use frontmatter volume).
         let existing = get_chapter(pool, work_id, ch_num, fm_volume).await?;
@@ -1858,6 +1869,43 @@ mod tests {
         assert_eq!(
             next2, None,
             "no next chapter after single-chapter completion"
+        );
+    }
+
+    // R-V143P0-fix: negative/zero volume frontmatter must default to 1.
+    #[tokio::test]
+    async fn test_reconcile_volume_rejects_negative() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_neg_vol").await;
+
+        let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
+        std::fs::create_dir_all(&stories_dir).unwrap();
+
+        // Chapter with volume: -1 in frontmatter.
+        std::fs::write(
+            stories_dir.join("ch01-negative.md"),
+            "---\ntitle: Bad Vol\nchapter: 1\nvolume: -1\nstatus: draft\n---\nContent",
+        )
+        .unwrap();
+
+        let report = reconcile_from_filesystem(
+            &pool,
+            "wrk_neg_vol",
+            "my-novel",
+            dir.path(),
+            "2026-06-12T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        // Row should be created with volume=1 (defaulted), not -1.
+        assert_eq!(report.created, 1);
+        let chapters = list_chapters(&pool, "wrk_neg_vol").await.unwrap();
+        assert_eq!(chapters.len(), 1);
+        assert_eq!(
+            chapters[0].volume,
+            Some(1),
+            "negative volume must default to 1"
         );
     }
 }
