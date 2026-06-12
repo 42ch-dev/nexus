@@ -194,6 +194,11 @@ pub fn load_preset_from_str_with_limits(
         });
     }
 
+    // 0c. Unknown top-level key check (R-V137P0-01).
+    //     serde silently ignores unknown keys; warn so mis-placed sections
+    //     (e.g. `gates:` at root instead of under `preset:`) are surfaced.
+    warn_unknown_top_level_keys(&yaml_value);
+
     // 1. Deserialize from the already-parsed Value (avoids double-parse that widens
     //    the stack-overflow attack surface — QC3 W-002).
     let manifest: PresetManifest =
@@ -1038,6 +1043,39 @@ pub fn yaml_value_depth(value: &serde_yaml::Value) -> usize {
             1 + child_depth
         }
         _ => 1,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unknown top-level key check (R-V137P0-01)
+// ---------------------------------------------------------------------------
+
+/// Known top-level keys in `preset.yaml` per the `PresetManifest` schema.
+const KNOWN_TOP_LEVEL_KEYS: &[&str] = &["preset", "states", "inner_graphs", "signals", "roles"];
+
+/// Warn via `tracing::warn!` if the YAML document contains top-level keys
+/// not recognized by [`PresetManifest`]. This catches mis-placed sections
+/// (e.g. `gates:` at root instead of under `preset:`) that serde would
+/// silently ignore.
+///
+/// The check is intentionally **non-fatal** — existing embedded presets must
+/// not break. Callers that want stricter behavior can promote the warnings
+/// to errors in a follow-up iteration.
+pub fn warn_unknown_top_level_keys(yaml_value: &serde_yaml::Value) {
+    let Some(mapping) = yaml_value.as_mapping() else {
+        return;
+    };
+    for key in mapping.keys() {
+        if let Some(key_str) = key.as_str() {
+            if !KNOWN_TOP_LEVEL_KEYS.contains(&key_str) {
+                tracing::warn!(
+                    key = key_str,
+                    "preset.yaml contains unknown top-level key — \
+                     serde will silently ignore it; \
+                     did you mean to nest it under `preset:`?"
+                );
+            }
+        }
     }
 }
 
@@ -2670,5 +2708,41 @@ states:
                 .any(|p| p.error.contains("ConditionalNotYetSupported")),
             "expected 'ConditionalNotYetSupported': {problems:?}"
         );
+    }
+
+    // R-V137P0-01: unknown top-level key detection.
+    #[test]
+    fn warn_unknown_top_level_keys_detects_misplaced_gates() {
+        let yaml = r#"
+preset:
+  id: stray-keys-test
+  version: 1
+  kind: creator
+  description: test
+  initial: start
+  terminal: done
+states:
+  - id: start
+    next: done
+  - id: done
+    terminal: true
+gates:
+  - kind: file_exists
+    path: Works/{{work_ref}}/README.md
+"#;
+        let caps = test_capability_registry();
+        // Should NOT fail — unknown keys are warnings only.
+        let loaded = load_preset_from_str(yaml, &caps).unwrap();
+        assert_eq!(loaded.id, "stray-keys-test");
+
+        // Verify the warning helper detects the stray key.
+        let yaml_value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+        let mapping = yaml_value.as_mapping().unwrap();
+        let stray_keys: Vec<&str> = mapping
+            .keys()
+            .filter_map(|k| k.as_str())
+            .filter(|k| !super::KNOWN_TOP_LEVEL_KEYS.contains(k))
+            .collect();
+        assert_eq!(stray_keys, vec!["gates"]);
     }
 }
