@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-12-v1.43-hygiene-and-residuals
-verdict: Request Changes
-generated_at: 2026-06-12T21:20:00+08:00
+verdict: Approve
+generated_at: 2026-06-12T21:38:03+08:00
 ---
 
 # Code Review Report — P-last (hygiene and residuals)
@@ -66,3 +66,26 @@ generated_at: 2026-06-12T21:20:00+08:00
 | 🟢 Suggestion | 2 |
 
 **Verdict**: Request Changes
+
+## Revalidation (post-fix wave, fix commit 016832f1)
+
+**Re-review mode**: Targeted — qc-specialist-3 only (raised 2 blocking Warnings in initial wave)
+**Fix range reviewed**: 283d61e4..016832f1
+**Files in fix wave**: crates/nexus-orchestration/src/preset/loader.rs, Cargo.toml, crates/nexus-local-db/src/work_chapters.rs, Cargo.lock
+
+### Previously raised blocking findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc3-W-001 | clippy too_long_first_doc_paragraph | PASS | `rg -n 'allow\(clippy::too_long_first_doc_paragraph\)' crates/nexus-orchestration/src/preset/loader.rs` → line 1066; doc comment split and `#[allow(...)]` with justification comment present; `cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings` finished clean |
+| qc3-W-002 | negative volume silently accepted | PASS | `rg -n 'raw_volume|\>= 1'` → lines 480-481; `tracing::warn!` with path + bad volume emitted and defaults to 1; new `test_reconcile_volume_rejects_negative` exists at line 1877 and passes |
+
+### Static checks (re-run on full P-last feature scope a693752b..016832f1)
+- `cargo +nightly fmt --all --check`: PASS (no output)
+- `cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings`: PASS (`Finished dev profile` with no warnings)
+- `cargo test -p nexus-orchestration --lib`: PASS — 560 passed; 0 failed; 1 ignored
+- `cargo test -p nexus-local-db --lib`: PASS — 187 passed; 0 failed; 0 ignored
+- Targeted volume tests (`cargo test -p nexus-local-db --lib test_reconcile_volume`): PASS — 2 passed; 0 failed
+
+### Updated verdict
+**Verdict**: Approve
+**Rationale**: Both blocking Warnings raised in the initial review are resolved in fix commit `016832f1`. The clippy lint is suppressed with a justified `#[allow]` and the doc paragraph has been split; the negative/zero volume frontmatter input now defaults to `1` with an observable `tracing::warn!` and is covered by a new regression test. All scoped static checks and tests pass with no failures.
