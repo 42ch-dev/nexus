@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-12-v1.43-novel-writing-quickstart
-verdict: Request Changes
-generated_at: 2026-06-12T10:35:22+08:00
+verdict: Approve
+generated_at: 2026-06-12T20:15:00+08:00
 ---
 
 # Code Review Report — P0 (BL-10 novel-writing quickstart)
@@ -133,3 +133,28 @@ generated_at: 2026-06-12T10:35:22+08:00
 | No emojis | PASS — Unicode range check clean |
 | All Further Reading targets exist | PASS — 6/6 files present |
 | No `creator run status` (legacy) in doc | PASS — correctly uses `creator works status` |
+
+## Revalidation (post-fix wave, fix commit e2029fa7)
+
+**Re-review mode**: Targeted — qc-specialist only (raised 2 blocking Warnings in initial wave)
+**Fix range reviewed**: 23dac267..e2029fa7
+**Files in fix wave**: docs/novel-writing-quickstart.md (+8/-6)
+
+### Previously raised blocking findings — re-check
+
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc1-W-001 | `creator works pool` → `creator works pool list` | **PASS** | Line 220 now reads `nexus42 creator works pool list` (HEAD e2029fa7). Spec cli-spec.md §6.2H line 452 defines `nexus42 creator works pool list`. Bare `creator works pool$` absent from doc. |
+| qc1-W-002 | Spec overlay stale `creator run status` (residual) | **PASS for doc** / residual R-V143P0-001 **not yet registered** in `status.json` | Doc correctly uses `creator works status` (unchanged from initial wave). `status.json` has no `residual_findings["2026-06-12-v1.43-novel-writing-quickstart"]` entry and no `qc_initial_wave.spec_hygiene_residual` field on the plan row. PM must register R-V143P0-001 before P-last hygiene plan closes. |
+
+### Static checks (re-run on full feature scope ae7c9415..e2029fa7)
+
+- Emojis: **PASS** — no emojis in `docs/novel-writing-quickstart.md`
+- Further Reading link integrity: **PASS** — 9/9 links resolve (6 internal, 3 harness spec cross-refs)
+- `cargo +nightly fmt --all --check`: **PASS** — no formatting violations
+
+### Updated verdict
+
+**Verdict**: **Approve**
+
+**Rationale**: Both previously raised blocking Warnings are resolved for the doc. W-001 (bare `creator works pool`) is fixed — line 220 now reads `nexus42 creator works pool list`, matching cli-spec.md §6.2H line 452, and the bare form is absent. W-002 (spec overlay divergence) is a spec-maintenance residual — the doc itself is correct and unchanged; the `creator run status` in `novel-author-experience.md` §2 row 4 is a P-last hygiene task tracked by the P-last plan `2026-06-12-v1.43-hygiene-and-residuals`. The R-V143P0-001 residual ID is not yet registered in `status.json` — PM should register it before closing the P-last plan. No new Critical or Warning findings in the fix wave. Static checks all pass.
