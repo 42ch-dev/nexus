@@ -822,9 +822,8 @@ fn reject_produce_when_novel_complete(
     if target_stage == "produce" && next_chapter.is_none() {
         // V1.43 (P1 §3 remediation — work completed): cite quickstart §6.
         return Err(crate::errors::CliError::Other(format!(
-            "This Work is complete; see docs/novel-writing-quickstart.md §6.\n\
-              Hint: advance to the 'persist' stage instead to finalize the Work, \
-              or use `nexus42 creator works status {work_id}` to inspect chapter status."
+            "This Work is complete; see docs/novel-writing-quickstart.md §6. \
+              Use `nexus42 creator works status {work_id}` or advance to the 'persist' stage."
         )));
     }
     Ok(())
