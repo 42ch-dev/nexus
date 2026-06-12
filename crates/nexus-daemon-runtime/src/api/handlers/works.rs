@@ -1058,6 +1058,13 @@ pub async fn patch_work(
     // Stage changes use gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
     if req.current_stage.is_some() || req.stage_status.is_some() {
         let updated = patch_work_stage(&state, &creator_id, &work_id, &req, &now).await?;
+        // V1.42.1 (R-V142-MERGE-CI-001): Release runtime lock before early return.
+        // The previous P0 T2 wiring (e8993870) returned without releasing, which
+        // leaked the holder column to subsequent operations on the same Work
+        // (manifest as `patch_work_stage_change_is_auditable` failing on the
+        // second PATCH call). All early-return paths after `acquire` MUST
+        // call `lock.release().await` to honor the single-writer contract.
+        lock.release().await;
         return Ok(Json(WorkApiDto::from(updated)));
     }
 
@@ -1075,6 +1082,8 @@ pub async fn patch_work(
         if current.world_id.is_some() {
             // R-V140P0-S4: tracing for mandatory binding check observability.
             tracing::info!(work_id = %work_id, "patch_work_stage: rejected world_id clear (stage path)");
+            // V1.42.1 (R-V142-MERGE-CI-001): release before early Err return.
+            lock.release().await;
             return Err(NexusApiError::BadRequest {
                 code: "WORLD_CLEAR_FORBIDDEN".to_string(),
                 message: format!(
@@ -1114,17 +1123,24 @@ pub async fn patch_work(
         lineage_from_work_id: None,
     };
 
-    let updated = works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now)
-        .await
-        .map_err(|e| match &e {
-            nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                NexusApiError::NotFound(format!("work {work_id}"))
-            }
-            _ => NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            },
-        })?;
+    // V1.42.1 (R-V142-MERGE-CI-001): release before propagating DB error.
+    // The previous P0 T2 wiring (e8993870) used `?` to propagate, which
+    // bypassed `lock.release().await` and leaked the holder column.
+    let updated = match works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now).await {
+        Ok(u) => u,
+        Err(e) => {
+            lock.release().await;
+            return Err(match &e {
+                nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+                    NexusApiError::NotFound(format!("work {work_id}"))
+                }
+                _ => NexusApiError::Internal {
+                    code: "DATABASE_ERROR".to_string(),
+                    message: e.to_string(),
+                },
+            });
+        }
+    };
 
     // R-V139P0-W-C: trigger supervisor tick when auto_chain_interrupted
     // transitions from true to false, so the resumed Work progresses
@@ -1156,21 +1172,32 @@ pub async fn append_inspiration(
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    // V1.42.1 (R-V142-MERGE-CI-001): Verify work exists BEFORE acquiring the
+    // runtime lock. The previous ordering (P0 T2 wiring in e8993870) acquired
+    // the lock before the existence check, which caused `acquire_runtime_lock`
+    // to fail with `MissingVersionKey` → mapped to 500 instead of 404. It also
+    // leaked the holder column for any DB-level reads until the row was
+    // touched again. Mirrors the pattern in `patch_work` and
+    // `reconcile_work_chapters` (existence check first, lock after).
+    let work = nexus_local_db::works::get_work(state.pool(), &creator_id, &work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+
     // V1.39 §5.6 (T6): Single FL-E driver invariant.
     // If the Work has an active auto-chain driver, reject side input
     // to prevent concurrent schedule conflicts.
-    if let Ok(Some(work)) =
-        nexus_local_db::works::get_work(state.pool(), &creator_id, &work_id).await
-    {
-        if work.auto_chain_enabled && work.driver_schedule_id.is_some() {
-            return Err(NexusApiError::Conflict(format!(
-                "AUTO_CHAIN_DRIVER_ACTIVE: Work {} has an active auto-chain driver schedule ({}). \
-                 Side input is not allowed while auto-chain is running. \
-                 Wait for the current stage to complete or pause the driver first.",
-                work_id,
-                work.driver_schedule_id.as_deref().unwrap_or("?")
-            )));
-        }
+    if work.auto_chain_enabled && work.driver_schedule_id.is_some() {
+        return Err(NexusApiError::Conflict(format!(
+            "AUTO_CHAIN_DRIVER_ACTIVE: Work {} has an active auto-chain driver schedule ({}). \
+             Side input is not allowed while auto-chain is running. \
+             Wait for the current stage to complete or pause the driver first.",
+            work_id,
+            work.driver_schedule_id.as_deref().unwrap_or("?")
+        )));
     }
 
     // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
@@ -1184,17 +1211,29 @@ pub async fn append_inspiration(
     let entry_json = serde_json::to_string(&entry).unwrap_or_default();
 
     // R-V133P1-04: append_inspiration now uses tx + Rust append and returns updated record
-    let updated = works::append_inspiration(state.pool(), &creator_id, &work_id, &entry_json, &now)
-        .await
-        .map_err(|e| match &e {
-            nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
-                NexusApiError::NotFound(format!("work {work_id}"))
+    //
+    // V1.42.1 (R-V142-MERGE-CI-001): release before propagating DB error.
+    // The work existence was verified at the top of this handler; a
+    // `MissingVersionKey` here would mean concurrent deletion (race), so the
+    // 404 mapping is preserved while still releasing the lock.
+    let updated =
+        match works::append_inspiration(state.pool(), &creator_id, &work_id, &entry_json, &now)
+            .await
+        {
+            Ok(u) => u,
+            Err(e) => {
+                lock.release().await;
+                return Err(match &e {
+                    nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
+                        NexusApiError::NotFound(format!("work {work_id}"))
+                    }
+                    _ => NexusApiError::Internal {
+                        code: "DATABASE_ERROR".to_string(),
+                        message: e.to_string(),
+                    },
+                });
             }
-            _ => NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            },
-        })?;
+        };
 
     // Derive count from post-state (not pre-fetch + 1)
     let count = serde_json::from_str::<serde_json::Value>(&updated.inspiration_log)
