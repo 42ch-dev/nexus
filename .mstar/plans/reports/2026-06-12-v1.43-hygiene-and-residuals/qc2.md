@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: 2026-06-12-v1.43-hygiene-and-residuals
-verdict: Request Changes
-generated_at: 2026-06-12T23:45:00+08:00
+verdict: Approve
+generated_at: 2026-06-12T22:18:00+08:00
 ---
 
 # Code Review Report — P-last (hygiene and residuals)
@@ -65,3 +65,24 @@ generated_at: 2026-06-12T23:45:00+08:00
 **Verdict**: Request Changes
 
 **Gate rationale**: The plan's own "lint cleanup" commit left the changed crates failing `cargo clippy ... -D warnings`. Per mstar-review-qc gate rule, any unresolved Warning blocks Approve. The two code changes under review (strict loader warn, volume-aware reconcile) are otherwise correct, safe, and well-tested for the stated residual fixes. The other hygiene items (residual closures, spec stamps, iteration closeout, system invariants) are accurate with only the minor process note on stamp timing (W-03). Fix the clippy failure (and consider strengthening the warn-side-effect test) and this becomes Approve on re-review.
+
+## Revalidation (post-fix wave, fix commit 016832f1)
+
+**Re-review mode**: Targeted — qc-specialist-2 only (raised 2 blocking Warnings in initial wave)
+**Fix range reviewed**: 283d61e4..016832f1
+**Files in fix wave**: crates/nexus-orchestration/src/preset/loader.rs, crates/nexus-orchestration/Cargo.toml, crates/nexus-local-db/src/work_chapters.rs, Cargo.lock
+
+### Previously raised blocking findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc2-W-01 | clippy too_long_first_doc_paragraph | PASS | `rg` confirms `#[allow(clippy::too_long_first_doc_paragraph)]` at `crates/nexus-orchestration/src/preset/loader.rs:1066`. Justification comment present: "Allow: first paragraph intentionally lists the purpose in full for single-reading callers of this helper; splitting would reduce clarity." `cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings` is now clean (Finished dev profile, no warnings or errors emitted). |
+| qc2-W-02 | tracing::warn! not asserted in test | PASS | Test `warn_unknown_top_level_keys_detects_misplaced_gates` rewritten with custom `CaptureLayer` (implements `tracing_subscriber::Layer`), `CaptureVisitor`, `Arc<Mutex<Vec<String>>>` capture, and `tracing::subscriber::with_default(subscriber, || { ... })`. Calls `load_preset_from_str` + `super::warn_unknown_top_level_keys` inside the subscriber scope, then asserts `messages.iter().any(|m| m.contains("gates"))`. Test passes in isolation and in full lib run. `tracing-subscriber = { workspace = true }` added under `[dev-dependencies]` in `crates/nexus-orchestration/Cargo.toml:49`. |
+
+### Static checks (re-run on full P-last feature scope a693752b..016832f1)
+- `cargo +nightly fmt --all --check`: PASS (no output, clean)
+- `cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings`: PASS (clean; only "Finished `dev` profile" output)
+- Test counts: orchestration 560 passed (0 failed, 1 ignored); local-db 187 passed (0 failed) — 0 failed
+
+### Updated verdict
+**Verdict**: Approve
+**Rationale**: Both previously blocking Warnings raised by qc-specialist-2 (qc2-W-01 clippy doc lint; qc2-W-02 missing tracing::warn! assertion) are resolved with targeted, minimal fixes in 016832f1. Static checks (fmt, clippy on the two crates, and relevant lib tests) are green. No unresolved Critical or Warning from this reviewer's initial scope remains. Per mstar-review-qc gate rule, `Critical = 0` and `Warning = 0` (for the re-reviewed items) permits Approve. W-03 (spec stamp timing) remains a process note outside the re-review mandate and does not block.
