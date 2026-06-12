@@ -33,3 +33,52 @@ All new sqlx queries **MUST** use compile-time checked macros (`sqlx::query!`, `
 - **Gitignore** `state.db`, `state.db-wal`, `state.db-shm`.
 - After adding/changing queries: run `cargo sqlx prepare --workspace --all -- --all-targets`
   and commit updated `.sqlx/`.
+
+## Runtime Lock Acquire / Release Order (Mandatory — V1.42.1 hotfix rule)
+
+> **Spec:** `.mstar/knowledge/specs/novel-multi-work-lifecycle.md` §4.2 — single-writer contract
+> for the per-Work `runtime_lock_holder` column.
+
+The `RuntimeLockGuard` (in `src/api/handlers/works.rs`) is an RAII guard that
+**does NOT release on Drop** — Drop only logs a warning because async release
+is not possible in a sync `Drop`. Therefore, every handler that calls
+`RuntimeLockGuard::acquire(...)` MUST honor two rules:
+
+### Rule 1: Existence check BEFORE acquire
+
+For any handler that operates on a `(creator_id, work_id)` pair, the
+`get_work(...)` existence check MUST run **before** `RuntimeLockGuard::acquire(...)`.
+
+```rust
+// CORRECT
+let work = works::get_work(state.pool(), &creator_id, &work_id).await?
+    .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
+let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+
+// WRONG — leaks lock + 500 instead of 404 for missing work
+let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+let work = works::get_work(state.pool(), &creator_id, &work_id).await?;
+```
+
+### Rule 2: Explicit `lock.release().await` on every exit path
+
+Any code path that returns (Ok or Err) after `acquire` MUST call
+`lock.release().await` before the return. This includes:
+
+- Early `return Ok(Json(...))` (e.g., the stage path in `patch_work`)
+- Early `return Err(NexusApiError::*)` (e.g., the `world_id` clear-rejection
+  in `patch_work`)
+- DB error propagation that uses `?` (convert to `match` + `lock.release().await`
+  on the `Err` arm)
+
+If a path is added that acquires the lock, all 3 of the above must be
+re-audited. The V1.42.1 hotfix (commit `279ec7b3`, PR #55) fixed 5 sites
+in 2 handlers with this pattern.
+
+### Reference
+
+- V1.42 P0 T2 wiring (initial): commit `e8993870` — introduced the bug class
+- V1.42.1 hotfix (all 5 sites): commit `279ec7b3` — pattern codified
+- Residual: `R-V142.1-ARCH-LESSON` — consider `tokio::task::spawn` in Drop
+  or a closure-based wrapper to eliminate this class entirely (V1.43+)
+

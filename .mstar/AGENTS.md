@@ -72,3 +72,59 @@ When an active delivery compass has **two or more** locked implement plans in th
 ### Residual detail prose (`plans/residuals/`)
 
 Optional Markdown under `plans/residuals/<plan-id>/`, named `<finding-id>-<short-label>.md`; supplements root `residual_findings` (see upstream `mstar-plan-conventions`). Archive prose with structured JSON to `archived/residuals/<plan-id>.json` when closed.
+
+### Post-merge hotfix pattern (V1.42.1)
+
+When a PR is merged to `main` and post-merge CI exposes a regression, the
+canonical recovery flow is:
+
+1. **Surface the regression as a `residual_findings` entry** at the
+   `high` or `medium` severity, **before** opening the hotfix branch —
+   the user's audit trail must see the regression first, not the fix.
+2. Create a fix branch from `main` HEAD (not the integration branch, which
+   is now retired). Use the `fix/<short-name>` naming convention (no
+   `feature/<ver>-` prefix; hotfixes are version-pinned to current main).
+3. Surgical fixes only — pattern-match the bug class, do not refactor
+   unrelated code, do not piggyback V1.43 work.
+4. Add at least one regression test per bug-class instance. Use
+   `handler_state()` (fresh DB) for handler-level tests; pre/post
+   `sqlx::query_scalar` to assert on lock state for paths where the
+   subject row does not exist.
+5. Verify: `cargo test -p <crate> --test <file>` (full file, not just
+   one test) + `cargo clippy --all -- -D warnings` (CI command) +
+   `cargo +nightly fmt --all --check`.
+6. Open a PR; wait for all CI checks (default +1 hour budget).
+7. Merge with `--merge` (merge commit, not squash) to preserve
+   provenance for the regression audit.
+8. Update `status.json`:
+   - Add a plan entry with `type: "hotfix"`, the merge commit, the
+     full file/function list, the regression tests, and the root_cause
+     analysis.
+   - Mark the regression `residual_findings` entry as `lifecycle: resolved`
+     with `resolution.commit` + `resolution.plan_id`.
+   - Add an architectural lesson residual (severity `low`) if the fix
+     generalizes to a code class.
+9. (Optional) Update the relevant crate's `AGENTS.md` with the rule that
+   would have prevented the bug class from being introduced.
+
+### "Pre-existing" claim verification protocol
+
+When a PM-override cites a "pre-existing" failure to justify accepting a
+test failure or a QC Request Changes verdict, the claim MUST be verified
+against **current `main` HEAD**, not against a stale base commit:
+
+| Step | Action |
+|------|--------|
+| 1 | Identify the failing test(s) and the failure mode |
+| 2 | Run the test against `origin/main` (or `integration_merge_target`) |
+| 3 | If the test **passes on current main** → the "pre-existing" claim is **FALSE**; the failure is attributable to the iteration under review |
+| 4 | If the test **fails on current main** → the "pre-existing" claim is **TRUE**; document the failure base SHA + reproduce command, then proceed with the PM-override |
+| 5 | If the test is **flaky** → use a fixed seed or document the flake rate, do not claim "pre-existing" without a deterministic reproduction |
+
+This protocol was added after the V1.42 P-last PM-override incorrectly
+cited `R-V141P0-W2` ("pre-existing works_api failures on c249c902 base")
+when the same tests pass on `origin/main` (`e69d2a65`) post-V1.41 merge.
+The actual cause was V1.42 P0 T2 wiring (`e8993870`), and the regression
+was caught in V1.42 CI (`c0f6cd62`) → fixed in V1.42.1 (`279ec7b3`).
+Residual: `R-V142-MERGE-CI-002`.
+
