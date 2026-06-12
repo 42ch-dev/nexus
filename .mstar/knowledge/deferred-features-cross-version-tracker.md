@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.42 Active** (prepare 2026-06-11 on `iteration/v1.42` — P0 runtime_lock + P1 DF-62 multi-volume + P2 DF-56 + P3 DF-47 + P-last UX) · **V1.41 Shipped** (2026-06-11 PR #53) · **V1.40 Shipped** · Platform **paused** · DF-60/61 **archived** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.43 Active** (prepare 2026-06-12 on `iteration/v1.43` — BL-10 P0 + CLI copy P1 + author visibility P2 + P-last hygiene) · **V1.42 Shipped** (2026-06-12) · **V1.41 Shipped** (PR #53) · Platform **paused** · v1.42.1 hotfix **on main** (PR #55) · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: Active (V1.42 prepare — compass locked; implement Todo)  
+**Status**: Active (V1.43 prepare — compass locked; implement Todo)  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-11 (V1.42 prepare: DF-60/61 → shipped archive; DF-62/56/47 → V1.42 Active; `iteration/v1.42` opened)
+**Last updated**: 2026-06-12 (V1.43 prepare: BL-10 → V1.43 Active P0; V1.42 → Shipped; `iteration/v1.43` on main worktree)
 
 ---
 
@@ -90,6 +90,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-65 | Three-layer rules architecture | V1.36 distill | **V1.40 P0.5 Shipped** | M | V1.36→V1.37→V1.39→V1.40 | Plan: [2026-06-09-v1.39-rules-and-logs.md](../plans/2026-06-09-v1.39-rules-and-logs.md). V1.39 shipped Layer 1 at `embedded-presets/rules/writing-craft.md` (interim). **V1.40 P0.5** migrated Layer 1 to `embedded-rules/writing-craft.md` per spec §5.5.4; doc path corrected in this tracker and `world-kb-runtime-architecture.md`. |
 | DF-66 | Per-chapter log subdirectories at `Works/<work_ref>/Logs/` | V1.36 distill | **V1.39 P3 Shipped** | S | V1.36→V1.37→V1.39 | Same plan as DF-65. Implemented: `Logs/{brainstorm,write,review,publish}/` subdirs scaffolded; novel-writing writes to `Logs/write/`; sync exclusion documented. PR #50 merged ad9725d8. |
 | DF-67 | Master-decision timeout (96h finding escalation) | V1.36 distill | **V1.39 P4 Shipped** | S | V1.36→V1.37→V1.39 | Plan: [2026-06-09-v1.39-master-decision-timeout.md](../plans/2026-06-09-v1.39-master-decision-timeout.md). Implemented: 24h-interval daemon task (env-var override); `find_resumable_works` stale-finding DAO; CLI status banner `⏰ N findings stale (>96h)`; per-Work `auto_review_master_on_timeout` opt-in (default false); RVM-prefixed review-master schedule helper; 7 hermetic tests. PR #50 merged ad9725d8. |
+| BL-10 | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | V1.41 prepare | **V1.43 P0 Active** | M | V1.41→V1.42 backlog→V1.43 | Ongoing serial happy path (Part I) + multi-work/multi-volume appendix (Part II). Plan: [2026-06-12-v1.43-novel-writing-quickstart.md](../plans/2026-06-12-v1.43-novel-writing-quickstart.md). Spec: [novel-author-experience.md](specs/novel-author-experience.md). |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -113,7 +114,6 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | BL-06 | Independent search microservice | V1.2 | Backlog | L | |
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | ADR-011 elevated. |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | ADR-011/012/013. |
-| BL-10 | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | V1.42 prepare | Backlog | M | V1.42 compass §1.2 OUT — user-facing doc deferred until product path stable. |
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
@@ -286,7 +286,8 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.42** (Active — prepare 2026-06-11): [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) — P0 runtime_lock + P1 DF-62 + P2 DF-56 + P3 DF-47 + P-last UX on `iteration/v1.42`.
+- **V1.43** (Active — prepare 2026-06-12): [v1.43-novel-author-experience-delivery-compass-v1.md](../iterations/v1.43-novel-author-experience-delivery-compass-v1.md) — BL-10 P0 + CLI copy P1 + author visibility P2 + P-last hygiene on `iteration/v1.43`.
+- **V1.42** (Shipped 2026-06-12): [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) — P0 runtime_lock + P1 DF-62 + P2 DF-56 + P3 DF-47 + P-last UX.
 - **V1.41** (Shipped 2026-06-11): [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) — PR #53; DF-60/61 archived.
 - **V1.40** (Shipped 2026-06-11 via PR #52 merged): [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) — DF-63 closed; `iteration/v1.40` retired.
 - **V1.39** (Shipped 2026-06-09): [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) — **DF-53 full auto-chain + DF-68 daemon continuation + DF-64/65/66/67 quality loop**; P0..P5 on `iteration/v1.39`; PR #50 merged ad9725d8.
@@ -318,4 +319,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-11 (V1.42 Active prepare). Status: **V1.42 Active** on `iteration/v1.42`; V1.41 Shipped (PR #53). DF-62/56/47 Active; DF-60/61 archived.*
+*Last updated: 2026-06-12 (V1.43 Active prepare). Status: **V1.43 Active** on `iteration/v1.43`; V1.42 Shipped; BL-10 Active P0.*

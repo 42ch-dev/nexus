@@ -151,6 +151,12 @@
     "2026-06-10-v1.41-hygiene",
     "2026-06-10-v1.41-multi-work-switch",
     "2026-06-10-v1.41-selection-pool",
+    "2026-06-11-v1.42-harness-docs-prepare",
+    "2026-06-11-v1.42-runtime-lock-and-hygiene",
+    "2026-06-11-v1.42-multi-volume",
+    "2026-06-11-v1.42-conditional-routing",
+    "2026-06-11-v1.42-agent-tool-production-wiring",
+    "2026-06-11-v1.42-ux-polish",
     "v1-tech-debt-cleanup",
     "v1-tech-debt-cleanup-milestone-cd-2026-04-10",
     "v1.2-program-review"
