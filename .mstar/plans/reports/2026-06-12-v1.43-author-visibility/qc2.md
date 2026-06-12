@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: 2026-06-12-v1.43-author-visibility
-verdict: Request Changes
-generated_at: 2026-06-12T14:42:00+08:00
+verdict: Approve
+generated_at: 2026-06-12T21:20:00+08:00
 ---
 
 # Code Review Report — P2 (author-visible UX)
@@ -128,3 +128,24 @@ generated_at: 2026-06-12T14:42:00+08:00
 
 ## Self-attestation
 Report committed; report frontmatter complete; no invented findings; verdict rationale documented. All alignment fields (cwd/branch/range/plan_id) were re-verified at start of session and match Assignment exactly. No subagent delegation occurred. Review executed entirely in the assigned worktree on the specified diff basis.
+
+## Revalidation (post-fix wave, fix commit 0d6b072f)
+
+**Re-review mode**: Targeted — qc-specialist-2 only (raised 2 blocking Warnings in initial wave)
+**Fix range reviewed**: 6e6b03bb..0d6b072f
+**Files in fix wave**: crates/nexus42/src/commands/creator/works/mod.rs (+224/-35)
+
+### Previously raised blocking findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc2-W-01 | Silent API error → "none open" misleading | PASS | `FindingsResult` enum (Fetched / Unavailable) at line 770; `fetch_open_findings` now returns `FindingsResult`; `print_findings_summary` matches on `Unavailable` → prints "findings: unavailable (daemon error)" (distinct from "none open"); new test `display_unavailable_findings` (line 1294) asserts the unavailable message contains "unavailable" and does NOT contain "none open". |
+| qc2-W-02 | User-data terminal sanitization missing | PASS | `sanitize_for_terminal` helper at line 1021 strips ANSI CSI (`\x1B\[...`) and ASCII control chars 0x00-0x1F (except \n/\t) + 0x7F (DEL); preserves \n, \t, Unicode, printable; applied to title, routing_hint (top findings), and work_id (action hint) — 3 call sites in `print_findings_summary` (lines 941-942, 948) plus mirrored in `capture_findings_output` (lines 1152-1153, 1160); 6 new tests: `sanitize_for_terminal_strips_escape_codes`, `sanitize_for_terminal_preserves_unicode`, `sanitize_for_terminal_strips_control_chars`, `sanitize_for_terminal_strips_del`, `sanitize_for_terminal_preserves_newline_and_tab`, `sanitize_for_terminal_strips_clear_screen`. |
+
+### Static checks (re-run on full P2 feature scope 04c2490d..0d6b072f)
+- `cargo +nightly fmt --all --check`: PASS (no output = clean)
+- `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -- -D warnings`: PASS (finished dev profile, no warnings emitted)
+- Test counts: nexus42 635 passed (0 failed), daemon-runtime 186 passed (0 failed), orchestration 559 passed (0 failed, 1 ignored) — 0 failed across scope
+
+### Updated verdict
+**Verdict**: Approve
+**Rationale**: Both blocking Warnings (qc2-W-01, qc2-W-02) are resolved with distinct error state, sanitization helper + call sites, and new covering tests. Static checks and scoped lib tests are clean. No unresolved Critical or Warning from this re-review. Per gate rule: Critical=0 and Warning=0 (unresolved from this re-review) → Approve.
