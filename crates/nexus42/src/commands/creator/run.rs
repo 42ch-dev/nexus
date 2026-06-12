@@ -820,11 +820,10 @@ fn reject_produce_when_novel_complete(
     work_id: &str,
 ) -> crate::errors::Result<()> {
     if target_stage == "produce" && next_chapter.is_none() {
+        // V1.43 (P1 §3 remediation — work completed): cite quickstart §6.
         return Err(crate::errors::CliError::Other(format!(
-            "NOVEL_COMPLETE: cannot advance Work {work_id} to stage 'produce' — \
-              no remaining active chapter (novel-workflow-profile §4.5.2).\n\
-              Hint: advance to the 'persist' stage instead to finalize the Work, \
-              or use `nexus42 creator run status {work_id}` to inspect chapter status."
+            "This Work is complete; see docs/novel-writing-quickstart.md §6. \
+              Use `nexus42 creator works status {work_id}` or advance to the 'persist' stage."
         )));
     }
     Ok(())
@@ -1242,12 +1241,17 @@ mod tests {
         // R-V138P1-01: when target_stage is "produce" and next_chapter is None
         // (all chapters finalized), advance must be refused — no empty-chapter
         // schedule should be created.
+        // V1.43 (P1 §3 remediation — work completed): error cites quickstart §6.
         let result = reject_produce_when_novel_complete("produce", None, "wrk_done");
         let err = result.expect_err("expected NOVEL_COMPLETE error when next_chapter=None");
         let err_msg = err.to_string();
         assert!(
-            err_msg.contains("NOVEL_COMPLETE"),
-            "error should be tagged NOVEL_COMPLETE: {err_msg}"
+            err_msg.contains("Work is complete"),
+            "error should say 'Work is complete': {err_msg}"
+        );
+        assert!(
+            err_msg.contains("novel-writing-quickstart.md §6"),
+            "error should cite quickstart §6: {err_msg}"
         );
         assert!(
             err_msg.contains("persist"),

@@ -49,11 +49,11 @@ When any of the following conditions occur, CLI or daemon **user-visible** outpu
 
 | Condition | Minimum remediation |
 | --- | --- |
-| Daemon not reachable | Start daemon; cite Part I §1 step 5 |
-| `preset_gates_failed` | Name failing gate; cite Part I §2 or §3 |
-| Missing scaffold / intake incomplete | Cite Part I §2 |
-| Work completed (auto-chain stopped) | Cite Part I §6 |
-| Open findings blocking progress (if applicable) | Cite Part I §5 |
+| Daemon not reachable | - [x] Shipped (V1.43 P1) — Start daemon; cite Part I §1 step 5 |
+| `preset_gates_failed` | - [x] Shipped (V1.43 P1) — Name failing gate; cite Part I §2 or §3 |
+| Missing scaffold / intake incomplete | - [x] Shipped (V1.43 P1) — Cite Part I §2 |
+| Work completed (auto-chain stopped) | - [x] Shipped (V1.43 P1) — Cite Part I §6 |
+| Open findings blocking progress (if applicable) | - [x] Shipped (V1.43 P1) — Cite Part I §5 |
 
 **Non-goals (P1)**: New commands, new API fields, interactive wizards.
 

@@ -442,9 +442,9 @@ pub enum CreatorCommand {
     // ── Primary tier (first-run and daily use) ──────────────────────
     /// Work lifecycle — start, continue, stage, and resume Works
     ///
-    /// Primary entry for creative Work. Start a new Work with an idea,
-    /// continue an existing Work with new direction, or manage stage progression.
-    /// For listing and inspecting Works, use `creator works`.
+    /// Start a new novel project, continue writing, advance chapters, or resume
+    /// an interrupted work session. For a guided walkthrough, see
+    /// docs/novel-writing-quickstart.md Part I §1–§3.
     Run {
         #[command(subcommand)]
         command: run::RunCommand,
@@ -452,8 +452,9 @@ pub enum CreatorCommand {
 
     /// Work management and pool (DF-60 §6.2H).
     ///
-    /// List, inspect, and manage Works and the selection pool.
-    /// `creator run` handles single-Work actions (start, continue, stage, resume).
+    /// List, inspect, and manage your Works and the selection pool.
+    /// Shows progress, chapter status, open findings, and completion state.
+    /// See docs/novel-writing-quickstart.md §4–§6 for usage patterns.
     Works {
         #[command(subcommand)]
         command: works::WorksCommand,
