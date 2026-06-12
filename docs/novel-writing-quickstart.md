@@ -162,9 +162,11 @@ nexus42 creator works status
 A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
 
 ```bash
-nexus42 creator run review-master <work_id>
+nexus42 creator run stage advance <work_id> --stage review
 ```
 
+> The spec describes a future `review-master` surface ([novel-workflow-profile.md](../.mstar/knowledge/specs/novel-workflow-profile.md) §5.5.3) that consolidates the master-decision review flow. Until that ships, `creator run stage advance --stage review` advances to the FL-E `review` stage which is the available remediation path.
+>
 > The quality loop uses local SQLite and the daemon — no Redis, no cron, no cloud dependency.
 
 ### §6 Completion
