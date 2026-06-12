@@ -152,11 +152,17 @@ open → resolved | wont_fix
 
 - **Continuity / craft findings** are attached to specific chapters.
 - **Severity levels** range from `info` (non-blocking notes) to `blocker` (must resolve).
-- Findings from earlier chapters are visible in status output.
+- Findings from earlier chapters are visible in status output, including count and highest severity.
 
 ```bash
 # See findings alongside chapter progress
 nexus42 creator works status
+# Output includes:
+#   findings: 2 open (1 blocker, 1 minor) — highest: blocker
+#     #1 [blocker] "Continuity error in chapter 5" → write
+#     #2 [minor] "Style inconsistency" → none
+#     Address findings or run: nexus42 creator run stage advance <work_id> --stage review
+#     See docs/novel-writing-quickstart.md §5
 ```
 
 A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
@@ -182,10 +188,20 @@ When all conditions are met, the daemon sets the Work status to `completed` and 
 ```bash
 # Check completion state
 nexus42 creator works status
-# Output:
-#   progress: 12 / 12 chapters finalized
-#   status: completed
-#   Next action: All chapters finalized; novel Work is complete.
+# Output (completed Work):
+# ═════════════════════════════════════════════════════
+#   "Your Novel" — Work wrk_... (novel)
+#   COMPLETED at 2026-06-12T10:00:00Z
+#   12/12 chapters finalized.
+#   No further novel-writing schedules will be enqueued.
+#
+#   findings: none open
+#   This Work is complete; see docs/novel-writing-quickstart.md §6
+#
+#   To start a new Work, run:
+#     nexus42 creator run start \
+#       --init-preset novel-project-init --idea "..."
+# ═════════════════════════════════════════════════════
 ```
 
 To start a **new** novel in the same World:
