@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-12-v1.43-cli-first-run-copy
-verdict: Request Changes
-generated_at: 2026-06-12T19:34:34+08:00
+verdict: Approve
+generated_at: 2026-06-12T19:52:11+08:00
 ---
 
 # Code Review Report — P1 (CLI first-run remediation copy)
@@ -176,3 +176,25 @@ New `creator run` and `creator works` doc comments in `crates/nexus42/src/comman
 1. **F-W01 scope**: Should the fix for the unwired daemon-not-reachable citation be done in this P1 review cycle, or deferred to a follow-up hotfix? If deferred, the `novel-author-experience.md` §3 checkbox and `cli-spec.md` §7.1 stamp should be reverted to avoid claiming shipped behavior.
 2. **Downstream message parsers**: Are there any out-of-repo consumers (e.g. platform E2E tests, user scripts) that grep for `NOVEL_COMPLETE` or the old schedule.rs completion message? If so, the message changes need a migration note.
 3. **Test strategy**: Two of the seven new/updated tests are literal-string snapshots (#1, #7). Does the team want a follow-up plan slice to convert these into path-covering assertions?
+
+## Revalidation (post-fix wave, fix commit 6f99ae87)
+
+**Re-review mode**: Targeted — qc-specialist-3 only (raised 1 blocking Warning in initial wave)
+**Fix range reviewed**: 078d74eb..6f99ae87
+**Files in fix wave**: crates/nexus42/src/api/daemon_client.rs (+8/-12), crates/nexus42/src/commands/creator/run.rs (+2/-3), crates/nexus42/src/errors.rs (+0/-1)
+
+### Previously raised findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc3-F-W01 (blocking) | Daemon-not-reachable quickstart citation dead code | PASS | `crates/nexus42/src/api/daemon_client.rs:586,622,658,693` all call `CliError::daemon_not_reachable_quickstart()`; `rg -n 'daemon_not_reachable\(' crates/nexus42/src/api/daemon_client.rs` returned 0 hits; `#[allow(dead_code)]` removed in `crates/nexus42/src/errors.rs:245` |
+| qc3-F-S01 (was Suggestion) | 2-line work-completed message | PASS | `crates/nexus42/src/commands/creator/run.rs:825` now single-line: `"This Work is complete; see docs/novel-writing-quickstart.md §6. Use `nexus42 creator works status {work_id}` or advance to the 'persist' stage."`; quickstart §6 citation preserved |
+
+### Static checks (re-run on full P1 feature scope cfdd71d3..6f99ae87)
+- `cargo +nightly fmt --all --check`: PASS
+- `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -- -D warnings`: PASS
+- Test counts: nexus42 616 passed, daemon-runtime 186 passed, orchestration 559 passed (1 ignored) — 0 failed
+- Constructor still `#[allow(dead_code)]`? NO (good)
+
+### Updated verdict
+**Verdict**: Approve
+**Rationale**: The blocking Warning F-W01 is fully resolved: `daemon_not_reachable_quickstart()` is wired to all four production call sites in `daemon_client.rs`, the old constructor is no longer used there, and the `#[allow(dead_code)]` suppression has been removed. The previously raised Suggestion F-S01 is also fixed in this wave — the work-completed message in `run.rs` is now a single line while preserving the quickstart §6 citation and helpful hint. Static checks (nightly fmt, scoped clippy, scoped lib tests) all pass with no regressions. No new Critical or Warning findings were introduced by the fix commit.
