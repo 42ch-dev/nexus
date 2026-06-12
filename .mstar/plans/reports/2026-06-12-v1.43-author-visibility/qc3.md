@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-12-v1.43-author-visibility
-verdict: Request Changes
-generated_at: 2026-06-12T20:24:23+08:00
+verdict: Approve
+generated_at: 2026-06-12T20:45:11+0800
 ---
 
 # Code Review Report — P2 (author-visible UX)
@@ -160,8 +160,30 @@ The stamps in `.mstar/knowledge/specs/novel-author-experience.md` §4 are:
 3. **Status hot-path budget**: How much latency is acceptable for `creator works status`? If authors call it frequently, a 30-second worst-case subcall may warrant a shorter dedicated timeout.
 4. **Style guide**: Should the CLI adopt the heavy box-drawing banner as the new standard, or align with existing simple separators? A project-wide decision prevents drift.
 
+## Revalidation (post-fix wave, fix commit 0d6b072f)
+
+**Re-review mode**: Targeted — qc-specialist-3 only (raised 3 blocking Warnings in initial wave)
+**Fix range reviewed**: 6e6b03bb..0d6b072f
+**Files in fix wave**: crates/nexus42/src/commands/creator/works/mod.rs (+224/-35)
+
+### Previously raised blocking findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc3-W-01 | Silent error swallow | PASS | `FindingsResult` enum added with `Fetched` / `Unavailable` variants; `print_findings_summary` prints `findings: unavailable (daemon error)` on `Unavailable`; new unit test `display_unavailable_findings` covers the path. |
+| qc3-W-02 | limit=50 silent undercount | PASS | `FindingsSummary::is_truncated` field added; `print_findings_summary` renders `50+ open` when `findings.len() == FINDINGS_FETCH_LIMIT`; new test `display_truncated_findings_shows_plus_indicator` asserts both the presence of `50+ open` and the absence of bare `50 open`. |
+| qc3-W-03 | 30s timeout on hot path | PASS (structural) | `FINDINGS_FETCH_TIMEOUT` constant set to 5s; `fetch_open_findings` builds a separate `DaemonClient::with_timeouts(...)` with the short timeout while the main Work fetch keeps the default; runtime timeout behavior is covered by the existing `daemon_client.rs` timeout test suite. |
+
+### Static checks (re-run on full P2 feature scope 04c2490d..0d6b072f)
+- `cargo +nightly fmt --all --check`: PASS
+- `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -- -D warnings`: PASS
+- Test counts: nexus42 635 passed, daemon-runtime 186 passed, orchestration 559 passed (1 ignored) — 0 failed
+
+### Updated verdict
+**Verdict**: Approve
+**Rationale**: All three blocking Warnings raised in the initial wave are resolved in fix commit `0d6b072f`: error states are now distinct from the empty-success state, the 50-finding cap is surfaced with a `+` indicator, and the findings subcall uses a dedicated 5s timeout to avoid blocking the status hot path. Scoped static checks and unit tests pass with no failures. Suggestions S-01/S-02 remain out of scope for this targeted re-review.
+
 ## Self-Attestation
 
 - Report committed; report frontmatter complete.
 - No invented findings: all findings are grounded in the diff, source code, or observed behavior.
-- Verdict rationale documented: unresolved Warnings (silent error swallow, limit-50 truncation, sequential 30 s subcall) require changes before approval.
+- Verdict rationale documented: all targeted Warnings (qc3-W-01, qc3-W-02, qc3-W-03) are resolved in fix commit `0d6b072f`; updated verdict is `Approve`.
