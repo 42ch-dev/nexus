@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-12-v1.43-cli-first-run-copy
-verdict: Request Changes
-generated_at: 2026-06-12T19:15:00+08:00
+verdict: Approve
+generated_at: 2026-06-12T20:00:00+08:00
 ---
 
 # Code Review Report — P1 (CLI first-run remediation copy)
@@ -166,3 +166,28 @@ All cited quickstart § anchors verified present in `docs/novel-writing-quicksta
 - Per `mstar-review-qc` gate rules: unresolved Warning → `Request Changes`.
 - The fix is surgical: wire `daemon_not_reachable_quickstart()` into the 4 call sites in `daemon_client.rs` (or the shared error helper they delegate to), then update the spec stamps if needed. This is a single-crate, single-file change with no blast radius beyond the daemon_client error paths.
 - The other 4 spec §3 conditions are fully and correctly implemented. Help-text changes are accurate. Tests are well-placed and meaningful. Code organization is otherwise sound.
+
+## Revalidation (post-fix wave, fix commit 6f99ae87)
+
+**Re-review mode**: Targeted — qc-specialist only (raised 2 blocking Warnings in initial wave)
+**Fix range reviewed**: 078d74eb..6f99ae87
+**Files in fix wave**: crates/nexus42/src/api/daemon_client.rs (+8/-12), crates/nexus42/src/commands/creator/run.rs (+2/-3), crates/nexus42/src/errors.rs (+0/-1)
+
+### Previously raised blocking findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc1-W-1 | `daemon_not_reachable_quickstart()` dead code | PASS | 4 production call sites wired in `daemon_client.rs:586,622,658,693`; `#[allow(dead_code)]` removed from `daemon_not_reachable_quickstart()` at `errors.rs:242`; old `daemon_not_reachable(suggestion)` constructor has 0 hits in `daemon_client.rs` (retained with `#[allow(dead_code)]` for non-creator paths — acceptable). |
+| qc1-W-2 | Spec stamp over-claim daemon-not-reachable | PASS | No spec file edits in fix wave (`git diff 078d74eb..6f99ae87 -- .mstar/knowledge/specs/` returns empty). The spec stamps in `cli-spec.md` §7.1 and `novel-author-experience.md` §3 are now factually accurate because the code fix (W-1) wires the quickstart constructor to all 4 production call sites. |
+
+### Static checks (re-run on full P1 feature scope cfdd71d3..6f99ae87)
+- `cargo +nightly fmt --all --check`: PASS (clean)
+- `cargo clippy -p nexus42 -p nexus-daemon-runtime -p nexus-orchestration -- -D warnings`: PASS (clean)
+- Constructor still `#[allow(dead_code)]`? NO — `daemon_not_reachable_quickstart()` has no `#[allow(dead_code)]` (verified at `errors.rs:242`). The old `daemon_not_reachable(suggestion)` at `errors.rs:235` retains `#[allow(dead_code)]` — this is expected since it is no longer used in `daemon_client.rs` but may serve non-creator paths.
+
+### Test results (scoped re-run)
+- `cargo test -p nexus42 --lib -- errors::tests`: 37 passed ✅
+- `cargo test -p nexus42 --lib -- run::tests`: 7 passed ✅
+
+### Updated verdict
+**Verdict**: Approve
+**Rationale**: Both previously raised blocking Warnings are resolved. W-1: `daemon_not_reachable_quickstart()` is now wired to all 4 production call sites in `daemon_client.rs`, `#[allow(dead_code)]` removed from the new constructor. W-2: spec stamps are now factually accurate without needing edits (the code fix made them correct). Static checks (fmt, clippy) pass clean. Scoped tests pass. 0 Critical, 0 Warning (unresolved from this re-review). Per `mstar-review-qc` gate rules: `Critical = 0` AND `Warning = 0` → `Approve`.
