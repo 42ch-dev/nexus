@@ -368,6 +368,30 @@ impl HostToolExecutor {
             }
         }
     }
+
+    /// Dispatch a schedule-initiated `nexus.*` tool call through the unified registry.
+    ///
+    /// V1.42 P3 (DF-47 production wiring): the schedule executor calls this
+    /// directly from the daemon process — no worker IPC round-trip needed.
+    /// Uses `HostToolCallerKind::Schedule` for audit trail differentiation.
+    ///
+    /// Returns the tool result JSON on success, or a `NexusApiError` on failure.
+    pub async fn dispatch_for_schedule(
+        tool_name: &str,
+        args: &serde_json::Value,
+        request_id: &str,
+        state: &WorkspaceState,
+    ) -> Result<serde_json::Value, NexusApiError> {
+        let req = ToolExecuteRequest {
+            tool_name: tool_name.to_string(),
+            parameters: args.clone(),
+            session_id: None,
+            request_id: Some(request_id.to_string()),
+            caller_kind: Some(HostToolCallerKind::Schedule),
+        };
+
+        Self::execute(&req, state).await
+    }
 }
 
 /// Worker upcall result shape (spec §7 — `worker/agent_tool_request_result`).
@@ -386,6 +410,53 @@ pub struct WorkerToolResult {
 pub struct WorkerToolError {
     pub code: String,
     pub message: String,
+}
+
+// ─── DaemonToolDispatch adapter (DF-47, V1.42 P3) ──────────────────────────
+
+/// Adapter implementing [`nexus_orchestration::capability::DaemonToolDispatch`]
+/// for the daemon runtime.
+///
+/// Bridges the orchestration engine's `HostToolCallTask` to the daemon's
+/// `HostToolExecutor::dispatch_for_schedule`, providing in-process tool
+/// dispatch without worker IPC round-trip.
+///
+/// Holds a snapshot of [`WorkspaceState`] captured at construction time.
+/// This is safe because the daemon's workspace state is long-lived and
+/// the inner fields (home path, pool, etc.) are Arc'd.
+pub struct DaemonToolDispatchAdapter {
+    state: WorkspaceState,
+}
+
+impl DaemonToolDispatchAdapter {
+    /// Create a new adapter bound to the given workspace state.
+    #[must_use]
+    pub const fn new(state: WorkspaceState) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait::async_trait]
+impl nexus_orchestration::capability::DaemonToolDispatch for DaemonToolDispatchAdapter {
+    async fn dispatch_tool(
+        &self,
+        tool_name: &str,
+        args: &serde_json::Value,
+        request_id: &str,
+    ) -> Result<serde_json::Value, nexus_orchestration::capability::CapabilityError> {
+        HostToolExecutor::dispatch_for_schedule(tool_name, args, request_id, &self.state)
+            .await
+            .map_err(|e| match &e {
+                NexusApiError::Forbidden { .. } => {
+                    nexus_orchestration::capability::CapabilityError::Forbidden(format!(
+                        "daemon tool dispatch failed for {tool_name}: {e}"
+                    ))
+                }
+                _ => nexus_orchestration::capability::CapabilityError::Internal(format!(
+                    "daemon tool dispatch failed for {tool_name}: {e}"
+                )),
+            })
+    }
 }
 
 // ─── Dispatch table (spec §7.1) ───────────────────────────────────────────

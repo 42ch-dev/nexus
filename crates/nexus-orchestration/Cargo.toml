@@ -38,6 +38,7 @@ sha2 = "0.10"
 include_dir = "0.7"
 handlebars = { workspace = true }
 anyhow = { workspace = true }
+uuid = { workspace = true }
 # WS2 R4: SIGTERM support for graceful worker shutdown (Unix only).
 # R5: gated behind cfg(unix) for Windows build compatibility.
 [target.'cfg(unix)'.dependencies]

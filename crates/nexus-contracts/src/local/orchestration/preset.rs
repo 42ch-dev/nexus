@@ -193,6 +193,19 @@ pub enum EnterAction {
         /// Name of the inner graph (must match `inner_graphs.<name>`).
         name: String,
     },
+    /// Invoke a daemon-side `nexus.*` host tool (DF-47, V1.42 P3).
+    ///
+    /// The tool is dispatched in-process through `HostToolExecutor::dispatch_for_schedule`
+    /// — no worker IPC round-trip. Designed for read-only tools like
+    /// `nexus.orchestration.schedule_status`.
+    #[serde(rename = "host_tool")]
+    HostTool {
+        /// Tool name, e.g. `nexus.orchestration.schedule_status`.
+        tool_name: String,
+        /// Tool arguments (JSON object; may contain template placeholders).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<serde_json::Value>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -262,11 +275,34 @@ pub enum ExitWhen {
 pub enum NextTarget {
     /// Linear transition to a single state ID.
     Linear(String),
-    /// Conditional transition (V1.4 returns error; not yet implemented).
+    /// GO/NOGO conditional transition for `llm_judge` states (V1.42 minimal slice).
+    ///
+    /// YAML form: `next: { go: <state_id>, nogo: <state_id> }`.
+    /// Only valid when `exit_when.kind` is `llm_judge`.
+    GoNogo(GoNogoNext),
+    /// Expression-based conditional transition (post-V1.42; loader rejects).
     Conditional(NextConditional),
 }
 
-/// Conditional next form — V1.4 does NOT implement this; loader returns error.
+/// GO/NOGO next form for `llm_judge` states (V1.42 P2 minimal slice).
+///
+/// The `go` branch is taken when the judge returns GO (`result: true`).
+/// The `nogo` branch is taken on NOGO or worker-unavailable.
+///
+/// ```yaml
+/// next:
+///   go: state_on_go
+///   nogo: state_on_nogo
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoNogoNext {
+    /// Target state ID when judge returns GO.
+    pub go: String,
+    /// Target state ID when judge returns NOGO or worker is unavailable.
+    pub nogo: String,
+}
+
+/// Conditional next form — post-V1.42; loader still rejects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NextConditional {
     /// Must be `"conditional"`.

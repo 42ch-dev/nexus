@@ -27,6 +27,9 @@ struct TransitionInput {
     creator_id: Option<String>,
     /// Chapter number (1-based).
     chapter: i32,
+    /// Volume number (V1.42: defaults to 1 for single-volume Works).
+    #[serde(default = "default_volume")]
+    volume: i32,
     /// Status to transition FROM (guard; mismatch = error).
     from_status: String,
     /// Status to transition TO.
@@ -49,6 +52,11 @@ struct TransitionInput {
     /// Body path relative to workspace root (for frontmatter update).
     #[serde(default)]
     body_path: Option<String>,
+}
+
+/// Default volume number (1 for single-volume Works).
+const fn default_volume() -> i32 {
+    1
 }
 
 /// Capability output.
@@ -182,9 +190,10 @@ impl NovelChapterTransition {
         let now = chrono::Utc::now().to_rfc3339();
 
         // Read current status to validate from_status guard
-        let current = nexus_local_db::work_chapters::get_chapter(pool, &inp.work_id, inp.chapter)
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("get_chapter: {e}")))?;
+        let current =
+            nexus_local_db::work_chapters::get_chapter(pool, &inp.work_id, inp.chapter, inp.volume)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("get_chapter: {e}")))?;
 
         let row = current.ok_or_else(|| {
             CapabilityError::InputInvalid(format!(
@@ -211,6 +220,7 @@ impl NovelChapterTransition {
             pool,
             &inp.work_id,
             inp.chapter,
+            inp.volume,
             &inp.to_status,
             actual_wc,
             &now,

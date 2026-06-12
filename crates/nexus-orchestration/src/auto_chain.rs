@@ -35,7 +35,12 @@ pub enum ChainAction {
     /// Advance to the next FL-E stage for the current chapter.
     AdvanceStage { work_id: String, next_stage: String },
     /// Start the produce stage for the next chapter (chapter outer loop).
-    NextChapter { work_id: String, next_chapter: i32 },
+    /// V1.42: includes volume for cross-volume chaining.
+    NextChapter {
+        work_id: String,
+        next_chapter: i32,
+        next_volume: i32,
+    },
     /// The Work is complete — all chapters finalized.
     WorkComplete { work_id: String },
 }
@@ -139,6 +144,10 @@ pub fn evaluate_next_step(work: &WorkRecord) -> ChainAction {
 /// This handles the chapter outer loop:
 /// - If more chapters remain → start produce for chapter N+1
 /// - If all chapters done → mark work as completed
+///
+/// For single-volume Works (the common case), uses the flat `current_chapter`
+/// comparison. For multi-volume Works, callers should use
+/// [`evaluate_after_persist_volume_aware`] instead.
 fn evaluate_after_persist(work: &WorkRecord) -> ChainAction {
     let total_chapters = work.total_planned_chapters.unwrap_or(0);
     let current_chapter = work.current_chapter;
@@ -157,12 +166,50 @@ fn evaluate_after_persist(work: &WorkRecord) -> ChainAction {
         ChainAction::NextChapter {
             work_id: work.work_id.clone(),
             next_chapter,
+            next_volume: 1, // V1.42: single-volume path defaults to 1
         }
     } else {
         // All chapters finalized
         ChainAction::WorkComplete {
             work_id: work.work_id.clone(),
         }
+    }
+}
+
+/// V1.42 volume-aware version of [`evaluate_after_persist`].
+///
+/// Queries the DB for the next non-finalized chapter across all volumes.
+/// Falls back to the flat `evaluate_after_persist` logic if the volume-aware
+/// query returns `None` (e.g. all chapters finalized).
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the DB query fails.
+pub async fn evaluate_after_persist_volume_aware(
+    pool: &SqlitePool,
+    work: &WorkRecord,
+) -> Result<ChainAction, AutoChainError> {
+    let total_chapters = work.total_planned_chapters.unwrap_or(0);
+
+    if total_chapters <= 0 {
+        return Ok(ChainAction::WorkComplete {
+            work_id: work.work_id.clone(),
+        });
+    }
+
+    // Try volume-aware next chapter selection
+    let next =
+        nexus_local_db::work_chapters::next_chapter_volume_aware(pool, &work.work_id).await?;
+
+    match next {
+        Some((volume, chapter)) => Ok(ChainAction::NextChapter {
+            work_id: work.work_id.clone(),
+            next_chapter: chapter,
+            next_volume: volume,
+        }),
+        None => Ok(ChainAction::WorkComplete {
+            work_id: work.work_id.clone(),
+        }),
     }
 }
 
@@ -496,6 +543,38 @@ pub async fn enqueue_auto_chain_schedule(
     // Update the Work checkpoint to point at the new driver schedule.
     set_driver(pool, creator_id, work_id, &schedule_id, stage).await?;
 
+    // V1.42 P0 (T3): Acquire runtime lock for this schedule.
+    // Holder format: `daemon:schedule:<schedule_id>`.
+    let holder = nexus_local_db::runtime_lock::schedule_holder(&schedule_id);
+    let ttl = nexus_local_db::runtime_lock::ttl_from_env();
+    match nexus_local_db::acquire_runtime_lock(
+        pool, creator_id, work_id, &holder, ttl, true, // force_stale=true for daemon
+    )
+    .await
+    {
+        Ok(nexus_local_db::AcquireResult::Acquired { .. }) => {}
+        Ok(nexus_local_db::AcquireResult::Locked {
+            holder: existing, ..
+        }) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                existing_holder = %existing,
+                "runtime_lock: could not acquire for auto-chain (locked by another process)"
+            );
+            // Continue — auto-chain will skip if Work is locked at next tick.
+        }
+        Err(e) => {
+            tracing::warn!(
+                work_id = %work_id,
+                schedule_id = %schedule_id,
+                error = %e,
+                "runtime_lock: failed to acquire for auto-chain"
+            );
+            // Non-fatal — the schedule was already enqueued.
+        }
+    }
+
     tracing::info!(
         work_id = %work_id,
         schedule_id = %schedule_id,
@@ -597,12 +676,14 @@ pub async fn enqueue_review_master_schedule(
 /// Returns `AutoChainError::Database` if the database query fails.
 pub async fn find_resumable_works(pool: &SqlitePool) -> Result<Vec<WorkRecord>, AutoChainError> {
     // SAFETY: dynamic SQL — complex multi-table join for boot recovery.
+    // V1.42 P0: skip Works with a foreign runtime_lock_holder.
     let rows = sqlx::query(&format!(
         "SELECT {0} FROM works w
          WHERE w.auto_chain_enabled = 1
            AND w.driver_schedule_id IS NOT NULL
            AND w.auto_chain_interrupted = 0
            AND w.status != 'completed'
+           AND w.runtime_lock_holder IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM creator_schedules cs
                WHERE cs.schedule_id = w.driver_schedule_id
@@ -720,6 +801,7 @@ mod tests {
             ChainAction::NextChapter {
                 work_id: "wrk_test".to_string(),
                 next_chapter: 2,
+                next_volume: 1,
             }
         );
     }
@@ -821,6 +903,7 @@ mod tests {
             ChainAction::NextChapter {
                 work_id: "wrk_test".to_string(),
                 next_chapter: 6,
+                next_volume: 1,
             }
         );
     }

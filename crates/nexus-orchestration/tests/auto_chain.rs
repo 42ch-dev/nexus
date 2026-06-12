@@ -134,6 +134,7 @@ async fn ac2_persist_chapter1_starts_chapter2() {
         ChainAction::NextChapter {
             work_id: "wrk_ac2".to_string(),
             next_chapter: 2,
+            next_volume: 1,
         }
     );
 }
@@ -150,6 +151,7 @@ async fn ac2_persist_penultimate_chapter_starts_last() {
         ChainAction::NextChapter {
             work_id: "wrk_ac2b".to_string(),
             next_chapter: 5,
+            next_volume: 1,
         }
     );
 }
@@ -405,6 +407,41 @@ async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> Option<String>
         .unwrap()
 }
 
+/// Helper: seed chapter rows for a work (required by volume-aware auto-chain).
+/// Chapter 1..=finalized are marked "finalized"; the rest are "not_started".
+async fn seed_chapters(
+    pool: &SqlitePool,
+    work_id: &str,
+    work_ref: &str,
+    total_chapters: i32,
+    finalized_up_to: i32,
+) {
+    let now_ts = chrono::Utc::now().timestamp();
+    for ch in 1..=total_chapters {
+        let status = if ch <= finalized_up_to {
+            "finalized"
+        } else {
+            "not_started"
+        };
+        // SAFETY: test-only — DML helper for chapter row seeding.
+        sqlx::query(
+            "INSERT INTO work_chapters
+               (work_id, volume, chapter, slug, status, created_at, updated_at)
+             VALUES (?, 1, ?, ?, ?, ?, ?)",
+        )
+        .bind(work_id)
+        .bind(ch)
+        .bind(format!("ch{ch:02}"))
+        .bind(status)
+        .bind(now_ts)
+        .bind(now_ts)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    let _ = work_ref; // used for path generation in real code, not needed here
+}
+
 #[tokio::test]
 async fn fix1_terminal_completed_enqueues_next_stage() {
     let pool = test_pool().await;
@@ -542,6 +579,10 @@ async fn fix1_chapter_loop_after_persist() {
     work.stage_status = "active".to_string();
     seed_work(&pool, &work).await;
 
+    // V1.42 F-001: seed chapter rows so the volume-aware evaluator finds ch 2.
+    // Chapter 1 is finalized, chapters 2-3 are not_started.
+    seed_chapters(&pool, "wrk_fix1c", "test-novel", 3, 1).await;
+
     insert_driver_schedule(
         &pool,
         "sch_persist_001",
@@ -602,6 +643,10 @@ async fn fix1_last_chapter_marks_work_complete() {
     work.current_stage = "persist".to_string();
     work.stage_status = "active".to_string();
     seed_work(&pool, &work).await;
+
+    // V1.42 F-001: seed all 3 chapters as finalized so volume-aware evaluator
+    // sees no remaining chapters → WorkComplete.
+    seed_chapters(&pool, "wrk_fix1d", "test-novel", 3, 3).await;
 
     insert_driver_schedule(
         &pool,
