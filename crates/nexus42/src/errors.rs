@@ -242,7 +242,6 @@ impl CliError {
 
     /// Create a `DaemonNotReachable` error with the canonical V1.43
     /// quickstart remediation string (Part I §1 step 5).
-    #[allow(dead_code)]
     #[must_use]
     pub fn daemon_not_reachable_quickstart() -> Self {
         Self::DaemonNotReachable {

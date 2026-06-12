@@ -582,9 +582,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                return Err(CliError::daemon_not_reachable(
-                    "Start the daemon with `nexus42 daemon start` and retry.",
-                ));
+                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
+                return Err(CliError::daemon_not_reachable_quickstart());
             }
         };
 
@@ -619,9 +618,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                return Err(CliError::daemon_not_reachable(
-                    "Start the daemon with `nexus42 daemon start` and retry.",
-                ));
+                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
+                return Err(CliError::daemon_not_reachable_quickstart());
             }
         };
 
@@ -656,9 +654,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                return Err(CliError::daemon_not_reachable(
-                    "Start the daemon with `nexus42 daemon start` and retry.",
-                ));
+                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
+                return Err(CliError::daemon_not_reachable_quickstart());
             }
         };
 
@@ -692,9 +689,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                return Err(CliError::daemon_not_reachable(
-                    "Start the daemon with `nexus42 daemon start` and retry.",
-                ));
+                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
+                return Err(CliError::daemon_not_reachable_quickstart());
             }
         };
 
