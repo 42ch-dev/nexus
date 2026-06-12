@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-12T12:46:58+08:00",
+  "updated_at": "2026-06-12T13:09:26+08:00",
   "plans": [
     {
       "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
@@ -89,6 +89,66 @@
         "2026-06-12T00:40:54+0800 — Implement complete. PM merged 5 commits (d04ae9f4 T1 triage, 3c40474f T2 CLI, f5d994a9 T3 dedup, 8a3350eb T4 flags, 42850bc3 T5 closeout). 6 UX items fixed; 8 rows waived/deferred; iteration Shipped markers updated. Working tree clean. PM next: dispatch QC tri-review (N=3) on integrated HEAD.",
         "2026-06-12T01:24:04+0800 — QA verification complete (Approve at c8ab46e1). PM closure: all 3 AC verified; 14 rows triaged; iteration Shipped markers in place. 3 blocking residuals closed + archived. 6 non-blocking Suggestions remain open (defer to P-last or future — N/A since this IS P-last; close at iteration closeout review or post-V1.42). P-last formally DONE. V1.42 iteration now complete; final PR from iteration/v1.42 to main pending.",
         "2026-06-12T01:24:04+0800 — QC tri-review final state: 2/3 Request Changes (qc1 + qc3) → fix-wave (4 commits) → targeted re-review 2/2 Approve (qc1 + qc3). qc2 Approve stands. PM consolidated Approve. QA Approve. Fix-wave addressed all 3 blocking items."
+      ]
+    },
+    {
+      "id": "2026-06-12-v1.42.1-runtime-lock-acquire-order",
+      "title": "V1.42.1 hotfix: runtime_lock acquire-order + all early-return release paths (R-V142-MERGE-CI-001)",
+      "status": "Done",
+      "lifecycle": "Done",
+      "owner": "@fullstack-dev",
+      "type": "hotfix",
+      "branch": "fix/v1.42.1-runtime-lock-acquire-order",
+      "pr": 55,
+      "merge_commit": "279ec7b3",
+      "scope": "5 surgical fixes in 2 handlers (append_inspiration + patch_work); 2 new regression tests in works_api.rs",
+      "root_cause": "V1.42 P0 T2 wiring (e8993870) introduced runtime_lock into mutating handler paths but did not consistently honor the single-writer contract on every exit path; 2 of the 5 sites leaked the holder column to subsequent operations",
+      "ci_status": "9/9 checks pass (cargo test, clippy --all, fmt, schema, sqlx, TS typecheck)",
+      "fixes": [
+        {
+          "file": "crates/nexus-daemon-runtime/src/api/handlers/works.rs",
+          "function": "append_inspiration",
+          "fix": "Move work-existence check BEFORE RuntimeLockGuard::acquire; 404 path no longer touches lock subsystem"
+        },
+        {
+          "file": "crates/nexus-daemon-runtime/src/api/handlers/works.rs",
+          "function": "patch_work (stage path)",
+          "fix": "Add lock.release().await before early 'return Ok(Json(...))' so stage PATCH releases cleanly"
+        },
+        {
+          "file": "crates/nexus-daemon-runtime/src/api/handlers/works.rs",
+          "function": "patch_work (world_id clear-rejection)",
+          "fix": "Add lock.release().await before early Err return"
+        },
+        {
+          "file": "crates/nexus-daemon-runtime/src/api/handlers/works.rs",
+          "function": "patch_work (regular patch error)",
+          "fix": "Convert ? propagation to match arm that releases before returning the mapped error"
+        },
+        {
+          "file": "crates/nexus-daemon-runtime/src/api/handlers/works.rs",
+          "function": "append_inspiration (DB error path)",
+          "fix": "Same match-arm-with-release pattern for inner works::append_inspiration error path"
+        }
+      ],
+      "regression_tests": [
+        {
+          "name": "handler_append_inspiration_404_does_not_acquire_lock",
+          "verifies": "After 404, no row in works table has runtime_lock_holder IS NOT NULL"
+        },
+        {
+          "name": "patch_work_stage_path_releases_runtime_lock",
+          "verifies": "After stage PATCH, lock column is NULL; follow-up stage PATCH on same work succeeds"
+        }
+      ],
+      "commits": [
+        "e994821d fix(daemon-runtime): V1.42.1 hotfix — runtime_lock acquire/exist ordering + all early-return release paths (R-V142-MERGE-CI-001)"
+      ],
+      "created_at": "2026-06-12T04:50:00+08:00",
+      "updated_at": "2026-06-12T13:09:26+08:00",
+      "decided_at": "2026-06-12T12:50:00+08:00",
+      "spec_refs": [
+        ".mstar/knowledge/specs/novel-multi-work-lifecycle.md §4.2 (runtime_lock single-writer contract)"
       ]
     }
   ],
@@ -1294,13 +1354,32 @@
       {
         "id": "R-V142-MERGE-CI-002",
         "severity": "medium",
-        "lifecycle": "open",
-        "title": "V1.41 P-last PM-override 'pre-existing works_api failures' claim invalidated by V1.42 merge CI",
+        "lifecycle": "resolved",
+        "title": "[RESOLVED via retrospective] V1.41 P-last PM-override 'pre-existing works_api failures' claim invalidated by V1.42 merge CI",
         "source": "PR #54 CI run 27394800917; same 2 works_api tests (handler_append_inspiration_returns_404_for_unknown + patch_work_stage_change_is_auditable) pass on origin/main e69d2a65 (V1.41) but fail on c0f6cd62 (V1.42 merge)",
         "scope": ".mstar/plans/2026-06-11-v1.42-ux-polish.md (P-last PM-override section referencing V1.41 P-last defer-7 disposition); .mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md (P0 qa referencing pre-existing); .mstar/plans/2026-06-11-v1.42-multi-volume.md (P1 qa); .mstar/plans/2026-06-11-v1.42-ux-polish.md (P-last qa); commit 0b76fb2f (V1.41 P-last PM-override)",
         "decision": "defer",
         "owner": "@project-manager",
         "target": "Document that V1.41 P-last R-V141P0-W2 disposition (pre-existing on c249c902) was based on a stale base; with V1.41 merged into main, the 2 failures disappeared on main; V1.42 reintroduced them. The 'pre-existing' was a real failure mode at V1.41 era but masked by other V1.41 fixes; V1.42 P0 runtime_lock wiring exposed the latent bug in mutating handlers. Do NOT cite 'pre-existing works_api failures' as a V1.42 carry-forward; the new R-V142-MERGE-CI-001 is the canonical entry.",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+        "resolution": {
+          "commit": "279ec7b3 (PR #55)",
+          "plan_id": "2026-06-12-v1.42.1-runtime-lock-acquire-order",
+          "fixes": "V1.41 P-last pre-existing claim is now fully explained: P0 T2 wiring (e8993870) introduced the regression; not pre-existing on c249c902 base; the claim was a process error during V1.41 PM-override",
+          "resolved_at": "2026-06-12T13:09:26+08:00",
+          "resolved_by": "@project-manager (post-merge retrospective)"
+        }
+      },
+      {
+        "id": "R-V142.1-ARCH-LESSON",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "Architectural lesson: RuntimeLockGuard relies on explicit release; future handler additions must pattern-match the 5-site fix or use a defer/scopeguard wrapper",
+        "source": "V1.42.1 hotfix post-mortem (5 sites, same bug class)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (RuntimeLockGuard + 3 mutating handlers); future handlers that acquire runtime_lock",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "Consider refactoring RuntimeLockGuard to use tokio::task::spawn in Drop for async release, or wrap acquire+release in a closure helper. Either pattern would eliminate the entire class of leak bug. For now, document the rule in the harness AGENTS.md and add a clippy lint or custom macro if feasible.",
         "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
       }
     ],
@@ -1344,14 +1423,21 @@
       {
         "id": "R-V142-MERGE-CI-001",
         "severity": "high",
-        "lifecycle": "open",
-        "title": "V1.42 merge exposed 2 works_api test regressions — runtime_lock acquire wired into append_inspiration BEFORE work existence check, leaking lock across tests",
+        "lifecycle": "resolved",
+        "title": "[RESOLVED via V1.42.1 hotfix] V1.42 merge exposed 2 works_api test regressions — runtime_lock acquire wired into append_inspiration BEFORE work existence check, leaking lock across tests",
         "source": "gh-actions run 27394800917 (Rust tests); PR #54 CI; tests: handler_append_inspiration_returns_404_for_unknown (returns 500 instead of 404) + patch_work_stage_change_is_auditable (lock leaked from previous test)",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (append_inspiration at line 1150: RuntimeLockGuard::acquire precedes work existence check; introduced by e8993870 P0 T2); suspected cascade in patch_work mutating paths",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.42.1 hotfix — move RuntimeLockGuard::acquire AFTER the work existence check; ensure Drop-release on 404/500 paths; add test isolation helper to clear orphan locks between tests; PM-override path-1 was a mistake: pre-existing claim was based on stale c249c902 base, contradicted by main HEAD c0f6cd62",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]",
+        "resolution": {
+          "commit": "279ec7b3 (PR #55)",
+          "plan_id": "2026-06-12-v1.42.1-runtime-lock-acquire-order",
+          "fixes": "5 sites in 2 handlers; 2 new regression tests; 9/9 CI checks pass",
+          "resolved_at": "2026-06-12T13:09:26+08:00",
+          "resolved_by": "@fullstack-dev (per PM dispatch)"
+        }
       }
     ],
     "2026-06-11-v1.42-conditional-routing": [
