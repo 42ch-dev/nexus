@@ -1,8 +1,9 @@
 # Novel Author Experience — Normative Supplement v1
 
-**Status**: Draft (V1.43 — 2026-06-12 prepare)  
-**Document class**: Draft overlay  
+**Status**: Shipped (V1.43 — 2026-06-12)  
+**Document class**: Feature line (author experience supplement)  
 **Created**: 2026-06-12  
+**Last updated**: 2026-06-12 (V1.43 P-last — promoted from Draft overlay to Shipped Feature line; §2 row 4 amended)
 **Scope**: End-user **ongoing serial** happy path — maps [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) (BL-10) to normative CLI surfaces and P1/P2 implement contracts  
 **Coordinates with**:
 
@@ -32,7 +33,7 @@ V1.36–V1.42 implemented novel-writing **capabilities** across crates. V1.43 do
 | Part I §1 | Prerequisites & bootstrap (`system doctor` … `creator run start`) | P0 doc; P1 copy |
 | Part I §2 | World + `novel-project-init` | P0 doc; P1 gate/scaffold errors |
 | Part I §3 | First chapter: outline → draft → finalize | P0 doc |
-| Part I §4 | Serial: auto-chain, `creator run status`, chapter N | P0 doc; P2 visibility |
+| Part I §4 | Serial: auto-chain, `creator works status`, chapter N | P0 doc; P2 visibility |
 | Part I §5 | Quality loop: findings, review, 96h banner | P0 doc; P2 visibility |
 | Part I §6 | Completion: when writing stops | P0 doc; P2 visibility |
 | Part II A | Multi-work desk (`creator works …`) | P0 doc only |
@@ -84,5 +85,6 @@ See plan [2026-06-12-v1.43-hygiene-and-residuals.md](../../plans/2026-06-12-v1.4
 
 At V1.43 P5/P-last hygiene:
 
-- Merge §2–§4 into [cli-spec.md](cli-spec.md) §7 appendix or extend [creator-centric-entry-model.md](creator-centric-entry-model.md).
-- Archive this overlay with `Superseded by:` stub or mark **Shipped (V1.43)** if kept as supplement.
+- [x] **Kept as Feature line supplement** — §2–§4 map quickstart sections to CLI surfaces and shipped implementation status. No merge into cli-spec.md required; this document continues to serve as the author-experience normative supplement.
+- [x] **Status promoted to Shipped (V1.43)** — all P0/P1/P2 surfaces implemented; §2 row 4 amended (`creator run status` → `creator works status` per R-V143P0-001).
+- [ ] Merge deferred rows (review-master surface per R-V143P0-002) into V1.44+ compass when reopened.

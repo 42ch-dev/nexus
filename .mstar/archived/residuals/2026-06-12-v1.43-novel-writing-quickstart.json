@@ -9,12 +9,12 @@
       "severity": "low",
       "source": "qc1-W-002 (qc1.md initial wave); see also writing-specialist Completion Report §7 spec discrepancy note",
       "scope": ".mstar/knowledge/specs/novel-author-experience.md §2 (Draft overlay V1.43)",
-      "decision": "defer",
+      "decision": "fix",
       "owner": "@fullstack-dev",
       "target": "V1.43 P-last (2026-06-12-v1.43-hygiene-and-residuals)",
       "tracking": null,
-      "lifecycle": "defer",
-      "closure_note": "Quickstart already correct (uses 'creator works status'). P-last plan should amend the §2 row 4 wording from 'creator run status' to 'creator works status' (and the §2 description to match V1.41 cli-spec.md §6.2H). Spec overlay is still Draft (V1.43) so no Master edit required; just an overlay amendment before P5 promotion. Tracked in P-last plan §2 'Hygiene — Promote V1.42 spec overlays'.",
+      "lifecycle": "resolved",
+      "closure_note": "V1.43 P-last T5: amended §2 row 4 from 'creator run status' to 'creator works status' to match V1.41 cli-spec.md §6.2H and quickstart. Spec overlay also promoted from Draft to Shipped (V1.43) Feature line.",
       "archived_at": "2026-06-12"
     },
     {
@@ -25,10 +25,10 @@
       "scope": ".mstar/knowledge/specs/novel-workflow-profile.md §5.5.3 + .mstar/knowledge/specs/novel-quality-loop.md §6 + nexus-daemon-runtime CLI subcommand surface",
       "decision": "defer",
       "owner": "@fullstack-dev",
-      "target": "V1.43 P-last (2026-06-12-v1.43-hygiene-and-residuals) or later",
+      "target": "V1.44+ (review-master surface convergence)",
       "tracking": null,
       "lifecycle": "defer",
-      "closure_note": "The spec describes a future 'review-master' surface consolidating the master-decision review flow. The CLI has not implemented it; the user-facing remediation path is 'creator run stage advance <work_id> --stage review'. P-last should either (a) implement the 'review-master' subcommand in the CLI, or (b) update the spec to match the implemented surface, or (c) keep both with explicit notes. Quickstart already cites the spec and provides the available CLI remediation; non-blocking for P0 ship. Quickstart line 168 has an inline note explaining the gap to readers.",
+      "closure_note": "V1.43 P-last T6: kept both spec + CLI with explicit notes. Spec documents future 'review-master' surface; CLI provides 'creator run stage advance --stage review' as available remediation. Quickstart line 168 has inline note explaining the gap. Full convergence deferred to V1.44+ when review-master subcommand can be implemented.",
       "archived_at": "2026-06-12"
     }
   ]

@@ -91,7 +91,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [orchestration-engine.md](orchestration-engine.md) | Master | Active |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
-| [preset-conditional-routing.md](preset-conditional-routing.md) | Draft overlay | **Draft (V1.42 P2)** — DF-56 minimal `llm_judge` slice |
+| [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice |
 
 ### Creator product lines
 
@@ -99,11 +99,11 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
-| [novel-workflow-profile.md](novel-workflow-profile.md) | Draft overlay | **Shipped (V1.36 → V1.40)** — World KB §3.5.1; V1.41 §6.4 multi-work cross-refs |
+| [novel-workflow-profile.md](novel-workflow-profile.md) | Feature line | **Shipped (V1.36 → V1.42)** — World KB §3.5.1; V1.41 §6.4 multi-work; V1.42 §4.5.4–7 multi-volume PK + outlines + tests |
 | [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) | Feature line | **Shipped (V1.41 → V1.42 P0)** — §4.2 runtime_lock production wiring implemented V1.42 P0 |
 | [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
 | [novel-quality-loop.md](novel-quality-loop.md) | Draft overlay | **Shipped (V1.39 → V1.40)** — full quality loop + V1.40 P3 extract persistence |
-| [novel-author-experience.md](novel-author-experience.md) | Draft overlay | **Draft (V1.43)** — BL-10 quickstart contract + CLI copy map + author visibility |
+| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.43)** — BL-10 quickstart contract + CLI copy map + author visibility |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration

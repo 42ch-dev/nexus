@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-13T00:00:00+08:00",
+  "updated_at": "2026-06-13T00:30:00+08:00",
   "plans": [],
   "v1_43_iteration_complete": true,
   "metadata": {
@@ -21,20 +21,21 @@
     "integration_branch_retired": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-12T18:00:00+08:00",
-      "total_open": 91,
+      "updated_at": "2026-06-13T00:30:00+08:00",
+      "total_open": 86,
       "by_severity": {
         "critical": 0,
-        "high": 1,
-        "medium": 10,
-        "low": 64,
+        "high": 0,
+        "medium": 7,
+        "low": 63,
         "nit": 16
       },
       "by_target": {
-        "v1.43": 5,
-        "v1.42": 14,
+        "v1.43": 2,
+        "v1.42": 9,
         "v1.41": 7,
-        "backlog": 65
+        "backlog": 65,
+        "v1.44": 3
       },
       "by_plan": {
         "creator-run": 3,
@@ -53,7 +54,7 @@
         "selection-pool": 19,
         "author-experience": 5
       },
-      "notes": "V1.43 prepare: BL-10 P0 + CLI copy P1 + author visibility P2 + P-last author-path/hygiene. v1.42.1 hotfix satisfied on main (PR #55). V1.42 Done plans compacted Profile B."
+      "notes": "V1.43 P-last: closed R-V137P0-01 (fix), R-V142P1-F-003 (fix), R-V142P0-QC-W-01 (waive), R-V142P0-QC-W-001 (waive), R-V143P0-001 (fix). R-V143P0-002 deferred to V1.44+. R-V138 chain-engine already fixed. Spec stamps: preset-conditional-routing → Shipped V1.42, novel-workflow-profile → Shipped V1.42, novel-author-experience → Shipped V1.43."
     },
     "wave_0_spec": ".mstar/knowledge/specs/novel-author-experience.md",
     "spec_refs": [
@@ -354,10 +355,14 @@
         "severity": "low",
         "source": "QC1/QC2/QC3 fix wave — discovered during gate_failure_returns_422 test debugging",
         "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/preset.yaml",
-        "decision": "defer",
+        "decision": "fix",
         "owner": "@fullstack-dev",
-        "target_date": "backlog",
-        "note": "Root cause fixed in this commit (gates moved under preset: key). Residual tracks the broader concern: serde silently ignores unknown top-level keys in YAML, so misplaced sections cause no error. Consider adding a strict-mode serde guard or loader validation that warns on unknown top-level keys in preset.yaml."
+        "target_date": "V1.43 P-last",
+        "note": "Root cause fixed in this commit (gates moved under preset: key). Residual tracks the broader concern: serde silently ignores unknown top-level keys in YAML, so misplaced sections cause no error. Consider adding a strict-mode serde guard or loader validation that warns on unknown top-level keys in preset.yaml.",
+        "lifecycle": "resolved",
+        "closure_note": "V1.43 P-last T2: added warn_unknown_top_level_keys() in loader.rs — checks serde_yaml::Value top-level keys against KNOWN_TOP_LEVEL_KEYS (preset, states, inner_graphs, signals, roles); non-fatal tracing::warn!. Added test warn_unknown_top_level_keys_detects_misplaced_gates. Commit 445e0f1d.",
+        "closed_at": "2026-06-12",
+        "closure_evidence": "crates/nexus-orchestration/src/preset/loader.rs — warn_unknown_top_level_keys + test"
       }
     ],
     "2026-06-08-v1.38-multi-chapter-selection-status": [
@@ -1179,14 +1184,17 @@
       {
         "id": "R-V142P0-QC-W-01",
         "severity": "medium",
-        "lifecycle": "open",
+        "lifecycle": "waived",
         "title": "RuntimeLockGuard Drop is best-effort; panic or cancellation leaks lock until TTL",
         "source": "qc1.md W-01 (qc-specialist, architecture coherence and maintainability risk)",
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs RuntimeLockGuard Drop impl (lines 108-123); production acquire contract spec novel-multi-work-lifecycle.md §4.2",
-        "decision": "defer",
+        "decision": "waive",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last or future hardening plan (V1.43+)",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+        "target": "Waived — V1.42.1 hotfix (279ec7b3) + TTL sufficient for local-only model",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+        "closure_note": "V1.43 P-last T6: waived. V1.42.1 hotfix resolved the 5-site release leak class. TTL-based cleanup is sufficient for local-only single-user model. Future hardening (tokio::task::spawn in Drop or scopeguard wrapper) tracked in R-V142.1-ARCH-LESSON.",
+        "closed_at": "2026-06-12",
+        "closure_evidence": "V1.42.1 hotfix 279ec7b3 — 5-site fix + regression tests + TTL sufficient"
       },
       {
         "id": "R-V142P0-QC-W-02",
@@ -1203,14 +1211,17 @@
       {
         "id": "R-V142P0-QC-W-001",
         "severity": "medium",
-        "lifecycle": "open",
+        "lifecycle": "waived",
         "title": "Stale-recovery concurrent-acquire race on force_stale=true path — check-then-act on holder column without prior-holder predicate",
         "source": "qc2.md W-001 (qc-specialist-2, security and correctness risk)",
         "scope": "crates/nexus-local-db/src/runtime_lock.rs (acquire_runtime_lock force-clear path + early-exit check in patch_work); spec novel-multi-work-lifecycle.md §4.2 (single-writer model)",
-        "decision": "defer",
+        "decision": "waive",
         "owner": "@fullstack-dev",
-        "target": "Harden if single-writer assumption is ever relaxed; current local-only model makes impact low",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+        "target": "Waived — local-only single-user model; impact low unless multi-terminal use becomes common",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+        "closure_note": "V1.43 P-last T6: waived. Local-only single-writer invariant documented in R-V138P0-01. Race only under concurrent multi-terminal invocation which is out of scope for local-first product. Reopen if multi-terminal becomes common.",
+        "closed_at": "2026-06-12",
+        "closure_evidence": "Local-only invariant documented; same rationale as R-V138P0-01 waive"
       },
       {
         "id": "R-V142-MERGE-CI-002",
@@ -1260,14 +1271,17 @@
       {
         "id": "R-V142P1-QC1-F-003",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "reconcile_from_filesystem hardcodes volume=1 — multi-volume chapter files silently skipped",
         "source": "qc1.md F-003 (qc-specialist)",
         "scope": "crates/nexus-orchestration/src/capability/builtins/novel_scaffold.rs (or similar) reconcile_from_filesystem",
-        "decision": "defer",
+        "decision": "fix",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last or future (non-blocking)",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+        "target": "V1.43 P-last",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]",
+        "closure_note": "V1.43 P-last T3: reconcile_from_filesystem now parses volume from frontmatter (defaults to 1). Also fixed frontmatter status on insert — was always 'not_started'; now applies actual frontmatter status via update_status call. Test test_reconcile_volume_aware_from_frontmatter. Commit 445e0f1d.",
+        "closed_at": "2026-06-12",
+        "closure_evidence": "crates/nexus-local-db/src/work_chapters.rs — volume-aware reconcile + frontmatter status fix + test"
       },
       {
         "id": "R-V142P1-QC1-F-004",
