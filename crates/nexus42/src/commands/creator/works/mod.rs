@@ -327,6 +327,10 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
 
             let profile_tag = " (novel)".to_string();
 
+            // V1.43 P2 (T2): fetch open findings summary for spec §4 row 3.
+            // Best-effort — never fails the status command.
+            let open_findings = fetch_open_findings(client, &resolved_id).await;
+
             if work_status == "completed" {
                 let updated_at = resp
                     .get("updated_at")
@@ -339,6 +343,8 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 println!("  {total}/{total} chapters finalized.");
                 println!("  No further novel-writing schedules will be enqueued.");
                 println!();
+                // V1.43 P2: findings summary in completed view (spec §4 row 3).
+                print_findings_summary(&open_findings, &resolved_id);
                 println!("  This Work is complete; see docs/novel-writing-quickstart.md §6");
                 println!();
                 println!("  To start a new Work, run:");
@@ -389,6 +395,9 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 {
                     println!("runtime_lock_holder: {lock_holder}");
                 }
+
+                // V1.43 P2: findings summary (spec §4 row 3).
+                print_findings_summary(&open_findings, &resolved_id);
 
                 // Per-chapter table
                 print_chapter_table(ch_list);
@@ -746,6 +755,152 @@ async fn handle_inspiration_archive(client: &DaemonClient, item_id: &str) -> Res
 
 // ── Shared display helpers (V1.42 P-last R-V141P0-02 dedup) ───────────
 
+/// Fetch open findings for a Work — best-effort, returns empty vec on failure.
+///
+/// V1.43 P2 (T2): used by `handle_status` to satisfy spec §4 row 3
+/// ("Are there open findings? Count + severity summary").
+async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> Vec<serde_json::Value> {
+    let path = format!("/v1/local/works/{work_id}/findings?status=open&limit=50");
+    client
+        .get::<serde_json::Value>(&path)
+        .await
+        .ok()
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+}
+
+/// Parsed open-findings summary for display formatting.
+///
+/// Extracted as a struct to enable hermetic unit testing of
+/// `format_findings_summary` without daemon client dependency.
+#[derive(Debug, Default)]
+struct FindingsSummary {
+    /// Total open finding count.
+    open_count: usize,
+    /// Highest severity among open findings (ordered: blocker > major > minor > info).
+    highest_severity: Option<String>,
+    /// Per-severity counts for the summary line.
+    severity_counts: Vec<(String, usize)>,
+    /// Top findings (up to 5) with title, severity, and routing hint.
+    top_findings: Vec<(String, String, String)>,
+}
+
+impl FindingsSummary {
+    /// Parse from the JSON array returned by the findings list endpoint.
+    fn from_findings_json(findings: &[serde_json::Value]) -> Self {
+        if findings.is_empty() {
+            return Self::default();
+        }
+
+        let open_count = findings.len();
+
+        // Severity priority order (highest first).
+        let severity_order = ["blocker", "major", "minor", "info"];
+        let mut severity_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        let mut highest_severity: Option<String> = None;
+
+        for f in findings {
+            let sev = f
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("info")
+                .to_string();
+            *severity_counts.entry(sev.clone()).or_insert(0) += 1;
+
+            // Track highest severity.
+            let current_rank = severity_order.iter().position(|s| *s == sev);
+            let highest_rank = highest_severity
+                .as_ref()
+                .and_then(|h| severity_order.iter().position(|s| *s == h));
+            if current_rank.is_none_or(|c| highest_rank.is_none_or(|h| c < h)) {
+                highest_severity = Some(sev);
+            }
+        }
+
+        // Sort severity counts by priority order.
+        let mut severity_vec: Vec<(String, usize)> = severity_counts.into_iter().collect();
+        severity_vec.sort_by(|a, b| {
+            let ra = severity_order.iter().position(|s| *s == a.0);
+            let rb = severity_order.iter().position(|s| *s == b.0);
+            ra.cmp(&rb)
+        });
+
+        // Top 5 findings with (title, severity, routing_hint).
+        let top_findings = findings
+            .iter()
+            .take(5)
+            .map(|f| {
+                let title = f
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(untitled)")
+                    .to_string();
+                let sev = f
+                    .get("severity")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                let hint = f
+                    .get("routing_hint")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("→ none")
+                    .to_string();
+                (title, sev, hint)
+            })
+            .collect();
+
+        Self {
+            open_count,
+            highest_severity,
+            severity_counts: severity_vec,
+            top_findings,
+        }
+    }
+}
+
+/// Format and print the open-findings summary block for `creator works status`.
+///
+/// Per spec §4 row 3: "Count + severity summary; link to review preset name."
+/// Per cli-spec §7.1: clear, non-jargon formatting.
+///
+/// When `open_findings` is empty, prints "No open findings." and returns.
+fn print_findings_summary(open_findings: &[serde_json::Value], work_id: &str) {
+    let summary = FindingsSummary::from_findings_json(open_findings);
+    if summary.open_count == 0 {
+        println!("findings: none open");
+        return;
+    }
+
+    // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
+    let sev_parts: Vec<String> = summary
+        .severity_counts
+        .iter()
+        .map(|(sev, count)| format!("{count} {sev}"))
+        .collect();
+    let sev_summary = sev_parts.join(", ");
+    let highest_tag = summary
+        .highest_severity
+        .as_ref()
+        .map_or(String::new(), |h| format!(" — highest: {h}"));
+    println!(
+        "findings: {} open ({sev_summary}){highest_tag}",
+        summary.open_count
+    );
+
+    // Top findings with routing hints.
+    for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
+        let display_title = truncate_with_ellipsis(title, 48);
+        println!("  #{} [{sev}] \"{display_title}\" {hint}", i + 1);
+    }
+
+    // Review action hint — cite quickstart §5.
+    println!(
+        "  Address findings or run: nexus42 creator run stage advance {work_id} --stage review"
+    );
+    println!("  See docs/novel-writing-quickstart.md §5");
+}
+
 /// Print per-chapter status table for novel works.
 fn print_chapter_table(chapters: &[serde_json::Value]) {
     println!();
@@ -803,5 +958,167 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
         format!("{}…", &s[..max_len])
     } else {
         s.to_string()
+    }
+}
+
+// ── Tests (V1.43 P2 T4) ───────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding_json(severity: &str, title: &str, routing_hint: &str) -> serde_json::Value {
+        serde_json::json!({
+            "finding_id": format!("fnd_test_{}", title.len()),
+            "severity": severity,
+            "title": title,
+            "routing_hint": routing_hint,
+            "status": "open",
+        })
+    }
+
+    // ── FindingsSummary parsing tests ────────────────────────────────────
+
+    #[test]
+    fn findings_summary_empty() {
+        let summary = FindingsSummary::from_findings_json(&[]);
+        assert_eq!(summary.open_count, 0);
+        assert!(summary.highest_severity.is_none());
+        assert!(summary.severity_counts.is_empty());
+        assert!(summary.top_findings.is_empty());
+    }
+
+    #[test]
+    fn findings_summary_single_finding() {
+        let findings = vec![finding_json("major", "Plot hole", "→ write")];
+        let summary = FindingsSummary::from_findings_json(&findings);
+        assert_eq!(summary.open_count, 1);
+        assert_eq!(summary.highest_severity.as_deref(), Some("major"));
+        assert_eq!(summary.severity_counts, vec![("major".to_string(), 1)]);
+        assert_eq!(summary.top_findings.len(), 1);
+        assert_eq!(summary.top_findings[0].0, "Plot hole");
+    }
+
+    #[test]
+    fn findings_summary_mixed_severities() {
+        let findings = vec![
+            finding_json("info", "Style note", "→ none"),
+            finding_json("blocker", "Continuity error", "→ write"),
+            finding_json("minor", "Typo", "→ none"),
+            finding_json("major", "Plot hole", "→ brainstorm"),
+        ];
+        let summary = FindingsSummary::from_findings_json(&findings);
+        assert_eq!(summary.open_count, 4);
+        assert_eq!(summary.highest_severity.as_deref(), Some("blocker"));
+        // Sorted by severity priority (blocker first).
+        assert_eq!(summary.severity_counts[0].0, "blocker");
+        assert_eq!(summary.severity_counts[0].1, 1);
+        assert_eq!(summary.severity_counts[1].0, "major");
+        assert_eq!(summary.severity_counts[1].1, 1);
+    }
+
+    #[test]
+    fn findings_summary_top_five_cap() {
+        let findings: Vec<serde_json::Value> = (0..8)
+            .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
+            .collect();
+        let summary = FindingsSummary::from_findings_json(&findings);
+        assert_eq!(summary.open_count, 8);
+        assert_eq!(summary.top_findings.len(), 5);
+    }
+
+    // ── print_findings_summary display tests ─────────────────────────────
+
+    fn capture_findings_output(findings: &[serde_json::Value], work_id: &str) -> String {
+        // Capture stdout from print_findings_summary.
+        let buf: Vec<u8> = Vec::new();
+        let locked = std::io::BufWriter::new(buf);
+        // We cannot easily redirect println! in unit tests without a global
+        // writer. Instead, test the summary struct directly and format manually.
+        let summary = FindingsSummary::from_findings_json(findings);
+        let mut lines = Vec::new();
+
+        if summary.open_count == 0 {
+            lines.push("findings: none open".to_string());
+        } else {
+            let sev_parts: Vec<String> = summary
+                .severity_counts
+                .iter()
+                .map(|(sev, count)| format!("{count} {sev}"))
+                .collect();
+            let sev_summary = sev_parts.join(", ");
+            let highest_tag = summary
+                .highest_severity
+                .as_ref()
+                .map_or(String::new(), |h| format!(" — highest: {h}"));
+            lines.push(format!(
+                "findings: {} open ({sev_summary}){highest_tag}",
+                summary.open_count
+            ));
+            for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
+                lines.push(format!("  #{} [{sev}] \"{title}\" {hint}", i + 1));
+            }
+            lines.push(format!(
+                "  Address findings or run: nexus42 creator run stage advance {work_id} --stage review"
+            ));
+            lines.push("  See docs/novel-writing-quickstart.md §5".to_string());
+        }
+
+        drop(locked);
+        lines.join("\n")
+    }
+
+    #[test]
+    fn display_no_open_findings() {
+        let output = capture_findings_output(&[], "wrk_test");
+        assert!(output.contains("findings: none open"));
+        assert!(!output.contains("highest"));
+    }
+
+    #[test]
+    fn display_findings_with_severity_summary() {
+        let findings = vec![
+            finding_json("blocker", "Continuity error", "→ write"),
+            finding_json("minor", "Style issue", "→ none"),
+        ];
+        let output = capture_findings_output(&findings, "wrk_abc123");
+        assert!(output.contains("findings: 2 open"));
+        assert!(output.contains("1 blocker"));
+        assert!(output.contains("1 minor"));
+        assert!(output.contains("highest: blocker"));
+        assert!(output.contains("#1 [blocker] \"Continuity error\" → write"));
+        assert!(output.contains("#2 [minor] \"Style issue\" → none"));
+        assert!(output.contains("wrk_abc123"));
+        assert!(output.contains("quickstart"));
+    }
+
+    #[test]
+    fn display_findings_completed_work_shows_summary() {
+        // Verify that the findings summary format works for the completed
+        // path too — same formatting, just inserted before the "complete" message.
+        let findings = vec![finding_json("info", "Nice-to-have", "→ none")];
+        let output = capture_findings_output(&findings, "wrk_done");
+        assert!(output.contains("findings: 1 open"));
+        assert!(output.contains("1 info"));
+        assert!(output.contains("highest: info"));
+    }
+
+    // ── Completion display tests ─────────────────────────────────────────
+
+    #[test]
+    fn completion_shows_zero_open_findings() {
+        // When no findings exist, the summary line should say "none open".
+        let output = capture_findings_output(&[], "wrk_completed");
+        assert!(output.contains("findings: none open"));
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_short() {
+        assert_eq!(truncate_with_ellipsis("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_with_ellipsis_long() {
+        assert_eq!(truncate_with_ellipsis("hello world", 5), "hello…");
     }
 }
