@@ -4,7 +4,7 @@ reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-12-v1.43-novel-writing-quickstart
 verdict: Approve
-generated_at: 2026-06-12T10:44:10Z
+generated_at: 2026-06-12T10:58:10Z
 ---
 
 # Code Review Report — P0 (BL-10 novel-writing quickstart)
@@ -88,3 +88,96 @@ generated_at: 2026-06-12T10:44:10Z
 ### Updated verdict
 **Verdict**: Approve
 **Rationale**: Both previously raised blocking Warnings (qc3-F-001 and qc3-F-002) are resolved in commit `e2029fa7`. The 96h banner now uses the spec-authoritative `creator run review-master <work_id>` command, and Part II C is renamed and cross-referenced so it no longer collides with the creator-scoped Inspiration Pool. No Critical findings exist and no Warnings remain unresolved from this re-review. Static checks (emoji, link integrity, nightly fmt) all pass.
+
+## Revalidation #2 (post-fix wave 2, fix commit 174ae534 — F-001 only)
+
+**Re-review mode**: Targeted — qc-specialist-3 only, F-001 only (F-002 was PASS in revalidation #1 and is untouched)
+**Fix range reviewed**: e2029fa7..174ae534
+**Files in fix wave**: docs/novel-writing-quickstart.md (+3/-1)
+
+### Re-assessment of qc3-F-001 (honest)
+
+The original qc3-F-001 Warning correctly identified that the 96h banner remediation command conflated the implemented `review` stage with the spec's `review-master` surface. Fix wave 1 (`e2029fa7`) replaced the doc line with the spec-authoritative `nexus42 creator run review-master <work_id>`, and the prior revalidation marked F-001 PASS on that basis. That revalidation was technically premature: the `review-master` subcommand is spec-future and is not present in the current `nexus42` binary, so the replacement introduced an AC1 copy-paste violation that QA caught. Fix wave 2 (`174ae534`) reverts line 165 to the copy-pasteable implemented command `nexus42 creator run stage advance <work_id> --stage review` and adds a spec-future note citing `novel-workflow-profile.md` §5.5.3. F-001 is now PASS on a different basis — the doc uses the currently available CLI surface and honestly acknowledges the future spec surface.
+
+### Live CLI evidence (post-fix wave 2)
+
+- `nexus42 creator run --help` (no `review-master` subcommand):
+
+```text
+Work lifecycle — start, continue, stage, and resume Works
+
+Primary entry for creative Work. Start a new Work with an idea, continue an existing Work with new direction, or manage stage progression. For listing and inspecting Works, use `creator works`.
+
+Usage: nexus42 creator run [OPTIONS] <COMMAND>
+
+Commands:
+  start               Start a new Work and run the initial preset
+  continue            Append inspiration / direction to an existing Work
+  stage               FL-E stage management (V1.34): list stages, advance stage
+  reconcile-chapters  Rebuild `work_chapters` from filesystem (V1.36 §4.1.2, §8)
+  resume              Resume an auto-chain Work whose driver was interrupted (V1.39 §5.7)
+  help                Print this message or the help of the given subcommand(s)
+
+Options:
+  -v, --verbose
+          Enable verbose logging
+
+  -o, --output <OUTPUT_FORMAT>
+          Output format (text or json)
+          
+          [default: text]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+```
+
+- `nexus42 creator run stage advance --help` (`--stage review` is valid):
+
+```text
+Advance a Work to the next FL-E stage
+
+Usage: nexus42 creator run stage advance [OPTIONS] --stage <STAGE> <WORK_ID>
+
+Arguments:
+  <WORK_ID>  Work ID (wrk_...)
+
+Options:
+      --stage <STAGE>              Target stage: research | produce | review | persist
+      --force                      Force advance even if current stage is not complete (audited)
+      --force-gates                Force gate bypass with audit reason (V1.37 §7.9) Requires --gate-reason to be set alongside
+      --gate-reason <GATE_REASON>  Audit reason for --force-gates (required when --force-gates is set)
+      --json                       Emit machine-readable JSON instead of human text
+  -v, --verbose                    Enable verbose logging
+  -o, --output <OUTPUT_FORMAT>     Output format (text or json) [default: text]
+  -h, --help                       Print help
+  -V, --version                    Print version
+```
+
+### New doc content (lines 162-170)
+
+```markdown
+A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
+
+```bash
+nexus42 creator run stage advance <work_id> --stage review
+```
+
+> The spec describes a future `review-master` surface ([novel-workflow-profile.md](../.mstar/knowledge/specs/novel-workflow-profile.md) §5.5.3) that consolidates the master-decision review flow. Until that ships, `creator run stage advance --stage review` advances to the FL-E `review` stage which is the available remediation path.
+>
+> The quality loop uses local SQLite and the daemon — no Redis, no cron, no cloud dependency.
+```
+
+### Spec citation in the new note
+
+> The spec describes a future `review-master` surface ([novel-workflow-profile.md](../.mstar/knowledge/specs/novel-workflow-profile.md) §5.5.3) that consolidates the master-decision review flow. Until that ships, `creator run stage advance --stage review` advances to the FL-E `review` stage which is the available remediation path.
+
+Citation: `novel-workflow-profile.md` §5.5.3.
+
+### Updated verdict
+
+**Verdict**: Approve
+**Rationale**: qc3-F-001 is now resolved on a pragmatic basis. The documented remediation command (`nexus42 creator run stage advance <work_id> --stage review`) is copy-pasteable against the current CLI binary, and the spec-future `review-master` surface is honestly noted with a citation to `novel-workflow-profile.md` §5.5.3. No Critical findings exist and no unresolved Warnings remain from this targeted re-review. F-002 remains PASS from revalidation #1 and was not revisited.
+
