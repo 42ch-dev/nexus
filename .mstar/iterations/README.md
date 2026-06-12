@@ -54,7 +54,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.40-novel-world-kb-delivery-compass-v1.md](v1.40-novel-world-kb-delivery-compass-v1.md) | V1.40 | **Shipped** (2026-06-11 via PR #52 merged to main) — DF-63 World KB product closure; integration branch `iteration/v1.40` retired post-PR |
 | [v1.41-multi-work-author-desk-delivery-compass-v1.md](v1.41-multi-work-author-desk-delivery-compass-v1.md) | V1.41 | **Shipped** (2026-06-11) — PR [#53](https://github.com/42ch-dev/nexus/pull/53); DF-60/61 archived; post-merge security fixes |
 | [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](v1.42-multi-volume-serial-writing-delivery-compass-v1.md) | V1.42 | **Shipped** (2026-06-12) — P0 runtime_lock + P1 DF-62 multi-volume + P2 DF-56 + P3 DF-47 + P-last UX; `iteration/v1.42` |
-| [v1.43-novel-author-experience-delivery-compass-v1.md](v1.43-novel-author-experience-delivery-compass-v1.md) | V1.43 | **Active** (prepare 2026-06-12) — BL-10 author quickstart (ongoing serial) + CLI copy + author visibility + P-last hygiene; `iteration/v1.43` on main worktree (v1.42.1 hotfix satisfied PR #55) |
+| [v1.43-novel-author-experience-delivery-compass-v1.md](v1.43-novel-author-experience-delivery-compass-v1.md) | V1.43 | **Shipped** (2026-06-12) — BL-10 author quickstart (ongoing serial) + CLI copy + author visibility + P-last hygiene; `iteration/v1.43` |
 
 ### Reference compasses
 
