@@ -349,31 +349,33 @@ fn describe_actual(value: Option<&serde_json::Value>) -> String {
 }
 
 fn work_field_remediation(field: &str) -> String {
+    // V1.43 (P1 §3 remediation — preset_gates_failed): cite quickstart §2/§3.
     match field {
-        "work_profile" => {
-            "Ensure the Work has `work_profile: novel` set.".to_string()
-        }
-        "work_ref" => {
-            "Run `creator run start --init-preset novel-project-init` to set work_ref.".to_string()
-        }
-        "intake_status" => {
-            "Complete intake via `creator run stage advance --stage intake`.".to_string()
-        }
-        "world_id" => {
-            "Create the World first via `nexus42 creator world create --title \"...\"` or pick an existing one via `nexus42 creator world list`.".to_string()
-        }
-        "workspace_slug" => {
-            "Ensure the workspace has a valid slug.".to_string()
-        }
+        "work_profile" => "Ensure the Work has `work_profile: novel` set. \
+             See docs/novel-writing-quickstart.md §2"
+            .to_string(),
+        "work_ref" => "Run `creator run start --init-preset novel-project-init` to set work_ref. \
+             See docs/novel-writing-quickstart.md §2"
+            .to_string(),
+        "intake_status" => "Complete intake via `creator run stage advance --stage intake`. \
+             See docs/novel-writing-quickstart.md §3"
+            .to_string(),
+        "world_id" => "Create the World first via `nexus42 creator world create --title \"...\"` \
+             or pick an existing one via `nexus42 creator world list`. \
+             See docs/novel-writing-quickstart.md §2"
+            .to_string(),
+        "workspace_slug" => "Ensure the workspace has a valid slug.".to_string(),
         _ => format!("Adjust the `{field}` field and retry."),
     }
 }
 
 fn filesystem_remediation(must_exist: bool, path: &str) -> String {
+    // V1.43 (P1 §3 remediation — missing scaffold): cite quickstart §2.
     if must_exist {
         if path.contains("Outlines") || path.contains("Stories") {
             format!(
-                "Run `creator run start --init-preset novel-project-init` to scaffold `{path}`."
+                "Run `creator run start --init-preset novel-project-init` to scaffold `{path}`. \
+                 See docs/novel-writing-quickstart.md §2"
             )
         } else {
             format!("Ensure the path `{path}` exists before scheduling this preset.")
@@ -384,11 +386,14 @@ fn filesystem_remediation(must_exist: bool, path: &str) -> String {
 }
 
 fn previous_preset_remediation(preset: &str) -> String {
+    // V1.43 (P1 §3 remediation — preset_gates_failed): cite quickstart §2/§3.
     match preset {
-        "novel-project-init" => {
-            "Run `creator run start --init-preset novel-project-init` first.".to_string()
-        }
-        "novel-writing" => "Run `creator run start` with a novel-writing preset first.".to_string(),
+        "novel-project-init" => "Run `creator run start --init-preset novel-project-init` first. \
+             See docs/novel-writing-quickstart.md §2"
+            .to_string(),
+        "novel-writing" => "Run `creator run start` with a novel-writing preset first. \
+             See docs/novel-writing-quickstart.md §3"
+            .to_string(),
         _ => format!("Ensure preset '{preset}' has completed for this Work."),
     }
 }
@@ -938,6 +943,128 @@ mod tests {
         assert!(
             result.is_err(),
             "research gates should fail when work_ref is missing"
+        );
+    }
+
+    // ── V1.43 P1 remediation citation tests ──────────────────────────────
+
+    /// V1.43 (P1 §3 remediation — preset_gates_failed): work_field remediation
+    /// strings cite quickstart §2/§3.
+    #[tokio::test]
+    async fn remediation_work_field_cites_quickstart() {
+        let gates = vec![Gate::WorkField {
+            field: "work_profile".to_string(),
+            op: GateOp::Equals {
+                value: serde_json::json!("essay"),
+            },
+        }];
+        let work = make_work();
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        let err = result.unwrap_err();
+        assert!(
+            err.failed_gates[0]
+                .remediation
+                .contains("novel-writing-quickstart.md"),
+            "work_field remediation should cite quickstart: {:?}",
+            err.failed_gates[0].remediation
+        );
+    }
+
+    /// V1.43 (P1 §3 remediation — missing scaffold): filesystem gate
+    /// remediation cites quickstart §2 when scaffold paths are missing.
+    #[tokio::test]
+    async fn remediation_filesystem_scaffold_cites_quickstart_section_2() {
+        let gates = vec![Gate::Filesystem {
+            path: "Works/{{work_ref}}/Outlines/ch01-outline.md".to_string(),
+            must_exist: true,
+        }];
+        let work = make_work();
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        let err = result.unwrap_err();
+        assert!(
+            err.failed_gates[0]
+                .remediation
+                .contains("novel-writing-quickstart.md §2"),
+            "scaffold remediation should cite quickstart §2: {:?}",
+            err.failed_gates[0].remediation
+        );
+    }
+
+    /// V1.43 (P1 §3 remediation — preset_gates_failed): previous_preset
+    /// remediation for novel-project-init cites quickstart §2.
+    #[tokio::test]
+    async fn remediation_previous_preset_init_cites_quickstart_section_2() {
+        let gates = vec![Gate::PreviousPreset {
+            preset: "novel-project-init".to_string(),
+            status: PreviousPresetStatus::Complete,
+            scope: "work".to_string(),
+        }];
+        let work = make_work();
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        let err = result.unwrap_err();
+        assert!(
+            err.failed_gates[0]
+                .remediation
+                .contains("novel-writing-quickstart.md §2"),
+            "previous_preset init remediation should cite §2: {:?}",
+            err.failed_gates[0].remediation
+        );
+    }
+
+    /// V1.43 (P1 §3 remediation — preset_gates_failed): previous_preset
+    /// remediation for novel-writing cites quickstart §3.
+    #[tokio::test]
+    async fn remediation_previous_preset_writing_cites_quickstart_section_3() {
+        let gates = vec![Gate::PreviousPreset {
+            preset: "novel-writing".to_string(),
+            status: PreviousPresetStatus::Complete,
+            scope: "work".to_string(),
+        }];
+        let work = make_work();
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "review", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        let err = result.unwrap_err();
+        assert!(
+            err.failed_gates[0]
+                .remediation
+                .contains("novel-writing-quickstart.md §3"),
+            "previous_preset writing remediation should cite §3: {:?}",
+            err.failed_gates[0].remediation
         );
     }
 }

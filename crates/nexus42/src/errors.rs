@@ -228,12 +228,29 @@ impl fmt::Display for CliError {
 
 // Helper constructors for enhanced error variants
 impl CliError {
-    /// Create a `DaemonNotReachable` error with suggestion
+    /// Create a `DaemonNotReachable` error with suggestion.
+    ///
+    /// V1.43 (P1 §3 remediation table — daemon not reachable): the default
+    /// suggestion cites quickstart Part I §1 step 5.
     #[allow(dead_code)]
     pub fn daemon_not_reachable(suggestion: impl Into<String>) -> Self {
         Self::DaemonNotReachable {
             message: "The nexus42 daemon is not reachable.".to_string(),
             suggestion: suggestion.into(),
+        }
+    }
+
+    /// Create a `DaemonNotReachable` error with the canonical V1.43
+    /// quickstart remediation string (Part I §1 step 5).
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn daemon_not_reachable_quickstart() -> Self {
+        Self::DaemonNotReachable {
+            message: "The nexus42 daemon is not reachable.".to_string(),
+            // V1.43 remediation: daemon down → quickstart §1 step 5
+            suggestion: "Start the daemon with `nexus42 daemon start`; \
+                see docs/novel-writing-quickstart.md §1"
+                .to_string(),
         }
     }
 
@@ -554,6 +571,25 @@ mod tests {
         assert!(
             msg.contains("daemon start"),
             "DaemonNotRunning message should suggest 'daemon start': {msg}"
+        );
+    }
+
+    // V1.43 (P1 §3 remediation — daemon not reachable): quickstart §1 citation
+    #[test]
+    fn daemon_not_reachable_quickstart_cites_section_1() {
+        let err = CliError::daemon_not_reachable_quickstart();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("daemon is not reachable"),
+            "should contain core message: {msg}"
+        );
+        assert!(
+            msg.contains("nexus42 daemon start"),
+            "should suggest starting daemon: {msg}"
+        );
+        assert!(
+            msg.contains("novel-writing-quickstart.md §1"),
+            "should cite quickstart §1: {msg}"
         );
     }
 }
