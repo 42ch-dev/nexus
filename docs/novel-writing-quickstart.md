@@ -159,10 +159,10 @@ open → resolved | wont_fix
 nexus42 creator works status
 ```
 
-A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a review pass:
+A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
 
 ```bash
-nexus42 creator run stage advance <work_id> --stage review
+nexus42 creator run review-master <work_id>
 ```
 
 > The quality loop uses local SQLite and the daemon — no Redis, no cron, no cloud dependency.
@@ -217,7 +217,7 @@ nexus42 creator works list
 nexus42 creator works use <work_id>
 
 # See the selection pool
-nexus42 creator works pool
+nexus42 creator works pool list
 ```
 
 The **selection pool** tracks which Work is `active` (the CLI default). Completing a Work clears the active slot — promote a new Work to active explicitly.
@@ -246,9 +246,9 @@ Works/<your-work-ref>/
 
 Cross-volume continuity is maintained through the shared World KB — characters and locations stay consistent because they live in the World, not per-Work.
 
-### C) Inspiration Pool
+### C) Work-Level Notes / Mid-Session Inspiration
 
-As you write, inspiration notes accumulate in the Work’s **inspiration log**. These are injected into the next chapter’s prompt context, so stray ideas and mid-session brainstorms are never lost.
+As you write, inspiration notes accumulate in the Work's **inspiration log**. These are injected into the next chapter's prompt context, so stray ideas and mid-session brainstorms are never lost.
 
 ```bash
 # Add inspiration at any time — even during auto-chain
@@ -256,11 +256,13 @@ nexus42 creator run continue <work_id> --note "Character X should have a hidden 
 ```
 
 Inspiration notes are:
-- **Appended** to the Work’s log (never overwrite).
+- **Appended** to the Work's log (never overwrite).
 - **Visible** in `creator works status`.
 - **Merged** into prompt context at the next chapter boundary.
 
 No special setup is needed — inspiration works out of the box with any ongoing novel Work.
+
+> For the **creator-scoped Inspiration Pool** (long-lived idea backlog, persisted at `Pool/Ideas/`), see `creator works pool inspiration *` and [novel-work-pool.md](../.mstar/knowledge/specs/novel-work-pool.md) §3.
 
 ---
 
