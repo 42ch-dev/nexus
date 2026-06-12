@@ -1,17 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-12T23:00:00+08:00",
+  "updated_at": "2026-06-12T23:30:00+08:00",
   "plans": [
-    {
-      "plan_id": "2026-06-12-v1.43-author-visibility",
-      "title": "P2 — completion + findings author-visible UX",
-      "status": "Todo",
-      "working_branch": "feature/v1.43-author-visibility",
-      "merge_target": "iteration/v1.43",
-      "plan_file": ".mstar/plans/2026-06-12-v1.43-author-visibility.md",
-      "depends_on": "2026-06-12-v1.43-cli-first-run-copy",
-      "compass": ".mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md"
-    },
     {
       "plan_id": "2026-06-12-v1.43-hygiene-and-residuals",
       "title": "P-last — author-path fixes + V1.42 spec hygiene",
