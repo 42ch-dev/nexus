@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-12-v1.43-hygiene-and-residuals
-verdict: Request Changes
-generated_at: 2026-06-12T23:45:00+08:00
+verdict: Approve
+generated_at: 2026-06-12T22:15:00+08:00
 ---
 
 # Code Review Report — P-last (hygiene and residuals)
@@ -121,3 +121,24 @@ generated_at: 2026-06-12T23:45:00+08:00
 | 🟢 Suggestion | 2 |
 
 **Verdict**: **Request Changes** — C-01 (clippy `too_long_first_doc_paragraph` on new code) is a blocking Critical. The lint cleanup commit `283d61e4` was supposed to handle all clippy issues but missed this one. Once fixed, the remaining Warning (W-01, maintenance trap) is non-blocking for P-last but should be addressed in a follow-up.
+
+## Revalidation (post-fix wave, fix commit 016832f1)
+
+**Re-review mode**: Targeted — qc-specialist only (raised 1 blocking Critical in initial wave)
+**Fix range reviewed**: 283d61e4..016832f1
+**Files in fix wave**: crates/nexus-orchestration/src/preset/loader.rs (+90/-22), Cargo.toml (+1 dev-dep), crates/nexus-local-db/src/work_chapters.rs (+50/-X), Cargo.lock
+
+### Previously raised blocking findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc1-C-01 | clippy too_long_first_doc_paragraph | **PASS** | `#[allow(clippy::too_long_first_doc_paragraph)]` present at loader.rs:1066 with justification comment (lines 1064–1065: "first paragraph intentionally lists the purpose in full for single-reading callers of this helper; splitting would reduce clarity"). `cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings` exits clean (0 errors). |
+| qc1-W-01 | KNOWN_TOP_LEVEL_KEYS maintenance trap | **NOT IN SCOPE** (deferred to V1.44+) | Prior recommendation explicitly deferred this to V1.44+; fix wave did not address it, which is expected. |
+
+### Static checks (re-run on full P-last feature scope a693752b..016832f1)
+- `cargo +nightly fmt --all --check`: **PASS** (no output)
+- `cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings`: **PASS** (0 errors)
+- Test counts: orchestration 560 passed, 0 failed; local-db 187 passed, 0 failed
+
+### Updated verdict
+**Verdict**: **Approve**
+**Rationale**: The sole blocking Critical (C-01) is resolved — the `#[allow(clippy::too_long_first_doc_paragraph)]` annotation is present with an adequate justification comment, and clippy is clean on both touched crates. W-01 remains deferred per the prior recommendation and is not in scope for this fix wave. All static checks pass (fmt, clippy, tests). No new findings from the fix wave diff.
