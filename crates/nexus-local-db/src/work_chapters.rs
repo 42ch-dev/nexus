@@ -408,6 +408,13 @@ fn verify_stories_dir_in_workspace(
 /// Returns `LocalDbError` if any database or I/O operation fails.
 /// Returns `LocalDbError::PathEscape` if `work_ref` would cause the resolved
 /// path to escape the `Works/<work_ref>/` subtree.
+//
+// Allow `clippy::too_many_lines` (pedantic): this is a single-purpose
+// reconcile routine that walks the filesystem and updates DB rows in one
+// pass; splitting into helper functions would hide the linear control flow
+// without reducing real complexity. Volume-aware per V1.43 P-last
+// (R-V142P1-F-003).
+#[allow(clippy::too_many_lines)]
 pub async fn reconcile_from_filesystem(
     pool: &SqlitePool,
     work_id: &str,
@@ -469,10 +476,7 @@ pub async fn reconcile_from_filesystem(
         let fm_word_count: Option<i32> = fm.get("word_count").and_then(|v| v.parse().ok());
         // R-V142P1-F-003: parse volume from frontmatter; default to 1 for
         // single-volume works or files without the field.
-        let fm_volume: i32 = fm
-            .get("volume")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1);
+        let fm_volume: i32 = fm.get("volume").and_then(|v| v.parse().ok()).unwrap_or(1);
 
         // Check if row exists (volume-aware: use frontmatter volume).
         let existing = get_chapter(pool, work_id, ch_num, fm_volume).await?;
