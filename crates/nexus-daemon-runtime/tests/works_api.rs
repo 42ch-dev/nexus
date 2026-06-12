@@ -457,6 +457,68 @@ async fn handler_append_inspiration_returns_404_for_unknown() {
     );
 }
 
+/// V1.42.1 (R-V142-MERGE-CI-001): the 404 path on `append_inspiration` MUST
+/// NOT acquire the runtime lock. The previous P0 T2 wiring (e8993870) called
+/// `RuntimeLockGuard::acquire` before the work-existence check, which caused
+/// `acquire_runtime_lock` to fail with `MissingVersionKey` → mapped to 500
+/// instead of 404, and (worse) would leak a holder entry for any concurrent
+/// reader until the row was touched. This test pins both behaviors:
+/// 1. The handler returns 404 (not 500) — primary contract.
+/// 2. No row in `works` table has `runtime_lock_holder IS NOT NULL` after
+///    the 404 — proving the lock was never written. (We count rows in the
+///    whole table because the non-existent work has no row to inspect; the
+///    fresh `handler_state()` seeds zero works with a lock, so the post-call
+///    count must remain zero.)
+#[tokio::test]
+async fn handler_append_inspiration_404_does_not_acquire_lock() {
+    let (state, _tmp) = handler_state().await;
+    let missing_work_id = "wrk_nonexistent_no_lock";
+
+    // Sanity: no work has an active lock at the start of the test.
+    let initial_locks: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE runtime_lock_holder IS NOT NULL")
+            .fetch_one(state.pool())
+            .await
+            .expect("count query should not error");
+    assert_eq!(
+        initial_locks, 0,
+        "precondition: fresh handler_state() should have zero active runtime locks"
+    );
+
+    // Call append_inspiration on a non-existent work.
+    let insp = AppendInspirationRequest {
+        note: "Note for non-existent work".into(),
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::append_inspiration(
+        State(state.clone()),
+        Path(missing_work_id.to_string()),
+        axum::Json(insp),
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(
+        result.unwrap_err().status_code(),
+        axum::http::StatusCode::NOT_FOUND,
+        "R-V142-MERGE-CI-001: append_inspiration on non-existent work must return 404"
+    );
+
+    // The 404 path must NOT have written any runtime_lock_holder row.
+    // If the previous bug (lock-before-existence-check) had been re-introduced,
+    // `acquire_runtime_lock` would have been called against a missing work,
+    // surfacing as a 500 (already covered above) AND any side-effect on
+    // existing rows. With the fix in place, the count stays at 0.
+    let post_locks: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE runtime_lock_holder IS NOT NULL")
+            .fetch_one(state.pool())
+            .await
+            .expect("count query should not error");
+    assert_eq!(
+        post_locks, 0,
+        "R-V142-MERGE-CI-001: 404 path on append_inspiration must not leave any runtime_lock_holder set; \
+         found {post_locks} row(s) with a non-NULL holder after the 404 response"
+    );
+}
+
 #[tokio::test]
 async fn handler_append_inspiration_returns_401_without_creator() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -1031,6 +1093,121 @@ async fn patch_work_stage_change_is_auditable() {
     assert_eq!(forced.0.current_stage, "produce");
     assert_eq!(forced.0.stage_status, "active");
     assert_eq!(forced.0.intake_status, "complete");
+}
+
+/// V1.42.1 (R-V142-MERGE-CI-001): `patch_work` MUST release the runtime lock
+/// after a stage PATCH, so a follow-up stage PATCH on the same Work succeeds
+/// without the prior `Locked` error. The previous P0 T2 wiring (e8993870) had
+/// an early `return Ok(Json(...))` in the stage path that bypassed
+/// `lock.release().await`, leaking the holder column and causing the second
+/// PATCH in `patch_work_stage_change_is_auditable` to fail.
+///
+/// This test exercises the stage path on its own and asserts the DB lock
+/// column is NULL after the call returns, so a follow-up acquire would
+/// succeed — which is the precondition for the existing audit test passing
+/// back-to-back.
+#[tokio::test]
+async fn patch_work_stage_path_releases_runtime_lock() {
+    use nexus_daemon_runtime::api::handlers::works::read_active_creator_id;
+
+    let (state, _tmp) = handler_state().await;
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).expect("test seeded an active creator");
+
+    // Create a Work
+    let req = CreateWorkRequest {
+        title: "Lock Release Test".into(),
+        long_term_goal: "Goal".into(),
+        initial_idea: "Idea".into(),
+        world_id: Some("wld_test_world".to_string()),
+        story_ref: None,
+        primary_preset_id: None,
+        client_request_id: None,
+        lineage_from_work_id: None,
+        set_pool_active: None,
+    };
+    let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
+        State(state.clone()),
+        axum::Json(req),
+    )
+    .await
+    .unwrap();
+    let work_id = resp.work_id.clone();
+
+    // First stage PATCH (force to bypass R-CURSOR-PR42-03 gate)
+    let patch = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: Some("complete".to_string()),
+        force: Some(true),
+        auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
+    };
+    let result = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::Json(patch),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "R-V142-MERGE-CI-001: first stage PATCH should succeed; got {:?}",
+        result.err()
+    );
+
+    // Verify the lock was released (R-V142-MERGE-CI-001 fix)
+    let work = nexus_local_db::works::get_work(state.pool(), &creator_id, &work_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        work.runtime_lock_holder.is_none(),
+        "R-V142-MERGE-CI-001: lock should be released after stage PATCH; \
+         found holder = {:?}",
+        work.runtime_lock_holder
+    );
+    assert!(
+        work.runtime_lock_acquired_at.is_none(),
+        "R-V142-MERGE-CI-001: acquired_at should be cleared after stage PATCH; \
+         found = {:?}",
+        work.runtime_lock_acquired_at
+    );
+
+    // Second stage PATCH on the SAME work should also succeed (no orphan lock)
+    let patch2 = PatchWorkRequest {
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: Some("produce".to_string()),
+        stage_status: Some("active".to_string()),
+        force: Some(true),
+        auto_review_master_on_timeout: None,
+        auto_chain_interrupted: None,
+    };
+    let result2 = nexus_daemon_runtime::api::handlers::works::patch_work(
+        State(state),
+        Path(work_id),
+        axum::Json(patch2),
+    )
+    .await;
+    assert!(
+        result2.is_ok(),
+        "R-V142-MERGE-CI-001: second stage PATCH should succeed (lock was released); \
+         got {:?}",
+        result2.err()
+    );
 }
 
 #[tokio::test]
