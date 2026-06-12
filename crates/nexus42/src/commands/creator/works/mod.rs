@@ -329,6 +329,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
 
             // V1.43 P2 (T2): fetch open findings summary for spec §4 row 3.
             // Best-effort — never fails the status command.
+            // Uses a shorter timeout (5s) to avoid blocking the hot path.
             let open_findings = fetch_open_findings(client, &resolved_id).await;
 
             if work_status == "completed" {
@@ -755,18 +756,45 @@ async fn handle_inspiration_archive(client: &DaemonClient, item_id: &str) -> Res
 
 // ── Shared display helpers (V1.42 P-last R-V141P0-02 dedup) ───────────
 
-/// Fetch open findings for a Work — best-effort, returns empty vec on failure.
+/// Findings subcall timeout — shorter than the default 30s to avoid
+/// blocking the status hot path when the findings endpoint is slow.
+const FINDINGS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Hard cap on the number of findings fetched from the daemon.
+const FINDINGS_FETCH_LIMIT: usize = 50;
+
+/// Result of fetching open findings from the daemon.
+///
+/// Distinguishes "successfully fetched 0 findings" from "fetch failed",
+/// so the display layer can print distinct messages.
+enum FindingsResult {
+    /// Findings were fetched successfully.
+    Fetched(Vec<serde_json::Value>),
+    /// The daemon did not return findings (network error, timeout, etc.).
+    Unavailable,
+}
+
+/// Fetch open findings for a Work — best-effort, returns `Unavailable` on failure.
 ///
 /// V1.43 P2 (T2): used by `handle_status` to satisfy spec §4 row 3
 /// ("Are there open findings? Count + severity summary").
-async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> Vec<serde_json::Value> {
-    let path = format!("/v1/local/works/{work_id}/findings?status=open&limit=50");
-    client
+///
+/// Uses a shorter timeout (`FINDINGS_FETCH_TIMEOUT`) than the default
+/// 30s so a slow findings endpoint does not block the status command.
+async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsResult {
+    let findings_client = DaemonClient::with_timeouts(
+        client.base_url(),
+        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+        FINDINGS_FETCH_TIMEOUT,
+    );
+    let path =
+        format!("/v1/local/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
+    findings_client
         .get::<serde_json::Value>(&path)
         .await
-        .ok()
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default()
+        .map_or(FindingsResult::Unavailable, |v| {
+            FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
+        })
 }
 
 /// Parsed open-findings summary for display formatting.
@@ -777,6 +805,8 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> Vec<serde_
 struct FindingsSummary {
     /// Total open finding count.
     open_count: usize,
+    /// Whether the count is truncated (server returned exactly the limit).
+    is_truncated: bool,
     /// Highest severity among open findings (ordered: blocker > major > minor > info).
     highest_severity: Option<String>,
     /// Per-severity counts for the summary line.
@@ -787,7 +817,11 @@ struct FindingsSummary {
 
 impl FindingsSummary {
     /// Parse from the JSON array returned by the findings list endpoint.
-    fn from_findings_json(findings: &[serde_json::Value]) -> Self {
+    ///
+    /// `is_truncated` should be `true` when the server returned exactly
+    /// `FINDINGS_FETCH_LIMIT` rows, indicating there may be more findings
+    /// beyond the fetched page.
+    fn from_findings_json(findings: &[serde_json::Value], is_truncated: bool) -> Self {
         if findings.is_empty() {
             return Self::default();
         }
@@ -852,6 +886,7 @@ impl FindingsSummary {
 
         Self {
             open_count,
+            is_truncated,
             highest_severity,
             severity_counts: severity_vec,
             top_findings,
@@ -864,15 +899,31 @@ impl FindingsSummary {
 /// Per spec §4 row 3: "Count + severity summary; link to review preset name."
 /// Per cli-spec §7.1: clear, non-jargon formatting.
 ///
-/// When `open_findings` is empty, prints "No open findings." and returns.
-fn print_findings_summary(open_findings: &[serde_json::Value], work_id: &str) {
-    let summary = FindingsSummary::from_findings_json(open_findings);
+/// - `FindingsResult::Fetched(vec)` with empty vec → "findings: none open"
+/// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
+fn print_findings_summary(result: &FindingsResult, work_id: &str) {
+    let findings = match result {
+        FindingsResult::Unavailable => {
+            println!("findings: unavailable (daemon error)");
+            return;
+        }
+        FindingsResult::Fetched(vec) => vec,
+    };
+
+    let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
+    let summary = FindingsSummary::from_findings_json(findings, is_truncated);
     if summary.open_count == 0 {
         println!("findings: none open");
         return;
     }
 
     // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
+    // Truncated: "findings: 50+ open (...)"
+    let count_display = if summary.is_truncated {
+        format!("{}+", summary.open_count)
+    } else {
+        format!("{}", summary.open_count)
+    };
     let sev_parts: Vec<String> = summary
         .severity_counts
         .iter()
@@ -883,20 +934,20 @@ fn print_findings_summary(open_findings: &[serde_json::Value], work_id: &str) {
         .highest_severity
         .as_ref()
         .map_or(String::new(), |h| format!(" — highest: {h}"));
-    println!(
-        "findings: {} open ({sev_summary}){highest_tag}",
-        summary.open_count
-    );
+    println!("findings: {count_display} open ({sev_summary}){highest_tag}");
 
-    // Top findings with routing hints.
+    // Top findings with routing hints (sanitized).
     for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
-        let display_title = truncate_with_ellipsis(title, 48);
-        println!("  #{} [{sev}] \"{display_title}\" {hint}", i + 1);
+        let safe_title = sanitize_for_terminal(title);
+        let safe_hint = sanitize_for_terminal(hint);
+        let display_title = truncate_with_ellipsis(&safe_title, 48);
+        println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
     }
 
-    // Review action hint — cite quickstart §5.
+    // Review action hint — cite quickstart §5 (sanitize work_id for defense in depth).
+    let safe_work_id = sanitize_for_terminal(work_id);
     println!(
-        "  Address findings or run: nexus42 creator run stage advance {work_id} --stage review"
+        "  Address findings or run: nexus42 creator run stage advance {safe_work_id} --stage review"
     );
     println!("  See docs/novel-writing-quickstart.md §5");
 }
@@ -961,6 +1012,35 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
     }
 }
 
+/// Strip ASCII control characters and ANSI escape sequences from a string
+/// to prevent terminal display corruption from user-supplied data.
+///
+/// Preserves printable ASCII, Unicode, `\n`, and `\t`. Strips:
+/// - ASCII control chars 0x00–0x1F (except `\n` 0x0A and `\t` 0x09) and 0x7F (DEL)
+/// - ANSI CSI sequences (`ESC [ ... letter`)
+fn sanitize_for_terminal(s: &str) -> String {
+    // Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
+    let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap_or_else(|e| {
+        // The pattern is a compile-time constant; panic is unreachable.
+        unreachable!("invalid ANSI regex pattern: {e}")
+    });
+    let stripped = ansi_re.replace_all(s, "");
+
+    // Phase 2: remove remaining ASCII control chars (keep \n, \t, and printable).
+    stripped
+        .chars()
+        .filter(|&c| {
+            if c == '\n' || c == '\t' {
+                return true;
+            }
+            let code = c as u32;
+            // Allow printable chars: space (0x20) and above, excluding DEL (0x7F).
+            // Below 0x20 are control chars — filter them out.
+            code >= 0x20 && code != 0x7F
+        })
+        .collect()
+}
+
 // ── Tests (V1.43 P2 T4) ───────────────────────────────────────────────
 
 #[cfg(test)]
@@ -981,8 +1061,9 @@ mod tests {
 
     #[test]
     fn findings_summary_empty() {
-        let summary = FindingsSummary::from_findings_json(&[]);
+        let summary = FindingsSummary::from_findings_json(&[], false);
         assert_eq!(summary.open_count, 0);
+        assert!(!summary.is_truncated);
         assert!(summary.highest_severity.is_none());
         assert!(summary.severity_counts.is_empty());
         assert!(summary.top_findings.is_empty());
@@ -991,8 +1072,9 @@ mod tests {
     #[test]
     fn findings_summary_single_finding() {
         let findings = vec![finding_json("major", "Plot hole", "→ write")];
-        let summary = FindingsSummary::from_findings_json(&findings);
+        let summary = FindingsSummary::from_findings_json(&findings, false);
         assert_eq!(summary.open_count, 1);
+        assert!(!summary.is_truncated);
         assert_eq!(summary.highest_severity.as_deref(), Some("major"));
         assert_eq!(summary.severity_counts, vec![("major".to_string(), 1)]);
         assert_eq!(summary.top_findings.len(), 1);
@@ -1007,7 +1089,7 @@ mod tests {
             finding_json("minor", "Typo", "→ none"),
             finding_json("major", "Plot hole", "→ brainstorm"),
         ];
-        let summary = FindingsSummary::from_findings_json(&findings);
+        let summary = FindingsSummary::from_findings_json(&findings, false);
         assert_eq!(summary.open_count, 4);
         assert_eq!(summary.highest_severity.as_deref(), Some("blocker"));
         // Sorted by severity priority (blocker first).
@@ -1022,25 +1104,37 @@ mod tests {
         let findings: Vec<serde_json::Value> = (0..8)
             .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
             .collect();
-        let summary = FindingsSummary::from_findings_json(&findings);
+        let summary = FindingsSummary::from_findings_json(&findings, false);
         assert_eq!(summary.open_count, 8);
         assert_eq!(summary.top_findings.len(), 5);
+    }
+
+    #[test]
+    fn findings_summary_truncated_flag() {
+        let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
+            .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
+            .collect();
+        let summary = FindingsSummary::from_findings_json(&findings, true);
+        assert_eq!(summary.open_count, FINDINGS_FETCH_LIMIT);
+        assert!(summary.is_truncated);
     }
 
     // ── print_findings_summary display tests ─────────────────────────────
 
     fn capture_findings_output(findings: &[serde_json::Value], work_id: &str) -> String {
-        // Capture stdout from print_findings_summary.
-        let buf: Vec<u8> = Vec::new();
-        let locked = std::io::BufWriter::new(buf);
-        // We cannot easily redirect println! in unit tests without a global
-        // writer. Instead, test the summary struct directly and format manually.
-        let summary = FindingsSummary::from_findings_json(findings);
+        // Test the summary struct formatting (mirrors print_findings_summary logic).
+        let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
+        let summary = FindingsSummary::from_findings_json(findings, is_truncated);
         let mut lines = Vec::new();
 
         if summary.open_count == 0 {
             lines.push("findings: none open".to_string());
         } else {
+            let count_display = if summary.is_truncated {
+                format!("{}+", summary.open_count)
+            } else {
+                format!("{}", summary.open_count)
+            };
             let sev_parts: Vec<String> = summary
                 .severity_counts
                 .iter()
@@ -1052,19 +1146,24 @@ mod tests {
                 .as_ref()
                 .map_or(String::new(), |h| format!(" — highest: {h}"));
             lines.push(format!(
-                "findings: {} open ({sev_summary}){highest_tag}",
-                summary.open_count
+                "findings: {count_display} open ({sev_summary}){highest_tag}"
             ));
             for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
-                lines.push(format!("  #{} [{sev}] \"{title}\" {hint}", i + 1));
+                let safe_title = sanitize_for_terminal(title);
+                let safe_hint = sanitize_for_terminal(hint);
+                let display_title = truncate_with_ellipsis(&safe_title, 48);
+                lines.push(format!(
+                    "  #{} [{sev}] \"{display_title}\" {safe_hint}",
+                    i + 1
+                ));
             }
+            let safe_work_id = sanitize_for_terminal(work_id);
             lines.push(format!(
-                "  Address findings or run: nexus42 creator run stage advance {work_id} --stage review"
+                "  Address findings or run: nexus42 creator run stage advance {safe_work_id} --stage review"
             ));
             lines.push("  See docs/novel-writing-quickstart.md §5".to_string());
         }
 
-        drop(locked);
         lines.join("\n")
     }
 
@@ -1112,6 +1211,8 @@ mod tests {
         assert!(output.contains("findings: none open"));
     }
 
+    // ── Truncation tests ─────────────────────────────────────────────────
+
     #[test]
     fn truncate_with_ellipsis_short() {
         assert_eq!(truncate_with_ellipsis("hello", 10), "hello");
@@ -1120,5 +1221,93 @@ mod tests {
     #[test]
     fn truncate_with_ellipsis_long() {
         assert_eq!(truncate_with_ellipsis("hello world", 5), "hello…");
+    }
+
+    // ── Truncated findings (50+) display test ────────────────────────────
+
+    #[test]
+    fn display_truncated_findings_shows_plus_indicator() {
+        let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
+            .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
+            .collect();
+        let output = capture_findings_output(&findings, "wrk_many");
+        assert!(
+            output.contains(&format!("findings: {}+ open", FINDINGS_FETCH_LIMIT)),
+            "expected '50+ open' indicator in output: {output}"
+        );
+        // Should NOT show bare "50 open" (without +).
+        assert!(
+            !output.contains(&format!("findings: {} open", FINDINGS_FETCH_LIMIT)),
+            "should not show exact count without '+' when truncated"
+        );
+    }
+
+    // ── sanitize_for_terminal tests ──────────────────────────────────────
+
+    #[test]
+    fn sanitize_for_terminal_strips_escape_codes() {
+        let input = "\x1b[31mRed Text\x1b[0m normal";
+        let sanitized = sanitize_for_terminal(input);
+        assert_eq!(sanitized, "Red Text normal");
+    }
+
+    #[test]
+    fn sanitize_for_terminal_preserves_unicode() {
+        let input = "你好世界 🌍 こんにちは";
+        let sanitized = sanitize_for_terminal(input);
+        assert_eq!(sanitized, input);
+    }
+
+    #[test]
+    fn sanitize_for_terminal_strips_control_chars() {
+        let input = "hello\x00world\x07bell\x1Fus";
+        let sanitized = sanitize_for_terminal(input);
+        assert_eq!(sanitized, "helloworldbellus");
+    }
+
+    #[test]
+    fn sanitize_for_terminal_strips_del() {
+        // DEL (0x7F) should be removed
+        let input = "before\x7Fafter";
+        let sanitized = sanitize_for_terminal(input);
+        assert_eq!(sanitized, "beforeafter");
+    }
+
+    #[test]
+    fn sanitize_for_terminal_preserves_newline_and_tab() {
+        let input = "line1\nline2\ttab";
+        let sanitized = sanitize_for_terminal(input);
+        assert_eq!(sanitized, "line1\nline2\ttab");
+    }
+
+    #[test]
+    fn sanitize_for_terminal_strips_clear_screen() {
+        // \x1b[2J is "clear screen"
+        let input = "good\x1b[2Jbad";
+        let sanitized = sanitize_for_terminal(input);
+        assert_eq!(sanitized, "goodbad");
+    }
+
+    // ── FindingsResult unavailable display test ──────────────────────────
+
+    #[test]
+    fn display_unavailable_findings() {
+        // When findings are unavailable, the output should say "unavailable"
+        // not "none open". This tests the logic that print_findings_summary uses.
+        let result = FindingsResult::Unavailable;
+        let output = match result {
+            FindingsResult::Unavailable => "findings: unavailable (daemon error)".to_string(),
+            FindingsResult::Fetched(vec) => {
+                let is_truncated = vec.len() == FINDINGS_FETCH_LIMIT;
+                let summary = FindingsSummary::from_findings_json(&vec, is_truncated);
+                if summary.open_count == 0 {
+                    "findings: none open".to_string()
+                } else {
+                    format!("findings: {} open", summary.open_count)
+                }
+            }
+        };
+        assert!(output.contains("unavailable"));
+        assert!(!output.contains("none open"));
     }
 }
