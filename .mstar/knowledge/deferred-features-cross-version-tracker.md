@@ -7,7 +7,7 @@
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-12 (V1.43 prepare: BL-10 → V1.43 Active P0; V1.42 → Shipped; `iteration/v1.43` on main worktree)
+**Last updated**: 2026-06-12 (V1.43 prepare: BL-10 → V1.43 Active P0; DF-69 backlog; V1.42 → Shipped; `iteration/v1.43` on main worktree)
 
 ---
 
@@ -90,7 +90,8 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-65 | Three-layer rules architecture | V1.36 distill | **V1.40 P0.5 Shipped** | M | V1.36→V1.37→V1.39→V1.40 | Plan: [2026-06-09-v1.39-rules-and-logs.md](../plans/2026-06-09-v1.39-rules-and-logs.md). V1.39 shipped Layer 1 at `embedded-presets/rules/writing-craft.md` (interim). **V1.40 P0.5** migrated Layer 1 to `embedded-rules/writing-craft.md` per spec §5.5.4; doc path corrected in this tracker and `world-kb-runtime-architecture.md`. |
 | DF-66 | Per-chapter log subdirectories at `Works/<work_ref>/Logs/` | V1.36 distill | **V1.39 P3 Shipped** | S | V1.36→V1.37→V1.39 | Same plan as DF-65. Implemented: `Logs/{brainstorm,write,review,publish}/` subdirs scaffolded; novel-writing writes to `Logs/write/`; sync exclusion documented. PR #50 merged ad9725d8. |
 | DF-67 | Master-decision timeout (96h finding escalation) | V1.36 distill | **V1.39 P4 Shipped** | S | V1.36→V1.37→V1.39 | Plan: [2026-06-09-v1.39-master-decision-timeout.md](../plans/2026-06-09-v1.39-master-decision-timeout.md). Implemented: 24h-interval daemon task (env-var override); `find_resumable_works` stale-finding DAO; CLI status banner `⏰ N findings stale (>96h)`; per-Work `auto_review_master_on_timeout` opt-in (default false); RVM-prefixed review-master schedule helper; 7 hermetic tests. PR #50 merged ad9725d8. |
-| BL-10 | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | V1.41 prepare | **V1.43 P0 Active** | M | V1.41→V1.42 backlog→V1.43 | Ongoing serial happy path (Part I) + multi-work/multi-volume appendix (Part II). Plan: [2026-06-12-v1.43-novel-writing-quickstart.md](../plans/2026-06-12-v1.43-novel-writing-quickstart.md). Spec: [novel-author-experience.md](specs/novel-author-experience.md). |
+| BL-10 | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | V1.41 prepare | **V1.43 P0 Active** | M | V1.41→V1.43 | Ongoing serial happy path (Part I) + multi-work/multi-volume appendix (Part II). Plan: [2026-06-12-v1.43-novel-writing-quickstart.md](../plans/2026-06-12-v1.43-novel-writing-quickstart.md). Spec: [novel-author-experience.md](specs/novel-author-experience.md). |
+| DF-69 | **Standalone manuscript audit preset** (review report **or** KB extract on chapter正文) | V1.43 grill-me | **Post-V1.43** | M | V1.43 | Dual-mode embedded preset (or preset pair) invoked **on demand** against existing `Works/<work_ref>/Stories/ch*.md` — **without** entering full FL-E auto-chain. **`mode=review`**: read chapter body → structured review (五问 baseline + optional extended checks) → write human-readable report under `Logs/review/` and optionally upsert `findings` rows. **`mode=extract`**: same `work_id` + `body_path` / chapter locator → `kb.extract_work` for World-bound Works (promote KeyBlocks) without `kb_extract_jobs` queue ceremony. **Distinct from shipped**: `novel-writing` finalize `llm_judge` (inline gate only); `reflection-loop` (FL-E `review` stage default); `novel-review-master` (master decisions on **existing** findings); `kb-extract` preset (queue claim → job lifecycle). **Entry sketch** (spec TBD): `creator run audit-chapter --mode review|extract` or `daemon schedule add --preset novel-manuscript-audit`. Natural follow-up after V1.43 author visibility (P2); spec overlay candidate: extend [novel-quality-loop.md](specs/novel-quality-loop.md) §3 or [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §extract-on-demand. |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -319,4 +320,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-12 (V1.43 Active prepare). Status: **V1.43 Active** on `iteration/v1.43`; V1.42 Shipped; BL-10 Active P0.*
+*Last updated: 2026-06-12 (V1.43 Active prepare + DF-69). Status: **V1.43 Active** on `iteration/v1.43`; V1.42 Shipped; BL-10 Active P0; DF-69 Post-V1.43 backlog.*
