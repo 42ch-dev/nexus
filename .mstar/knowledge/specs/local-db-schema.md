@@ -3,7 +3,8 @@
 **Status**: Normative  
 **Document class**: Master  
 **V1.40 Shipped amendments:** §4.1.2 `kb_key_blocks` validation intent — application-layer validation in `nexus-kb::validation` module (ValidationMode::Novel enforces `body.attributes.novel_category`); `narrative_worlds` rows via `creator world create` (V1.40 P0); `kb_extract_jobs` artifact locator columns (`source_kind`, `source_locator`, `profile_hint`, `work_id`) added V1.40 P3.  
-**Last updated**: 2026-06-11 — V1.40 P1/P3 shipped  
+**V1.42 Draft amendment:** `work_chapters` PK migration — composite primary key `(work_id, volume, chapter)` with `volume INTEGER NOT NULL DEFAULT 1`; backfill existing rows `volume = 1`; drop legacy `(work_id, chapter)` PK. Normative detail: [novel-workflow-profile.md §4.5.4](novel-workflow-profile.md). Plan: [2026-06-11-v1.42-multi-volume.md](../../plans/2026-06-11-v1.42-multi-volume.md).  
+**Last updated**: 2026-06-11 — V1.42 prepare overlay  
 
 ## 0. 文档定位
 

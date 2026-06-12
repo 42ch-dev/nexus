@@ -16,7 +16,7 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
-use crate::preset::manifest::{EnterAction, ExitWhen, StateDefinition};
+use crate::preset::manifest::{EnterAction, ExitWhen, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
@@ -514,6 +514,8 @@ pub struct StateCompositeTask {
     terminal: bool,
     enter_actions: Vec<EnterAction>,
     exit_when: Option<ExitWhen>,
+    /// Transition target (linear, go/nogo, or conditional).
+    next: Option<NextTarget>,
     /// Orchestration engine reference (for spawning child sessions).
     engine: Option<Arc<dyn OrchestrationEngine>>,
     /// Named inner graphs keyed by name.
@@ -522,6 +524,8 @@ pub struct StateCompositeTask {
     output_bindings: std::collections::HashMap<String, String>,
     /// Shared capability registry (injected by the engine; falls back to builtins if None).
     registry: Option<std::sync::Arc<CapabilityRegistry>>,
+    /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
 }
 
 impl StateCompositeTask {
@@ -535,10 +539,12 @@ impl StateCompositeTask {
             terminal: state.terminal,
             enter_actions: state.enter.clone(),
             exit_when: state.exit_when.clone(),
+            next: state.next.clone(),
             engine: None,
             inner_graphs: std::collections::HashMap::new(),
             output_bindings: std::collections::HashMap::new(),
             registry: None,
+            daemon_tool_dispatch: None,
         }
     }
 
@@ -576,6 +582,16 @@ impl StateCompositeTask {
         self
     }
 
+    /// Set the daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
+    #[must_use]
+    pub fn with_daemon_tool_dispatch(
+        mut self,
+        dispatch: std::sync::Arc<dyn crate::capability::DaemonToolDispatch>,
+    ) -> Self {
+        self.daemon_tool_dispatch = Some(dispatch);
+        self
+    }
+
     /// Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
     ///
     /// For embedded presets, reads the template content from the compiled-in
@@ -603,6 +619,21 @@ impl StateCompositeTask {
             }
         }
         self
+    }
+
+    /// Determine the `NextAction` after judge evaluation.
+    ///
+    /// When `next` is `GoNogo`, both GO and NOGO advance via `Continue`
+    /// (the conditional edge routes to the correct target).
+    /// When `next` is `Linear` or `None`, GO advances but NOGO waits.
+    // Clippy wants const but this borrows self.next; suppress.
+    #[allow(clippy::missing_const_for_fn)]
+    fn judge_next_action(&self, judge_result: bool) -> NextAction {
+        match &self.next {
+            Some(NextTarget::GoNogo(_)) => NextAction::Continue,
+            _ if judge_result => NextAction::Continue,
+            _ => NextAction::WaitForInput,
+        }
     }
 }
 
@@ -717,6 +748,26 @@ impl Task for StateCompositeTask {
                             .await;
                     }
                 }
+                EnterAction::HostTool { tool_name, args } => {
+                    // DF-47 (V1.42 P3): invoke daemon-side nexus.* tool.
+                    // The dispatch slot is injected by the engine at graph
+                    // construction time via `with_daemon_tool_dispatch`.
+                    let dispatch = self.daemon_tool_dispatch.as_ref();
+                    if let Some(dispatch) = dispatch {
+                        let host_tool_task = HostToolCallTask::from_dispatch(
+                            dispatch.clone(),
+                            format!("{}_host_tool_{}", self.id, tool_name.replace('.', "_")),
+                            tool_name.clone(),
+                            args.clone()
+                                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+                        );
+                        host_tool_task.run(context.clone()).await?;
+                    } else {
+                        return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                            "HostTool action requires daemon_tool_dispatch but none is configured (tool: {tool_name})"
+                        )));
+                    }
+                }
             }
         }
 
@@ -800,10 +851,8 @@ impl Task for StateCompositeTask {
                                             Some(format!("judge (throttled): {prev_reason}")),
                                             if self.terminal {
                                                 NextAction::End
-                                            } else if prev_result {
-                                                NextAction::Continue
                                             } else {
-                                                NextAction::WaitForInput
+                                                self.judge_next_action(prev_result)
                                             },
                                         ));
                                     }
@@ -827,11 +876,10 @@ impl Task for StateCompositeTask {
                     context.set("_judge_result", result).await;
                     context.set("_judge_reason", reason.clone()).await;
 
-                    if result {
-                        NextAction::Continue
-                    } else {
-                        NextAction::WaitForInput
-                    }
+                    // V1.42 P2: when next is GoNogo, both GO and NOGO advance
+                    // (the conditional edge routes to the correct target).
+                    // When next is Linear/None, GO advances but NOGO waits.
+                    self.judge_next_action(result)
                 }
             }
             Some(ExitWhen::GraphComplete) => {
@@ -1331,6 +1379,19 @@ fn render_strict_template(template: &str, payload: &serde_json::Value) -> anyhow
 ///
 /// # Errors
 ///
+/// Check whether a JSON value contains any handlebars template placeholder (`{{`).
+///
+/// Used to short-circuit the expensive `build_nested_payload` + `render_value_templates`
+/// path when no placeholders exist (T7, qc3 W-02 hot-path fix).
+fn value_contains_template(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(s) => s.contains("{{"),
+        serde_json::Value::Object(map) => map.values().any(value_contains_template),
+        serde_json::Value::Array(arr) => arr.iter().any(value_contains_template),
+        _ => false,
+    }
+}
+
 /// Returns an error if any string value contains a template placeholder that
 /// fails to render (e.g. `{{nonexistent.key}}`). This is fail-closed: the
 /// capability is NOT called with literal "{{...}}" placeholders.
@@ -1413,6 +1474,192 @@ fn insert_nested(
             .expect("insert_nested: intermediate segment must be an object");
     }
     current.insert(leaf.to_string(), value);
+}
+
+// ---------------------------------------------------------------------------
+// HostToolCallTask — invoke a nexus.* tool from a schedule tick (DF-47, V1.42 P3)
+// ---------------------------------------------------------------------------
+
+/// Type alias for the dispatch slot used by `HostToolCallTask`.
+/// Wraps an `Arc<Mutex<Option<Arc<dyn DaemonToolDispatch>>>>` for interior
+/// mutability without consuming the dispatch on use.
+type DaemonDispatchSlot = std::sync::Arc<
+    std::sync::Mutex<Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>>,
+>;
+
+/// A task that calls a `nexus.*` host tool through the daemon's unified registry.
+///
+/// Production wiring for DF-47: the schedule executor can invoke read-only
+/// (or mutating) `nexus.*` tools on a configured stage without worker IPC.
+/// The call goes directly through [`crate::capability::DaemonToolDispatch`]
+/// which is implemented in `nexus-daemon-runtime` using
+/// `HostToolExecutor::dispatch_from_worker`.
+///
+/// Design: `agent-nexus-tool-bridge.md` §7.4, V1.42 P3.
+pub struct HostToolCallTask {
+    /// Daemon-side tool dispatch provider (test-oriented, wraps Arc<Mutex<Option<...>>>).
+    dispatch: Option<DaemonDispatchSlot>,
+    /// Direct dispatch reference (production path, no Mutex overhead).
+    direct_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    /// Tool name, e.g. `"nexus.orchestration.schedule_status"`.
+    tool_name: String,
+    /// Tool parameters (may contain template references rendered at runtime).
+    args: serde_json::Value,
+    /// Unique task id for logging.
+    task_id: String,
+}
+
+impl HostToolCallTask {
+    /// Create a new `HostToolCallTask`.
+    ///
+    /// `dispatch`: the daemon-side tool dispatch provider. `None` for test stub mode.
+    /// `task_id`: unique identifier for this task instance.
+    /// `tool_name`: the `nexus.*` tool to invoke.
+    /// `args`: tool parameters (JSON object, may contain template placeholders).
+    #[must_use]
+    pub fn new(
+        dispatch: Option<DaemonDispatchSlot>,
+        task_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            dispatch,
+            direct_dispatch: None,
+            task_id: task_id.into(),
+            tool_name: tool_name.into(),
+            args,
+        }
+    }
+
+    /// Create with a direct dispatch reference (production path from `StateCompositeTask`).
+    ///
+    /// This avoids the `Mutex<Option<...>>` wrapper used by the test-oriented `new()`.
+    /// The dispatch is stored directly; `run()` skips the lock/unlock overhead.
+    #[must_use]
+    pub fn from_dispatch(
+        dispatch: std::sync::Arc<dyn crate::capability::DaemonToolDispatch>,
+        task_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            dispatch: None,
+            direct_dispatch: Some(dispatch),
+            task_id: task_id.into(),
+            tool_name: tool_name.into(),
+            args,
+        }
+    }
+
+    /// Create in stub mode (no daemon dispatch, for testing).
+    #[must_use]
+    pub fn new_stub(
+        task_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            dispatch: None,
+            direct_dispatch: None,
+            task_id: task_id.into(),
+            tool_name: tool_name.into(),
+            args,
+        }
+    }
+}
+
+#[async_trait]
+impl Task for HostToolCallTask {
+    fn id(&self) -> &str {
+        &self.task_id
+    }
+
+    async fn run(
+        &self,
+        context: graph_flow::Context,
+    ) -> Result<TaskResult, graph_flow::GraphError> {
+        // T7 (qc3 W-02): short-circuit template rendering when args contain no
+        // placeholders. Avoids serializing the full context + handlebars walk
+        // for trivial calls like `{"work_id": "..."}`.
+        let rendered_args = if value_contains_template(&self.args) {
+            let payload = build_nested_payload(&context);
+            render_value_templates(&self.args, &payload)?
+        } else {
+            self.args.clone()
+        };
+
+        // Generate a request_id for traceability.
+        let request_id = format!(
+            "host_tool_{}_{}",
+            self.tool_name.replace('.', "_"),
+            uuid::Uuid::new_v4()
+        );
+
+        let result_value = if let Some(ref dispatch_ref) = self.direct_dispatch {
+            // Production path (direct): call through injected dispatch.
+            dispatch_ref
+                .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
+                .await
+                .map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "daemon tool dispatch failed for {}: {e}",
+                        self.tool_name
+                    ))
+                })?
+        } else if let Some(ref dispatch_arc) = self.dispatch {
+            // Test-oriented path: call through Mutex-wrapped dispatch slot.
+            let dispatch = {
+                let guard = dispatch_arc.lock().map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "daemon tool dispatch lock: {e}"
+                    ))
+                })?;
+                guard
+                    .as_ref()
+                    .ok_or_else(|| {
+                        graph_flow::GraphError::TaskExecutionFailed(
+                            "daemon tool dispatch not available".into(),
+                        )
+                    })?
+                    .clone()
+            };
+
+            dispatch
+                .dispatch_tool(&self.tool_name, &rendered_args, &request_id)
+                .await
+                .map_err(|e| {
+                    graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "daemon tool dispatch failed for {}: {e}",
+                        self.tool_name
+                    ))
+                })?
+        } else {
+            // Stub mode: return a synthetic result.
+            serde_json::json!({
+                "stub": true,
+                "tool_name": self.tool_name,
+                "args": rendered_args,
+                "request_id": request_id,
+            })
+        };
+
+        // Store the result in context for downstream nodes.
+        let context_key = format!("host_tool.{}.result", self.task_id);
+        context.set(&context_key, &result_value).await;
+        context.set("_last_host_tool_result", &result_value).await;
+
+        tracing::info!(
+            tool_name = %self.tool_name,
+            request_id = %request_id,
+            "HostToolCallTask completed"
+        );
+
+        Ok(TaskResult::new(
+            Some(format!("host_tool_call:{}:ok", self.tool_name)),
+            NextAction::Continue,
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1518,6 +1765,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::preset::manifest::GoNogoNext;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -1598,6 +1846,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockGoProvider)),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1636,6 +1885,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockNogoProvider)),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1728,6 +1978,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(provider),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -1773,6 +2024,7 @@ mod tests {
         let deps = CapabilityRuntimeDeps {
             pool: None,
             worker_provider: Some(provider),
+            daemon_tool_dispatch: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -2563,5 +2815,74 @@ mod tests {
         // Verify identity injection still works after template rendering
         assert_eq!(cap_input["_creator_id"], "ctr_test");
         assert_eq!(cap_input["_session_id"], "sess_test");
+    }
+
+    // ── V1.42 P2 T4: judge_next_action unit tests ──────────────────────
+
+    fn make_composite_with_next(next: Option<NextTarget>) -> StateCompositeTask {
+        StateCompositeTask {
+            id: "test_judge".to_string(),
+            terminal: false,
+            enter_actions: vec![],
+            exit_when: None,
+            next,
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
+            registry: None,
+            daemon_tool_dispatch: None,
+        }
+    }
+
+    #[test]
+    fn judge_next_action_linear_go_advances() {
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
+    }
+
+    #[test]
+    fn judge_next_action_linear_nogo_waits() {
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::WaitForInput
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_none_go_advances() {
+        let task = make_composite_with_next(None);
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
+    }
+
+    #[test]
+    fn judge_next_action_none_nogo_waits() {
+        let task = make_composite_with_next(None);
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::WaitForInput
+        ));
+    }
+
+    #[test]
+    fn judge_next_action_gonogo_go_advances() {
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "go_state".to_string(),
+            nogo: "nogo_state".to_string(),
+        })));
+        assert!(matches!(task.judge_next_action(true), NextAction::Continue));
+    }
+
+    #[test]
+    fn judge_next_action_gonogo_nogo_also_advances() {
+        // Key V1.42 behavior: NOGO with GoNogo next → Continue (edge routes to nogo target).
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "go_state".to_string(),
+            nogo: "nogo_state".to_string(),
+        })));
+        assert!(matches!(
+            task.judge_next_action(false),
+            NextAction::Continue
+        ));
     }
 }

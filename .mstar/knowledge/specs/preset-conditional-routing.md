@@ -1,7 +1,7 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Exploration (pre-normative — **not shipped**)  
-**Document class**: Exploration  
+**Status**: Draft V1.42 (minimal slice shipped — `llm_judge` GO/NOGO → two `next` edges; full DF-56 roadmap in deferred tracker §3.6.3)  
+**Document class**: Draft overlay (V1.42 P2 minimal slice)  
 **Created**: 2026-06-06  
 **Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (future iteration)  
@@ -19,24 +19,31 @@
 
 Authors need presets that branch on runtime signals (judge outcome, tool result, user input) without spawning separate schedules or manual `creator run stage advance` calls.
 
-Today:
+**V1.42 P2 shipped minimal slice** (2026-06-11):
 
-- Preset loader rejects `next.kind: conditional` with `ConditionalNotYetSupported`.
+- `llm_judge` states with `next: { go: <state>, nogo: <state> }` now accepted by loader.
+- Graph wires a conditional edge using `_judge_result` from context.
+- GO → `go` target; NOGO or worker-unavailable → `nogo` target.
+- Only valid on `exit_when: { kind: llm_judge }` states. Full expression-based conditional routing remains post-V1.42 (see §3.6.3).
+- Plan: [2026-06-11-v1.42-conditional-routing.md](../../plans/2026-06-11-v1.42-conditional-routing.md).
+
+Pre-V1.42 state:
+
+- Preset loader rejected `next.kind: conditional` with `ConditionalNotYetSupported`.
 - Shipped creator workflow uses linear stage enum + explicit `creator run stage advance` (DF-53 auto-chain still open).
 - V1.32 validator catches invalid preset graphs at load time for **linear** graphs only.
 
-This spec holds **design axes and dependencies** until a future locked compass authorizes implement. It does **not** authorize code changes while Status remains Exploration.
-
 ---
 
-## 2. Current state (post-V1.34)
+## 2. Current state (V1.42 P2 shipped)
 
 | Area | State |
 | --- | --- |
-| Preset loader | Rejects `next.kind: conditional` → `ConditionalNotYetSupported` |
+| Preset loader | Accepts `next: { go: <state>, nogo: <state> }` on `llm_judge` states; still rejects expression-based `ConditionalNotYetSupported` |
 | Creator workflow stages | Linear enum; explicit `creator run stage advance` |
 | Quality gate | V1.32 validator: reachability, terminal consistency, asset sandbox (linear graphs) |
-| Open deferrals | DF-29 (`registry.refresh`), DF-31 (`workspace.*`), **DF-56** (routing engine) |
+| Conditional edge runtime | `graph_flow::add_conditional_edge` reads `_judge_result` from context |
+| Open deferrals | DF-29 (`registry.refresh`), DF-31 (`workspace.*`), **DF-56** (full expression routing — post-V1.42) |
 
 ---
 
@@ -120,10 +127,10 @@ next:
 
 | Event | Action |
 | --- | --- |
-| Implement compass locks | Status → Draft; open implement plan; extend orchestration-engine §7.5 |
+| V1.42 P2 implement compass locks | Status → Draft V1.42; open implement plan; ship minimal `llm_judge` GO/NOGO slice ✅ (2026-06-11) |
 | First preset with conditional edges ships | Status → Normative; close DF-56 in deferred tracker |
 | Conflict with active linear creator-workflow spec | Linear workflow spec wins until ADR + compass explicitly supersedes |
 
 ---
 
-*Exploration SSOT for preset conditional routing (DF-56). Delivery authority remains a future locked compass.*
+*Draft V1.42 SSOT for preset conditional routing (DF-56 minimal slice). Full routing authority remains a future locked compass.*

@@ -365,6 +365,22 @@ impl ScheduleSupervisor {
             }
         }
 
+        // V1.42 P0 (T3): Release runtime lock held by this schedule.
+        // The holder format is `daemon:schedule:<schedule_id>`.
+        // Look up the Work that was driven by this schedule and release its lock.
+        if let Some(ref creator_id) = &row {
+            let holder = format!("daemon:schedule:{schedule_id}");
+            // Best-effort: if the schedule wasn't a Work driver, this is a no-op.
+            if let Err(e) = release_daemon_schedule_lock(&self.pool, creator_id, &holder).await {
+                tracing::warn!(
+                    schedule_id,
+                    holder = %holder,
+                    error = %e,
+                    "runtime_lock: failed to release daemon schedule lock on terminal"
+                );
+            }
+        }
+
         // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
         // Only on success — failed/cancelled schedules do not trigger auto-chain.
         if terminal_status == ScheduleStatus::Completed {
@@ -387,6 +403,10 @@ impl ScheduleSupervisor {
     ///
     /// Errors are logged but do not propagate — auto-chain failure should not block
     /// the terminal transition.
+    // V1.42 F-001: volume-aware evaluator adds ~15 lines to the persist-complete
+    // branch; total is a flat match-based dispatcher where each arm is independent.
+    // Splitting would introduce artificial indirection without reducing complexity.
+    #[allow(clippy::too_many_lines)]
     async fn process_auto_chain_after_terminal(&self, schedule_id: &str, creator_id: &str) {
         use crate::auto_chain::{self, ChainAction};
 
@@ -432,7 +452,25 @@ impl ScheduleSupervisor {
                 }
             };
 
-        let action = auto_chain::evaluate_next_step(&work);
+        // V1.42 F-001: When the persist stage just completed, use the
+        // volume-aware evaluator to correctly handle cross-volume auto-chain
+        // (Plan Goal 4 / AC2). For all other stages, the flat evaluator suffices.
+        let action = if work.current_stage == "persist" && work.stage_status == "complete" {
+            match auto_chain::evaluate_after_persist_volume_aware(&self.pool, &work).await {
+                Ok(vol_action) => vol_action,
+                Err(e) => {
+                    tracing::warn!(
+                        work_id = %work.work_id,
+                        error = %e,
+                        "auto-chain: volume-aware evaluation failed, falling back to flat"
+                    );
+                    auto_chain::evaluate_next_step(&work)
+                }
+            }
+        } else {
+            auto_chain::evaluate_next_step(&work)
+        };
+
         match action {
             ChainAction::AdvanceStage {
                 ref work_id,
@@ -453,7 +491,19 @@ impl ScheduleSupervisor {
             ChainAction::NextChapter {
                 ref work_id,
                 ref next_chapter,
+                next_volume,
             } => {
+                // V1.42: log cross-volume transitions for observability.
+                let is_cross_volume =
+                    next_volume > 1 || (next_volume == 1 && work.current_chapter > 0);
+                if is_cross_volume {
+                    tracing::info!(
+                        work_id = %work_id,
+                        next_chapter = *next_chapter,
+                        next_volume,
+                        "auto-chain: next chapter (volume-aware)"
+                    );
+                }
                 // Next chapter starts at produce stage
                 if let Err(e) = self
                     .enqueue_auto_chain_step(
@@ -468,6 +518,7 @@ impl ScheduleSupervisor {
                     tracing::warn!(
                         work_id = %work_id,
                         next_chapter = *next_chapter,
+                        next_volume,
                         error = %e,
                         "auto-chain: failed to enqueue next chapter"
                     );
@@ -1079,6 +1130,36 @@ impl ScheduleRow {
             terminated_at: self.terminated_at.map(|t| t.to_string()),
         }
     }
+}
+
+/// Release a daemon schedule holder from any Work that holds it.
+///
+/// Looks up the Work where `runtime_lock_holder = <holder>` and clears it.
+/// Returns `Ok(false)` if no Work was locked with this holder (not an error).
+async fn release_daemon_schedule_lock(
+    pool: &SqlitePool,
+    creator_id: &str,
+    holder: &str,
+) -> Result<bool, sqlx::Error> {
+    let now = chrono::Utc::now().to_rfc3339();
+    // SAFETY: Dynamic SQL for conditional lock release — matches holder string.
+    let result = sqlx::query(
+        "UPDATE works SET runtime_lock_holder = NULL, runtime_lock_acquired_at = NULL, updated_at = ? \
+         WHERE creator_id = ? AND runtime_lock_holder = ?",
+    )
+    .bind(&now)
+    .bind(creator_id)
+    .bind(holder)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() > 0 {
+        tracing::info!(
+            holder = %holder,
+            "runtime_lock: released daemon schedule lock"
+        );
+    }
+    Ok(result.rows_affected() > 0)
 }
 
 #[cfg(test)]

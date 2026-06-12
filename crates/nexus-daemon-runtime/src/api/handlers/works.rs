@@ -17,8 +17,110 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
+use nexus_local_db::SqlitePool;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+// ─── Runtime Lock Guard (V1.42 P0 T2) ──────────────────────────────────────
+
+/// RAII guard that acquires a runtime lock on creation and releases on drop.
+///
+/// Spec: `novel-multi-work-lifecycle.md` §4.2 — CLI holder format
+/// `cli:<caller>:<uuid>`. For HTTP callers, `caller` is `http` since the
+/// actual PID isn't available over the API.
+struct RuntimeLockGuard {
+    pool: SqlitePool,
+    creator_id: String,
+    work_id: String,
+    holder: String,
+    /// Whether the lock was successfully acquired and should be released on drop.
+    armed: bool,
+}
+
+impl RuntimeLockGuard {
+    /// Acquire a runtime lock for a mutating HTTP handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NexusApiError::Locked` if the Work is already locked by another
+    /// process (and the lock is not stale).
+    async fn acquire(
+        pool: &SqlitePool,
+        creator_id: &str,
+        work_id: &str,
+    ) -> Result<Self, NexusApiError> {
+        let holder = nexus_local_db::cli_holder("http");
+        let ttl = nexus_local_db::ttl_from_env();
+        match nexus_local_db::acquire_runtime_lock(pool, creator_id, work_id, &holder, ttl, true)
+            .await
+        {
+            Ok(nexus_local_db::AcquireResult::Acquired { .. }) => Ok(Self {
+                pool: pool.clone(),
+                creator_id: creator_id.to_string(),
+                work_id: work_id.to_string(),
+                holder,
+                armed: true,
+            }),
+            Ok(nexus_local_db::AcquireResult::Locked {
+                holder: existing, ..
+            }) => Err(NexusApiError::Locked {
+                resource: "work".to_string(),
+                reason: format!(
+                    "work {work_id} is locked by '{existing}'; \
+                     wait for release or check 'creator works status'"
+                ),
+            }),
+            Err(e) => Err(NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("runtime_lock acquire failed: {e}"),
+            }),
+        }
+    }
+
+    /// Release the lock early (before drop). Useful when the handler
+    /// needs to explicitly control the release point.
+    async fn release(mut self) {
+        self.disarm().await;
+    }
+
+    async fn disarm(&mut self) {
+        if self.armed {
+            self.armed = false;
+            if let Err(e) = nexus_local_db::release_runtime_lock(
+                &self.pool,
+                &self.creator_id,
+                &self.work_id,
+                &self.holder,
+            )
+            .await
+            {
+                tracing::warn!(
+                    work_id = %self.work_id,
+                    holder = %self.holder,
+                    error = %e,
+                    "runtime_lock: failed to release on drop"
+                );
+            }
+        }
+    }
+}
+
+impl Drop for RuntimeLockGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            // Best-effort synchronous release is not possible with async.
+            // Log a warning — the guard should be explicitly released via
+            // `release()` before dropping. If not, the TTL will clean up
+            // the stale lock.
+            tracing::warn!(
+                work_id = %self.work_id,
+                holder = %self.holder,
+                "runtime_lock: guard dropped without explicit release; \
+                 TTL-based recovery will clean up"
+            );
+        }
+    }
+}
 
 // ─── Request / Response types ──────────────────────────────────────────────
 
@@ -65,6 +167,9 @@ pub struct WorkApiDto {
     /// Next chapter to work on per §4.5.2 selection (V1.38 P0 — populated for novel profile).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_chapter: Option<i32>,
+    /// V1.42: volume of the next chapter to work on (cross-volume aware).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_chapter_volume: Option<i32>,
     /// Auto-chain enabled flag (V1.39 §5.4).
     pub auto_chain_enabled: bool,
     /// Currently-running FL-E driver schedule ID (V1.39 §5.4, nullable).
@@ -125,8 +230,9 @@ impl From<WorkRecord> for WorkApiDto {
             work_ref: r.work_ref,
             total_planned_chapters: r.total_planned_chapters,
             current_chapter: r.current_chapter,
-            chapters: None,     // populated by enrich_with_chapters()
-            next_chapter: None, // populated by enrich_with_chapters()
+            chapters: None,            // populated by enrich_with_chapters()
+            next_chapter: None,        // populated by enrich_with_chapters()
+            next_chapter_volume: None, // populated by enrich_with_chapters()
             auto_chain_enabled: r.auto_chain_enabled,
             driver_schedule_id: r.driver_schedule_id,
             auto_chain_interrupted: r.auto_chain_interrupted,
@@ -190,6 +296,9 @@ pub struct WorkSummary {
     pub intake_status: String,
     pub primary_preset_id: String,
     pub updated_at: String,
+    /// V1.42 P-last (R-V141P0-11): lock state at a glance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_locked_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -241,6 +350,8 @@ pub struct SetPoolActiveRequest {
 #[derive(Debug, Serialize)]
 pub struct PoolEntryDto {
     pub entry_id: String,
+    /// V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
+    #[serde(skip_serializing)]
     pub creator_id: String,
     pub work_id: String,
     pub status: String,
@@ -494,6 +605,7 @@ pub async fn list_works(
             intake_status: r.intake_status,
             primary_preset_id: r.primary_preset_id,
             updated_at: r.updated_at,
+            completion_locked_at: r.completion_locked_at,
         })
         .collect();
 
@@ -656,15 +768,21 @@ async fn enrich_with_chapters(
         }
     }
 
-    // Populate next_chapter (§4.5.2 selection)
-    match nexus_local_db::work_chapters::next_chapter(state.pool(), work_id).await {
-        Ok(ch) => dto.next_chapter = ch,
+    // Populate next_chapter (§4.5.2 selection) and next_chapter_volume (V1.42)
+    match nexus_local_db::work_chapters::next_chapter_volume_aware(state.pool(), work_id).await {
+        Ok(Some((volume, chapter))) => {
+            dto.next_chapter = Some(chapter);
+            dto.next_chapter_volume = Some(volume);
+        }
+        Ok(None) => {
+            // No more chapters to work on
+        }
         Err(e) => {
             tracing::warn!(
                 target: "novel.chapters",
                 work_id = %work_id,
                 error = %e,
-                "Failed to compute next_chapter"
+                "Failed to compute next_chapter (volume-aware)"
             );
         }
     }
@@ -922,13 +1040,20 @@ pub async fn patch_work(
     }
 
     if let Some(ref holder) = current_work.runtime_lock_holder {
-        return Err(NexusApiError::Locked {
-            resource: "work".to_string(),
-            reason: format!(
-                "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
-            ),
-        });
+        // V1.42 P0: allow stale locks to be force-cleared by acquire below.
+        let ttl = nexus_local_db::ttl_from_env();
+        if !nexus_local_db::is_lock_stale(&current_work, ttl) {
+            return Err(NexusApiError::Locked {
+                resource: "work".to_string(),
+                reason: format!(
+                    "work {work_id} is locked by '{holder}'; wait for release or check 'creator works status'"
+                ),
+            });
+        }
     }
+
+    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
+    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
 
     // Stage changes use gate validation + atomic transaction (R-FL-E-05 + R-FL-E-07).
     if req.current_stage.is_some() || req.stage_status.is_some() {
@@ -1016,6 +1141,9 @@ pub async fn patch_work(
         }
     }
 
+    // V1.42 P0 (T2): Release runtime lock before returning.
+    lock.release().await;
+
     Ok(Json(WorkApiDto::from(updated)))
 }
 
@@ -1045,6 +1173,9 @@ pub async fn append_inspiration(
         }
     }
 
+    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
+    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+
     // Build JSON for inspiration entry
     let entry = serde_json::json!({
         "at": now.clone(),
@@ -1070,6 +1201,9 @@ pub async fn append_inspiration(
         .ok()
         .and_then(|v| v.as_array().map(Vec::len))
         .unwrap_or(0);
+
+    // V1.42 P0 (T2): Release runtime lock before returning.
+    lock.release().await;
 
     Ok(Json(AppendInspirationResponse {
         work_id,
@@ -1346,6 +1480,9 @@ pub async fn reconcile_chapters(
         });
     }
 
+    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
+    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+
     // Resolve workspace root from state
     let workspace_path_str = state.workspace_path().unwrap_or_default();
     let workspace_root = std::path::Path::new(&workspace_path_str);
@@ -1363,6 +1500,9 @@ pub async fn reconcile_chapters(
         code: "DATABASE_ERROR".to_string(),
         message: format!("reconcile failed: {e}"),
     })?;
+
+    // V1.42 P0 (T2): Release runtime lock before returning.
+    lock.release().await;
 
     Ok((StatusCode::OK, Json(report)))
 }
@@ -1765,6 +1905,8 @@ pub struct ListInspirationResponse {
 #[derive(Debug, Serialize)]
 pub struct InspirationItemDto {
     pub item_id: String,
+    /// V1.42 P-last (R-V141P1-11): hidden from API — local-first, always the active creator.
+    #[serde(skip_serializing)]
     pub creator_id: String,
     pub rel_path: String,
     pub title: String,

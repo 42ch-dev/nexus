@@ -24,6 +24,7 @@ pub mod novel_pool_entries;
 pub mod pending_review;
 pub mod prompt_injection;
 pub mod reference_source;
+pub mod runtime_lock;
 pub mod soul_meta;
 pub mod work_chapters;
 pub mod works;
@@ -132,14 +133,21 @@ pub use inspiration_items::{
 // Re-export work_chapters types
 pub use work_chapters::{
     count_chapters, get_chapter, insert_chapter, is_work_completed, next_chapter,
-    reconcile_from_filesystem, seed_chapters, update_paths, update_status, InsertChapterParams,
-    ReconcileReport, WorkChapterRecord,
+    next_chapter_volume_aware, reconcile_from_filesystem, seed_chapters,
+    seed_chapters_multi_volume, seed_chapters_multi_volume_tx, update_paths, update_status,
+    InsertChapterParams, ReconcileReport, WorkChapterRecord,
 };
 
 // Re-export force_gates_audit types
 pub use force_gates_audit::{
     insert_force_gates_audit, list_force_gates_audit, prune_force_gates_audit_before,
     ForceGatesAuditParams, ForceGatesAuditRow,
+};
+
+// Re-export runtime_lock types (V1.42 P0)
+pub use runtime_lock::{
+    acquire_runtime_lock, clear_stale_lock, cli_holder, is_lock_stale, release_runtime_lock,
+    schedule_holder, ttl_from_env, AcquireResult, DEFAULT_RUNTIME_LOCK_TTL_SECS,
 };
 
 /// Runtime role for database initialization

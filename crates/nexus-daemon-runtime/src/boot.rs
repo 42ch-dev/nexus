@@ -123,8 +123,23 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     let capabilities = Arc::new(CapabilityRegistry::with_builtins());
 
-    let concrete_engine =
+    // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
+    // Stored in WorkspaceState so schedule-executed HostToolCallTask instances
+    // can invoke nexus.* tools directly through HostToolExecutor::dispatch_for_schedule.
+    let tool_dispatch = Arc::new(
+        crate::api::handlers::host_tool_executor::DaemonToolDispatchAdapter::new(
+            WorkspaceState::clone(&state),
+        ),
+    );
+    state.set_daemon_tool_dispatch(tool_dispatch.clone());
+    tracing::info!("Daemon tool dispatch adapter wired");
+
+    let mut concrete_engine =
         GraphFlowEngine::new_with_storage(sqlite_storage.clone(), capabilities.clone());
+
+    // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
+    // HostTool enter actions in preset graphs can invoke nexus.* tools.
+    concrete_engine.set_daemon_tool_dispatch(tool_dispatch.clone());
 
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
     match sqlite_storage.list_non_terminal_sessions().await {
@@ -157,6 +172,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             &entry.loaded,
             &engine_ref.clone(),
             &capabilities.clone(),
+            Some(tool_dispatch.clone()),
         );
         let graph = Arc::new(graph);
 
@@ -245,8 +261,27 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                         .await;
 
                         if let Ok(Some(latest)) = fresh {
-                            let action =
-                                nexus_orchestration::auto_chain::evaluate_next_step(&latest);
+                            // V1.42 F-001: When the persist stage just completed,
+                            // use the volume-aware evaluator to correctly handle
+                            // cross-volume auto-chain (Plan Goal 4 / AC2). For all
+                            // other stages, the flat evaluator suffices.
+                            let action = if latest.current_stage == "persist"
+                                && latest.stage_status == "complete"
+                            {
+                                match nexus_orchestration::auto_chain::evaluate_after_persist_volume_aware(recovery_pool, &latest).await {
+                                        Ok(vol_action) => vol_action,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                work_id = %latest.work_id,
+                                                error = %e,
+                                                "auto-chain boot resume: volume-aware eval failed, falling back to flat"
+                                            );
+                                            nexus_orchestration::auto_chain::evaluate_next_step(&latest)
+                                        }
+                                    }
+                            } else {
+                                nexus_orchestration::auto_chain::evaluate_next_step(&latest)
+                            };
 
                             match action {
                                 nexus_orchestration::auto_chain::ChainAction::AdvanceStage {
@@ -279,6 +314,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                 nexus_orchestration::auto_chain::ChainAction::NextChapter {
                                     ref work_id,
                                     ref next_chapter,
+                                    next_volume,
                                 } => {
                                     match resume_auto_chain_work(
                                         recovery_pool,
@@ -293,8 +329,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                         Ok(sid) => tracing::info!(
                                             work_id = %work_id,
                                             chapter = *next_chapter,
+                                            volume = next_volume,
                                             schedule_id = %sid,
-                                            "auto-chain boot resume: enqueued next chapter"
+                                            "auto-chain boot resume: enqueued next chapter (volume-aware)"
                                         ),
                                         Err(e) => tracing::warn!(
                                             work_id = %work_id,

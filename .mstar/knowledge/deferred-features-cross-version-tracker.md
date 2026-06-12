@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.41 Active** (prepare 2026-06-10 on `iteration/v1.41` — DF-60 P0 + DF-61 P1) · **V1.40 Shipped** (2026-06-11 PR #52 merged) · **V1.39 Shipped** · FL-E **Shipped in V1.34** · Platform **paused** · DF-63 closed · multi-volume PK **deferred V1.42** · DF-56/47/59 backlog · Tech debt SSOT: [`status.json`](../status.json) — aggressive hygiene targets V1.40 batch (24) + V1.33 P3/P4 medium (5); excludes R-V140P4-W2 PM-accept
+**Quick status**: **V1.42 Active** (prepare 2026-06-11 on `iteration/v1.42` — P0 runtime_lock + P1 DF-62 multi-volume + P2 DF-56 + P3 DF-47 + P-last UX) · **V1.41 Shipped** (2026-06-11 PR #53) · **V1.40 Shipped** · Platform **paused** · DF-60/61 **archived** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: Active (V1.41 prepare — compass locked; implement Todo)  
+**Status**: Active (V1.42 prepare — compass locked; implement Todo)  
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-10 (V1.41 prepare: DF-60/61 → V1.41 Active; multi-volume PK → V1.42; integration branch `iteration/v1.41` opened)
+**Last updated**: 2026-06-11 (V1.42 prepare: DF-60/61 → shipped archive; DF-62/56/47 → V1.42 Active; `iteration/v1.42` opened)
 
 ---
 
@@ -71,7 +71,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
-| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **Conditional (V1.36+ → V1.37+ / backlog)** | M | V1.34→V1.35→V1.36 | V1.34 P4 shipped adapter; V1.35 P0 deferred carry-forward: **production caller wiring OPEN**. V1.36 shipped: production caller **NOT** wired (novel-writing UX did not require it; per spec §5.4 the grill-me is daemon-internal). DF-47 stays conditional; deferred to V1.37+ (or backlog if no product pressure). |
+| DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.42 P3 Narrowed** | M | V1.34→V1.35→V1.36→V1.42 | V1.34 P4 shipped adapter. **V1.42 P3 shipped**: `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool (`nexus.orchestration.schedule_status`) proven E2E with 5 hermetic tests. Production caller wiring complete for minimal slice. Full DF-46 parity remains Post-V1.42. Plan: [2026-06-11-v1.42-agent-tool-production-wiring.md](../plans/2026-06-11-v1.42-agent-tool-production-wiring.md). |
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
@@ -80,13 +80,11 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.39 P0 Shipped** | S | V1.34→V1.35→V1.36→V1.37→V1.38→V1.39 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce). V1.38 shipped multi-chapter foundation **without** auto-reenqueue. **V1.39 P0** implements full `intake → research → produce → review → persist` auto-chain (default true), chapter outer loop, side-input lane, boot recovery, `--no-auto-chain` opt-out, `creator run resume` command. Core: `nexus-orchestration::auto_chain` module with `evaluate_next_step` + 15 unit tests + 14 integration tests. Plan: [2026-06-09-v1.39-fl-e-auto-chain-engine.md](../plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md). **Tri-review + targeted re-review all Approve; final consolidated gate Approve. PR #50 merged ad9725d8.** |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
-| DF-56 | Conditional routing / branching engine | V1.33 | Post-V1.34 | L | V1.33→V1.34 | OUT of V1.34/V1.35; see [preset-conditional-routing.md](specs/preset-conditional-routing.md). |
+| DF-56 | Conditional routing / branching engine | V1.33 | **V1.42 P2 Shipped** | L | V1.33→V1.34→V1.42 | **V1.42 P2 shipped**: `llm_judge` GO/NOGO → two `next` edges (commits `5467eaa2` T1, `e81412e6` T2, `c8b1cb5c` T3, `3153a7bd` T4). Plan: [2026-06-11-v1.42-conditional-routing.md](../plans/2026-06-11-v1.42-conditional-routing.md). Spec: [preset-conditional-routing.md](specs/preset-conditional-routing.md). **Post-V1.42 full roadmap**: see §3.6.3. |
 | DF-57 | **Closed in V1.36 P2** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-58 | **Closed in V1.36 P1** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-59 | Platform publish integration for novel正文 | V1.36 prepare | **Backlog** | L | V1.36 | Explicit OUT of V1.36 short-term scope; user may publish manually. See compass §1.2 non-goals |
-| DF-60 | Multi-novel lifecycle (Medium: 2-step + completion-lock + runtime lock) | V1.36 distill | **V1.41 P0 Shipped** | L | V1.36→V1.41 | Shipped on `feature/v1.41-multi-work-switch` (4 commits). 2-step completion ceremony + `.completion-lock.json` + runtime_lock + `creator works` IA + `run start --from-work` + `resume --reopen`. 8 hermetic tests pass. Report: [completion-report.md](../plans/reports/2026-06-10-v1.41-multi-work-switch/completion-report.md). **No** `creator work switch`. Concurrent multi-Work OK. |
-| DF-61 | Selection pool / inspiration pool (DB SSOT + MD refs) | V1.36 distill | **V1.41 P1 Shipped** | M | V1.36→V1.41 | Shipped on `feature/v1.41-selection-pool` (23 commits across 3 PM merge commits; 13/13 selection_pool hermetic tests + 49/49 command_surface_contract tests pass). `novel_pool_entries` (P0 schema) + `inspiration_items` (P1) in `state.db`; inspiration files under `{workspace}/Pool/Ideas/` (creator-scoped, per user 2026-06-10 path correction). Pool promote/archive + inspiration add/list/promote/archive via daemon API + CLI `creator works pool`. Auto-chain `mark_work_completed` updates pool row in single tx. Cross-creator authz guards. List pagination + count. Covering indexes. Sync I/O in spawn_blocking. 19 residuals registered (8 closed in fix wave; 11 defer to V1.42/P-last/backlog). **Not** `work_profile: novel-pool`. [novel-work-pool.md](specs/novel-work-pool.md) + plan [2026-06-10-v1.41-selection-pool.md](../plans/2026-06-10-v1.41-selection-pool.md). Report: [completion-report.md](../plans/reports/2026-06-10-v1.41-selection-pool/completion-report.md). |
-| DF-62 | Multi-chapter / serial writing (first slice shipped V1.38; multi-volume PK deferred) | V1.36 distill | **V1.38 Shipped (first slice); multi-volume PK deferred V1.42** | M | V1.36→V1.40→V1.41 | **Shipped V1.38/V1.39** for single-volume multi-chapter. Multi-volume PK migration (`(work_id, chapter)` → `(work_id, volume, chapter)`) **deferred V1.42** (grill-me Q1). |
+| DF-62 | Multi-chapter / serial writing + **multi-volume PK** | V1.36 distill | **V1.42 P1 Shipped** | M | V1.36→V1.38→V1.39→V1.41→V1.42 | Single-volume multi-chapter **shipped V1.38–V1.39**. **V1.42 P1 shipped**: PK `(work_id, volume, chapter)` migration with `volume=1` backfill, `seed_chapters_multi_volume_tx`, volume-aware auto-chain (`evaluate_after_persist_volume_aware`), status API `next_chapter_volume`, and multi-volume volume-outline.md scaffold. Plan: [2026-06-11-v1.42-multi-volume.md](../plans/2026-06-11-v1.42-multi-volume.md). Commits: `9fefdfbc` (T1+T2), `398d0ba2` (T3), `b63543e1` (T4), `0bbf1581` (T5), `1a6fd97c` (T6). |
 | DF-63 | **World KB cross-Work unification** (was: Worldbuilding 7 sub-categories schema) | V1.36 distill → V1.36 spec §3.5 refactor | **V1.40 Closed (Shipped P0+P1+P2+P3 all 5 slices W1–W5)** | L | V1.36→V1.37→V1.40 | **Shipped V1.40 P0–P3** (PR #52, MERGEABLE). V1.37 P2 roadmap shipped as spec; V1.40 implements all 5 slices via [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) + [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md). **P0 W1+W4** ([world-create-and-validation plan](../plans/2026-06-10-v1.40-world-create-and-validation.md)) — mandatory world binding per user clarification 2026-06-10; `creator world create/show/list`; `create_world_tx` atomic scaffold; ownership FK + 422 enforcement. **P1 W2** ([world-kb-taxonomy plan](../plans/2026-06-10-v1.40-world-kb-taxonomy.md)) — BlockType + novel_category + canonical_name grammar; SqliteKbStore wired with ValidationMode; structured ValidationError. **P2 W3** ([world-context-prompt-block plan](../plans/2026-06-10-v1.40-world-context-prompt-block.md)) — `{{ world_kb_block }}` template var via `build_chapter_kb_block`; legacy V1.39 worldless Works skip. **P3 W5** ([world-kb-extract-binding plan](../plans/2026-06-10-v1.40-world-kb-extract-binding.md)) — `kb_extract_jobs` artifact locator; `finalize_extract` helper; `kb.extract_work` V1.40 schema; `novel-review-master sync_world_kb`. DF-63 row archived 2026-06-11; full delivery snapshot in [shipped-features-tracker.md](../archived/shipped-features-tracker.md). 24 V1.40-tagged open residuals carry-forward to V1.41 (see [`status.json`](../status.json) `residual_findings`). |
 | DF-64 | Findings lifecycle (review → brainstorm → write coordination; 3-role) | V1.36 distill | **V1.39 P1+P2 Shipped** | L | V1.36→V1.37→V1.39 | V1.37 P3 roadmap; **V1.39** implemented via [novel-quality-loop.md](specs/novel-quality-loop.md) + [2026-06-09-v1.39-findings-and-review-routing.md](../plans/2026-06-09-v1.39-findings-and-review-routing.md) + [2026-06-09-v1.39-novel-review-presets.md](../plans/2026-06-09-v1.39-novel-review-presets.md). `findings` table + DAO + API + review-verdict hook + routing enum + 7 hermetic API tests; `novel-brainstorm` + `novel-review-master` presets with 8 hermetic tests. PR #50 merged ad9725d8. |
 | DF-65 | Three-layer rules architecture | V1.36 distill | **V1.40 P0.5 Shipped** | M | V1.36→V1.37→V1.39→V1.40 | Plan: [2026-06-09-v1.39-rules-and-logs.md](../plans/2026-06-09-v1.39-rules-and-logs.md). V1.39 shipped Layer 1 at `embedded-presets/rules/writing-craft.md` (interim). **V1.40 P0.5** migrated Layer 1 to `embedded-rules/writing-craft.md` per spec §5.5.4; doc path corrected in this tracker and `world-kb-runtime-architecture.md`. |
@@ -115,8 +113,12 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 | BL-06 | Independent search microservice | V1.2 | Backlog | L | |
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | ADR-011 elevated. |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | ADR-011/012/013. |
+| BL-10 | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | V1.42 prepare | Backlog | M | V1.42 compass §1.2 OUT — user-facing doc deferred until product path stable. |
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
+
+**V1.42 P0 defer carry-forward** (from V1.41 P-last hygiene): R-V140P0-S3, R-V140P1-S6, R-V140P2-S2, R-V140P3-S1/S2/S3, R-V140P4-INFRA — see [2026-06-11-v1.42-runtime-lock-and-hygiene.md](../plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md) §2.
+
 
 **Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-11**; `tech_debt_summary.updated_at` **2026-06-11**; V1.40 closeout, Profile B compaction applied). Do **not** mirror full rows here — JSON wins on conflict. This section is a human pointer only; use `status.json` for current totals, severity buckets, and target buckets.
 
@@ -231,6 +233,27 @@ When V1.37+ picks up multi-chapter or multi-novel work:
 4. **Register the new spec + plan in `status.json`** per mstar-plan-artifacts lifecycle.
 5. **Update the deferred tracker** to record the new spec/plan closure (per §4 change control).
 
+#### 3.6.3 DF-56 post-V1.42 P2 roadmap (grill-me 2026-06-11)
+
+**Shipped in V1.42 P2 (minimal slice)** — commits on `feature/v1.42-conditional-routing`:
+
+| Task | Commit | Description |
+|------|--------|-------------|
+| T1 | `5467eaa2` | Spec promoted from Exploration to Draft V1.42 |
+| T2 | `e81412e6` | `GoNogoNext` struct + `NextTarget::GoNogo` variant; loader validation; `add_conditional_edge` wiring; reachability via both branches |
+| T3 | `c8b1cb5c` | `StateCompositeTask::judge_next_action` — GoNogo returns `Continue` for both GO and NOGO; Linear/None preserves existing behavior |
+| T4 | `3153a7bd` | 12 hermetic tests (6 loader + 6 executor); reachability validator traverses GoNogo edges |
+
+Runtime behavior: `_judge_result` in `graph_flow::Context` drives the conditional edge. `true` → `go` target; `false` or absent → `nogo` target (safe fallback).
+
+**Deferred Post-V1.42** (remain open under DF-56 until a future compass reopens):
+
+- Arbitrary stage-level conditional `next` (non-judge nodes)
+- Expression / rule-based routing beyond GO/NOGO
+- `registry.refresh` conditional edges (depends on DF-29)
+- `workspace.open` / `workspace.commit` branch inputs (depends on DF-31)
+- Multi-branch graphs with >2 outgoing edges and merge points
+
 #### 3.6.2 Future distills
 
 Future iterations may add new distills here. Each distill should be a single subsection with:
@@ -263,7 +286,8 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.41** (Active — prepare 2026-06-10): [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) — **DF-60 P0 + DF-61 P1** on `iteration/v1.41`; multi-volume PK → V1.42; P-last aggressive hygiene (V1.40 batch + V1.33 P3/P4 medium).
+- **V1.42** (Active — prepare 2026-06-11): [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) — P0 runtime_lock + P1 DF-62 + P2 DF-56 + P3 DF-47 + P-last UX on `iteration/v1.42`.
+- **V1.41** (Shipped 2026-06-11): [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) — PR #53; DF-60/61 archived.
 - **V1.40** (Shipped 2026-06-11 via PR #52 merged): [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) — DF-63 closed; `iteration/v1.40` retired.
 - **V1.39** (Shipped 2026-06-09): [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) — **DF-53 full auto-chain + DF-68 daemon continuation + DF-64/65/66/67 quality loop**; P0..P5 on `iteration/v1.39`; PR #50 merged ad9725d8.
 - **V1.38** (Shipped 2026-06-09): [v1.38-multi-chapter-serial-writing-delivery-compass-v1.md](../iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md) — DF-62 first slice shipped (PR #49).
@@ -294,4 +318,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-10 (V1.41 Active prepare). Status: **V1.41 Active** on `iteration/v1.41`; V1.40 Shipped. V1.41 targets DF-60/61 + hygiene. Multi-volume PK deferred V1.42.*
+*Last updated: 2026-06-11 (V1.42 Active prepare). Status: **V1.42 Active** on `iteration/v1.42`; V1.41 Shipped (PR #53). DF-62/56/47 Active; DF-60/61 archived.*

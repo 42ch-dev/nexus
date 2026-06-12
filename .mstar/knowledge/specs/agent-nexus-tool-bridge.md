@@ -209,15 +209,34 @@ Worker sessions must not cache or reuse tool grants across creators. A worker st
 
 If P4 completes unification, **do not** register DF-47. If partial, register DF-47 in deferred tracker.
 
-### 7.3 DF-47 Disposition (P4 outcome)
+### 7.3 DF-47 Disposition (P4 + V1.42 P3)
 
-**Status: OPEN** (partial unification).
+**Status: NARROWED** — production caller wiring shipped in V1.42 P3.
 
-P4 shipped the unified dispatch adapter (`HostToolExecutor::execute` normalizes both HTTP tool execute and `dispatch_from_worker` paths into the same dispatch table), and hermetic unit tests confirm the adapter works. However, the **production caller** in `nexus-orchestration` — the code that actually sends `worker/agent_tool_request` IPC to the daemon — is **not wired**. No orchestration-side call site invokes `dispatch_from_worker` at runtime.
+P4 shipped the unified dispatch adapter (`HostToolExecutor::execute` normalizes both HTTP tool execute and `dispatch_from_worker` paths into the same dispatch table), and hermetic unit tests confirm the adapter works.
 
-Per §7 rule above, this is "partial" unification: the registry adapter is complete, but the end-to-end worker upcall path from orchestration through daemon remains deferred.
+V1.42 P3 completes the production caller: `DaemonToolDispatchAdapter` bridges the orchestration engine's `HostToolCallTask` to `HostToolExecutor::dispatch_for_schedule` for schedule-initiated in-process tool dispatch. One tool (`nexus.orchestration.schedule_status`) is proven end-to-end with 5 hermetic E2E tests.
 
-DF-47 row in the deferred tracker is retained. Production caller wiring belongs to a future plan (P5 or V1.34+ hygiene plan).
+DF-47 row in the deferred tracker is narrowed. Full DF-46 capability matrix (all `nexus.*` tools wired for schedule dispatch) remains deferred.
+
+### 7.4 Production caller wiring (V1.42 P3)
+
+**Status**: **Shipped** (V1.42 P3 — 2026-06-11)
+
+**Plan**: [2026-06-11-v1.42-agent-tool-production-wiring.md](../../plans/2026-06-11-v1.42-agent-tool-production-wiring.md)
+
+**Shipped scope**:
+
+1. `DaemonToolDispatch` trait in `nexus-orchestration` for daemon-side `nexus.*` tool dispatch.
+2. `DaemonToolDispatchAdapter` in `nexus-daemon-runtime` using `HostToolExecutor::dispatch_for_schedule` (in-process, no worker IPC).
+3. `HostToolCallTask` graph-flow task for schedule-initiated tool calls with template rendering.
+4. Chosen tool: `nexus.orchestration.schedule_status` (read-only, spec §4).
+5. Hermetic E2E tests: 5 tests covering round-trip, stub mode, cross-creator rejection, and Schedule vs HTTP equivalence.
+6. `WorkspaceState.daemon_tool_dispatch` wired at daemon boot.
+
+**Authz/locks**: read-only tool respects completion-lock; mutating tools must follow `runtime_lock_holder` (P0).
+
+**Deferred**: full DF-46 capability parity; CLI subprocess bridge (DF-48); MCP server (DF-49).
 
 ---
 

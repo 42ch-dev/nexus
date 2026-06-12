@@ -1,7 +1,97 @@
 {
   "version": 1,
-  "updated_at": "2026-06-11T07:00:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-12T01:24:04+0800",
+  "plans": [
+    {
+      "plan_id": "2026-06-11-v1.42-harness-docs-prepare",
+      "title": "P-1 — V1.42 compass, plans, specs, tracker, status (docs-only)",
+      "status": "Done",
+      "working_branch": "iteration/v1.42",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-harness-docs-prepare.md",
+      "compass": ".mstar/iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-runtime-lock-and-hygiene",
+      "title": "P0 — runtime_lock production acquire + V1.41 P-last defer-7",
+      "status": "Done",
+      "working_branch": "feature/v1.42-runtime-lock-and-hygiene",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md",
+      "depends_on": "2026-06-11-v1.42-harness-docs-prepare",
+      "notes": [
+        "2026-06-11T16:30:55+0800 — Pre-Implement Gate Check GO. PM created worktree .worktrees/v1.42-p0 (topic branch feature/v1.42-runtime-lock-and-hygiene from iteration/v1.42). PM Task Board = plan §5 T1–T7. Routing: fullstack-dev single-stream (not >=2 independent units). Single batch assignment covers T1–T7. Implement dispatch to follow.",
+        "2026-06-11 — T1–T7 Done. Commits: 1dad80fe (T1+T2), e8993870 (T2+T3), e44c8fda (T4+T5+stale fix). R-V141P0-01 fixed. Defer-7 disposition: all waived/deferred (test-only). No schema touched → T7 no-op. AC1+AC2+AC4+AC5 verified; AC3 (spec stamp) pending PM review.",
+        "2026-06-11T17:50:20+0800 — QC tri-review completed (N=3, all Approve). qc1 (ff7d7304, qc-specialist, architecture/maintainability) 0C/2W/3S; qc2 (248cba38, qc-specialist-2, security/correctness) 0C/1W/3S; qc3 (4c78c8ae, qc-specialist-3, perf/reliability) 0C/0W/5S. All 3 reports committed to integration via 10fa2c09 + bfa82c68. PM consolidated verdict: Approve with 4 open residuals (R-V142P0-PROC high risk-accepted; R-V142P0-QC-W-01 medium defer; R-V142P0-QC-W-02 low defer; R-V142P0-QC-W-001 medium defer). QA verification dispatch to follow."
+      ]
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-multi-volume",
+      "title": "P1 — DF-62 multi-volume PK + auto-chain + status data plane",
+      "status": "Done",
+      "working_branch": "feature/v1.42-multi-volume",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-multi-volume.md",
+      "depends_on": "2026-06-11-v1.42-runtime-lock-and-hygiene",
+      "notes": [
+        "2026-06-11T18:01:00+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p1 (topic branch feature/v1.42-multi-volume from iteration/v1.42). PM Task Board = plan §5 T1–T7. Routing: fullstack-dev single-stream (sequential T1→T6; T1 schema migration must complete before T2–T5). Primary specs: novel-workflow-profile.md §4.5.4–§4.5.7 + local-db-schema.md work_chapters PK migration. Implement dispatch to follow.",
+        "2026-06-11T18:48:10+0800 — Implement complete. PM merged 7 commits into iteration/v1.42 (merge SHA above). All 4 AC verified per dev Completion Report. Working tree clean. Known carry-forward: .sqlx/ regeneration deferred (R-V140P4-INFRA pattern). PM next: dispatch QC tri-review (N=3) on integrated HEAD.",
+        "2026-06-11T19:24:31+0800 — Fix wave complete. PM merged 4 fix-wave commits (1a873632 F-001, 28d842ab W-01, c9a8ff35 W-02, 9525f4a9 plan checkboxes). All 3 blocking QC findings addressed: F-001 evaluate_after_persist_volume_aware wired into supervisor + boot; W-01 migration DROP TABLE IF EXISTS guard; W-02 composite index idx_work_chapters_next_volume_aware. 4 new supervisor_cross_volume tests + 2 new migration fix tests pass. cargo test + clippy + nightly fmt all clean. PM next: targeted QC re-review of qc1 + qc3 (N=2, same turn).",
+        "2026-06-11T19:40:00+0800 — QC revalidation complete. qc1 re-review Approve (b2a58edc); qc3 re-review Approve (f662b0db); qc2 Approve stands. 3 blocking residuals (F-001 critical, W-01/W-02 medium) closed + archived. 3 non-blocking residuals (F-002/F-003/F-004 low) remain open (defer to P-last). PM consolidated verdict: Approve. PM next: QA verification (N=1).",
+        "2026-06-11T19:47:49+0800 — PM closure: 3 QA Critical findings addressed. QA-F-002 (qc2.md missing) fixed by PM merge of c626f150 onto integration. QA-F-003 (spec §4.5.5-§4.5.7 markers) fixed by adding V1.42 P1 Implemented stamps to §4.5.5 (volume outline scaffold) and §4.5.7 (test #6 migration idempotency + W-02 index). QA-F-001 (works_api 2 test failures) verified pre-existing on base c249c902 (re-ran checkout + test); not P1-attributable; PM override documented per V1.41 P-last closeout pattern (commit 0b76fb2f). All AC1-AC4 met. P1 formally DONE.",
+        "2026-06-11T19:47:49+0800 — QC tri-review final state: qc1 Approve (re-review b2a58edc; F-001 resolved; F-004 folded); qc2 Approve (c626f150; now on integration); qc3 Approve (re-review f662b0db; W-01+W-02 resolved). qc-consolidated.md Approve. 3 blocking residuals (F-001 critical, W-01/W-02 medium) closed + archived. 3 non-blocking residuals (F-002/F-003/F-004 low) remain open (defer to P-last)."
+      ]
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-conditional-routing",
+      "title": "P2 — DF-56 llm_judge GO/NOGO conditional next",
+      "status": "Done",
+      "working_branch": "feature/v1.42-conditional-routing",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-conditional-routing.md",
+      "depends_on": "2026-06-11-v1.42-multi-volume",
+      "notes": [
+        "2026-06-11T19:48:48+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p2 (topic branch feature/v1.42-conditional-routing from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; minimal slice). Primary spec: preset-conditional-routing.md (DF-56 Draft V1.42 minimal). Implement dispatch to follow.",
+        "2026-06-11T20:07:27+0800 — Implement complete. PM merged 5 implementation commits (5467eaa2 T1, e81412e6 T2, c8b1cb5c T3, 3153a7bd T4, de99587b T5) into iteration/v1.42. All 4 AC verified. 555 tests pass; clippy clean; nightly fmt clean. PM next: dispatch QC tri-review (N=3).",
+        "2026-06-11T20:19:48+0800 — QC tri-review complete (N=3, all Approve). qc1 (5eb9af84) 0C/1W/2S; qc2 (8a590df5) 0C/0W/1S; qc3 (2f2a92b1) 0C/1W/1S. PM consolidated verdict: Approve. 2 non-blocking warnings (W-001 qc1, W-QC3-01 qc3) + 4 suggestions registered as open residuals (decision: defer to P-last or future). All 4 AC verified. PM next: dispatch QA verification (N=1).",
+        "2026-06-11T20:23:59+0800 — QA verification complete (Approve at 6db703ad). PM closure: all 4 AC verified; cargo test + clippy + nightly fmt clean. 2 non-blocking residuals (W-001 qc1, W-QC3-01 qc3) + 4 Suggestions remain open (defer to P-last or future). P2 formally DONE.",
+        "2026-06-11T20:23:59+0800 — QC tri-review final state: 3/3 Approve. qc1 (5eb9af84, architecture) 0C/1W/2S; qc2 (8a590df5, security/correctness) 0C/0W/1S; qc3 (2f2a92b1, perf/reliability) 0C/1W/1S. qc-consolidated Approve. QA Approve. No fix wave needed (3/3 clean)."
+      ]
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-agent-tool-production-wiring",
+      "title": "P3 — DF-47 one E2E agent tool upcall",
+      "status": "Done",
+      "working_branch": "feature/v1.42-agent-tool-wiring",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-agent-tool-production-wiring.md",
+      "depends_on": "2026-06-11-v1.42-conditional-routing",
+      "notes": [
+        "2026-06-11T20:24:31+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-p3 (topic branch feature/v1.42-agent-tool-wiring from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; minimal slice: ONE tool wired). Primary spec: agent-nexus-tool-bridge.md (DF-47 production caller). Implement dispatch to follow.",
+        "2026-06-11T20:35:00+0800 — Implement complete (4 commits 4798ff64 / c8a0f840 / eb56d7a2 / b6e33d2a on feature/v1.42-agent-tool-wiring). 11 files +547/-16. PM verification: cargo test -p nexus-daemon-runtime --test agent_tool_production_wiring --test agent_tool_api = 31/31 pass; cargo clippy -p nexus-daemon-runtime -p nexus-orchestration -p nexus-agent-host -- -D warnings = clean; cargo +nightly fmt --all --check = clean. AC1 (one tool callable from running schedule via HostToolCallTask + nexus.orchestration.schedule_status), AC2 (read-only tool respects completion-lock via adapter + authz), AC3 (E2E hermetic test: 5 tests in agent_tool_production_wiring.rs covering stub mode, cross-creator FORBIDDEN, schedule_status round-trip, HostToolCallTask round-trip, Schedule vs HTTP equivalence). Spec agent-nexus-tool-bridge.md §7.3 (DF-47: OPEN → NARROWED) + §7.4 (Shipped) updated in T5 commit 4798ff64. Deferred tracker DF-47 row: Active → Narrowed. PM next: dispatch QC tri-review (N=3) on integration HEAD with same Review cwd + plan_id + Review range.",
+        "2026-06-11T23:40:53+0800 — QC tri-review complete (N=3): 2 Approve + 1 Request Changes. qc1 (238fb1e6, architecture) Approve; qc2 (146eae00, security/correctness) Approve (2 non-blocking warnings); qc3 (01c9f4c8, perf/reliability) Request Changes (W-01 production path is dead code — AC1 not met). PM consolidated verdict: Request Changes. 4 blocking residuals registered (qc3 W-01 + W-02; qc2 W-01 + W-02). PM next: dispatch fix wave to fullstack-dev for the 4 blocking items. qc1 Approve stands.",
+        "2026-06-11T23:40:53+0800 — Process note: P3 work was done primarily by the Cursor agent (Auto.Wood) in parallel with the PM dispatch. The dispatched fullstack-dev task was cancelled (likely work overlap or recursion attempt caught by the system). User has accepted the autonomous work pattern. Same process gap as P0/P1/P2 — risk-accepted per R-V142P0-PROC.",
+        "2026-06-12T00:09:01+0800 — Targeted QC re-validation complete. qc2 re-review (9edb1658) Approve (W-01 + W-02 verified). qc3 re-review (615f1e93) Approve (W-01 + W-02 verified). qc1 Approve stands. All 4 blocking residuals closed + archived. PM consolidated verdict: Approve. PM next: dispatch QA verification (N=1).",
+        "2026-06-12T00:14:37+0800 — QA verification complete (Approve at 27c50f07). PM closure: all 3 AC verified; cargo test + clippy + nightly fmt clean. 4 blocking residuals (qc3 W-01+W-02; qc2 W-01+W-02) closed + archived. 6 non-blocking Suggestions remain open (defer to P-last or future). P3 formally DONE.",
+        "2026-06-12T00:14:37+0800 — QC tri-review final state: 3/3 Approve. qc1 (238fb1e6) Approve; qc2 (146eae00 initial, 9edb1658 reval) Approve; qc3 (01c9f4c8 initial Request Changes, 615f1e93 reval) Approve. Fix-wave (aa0574cc) addressed all 4 blocking items. PM consolidated Approve. QA Approve."
+      ]
+    },
+    {
+      "plan_id": "2026-06-11-v1.42-ux-polish",
+      "title": "P-last — V1.41 UX carry-forward (14 residuals)",
+      "status": "Done",
+      "working_branch": "feature/v1.42-ux-polish",
+      "merge_target": "iteration/v1.42",
+      "plan_file": ".mstar/plans/2026-06-11-v1.42-ux-polish.md",
+      "depends_on": "2026-06-11-v1.42-agent-tool-production-wiring",
+      "notes": [
+        "2026-06-12T00:15:21+0800 — Pre-Implement Gate Check GO. PM creating worktree .worktrees/v1.42-plast (topic branch feature/v1.42-ux-polish from iteration/v1.42). PM Task Board = plan §5 T1–T5. Routing: fullstack-dev single-stream (sequential T1→T5; 14 V1.41 UX residuals triage). 5 UX items (must fix), 4 defer items, 3 refactor items, 1 nit per plan §2 residual table. Implement dispatch to follow.",
+        "2026-06-12T00:40:54+0800 — Implement complete. PM merged 5 commits (d04ae9f4 T1 triage, 3c40474f T2 CLI, f5d994a9 T3 dedup, 8a3350eb T4 flags, 42850bc3 T5 closeout). 6 UX items fixed; 8 rows waived/deferred; iteration Shipped markers updated. Working tree clean. PM next: dispatch QC tri-review (N=3) on integrated HEAD.",
+        "2026-06-12T01:24:04+0800 — QA verification complete (Approve at c8ab46e1). PM closure: all 3 AC verified; 14 rows triaged; iteration Shipped markers in place. 3 blocking residuals closed + archived. 6 non-blocking Suggestions remain open (defer to P-last or future — N/A since this IS P-last; close at iteration closeout review or post-V1.42). P-last formally DONE. V1.42 iteration now complete; final PR from iteration/v1.42 to main pending.",
+        "2026-06-12T01:24:04+0800 — QC tri-review final state: 2/3 Request Changes (qc1 + qc3) → fix-wave (4 commits) → targeted re-review 2/2 Approve (qc1 + qc3). qc2 Approve stands. PM consolidated Approve. QA Approve. Fix-wave addressed all 3 blocking items."
+      ]
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,18 +99,18 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
+    "integration_branch": "iteration/v1.42",
     "last_integration_branch": "iteration/v1.41",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
-    "latest_shipped_iteration": "v1.41",
-    "latest_shipped_at": "2026-06-11T07:00:00+08:00",
-    "latest_active_iteration": null,
-    "latest_active_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md",
+    "latest_shipped_iteration": "v1.42",
+    "latest_shipped_at": "2026-06-12T01:24:04+0800",
+    "latest_active_iteration": "v1.42",
+    "latest_active_compass": ".mstar/iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md",
     "integration_branch_retired": "iteration/v1.41",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-11T07:00:00+08:00",
+      "updated_at": "2026-06-11T16:14:57+08:00",
       "total_open": 91,
       "by_severity": {
         "critical": 0,
@@ -30,8 +120,9 @@
         "nit": 16
       },
       "by_target": {
-        "v1.41": 31,
-        "backlog": 60
+        "v1.42": 14,
+        "v1.41": 7,
+        "backlog": 70
       },
       "by_plan": {
         "creator-run": 3,
@@ -49,9 +140,9 @@
         "work-switch": 12,
         "selection-pool": 19
       },
-      "notes": "V1.41 prepare: DF-60/61 in scope; aggressive hygiene targets V1.40 batch (24) + V1.33 P3/P4 medium (5). Exclude R-V140P4-W2 PM-accept. Multi-volume PK deferred V1.42."
+      "notes": "V1.42 prepare: P0 runtime_lock + defer-7 hygiene; P1 DF-62 multi-volume; P2 DF-56; P3 DF-47; P-last 14 UX residuals. Exclude R-V140P4-W2 PM-accept."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
     "spec_refs": [
       ".mstar/knowledge/specs/novel-workflow-profile.md",
       ".mstar/knowledge/specs/entity-scope-model.md",
@@ -69,7 +160,7 @@
       ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
       ".mstar/knowledge/specs/novel-work-pool.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md"
+    "iteration_compass": ".mstar/iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md"
   },
   "residual_findings": {
     "2026-06-04-v1.33-work-model-and-creator-run": [
@@ -810,7 +901,10 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work guard); works.runtime_lock_holder column",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.41 P-last or V1.42"
+        "target": "V1.42 P0",
+        "lifecycle": "fixed",
+        "fixed_in_plan": "2026-06-11-v1.42-runtime-lock-and-hygiene",
+        "fix_note": "T4 stale recovery: acquire_runtime_lock with force_stale=true + TTL env override + is_lock_stale check in patch_work early-exit"
       },
       {
         "id": "R-V141P0-02",
@@ -820,7 +914,10 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs:140-354",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 refactor"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T3: deduplicated handle_status by extracting shared display helpers (print_chapter_table, print_completion_lock_hint, truncate_with_ellipsis). Line count reduced, no logic change.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P0-03",
@@ -830,7 +927,9 @@
         "scope": "crates/nexus-local-db/src/works.rs:151-201",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — builder pattern is a code quality improvement, not user-facing. All current callers construct WorkPatch correctly. Defer to V1.43+."
       },
       {
         "id": "R-V141P0-04",
@@ -850,7 +949,9 @@
         "scope": "crates/nexus42/src/commands/creator/run.rs (start + resume)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — --from-work is on Start; --reopen/--extend-chapters are on Resume. These are separate commands used sequentially. No combined single-command path is needed. Each works correctly in isolation."
       },
       {
         "id": "R-V141P0-06",
@@ -858,9 +959,12 @@
         "severity": "low",
         "source": "qc2 S3 (V1.41 P0 review); qc-consolidated.md",
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs (handle_status)",
-        "decision": "defer",
+        "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added on-disk missing-file hint in handle_status for completion-locked novel works. Shows '⚠ completion-lock file missing' when DB column is set but .completion-lock.json is absent.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P0-07",
@@ -880,7 +984,9 @@
         "scope": "crates/nexus-local-db/src/works.rs (work_ref field validation)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — defense-in-depth newtype; no user-facing impact. Current validation in callers is sufficient for pre-1.0 local-first. Defer to V1.43+."
       },
       {
         "id": "R-V141P0-09",
@@ -910,7 +1016,10 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs:175",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added completion_locked_at to WorkSummary struct and list query. CLI handle_list now shows lock icon in status column when locked.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P0-12",
@@ -1012,7 +1121,9 @@
         "scope": "novel_pool_entries.rs:159 + inspiration_items.rs:219 (after fix wave: with creator_id param)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — defense-in-depth parameter; current handlers already validate creator_id at the API layer. Defer to V1.43+."
       },
       {
         "id": "R-V141P1-10",
@@ -1022,7 +1133,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs handle_pool_promote",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.43+",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — optimization; both round-trips succeed independently. No data loss if second fails. Defer to V1.43+ when pool promote can be made atomic server-side."
       },
       {
         "id": "R-V141P1-11",
@@ -1032,7 +1145,10 @@
         "scope": "works.rs:240, 1669",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added #[serde(skip_serializing)] on creator_id for PoolEntryDto and InspirationItemDto. API consumers no longer see creator_id in pool/inspiration responses.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P1-12",
@@ -1042,7 +1158,10 @@
         "scope": "inspiration_items.rs:263-327 title_to_slug",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added idea-<hex> short-id fallback in title_to_slug for pure-CJK titles. When no ASCII chars are extractable, a deterministic hex suffix is appended (e.g. idea-a1b2c3) instead of producing 'untitled'.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P1-13",
@@ -1052,7 +1171,10 @@
         "scope": "inspiration_items.rs:create_inspiration_with_scaffold",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42 UX"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T2: added auto-suffix on collision. create_inspiration_with_scaffold now appends -2, -3, etc. to slug when file exists, instead of returning an error.",
+        "closed_at": "2026-06-12"
       },
       {
         "id": "R-V141P1-14",
@@ -1062,7 +1184,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last",
+        "lifecycle": "open",
+        "closure_note": "V1.42 P-last T1: waived — cosmetic help text split; no user-facing behavior change. Each PoolAction already has its own doc comment. Defer to V1.43+."
       },
       {
         "id": "R-V141P1-15",
@@ -1112,8 +1236,127 @@
         "scope": "works.rs:1331-1341, 1374-1381, 1399-1406 (after fix wave: includes title)",
         "decision": "accept",
         "owner": "@fullstack-dev",
-        "target": "V1.42"
+        "target": "V1.42 P-last",
+        "lifecycle": "resolved",
+        "closure_note": "V1.42 P-last T1: already implemented in V1.41 P1 fix wave — From<PoolEntry> for PoolEntryDto and From<InspirationItem> for InspirationItemDto exist at works.rs:358-384. No further action needed.",
+        "closed_at": "2026-06-12"
       }
-    ]
+    ],
+    "2026-06-11-v1.42-runtime-lock-and-hygiene": [
+      {
+        "id": "R-V142P0-PROC",
+        "severity": "high",
+        "lifecycle": "open",
+        "title": "Process violation: Cursor (Auto.Wood) direct-committed to integration branch and marked P0 Done without QC/QA gates; integration HEAD had no code until PM merge",
+        "source": "cursor-parallel-agent (Auto.Wood <hk@btang.cn>; Co-authored-by: Cursor)",
+        "scope": ".mstar/status.json (plans[1].status flip Todo→Done), .mstar/knowledge/specs/novel-multi-work-lifecycle.md (§4.2 stamp: gap→Implemented), .mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md (status: Todo→Done), .mstar/knowledge/specs/README.md (status line update), .mstar/archived/plans-done.json (Profile B migration: object-array → id catalog + delete misplaced archived/plans/plans-done.json)",
+        "decision": "risk-accepted",
+        "owner": "@project-manager",
+        "target": "V1.42 P0 closeout — process gap accepted per user directive (Option B); QC tri-review (N=3) + PM merge now in progress to restore gate discipline",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      },
+      {
+        "id": "R-V142P0-QC-W-01",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "RuntimeLockGuard Drop is best-effort; panic or cancellation leaks lock until TTL",
+        "source": "qc1.md W-01 (qc-specialist, architecture coherence and maintainability risk)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs RuntimeLockGuard Drop impl (lines 108-123); production acquire contract spec novel-multi-work-lifecycle.md §4.2",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future hardening plan (V1.43+)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      },
+      {
+        "id": "R-V142P0-QC-W-02",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "patch_work handler complexity — pre-existing too_many_lines suppression now carries additional lock logic",
+        "source": "qc1.md W-02 (qc-specialist)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs patch_work handler (lines 998-1132)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "Future refactor plan (V1.43+ or P-last); not blocking",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      },
+      {
+        "id": "R-V142P0-QC-W-001",
+        "severity": "medium",
+        "lifecycle": "open",
+        "title": "Stale-recovery concurrent-acquire race on force_stale=true path — check-then-act on holder column without prior-holder predicate",
+        "source": "qc2.md W-001 (qc-specialist-2, security and correctness risk)",
+        "scope": "crates/nexus-local-db/src/runtime_lock.rs (acquire_runtime_lock force-clear path + early-exit check in patch_work); spec novel-multi-work-lifecycle.md §4.2 (single-writer model)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "Harden if single-writer assumption is ever relaxed; current local-only model makes impact low",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]"
+      }
+    ],
+    "2026-06-11-v1.42-multi-volume": [
+      {
+        "id": "R-V142P1-QC1-F-002",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "is_work_completed uses flat current_chapter comparison — correct under current invariants but architecturally fragile",
+        "source": "qc1.md F-002 (qc-specialist)",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs is_work_completed (current_chapter flat comparison vs per-volume)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future refactor (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      },
+      {
+        "id": "R-V142P1-QC1-F-003",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "reconcile_from_filesystem hardcodes volume=1 — multi-volume chapter files silently skipped",
+        "source": "qc1.md F-003 (qc-specialist)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/novel_scaffold.rs (or similar) reconcile_from_filesystem",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      },
+      {
+        "id": "R-V142P1-QC1-F-004",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "Supervisor NextChapter match arm ignores next_volume — volume context lost before schedule enqueue",
+        "source": "qc1.md F-004 (qc-specialist)",
+        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs NextChapter match arm",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+      }
+    ],
+    "2026-06-11-v1.42-conditional-routing": [
+      {
+        "id": "R-V142P2-QC1-W-001",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "_judge_result / _judge_reason context keys as bare string literals across two modules — maintainability risk (non-blocking)",
+        "source": "qc1.md W-001 (qc-specialist, architecture coherence and maintainability risk)",
+        "scope": "crates/nexus-orchestration/src/preset/loader.rs (lines using _judge_result/_judge_reason); crates/nexus-orchestration/src/tasks/mod.rs (judge_next_action)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future hygiene (non-blocking)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]"
+      },
+      {
+        "id": "R-V142P2-QC3-W-QC3-01",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "Observability gap in conditional edge branch selection — no tracing for which go/nogo branch is taken (non-blocking)",
+        "source": "qc3.md W-QC3-01 (qc-specialist-3, performance and reliability risk)",
+        "scope": "crates/nexus-orchestration/src/preset/loader.rs (add_conditional_edge); crates/nexus-orchestration/src/tasks/mod.rs (executor branch selection)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.42 P-last or future (non-blocking; recommend follow-up enhancement)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]"
+      }
+    ],
+    "2026-06-11-v1.42-agent-tool-production-wiring": [],
+    "2026-06-11-v1.42-ux-polish": []
   }
 }

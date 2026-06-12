@@ -1,8 +1,12 @@
-//! Work chapters CRUD operations (V1.36 novel-workflow-profile §4.1).
+//! Work chapters CRUD operations (V1.36 novel-workflow-profile §4.1, V1.42 §4.5.4).
 //!
 //! Manages the `work_chapters` table — per-chapter state SSOT for
 //! `work_profile: novel` Works. Seeded by the `novel-project-init` preset
 //! scaffold capability.
+//!
+//! V1.42 P1: PK migrated from `(work_id, chapter)` to `(work_id, volume, chapter)`.
+//! Existing rows backfilled with `volume = 1`. Single-volume Works (V1.41 and earlier)
+//! behave identically — all queries default to volume 1 when not specified.
 
 use sqlx::{Row, SqlitePool};
 
@@ -13,9 +17,10 @@ use crate::error::LocalDbError;
 pub struct WorkChapterRecord {
     /// Owning Work ID.
     pub work_id: String,
-    /// Chapter number (`1..total_planned_chapters`).
+    /// Chapter number (`1..total_planned_chapters` within the volume).
     pub chapter: i32,
-    /// Volume number (nullable; V1.36 single-volume leaves NULL).
+    /// Volume number (`NOT NULL DEFAULT 1` in DB; backfilled for pre-V1.42 rows).
+    /// V1.42: always `Some(1)` for single-volume Works; `Some(N)` for multi-volume.
     pub volume: Option<i32>,
     /// Filename slug (e.g. "the-third-layer").
     pub slug: Option<String>,
@@ -64,12 +69,13 @@ pub async fn seed_chapters(
         // SAFETY: INSERT OR IGNORE against work_chapters — runtime query because
         // the table was added in the same migration cycle and sqlx prepare hasn't
         // run yet. Uses INSERT OR IGNORE for idempotent seeding (PK conflict on
-        // (work_id, chapter) preserves existing rows).
+        // (work_id, volume, chapter) preserves existing rows).
+        // V1.42: explicit volume = 1 (PK now includes volume).
         sqlx::query(
             "INSERT OR IGNORE INTO work_chapters
              (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
               status, outline_path, body_path, created_at, updated_at)
-             VALUES (?, ?, NULL, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+             VALUES (?, ?, 1, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
         )
         .bind(work_id)
         .bind(ch)
@@ -110,11 +116,12 @@ pub async fn seed_chapters_tx(
 
         // SAFETY: INSERT OR IGNORE against work_chapters — runtime query
         // (same rationale as seed_chapters).
+        // V1.42: explicit volume = 1 (PK now includes volume).
         sqlx::query(
             "INSERT OR IGNORE INTO work_chapters
              (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
               status, outline_path, body_path, created_at, updated_at)
-             VALUES (?, ?, NULL, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+             VALUES (?, ?, 1, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
         )
         .bind(work_id)
         .bind(ch)
@@ -129,7 +136,7 @@ pub async fn seed_chapters_tx(
     Ok(())
 }
 
-/// List all chapter rows for a Work, ordered by chapter number.
+/// List all chapter rows for a Work, ordered by volume then chapter number.
 ///
 /// # Errors
 ///
@@ -139,11 +146,12 @@ pub async fn list_chapters(
     work_id: &str,
 ) -> Result<Vec<WorkChapterRecord>, LocalDbError> {
     // SAFETY: SELECT against work_chapters — runtime query.
+    // V1.42: ORDER BY volume, chapter for multi-volume Works.
     let rows = sqlx::query(
         "SELECT work_id, chapter, volume, slug, planned_word_count, actual_word_count,
                 status, outline_path, body_path, created_at, updated_at
          FROM work_chapters WHERE work_id = ?
-         ORDER BY chapter",
+         ORDER BY volume, chapter",
     )
     .bind(work_id)
     .fetch_all(pool)
@@ -189,7 +197,7 @@ pub struct InsertChapterParams<'a> {
     pub work_id: &'a str,
     /// Chapter number.
     pub chapter: i32,
-    /// Volume number (nullable; V1.36 single-volume leaves NULL).
+    /// Volume number (V1.42: `NOT NULL DEFAULT 1`; pass `Some(1)` for single-volume).
     pub volume: Option<i32>,
     /// Filename slug.
     pub slug: Option<&'a str>,
@@ -233,7 +241,10 @@ pub async fn insert_chapter(
     Ok(())
 }
 
-/// Get a single chapter row by `work_id` and chapter number.
+/// Get a single chapter row by `work_id`, `volume`, and chapter number.
+///
+/// V1.42: PK is now `(work_id, volume, chapter)`. Pass `volume = 1` for
+/// single-volume Works (backward-compatible default).
 ///
 /// # Errors
 ///
@@ -242,14 +253,16 @@ pub async fn get_chapter(
     pool: &SqlitePool,
     work_id: &str,
     chapter: i32,
+    volume: i32,
 ) -> Result<Option<WorkChapterRecord>, LocalDbError> {
     // SAFETY: SELECT against work_chapters — runtime query.
     let row = sqlx::query(
         "SELECT work_id, chapter, volume, slug, planned_word_count, actual_word_count,
                 status, outline_path, body_path, created_at, updated_at
-         FROM work_chapters WHERE work_id = ? AND chapter = ?",
+         FROM work_chapters WHERE work_id = ? AND volume = ? AND chapter = ?",
     )
     .bind(work_id)
+    .bind(volume)
     .bind(chapter)
     .fetch_optional(pool)
     .await?;
@@ -271,6 +284,9 @@ pub async fn get_chapter(
 
 /// Update a chapter's status and optionally its actual word count.
 ///
+/// V1.42: PK is now `(work_id, volume, chapter)`. Pass `volume = 1` for
+/// single-volume Works.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
@@ -278,6 +294,7 @@ pub async fn update_status(
     pool: &SqlitePool,
     work_id: &str,
     chapter: i32,
+    volume: i32,
     new_status: &str,
     actual_word_count: Option<u32>,
     now: &str,
@@ -285,12 +302,13 @@ pub async fn update_status(
     // SAFETY: UPDATE against work_chapters — runtime query.
     sqlx::query(
         "UPDATE work_chapters SET status = ?, actual_word_count = ?, updated_at = ?
-         WHERE work_id = ? AND chapter = ?",
+         WHERE work_id = ? AND volume = ? AND chapter = ?",
     )
     .bind(new_status)
     .bind(actual_word_count.map(|v| i32::try_from(v).unwrap_or(i32::MAX)))
     .bind(now)
     .bind(work_id)
+    .bind(volume)
     .bind(chapter)
     .execute(pool)
     .await?;
@@ -299,6 +317,9 @@ pub async fn update_status(
 
 /// Update a chapter's `outline_path` and `body_path`.
 ///
+/// V1.42: PK is now `(work_id, volume, chapter)`. Pass `volume = 1` for
+/// single-volume Works.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
@@ -306,6 +327,7 @@ pub async fn update_paths(
     pool: &SqlitePool,
     work_id: &str,
     chapter: i32,
+    volume: i32,
     outline_path: Option<&str>,
     body_path: Option<&str>,
     now: &str,
@@ -313,12 +335,13 @@ pub async fn update_paths(
     // SAFETY: UPDATE against work_chapters — runtime query.
     sqlx::query(
         "UPDATE work_chapters SET outline_path = ?, body_path = ?, updated_at = ?
-         WHERE work_id = ? AND chapter = ?",
+         WHERE work_id = ? AND volume = ? AND chapter = ?",
     )
     .bind(outline_path)
     .bind(body_path)
     .bind(now)
     .bind(work_id)
+    .bind(volume)
     .bind(chapter)
     .execute(pool)
     .await?;
@@ -445,8 +468,8 @@ pub async fn reconcile_from_filesystem(
         let fm_status = fm.get("status").cloned();
         let fm_word_count: Option<i32> = fm.get("word_count").and_then(|v| v.parse().ok());
 
-        // Check if row exists
-        let existing = get_chapter(pool, work_id, ch_num).await?;
+        // Check if row exists (V1.42: single-volume reconcile defaults to volume 1)
+        let existing = get_chapter(pool, work_id, ch_num, 1).await?;
 
         match existing {
             None => {
@@ -457,7 +480,7 @@ pub async fn reconcile_from_filesystem(
                     &InsertChapterParams {
                         work_id,
                         chapter: ch_num,
-                        volume: None,
+                        volume: Some(1), // V1.42: single-volume reconcile defaults to 1
                         slug: None,
                         planned_word_count: 4000,
                         outline_path: None,
@@ -479,6 +502,7 @@ pub async fn reconcile_from_filesystem(
                         pool,
                         work_id,
                         ch_num,
+                        1, // V1.42: single-volume reconcile defaults to volume 1
                         fm_status.as_deref().unwrap_or(&db_status),
                         fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
                         now,
@@ -546,6 +570,141 @@ pub async fn next_chapter(pool: &SqlitePool, work_id: &str) -> Result<Option<i32
             Ok(ch)
         },
     )
+}
+
+/// Volume-aware next chapter selection per novel-workflow-profile §4.5.2 + §4.5.4.
+///
+/// Returns the **lowest (volume, chapter) pair** whose status is in the active set
+/// `{not_started, outlined, draft}`. For single-volume Works this is equivalent
+/// to [`next_chapter`]. For multi-volume Works, this crosses volume boundaries:
+/// after all chapters in volume N are finalized, it picks the first active chapter
+/// in volume N+1.
+///
+/// Returns `Ok(None)` when all chapters across all volumes are finalized (novel-completion).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn next_chapter_volume_aware(
+    pool: &SqlitePool,
+    work_id: &str,
+) -> Result<Option<(i32, i32)>, LocalDbError> {
+    // SAFETY: SELECT against work_chapters — runtime query.
+    let row = sqlx::query(
+        "SELECT volume, chapter FROM work_chapters \
+         WHERE work_id = ? AND status IN ('not_started', 'outlined', 'draft') \
+         ORDER BY volume ASC, chapter ASC LIMIT 1",
+    )
+    .bind(work_id)
+    .fetch_optional(pool)
+    .await?;
+
+    row.map_or_else(
+        || Ok(None),
+        |r| {
+            let vol: i32 = r.get("volume");
+            let ch: i32 = r.get("chapter");
+            Ok(Some((vol, ch)))
+        },
+    )
+}
+
+/// Seed chapter rows for a multi-volume Work (V1.42 §4.5.4).
+///
+/// For each volume in `volumes`, inserts `chapters_per_volume` rows. On PK
+/// conflict `(work_id, volume, chapter)`, existing rows are not overwritten
+/// (idempotent).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any insert fails.
+pub async fn seed_chapters_multi_volume(
+    pool: &SqlitePool,
+    work_id: &str,
+    work_ref: &str,
+    total_volumes: i32,
+    chapters_per_volume: i32,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    let mut tx = pool.begin().await?;
+
+    for vol in 1..=total_volumes {
+        for ch in 1..=chapters_per_volume {
+            let ch_nn = format!("ch{ch:02}");
+            let outline_path =
+                format!("Works/{work_ref}/Outlines/chapters/v{vol:02}-{ch_nn}-outline.md");
+            let slug = format!("v{vol:02}-{ch_nn}");
+            let body_path = format!("Works/{work_ref}/Stories/v{vol:02}-{ch_nn}-{slug}.md");
+
+            // SAFETY: INSERT OR IGNORE — idempotent seeding on PK conflict.
+            sqlx::query(
+                "INSERT OR IGNORE INTO work_chapters
+                 (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
+                  status, outline_path, body_path, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+            )
+            .bind(work_id)
+            .bind(ch)
+            .bind(vol)
+            .bind(&slug)
+            .bind(&outline_path)
+            .bind(&body_path)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Seed multi-volume chapter rows inside an existing transaction (V1.42 T3).
+///
+/// Same logic as [`seed_chapters_multi_volume`] but uses a caller-provided
+/// transaction so the seed can be atomic with `patch_work_tx`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any insert fails. The caller decides whether
+/// to commit or roll back the transaction.
+pub async fn seed_chapters_multi_volume_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    work_id: &str,
+    work_ref: &str,
+    total_volumes: i32,
+    chapters_per_volume: i32,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    for vol in 1..=total_volumes {
+        for ch in 1..=chapters_per_volume {
+            let ch_nn = format!("ch{ch:02}");
+            let outline_path =
+                format!("Works/{work_ref}/Outlines/chapters/v{vol:02}-{ch_nn}-outline.md");
+            let slug = format!("v{vol:02}-{ch_nn}");
+            let body_path = format!("Works/{work_ref}/Stories/v{vol:02}-{ch_nn}-{slug}.md");
+
+            // SAFETY: INSERT OR IGNORE — idempotent seeding on PK conflict.
+            sqlx::query(
+                "INSERT OR IGNORE INTO work_chapters
+                 (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
+                  status, outline_path, body_path, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+            )
+            .bind(work_id)
+            .bind(ch)
+            .bind(vol)
+            .bind(&slug)
+            .bind(&outline_path)
+            .bind(&body_path)
+            .bind(now)
+            .bind(now)
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 /// Check whether a Work is completed per novel-workflow-profile §6.1.
@@ -780,7 +939,7 @@ mod tests {
             &InsertChapterParams {
                 work_id: "wrk_crud_001",
                 chapter: 1,
-                volume: None,
+                volume: Some(1),
                 slug: Some("introduction"),
                 planned_word_count: 5000,
                 outline_path: Some("Works/my-novel/Outlines/chapters/ch01-outline.md"),
@@ -791,11 +950,12 @@ mod tests {
         .await
         .unwrap();
 
-        let row = get_chapter(&pool, "wrk_crud_001", 1)
+        let row = get_chapter(&pool, "wrk_crud_001", 1, 1)
             .await
             .unwrap()
             .expect("chapter should exist");
         assert_eq!(row.chapter, 1);
+        assert_eq!(row.volume, Some(1));
         assert_eq!(row.slug.as_deref(), Some("introduction"));
         assert_eq!(row.planned_word_count, 5000);
         assert_eq!(row.status, "not_started");
@@ -818,6 +978,7 @@ mod tests {
             &pool,
             "wrk_crud_002",
             1,
+            1,
             "draft",
             None,
             "2026-06-07T11:00:00Z",
@@ -825,7 +986,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row = get_chapter(&pool, "wrk_crud_002", 1)
+        let row = get_chapter(&pool, "wrk_crud_002", 1, 1)
             .await
             .unwrap()
             .expect("chapter 1");
@@ -837,6 +998,7 @@ mod tests {
             &pool,
             "wrk_crud_002",
             1,
+            1,
             "finalized",
             Some(4200),
             "2026-06-07T12:00:00Z",
@@ -844,7 +1006,7 @@ mod tests {
         .await
         .unwrap();
 
-        let row = get_chapter(&pool, "wrk_crud_002", 1)
+        let row = get_chapter(&pool, "wrk_crud_002", 1, 1)
             .await
             .unwrap()
             .expect("chapter 1");
@@ -882,6 +1044,7 @@ mod tests {
                 &pool,
                 "wrk_comp_001",
                 ch,
+                1,
                 "finalized",
                 Some(4000),
                 "2026-06-07T12:00:00Z",
@@ -921,6 +1084,7 @@ mod tests {
                 &pool,
                 "wrk_comp_002",
                 ch,
+                1,
                 "finalized",
                 Some(4000),
                 "2026-06-07T12:00:00Z",
@@ -932,6 +1096,7 @@ mod tests {
             &pool,
             "wrk_comp_002",
             3,
+            1,
             "draft",
             None,
             "2026-06-07T11:00:00Z",
@@ -1112,7 +1277,7 @@ mod tests {
         assert_eq!(report.created, 0);
 
         // Verify ch01 updated
-        let ch1 = get_chapter(&pool, "wrk_recon_002", 1)
+        let ch1 = get_chapter(&pool, "wrk_recon_002", 1, 1)
             .await
             .unwrap()
             .expect("ch1");
@@ -1166,6 +1331,7 @@ mod tests {
             &pool,
             "wrk_sel_001",
             1,
+            1,
             "finalized",
             Some(4000),
             "2026-06-08T11:00:00Z",
@@ -1192,6 +1358,7 @@ mod tests {
             &pool,
             "wrk_sel_002",
             1,
+            1,
             "finalized",
             Some(4000),
             "2026-06-08T11:00:00Z",
@@ -1202,6 +1369,7 @@ mod tests {
             &pool,
             "wrk_sel_002",
             2,
+            1,
             "draft",
             None,
             "2026-06-08T12:00:00Z",
@@ -1222,6 +1390,7 @@ mod tests {
             &pool,
             "wrk_sel_002",
             2,
+            1,
             "finalized",
             Some(4000),
             "2026-06-08T13:00:00Z",
@@ -1252,6 +1421,7 @@ mod tests {
             &pool,
             "wrk_sel_003",
             1,
+            1,
             "outlined",
             None,
             "2026-06-08T11:00:00Z",
@@ -1270,6 +1440,7 @@ mod tests {
         update_status(
             &pool,
             "wrk_sel_003",
+            1,
             1,
             "finalized",
             Some(4000),
@@ -1301,6 +1472,7 @@ mod tests {
             &pool,
             "wrk_sel_004",
             1,
+            1,
             "finalized",
             Some(4000),
             "2026-06-08T11:00:00Z",
@@ -1311,6 +1483,7 @@ mod tests {
             &pool,
             "wrk_sel_004",
             2,
+            1,
             "outlined",
             None,
             "2026-06-08T12:00:00Z",
@@ -1321,6 +1494,7 @@ mod tests {
             &pool,
             "wrk_sel_004",
             3,
+            1,
             "draft",
             None,
             "2026-06-08T13:00:00Z",
@@ -1359,6 +1533,7 @@ mod tests {
                 &pool,
                 "wrk_comp_010",
                 ch,
+                1,
                 "finalized",
                 Some(4000),
                 "2026-06-08T12:00:00Z",
@@ -1401,6 +1576,7 @@ mod tests {
                 &pool,
                 "wrk_comp_011",
                 ch,
+                1,
                 "finalized",
                 Some(4000),
                 "2026-06-08T12:00:00Z",
@@ -1412,6 +1588,7 @@ mod tests {
             &pool,
             "wrk_comp_011",
             3,
+            1,
             "draft",
             None,
             "2026-06-08T13:00:00Z",
@@ -1447,6 +1624,7 @@ mod tests {
         update_status(
             &pool,
             "wrk_comp_012",
+            1,
             1,
             "finalized",
             Some(4000),
@@ -1494,6 +1672,7 @@ mod tests {
                 &pool,
                 "wrk_comp_novel_001",
                 ch,
+                1,
                 "finalized",
                 Some(4000),
                 "2026-06-08T12:00:00Z",
@@ -1527,6 +1706,7 @@ mod tests {
         update_status(
             &pool,
             "wrk_comp_novel_001",
+            1,
             1,
             "draft",
             None,
@@ -1575,6 +1755,7 @@ mod tests {
         update_status(
             &pool,
             "wrk_compat_001",
+            1,
             1,
             "finalized",
             Some(4000),

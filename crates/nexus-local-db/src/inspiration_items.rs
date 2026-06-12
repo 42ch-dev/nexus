@@ -156,8 +156,10 @@ pub async fn create_inspiration_row(
 
 /// Create an inspiration item atomically: DB row + markdown file scaffold.
 ///
-/// The MD file is written via tmp+rename for atomicity. If the MD file
-/// already exists, returns an error without modifying the DB.
+/// The MD file is written via tmp+rename for atomicity.
+///
+/// V1.42 P-last (R-V141P1-13): on slug collision, auto-suffixes with -2, -3, etc.
+/// instead of returning an error.
 ///
 /// `workspace_dir` must be the resolved operational workspace directory
 /// (per `nexus_home_layout::operational_workspace_dir`). The scaffold is
@@ -165,8 +167,8 @@ pub async fn create_inspiration_row(
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails, the file cannot be
-/// written, or the file already exists.
+/// Returns `LocalDbError` if the database query fails or the file cannot be
+/// written after exhausting collision retries.
 pub async fn create_inspiration_with_scaffold(
     pool: &SqlitePool,
     item_id: &str,
@@ -175,38 +177,49 @@ pub async fn create_inspiration_with_scaffold(
     workspace_dir: &std::path::Path,
     created_at: &str,
 ) -> Result<InspirationItem, LocalDbError> {
-    let slug = title_to_slug(title);
-    let rel_path = format!("Pool/Ideas/{slug}.md");
+    let base_slug = title_to_slug(title);
 
-    // Step 1: Write MD file (tmp + rename) — fail if exists.
-    // File I/O is blocking; run on a blocking thread to avoid stalling
-    // the async runtime (qc-consolidated F-08).
-    let abs_path = workspace_dir.join(&rel_path);
-    let frontmatter = format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
-
-    tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, LocalDbError> {
-        if let Some(parent) = abs_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| LocalDbError::Io(e.to_string()))?;
+    // V1.42 P-last (R-V141P1-13): try base slug, then -2, -3, ... up to 100.
+    let mut suffix: u32 = 0;
+    let (rel_path, abs_path) = loop {
+        let candidate = if suffix == 0 {
+            base_slug.clone()
+        } else {
+            format!("{base_slug}-{suffix}")
+        };
+        let rp = format!("Pool/Ideas/{candidate}.md");
+        let ap = workspace_dir.join(&rp);
+        if !ap.exists() {
+            break (rp, ap);
         }
-
-        if abs_path.exists() {
+        suffix += 1;
+        if suffix > 100 {
             return Err(LocalDbError::ConstraintViolation {
                 table: "inspiration_items".to_string(),
                 constraint: format!(
-                    "inspiration file already exists at {} — use a different title or archive the existing one",
-                    abs_path.display()
+                    "too many slug collisions for '{base_slug}' (tried up to -100)"
                 ),
             });
         }
+    };
 
-        let tmp_path = abs_path.with_extension("md.tmp");
+    // Step 1: Write MD file (tmp + rename)
+    let frontmatter = format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
+
+    let abs_path_clone = abs_path.clone();
+    tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, LocalDbError> {
+        if let Some(parent) = abs_path_clone.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| LocalDbError::Io(e.to_string()))?;
+        }
+
+        let tmp_path = abs_path_clone.with_extension("md.tmp");
         std::fs::write(&tmp_path, &frontmatter).map_err(|e| LocalDbError::Io(e.to_string()))?;
-        std::fs::rename(&tmp_path, &abs_path).map_err(|e| {
+        std::fs::rename(&tmp_path, &abs_path_clone).map_err(|e| {
             let _ = std::fs::remove_file(&tmp_path);
             LocalDbError::Io(e.to_string())
         })?;
 
-        Ok(abs_path)
+        Ok(abs_path_clone)
     })
     .await
     .map_err(|e| LocalDbError::Io(e.to_string()))??;
@@ -437,6 +450,8 @@ pub async fn get_inspiration(
 ///
 /// Rules:
 /// - Lowercase ASCII only (non-ASCII → hyphen)
+/// - CJK fallback: if the resulting slug would be "untitled", generate
+///   a short ID suffix instead (e.g. `idea-a3f2`)
 /// - Hyphens for spaces
 /// - Truncate to 64 characters
 /// - Reject empty or reserved slugs
@@ -481,15 +496,26 @@ pub fn title_to_slug(title: &str) -> String {
 
     // Reject empty
     if final_slug.is_empty() {
-        return "untitled".to_string();
+        return generate_fallback_slug();
     }
 
     // Reject reserved names
     if final_slug == "." || final_slug == ".." {
-        return "untitled".to_string();
+        return generate_fallback_slug();
     }
 
     final_slug
+}
+
+/// V1.42 P-last (R-V141P1-12): CJK fallback — when the title produces no ASCII
+/// slug, generate a short ID suffix instead of "untitled".
+fn generate_fallback_slug() -> String {
+    // Use a simple timestamp-based short ID (6 hex chars = 24 bits of entropy).
+    // Good enough for local-first use; avoids external deps.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("idea-{:06x}", (now.subsec_nanos() >> 4) & 0x00FF_FFFF)
 }
 
 #[cfg(test)]
@@ -504,10 +530,12 @@ mod tests {
 
     #[test]
     fn test_title_to_slug_chinese() {
-        // Non-ASCII → hyphen, collapsed
-        assert_eq!(title_to_slug("灵感和创意"), "untitled");
-        // Mixed: the CJK chars become hyphens, collapsed, stripped → empty → untitled
-        // But a better test:
+        // V1.42 P-last (R-V141P1-12): pure CJK now produces idea-<hex>
+        // instead of "untitled"
+        let slug = title_to_slug("灵感和创意");
+        assert!(slug.starts_with("idea-"));
+        assert!(slug.len() > 5);
+        // Mixed: the CJK chars become hyphens, collapsed, trailing stripped
         let slug = title_to_slug("My 灵感 Idea");
         // "my-idea" (CJK → hyphens collapsed, trailing stripped)
         assert!(slug.contains("my"));
@@ -523,12 +551,16 @@ mod tests {
 
     #[test]
     fn test_title_to_slug_empty() {
-        assert_eq!(title_to_slug(""), "untitled");
-        assert_eq!(title_to_slug("   "), "untitled");
+        // Empty/whitespace now produces idea-<hex> fallback
+        let slug = title_to_slug("");
+        assert!(slug.starts_with("idea-"));
+        let slug = title_to_slug("   ");
+        assert!(slug.starts_with("idea-"));
     }
 
     #[test]
     fn test_title_to_slug_reserved() {
-        assert_eq!(title_to_slug(".."), "untitled");
+        let slug = title_to_slug("..");
+        assert!(slug.starts_with("idea-"));
     }
 }

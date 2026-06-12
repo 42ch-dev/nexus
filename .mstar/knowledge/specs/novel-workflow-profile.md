@@ -342,18 +342,20 @@ Missing filesystem hints are still surfaced to the user (see §8.1), but a missi
 
 #### 4.5.4 Primary key and volume migration decision
 
-V1.37 keeps the `work_chapters` primary key as `(work_id, chapter)` and keeps `volume` nullable. This matches V1.36 single-volume Works and avoids a risky mid-iteration migration while P0 foundation gates and scaffold atomicity are stabilizing.
+**V1.37–V1.41 (shipped):** PK `(work_id, chapter)`; `volume` nullable; single-volume Works use unique chapter numbers across the Work.
 
-Reserved post-V1.37 migration path:
+**V1.42 P1 (implement — grill-me locked):**
 
-1. Backfill `volume = 1` or another explicit volume number for Works that opt into multi-volume behavior.
-2. Drop the `(work_id, chapter)` primary-key constraint.
-3. Add a unique index on `(work_id, volume, chapter)`.
-4. Preserve row data (`status`, `outline_path`, `body_path`, `actual_word_count`, timestamps) through an idempotent migration.
+1. Backfill **implicit `volume = 1`** for all existing `work_chapters` rows (single-volume behavior unchanged).
+2. Migrate PK to **`(work_id, volume, chapter)`** (see [local-db-schema.md](local-db-schema.md) V1.42 amendment).
+3. Preserve row data (`status`, `outline_path`, `body_path`, `actual_word_count`, timestamps) through an idempotent migration.
+4. New multi-volume Works declare volume count at init; chapter numbers may repeat across volumes.
 
-Until that migration ships, V1.37 single-volume Works use unique chapter numbers across the entire Work. Multi-volume Works may be described in specs with `volume = 1, 2, 3, ...`, but implementation must not rely on duplicate `chapter` numbers across volumes while the old PK remains active.
+Plan: [2026-06-11-v1.42-multi-volume.md](../../plans/2026-06-11-v1.42-multi-volume.md).
 
 #### 4.5.5 Volume outline semantics
+
+**V1.42 P1 (Implemented):** Volume-outline scaffold delivered. `novel-project-init` grill-me captures volume count + per-volume chapter totals and seeds `Works/<work_ref>/Outlines/volume-{n}-outline.md` per the YAML structure below. Cross-volume chapter numbers may repeat across volumes (per §4.5.4 PK migration).
 
 When `volume != NULL`, the chapter must appear in `Outlines/volume-outline.md` under that volume's chapter range. The minimum V1.37+ multi-volume outline structure is:
 
@@ -381,6 +383,8 @@ The V1.36 `novel-writing` preset and templates may still bind or imply `chapter:
 This keeps `novel-writing` a single preset that scales from chapter 1 to chapter N rather than creating separate per-chapter presets.
 
 #### 4.5.7 Future acceptance and migration tests
+
+**V1.42 P1 (Implemented subset):** Test #6 (Future multi-volume migration: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data) is implemented. Verified by `w01_v142_migration_idempotent` test in `crates/nexus-local-db/tests/v142_migration_fixes.rs`. Index coverage for `next_chapter_volume_aware` query is also verified by `w02_volume_aware_index_coverage` test. Other tests (#1–#5) remain future per the existing roadmap below.
 
 A future implementation plan for this roadmap must include at least these tests:
 
@@ -798,9 +802,9 @@ The V1.36 single-chapter case (`total_planned_chapters == 1`) is a strict subset
 - No platform publish on completion
 - No novels-system 8-step / Redis switch (rejected for OSS core)
 
-### 6.4 Multi-work completion extension (V1.41 Draft)
+### 6.4 Multi-work completion extension (Shipped V1.41)
 
-When [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) ships (V1.41 P0):
+[novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) shipped V1.41 (PR #53):
 
 1. §6.1–§6.2 completion criteria unchanged.
 2. Extend `auto_chain::mark_work_completed`: write `Works/<work_ref>/.completion-lock.json`; stop auto-chain on **that** Work only (lifecycle spec §3).
@@ -809,7 +813,7 @@ When [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) ships (V1.41
 5. **Reopen** same Work: `completion-lock release` then `creator run resume --reopen --reason` (grill-me B); distinct from `--from-work` new Work.
 6. Pool integration: [novel-work-pool.md](novel-work-pool.md). **OUT:** `creator work switch`.
 
-**OUT V1.41**: multi-volume PK (§4.5.4) remains V1.42.
+**V1.42 P1**: multi-volume PK (§4.5.4) — [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md).
 
 ---
 

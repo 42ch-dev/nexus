@@ -502,6 +502,28 @@ fn validate_manifest(
                         });
                     }
                 }
+                NextTarget::GoNogo(go_nogo) => {
+                    // V1.42 P2: GoNogo is only valid on llm_judge states.
+                    if !matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. })) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next"),
+                            error: "go/nogo conditional next is only valid on llm_judge states"
+                                .to_string(),
+                        });
+                    }
+                    if !state_ids.contains(go_nogo.go.as_str()) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next.go"),
+                            error: format!("unknown state: '{}'", go_nogo.go),
+                        });
+                    }
+                    if !state_ids.contains(go_nogo.nogo.as_str()) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next.nogo"),
+                            error: format!("unknown state: '{}'", go_nogo.nogo),
+                        });
+                    }
+                }
                 NextTarget::Conditional(_) => {
                     problems.push(ValidationProblem {
                         path: format!("{state_path}.next"),
@@ -544,6 +566,11 @@ fn validate_manifest(
                             error: format!("unknown inner_graph: '{name}'"),
                         });
                     }
+                }
+                crate::preset::manifest::EnterAction::HostTool { .. } => {
+                    // HostTool actions are dispatched through the daemon's
+                    // unified registry, not the capability registry. No
+                    // static validation needed.
                 }
             }
         }
@@ -838,10 +865,23 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
         graph.add_task(std::sync::Arc::new(task));
     }
 
-    // Wire edges from state.next (linear only; conditional already rejected by validation).
+    // Wire edges from state.next.
     for state in &manifest.states {
-        if let Some(NextTarget::Linear(ref next_id)) = state.next {
-            graph.add_edge(&state.id, next_id);
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => {
+                graph.add_edge(&state.id, next_id);
+            }
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                // V1.42 P2: conditional edge reads _judge_result from context.
+                // `go` branch when true; `nogo` branch when false or absent.
+                graph.add_conditional_edge(
+                    &state.id,
+                    |ctx| ctx.get_sync::<bool>("_judge_result").unwrap_or(false),
+                    &go_nogo.go,
+                    &go_nogo.nogo,
+                );
+            }
+            Some(NextTarget::Conditional(_)) | None => {}
         }
     }
 
@@ -850,29 +890,51 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
 
 /// Build the outer graph with engine + inner graph references wired into
 /// composite tasks (for `start_session_with_preset`).
+///
+/// `daemon_tool_dispatch` is passed by value because it's cloned into each
+/// composite task that contains `HostTool` enter actions.
+#[allow(clippy::needless_pass_by_value)]
 pub fn build_wired_outer_graph(
     loaded: &LoadedPreset,
     engine: &Arc<dyn crate::engine::OrchestrationEngine>,
     caps: &Arc<CapabilityRegistry>,
+    daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
 ) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
 
     let graph = graph_flow::Graph::new(&loaded.id);
 
     for state in &loaded.manifest.states {
-        let task = StateCompositeTask::from_manifest(state)
+        let mut task = StateCompositeTask::from_manifest(state)
             .with_resolved_template(&loaded.id)
             .with_engine(engine.clone())
             .with_inner_graphs(loaded.inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())
             .with_registry(caps.clone());
+
+        // Wire daemon tool dispatch for HostTool enter actions (DF-47, V1.42 P3).
+        if let Some(ref dispatch) = daemon_tool_dispatch {
+            task = task.with_daemon_tool_dispatch(dispatch.clone());
+        }
+
         graph.add_task(std::sync::Arc::new(task));
     }
 
     // Wire edges.
     for state in &loaded.manifest.states {
-        if let Some(NextTarget::Linear(ref next_id)) = state.next {
-            graph.add_edge(&state.id, next_id);
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => {
+                graph.add_edge(&state.id, next_id);
+            }
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                graph.add_conditional_edge(
+                    &state.id,
+                    |ctx| ctx.get_sync::<bool>("_judge_result").unwrap_or(false),
+                    &go_nogo.go,
+                    &go_nogo.nogo,
+                );
+            }
+            Some(NextTarget::Conditional(_)) | None => {}
         }
     }
 
@@ -2375,6 +2437,238 @@ states:
                 .iter()
                 .any(|p| p.path.contains("system_prompt_file") && p.error.contains("..")),
             "expected '..' path safety error from A3 surface on system_prompt_file: {problems:?}"
+        );
+    }
+
+    // ── V1.42 P2 T4: GoNogo conditional next tests ──────────────────────
+
+    /// Helper YAML for a preset with llm_judge + GoNogo next.
+    fn gonogo_yaml() -> &'static str {
+        r#"
+preset:
+  id: gonogo-test
+  version: 1
+  kind: creator
+  description: test gonogo conditional
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: judge_state
+  terminal: end
+states:
+  - id: judge_state
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      go: go_state
+      nogo: nogo_state
+  - id: go_state
+    enter: []
+    exit_when: { kind: manual }
+    next: end
+  - id: nogo_state
+    enter: []
+    exit_when: { kind: manual }
+    next: end
+  - id: end
+    terminal: true
+"#
+    }
+
+    #[test]
+    fn gonogo_next_loads_successfully_on_llm_judge() {
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(gonogo_yaml(), &caps);
+        assert!(loaded.is_ok(), "expected valid preset: {loaded:?}");
+        let preset = loaded.unwrap();
+        assert_eq!(preset.id, "gonogo-test");
+    }
+
+    #[test]
+    fn gonogo_next_wires_conditional_edge() {
+        let caps = test_capability_registry();
+        let loaded = load_preset_from_str(gonogo_yaml(), &caps).unwrap();
+
+        // Verify outer graph has tasks for all four states.
+        assert!(loaded.outer_graph.get_task("judge_state").is_some());
+        assert!(loaded.outer_graph.get_task("go_state").is_some());
+        assert!(loaded.outer_graph.get_task("nogo_state").is_some());
+        assert!(loaded.outer_graph.get_task("end").is_some());
+
+        // When _judge_result is true, find_next_task should return go_state.
+        let ctx = graph_flow::Context::new();
+        ctx.set_sync("_judge_result", true);
+        let next = loaded.outer_graph.find_next_task("judge_state", &ctx);
+        assert_eq!(
+            next.as_deref(),
+            Some("go_state"),
+            "GO path: expected go_state, got {next:?}"
+        );
+
+        // When _judge_result is false, find_next_task should return nogo_state.
+        let ctx2 = graph_flow::Context::new();
+        ctx2.set_sync("_judge_result", false);
+        let next2 = loaded.outer_graph.find_next_task("judge_state", &ctx2);
+        assert_eq!(
+            next2.as_deref(),
+            Some("nogo_state"),
+            "NOGO path: expected nogo_state, got {next2:?}"
+        );
+
+        // When _judge_result is absent, find_next_task should return nogo_state (fallback).
+        let ctx3 = graph_flow::Context::new();
+        let next3 = loaded.outer_graph.find_next_task("judge_state", &ctx3);
+        assert_eq!(
+            next3.as_deref(),
+            Some("nogo_state"),
+            "No judge result: expected nogo_state fallback, got {next3:?}"
+        );
+    }
+
+    #[test]
+    fn reject_gonogo_on_non_llm_judge_state() {
+        let yaml = r#"
+preset:
+  id: bad-gonogo
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next:
+      go: b
+      nogo: c
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+    next: c
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.error.contains("go/nogo") && p.error.contains("llm_judge")),
+            "expected 'go/nogo only valid on llm_judge' problem: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_gonogo_with_unknown_go_target() {
+        let yaml = r#"
+preset:
+  id: bad-gonogo-go
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      go: nonexistent
+      nogo: c
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("next.go") && p.error.contains("unknown state")),
+            "expected 'unknown state' on next.go: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn reject_gonogo_with_unknown_nogo_target() {
+        let yaml = r#"
+preset:
+  id: bad-gonogo-nogo
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      go: c
+      nogo: nonexistent
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.path.contains("next.nogo") && p.error.contains("unknown state")),
+            "expected 'unknown state' on next.nogo: {problems:?}"
+        );
+    }
+
+    #[test]
+    fn expression_conditional_still_rejected() {
+        // Ensure the expression-based Conditional form is still rejected.
+        let yaml = r#"
+preset:
+  id: expr-cond
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: c
+states:
+  - id: a
+    enter: []
+    exit_when:
+      kind: llm_judge
+      template_file: "judge.txt"
+    next:
+      kind: conditional
+      rules:
+        - when: "true"
+          to: b
+      default: c
+  - id: b
+    enter: []
+    exit_when: { kind: manual }
+    next: c
+  - id: c
+    terminal: true
+"#;
+        let caps = test_capability_registry();
+        let err = load_preset_from_str(yaml, &caps).unwrap_err();
+        let problems = err.problems();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.error.contains("ConditionalNotYetSupported")),
+            "expected 'ConditionalNotYetSupported': {problems:?}"
         );
     }
 }
