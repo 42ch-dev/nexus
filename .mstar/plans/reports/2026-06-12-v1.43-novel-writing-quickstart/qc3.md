@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-12-v1.43-novel-writing-quickstart
-verdict: Request Changes
-generated_at: 2026-06-12T18:35:00+08:00
+verdict: Approve
+generated_at: 2026-06-12T10:44:10Z
 ---
 
 # Code Review Report — P0 (BL-10 novel-writing quickstart)
@@ -60,3 +60,31 @@ generated_at: 2026-06-12T18:35:00+08:00
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation (post-fix wave, fix commit e2029fa7)
+
+**Re-review mode**: Targeted — qc-specialist-3 only (raised 2 blocking Warnings in initial wave)
+**Fix range reviewed**: 23dac267..e2029fa7
+**Files in fix wave**: docs/novel-writing-quickstart.md (+8/-6)
+
+### Previously raised blocking findings — re-check
+| Finding ID | Summary | Status | Evidence |
+|------------|---------|--------|----------|
+| qc3-F-001 | 96h banner remediation command → review-master | PASS | `docs/novel-writing-quickstart.md:165` now reads `nexus42 creator run review-master <work_id>`; the conflated `stage advance <work_id> --stage review` form is absent. Spec authority: `novel-workflow-profile.md` §5.5.3 lines 685-699 explicitly prescribe `creator run review-master <work_id>` as the 96h master-decision next action. `novel-quality-loop.md` §6 lines 77-82 reinforces the `review-master` hint in `creator run status` banners. |
+| qc3-F-002 | Part II C disambiguation from creator-scoped Inspiration Pool | PASS | `docs/novel-writing-quickstart.md:249` now reads `### C) Work-Level Notes / Mid-Session Inspiration`; line 265 adds a cross-reference blockquote pointing to the creator-scoped Inspiration Pool (`Pool/Ideas/`) and `[novel-work-pool.md](../.mstar/knowledge/specs/novel-work-pool.md) §3`. The old unqualified `### C) Inspiration Pool` heading is absent and the Work-level `--note` content is preserved. Spec authority: `novel-work-pool.md` §3 lines 65-78 defines the creator-scoped `inspiration_items` table + `Pool/Ideas/<slug>.md` files and explicitly notes it is **not** per-Work `works.inspiration_log`. |
+
+### Spec claims re-audit (post-fix)
+- 96h banner threshold (novel-quality-loop.md §6): PASS — banner text at `docs/novel-writing-quickstart.md:162` correctly states the 96h master-decision banner prompts a master-decision review, and the remediation command at line 165 matches the spec-authoritative `creator run review-master <work_id>` surface.
+- Completion semantics (novel-workflow-profile.md §6.1): PASS — `docs/novel-writing-quickstart.md:172-178` lists the three completion conditions (all chapters finalized, `current_chapter >= total_planned_chapters`, intake complete), sets Work status to `completed`, stops auto-chain, and mentions the completion-lock file; consistent with `novel-workflow-profile.md` §6.1.
+- Auto-chain (creator-workflow.md §5.4): PASS — `docs/novel-writing-quickstart.md:210` states each Work runs its own auto-chain independently; the Part I flow uses `creator run continue` and `creator run finalize` without contradicting the single FL-E driver invariant.
+- Multi-volume primary key (local-db-schema.md V1.42 amendment): PASS — `docs/novel-writing-quickstart.md:236` correctly states the primary key is `(work_id, volume, chapter)`, matching the V1.42 PK migration described in `novel-workflow-profile.md` §4.5.4.
+- Inspiration pool naming disambiguation (novel-work-pool.md §3 vs. creator-workflow.md §5.5): PASS — the section heading now qualifies the Work-level notes as "Mid-Session Inspiration" and the line 265 blockquote explicitly separates it from the creator-scoped Inspiration Pool in `novel-work-pool.md` §3, resolving the collision with the existing spec concept.
+
+### Static checks (re-run on full feature scope ae7c9415..e2029fa7)
+- Emojis: PASS — `rg -nP '[\x{1F300}-\x{1FAFF}]|[\x{2600}-\x{27BF}]'` returned no matches.
+- Link integrity: PASS — all 9 links in the file resolve (repo-relative targets exist; remote URLs noted as remote).
+- cargo +nightly fmt --all --check: PASS — returned no output (exit 0).
+
+### Updated verdict
+**Verdict**: Approve
+**Rationale**: Both previously raised blocking Warnings (qc3-F-001 and qc3-F-002) are resolved in commit `e2029fa7`. The 96h banner now uses the spec-authoritative `creator run review-master <work_id>` command, and Part II C is renamed and cross-referenced so it no longer collides with the creator-scoped Inspiration Pool. No Critical findings exist and no Warnings remain unresolved from this re-review. Static checks (emoji, link integrity, nightly fmt) all pass.
