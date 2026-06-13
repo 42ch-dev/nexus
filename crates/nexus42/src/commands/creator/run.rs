@@ -124,13 +124,21 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
         .map_err(|e| crate::errors::CliError::Config(format!("Cannot resolve nexus home: {e}")))?;
     let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
 
-    let loaded = nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps)
-        .map_err(|e| {
-            crate::errors::CliError::Config(format!(
-                "Unknown preset '{preset_id}': {e}. \
-                 Run `nexus42 creator presets list` to see available presets."
-            ))
-        })?;
+    // QC3 W-1: try O(1) direct path lookup before falling back to full scan.
+    let loaded = match nexus_orchestration::preset::lookup_preset_by_id(
+        &preset_id,
+        &nexus_home,
+        &caps,
+    ) {
+        Some(loaded) => loaded,
+        None => nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps)
+            .map_err(|e| {
+                crate::errors::CliError::Config(format!(
+                    "Unknown preset '{preset_id}': {e}. \
+                     Run `nexus42 creator presets list` to see available presets."
+                ))
+            })?,
+    };
 
     // Parse trailing args against preset.cli_args declarations.
     let mut input = parse_preset_cli_args(&loaded.manifest.preset.cli_args, &extra)?;
@@ -670,19 +678,31 @@ async fn stage_advance(
                     "FL-E stage schedule creation failed; rolling back stage advance"
                 );
 
-                // Attempt to restore previous stage state
+                // Attempt to restore previous stage state (QC3 W-2: propagate
+                // rollback failure so operators can detect orphaned state).
                 let rollback = serde_json::json!({
                     "current_stage": current_stage,
                     "stage_status": current_status,
                 });
-                let _ = client
-                    .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &rollback)
+                let rollback_result = client
+                    .patch::<serde_json::Value, _>(
+                        &format!("/v1/local/works/{work_id}"),
+                        &rollback,
+                    )
                     .await;
 
-                return Err(crate::errors::CliError::Other(format!(
-                    "FL_E_SCHEDULE_CREATE_FAILED: failed to create stage schedule for '{target_stage}': {e}. \
-                     Stage advance rolled back to '{current_stage}' ({current_status})."
-                )));
+                return Err(match rollback_result {
+                    Ok(_) => crate::errors::CliError::Other(format!(
+                        "FL_E_SCHEDULE_CREATE_FAILED: failed to create stage schedule for '{target_stage}': {e}. \
+                         Stage advance rolled back to '{current_stage}' ({current_status})."
+                    )),
+                    Err(rollback_err) => crate::errors::CliError::Other(format!(
+                        "schedule creation failed AND stage rollback failed: \
+                         schedule_error={e}; rollback_error={rollback_err}; \
+                         Work {work_id} may be in inconsistent state — \
+                         run `nexus42 creator works status {work_id}` to inspect"
+                    )),
+                });
             }
         }
     }
