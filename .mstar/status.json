@@ -84,7 +84,7 @@
         "integration_branch_retired": "iteration/v1.44",
         "platform_integration": "paused \u2014 local-only until further notice",
         "tech_debt_summary": {
-            "updated_at": "2026-06-13T22:30:00+08:00",
+            "updated_at": "2026-06-13T23:00:00+08:00",
             "total_open": 79,
             "by_severity": {
                 "critical": 0,
