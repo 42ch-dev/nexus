@@ -62,7 +62,7 @@ pub enum WorksCommand {
 pub enum CompletionLockCommand {
     /// Release `.completion-lock.json` for a Work.
     ///
-    /// After release, `creator run resume --reopen` can be used on the Work.
+    /// After release, `creator works reopen --reason "..."` can be used on the Work.
     Release {
         /// Work ID (wrk_...) to release the completion lock for
         work_id: String,
@@ -349,8 +349,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 println!("  This Work is complete; see docs/novel-writing-quickstart.md §6");
                 println!();
                 println!("  To start a new Work, run:");
-                println!("    nexus42 creator run start \\");
-                println!("      --init-preset novel-project-init --idea \"...\"");
+                println!("    nexus42 creator bootstrap --idea \"...\"");
                 println!("═══════════════════════════════════════════════════════");
             } else {
                 // Header
@@ -378,7 +377,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 println!("auto_chain_enabled: {auto_chain}");
                 println!("driver_schedule_id: {driver}");
                 if interrupted {
-                    println!("auto_chain_interrupted: true (use `creator run resume`)");
+                    println!("auto_chain_interrupted: true (use `creator works resume-chain`)");
                 }
 
                 // V1.41: completion lock fields (DF-60 §6.2H)
@@ -488,7 +487,7 @@ async fn handle_completion_lock(client: &DaemonClient, cmd: CompletionLockComman
             } else {
                 println!("Completion lock released for Work {work_id}.");
                 println!(
-                    "You can now use `nexus42 creator run resume --reopen --reason \"...\" {work_id}`"
+                    "You can now use `nexus42 creator works reopen --reason \"...\" {work_id}`"
                 );
             }
         }
@@ -946,9 +945,7 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
 
     // Review action hint — cite quickstart §5 (sanitize work_id for defense in depth).
     let safe_work_id = sanitize_for_terminal(work_id);
-    println!(
-        "  Address findings or run: nexus42 creator run stage advance {safe_work_id} --stage review"
-    );
+    println!("  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}");
     println!("  See docs/novel-writing-quickstart.md §5");
 }
 
@@ -996,7 +993,7 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
                     .join(".completion-lock.json");
                 if !lock_path.exists() {
                     println!("⚠ completion-lock file missing (DB says locked but file not found)");
-                    println!("  Run: nexus42 creator run reconcile-chapters {work_id}");
+                    println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
                 }
             }
         }
@@ -1159,7 +1156,7 @@ mod tests {
             }
             let safe_work_id = sanitize_for_terminal(work_id);
             lines.push(format!(
-                "  Address findings or run: nexus42 creator run stage advance {safe_work_id} --stage review"
+                "  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}"
             ));
             lines.push("  See docs/novel-writing-quickstart.md §5".to_string());
         }
