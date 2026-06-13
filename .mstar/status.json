@@ -62,14 +62,15 @@
     {
       "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence",
       "title": "P3 — author-desk UX residual whitelist",
-      "status": "Todo",
+      "status": "InReview",
       "working_branch": "feature/v1.44-author-desk-residual-convergence",
       "merge_target": "iteration/v1.44",
       "plan_file": ".mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md",
       "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
       "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+      "review_sha_range": "cbb18e25..ca2ac052",
       "notes": [
-        "Soft: merge P1 before dispatch for stable CLI IA. Whitelist trimmed 2026-06-13 review (4 IDs; waived items → P-last)."
+        "Implemented 4 commits (d5ebbe6c..19497b45): R-V141P0-04 integration test (7 tests), R-V138P1-02 frontmatter docs, R-V138P1-07 tracing span, status.json residual updates; merged to iteration/v1.44 at ca2ac052; awaiting QC tri-review."
       ]
     },
     {
