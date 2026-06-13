@@ -331,8 +331,9 @@ fn validate_produce_chapter_context(
         return Err(crate::errors::CliError::Other(format!(
             "novel-writing schedule requires chapter context (outline_path, body_path).\n\
               The daemon response is missing chapters[] or the selected chapter row.\n\
-              Hint: re-run `nexus42 creator run status {work_id}` to inspect,\n\
-              or re-seed the work via `nexus42 creator run start --init-preset novel-project-init`."
+              Hint: re-run `nexus42 creator works status {work_id}` to inspect,\n\
+              or re-seed the work via `nexus42 creator bootstrap --init-preset novel-project-init`.\n\
+              (V1.45: `creator run status` → `creator works status`; `creator run start` → `creator bootstrap`.)"
         )));
     }
     Ok(())

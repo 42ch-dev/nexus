@@ -2,6 +2,24 @@
 
 Follow this guide to write a novel with Nexus from a clean install — no platform account, no cloud sync, no harness knowledge required. Everything runs locally.
 
+## Migrating from V1.44
+
+V1.45 hard-deletes the V1.33–V1.44 `creator run` subcommands. If you used any of these in V1.44 scripts or workflows, use the V1.45 equivalent:
+
+| V1.44 (deleted) | V1.45 equivalent |
+|------------------|-------------------|
+| `creator run start --idea "..."` | `creator bootstrap --idea "..."` |
+| `creator run continue --note "..."` | `creator works inspire [<work_id>] --note "..."` |
+| `creator run resume --reopen` | `creator works reopen [<work_id>] --reason "..."` |
+| `creator run reconcile-chapters` | `creator works reconcile-chapters [<work_id>]` |
+| `creator run stage list` | `creator works status` |
+| `creator run stage advance --stage <name>` | `creator run <preset_id> [<work_id>]` (e.g. `research`, `novel-writing`, `reflection-loop`, `kb-extract`) |
+| `creator run audit-chapter --mode review` | `creator run novel-manuscript-audit-review [<work_id>] --chapter N [--volume V]` |
+| `creator run audit-chapter --mode extract` | `creator run novel-manuscript-audit-extract [<work_id>] --chapter N [--volume V]` |
+| `creator run review-master` | `creator run novel-review-master [<work_id>] [--finding-id ID] [--auto-schedule]` |
+
+For the full migration table and rationale, see the [V1.45 compass migration appendix](../.mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md).
+
 ## Prerequisites
 
 - **Nexus installed** — see [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, or use a pre-built binary.
@@ -166,15 +184,17 @@ nexus42 creator works status
 A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
 
 ```bash
-# Primary path — run the master-decision review on open findings
+# Enqueue a master-decision review schedule on open findings
 nexus42 creator run novel-review-master <work_id>
 
-# List master findings (default), then enqueue the review for a specific finding:
+# Enqueue master-decision review scoped to a specific finding:
 nexus42 creator run novel-review-master <work_id> --finding-id <finding_id>
 
 # Opt-in: auto-schedule review when stale findings exist:
 nexus42 creator run novel-review-master <work_id> --auto-schedule
 ```
+
+> **`novel-review-master` is enqueue-only** — it dispatches the `novel-review-master` preset as a schedule. It does **not** list findings. To **list** open findings, use `nexus42 creator works status [<work_id>]` (documented above in §3 and §5).
 
 > `novel-review-master` enqueues the `novel-review-master` preset for master decisions on **existing** findings. This is distinct from `creator run reflection-loop`, which runs the FL-E review stage to **generate** new findings from chapter content. Use `creator run reflection-loop` to produce findings, then `creator run novel-review-master` to decide on them.
 >
