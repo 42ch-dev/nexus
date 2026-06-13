@@ -1941,9 +1941,16 @@ mod tests {
         .unwrap();
 
         // Seed 2 volumes × 3 chapters using multi-volume seeder
-        seed_chapters_multi_volume(&pool, "wrk_mv_comp_001", "my-novel", 2, 3, "2026-06-13T10:00:00Z")
-            .await
-            .unwrap();
+        seed_chapters_multi_volume(
+            &pool,
+            "wrk_mv_comp_001",
+            "my-novel",
+            2,
+            3,
+            "2026-06-13T10:00:00Z",
+        )
+        .await
+        .unwrap();
 
         // Finalize ALL 6 chapters across both volumes
         for vol in 1..=2 {
@@ -1985,9 +1992,16 @@ mod tests {
         .await
         .unwrap();
 
-        seed_chapters_multi_volume(&pool, "wrk_mv_comp_002", "my-novel", 2, 3, "2026-06-13T10:00:00Z")
-            .await
-            .unwrap();
+        seed_chapters_multi_volume(
+            &pool,
+            "wrk_mv_comp_002",
+            "my-novel",
+            2,
+            3,
+            "2026-06-13T10:00:00Z",
+        )
+        .await
+        .unwrap();
 
         // Finalize all vol 1 chapters
         for ch in 1..=3 {
@@ -2053,9 +2067,16 @@ mod tests {
         .unwrap();
 
         // Only seed vol 1 (3 rows, total says 6)
-        seed_chapters_multi_volume(&pool, "wrk_mv_comp_003", "my-novel", 1, 3, "2026-06-13T10:00:00Z")
-            .await
-            .unwrap();
+        seed_chapters_multi_volume(
+            &pool,
+            "wrk_mv_comp_003",
+            "my-novel",
+            1,
+            3,
+            "2026-06-13T10:00:00Z",
+        )
+        .await
+        .unwrap();
 
         // Finalize all vol 1 chapters
         for ch in 1..=3 {

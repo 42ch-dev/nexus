@@ -732,6 +732,7 @@ async fn simulate_boot_auto_resume(pool: &SqlitePool) -> Vec<(String, String, Op
                     work_id,
                     next_stage,
                     None,
+                    None,
                     &latest,
                 )
                 .await
