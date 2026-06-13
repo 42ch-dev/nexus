@@ -5,44 +5,68 @@
         {
             "plan_id": "2026-06-13-v1.45-creator-run-generic-runner",
             "title": "P0 \u2014 Generic creator run <preset_id>",
-            "status": "InReview",
+            "status": "Done",
             "working_branch": "feature/v1.45-creator-run-generic-runner",
             "merge_target": "iteration/v1.45",
             "merge_commits": [
-                "7f9767f9"
+                "7f9767f9",
+                "61082146"
             ],
             "completion_report": "P0 Completion Report v2 received; 4 commits d0e1b94c/f4841a69/e9a996c1/4aa5aa53; T1-T6 PASS; cli_args schema + RunCommand struct + 39 surface tests + 207 preset tests",
             "plan_file": ".mstar/plans/2026-06-13-v1.45-creator-run-generic-runner.md",
             "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+            "done_at": "2026-06-14T00:55:00+08:00",
+            "qc_reports": {
+                "qc1": "Approve (after fix round; C-1 + W-1/2/3 fixed)",
+                "qc2": "Approve (initial; 0 Critical, 2 pre-existing Warning)",
+                "qc3": "Approve (initial; 0 Critical, 2 Warning fixed in B1 fix round)"
+            },
+            "qa_report": "PASS (initial + accepts fix round)"
         },
         {
             "plan_id": "2026-06-13-v1.45-delete-bespoke-run-subcommands",
             "title": "P1 \u2014 Delete bespoke creator run subcommands",
-            "status": "InReview",
+            "status": "Done",
             "working_branch": "feature/v1.45-delete-bespoke-run-subcommands",
             "merge_target": "iteration/v1.45",
             "merge_commits": [
-                "00084b92"
+                "00084b92",
+                "61082146"
             ],
             "completion_report": "P1 Completion Report v2 received; 6 commits e3ca5a47/609e92d2/8e1928c3/ef1f7c47/a3e45b30/f95ce3ff; T1-T5 PASS; DEPRECATED parent dir + memory-review allowlist + hint strings updated; 628 lib tests PASS single-threaded (pre-existing env-var race unrelated)",
             "plan_file": ".mstar/plans/2026-06-13-v1.45-delete-bespoke-run-subcommands.md",
             "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+            "done_at": "2026-06-14T00:55:00+08:00",
+            "qc_reports": {
+                "qc1": "Approve (after fix round; C-1 + W-1/2/3 fixed)",
+                "qc2": "Approve (initial; 0 Critical, 2 pre-existing Warning)",
+                "qc3": "Approve (initial; 0 Critical, 2 Warning fixed in B1 fix round)"
+            },
+            "qa_report": "PASS (initial + accepts fix round)"
         },
         {
             "plan_id": "2026-06-13-v1.45-creator-bootstrap-and-works-migration",
             "title": "P2 \u2014 creator bootstrap + works atomic ops",
-            "status": "InReview",
+            "status": "Done",
             "working_branch": "feature/v1.45-creator-bootstrap-and-works-migration",
             "merge_target": "iteration/v1.45",
             "merge_commits": [
-                "69cb9e1e"
+                "69cb9e1e",
+                "61082146"
             ],
             "completion_report": "P2 Completion Report v2 received; 1 commit 6c078f53; T1-T5 PASS; bootstrap.rs + 4 new works subcommands + 18 hermetic tests; 665 lib tests",
             "plan_file": ".mstar/plans/2026-06-13-v1.45-creator-bootstrap-and-works-migration.md",
             "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+            "done_at": "2026-06-14T00:55:00+08:00",
+            "qc_reports": {
+                "qc1": "Approve (after fix round; C-1 + W-1/2/3 fixed)",
+                "qc2": "Approve (initial; 0 Critical, 2 pre-existing Warning)",
+                "qc3": "Approve (initial; 0 Critical, 2 Warning fixed in B1 fix round)"
+            },
+            "qa_report": "PASS (initial + accepts fix round)"
         },
         {
             "plan_id": "2026-06-13-v1.45-quickstart-and-author-spec",
@@ -141,7 +165,7 @@
             ".mstar/knowledge/specs/novel-work-pool.md"
         ],
         "iteration_compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-        "pre_implement_gate": "B1 MERGED + QC DISPATCHED 2026-06-13 \u2014 P0\u2225P1\u2225P2 atomic merge into iteration/v1.45 (7f9767f9 / 69cb9e1e / 00084b92 / c712bf05 / fb02215a / 79f540dc); fmt+clippy+command_surface+nexus42 lib+orchestration lib all PASS (665/665 lib, 37/37 surface, 207/207 preset). Pre-existing env-var race in context::summary confirmed non-V1.45 (5/5 stable runs). B1 QC tri-review (3 reviewers N=3) + QA dispatch authorized by user; report path .mstar/plans/reports/2026-06-13-v1.45-creator-run-generic-runner/ (qc1/qc2/qc3 + qa); Review range merge-base(76a9eb79)..HEAD(79f540dc).",
+        "pre_implement_gate": "B1 FIXED + APPROVED 2026-06-14 \u2014 QC1 re-review Approve; QC2/QC3 Approve; QA PASS; C-1 + W-1/2/3 + QC3 W-1/W-2 all fixed (commits 695d0a3a/d68b637b/90374e4e/0ea6e67a/4c82432b/7749d8eb + merge 61082146 + qc revalidation 6b10f4b1). 7 deferred Suggestions registered as residuals. P0/P1/P2 \u2192 Done. B2 P3 dispatch next.",
         "v1_43_ship": {
             "merge_commit": "0004d85f",
             "pr": 56,
@@ -167,7 +191,7 @@
             ],
             "pr_url": "https://github.com/42ch-dev/nexus/pull/57"
         },
-        "updated_at": "2026-06-13T23:30:00+08:00"
+        "updated_at": "2026-06-14T00:55:00+08:00"
     },
     "residual_findings": {
         "2026-06-04-v1.33-work-model-and-creator-run": [
@@ -1483,6 +1507,98 @@
                     "note": "Shipped creator run review-master CLI subcommand (T1), quickstart \u00a75 updated (T4), spec amendments (T5), hermetic tests green (T6). Archive in P-last."
                 },
                 "note": "stage advance --stage review runs reflection-loop, not novel-review-master. P1 wired creator run review-master to novel-review-master preset."
+            }
+        ],
+        "2026-06-13-v1.45-creator-run-generic-runner": [
+            {
+                "id": "R-V145B1-001",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc1.md S-1",
+                "title": "works_start_handler_returns_clear_error test is a tautology (does not actually invoke handler)",
+                "decision": "defer",
+                "owner": "unassigned",
+                "target": "V1.46 or later"
+            },
+            {
+                "id": "R-V145B1-002",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc1.md S-2",
+                "title": "creator run <preset_id> --help does not surface preset cli_args help text (consider --help-args subcommand)",
+                "decision": "defer",
+                "owner": "unassigned",
+                "target": "V1.46 or later"
+            },
+            {
+                "id": "R-V145B1-003",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc1.md S-3",
+                "title": "Consider splitting RunCommand into smaller Args structs (GlobalRunFlags + RunArgs) for clarity",
+                "decision": "defer",
+                "owner": "unassigned",
+                "target": "V1.46 or later"
+            },
+            {
+                "id": "R-V145B1-004",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc3.md S-1",
+                "title": "Announce hard deletion of legacy creator run subcommands in V1.45 release notes (V1.44 callers will break)",
+                "decision": "defer",
+                "owner": "@writing-specialist",
+                "target": "P3 (quickstart) or P-last (closeout)"
+            },
+            {
+                "id": "R-V145B1-005",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc3.md S-2",
+                "title": "parse_preset_cli_args HashMaps should use with_capacity(cli_args.len())",
+                "decision": "defer",
+                "owner": "unassigned",
+                "target": "V1.46 or later"
+            },
+            {
+                "id": "R-V145B1-006",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc3.md S-3",
+                "title": "sanitize_for_terminal recompiles ANSI regex on every call; cache via once_cell::sync::Lazy",
+                "decision": "defer",
+                "owner": "unassigned",
+                "target": "V1.46 or later"
+            },
+            {
+                "id": "R-V145B1-007",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc3.md S-4",
+                "title": "World KB block assembly on every world-bound stage advance; bound query or cache when KB rows unchanged",
+                "decision": "defer",
+                "owner": "unassigned",
+                "target": "V1.46 or later"
+            }
+        ],
+        "2026-06-13-v1.45-creator-run-generic-runner_v145_anchors": [
+            {
+                "id": "BL-12",
+                "title": "V1.45 deliverable \u2014 creator run <preset_id> generic runner (resolved by B1 P0+P1+P2 atomic merge)",
+                "severity": "n/a",
+                "lifecycle": "resolved (V1.45 B1)"
+            },
+            {
+                "id": "BL-13",
+                "title": "V1.45 STAGE_PRESET_ALLOWLIST memory-review drift (resolved by P1 T4)",
+                "severity": "n/a",
+                "lifecycle": "resolved (V1.45 B1)"
+            },
+            {
+                "id": "Grill #20",
+                "title": "V1.45 hard-delete DEPRECATED novel-manuscript-audit parent preset dir (resolved by P1 T2)",
+                "severity": "n/a",
+                "lifecycle": "resolved (V1.45 B1)"
             }
         ]
     }
