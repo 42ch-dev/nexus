@@ -166,15 +166,17 @@ nexus42 creator works status
 A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
 
 ```bash
-# Primary path — run the master-decision review on open findings
+# Enqueue a master-decision review schedule on open findings
 nexus42 creator run novel-review-master <work_id>
 
-# List master findings (default), then enqueue the review for a specific finding:
+# Enqueue master-decision review scoped to a specific finding:
 nexus42 creator run novel-review-master <work_id> --finding-id <finding_id>
 
 # Opt-in: auto-schedule review when stale findings exist:
 nexus42 creator run novel-review-master <work_id> --auto-schedule
 ```
+
+> **`novel-review-master` is enqueue-only** — it dispatches the `novel-review-master` preset as a schedule. It does **not** list findings. To **list** open findings, use `nexus42 creator works status [<work_id>]` (documented above in §3 and §5).
 
 > `novel-review-master` enqueues the `novel-review-master` preset for master decisions on **existing** findings. This is distinct from `creator run reflection-loop`, which runs the FL-E review stage to **generate** new findings from chapter content. Use `creator run reflection-loop` to produce findings, then `creator run novel-review-master` to decide on them.
 >
