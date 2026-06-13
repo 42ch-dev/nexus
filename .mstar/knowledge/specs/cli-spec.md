@@ -360,6 +360,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 | `nexus42 creator run resume [<work_id>]` | Resume checkpointed auto-chain |
 | `nexus42 creator run reconcile-chapters <work_id>` | Rebuild `work_chapters` from filesystem |
 | `nexus42 creator run audit-chapter <work_id> --mode {review\|extract} --chapter N [--volume N]` | On-demand chapter audit via `novel-manuscript-audit` preset (DF-69, V1.44 P0). Review mode: five-question structured report. Extract mode: synchronous `kb.extract_work` for World-bound Works (422 if worldless). Does NOT enter FL-E auto-chain driver. |
+| `nexus42 creator run review-master <work_id> [--finding-id <id>] [--auto-schedule]` | Master-decision review on open findings (V1.44 P1); enqueues `novel-review-master` preset. Distinct from `stage advance --stage review` which runs `reflection-loop`. |
 
 Rules:
 

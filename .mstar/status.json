@@ -1433,8 +1433,13 @@
         "decision": "fix",
         "owner": "@fullstack-dev",
         "target": "V1.44 P1 (2026-06-13-v1.44-review-master-cli-surface)",
-        "lifecycle": "open",
-        "note": "stage advance --stage review runs reflection-loop, not novel-review-master. P1 must wire creator run review-master to novel-review-master preset."
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "a7b70ebf",
+          "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
+          "note": "Shipped creator run review-master CLI subcommand (T1), quickstart §5 updated (T4), spec amendments (T5), hermetic tests green (T6). Archive in P-last."
+        },
+        "note": "stage advance --stage review runs reflection-loop, not novel-review-master. P1 wired creator run review-master to novel-review-master preset."
       }
     ]
   }

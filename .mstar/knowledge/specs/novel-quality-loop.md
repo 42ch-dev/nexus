@@ -66,9 +66,9 @@ Auto-chain must not fork driver when routing spawns auxiliary schedules; at most
 
 ### 3.4 Review-master CLI surface (V1.44 P1 — R-V143P0-002)
 
-V1.43 shipped `novel-review-master` preset and daemon 96h banner, but authors still use the workaround `creator run stage advance --stage review` per [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) line 174. V1.44 P1 **converges** a dedicated author-facing command.
+V1.43 shipped `novel-review-master` preset and daemon 96h banner, but authors still used the workaround `creator run stage advance --stage review` per [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) line 174. V1.44 P1 **converged** a dedicated author-facing command.
 
-**Normative CLI** (P1 implement locks exact flags):
+**Normative CLI** (Shipped V1.44):
 
 ```bash
 nexus42 creator run review-master <work_id> [--finding-id <id>] [--auto-schedule]
@@ -85,9 +85,9 @@ nexus42 creator run review-master <work_id> [--finding-id <id>] [--auto-schedule
 
 - Stdout summary: open master findings count + top 3 by severity
 - On empty: single line "No master findings" + quickstart §5 link
-- Replace quickstart workaround note with this command when P1 ships
+- Quickstart §5 updated to cite this command as primary path (V1.44)
 
-**Residual**: R-V143P0-002 — target V1.44 P1; close in P-last hygiene.
+**Residual**: R-V143P0-002 — resolved V1.44 P1; close in P-last hygiene.
 
 ---
 
