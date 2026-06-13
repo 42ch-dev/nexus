@@ -159,7 +159,7 @@ nexus42 creator works status
 #   findings: 2 open (1 blocker, 1 minor) — highest: blocker
 #     #1 [blocker] "Continuity error in chapter 5" → write
 #     #2 [minor] "Style inconsistency" → none
-#     Address findings or run: nexus42 creator run stage advance <work_id> --stage review
+#     Address findings or run: nexus42 creator run reflection-loop <work_id>
 #     See docs/novel-writing-quickstart.md §5
 ```
 
@@ -167,16 +167,16 @@ A **96-hour master-decision banner** appears if any finding stays `open` too lon
 
 ```bash
 # Primary path — run the master-decision review on open findings
-nexus42 creator run review-master <work_id>
+nexus42 creator run novel-review-master <work_id>
 
 # List master findings (default), then enqueue the review for a specific finding:
-nexus42 creator run review-master <work_id> --finding-id <finding_id>
+nexus42 creator run novel-review-master <work_id> --finding-id <finding_id>
 
 # Opt-in: auto-schedule review when stale findings exist:
-nexus42 creator run review-master <work_id> --auto-schedule
+nexus42 creator run novel-review-master <work_id> --auto-schedule
 ```
 
-> `review-master` enqueues the `novel-review-master` preset for master decisions on **existing** findings. This is distinct from `creator run stage advance --stage review`, which runs the `reflection-loop` FL-E review stage to **generate** new findings from chapter content. Use `stage advance --stage review` to produce findings, then `review-master` to decide on them.
+> `novel-review-master` enqueues the `novel-review-master` preset for master decisions on **existing** findings. This is distinct from `creator run reflection-loop`, which runs the FL-E review stage to **generate** new findings from chapter content. Use `creator run reflection-loop` to produce findings, then `creator run novel-review-master` to decide on them.
 >
 > The quality loop uses local SQLite and the daemon — no Redis, no cron, no cloud dependency.
 
