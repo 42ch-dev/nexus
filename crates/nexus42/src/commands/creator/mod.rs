@@ -12,7 +12,6 @@ pub mod kb;
 pub mod knowledge;
 pub mod memory;
 pub mod reference;
-pub mod run;
 pub mod soul;
 pub mod works;
 pub mod world;
@@ -440,16 +439,6 @@ fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
     // ── Primary tier (first-run and daily use) ──────────────────────
-    /// Work lifecycle — start, continue, stage, and resume Works
-    ///
-    /// Start a new novel project, continue writing, advance chapters, or resume
-    /// an interrupted work session. For a guided walkthrough, see
-    /// docs/novel-writing-quickstart.md Part I §1–§3.
-    Run {
-        #[command(subcommand)]
-        command: run::RunCommand,
-    },
-
     /// Work management and pool (DF-60 §6.2H).
     ///
     /// List, inspect, and manage your Works and the selection pool.
@@ -691,7 +680,6 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
-        CreatorCommand::Run { command } => run::handle_run(command, config).await,
         CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
         CreatorCommand::Logout => logout_creator(config).await,
