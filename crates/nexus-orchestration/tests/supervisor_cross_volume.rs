@@ -379,7 +379,10 @@ async fn f004_supervisor_enqueue_includes_volume_in_preset_input() {
     assert_eq!(schedule_req.preset_id, "novel-writing");
     let input = schedule_req.input.expect("input should be set");
     assert_eq!(input["chapter"], 1, "chapter should be 1 (vol 2 ch 1)");
-    assert_eq!(input["volume"], 2, "F-004: volume should be 2 in preset input");
+    assert_eq!(
+        input["volume"], 2,
+        "F-004: volume should be 2 in preset input"
+    );
     assert_eq!(input["work_id"], "wrk_f004_1");
 }
 
@@ -424,10 +427,9 @@ async fn f002_multi_volume_work_completed_all_volumes_finalized() {
     // Seed 2 volumes × 3 chapters = 6 rows
     seed_multi_volume_chapters(&pool, "wrk_f002_1", 2, 3, 2, 3).await;
 
-    let completed =
-        nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_1")
-            .await
-            .unwrap();
+    let completed = nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_1")
+        .await
+        .unwrap();
 
     assert!(
         completed,
@@ -448,10 +450,9 @@ async fn f002_multi_volume_work_not_completed_partial_vol2() {
     // Seed with only vol 1 finalized
     seed_multi_volume_chapters(&pool, "wrk_f002_2", 2, 3, 1, 3).await;
 
-    let completed =
-        nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_2")
-            .await
-            .unwrap();
+    let completed = nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_2")
+        .await
+        .unwrap();
 
     assert!(
         !completed,

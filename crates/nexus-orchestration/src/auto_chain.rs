@@ -503,8 +503,8 @@ pub async fn enqueue_auto_chain_schedule(
     volume: Option<i32>,
     work: &WorkRecord,
 ) -> Result<String, AutoChainError> {
-    let schedule_req =
-        build_auto_chain_schedule(stage, creator_id, work, chapter, volume).ok_or_else(|| {
+    let schedule_req = build_auto_chain_schedule(stage, creator_id, work, chapter, volume)
+        .ok_or_else(|| {
             AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
         })?;
 
@@ -935,10 +935,11 @@ mod tests {
             .await
             .unwrap();
 
-        let sid =
-            enqueue_auto_chain_schedule(&pool, "ctr_test", "wrk_test", "research", None, None, &work)
-                .await
-                .unwrap();
+        let sid = enqueue_auto_chain_schedule(
+            &pool, "ctr_test", "wrk_test", "research", None, None, &work,
+        )
+        .await
+        .unwrap();
 
         // Verify schedule ID format
         assert!(
