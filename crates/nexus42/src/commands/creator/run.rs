@@ -128,6 +128,27 @@ pub enum RunCommand {
         #[arg(long)]
         extend_chapters: Option<i32>,
     },
+    /// Run the master-decision review on open findings (V1.44 P1).
+    ///
+    /// Lists open findings with `target_executor=master` and optionally
+    /// enqueues the `novel-review-master` preset for a specific finding.
+    /// Distinct from `stage advance --stage review` which runs the
+    /// `reflection-loop` FL-E review stage.
+    ///
+    /// See docs/novel-writing-quickstart.md §5 for usage patterns.
+    ReviewMaster {
+        /// Work ID (wrk_...) to review
+        work_id: String,
+        /// Run review-master preset scoped to a specific finding
+        #[arg(long)]
+        finding_id: Option<String>,
+        /// Opt-in: enqueue novel-review-master when 96h stale findings exist
+        #[arg(long, default_value_t = false)]
+        auto_schedule: bool,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 /// FL-E stage subcommands (V1.34 cli-spec §6.2E).
@@ -652,6 +673,327 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                         );
                     }
                 }
+            }
+        }
+        RunCommand::ReviewMaster {
+            work_id,
+            finding_id,
+            auto_schedule,
+            json,
+        } => {
+            handle_review_master(&work_id, finding_id.as_deref(), auto_schedule, json, config, &client)
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+// ── Review-master CLI (V1.44 P1) ────────────────────────────────────────────
+
+/// Handle `creator run review-master <work_id>` (V1.44 P1).
+///
+/// Lists open findings with `target_executor=master` and optionally enqueues
+/// the `novel-review-master` preset for a specific finding or on opt-in
+/// auto-schedule.
+///
+/// # Errors
+///
+/// Returns an error if the daemon API call fails or the work is not found.
+async fn handle_review_master(
+    work_id: &str,
+    finding_id: Option<&str>,
+    auto_schedule: bool,
+    json: bool,
+    config: &CliConfig,
+    client: &crate::api::DaemonClient,
+) -> Result<()> {
+    // Fetch open findings for the Work
+    let findings: Vec<serde_json::Value> = client
+        .get::<Vec<serde_json::Value>>(&format!(
+            "/v1/local/works/{work_id}/findings?status=open&limit=50"
+        ))
+        .await?;
+
+    // Filter to master-targeted findings
+    let master_findings: Vec<&serde_json::Value> = findings
+        .iter()
+        .filter(|f| {
+            f.get("target_executor")
+                .and_then(|v| v.as_str())
+                .map_or(false, |t| t == "master")
+        })
+        .collect();
+
+    if json {
+        let output = serde_json::json!({
+            "work_id": work_id,
+            "master_findings_count": master_findings.len(),
+            "master_findings": master_findings,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if master_findings.is_empty() {
+        println!("No master findings for Work {work_id}.");
+        println!(
+            "See docs/novel-writing-quickstart.md §5 for the quality-loop workflow."
+        );
+    } else {
+        // Summary: open master findings count + top 3 by severity
+        let severity_order = |s: &str| match s {
+            "blocker" => 0,
+            "major" => 1,
+            "minor" => 2,
+            "info" => 3,
+            _ => 4,
+        };
+        let mut sorted: Vec<&&serde_json::Value> = master_findings.iter().collect();
+        sorted.sort_by_key(|f| {
+            severity_order(
+                f.get("severity")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("info"),
+            )
+        });
+
+        println!(
+            "Master findings for Work {work_id}: {} open",
+            master_findings.len()
+        );
+        println!();
+
+        let top = sorted.iter().take(3);
+        for (i, f) in top.enumerate() {
+            let finding_id_val = f
+                .get("finding_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let severity = f
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let title = f.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+            println!(
+                "  #{idx} [{severity}] {title}",
+                idx = i + 1
+            );
+            println!("     finding_id: {finding_id_val}");
+        }
+        println!();
+        if master_findings.len() > 3 {
+            println!(
+                "  ... and {} more master finding(s).",
+                master_findings.len() - 3
+            );
+            println!();
+        }
+        println!(
+            "Next: nexus42 creator run review-master {work_id} --finding-id <id>"
+        );
+    }
+
+    // --finding-id: enqueue novel-review-master preset scoped to one finding
+    if let Some(fid) = finding_id {
+        let creator_id = config
+            .active_creator_id
+            .as_deref()
+            .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+        // Fetch the specific finding to get its details
+        let finding: serde_json::Value = client
+            .get::<serde_json::Value>(&format!(
+                "/v1/local/works/{work_id}/findings/{fid}"
+            ))
+            .await?;
+
+        let finding_title = finding
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(untitled)");
+
+        // Fetch work info for work_ref and other context
+        let work: serde_json::Value = client
+            .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+            .await?;
+
+        let work_ref = work
+            .get("work_ref")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let topic = work
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("novel");
+        let world_id = work.get("world_id").and_then(|v| v.as_str());
+        let body_path = finding
+            .get("chapter")
+            .and_then(|v| v.as_i64())
+            .map(|ch| {
+                work.get("chapters")
+                    .and_then(|v| v.as_array())
+                    .and_then(|chapters| {
+                        chapters.iter().find(|c| {
+                            c.get("chapter").and_then(|v| v.as_i64()) == Some(ch)
+                        })
+                    })
+                    .and_then(|c| c.get("body_path").and_then(|v| v.as_str()))
+            })
+            .flatten();
+
+        // Serialize the single finding as open_findings input
+        let open_findings_json = serde_json::to_string(&vec![&finding])?;
+
+        let mut input = serde_json::json!({
+            "work_id": work_id,
+            "work_ref": work_ref,
+            "topic": topic,
+            "open_findings": open_findings_json,
+        });
+        if let Some(wid) = world_id {
+            if let Some(o) = input.as_object_mut() {
+                o.insert("world_id".to_string(), serde_json::Value::String(wid.to_string()));
+            }
+        }
+        if let Some(bp) = body_path {
+            if let Some(o) = input.as_object_mut() {
+                o.insert("body_path".to_string(), serde_json::Value::String(bp.to_string()));
+            }
+        }
+
+        let schedule_request = AddScheduleRequest {
+            creator_id: creator_id.to_string(),
+            preset_id: "novel-review-master".to_string(),
+            seed: Some(format!("Review finding: {finding_title}")),
+            label: None,
+            depends_on: None,
+            concurrency: None,
+            scheduled_at: None,
+            input: Some(input),
+            force_gates: false,
+            reason: None,
+        };
+
+        let sched_resp: serde_json::Value = client
+            .post::<serde_json::Value, _>(
+                "/v1/local/orchestration/schedules",
+                &schedule_request,
+            )
+            .await?;
+
+        let schedule_id = sched_resp
+            .get("schedule_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+
+        if json {
+            let output = serde_json::json!({
+                "work_id": work_id,
+                "finding_id": fid,
+                "schedule_id": schedule_id,
+                "preset": "novel-review-master",
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!();
+            println!(
+                "Enqueued novel-review-master for finding {fid} ({finding_title})."
+            );
+            println!("  Schedule ID: {schedule_id}");
+            println!("  The daemon will run the review-master preset via ACP.");
+        }
+    }
+
+    // --auto-schedule: opt-in enqueue when 96h stale findings exist
+    if auto_schedule {
+        let creator_id = config
+            .active_creator_id
+            .as_deref()
+            .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+        // Check for stale findings
+        let stale: serde_json::Value = client
+            .get::<serde_json::Value>("/v1/local/findings/stale")
+            .await?;
+
+        let stale_count = stale
+            .get("stale_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        if stale_count == 0 {
+            if !json {
+                println!("No stale findings — auto-schedule skipped.");
+            }
+        } else {
+            // Fetch work info for context
+            let work: serde_json::Value = client
+                .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+                .await?;
+
+            let work_ref = work
+                .get("work_ref")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let topic = work
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("novel");
+            let world_id = work.get("world_id").and_then(|v| v.as_str());
+
+            // Fetch open master findings for the input
+            let open_findings_json = serde_json::to_string(&master_findings)?;
+
+            let mut input = serde_json::json!({
+                "work_id": work_id,
+                "work_ref": work_ref,
+                "topic": topic,
+                "open_findings": open_findings_json,
+            });
+            if let Some(wid) = world_id {
+                if let Some(o) = input.as_object_mut() {
+                    o.insert("world_id".to_string(), serde_json::Value::String(wid.to_string()));
+                }
+            }
+
+            let schedule_request = AddScheduleRequest {
+                creator_id: creator_id.to_string(),
+                preset_id: "novel-review-master".to_string(),
+                seed: Some("Auto-scheduled master review (stale findings)".to_string()),
+                label: None,
+                depends_on: None,
+                concurrency: None,
+                scheduled_at: None,
+                input: Some(input),
+                force_gates: false,
+                reason: None,
+            };
+
+            let sched_resp: serde_json::Value = client
+                .post::<serde_json::Value, _>(
+                    "/v1/local/orchestration/schedules",
+                    &schedule_request,
+                )
+                .await?;
+
+            let schedule_id = sched_resp
+                .get("schedule_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+
+            if json {
+                let output = serde_json::json!({
+                    "work_id": work_id,
+                    "auto_schedule": true,
+                    "stale_count": stale_count,
+                    "schedule_id": schedule_id,
+                    "preset": "novel-review-master",
+                });
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                println!();
+                println!(
+                    "Auto-scheduled novel-review-master for {stale_count} stale finding(s)."
+                );
+                println!("  Schedule ID: {schedule_id}");
             }
         }
     }
