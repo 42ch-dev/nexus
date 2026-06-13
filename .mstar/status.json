@@ -551,7 +551,14 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "backlog",
-        "note": "Old template contained a bulleted list explaining each frontmatter field (title, chapter, status, word_count, world_refs). New template drops this entirely; frontmatter example block remains but field descriptions are gone. Restore compact 1-2 line summary of required frontmatter fields in a follow-up."
+        "note": "Old template contained a bulleted list explaining each frontmatter field (title, chapter, status, word_count, world_refs). New template drops this entirely; frontmatter example block remains but field descriptions are gone. Restore compact 1-2 line summary of required frontmatter fields in a follow-up.",
+        "lifecycle": "resolved",
+        "closure_note": "V1.44 P3 T3: restored compact frontmatter field docs in draft-chapter.md — added bulleted list explaining title, chapter, status, word_count, and world_refs after the YAML example block. Commit 6b834ae8.",
+        "closed_at": "2026-06-13",
+        "resolution": {
+          "commit": "6b834ae8",
+          "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence"
+        }
       },
       {
         "id": "R-V138P1-03",
@@ -610,7 +617,14 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.39+ observability",
-        "note": "Add tracing::info! or debug! span showing the selected chapter context (chapter_label, outline_path, body_path, slug) to aid production debugging when chapter selection behaves unexpectedly."
+        "note": "Add tracing::info! or debug! span showing the selected chapter context (chapter_label, outline_path, body_path, slug) to aid production debugging when chapter selection behaves unexpectedly.",
+        "lifecycle": "resolved",
+        "closure_note": "V1.44 P3 T4: added tracing::debug! span (target: fl_e.stage) after chapter context extraction in stage_advance(). Logs work_id, next_chapter, chapter_label, outline_path, body_path, and slug. Commit 93db2288.",
+        "closed_at": "2026-06-13",
+        "resolution": {
+          "commit": "93db2288",
+          "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence"
+        }
       }
     ],
     "2026-06-09-v1.39-fl-e-auto-chain-engine": [
@@ -957,7 +971,15 @@
         "scope": "crates/nexus42/tests/integration/ (does not exist); need an end-to-end CLI test against running daemon",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post this fix wave"
+        "target": "post this fix wave",
+        "lifecycle": "resolved",
+        "closure_note": "V1.44 P3 T2: added hermetic CLI surface tests in crates/nexus42/tests/creator_works.rs (7 tests covering works use, completion-lock help text, required-argument validation, and subcommand enumeration). Commit d5ebbe6c.",
+        "closed_at": "2026-06-13",
+        "resolution": {
+          "commit": "d5ebbe6c",
+          "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence",
+          "test_file": "crates/nexus42/tests/creator_works.rs"
+        }
       },
       {
         "id": "R-V141P0-05",
@@ -1214,7 +1236,9 @@
         "scope": "novel_pool_entries.rs + inspiration_items.rs + handlers",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.41 P-last"
+        "target": "V1.41 P-last",
+        "lifecycle": "open",
+        "closure_note": "V1.44 P3 T5: deferred to next iteration. Low-severity observability improvement; no user-facing behavior change. Pool/inspiration mutation tracing will be addressed in a future observability hardening plan."
       },
       {
         "id": "R-V141P1-16",
