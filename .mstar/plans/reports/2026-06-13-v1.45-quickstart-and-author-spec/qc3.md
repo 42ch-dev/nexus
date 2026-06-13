@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-13-v1.45-quickstart-and-author-spec
-verdict: Request Changes
-generated_at: 2026-06-14T13:00:00Z
+verdict: Approve
+generated_at: 2026-06-14T14:00:00Z
 review_range: merge-base: 997ebd8a; tip: HEAD (8f330834); equivalent: git diff 997ebd8a...HEAD
 working_branch: iteration/v1.45
 review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
@@ -132,3 +132,30 @@ None.
 **Verdict**: Request Changes
 
 The P3 documentation changes are internally consistent, copy-paste safe, and accurately reflect the new V1.45 CLI surface for new users. However, two reliability issues remain unresolved: a stale command path in the normative quality-loop spec (W-1) and missing migration guidance for returning V1.44 users who will have hard-deleted commands in their muscle memory or scripts (W-2).
+
+## Revalidation (P3 fix round, 2026-06-14)
+
+### Re-review scope
+- Review range: 1baa920f..HEAD (= 03baf31e); equivalent `git diff 1baa920f...HEAD`
+
+### Original findings — fix verification
+
+| ID | Original | Status | Evidence |
+|----|----------|--------|----------|
+| W-1 | `creator run status` stale reference | **FIXED** | novel-quality-loop.md:108 now `creator works status` |
+| W-2 | missing migration section | **FIXED** | quickstart §"Migrating from V1.44" with 9-row table at top of file |
+
+### Re-validation gates
+- `cargo +nightly fmt --check`: PASS
+- `cargo clippy --all -- -D warnings`: PASS
+- `cargo test -p nexus42 --test command_surface_contract`: 37/37 PASS
+
+### Re-verdict
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (after fix) |
+| 🟢 Suggestion | 0 |
+
+**Verdict**: Approve
