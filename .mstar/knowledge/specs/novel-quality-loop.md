@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Draft (V1.39 — 2026-06-09; V1.44 overlay §3.4)  
-**Document class**: Draft overlay  
+**Status**: Shipped (V1.44 — 2026-06-13; V1.39 baseline retained)  
+**Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-13 (V1.44 P1 overlay — review-master CLI surface)  
+**Last updated**: 2026-06-13 (V1.44 P-last — promoted from Draft overlay to Shipped Feature line; §3.4 review-master CLI overlay folded in; R-V143P0-002 closed)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
