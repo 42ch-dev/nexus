@@ -34,6 +34,7 @@ fn demo_work_fields(stage: &str) -> WorkFields {
         workspace_dir: None,
         world_kb_block: None,
         world_id: None,
+        volume: None,
     }
 }
 
