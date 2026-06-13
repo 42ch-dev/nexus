@@ -5,6 +5,7 @@
 **V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
 **V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).  
 **V1.41 Draft amendments:** §6.2H `creator works` (list/status/use/pool); `creator run` single-Work actions only; `creator run start --from-work`; completion-lock + runtime lock (DF-60/61).
+**V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver.
 
 ## 0. 文档定位
 
@@ -358,6 +359,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 | `nexus42 creator run stage …` | FL-E stage list/advance (see §6.2E) |
 | `nexus42 creator run resume [<work_id>]` | Resume checkpointed auto-chain |
 | `nexus42 creator run reconcile-chapters <work_id>` | Rebuild `work_chapters` from filesystem |
+| `nexus42 creator run audit-chapter <work_id> --mode {review\|extract} --chapter N [--volume N]` | On-demand chapter audit via `novel-manuscript-audit` preset (DF-69, V1.44 P0). Review mode: five-question structured report. Extract mode: synchronous `kb.extract_work` for World-bound Works (422 if worldless). Does NOT enter FL-E auto-chain driver. |
 
 Rules:
 
@@ -367,7 +369,7 @@ Rules:
 - When `work_id` is optional and omitted, resolve [novel-work-pool.md](./novel-work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
 - Multiple Works may run concurrently; runtime lock prevents **same** Work mutation from two processes (lifecycle spec §4).
 
-**Shipped (V1.33 P1 + P2):** `creator run start / continue` wired in `crates/nexus42/src/commands/creator/run.rs`. **V1.41:** `list` / `status` **hard-removed** from `creator run` → `creator works` (§6.2H); **no** deprecated alias (grill-me).
+**Shipped (V1.33 P1 + P2):** `creator run start / continue` wired in `crates/nexus42/src/commands/creator/run.rs`. **V1.41:** `list` / `status` **hard-removed** from `creator run` → `creator works` (§6.2H); **no** deprecated alias (grill-me). **V1.44 (DF-69):** `audit-chapter` subcommand added (dual-mode review/extract, embedded `novel-manuscript-audit` preset).
 
 **V1.36 flags (`creator run start` — novel project init):**
 
@@ -382,6 +384,17 @@ Rules:
 | Flag | Purpose |
 | --- | --- |
 | `--force --reason "<text>"` | Skip the prior-stage `complete` check (FL-E §6.2E). Audited; `--reason` required. V1.36 stub — full implementation tracked under V1.36 P5 (FL-E hardening). |
+
+**V1.44 flags (`creator run audit-chapter` — DF-69):**
+
+| Flag | Purpose |
+| --- | --- |
+| `--mode {review\|extract}` | Audit mode. `review`: structured five-question report (written to `Works/<ref>/Logs/review/`). `extract`: synchronous `kb.extract_work` upsert into World KB. Required. |
+| `--chapter <N>` | Target chapter number (1-based). Required. |
+| `--volume <N>` | Target volume number. Default: `1`. |
+| `--json` | Machine-readable JSON output (includes `audit_mode`, `chapter`, `volume` in response). |
+
+Preset: `novel-manuscript-audit` (embedded, dual-mode). State machine: `load_chapter` → `review_report` (review) or `extract_sync` (extract) → `done`. Does NOT trigger FL-E `enqueue_auto_chain_step`.
 
 
 
