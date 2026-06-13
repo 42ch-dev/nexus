@@ -161,10 +161,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     };
 
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>(
-            "/v1/local/orchestration/schedules",
-            &request,
-        )
+        .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
         .await?;
 
     let schedule_id = resp
@@ -210,10 +207,7 @@ async fn resolve_work_id(
 ///
 /// Returns a JSON object mapping arg names to coerced values, suitable for
 /// `AddScheduleRequest.input`.
-fn parse_preset_cli_args(
-    cli_args: &[PresetCliArg],
-    raw: &[String],
-) -> Result<serde_json::Value> {
+fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<serde_json::Value> {
     use std::collections::HashMap;
 
     // If the preset declares no cli_args, ignore trailing args silently.
@@ -222,24 +216,20 @@ fn parse_preset_cli_args(
     }
 
     // Build a lookup: kebab-name → PresetCliArg
-    let lookup: HashMap<&str, &PresetCliArg> = cli_args
-        .iter()
-        .map(|a| (a.name.as_str(), a))
-        .collect();
+    let lookup: HashMap<&str, &PresetCliArg> =
+        cli_args.iter().map(|a| (a.name.as_str(), a)).collect();
 
     // Parse `--name value` pairs from the raw trailing args.
     let mut parsed: HashMap<String, serde_json::Value> = HashMap::new();
     let mut i = 0;
     while i < raw.len() {
         let token = &raw[i];
-        let name = token
-            .strip_prefix("--")
-            .ok_or_else(|| {
-                crate::errors::CliError::Config(format!(
-                    "Unexpected positional '{token}' in preset args. \
+        let name = token.strip_prefix("--").ok_or_else(|| {
+            crate::errors::CliError::Config(format!(
+                "Unexpected positional '{token}' in preset args. \
                      Preset-specific args must use --flag syntax."
-                ))
-            })?;
+            ))
+        })?;
 
         let arg = lookup.get(name).ok_or_else(|| {
             crate::errors::CliError::Config(format!(

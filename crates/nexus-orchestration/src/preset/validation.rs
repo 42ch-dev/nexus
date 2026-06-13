@@ -987,8 +987,6 @@ fn check_cli_args(manifest: &PresetManifest, result: &mut ValidationResult) {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -17,6 +17,7 @@ pub mod kb;
 pub mod knowledge;
 pub mod memory;
 pub mod reference;
+pub mod run;
 pub mod soul;
 pub mod works;
 pub mod world;
@@ -710,6 +711,7 @@ pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
         CreatorCommand::Kb { command } => kb::run(command, config).await,
         CreatorCommand::World { command } => world::run(command, config).await,
         CreatorCommand::Knowledge { command } => knowledge::run(command, config).await,
+        CreatorCommand::Run { command } => run::handle_run(command, config).await,
         CreatorCommand::Works { command } => works::handle_works(command, config).await,
         CreatorCommand::DemoSeed { force } => run_demo_seed(config, force).await,
         CreatorCommand::Logout => logout_creator(config).await,
