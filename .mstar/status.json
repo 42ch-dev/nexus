@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-13T18:30:00+08:00",
+  "updated_at": "2026-06-13T19:00:00+08:00",
   "plans": [],
   "v1_43_iteration_complete": true,
   "v1_44_iteration_complete": true,
@@ -78,8 +78,8 @@
       "residual": "R-V142-MERGE-CI-001"
     },
     "v1_44_ship": {
-      "merge_commit": "pending T7 PR",
-      "pr": "pending T7 PR",
+      "merge_commit": "pending PR #57 review + merge",
+      "pr": 57,
       "shipped_at": "2026-06-13T18:00:00+08:00",
       "5_plans": [
         "P-1 harness-docs-prepare",
@@ -88,7 +88,8 @@
         "P2 multi-volume-hardening (R-V142P1-QC1-F-002/004)",
         "P3 author-desk-residual-convergence (R-V141P0-04, R-V138P1-02, R-V138P1-07; waived R-V141P0-05, R-V141P1-14)",
         "P-last hygiene-and-closeout"
-      ]
+      ],
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/57"
     }
   },
   "residual_findings": {
