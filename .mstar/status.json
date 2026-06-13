@@ -141,7 +141,7 @@
             ".mstar/knowledge/specs/novel-work-pool.md"
         ],
         "iteration_compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-        "pre_implement_gate": "GO \u2014 V1.45 B1 (P0\u2225P1\u2225P2) implement dispatch authorized 2026-06-13; user approval A; 3 worktrees + 3 topic branches created at c28b9812 on iteration/v1.45; awaiting Completion Reports v2.",
+        "pre_implement_gate": "B1 MERGED + QC DISPATCHED 2026-06-13 \u2014 P0\u2225P1\u2225P2 atomic merge into iteration/v1.45 (7f9767f9 / 69cb9e1e / 00084b92 / c712bf05 / fb02215a / 79f540dc); fmt+clippy+command_surface+nexus42 lib+orchestration lib all PASS (665/665 lib, 37/37 surface, 207/207 preset). Pre-existing env-var race in context::summary confirmed non-V1.45 (5/5 stable runs). B1 QC tri-review (3 reviewers N=3) + QA dispatch authorized by user; report path .mstar/plans/reports/2026-06-13-v1.45-creator-run-generic-runner/ (qc1/qc2/qc3 + qa); Review range merge-base(76a9eb79)..HEAD(79f540dc).",
         "v1_43_ship": {
             "merge_commit": "0004d85f",
             "pr": 56,
@@ -166,7 +166,8 @@
                 "P-last hygiene-and-closeout"
             ],
             "pr_url": "https://github.com/42ch-dev/nexus/pull/57"
-        }
+        },
+        "updated_at": "2026-06-13T23:30:00+08:00"
     },
     "residual_findings": {
         "2026-06-04-v1.33-work-model-and-creator-run": [
