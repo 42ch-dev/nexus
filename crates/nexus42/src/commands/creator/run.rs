@@ -95,8 +95,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     } = cmd;
 
     // Resolve work_id: if omitted, try the pool active Work.
-    let resolved_work_id =
-        super::work_utils::resolve_active_work_id(&client, work_id).await?;
+    let resolved_work_id = super::work_utils::resolve_active_work_id(&client, work_id).await?;
 
     // FL-E stage-advance presets: dispatch to stage_advance.
     if let Some(target_stage) = stage_for_preset(&preset_id) {
@@ -125,20 +124,17 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
 
     // QC3 W-1: try O(1) direct path lookup before falling back to full scan.
-    let loaded = match nexus_orchestration::preset::lookup_preset_by_id(
-        &preset_id,
-        &nexus_home,
-        &caps,
-    ) {
-        Some(loaded) => loaded,
-        None => nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps)
-            .map_err(|e| {
-                crate::errors::CliError::Config(format!(
-                    "Unknown preset '{preset_id}': {e}. \
+    let loaded =
+        match nexus_orchestration::preset::lookup_preset_by_id(&preset_id, &nexus_home, &caps) {
+            Some(loaded) => loaded,
+            None => nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps)
+                .map_err(|e| {
+                    crate::errors::CliError::Config(format!(
+                        "Unknown preset '{preset_id}': {e}. \
                      Run `nexus42 creator presets list` to see available presets."
-                ))
-            })?,
-    };
+                    ))
+                })?,
+        };
 
     // Parse trailing args against preset.cli_args declarations.
     let mut input = parse_preset_cli_args(&loaded.manifest.preset.cli_args, &extra)?;
@@ -261,14 +257,11 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
                 let (val, advance) = match inline_value {
                     Some(v) => (v, 1), // --flag=value: 1 token
                     None => {
-                        let next = raw
-                            .get(i + 1)
-                            .cloned()
-                            .ok_or_else(|| {
-                                crate::errors::CliError::Config(format!(
-                                    "Flag '--{name}' requires an integer value"
-                                ))
-                            })?;
+                        let next = raw.get(i + 1).cloned().ok_or_else(|| {
+                            crate::errors::CliError::Config(format!(
+                                "Flag '--{name}' requires an integer value"
+                            ))
+                        })?;
                         (next, 2) // --flag value: 2 tokens
                     }
                 };
@@ -284,14 +277,11 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
                 let (val, advance) = match inline_value {
                     Some(v) => (v, 1), // --flag=value: 1 token
                     None => {
-                        let next = raw
-                            .get(i + 1)
-                            .cloned()
-                            .ok_or_else(|| {
-                                crate::errors::CliError::Config(format!(
-                                    "Flag '--{name}' requires a string value"
-                                ))
-                            })?;
+                        let next = raw.get(i + 1).cloned().ok_or_else(|| {
+                            crate::errors::CliError::Config(format!(
+                                "Flag '--{name}' requires a string value"
+                            ))
+                        })?;
                         (next, 2) // --flag value: 2 tokens
                     }
                 };
@@ -318,7 +308,6 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
 
     Ok(serde_json::Value::Object(parsed.into_iter().collect()))
 }
-
 
 /// Advance a Work to the next FL-E stage.
 ///
@@ -678,10 +667,7 @@ async fn stage_advance(
                     "stage_status": current_status,
                 });
                 let rollback_result = client
-                    .patch::<serde_json::Value, _>(
-                        &format!("/v1/local/works/{work_id}"),
-                        &rollback,
-                    )
+                    .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &rollback)
                     .await;
 
                 return Err(match rollback_result {
@@ -1073,9 +1059,7 @@ mod tests {
         Mock::given(method("PATCH"))
             .and(path(format!("/v1/local/works/{work_id}")))
             .and(body_string_contains("complete"))
-            .respond_with(
-                ResponseTemplate::new(500).set_body_string("rollback daemon error"),
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_string("rollback daemon error"))
             .mount(&mock)
             .await;
 
@@ -1083,8 +1067,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/local/orchestration/schedules"))
             .respond_with(
-                ResponseTemplate::new(500)
-                    .set_body_string("daemon schedule creation failed"),
+                ResponseTemplate::new(500).set_body_string("daemon schedule creation failed"),
             )
             .mount(&mock)
             .await;
@@ -1097,14 +1080,7 @@ mod tests {
         };
 
         let result = stage_advance(
-            work_id,
-            "research",
-            false,
-            false,
-            None,
-            false,
-            &config,
-            &client,
+            work_id, "research", false, false, None, false, &config, &client,
         )
         .await;
 
