@@ -34,7 +34,8 @@ V1.44 P0 implements **DF-69**: a dual-mode embedded preset (or preset pair) plus
 | `reflection-loop` | Default FL-E `review` stage | Yes |
 | `novel-review-master` | Master decisions on **existing** findings | Auxiliary schedule only |
 | `kb-extract` preset | Queue claim → job lifecycle | No (queue path) |
-| **`novel-manuscript-audit` (this spec)** | On-demand read chapter → review report and/or extract | **No** |
+| `creator kb queue-extract --chapter N` | CLI sugar → `kb_extract_jobs` row | No (queue path) |
+| **`novel-manuscript-audit` (this spec)** | On-demand read chapter → review report and/or sync extract | **No** |
 
 ---
 
