@@ -193,4 +193,21 @@ Invariant: at most one active FL-E stage driver schedule per Work remains enforc
 
 ---
 
+## V1.45 Draft overlay — FL-E CLI
+
+1. **Delete** `creator run stage list|advance`. Stage visibility → `creator works status`.
+2. Manual FL-E advance → preset ids only:
+
+| Stage | Command |
+| --- | --- |
+| `research` | `creator run research [<work_id>]` |
+| `produce` | `creator run novel-writing [<work_id>]` |
+| `review` | `creator run reflection-loop [<work_id>]` |
+| `persist` | `creator run kb-extract [<work_id>]` |
+
+3. **`creator run start`** → **`creator bootstrap`**. Side-input → **`creator works inspire`**.
+4. Auxiliary presets (`novel-brainstorm`, `novel-review-master`, audit split ids) use generic `creator run <preset_id>` — not stage subcommands.
+
+---
+
 *Normative staged creator workflow. Shipped V1.34 via `.mstar/plans/2026-06-04-v1.34-*`.*

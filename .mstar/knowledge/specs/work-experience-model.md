@@ -278,3 +278,13 @@ FL-E reuses V1.33 `creator run start/continue/list/status` and does not replace 
 ---
 
 *Normative product model for Work + FL-E. V1.33 plans: `.mstar/plans/2026-06-04-v1.33-*`. V1.34: `.mstar/plans/2026-06-04-v1.34-*`.*
+
+---
+
+## V1.45 Draft overlay — side-input and run_intents
+
+1. **`creator works inspire`** replaces `creator run continue`. Inspiration append is **not** a preset dispatch.
+2. **Delete** any narrative that `continue --preset` starts a preset — never implemented; use `creator run <preset_id>`.
+3. **`run_intents`** are enforced at **schedule creation** by orchestration/daemon, not by CLI subcommand filtering ([creator-run-preset-entry.md](creator-run-preset-entry.md) §4).
+4. New Work creation: **`creator bootstrap` only** (no `creator works create`).
+

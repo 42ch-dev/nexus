@@ -1077,3 +1077,13 @@ External (stable, public):
 ---
 
 *End of specification. The companion knowledge documents ([daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
+
+---
+
+## V1.45 Draft overlay — `run_intents` dispatch
+
+1. **Remove** §7.8 bullets mapping `run_intents` to `creator run start` / `creator run continue` subcommands.
+2. **Replace with:** CLI submits `creator run <preset_id>`; loader validates `run_intents` + `gates` when creating schedule (same as `POST /v1/local/orchestration/schedules`).
+3. Remediation strings: use `creator bootstrap` instead of `creator run start`; use `creator run <preset_id>` instead of `stage advance`.
+4. **`--force-gates --reason`** on `creator run` only; delete `stage advance --force` from product surface.
+

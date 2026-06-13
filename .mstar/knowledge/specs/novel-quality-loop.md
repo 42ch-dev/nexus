@@ -121,3 +121,18 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 ---
 
 *Draft overlay for V1.39. Merge into novel-workflow-profile §5.5 at iteration P5 hygiene if section stabilizes.*
+
+---
+
+## V1.45 Draft overlay — preset-id commands
+
+1. **§3.4** command becomes:
+
+```text
+nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]
+```
+
+2. **Enqueue only** — findings list moves to `creator works status` enhancement (P4).
+3. **§6** remediation hints use `creator run novel-review-master`, not `creator run review-master`.
+4. On-demand audit: `creator run novel-manuscript-audit-review|extract` per [novel-manuscript-audit.md](novel-manuscript-audit.md) V1.45 overlay.
+

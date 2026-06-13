@@ -1116,3 +1116,33 @@ v1 至少应保证：
 - ~~workspace 是否支持多 world 共存~~。**Closed（C2）**：支持；以 `world_id` 显式参数隔离并发；单运行时 **一个活跃 `creator_id`（`creator use`）** + 在该 Creator 下 **一个活跃 `workspace_slug`（`creator workspace use`，默认 `default`）**（见 §6.2C C2、nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14、nexus-platform `v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md`）。
 - `sync` 是否允许默认后台定时拉取
 - skills export 的目标格式优先级
+
+---
+
+## V1.45 Draft overlay — `creator run` preset entry (P-1 prepare)
+
+**Authority**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Draft Master). On P-last, replace §6.2D/E below with that Master.
+
+**Target §6.2D (replaces shipped V1.33–V1.44 subcommand table):**
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator bootstrap --idea "<text>" …` | Create Work + intake/init/produce chain (flags 1:1 from former `creator run start`) |
+| `nexus42 creator run <preset_id> [<work_id>]` | Enqueue any resolved preset; optional positional work_id defaults to pool active |
+| `nexus42 creator works inspire [<work_id>] --note "<text>"` | Append inspiration (former `continue`) |
+| `nexus42 creator works reopen [<work_id>] --reason "<text>" …` | Reopen completed Work (former `resume --reopen`) |
+| `nexus42 creator works resume-chain [<work_id>]` | Clear auto-chain interrupt (former `resume`) |
+| `nexus42 creator works reconcile-chapters [<work_id>]` | DB↔FS chapter repair |
+
+**Deleted:** §6.2E `creator run stage` entirely. FL-E visibility → `creator works status`. Stage advance → `creator run research|novel-writing|reflection-loop|kb-extract`.
+
+**Example preset commands:**
+
+```text
+nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]
+nexus42 creator run novel-brainstorm [<work_id>]
+nexus42 creator run novel-manuscript-audit-review [<work_id>] --chapter N [--volume V]
+```
+
+**Global flags on `creator run`:** `--json`, `--force-gates --reason` only (no `stage advance --force`).
+

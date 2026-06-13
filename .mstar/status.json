@@ -1,9 +1,71 @@
 {
   "version": 1,
-  "updated_at": "2026-06-13T19:00:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-13T22:00:00+08:00",
+  "plans": [
+    {
+      "plan_id": "2026-06-13-v1.45-creator-run-generic-runner",
+      "title": "P0 — Generic creator run <preset_id>",
+      "status": "Todo",
+      "working_branch": "feature/v1.45-creator-run-generic-runner",
+      "merge_target": "iteration/v1.45",
+      "plan_file": ".mstar/plans/2026-06-13-v1.45-creator-run-generic-runner.md",
+      "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
+      "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.45-delete-bespoke-run-subcommands",
+      "title": "P1 — Delete bespoke creator run subcommands",
+      "status": "Todo",
+      "working_branch": "feature/v1.45-delete-bespoke-run-subcommands",
+      "merge_target": "iteration/v1.45",
+      "plan_file": ".mstar/plans/2026-06-13-v1.45-delete-bespoke-run-subcommands.md",
+      "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
+      "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.45-creator-bootstrap-and-works-migration",
+      "title": "P2 — creator bootstrap + works atomic ops",
+      "status": "Todo",
+      "working_branch": "feature/v1.45-creator-bootstrap-and-works-migration",
+      "merge_target": "iteration/v1.45",
+      "plan_file": ".mstar/plans/2026-06-13-v1.45-creator-bootstrap-and-works-migration.md",
+      "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
+      "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.45-quickstart-and-author-spec",
+      "title": "P3 — Quickstart + author spec rewrite",
+      "status": "Todo",
+      "working_branch": "feature/v1.45-quickstart-and-author-spec",
+      "merge_target": "iteration/v1.45",
+      "plan_file": ".mstar/plans/2026-06-13-v1.45-quickstart-and-author-spec.md",
+      "depends_on": "2026-06-13-v1.45-creator-run-generic-runner",
+      "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.45-author-desk-status-ux",
+      "title": "P4 — Author desk + findings in works status (optional)",
+      "status": "Todo",
+      "working_branch": "feature/v1.45-author-desk-status-ux",
+      "merge_target": "iteration/v1.45",
+      "plan_file": ".mstar/plans/2026-06-13-v1.45-author-desk-status-ux.md",
+      "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
+      "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.45-hygiene-and-closeout",
+      "title": "P-last — Spec promotion + tracker closeout",
+      "status": "Todo",
+      "working_branch": "feature/v1.45-hygiene-and-closeout",
+      "merge_target": "iteration/v1.45",
+      "plan_file": ".mstar/plans/2026-06-13-v1.45-hygiene-and-closeout.md",
+      "depends_on": "2026-06-13-v1.45-quickstart-and-author-spec",
+      "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+    }
+  ],
   "v1_43_iteration_complete": true,
   "v1_44_iteration_complete": true,
+  "v1_45_iteration_complete": false,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -11,24 +73,24 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.44",
-    "last_integration_branch": "iteration/v1.43",
+    "integration_branch": "iteration/v1.45",
+    "last_integration_branch": "iteration/v1.44",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
     "latest_shipped_iteration": "v1.44",
     "latest_shipped_at": "2026-06-13T18:00:00+08:00",
-    "latest_active_iteration": "v1.44",
-    "latest_active_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-    "integration_branch_retired": null,
+    "latest_active_iteration": "v1.45",
+    "latest_active_compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+    "integration_branch_retired": "iteration/v1.44",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-13T18:00:00+08:00",
-      "total_open": 77,
+      "updated_at": "2026-06-13T22:00:00+08:00",
+      "total_open": 79,
       "by_severity": {
         "critical": 0,
         "high": 2,
         "medium": 7,
-        "low": 58,
+        "low": 60,
         "nit": 10
       },
       "by_target": {
@@ -40,32 +102,34 @@
         "V1.39": 22,
         "V1.40": 1,
         "V1.41": 21,
-        "V1.42": 5
+        "V1.42": 5,
+        "V1.45": 2
       },
-      "notes": "V1.44 ship closeout (2026-06-13): DF-69 → shipped archive; R-V143P0-002 closed; R-V141P0-04 / R-V138P1-02 / R-V138P1-07 resolved in P3; R-V141P0-05 / R-V141P1-14 formally waived; R-V142P1-QC1-F-002 / F-004 resolved in P2; R-V144P0-001..010 (P0 fix-wave) + R-V144P1-001..006 (P1 fix-wave) resolved; Suggestions S01.. (P0/P1/P2/P3) deferred to next iteration. 5/5 V1.44 implement plans Done; PR iteration/v1.44 → main pending (T7)."
+      "notes": "V1.45 P-1 prepare (2026-06-13): BL-12/BL-13 registered; DF-52 resolution path locked. V1.44 ship closeout: PR #57 merged 76a9eb79. 6 implement plans Todo on iteration/v1.45."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-manuscript-audit.md",
+    "wave_0_spec": ".mstar/knowledge/specs/creator-run-preset-entry.md",
     "spec_refs": [
-      ".mstar/knowledge/specs/novel-manuscript-audit.md",
+      ".mstar/knowledge/specs/creator-run-preset-entry.md",
+      ".mstar/knowledge/specs/cli-spec.md",
+      ".mstar/knowledge/specs/cli-command-ia.md",
+      ".mstar/knowledge/specs/creator-workflow.md",
+      ".mstar/knowledge/specs/work-experience-model.md",
+      ".mstar/knowledge/specs/orchestration-engine.md",
       ".mstar/knowledge/specs/novel-quality-loop.md",
+      ".mstar/knowledge/specs/novel-manuscript-audit.md",
       ".mstar/knowledge/specs/novel-author-experience.md",
       ".mstar/knowledge/specs/novel-workflow-profile.md",
       ".mstar/knowledge/specs/entity-scope-model.md",
-      ".mstar/knowledge/specs/cli-command-ia.md",
       ".mstar/knowledge/specs/creator-centric-entry-model.md",
-      ".mstar/knowledge/specs/cli-spec.md",
-      ".mstar/knowledge/specs/work-experience-model.md",
-      ".mstar/knowledge/specs/creator-workflow.md",
       ".mstar/knowledge/specs/novel-writing-sync-contract.md",
       ".mstar/knowledge/specs/local-db-schema.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md",
       ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
-      ".mstar/knowledge/specs/orchestration-engine.md",
       ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
       ".mstar/knowledge/specs/novel-work-pool.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-    "pre_implement_gate": "CLOSED — V1.44 iteration complete 2026-06-13 (5 implement plans + P-last hygiene all Done on iteration/v1.44; PR to main pending user push authorization).",
+    "iteration_compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+    "pre_implement_gate": "OPEN — V1.45 harness prepare complete 2026-06-13 (P-1 Done on iteration/v1.45); P0–P-last Todo until Execute dispatch.",
     "v1_43_ship": {
       "merge_commit": "0004d85f",
       "pr": 56,
@@ -78,7 +142,7 @@
       "residual": "R-V142-MERGE-CI-001"
     },
     "v1_44_ship": {
-      "merge_commit": "pending PR #57 review + merge",
+      "merge_commit": "76a9eb79",
       "pr": 57,
       "shipped_at": "2026-06-13T18:00:00+08:00",
       "5_plans": [
@@ -86,7 +150,7 @@
         "P0 manuscript-audit-preset (DF-69)",
         "P1 review-master-cli-surface (R-V143P0-002)",
         "P2 multi-volume-hardening (R-V142P1-QC1-F-002/004)",
-        "P3 author-desk-residual-convergence (R-V141P0-04, R-V138P1-02, R-V138P1-07; waived R-V141P0-05, R-V141P1-14)",
+        "P3 author-desk-residual-convergence",
         "P-last hygiene-and-closeout"
       ],
       "pr_url": "https://github.com/42ch-dev/nexus/pull/57"

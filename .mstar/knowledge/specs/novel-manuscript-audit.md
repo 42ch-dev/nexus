@@ -135,3 +135,14 @@ At V1.44 P-last hygiene:
 ---
 
 *Draft overlay for V1.44 P0. P0 implement plan is scope authority for preset YAML and exact CLI flags.*
+
+---
+
+## V1.45 Draft overlay — CLI entry
+
+1. **Delete** `creator run audit-chapter`; use split preset ids:
+   - `creator run novel-manuscript-audit-review [<work_id>] --chapter N [--volume V]`
+   - `creator run novel-manuscript-audit-extract [<work_id>] --chapter N [--volume V]`
+2. **Hard delete** parent preset directory `novel-manuscript-audit/` (DEPRECATED); keep `-review` and `-extract` only (P1).
+3. Declare `cli_args` on split presets per [creator-run-preset-entry.md](creator-run-preset-entry.md) §3.3.
+
