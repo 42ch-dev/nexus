@@ -121,7 +121,7 @@ nexus42 creator works status
 While auto-chain runs, you can inject inspiration at any time:
 
 ```bash
-nexus42 creator run continue <work_id> --note "New plot twist idea: the detective's partner is the informant"
+nexus42 creator works inspire <work_id> --note "New plot twist idea: the detective's partner is the informant"
 ```
 
 This does **not** interrupt the current chapter; it merges into the next chapter’s prompt context.
@@ -129,13 +129,13 @@ This does **not** interrupt the current chapter; it merges into the next chapter
 If the daemon restarts, resume where you left off:
 
 ```bash
-nexus42 creator run resume <work_id>
+nexus42 creator works resume-chain <work_id>
 ```
 
 If chapter files get out of sync with the database, reconcile them:
 
 ```bash
-nexus42 creator run reconcile-chapters <work_id>
+nexus42 creator works reconcile-chapters <work_id>
 ```
 
 ### §5 Quality Loop
@@ -204,7 +204,7 @@ nexus42 creator works status
 #   This Work is complete; see docs/novel-writing-quickstart.md §6
 #
 #   To start a new Work, run:
-#     nexus42 creator run start \
+#     nexus42 creator bootstrap \
 #       --init-preset novel-project-init --idea "..."
 # ═════════════════════════════════════════════════════
 ```
@@ -212,14 +212,15 @@ nexus42 creator works status
 To start a **new** novel in the same World:
 
 ```bash
-nexus42 creator run start --idea "..." --init-preset novel-project-init --world-id <world_id>
+nexus42 creator bootstrap --idea "..." --init-preset novel-project-init --world-id <world_id>
 ```
 
 To **reopen** a completed Work (e.g., to add bonus chapters):
 
 ```bash
 nexus42 creator works completion-lock release <work_id>
-nexus42 creator run resume <work_id> --reopen --reason "Adding epilogue"
+nexus42 creator works reopen <work_id> --reason "Adding epilogue"
+nexus42 creator works resume-chain <work_id>
 ```
 
 ---
@@ -275,7 +276,7 @@ As you write, inspiration notes accumulate in the Work's **inspiration log**. Th
 
 ```bash
 # Add inspiration at any time — even during auto-chain
-nexus42 creator run continue <work_id> --note "Character X should have a hidden motive from chapter 3 onward"
+nexus42 creator works inspire <work_id> --note "Character X should have a hidden motive from chapter 3 onward"
 ```
 
 Inspiration notes are:
