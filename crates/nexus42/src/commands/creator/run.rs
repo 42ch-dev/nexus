@@ -254,16 +254,15 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
                 i += 1; // boolean: always 1 token (--flag or --flag=value)
             }
             PresetCliArgType::Integer => {
-                let (val, advance) = match inline_value {
-                    Some(v) => (v, 1), // --flag=value: 1 token
-                    None => {
-                        let next = raw.get(i + 1).cloned().ok_or_else(|| {
-                            crate::errors::CliError::Config(format!(
-                                "Flag '--{name}' requires an integer value"
-                            ))
-                        })?;
-                        (next, 2) // --flag value: 2 tokens
-                    }
+                let (val, advance) = if let Some(v) = inline_value {
+                    (v, 1) // --flag=value: 1 token
+                } else {
+                    let next = raw.get(i + 1).cloned().ok_or_else(|| {
+                        crate::errors::CliError::Config(format!(
+                            "Flag '--{name}' requires an integer value"
+                        ))
+                    })?;
+                    (next, 2) // --flag value: 2 tokens
                 };
                 let n: i64 = val.parse().map_err(|_| {
                     crate::errors::CliError::Config(format!(
@@ -274,16 +273,15 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
                 i += advance;
             }
             PresetCliArgType::String => {
-                let (val, advance) = match inline_value {
-                    Some(v) => (v, 1), // --flag=value: 1 token
-                    None => {
-                        let next = raw.get(i + 1).cloned().ok_or_else(|| {
-                            crate::errors::CliError::Config(format!(
-                                "Flag '--{name}' requires a string value"
-                            ))
-                        })?;
-                        (next, 2) // --flag value: 2 tokens
-                    }
+                let (val, advance) = if let Some(v) = inline_value {
+                    (v, 1) // --flag=value: 1 token
+                } else {
+                    let next = raw.get(i + 1).cloned().ok_or_else(|| {
+                        crate::errors::CliError::Config(format!(
+                            "Flag '--{name}' requires a string value"
+                        ))
+                    })?;
+                    (next, 2) // --flag value: 2 tokens
                 };
                 parsed.insert(arg.name.clone(), serde_json::json!(val));
                 i += advance;
