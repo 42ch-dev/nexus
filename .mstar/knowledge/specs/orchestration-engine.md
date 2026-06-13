@@ -1080,10 +1080,7 @@ External (stable, public):
 
 ---
 
-## V1.45 Draft overlay — `run_intents` dispatch
+## V1.45 supersession (P-last promotion)
 
-1. **Remove** §7.8 bullets mapping `run_intents` to `creator run start` / `creator run continue` subcommands.
-2. **Replace with:** CLI submits `creator run <preset_id>`; loader validates `run_intents` + `gates` when creating schedule (same as `POST /v1/local/orchestration/schedules`).
-3. Remediation strings: use `creator bootstrap` instead of `creator run start`; use `creator run <preset_id>` instead of `stage advance`.
-4. **`--force-gates --reason`** on `creator run` only; delete `stage advance --force` from product surface.
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The `run_intents` dispatch via generic `creator run <preset_id>` and `--force-gates --reason` semantics are now part of the canonical Master body.
 

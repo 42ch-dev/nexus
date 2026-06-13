@@ -281,10 +281,7 @@ FL-E reuses V1.33 `creator run start/continue/list/status` and does not replace 
 
 ---
 
-## V1.45 Draft overlay — side-input and run_intents
+## V1.45 supersession (P-last promotion)
 
-1. **`creator works inspire`** replaces `creator run continue`. Inspiration append is **not** a preset dispatch.
-2. **Delete** any narrative that `continue --preset` starts a preset — never implemented; use `creator run <preset_id>`.
-3. **`run_intents`** are enforced at **schedule creation** by orchestration/daemon, not by CLI subcommand filtering ([creator-run-preset-entry.md](creator-run-preset-entry.md) §4).
-4. New Work creation: **`creator bootstrap` only** (no `creator works create`).
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The side-input lane (`creator works inspire`), `run_intents` enforcement at schedule creation, and the `creator bootstrap`-only new-Work rule are now part of the canonical Master body.
 

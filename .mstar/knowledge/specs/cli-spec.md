@@ -1109,30 +1109,9 @@ v1 至少应保证：
 
 ---
 
-## V1.45 Draft overlay — `creator run` preset entry (P-1 prepare)
+## V1.45 supersession (P-last promotion)
 
-**Authority**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Draft Master). On P-last, replace §6.2D/E below with that Master.
+**Superseded by**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Shipped Master V1.45). The §6.2D/E `creator run` preset-entry table, FL-E stage advance mapping, preset-id examples, and global flags on `creator run` are now part of the canonical Master body.
 
-**Target §6.2D (replaces shipped V1.33–V1.44 subcommand table):**
-
-| Command | Purpose |
-| --- | --- |
-| `nexus42 creator bootstrap --idea "<text>" …` | Create Work + intake/init/produce chain (flags 1:1 from former `creator run start`) |
-| `nexus42 creator run <preset_id> [<work_id>]` | Enqueue any resolved preset; optional positional work_id defaults to pool active |
-| `nexus42 creator works inspire [<work_id>] --note "<text>"` | Append inspiration (former `continue`) |
-| `nexus42 creator works reopen [<work_id>] --reason "<text>" …` | Reopen completed Work (former `resume --reopen`) |
-| `nexus42 creator works resume-chain [<work_id>]` | Clear auto-chain interrupt (former `resume`) |
-| `nexus42 creator works reconcile-chapters [<work_id>]` | DB↔FS chapter repair |
-
-**Deleted:** §6.2E `creator run stage` entirely. FL-E visibility → `creator works status`. Stage advance → `creator run research|novel-writing|reflection-loop|kb-extract`.
-
-**Example preset commands:**
-
-```text
-nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]
-nexus42 creator run novel-brainstorm [<work_id>]
-nexus42 creator run novel-manuscript-audit-review [<work_id>] --chapter N [--volume V]
-```
-
-**Global flags on `creator run`:** `--json`, `--force-gates --reason` only (no `stage advance --force`).
+> **Note on §6.2D/E body**: The shipped V1.33–V1.44 text in §6.2D/E below has not been rewritten in this P-last pass (out of plan scope; the overlay was the canonical update channel). The Master [creator-run-preset-entry.md](./creator-run-preset-entry.md) is the authoritative reference for the V1.45 surface. A follow-up spec-hygiene pass should rewrite the §6.2D/E body to match. Tracked as residual `R-V145B3-001`.
 

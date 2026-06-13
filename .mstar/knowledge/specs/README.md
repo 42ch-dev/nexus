@@ -105,7 +105,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.44)** — V1.39 baseline + §3.4 review-master CLI overlay (P1); R-V143P0-002 closed |
 | [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
 | [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.43)** — BL-10 quickstart contract + CLI copy map + author visibility |
-| [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Draft (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA |
+| [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration

@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.45 Active** (2026-06-13 harness prepare) · **V1.44 Shipped** (2026-06-13, PR #57) · **V1.43 Shipped** (2026-06-12) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.45 Shipped** (2026-06-14, P-last closeout) · **V1.44 Shipped** (2026-06-13, PR #57) · **V1.43 Shipped** (2026-06-12) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: Active (V1.45 harness prepare — 2026-06-13)
+**Status**: Active (V1.45 Shipped 2026-06-14)
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-13 (V1.45 P-1 prepare: BL-12/BL-13 registered; DF-52 resolution path; compass [v1.45](../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md))
+**Last updated**: 2026-06-14 (V1.45 P-last closeout: BL-12/DF-52/BL-13 archived; iteration Shipped; full V1.45 delivery snapshot in archive)
 
 ---
 
@@ -76,7 +76,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
 | DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
 | DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 residual-convergence** (commits a044f94 + 71c10cc). Schema now declares `prompt_file` + `vars` with `anyOf`. Closure recorded in [`.mstar/archived/residuals/v1.32-post-qc-tech-debt.json`](../archived/residuals/v1.32-post-qc-tech-debt.json) (R-P2-01). |
-| DF-52 | Top-level `nexus42 preset` command group | V1.33 | **V1.45 P-last** | S | V1.33 | **Resolution path:** `creator run <preset_id>` generic entry (BL-12). Archive on V1.45 ship. |
+| DF-52 | Top-level `nexus42 preset` command group | V1.33 | **V1.45 Shipped** (P-last) | S | V1.33 | **Resolution path:** `creator run <preset_id>` generic entry (BL-12). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.39 P0 Shipped** | S | V1.34→V1.35→V1.36→V1.37→V1.38→V1.39 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce). V1.38 shipped multi-chapter foundation **without** auto-reenqueue. **V1.39 P0** implements full `intake → research → produce → review → persist` auto-chain (default true), chapter outer loop, side-input lane, boot recovery, `--no-auto-chain` opt-out, `creator run resume` command. Core: `nexus-orchestration::auto_chain` module with `evaluate_next_step` + 15 unit tests + 14 integration tests. Plan: [2026-06-09-v1.39-fl-e-auto-chain-engine.md](../plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md). **Tri-review + targeted re-review all Approve; final consolidated gate Approve. PR #50 merged ad9725d8.** |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
@@ -91,8 +91,8 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-66 | Per-chapter log subdirectories at `Works/<work_ref>/Logs/` | V1.36 distill | **V1.39 P3 Shipped** | S | V1.36→V1.37→V1.39 | Same plan as DF-65. Implemented: `Logs/{brainstorm,write,review,publish}/` subdirs scaffolded; novel-writing writes to `Logs/write/`; sync exclusion documented. PR #50 merged ad9725d8. |
 | DF-67 | Master-decision timeout (96h finding escalation) | V1.36 distill | **V1.39 P4 Shipped** | S | V1.36→V1.37→V1.39 | Plan: [2026-06-09-v1.39-master-decision-timeout.md](../plans/2026-06-09-v1.39-master-decision-timeout.md). Implemented: 24h-interval daemon task (env-var override); `find_resumable_works` stale-finding DAO; CLI status banner `⏰ N findings stale (>96h)`; per-Work `auto_review_master_on_timeout` opt-in (default false); RVM-prefixed review-master schedule helper; 7 hermetic tests. PR #50 merged ad9725d8. |
 | ~~BL-10~~ | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | V1.41 prepare | **V1.43 Shipped** | M | V1.41→V1.43 | **Shipped V1.43** on `iteration/v1.43` (merge `340423e5`, 2026-06-12). Plan: [2026-06-12-v1.43-novel-writing-quickstart.md](../plans/2026-06-12-v1.43-novel-writing-quickstart.md). Spec: [novel-author-experience.md](specs/novel-author-experience.md). P-last residuals: R-V143P0-001 closed (spec amendment); R-V143P0-002 deferred to V1.44+ (review-master surface). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md). |
-| BL-12 | `creator run` hardcoded subcommands vs preset-generic entry | V1.44 ship | **V1.45 P0–P2** | L | V1.45 | V1.44 shipped `audit-chapter` / `review-master` as new enum variants — anti-pattern. V1.45: generic `creator run <preset_id>` + delete bespoke subcommands. Plan: [2026-06-13-v1.45-creator-run-generic-runner.md](../plans/2026-06-13-v1.45-creator-run-generic-runner.md). Spec: [creator-run-preset-entry.md](specs/creator-run-preset-entry.md). |
-| BL-13 | `STAGE_PRESET_ALLOWLIST` references `memory-review` without embedded preset | V1.34 | **V1.45 P1/P-last** | S | V1.34 | Allowlist drift in `validation.rs`; no `embedded-presets/memory-review/`. P1: remove allowlist entry or add preset dir (implement decision). |
+| ~~BL-12~~ | `creator run` hardcoded subcommands vs preset-generic entry | V1.44 ship | **V1.45 Shipped** (P0+P1+P2) | L | V1.45 | V1.44 shipped `audit-chapter` / `review-master` as new enum variants — anti-pattern. V1.45: generic `creator run <preset_id>` + delete bespoke subcommands. Plan: [2026-06-13-v1.45-creator-run-generic-runner.md](../plans/2026-06-13-v1.45-creator-run-generic-runner.md). Spec: [creator-run-preset-entry.md](specs/creator-run-preset-entry.md) (Shipped V1.45). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
+| ~~BL-13~~ | `STAGE_PRESET_ALLOWLIST` references `memory-review` without embedded preset | V1.34 | **V1.45 Shipped** (P1 T4) | S | V1.34 | Allowlist drift in `validation.rs`; no `embedded-presets/memory-review/`. P1: removed allowlist entry (implement decision). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -323,4 +323,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-13 (V1.45 P-1 harness prepare: BL-12/BL-13; DF-52 → V1.45 resolution). Status: **V1.45 Active**; V1.44 Shipped.*
+*Last updated: 2026-06-14 (V1.45 P-last closeout: BL-12/DF-52/BL-13 archived; iteration Shipped; full V1.45 delivery snapshot in archive). Status: **V1.45 Shipped**.*
