@@ -681,8 +681,15 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
             auto_schedule,
             json,
         } => {
-            handle_review_master(&work_id, finding_id.as_deref(), auto_schedule, json, config, &client)
-                .await?;
+            handle_review_master(
+                &work_id,
+                finding_id.as_deref(),
+                auto_schedule,
+                json,
+                config,
+                &client,
+            )
+            .await?;
         }
     }
 
@@ -700,6 +707,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 /// # Errors
 ///
 /// Returns an error if the daemon API call fails or the work is not found.
+#[allow(clippy::too_many_lines)]
 async fn handle_review_master(
     work_id: &str,
     finding_id: Option<&str>,
@@ -718,11 +726,7 @@ async fn handle_review_master(
     // Filter to master-targeted findings
     let master_findings: Vec<&serde_json::Value> = findings
         .iter()
-        .filter(|f| {
-            f.get("target_executor")
-                .and_then(|v| v.as_str())
-                .map_or(false, |t| t == "master")
-        })
+        .filter(|f| f.get("target_executor").and_then(|v| v.as_str()) == Some("master"))
         .collect();
 
     if json {
@@ -734,9 +738,7 @@ async fn handle_review_master(
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else if master_findings.is_empty() {
         println!("No master findings for Work {work_id}.");
-        println!(
-            "See docs/novel-writing-quickstart.md §5 for the quality-loop workflow."
-        );
+        println!("See docs/novel-writing-quickstart.md §5 for the quality-loop workflow.");
     } else {
         // Summary: open master findings count + top 3 by severity
         let severity_order = |s: &str| match s {
@@ -748,11 +750,7 @@ async fn handle_review_master(
         };
         let mut sorted: Vec<&&serde_json::Value> = master_findings.iter().collect();
         sorted.sort_by_key(|f| {
-            severity_order(
-                f.get("severity")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("info"),
-            )
+            severity_order(f.get("severity").and_then(|v| v.as_str()).unwrap_or("info"))
         });
 
         println!(
@@ -763,19 +761,10 @@ async fn handle_review_master(
 
         let top = sorted.iter().take(3);
         for (i, f) in top.enumerate() {
-            let finding_id_val = f
-                .get("finding_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let severity = f
-                .get("severity")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+            let finding_id_val = f.get("finding_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let severity = f.get("severity").and_then(|v| v.as_str()).unwrap_or("?");
             let title = f.get("title").and_then(|v| v.as_str()).unwrap_or("?");
-            println!(
-                "  #{idx} [{severity}] {title}",
-                idx = i + 1
-            );
+            println!("  #{idx} [{severity}] {title}", idx = i + 1);
             println!("     finding_id: {finding_id_val}");
         }
         println!();
@@ -786,9 +775,7 @@ async fn handle_review_master(
             );
             println!();
         }
-        println!(
-            "Next: nexus42 creator run review-master {work_id} --finding-id <id>"
-        );
+        println!("Next: nexus42 creator run review-master {work_id} --finding-id <id>");
     }
 
     // --finding-id: enqueue novel-review-master preset scoped to one finding
@@ -800,9 +787,7 @@ async fn handle_review_master(
 
         // Fetch the specific finding to get its details
         let finding: serde_json::Value = client
-            .get::<serde_json::Value>(&format!(
-                "/v1/local/works/{work_id}/findings/{fid}"
-            ))
+            .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}/findings/{fid}"))
             .await?;
 
         let finding_title = finding
@@ -826,18 +811,17 @@ async fn handle_review_master(
         let world_id = work.get("world_id").and_then(|v| v.as_str());
         let body_path = finding
             .get("chapter")
-            .and_then(|v| v.as_i64())
-            .map(|ch| {
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|ch| {
                 work.get("chapters")
                     .and_then(|v| v.as_array())
                     .and_then(|chapters| {
                         chapters.iter().find(|c| {
-                            c.get("chapter").and_then(|v| v.as_i64()) == Some(ch)
+                            c.get("chapter").and_then(serde_json::Value::as_i64) == Some(ch)
                         })
                     })
                     .and_then(|c| c.get("body_path").and_then(|v| v.as_str()))
-            })
-            .flatten();
+            });
 
         // Serialize the single finding as open_findings input
         let open_findings_json = serde_json::to_string(&vec![&finding])?;
@@ -850,12 +834,18 @@ async fn handle_review_master(
         });
         if let Some(wid) = world_id {
             if let Some(o) = input.as_object_mut() {
-                o.insert("world_id".to_string(), serde_json::Value::String(wid.to_string()));
+                o.insert(
+                    "world_id".to_string(),
+                    serde_json::Value::String(wid.to_string()),
+                );
             }
         }
         if let Some(bp) = body_path {
             if let Some(o) = input.as_object_mut() {
-                o.insert("body_path".to_string(), serde_json::Value::String(bp.to_string()));
+                o.insert(
+                    "body_path".to_string(),
+                    serde_json::Value::String(bp.to_string()),
+                );
             }
         }
 
@@ -873,10 +863,7 @@ async fn handle_review_master(
         };
 
         let sched_resp: serde_json::Value = client
-            .post::<serde_json::Value, _>(
-                "/v1/local/orchestration/schedules",
-                &schedule_request,
-            )
+            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &schedule_request)
             .await?;
 
         let schedule_id = sched_resp
@@ -894,9 +881,7 @@ async fn handle_review_master(
             println!("{}", serde_json::to_string_pretty(&output)?);
         } else {
             println!();
-            println!(
-                "Enqueued novel-review-master for finding {fid} ({finding_title})."
-            );
+            println!("Enqueued novel-review-master for finding {fid} ({finding_title}).");
             println!("  Schedule ID: {schedule_id}");
             println!("  The daemon will run the review-master preset via ACP.");
         }
@@ -916,7 +901,7 @@ async fn handle_review_master(
 
         let stale_count = stale
             .get("stale_count")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
 
         if stale_count == 0 {
@@ -950,7 +935,10 @@ async fn handle_review_master(
             });
             if let Some(wid) = world_id {
                 if let Some(o) = input.as_object_mut() {
-                    o.insert("world_id".to_string(), serde_json::Value::String(wid.to_string()));
+                    o.insert(
+                        "world_id".to_string(),
+                        serde_json::Value::String(wid.to_string()),
+                    );
                 }
             }
 
@@ -990,9 +978,7 @@ async fn handle_review_master(
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
                 println!();
-                println!(
-                    "Auto-scheduled novel-review-master for {stale_count} stale finding(s)."
-                );
+                println!("Auto-scheduled novel-review-master for {stale_count} stale finding(s).");
                 println!("  Schedule ID: {schedule_id}");
             }
         }
