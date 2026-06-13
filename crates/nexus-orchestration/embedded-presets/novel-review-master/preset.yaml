@@ -63,6 +63,17 @@ preset:
     - kind: work_field
       field: work_ref
       op: required
+  # V1.45 §3.3: CLI args parsed by the generic `creator run` runner.
+  cli_args:
+    - name: finding-id
+      type: string
+      required: false
+      description: "Filter to a specific finding ID for targeted review"
+    - name: auto-schedule
+      type: boolean
+      required: false
+      default: false
+      description: "Skip interactive confirmation and auto-schedule immediately"
 
 states:
   - id: present
