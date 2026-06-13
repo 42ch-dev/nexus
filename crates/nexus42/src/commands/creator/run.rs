@@ -722,6 +722,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 /// - The Work does not exist or is not a novel Work.
 /// - Extract mode is requested on a worldless Work (422).
 /// - The daemon API call fails.
+#[allow(clippy::too_many_lines)] // Single-entry CLI handler; splitting would create a >7-arg helper
 async fn handle_audit_chapter(
     work_id: &str,
     mode: AuditMode,
@@ -796,8 +797,7 @@ async fn handle_audit_chapter(
         creator_id: creator_id.to_string(),
         preset_id: "novel-manuscript-audit".to_string(),
         seed: Some(format!(
-            "audit-chapter {work_id} mode={} ch={chapter} vol={volume}",
-            mode.to_string()
+            "audit-chapter {work_id} mode={mode} ch={chapter} vol={volume}"
         )),
         label: Some(format!(
             "On-demand audit: {mode} ch{chapter} v{volume} ({work_id})"
@@ -810,18 +810,18 @@ async fn handle_audit_chapter(
         reason: None,
     };
 
-    let sched_resp: serde_json::Value = client
+    let mut sched_resp: serde_json::Value = client
         .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
         .await?;
 
     let schedule_id = sched_resp
         .get("schedule_id")
         .and_then(|v| v.as_str())
-        .unwrap_or("?");
+        .unwrap_or("?")
+        .to_string();
 
     if json {
-        let mut output = sched_resp;
-        output.as_object_mut().map(|o| {
+        if let Some(o) = sched_resp.as_object_mut() {
             o.insert(
                 "audit_mode".to_string(),
                 serde_json::Value::String(mode.to_string()),
@@ -834,12 +834,10 @@ async fn handle_audit_chapter(
                 "volume".to_string(),
                 serde_json::Value::Number(volume.into()),
             );
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        }
+        println!("{}", serde_json::to_string_pretty(&sched_resp)?);
     } else {
-        println!(
-            "Audit scheduled: {mode} mode for Work {work_id} ch{chapter} v{volume}"
-        );
+        println!("Audit scheduled: {mode} mode for Work {work_id} ch{chapter} v{volume}");
         println!("  Schedule: {schedule_id} (preset: novel-manuscript-audit)");
         if matches!(mode, AuditMode::Review) {
             println!("  Report will be written to Works/{work_ref}/Logs/review/");
@@ -854,7 +852,7 @@ async fn handle_audit_chapter(
     Ok(())
 }
 
-/// Resolve the body_path for the audit chapter from the Work response.
+/// Resolve the `body_path` for the audit chapter from the Work response.
 ///
 /// Looks up the chapter row matching the given chapter/volume in the
 /// Work's chapters array. Returns None if not found (preset will use
@@ -868,7 +866,10 @@ fn resolve_audit_body_path(
     let ch_row = chapters.iter().find(|c| {
         c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(chapter))
     })?;
-    ch_row.get("body_path").and_then(|v| v.as_str()).map(String::from)
+    ch_row
+        .get("body_path")
+        .and_then(|v| v.as_str())
+        .map(String::from)
 }
 
 // ── FL-E stage management (V1.34) ───────────────────────────────────────────
@@ -1495,5 +1496,49 @@ mod tests {
                 "stage '{stage}' should NOT be gated by novel-complete check: {result:?}"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.44 P0 (DF-69): audit-chapter CLI tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn audit_mode_display_review() {
+        assert_eq!(AuditMode::Review.to_string(), "review");
+    }
+
+    #[test]
+    fn audit_mode_display_extract() {
+        assert_eq!(AuditMode::Extract.to_string(), "extract");
+    }
+
+    #[test]
+    fn resolve_audit_body_path_finds_chapter() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
+                {"chapter": 3, "body_path": "Works/novel/Stories/ch03.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 3, 1);
+        assert_eq!(result.as_deref(), Some("Works/novel/Stories/ch03.md"));
+    }
+
+    #[test]
+    fn resolve_audit_body_path_returns_none_for_missing() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 99, 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn resolve_audit_body_path_returns_none_for_empty_chapters() {
+        let resp = serde_json::json!({"work_id": "wrk_test"});
+        let result = resolve_audit_body_path(&resp, 1, 1);
+        assert!(result.is_none());
     }
 }
