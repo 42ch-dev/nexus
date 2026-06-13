@@ -123,10 +123,7 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 
 ---
 
-## V1.45 Draft overlay — preset-id commands (applied P3 2026-06-14)
+## V1.45 supersession (P-last promotion)
 
-1. **§3.4** command is now `creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]` — applied to body in P3.
-2. **Enqueue only** — findings list moves to `creator works status` enhancement (P4).
-3. **§6** remediation hints use `creator run novel-review-master`, not `creator run review-master` — applied P3.
-4. On-demand audit: `creator run novel-manuscript-audit-review|extract` per [novel-manuscript-audit.md](novel-manuscript-audit.md) V1.45 overlay.
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.
 

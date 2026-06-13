@@ -1,9 +1,9 @@
 # Creator Run Preset Entry — Normative Specification v1
 
-**Status**: Draft (V1.45 — 2026-06-13)  
+**Status**: Shipped (V1.45 — 2026-06-13)  
 **Document class**: Master (wave 0 for V1.45 CLI IA)  
 **Created**: 2026-06-13  
-**Last updated**: 2026-06-13 (P-1 harness prepare — target contract before implement)  
+**Last updated**: 2026-06-14 (P-last promotion Draft → Shipped)  
 **Scope**: Author-facing **`nexus42 creator run <preset_id> [<work_id>]`** — generic orchestration preset dispatch; relationship to `creator bootstrap`, atomic `creator works`, and `daemon schedule`  
 **Coordinates with**:
 
@@ -144,6 +144,15 @@ Hard delete legacy subcommands — **no deprecated aliases** (pre-release).
 
 ---
 
-## 8. V1.45 Draft overlay — supersession notes
+## 8. V1.45 supersession notes (P-last promotion)
 
-On P-last promotion, this Master **supersedes** cli-spec §6.2D/E bespoke subcommand tables. Until then, [cli-spec.md](cli-spec.md) retains shipped V1.44 text with overlay pointer below.
+This Master **supersedes** the V1.44 cli-spec §6.2D/E bespoke subcommand tables and the V1.45 Draft overlay sections in the following specs:
+
+- [creator-workflow.md](creator-workflow.md) (FL-E CLI overlay)
+- [novel-quality-loop.md](novel-quality-loop.md) (preset-id commands overlay; applied P3)
+- [novel-manuscript-audit.md](novel-manuscript-audit.md) (CLI entry overlay; split presets)
+- [work-experience-model.md](work-experience-model.md) (side-input + run_intents overlay)
+- [orchestration-engine.md](orchestration-engine.md) (`run_intents` dispatch overlay)
+- [cli-spec.md](cli-spec.md) (creator run preset entry overlay)
+
+**Promotion date**: 2026-06-14 (P-last closeout)

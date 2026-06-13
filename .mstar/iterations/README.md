@@ -56,7 +56,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](v1.42-multi-volume-serial-writing-delivery-compass-v1.md) | V1.42 | **Shipped** (2026-06-12) — P0 runtime_lock + P1 DF-62 multi-volume + P2 DF-56 + P3 DF-47 + P-last UX; `iteration/v1.42` |
 | [v1.43-novel-author-experience-delivery-compass-v1.md](v1.43-novel-author-experience-delivery-compass-v1.md) | V1.43 | **Shipped** (2026-06-12) — BL-10 author quickstart (ongoing serial) + CLI copy + author visibility + P-last hygiene; `iteration/v1.43` |
 | [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) | V1.44 | **Shipped** (2026-06-13) — DF-69 P0 + review-master CLI P1 + multi-volume P2 + author-desk P3 + P-last hygiene; PR [#57](https://github.com/42ch-dev/nexus/pull/57) merged `76a9eb79` |
-| [v1.45-creator-run-preset-unification-delivery-compass-v1.md](v1.45-creator-run-preset-unification-delivery-compass-v1.md) | V1.45 | **Active** (2026-06-13 harness prepare) — CLI IA: `creator run <preset_id>` + `creator bootstrap` + atomic `creator works`; `iteration/v1.45` |
+| [v1.45-creator-run-preset-unification-delivery-compass-v1.md](v1.45-creator-run-preset-unification-delivery-compass-v1.md) | V1.45 | **Shipped** (2026-06-14, P-last closeout) — CLI IA: `creator run <preset_id>` + `creator bootstrap` + atomic `creator works`; `iteration/v1.45` |
 
 ### Reference compasses
 
