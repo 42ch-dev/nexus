@@ -1916,4 +1916,165 @@ mod tests {
             "negative volume must default to 1"
         );
     }
+
+    // =======================================================================
+    // V1.44 P2 (F-002): Multi-volume completion regression tests
+    // =======================================================================
+
+    /// AC1: 2-volume Work (2×3 = 6 chapters) completes only when ALL volume
+    /// rows are finalized. Previously, the flat `current_chapter >= total`
+    /// check would fail because `current_chapter` resets per volume.
+    #[tokio::test]
+    async fn test_is_work_completed_multi_volume_all_finalized() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_mv_comp_001").await;
+
+        // Set up as a 2-volume novel with 6 total chapters
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query(
+            "UPDATE works SET total_planned_chapters = 6, intake_status = 'complete' \
+             WHERE work_id = ?",
+        )
+        .bind("wrk_mv_comp_001")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Seed 2 volumes × 3 chapters using multi-volume seeder
+        seed_chapters_multi_volume(&pool, "wrk_mv_comp_001", "my-novel", 2, 3, "2026-06-13T10:00:00Z")
+            .await
+            .unwrap();
+
+        // Finalize ALL 6 chapters across both volumes
+        for vol in 1..=2 {
+            for ch in 1..=3 {
+                update_status(
+                    &pool,
+                    "wrk_mv_comp_001",
+                    ch,
+                    vol,
+                    "finalized",
+                    Some(4000),
+                    "2026-06-13T12:00:00Z",
+                )
+                .await
+                .unwrap();
+            }
+        }
+
+        assert!(
+            is_work_completed(&pool, "wrk_mv_comp_001").await.unwrap(),
+            "2-volume Work with all 6 chapters finalized should be completed (F-002)"
+        );
+    }
+
+    /// AC1 negative: 2-volume Work where vol 1 is finalized but vol 2 has a
+    /// draft chapter — must NOT be completed.
+    #[tokio::test]
+    async fn test_is_work_completed_multi_volume_partial_vol2() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_mv_comp_002").await;
+
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query(
+            "UPDATE works SET total_planned_chapters = 6, intake_status = 'complete' \
+             WHERE work_id = ?",
+        )
+        .bind("wrk_mv_comp_002")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        seed_chapters_multi_volume(&pool, "wrk_mv_comp_002", "my-novel", 2, 3, "2026-06-13T10:00:00Z")
+            .await
+            .unwrap();
+
+        // Finalize all vol 1 chapters
+        for ch in 1..=3 {
+            update_status(
+                &pool,
+                "wrk_mv_comp_002",
+                ch,
+                1,
+                "finalized",
+                Some(4000),
+                "2026-06-13T12:00:00Z",
+            )
+            .await
+            .unwrap();
+        }
+
+        // Vol 2: finalize ch1+ch2 but leave ch3 as draft
+        for ch in 1..=2 {
+            update_status(
+                &pool,
+                "wrk_mv_comp_002",
+                ch,
+                2,
+                "finalized",
+                Some(4000),
+                "2026-06-13T12:00:00Z",
+            )
+            .await
+            .unwrap();
+        }
+        update_status(
+            &pool,
+            "wrk_mv_comp_002",
+            3,
+            2,
+            "draft",
+            None,
+            "2026-06-13T11:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !is_work_completed(&pool, "wrk_mv_comp_002").await.unwrap(),
+            "2-volume Work with vol2 ch3 still draft → should NOT be completed"
+        );
+    }
+
+    /// F-002 edge: row count mismatch (only vol 1 seeded, total says 6).
+    #[tokio::test]
+    async fn test_is_work_completed_multi_volume_missing_vol2_rows() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_mv_comp_003").await;
+
+        // SAFETY: UPDATE against works — runtime query.
+        sqlx::query(
+            "UPDATE works SET total_planned_chapters = 6, intake_status = 'complete' \
+             WHERE work_id = ?",
+        )
+        .bind("wrk_mv_comp_003")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Only seed vol 1 (3 rows, total says 6)
+        seed_chapters_multi_volume(&pool, "wrk_mv_comp_003", "my-novel", 1, 3, "2026-06-13T10:00:00Z")
+            .await
+            .unwrap();
+
+        // Finalize all vol 1 chapters
+        for ch in 1..=3 {
+            update_status(
+                &pool,
+                "wrk_mv_comp_003",
+                ch,
+                1,
+                "finalized",
+                Some(4000),
+                "2026-06-13T12:00:00Z",
+            )
+            .await
+            .unwrap();
+        }
+
+        assert!(
+            !is_work_completed(&pool, "wrk_mv_comp_003").await.unwrap(),
+            "total=6 but only 3 rows seeded → should NOT be completed (row count mismatch)"
+        );
+    }
 }
