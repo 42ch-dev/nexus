@@ -1,0 +1,112 @@
+# Novel Manuscript Audit Preset — On-demand chapter audit (V1.44 P0, DF-69)
+#
+# Dual-mode embedded preset for on-demand chapter quality review and/or
+# World KB extraction. Does NOT enter the FL-E auto-chain driver.
+#
+# Modes:
+#   review  — Read chapter body → structured 五问 review → write report
+#             under Logs/review/ + optional findings upsert.
+#   extract — Read chapter body → synchronous kb.extract_work (no queue
+#             ceremony). World-bound only; worldless Works fail with 422.
+#
+# Input variables (passed via schedule input):
+#   work_id:           Work entity ID (wrk_...).
+#   work_ref:          Human-readable short reference (directory name).
+#   mode:              "review" | "extract" (required).
+#   chapter:           Integer chapter number (required).
+#   volume:            Volume number (default 1; required for multi-volume).
+#   body_path:         Override path; default resolved from work_chapters.
+#   upsert_findings:   Boolean (review mode only; default true).
+#   world_id:          Bound World ID (required for extract mode).
+#
+# State machine: load_chapter → (review_path | extract_path) → done
+#   - load_chapter:   Read chapter body from resolved body_path.
+#   - review_report:  (review mode) Run 五问 structured review, write report.
+#   - extract_sync:   (extract mode) Invoke kb.extract_work synchronously.
+#   - done:           Terminal.
+#
+# Launch:
+#   nexus42 creator run audit-chapter <work_id> --mode review|extract [--chapter N]
+#
+# Alternatively via daemon schedule:
+#   nexus42 daemon schedule add --preset novel-manuscript-audit \
+#     --creator <creator-id> --input '{"mode":"review","work_id":"...","chapter":1}'
+
+preset:
+  id: novel-manuscript-audit
+  version: 1
+  kind: creator
+  description: "On-demand chapter audit: structured review report and/or synchronous World KB extract (no FL-E auto-chain)"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - kb.extract_work
+  run_intents:
+    - work_continue
+  initial: load_chapter
+  terminal: done
+  world_binding:
+    mode: optional
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+
+states:
+  - id: load_chapter
+    description: "Load chapter body from resolved path; branch on mode"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/load-chapter.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            mode: "{{preset.input.mode}}"
+            chapter: "{{preset.input.chapter}}"
+            volume: "{{preset.input.volume}}"
+            body_path: "{{preset.input.body_path}}"
+    exit_when:
+      kind: manual
+    next: review_report
+
+  - id: review_report
+    description: "Review mode: run 五問 structured review, write report under Logs/review/"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/review-report.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            chapter: "{{preset.input.chapter}}"
+            volume: "{{preset.input.volume}}"
+            upsert_findings: "{{preset.input.upsert_findings}}"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: extract_sync
+    description: "Extract mode: synchronous kb.extract_work for World-bound Works (no queue ceremony)"
+    enter:
+      - kind: capability
+        name: kb.extract_work
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          work_id: "{{preset.input.work_id}}"
+          world_id: "{{preset.input.world_id}}"
+          profile_hint: "novel"
+          source_kind: "work_chapter"
+          source_locator: "{{preset.input.body_path}}"
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true
