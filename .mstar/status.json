@@ -1,8 +1,72 @@
 {
   "version": 1,
-  "updated_at": "2026-06-12T23:45:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-13T12:00:00+08:00",
+  "plans": [
+    {
+      "plan_id": "2026-06-13-v1.44-harness-docs-prepare",
+      "title": "P-1 — V1.44 compass, plans, specs, tracker, status (docs-only)",
+      "status": "Done",
+      "working_branch": "iteration/v1.44",
+      "merge_target": "iteration/v1.44",
+      "plan_file": ".mstar/plans/2026-06-13-v1.44-harness-docs-prepare.md",
+      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+      "notes": [
+        "2026-06-13 — V1.44 grill-me closure (large hybrid: audit + review-master + multi-volume + author-desk). Harness prepare on iteration/v1.44 from main (V1.43 shipped PR #56)."
+      ]
+    },
+    {
+      "plan_id": "2026-06-13-v1.44-manuscript-audit-preset",
+      "title": "P0 — DF-69 novel-manuscript-audit preset + CLI entry",
+      "status": "Todo",
+      "working_branch": "feature/v1.44-manuscript-audit-preset",
+      "merge_target": "iteration/v1.44",
+      "plan_file": ".mstar/plans/2026-06-13-v1.44-manuscript-audit-preset.md",
+      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
+      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
+      "title": "P1 — R-V143P0-002 review-master CLI + quickstart convergence",
+      "status": "Todo",
+      "working_branch": "feature/v1.44-review-master-cli-surface",
+      "merge_target": "iteration/v1.44",
+      "plan_file": ".mstar/plans/2026-06-13-v1.44-review-master-cli-surface.md",
+      "depends_on": "2026-06-13-v1.44-manuscript-audit-preset",
+      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.44-multi-volume-hardening",
+      "title": "P2 — multi-volume completion + supervisor volume context",
+      "status": "Todo",
+      "working_branch": "feature/v1.44-multi-volume-hardening",
+      "merge_target": "iteration/v1.44",
+      "plan_file": ".mstar/plans/2026-06-13-v1.44-multi-volume-hardening.md",
+      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
+      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence",
+      "title": "P3 — author-desk UX residual whitelist",
+      "status": "Todo",
+      "working_branch": "feature/v1.44-author-desk-residual-convergence",
+      "merge_target": "iteration/v1.44",
+      "plan_file": ".mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md",
+      "depends_on": "2026-06-13-v1.44-review-master-cli-surface",
+      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md"
+    },
+    {
+      "plan_id": "2026-06-13-v1.44-hygiene-and-closeout",
+      "title": "P-last — spec promotion + tracker/status closeout",
+      "status": "Todo",
+      "working_branch": "feature/v1.44-hygiene-and-residuals",
+      "merge_target": "iteration/v1.44",
+      "plan_file": ".mstar/plans/2026-06-13-v1.44-hygiene-and-closeout.md",
+      "depends_on": "2026-06-13-v1.44-author-desk-residual-convergence",
+      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md"
+    }
+  ],
   "v1_43_iteration_complete": true,
+  "v1_44_iteration_complete": false,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -10,18 +74,18 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
+    "integration_branch": "iteration/v1.44",
     "last_integration_branch": "iteration/v1.43",
     "integration_merge_target": "main",
-    "integration_branch_role": "retired",
+    "integration_branch_role": "active",
     "latest_shipped_iteration": "v1.43",
     "latest_shipped_at": "2026-06-12T23:39:10+08:00",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
-    "integration_branch_retired": "iteration/v1.43",
+    "latest_active_iteration": "v1.44",
+    "latest_active_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+    "integration_branch_retired": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-12T23:45:00+08:00",
+      "updated_at": "2026-06-13T12:00:00+08:00",
       "total_open": 86,
       "by_severity": {
         "critical": 0,
@@ -31,11 +95,11 @@
         "nit": 16
       },
       "by_target": {
-        "v1.43": 2,
+        "v1.43": 0,
         "v1.42": 9,
         "v1.41": 7,
-        "backlog": 65,
-        "v1.44": 3
+        "backlog": 58,
+        "v1.44": 12
       },
       "by_plan": {
         "creator-run": 3,
@@ -52,12 +116,18 @@
         "v1.40-hygiene": 1,
         "work-switch": 12,
         "selection-pool": 19,
-        "author-experience": 5
+        "author-experience": 5,
+        "manuscript-audit": 1,
+        "review-master-cli": 1,
+        "multi-volume-hardening": 2,
+        "author-desk": 7
       },
-      "notes": "V1.43 P-last: closed R-V137P0-01 (fix), R-V142P1-F-003 (fix), R-V142P0-QC-W-01 (waive), R-V142P0-QC-W-001 (waive), R-V143P0-001 (fix). R-V143P0-002 deferred to V1.44+. R-V138 chain-engine already fixed. Spec stamps: preset-conditional-routing → Shipped V1.42, novel-workflow-profile → Shipped V1.42, novel-author-experience → Shipped V1.43."
+      "notes": "V1.44 harness prepare: DF-69 → P0; R-V143P0-002 → P1; R-V142P1-F-002/F-004 → P2; P3 whitelist (R-V141P0-04/05, R-V138P0-02, R-V138P1-02/07, R-V141P1-14/15). by_target.v1.44 pre-allocated from compass §1.6 intake; JSON residual_findings SSOT on conflict."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-author-experience.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-manuscript-audit.md",
     "spec_refs": [
+      ".mstar/knowledge/specs/novel-manuscript-audit.md",
+      ".mstar/knowledge/specs/novel-quality-loop.md",
       ".mstar/knowledge/specs/novel-author-experience.md",
       ".mstar/knowledge/specs/novel-workflow-profile.md",
       ".mstar/knowledge/specs/entity-scope-model.md",
@@ -69,14 +139,18 @@
       ".mstar/knowledge/specs/novel-writing-sync-contract.md",
       ".mstar/knowledge/specs/local-db-schema.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md",
-      ".mstar/knowledge/specs/novel-quality-loop.md",
       ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
       ".mstar/knowledge/specs/orchestration-engine.md",
       ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
       ".mstar/knowledge/specs/novel-work-pool.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md",
-    "pre_implement_gate": "satisfied — v1.42.1 hotfix on main (279ec7b3, PR #55); iteration/v1.43 based on 955c4cbc",
+    "iteration_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+    "pre_implement_gate": "GO — harness prepare complete 2026-06-13; base main ≥ V1.43 ship (PR #56 d1e04d06); implement dispatch may proceed",
+    "v1_43_ship": {
+      "merge_commit": "0004d85f",
+      "pr": 56,
+      "shipped_at": "2026-06-12T23:39:10+08:00"
+    },
     "v1_42_1_hotfix": {
       "plan_id": "2026-06-12-v1.42.1-runtime-lock-acquire-order",
       "merge_commit": "279ec7b3",

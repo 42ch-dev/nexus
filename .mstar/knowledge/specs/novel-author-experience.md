@@ -87,4 +87,5 @@ At V1.43 P5/P-last hygiene:
 
 - [x] **Kept as Feature line supplement** — §2–§4 map quickstart sections to CLI surfaces and shipped implementation status. No merge into cli-spec.md required; this document continues to serve as the author-experience normative supplement.
 - [x] **Status promoted to Shipped (V1.43)** — all P0/P1/P2 surfaces implemented; §2 row 4 amended (`creator run status` → `creator works status` per R-V143P0-001).
-- [ ] Merge deferred rows (review-master surface per R-V143P0-002) into V1.44+ compass when reopened.
+- [x] **R-V143P0-002 registered in V1.44 compass** — [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) P1; implement via [novel-quality-loop.md](novel-quality-loop.md) §3.4.
+- [ ] **DF-69 audit entry** — quickstart §5 cross-ref when P0 ships ([novel-manuscript-audit.md](novel-manuscript-audit.md)).
