@@ -84,7 +84,7 @@ nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-
 
 - Use `creator works status` to list open findings with severity breakdown
 - Quickstart §5 updated to cite `creator run novel-review-master` as primary path (V1.45 P3)
-- On empty findings: single line "No master findings" + quickstart §5 link
+- On empty findings: `creator works status [<work_id>]` surfaces a clear "no findings yet" message and suggests `creator run novel-review-master` to enqueue a master-decision review
 
 **Residual**: R-V143P0-002 — resolved V1.44 P1; close in P-last hygiene.
 
