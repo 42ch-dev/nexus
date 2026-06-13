@@ -1,0 +1,79 @@
+# Novel Manuscript Audit — Review Mode (V1.44 P0 fix, DF-69)
+#
+# On-demand chapter review: read chapter body → structured 五問 review →
+# write report under Logs/review/ + optional findings upsert.
+# Does NOT enter the FL-E auto-chain driver.
+#
+# Input variables (passed via schedule input):
+#   work_id:           Work entity ID (wrk_...).
+#   work_ref:          Human-readable short reference (directory name).
+#   chapter:           Integer chapter number (required).
+#   volume:            Volume number (default 1; required for multi-volume).
+#   body_path:         Override path; default resolved from work_chapters.
+#   upsert_findings:   Boolean (default true).
+#
+# State machine: load_chapter → review_report → done
+#
+# Launch:
+#   nexus42 creator run audit-chapter <work_id> --mode review [--chapter N]
+
+preset:
+  id: novel-manuscript-audit-review
+  version: 1
+  kind: creator
+  description: "On-demand chapter review: structured 五問 review report under Logs/review/ (no FL-E auto-chain)"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+  run_intents:
+    - work_continue
+  initial: load_chapter
+  terminal: done
+  world_binding:
+    mode: optional
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+
+states:
+  - id: load_chapter
+    description: "Load chapter body from resolved path for review"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/load-chapter.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            chapter: "{{preset.input.chapter}}"
+            volume: "{{preset.input.volume}}"
+            body_path: "{{preset.input.body_path}}"
+    exit_when:
+      kind: manual
+    next: review_report
+
+  - id: review_report
+    description: "Run 五問 structured review, write report under Logs/review/"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/review-report.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            chapter: "{{preset.input.chapter}}"
+            volume: "{{preset.input.volume}}"
+            upsert_findings: "{{preset.input.upsert_findings}}"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: done
+    terminal: true

@@ -128,6 +128,70 @@ pub enum RunCommand {
         #[arg(long)]
         extend_chapters: Option<i32>,
     },
+    /// On-demand chapter audit — review or extract without entering FL-E auto-chain (DF-69)
+    ///
+    /// Audits an already-written chapter body. Two modes:
+    ///   - review:  structured 五問 review report → Logs/review/
+    ///   - extract: synchronous World KB extraction (World-bound Works only)
+    ///
+    /// This command does NOT create an FL-E driver schedule or advance auto-chain state.
+    AuditChapter {
+        /// Work ID (wrk_...) to audit
+        work_id: String,
+        /// Audit mode: "review" (structured review report) or "extract" (World KB extract)
+        #[arg(long, value_enum)]
+        mode: AuditMode,
+        /// Chapter number to audit (required)
+        #[arg(long)]
+        chapter: i32,
+        /// Volume number (default 1; required for multi-volume Works)
+        #[arg(long, default_value_t = 1)]
+        volume: i32,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Run the master-decision review on open findings (V1.44 P1).
+    ///
+    /// Lists open findings with `target_executor=master` and optionally
+    /// enqueues the `novel-review-master` preset for a specific finding.
+    /// Distinct from `stage advance --stage review` which runs the
+    /// `reflection-loop` FL-E review stage.
+    ///
+    /// See docs/novel-writing-quickstart.md §5 for usage patterns.
+    ReviewMaster {
+        /// Work ID (wrk_...) to review
+        work_id: String,
+        /// Run review-master preset scoped to a specific finding
+        #[arg(long)]
+        finding_id: Option<String>,
+        /// Opt-in: enqueue novel-review-master when this Work has stale
+        /// (96h+) findings. Scoped to the supplied `work_id` — only stale
+        /// findings belonging to this Work trigger the schedule.
+        #[arg(long, default_value_t = false)]
+        auto_schedule: bool,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// Audit mode for `creator run audit-chapter` (DF-69).
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum AuditMode {
+    /// Structured 五問 review report under Logs/review/
+    Review,
+    /// Synchronous World KB extract (World-bound Works only)
+    Extract,
+}
+
+impl std::fmt::Display for AuditMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Review => write!(f, "review"),
+            Self::Extract => write!(f, "extract"),
+        }
+    }
 }
 
 /// FL-E stage subcommands (V1.34 cli-spec §6.2E).
@@ -654,9 +718,582 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             }
         }
+        RunCommand::AuditChapter {
+            work_id,
+            mode,
+            chapter,
+            volume,
+            json,
+        } => {
+            handle_audit_chapter(&work_id, mode, chapter, volume, json, config, &client).await?;
+        }
+        RunCommand::ReviewMaster {
+            work_id,
+            finding_id,
+            auto_schedule,
+            json,
+        } => {
+            handle_review_master(
+                &work_id,
+                finding_id.as_deref(),
+                auto_schedule,
+                json,
+                config,
+                &client,
+            )
+            .await?;
+        }
     }
 
     Ok(())
+}
+
+// ── Review-master CLI (V1.44 P1) ────────────────────────────────────────────
+
+/// Fetch common work context fields for review-master schedule input.
+///
+/// Returns `(work_ref, topic, world_id, work_json)` where `work_json` is the
+/// full Work response (used by `--finding-id` path for `body_path` extraction).
+/// Extracted to avoid duplicate Work fetch in `--finding-id` and
+/// `--auto-schedule` paths (R-V144P1-005).
+async fn fetch_work_context(
+    client: &crate::api::DaemonClient,
+    work_id: &str,
+) -> Result<(String, String, Option<String>, serde_json::Value)> {
+    let work: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .await?;
+    let work_ref = work
+        .get("work_ref")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let topic = work
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("novel")
+        .to_string();
+    let world_id = work
+        .get("world_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Ok((work_ref, topic, world_id, work))
+}
+
+/// Handle `creator run review-master <work_id>` (V1.44 P1).
+///
+/// Lists open findings with `target_executor=master` and optionally enqueues
+/// the `novel-review-master` preset for a specific finding or on opt-in
+/// auto-schedule.
+///
+/// # Errors
+///
+/// Returns an error if the daemon API call fails or the work is not found.
+#[allow(clippy::too_many_lines)]
+async fn handle_review_master(
+    work_id: &str,
+    finding_id: Option<&str>,
+    auto_schedule: bool,
+    json: bool,
+    config: &CliConfig,
+    client: &crate::api::DaemonClient,
+) -> Result<()> {
+    // Fetch open findings for the Work.
+    // Uses limit=200 to reduce truncation risk for high-volume works;
+    // client-side filter to master-targeted findings follows.
+    // For works with >200 open findings, the summary may be incomplete
+    // (R-V144P1-006: documented cap; daemon-side target_executor filter
+    // is deferred to a future iteration).
+    let findings: Vec<serde_json::Value> = client
+        .get::<Vec<serde_json::Value>>(&format!(
+            "/v1/local/works/{work_id}/findings?status=open&limit=200"
+        ))
+        .await?;
+
+    // Filter to master-targeted findings
+    let master_findings: Vec<&serde_json::Value> = findings
+        .iter()
+        .filter(|f| f.get("target_executor").and_then(|v| v.as_str()) == Some("master"))
+        .collect();
+
+    if json {
+        let output = serde_json::json!({
+            "work_id": work_id,
+            "master_findings_count": master_findings.len(),
+            "master_findings": master_findings,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else if master_findings.is_empty() {
+        println!("No master findings for Work {work_id}.");
+        println!("See docs/novel-writing-quickstart.md §5 for the quality-loop workflow.");
+    } else {
+        // Summary: open master findings count + top 3 by severity
+        let severity_order = |s: &str| match s {
+            "blocker" => 0,
+            "major" => 1,
+            "minor" => 2,
+            "info" => 3,
+            _ => 4,
+        };
+        let mut sorted: Vec<&&serde_json::Value> = master_findings.iter().collect();
+        sorted.sort_by_key(|f| {
+            severity_order(f.get("severity").and_then(|v| v.as_str()).unwrap_or("info"))
+        });
+
+        println!(
+            "Master findings for Work {work_id}: {} open",
+            master_findings.len()
+        );
+        println!();
+
+        let top = sorted.iter().take(3);
+        for (i, f) in top.enumerate() {
+            let finding_id_val = f.get("finding_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let severity = f.get("severity").and_then(|v| v.as_str()).unwrap_or("?");
+            let title = f.get("title").and_then(|v| v.as_str()).unwrap_or("?");
+            println!("  #{idx} [{severity}] {title}", idx = i + 1);
+            println!("     finding_id: {finding_id_val}");
+        }
+        println!();
+        if master_findings.len() > 3 {
+            println!(
+                "  ... and {} more master finding(s).",
+                master_findings.len() - 3
+            );
+            println!();
+        }
+        println!("Next: nexus42 creator run review-master {work_id} --finding-id <id>");
+    }
+
+    // --finding-id: enqueue novel-review-master preset scoped to one finding
+    if let Some(fid) = finding_id {
+        let creator_id = config
+            .active_creator_id
+            .as_deref()
+            .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+        // Fetch the specific finding to get its details
+        let finding: serde_json::Value = client
+            .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}/findings/{fid}"))
+            .await?;
+
+        // R-V144P1-004: assert the finding is master-targeted before enqueuing
+        let target_executor = finding.get("target_executor").and_then(|v| v.as_str());
+        if target_executor != Some("master") {
+            let actual = target_executor.unwrap_or("(missing)");
+            return Err(crate::errors::CliError::Config(format!(
+                "finding {fid} has target_executor={actual}, not 'master'; \
+                 review-master only enqueues master-targeted findings"
+            )));
+        }
+
+        let finding_title = finding
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(untitled)");
+
+        // R-V144P1-005: use shared work context helper (avoids duplicate fetch)
+        let (work_ref, topic, world_id, work) = fetch_work_context(client, work_id).await?;
+
+        let body_path = finding
+            .get("chapter")
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|ch| {
+                work.get("chapters")
+                    .and_then(|v| v.as_array())
+                    .and_then(|chapters| {
+                        chapters.iter().find(|c| {
+                            c.get("chapter").and_then(serde_json::Value::as_i64) == Some(ch)
+                        })
+                    })
+                    .and_then(|c| c.get("body_path").and_then(|v| v.as_str()))
+            });
+
+        // Serialize the single finding as open_findings input
+        let open_findings_json = serde_json::to_string(&vec![&finding])?;
+
+        let mut input = serde_json::json!({
+            "work_id": work_id,
+            "work_ref": work_ref,
+            "topic": topic,
+            "open_findings": open_findings_json,
+        });
+        if let Some(wid) = world_id {
+            if let Some(o) = input.as_object_mut() {
+                o.insert("world_id".to_string(), serde_json::Value::String(wid));
+            }
+        }
+        if let Some(bp) = body_path {
+            if let Some(o) = input.as_object_mut() {
+                o.insert(
+                    "body_path".to_string(),
+                    serde_json::Value::String(bp.to_string()),
+                );
+            }
+        }
+
+        let schedule_request = AddScheduleRequest {
+            creator_id: creator_id.to_string(),
+            preset_id: "novel-review-master".to_string(),
+            seed: Some(format!("Review finding: {finding_title}")),
+            label: None,
+            depends_on: None,
+            concurrency: None,
+            scheduled_at: None,
+            input: Some(input),
+            force_gates: false,
+            reason: None,
+        };
+
+        let sched_resp: serde_json::Value = client
+            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &schedule_request)
+            .await?;
+
+        let schedule_id = sched_resp
+            .get("schedule_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+
+        if json {
+            let output = serde_json::json!({
+                "work_id": work_id,
+                "finding_id": fid,
+                "schedule_id": schedule_id,
+                "preset": "novel-review-master",
+            });
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!();
+            println!("Enqueued novel-review-master for finding {fid} ({finding_title}).");
+            println!("  Schedule ID: {schedule_id}");
+            println!("  The daemon will run the review-master preset via ACP.");
+        }
+    }
+
+    // --auto-schedule: opt-in enqueue when 96h stale findings exist for this Work
+    if auto_schedule {
+        let creator_id = config
+            .active_creator_id
+            .as_deref()
+            .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+        // R-V144P1-003: scope stale check to the current Work.
+        // The daemon /stale endpoint is creator-global; we filter client-side
+        // to count only stale findings belonging to this work_id, so that
+        // auto-schedule fires only when this Work has stale master findings.
+        let stale: serde_json::Value = client
+            .get::<serde_json::Value>("/v1/local/findings/stale")
+            .await?;
+
+        let stale_findings = stale
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .map_or(&[] as &[serde_json::Value], |v| v.as_slice());
+        let work_stale_count = stale_findings
+            .iter()
+            .filter(|f| f.get("work_id").and_then(|v| v.as_str()) == Some(work_id))
+            .count();
+
+        if work_stale_count == 0 {
+            if !json {
+                println!("No stale findings for this Work — auto-schedule skipped.");
+            }
+        } else {
+            // R-V144P1-005: use shared work context helper
+            let (work_ref, topic, world_id, _work) = fetch_work_context(client, work_id).await?;
+
+            // Fetch open master findings for the input
+            let open_findings_json = serde_json::to_string(&master_findings)?;
+
+            let mut input = serde_json::json!({
+                "work_id": work_id,
+                "work_ref": work_ref,
+                "topic": topic,
+                "open_findings": open_findings_json,
+            });
+            if let Some(wid) = world_id {
+                if let Some(o) = input.as_object_mut() {
+                    o.insert("world_id".to_string(), serde_json::Value::String(wid));
+                }
+            }
+
+            let schedule_request = AddScheduleRequest {
+                creator_id: creator_id.to_string(),
+                preset_id: "novel-review-master".to_string(),
+                seed: Some("Auto-scheduled master review (stale findings)".to_string()),
+                label: None,
+                depends_on: None,
+                concurrency: None,
+                scheduled_at: None,
+                input: Some(input),
+                force_gates: false,
+                reason: None,
+            };
+
+            let sched_resp: serde_json::Value = client
+                .post::<serde_json::Value, _>(
+                    "/v1/local/orchestration/schedules",
+                    &schedule_request,
+                )
+                .await?;
+
+            let schedule_id = sched_resp
+                .get("schedule_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+
+            if json {
+                let output = serde_json::json!({
+                    "work_id": work_id,
+                    "auto_schedule": true,
+                    "stale_count": work_stale_count,
+                    "schedule_id": schedule_id,
+                    "preset": "novel-review-master",
+                });
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            } else {
+                println!();
+                println!(
+                    "Auto-scheduled novel-review-master for {work_stale_count} stale finding(s) in this Work."
+                );
+                println!("  Schedule ID: {schedule_id}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// ── On-demand chapter audit (DF-69, V1.44 P0) ─────────────────────────────
+
+/// Handle `creator run audit-chapter` subcommand (DF-69).
+///
+/// Creates a schedule for the `novel-manuscript-audit-review` or
+/// `novel-manuscript-audit-extract` preset based on mode, with the
+/// given chapter and volume. Does NOT enter the FL-E auto-chain driver.
+///
+/// # Runtime lock invariant (R-V144P0-010)
+///
+/// The CLI handler creates a schedule (not a direct Work mutation), so the
+/// per-Work `runtime_lock_holder` is not acquired here. The daemon supervisor
+/// serializes schedule execution per `Serial` concurrency, preventing concurrent
+/// same-Work mutation during audit execution. The `novel-manuscript-audit-extract`
+/// preset's `world_binding: required` gate provides an additional boundary.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The Work does not exist or is not a novel Work.
+/// - Extract mode is requested on a worldless Work (422).
+/// - The chapter cannot be resolved (missing `body_path`).
+/// - The daemon API call fails.
+#[allow(clippy::too_many_lines)] // Single-entry CLI handler; splitting would create a >7-arg helper
+async fn handle_audit_chapter(
+    work_id: &str,
+    mode: AuditMode,
+    chapter: i32,
+    volume: i32,
+    json: bool,
+    config: &CliConfig,
+    client: &crate::api::DaemonClient,
+) -> Result<()> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+    // Fetch Work state to extract work_ref and world_id
+    let resp: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .await?;
+
+    let work_ref = resp
+        .get("work_ref")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let world_id = resp
+        .get("world_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let body_path = resolve_audit_body_path(&resp, chapter, volume);
+
+    // R-V144P0-007: fail fast if body_path cannot be resolved
+    if body_path.is_none() {
+        return Err(crate::errors::CliError::Config(format!(
+            "Cannot resolve chapter {chapter} (volume {volume}) for Work {work_id}. \
+             Verify the chapter exists in the Work's chapters array, \
+             or provide a valid body path override."
+        )));
+    }
+
+    // Extract mode: validate World-bound precondition (R-V144P0-008: typed error)
+    if matches!(mode, AuditMode::Extract) && world_id.is_none() {
+        return Err(crate::errors::CliError::WorldRequiredForExtract {
+            work_id: work_id.to_string(),
+        });
+    }
+
+    // Build preset input
+    let mut audit_input = serde_json::json!({
+        "work_id": work_id,
+        "work_ref": work_ref,
+        "mode": mode.to_string(),
+        "chapter": chapter,
+        "volume": volume,
+        "creator_id": creator_id,
+        "upsert_findings": true,
+    });
+
+    // Set body_path if resolved
+    if let Some(ref bp) = body_path {
+        if let Some(o) = audit_input.as_object_mut() {
+            o.insert(
+                "body_path".to_string(),
+                serde_json::Value::String(bp.clone()),
+            );
+        }
+    }
+
+    // Set world_id for extract mode
+    if let Some(ref wid) = world_id {
+        if let Some(o) = audit_input.as_object_mut() {
+            o.insert(
+                "world_id".to_string(),
+                serde_json::Value::String(wid.clone()),
+            );
+        }
+    }
+
+    // R-V144P0-001: dispatch to the correct split preset based on mode
+    let preset_id = match mode {
+        AuditMode::Review => "novel-manuscript-audit-review",
+        AuditMode::Extract => "novel-manuscript-audit-extract",
+    };
+
+    let request = AddScheduleRequest {
+        creator_id: creator_id.to_string(),
+        preset_id: preset_id.to_string(),
+        seed: Some(format!(
+            "audit-chapter {work_id} mode={mode} ch={chapter} vol={volume}"
+        )),
+        label: Some(format!(
+            "On-demand audit: {mode} ch{chapter} v{volume} ({work_id})"
+        )),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(audit_input),
+        force_gates: false,
+        reason: None,
+    };
+
+    let mut sched_resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
+        .await?;
+
+    let schedule_id = sched_resp
+        .get("schedule_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
+
+    if json {
+        if let Some(o) = sched_resp.as_object_mut() {
+            o.insert(
+                "audit_mode".to_string(),
+                serde_json::Value::String(mode.to_string()),
+            );
+            o.insert(
+                "chapter".to_string(),
+                serde_json::Value::Number(chapter.into()),
+            );
+            o.insert(
+                "volume".to_string(),
+                serde_json::Value::Number(volume.into()),
+            );
+        }
+        println!("{}", serde_json::to_string_pretty(&sched_resp)?);
+    } else {
+        println!("Audit schedule created: {mode} mode for Work {work_id} ch{chapter} v{volume}");
+        println!("  Schedule: {schedule_id} (preset: {preset_id}, status: pending)");
+        println!("  The daemon will execute this schedule asynchronously.");
+        if matches!(mode, AuditMode::Review) {
+            println!(
+                "  On completion, the review report will be under Works/{work_ref}/Logs/review/."
+            );
+        } else {
+            println!(
+                "  On completion, KB extraction results will be available for World {}.",
+                world_id.as_deref().unwrap_or("?")
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolve the `body_path` for the audit chapter from the Work response.
+///
+/// Looks up the chapter row matching the given chapter/volume in the
+/// Work's chapters array. Returns `None` if not found.
+///
+/// # Path validation (R-V144P0-004)
+///
+/// Rejects paths that are absolute, contain `..`, or do not start with
+/// the expected `Works/` layout prefix.
+fn resolve_audit_body_path(
+    work_resp: &serde_json::Value,
+    chapter: i32,
+    volume: i32,
+) -> Option<String> {
+    let chapters = work_resp.get("chapters").and_then(|v| v.as_array())?;
+
+    // R-V144P0-003: filter by volume when volume > 1 or multiple matches exist
+    let ch_row = chapters
+        .iter()
+        .find(|c| {
+            let matches_chapter =
+                c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(chapter));
+            let matches_volume =
+                c.get("volume").and_then(serde_json::Value::as_i64) == Some(i64::from(volume));
+            matches_chapter && matches_volume
+        })
+        .or_else(|| {
+            // Fallback: match chapter only (backward compat for Works without volume field)
+            chapters.iter().find(|c| {
+                c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(chapter))
+            })
+        })?;
+
+    let raw_path = ch_row.get("body_path").and_then(|v| v.as_str())?;
+
+    // R-V144P0-004: validate path safety
+    validate_body_path(raw_path)
+}
+
+/// Validate a resolved `body_path` against path traversal and layout rules.
+///
+/// Returns `Some(path)` if the path is safe, `None` if it fails validation.
+fn validate_body_path(path: &str) -> Option<String> {
+    // Reject absolute paths
+    if path.starts_with('/') {
+        return None;
+    }
+    // Reject path traversal
+    if path.contains("..") {
+        return None;
+    }
+    // Must be under expected layout prefix
+    if !path.starts_with("Works/") {
+        return None;
+    }
+    // Reject control characters
+    if path.chars().any(char::is_control) {
+        return None;
+    }
+    Some(path.to_string())
 }
 
 // ── FL-E stage management (V1.34) ───────────────────────────────────────────
@@ -999,6 +1636,19 @@ async fn stage_advance(
         })
         .unwrap_or_default();
 
+    // V1.44 P3 (R-V138P1-07): audit-log chapter context extraction to aid
+    // production debugging when chapter selection behaves unexpectedly.
+    tracing::debug!(
+        target: "fl_e.stage",
+        work_id = %work_id,
+        next_chapter = ?next_chapter,
+        chapter_label = ?chapter_label,
+        outline_path = ?outline_path,
+        body_path = ?body_path,
+        slug = ?slug,
+        "stage_advance chapter context extracted"
+    );
+
     // W-1 fix: fail fast when novel-writing ("produce") expects chapter context
     // but the daemon response is missing the chapters[] array or the selected
     // chapter row. Without outline_path and body_path, template rendering would
@@ -1059,6 +1709,7 @@ async fn stage_advance(
         workspace_dir: None,
         world_kb_block,
         world_id,
+        volume: None,
     };
 
     if let Some(mut request) =
@@ -1283,5 +1934,123 @@ mod tests {
                 "stage '{stage}' should NOT be gated by novel-complete check: {result:?}"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.44 P0 (DF-69): audit-chapter CLI tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn audit_mode_display_review() {
+        assert_eq!(AuditMode::Review.to_string(), "review");
+    }
+
+    #[test]
+    fn audit_mode_display_extract() {
+        assert_eq!(AuditMode::Extract.to_string(), "extract");
+    }
+
+    #[test]
+    fn resolve_audit_body_path_finds_chapter() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "volume": 1, "body_path": "Works/novel/Stories/ch01.md"},
+                {"chapter": 3, "volume": 1, "body_path": "Works/novel/Stories/ch03.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 3, 1);
+        assert_eq!(result.as_deref(), Some("Works/novel/Stories/ch03.md"));
+    }
+
+    #[test]
+    fn resolve_audit_body_path_returns_none_for_missing() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "volume": 1, "body_path": "Works/novel/Stories/ch01.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 99, 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn resolve_audit_body_path_returns_none_for_empty_chapters() {
+        let resp = serde_json::json!({"work_id": "wrk_test"});
+        let result = resolve_audit_body_path(&resp, 1, 1);
+        assert!(result.is_none());
+    }
+
+    // R-V144P0-003: volume-aware lookup
+    #[test]
+    fn resolve_audit_body_path_filters_by_volume() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "volume": 1, "body_path": "Works/novel/Stories/v1/ch01.md"},
+                {"chapter": 1, "volume": 2, "body_path": "Works/novel/Stories/v2/ch01.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 1, 2);
+        assert_eq!(result.as_deref(), Some("Works/novel/Stories/v2/ch01.md"));
+    }
+
+    #[test]
+    fn resolve_audit_body_path_falls_back_without_volume_field() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 1, 1);
+        assert_eq!(result.as_deref(), Some("Works/novel/Stories/ch01.md"));
+    }
+
+    // R-V144P0-004: path validation
+    #[test]
+    fn validate_body_path_rejects_absolute() {
+        assert!(validate_body_path("/etc/passwd").is_none());
+    }
+
+    #[test]
+    fn validate_body_path_rejects_traversal() {
+        assert!(validate_body_path("Works/novel/../../etc/passwd").is_none());
+    }
+
+    #[test]
+    fn validate_body_path_rejects_non_works_prefix() {
+        assert!(validate_body_path("tmp/evil.md").is_none());
+    }
+
+    #[test]
+    fn validate_body_path_accepts_valid_path() {
+        assert_eq!(
+            validate_body_path("Works/my-novel/Stories/ch01.md").as_deref(),
+            Some("Works/my-novel/Stories/ch01.md")
+        );
+    }
+
+    #[test]
+    fn validate_body_path_rejects_control_chars() {
+        assert!(validate_body_path("Works/novel/Stories/ch\x01.md").is_none());
+    }
+
+    // R-V144P0-008: typed error variant
+    #[test]
+    fn world_required_for_extract_error_display() {
+        let err = crate::errors::CliError::WorldRequiredForExtract {
+            work_id: "wrk_test123".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("422 world_required_for_extract"),
+            "error must contain error code: {msg}"
+        );
+        assert!(
+            msg.contains("wrk_test123"),
+            "error must contain work_id: {msg}"
+        );
+        assert!(
+            msg.contains("Suggestion:"),
+            "error must contain suggestion: {msg}"
+        );
     }
 }
