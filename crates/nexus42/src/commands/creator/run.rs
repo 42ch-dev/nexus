@@ -1041,14 +1041,24 @@ async fn handle_review_master(
 
 /// Handle `creator run audit-chapter` subcommand (DF-69).
 ///
-/// Creates a schedule for the `novel-manuscript-audit` preset with the
-/// given mode, chapter, and volume. Does NOT enter the FL-E auto-chain driver.
+/// Creates a schedule for the `novel-manuscript-audit-review` or
+/// `novel-manuscript-audit-extract` preset based on mode, with the
+/// given chapter and volume. Does NOT enter the FL-E auto-chain driver.
+///
+/// # Runtime lock invariant (R-V144P0-010)
+///
+/// The CLI handler creates a schedule (not a direct Work mutation), so the
+/// per-Work `runtime_lock_holder` is not acquired here. The daemon supervisor
+/// serializes schedule execution per `Serial` concurrency, preventing concurrent
+/// same-Work mutation during audit execution. The `novel-manuscript-audit-extract`
+/// preset's `world_binding: required` gate provides an additional boundary.
 ///
 /// # Errors
 ///
 /// Returns an error if:
 /// - The Work does not exist or is not a novel Work.
 /// - Extract mode is requested on a worldless Work (422).
+/// - The chapter cannot be resolved (missing `body_path`).
 /// - The daemon API call fails.
 #[allow(clippy::too_many_lines)] // Single-entry CLI handler; splitting would create a >7-arg helper
 async fn handle_audit_chapter(
@@ -1082,12 +1092,20 @@ async fn handle_audit_chapter(
 
     let body_path = resolve_audit_body_path(&resp, chapter, volume);
 
-    // Extract mode: validate World-bound precondition
-    if matches!(mode, AuditMode::Extract) && world_id.is_none() {
-        return Err(crate::errors::CliError::Other(format!(
-            "422 world_required_for_extract: Work {work_id} is not World-bound. \
-             Extract mode requires a Work with an associated World."
+    // R-V144P0-007: fail fast if body_path cannot be resolved
+    if body_path.is_none() {
+        return Err(crate::errors::CliError::Config(format!(
+            "Cannot resolve chapter {chapter} (volume {volume}) for Work {work_id}. \
+             Verify the chapter exists in the Work's chapters array, \
+             or provide a valid body path override."
         )));
+    }
+
+    // Extract mode: validate World-bound precondition (R-V144P0-008: typed error)
+    if matches!(mode, AuditMode::Extract) && world_id.is_none() {
+        return Err(crate::errors::CliError::WorldRequiredForExtract {
+            work_id: work_id.to_string(),
+        });
     }
 
     // Build preset input
@@ -1121,9 +1139,15 @@ async fn handle_audit_chapter(
         }
     }
 
+    // R-V144P0-001: dispatch to the correct split preset based on mode
+    let preset_id = match mode {
+        AuditMode::Review => "novel-manuscript-audit-review",
+        AuditMode::Extract => "novel-manuscript-audit-extract",
+    };
+
     let request = AddScheduleRequest {
         creator_id: creator_id.to_string(),
-        preset_id: "novel-manuscript-audit".to_string(),
+        preset_id: preset_id.to_string(),
         seed: Some(format!(
             "audit-chapter {work_id} mode={mode} ch={chapter} vol={volume}"
         )),
@@ -1165,13 +1189,16 @@ async fn handle_audit_chapter(
         }
         println!("{}", serde_json::to_string_pretty(&sched_resp)?);
     } else {
-        println!("Audit scheduled: {mode} mode for Work {work_id} ch{chapter} v{volume}");
-        println!("  Schedule: {schedule_id} (preset: novel-manuscript-audit)");
+        println!("Audit schedule created: {mode} mode for Work {work_id} ch{chapter} v{volume}");
+        println!("  Schedule: {schedule_id} (preset: {preset_id}, status: pending)");
+        println!("  The daemon will execute this schedule asynchronously.");
         if matches!(mode, AuditMode::Review) {
-            println!("  Report will be written to Works/{work_ref}/Logs/review/");
+            println!(
+                "  On completion, the review report will be under Works/{work_ref}/Logs/review/."
+            );
         } else {
             println!(
-                "  KB extraction will run synchronously for World {}",
+                "  On completion, KB extraction results will be available for World {}.",
                 world_id.as_deref().unwrap_or("?")
             );
         }
@@ -1183,21 +1210,63 @@ async fn handle_audit_chapter(
 /// Resolve the `body_path` for the audit chapter from the Work response.
 ///
 /// Looks up the chapter row matching the given chapter/volume in the
-/// Work's chapters array. Returns None if not found (preset will use
-/// default layout resolution).
+/// Work's chapters array. Returns `None` if not found.
+///
+/// # Path validation (R-V144P0-004)
+///
+/// Rejects paths that are absolute, contain `..`, or do not start with
+/// the expected `Works/` layout prefix.
 fn resolve_audit_body_path(
     work_resp: &serde_json::Value,
     chapter: i32,
-    _volume: i32,
+    volume: i32,
 ) -> Option<String> {
     let chapters = work_resp.get("chapters").and_then(|v| v.as_array())?;
-    let ch_row = chapters.iter().find(|c| {
-        c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(chapter))
-    })?;
-    ch_row
-        .get("body_path")
-        .and_then(|v| v.as_str())
-        .map(String::from)
+
+    // R-V144P0-003: filter by volume when volume > 1 or multiple matches exist
+    let ch_row = chapters
+        .iter()
+        .find(|c| {
+            let matches_chapter =
+                c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(chapter));
+            let matches_volume =
+                c.get("volume").and_then(serde_json::Value::as_i64) == Some(i64::from(volume));
+            matches_chapter && matches_volume
+        })
+        .or_else(|| {
+            // Fallback: match chapter only (backward compat for Works without volume field)
+            chapters.iter().find(|c| {
+                c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(chapter))
+            })
+        })?;
+
+    let raw_path = ch_row.get("body_path").and_then(|v| v.as_str())?;
+
+    // R-V144P0-004: validate path safety
+    validate_body_path(raw_path)
+}
+
+/// Validate a resolved `body_path` against path traversal and layout rules.
+///
+/// Returns `Some(path)` if the path is safe, `None` if it fails validation.
+fn validate_body_path(path: &str) -> Option<String> {
+    // Reject absolute paths
+    if path.starts_with('/') {
+        return None;
+    }
+    // Reject path traversal
+    if path.contains("..") {
+        return None;
+    }
+    // Must be under expected layout prefix
+    if !path.starts_with("Works/") {
+        return None;
+    }
+    // Reject control characters
+    if path.chars().any(char::is_control) {
+        return None;
+    }
+    Some(path.to_string())
 }
 
 // ── FL-E stage management (V1.34) ───────────────────────────────────────────
@@ -1845,8 +1914,8 @@ mod tests {
     fn resolve_audit_body_path_finds_chapter() {
         let resp = serde_json::json!({
             "chapters": [
-                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
-                {"chapter": 3, "body_path": "Works/novel/Stories/ch03.md"},
+                {"chapter": 1, "volume": 1, "body_path": "Works/novel/Stories/ch01.md"},
+                {"chapter": 3, "volume": 1, "body_path": "Works/novel/Stories/ch03.md"},
             ]
         });
         let result = resolve_audit_body_path(&resp, 3, 1);
@@ -1857,7 +1926,7 @@ mod tests {
     fn resolve_audit_body_path_returns_none_for_missing() {
         let resp = serde_json::json!({
             "chapters": [
-                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
+                {"chapter": 1, "volume": 1, "body_path": "Works/novel/Stories/ch01.md"},
             ]
         });
         let result = resolve_audit_body_path(&resp, 99, 1);
@@ -1869,5 +1938,79 @@ mod tests {
         let resp = serde_json::json!({"work_id": "wrk_test"});
         let result = resolve_audit_body_path(&resp, 1, 1);
         assert!(result.is_none());
+    }
+
+    // R-V144P0-003: volume-aware lookup
+    #[test]
+    fn resolve_audit_body_path_filters_by_volume() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "volume": 1, "body_path": "Works/novel/Stories/v1/ch01.md"},
+                {"chapter": 1, "volume": 2, "body_path": "Works/novel/Stories/v2/ch01.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 1, 2);
+        assert_eq!(result.as_deref(), Some("Works/novel/Stories/v2/ch01.md"));
+    }
+
+    #[test]
+    fn resolve_audit_body_path_falls_back_without_volume_field() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 1, 1);
+        assert_eq!(result.as_deref(), Some("Works/novel/Stories/ch01.md"));
+    }
+
+    // R-V144P0-004: path validation
+    #[test]
+    fn validate_body_path_rejects_absolute() {
+        assert!(validate_body_path("/etc/passwd").is_none());
+    }
+
+    #[test]
+    fn validate_body_path_rejects_traversal() {
+        assert!(validate_body_path("Works/novel/../../etc/passwd").is_none());
+    }
+
+    #[test]
+    fn validate_body_path_rejects_non_works_prefix() {
+        assert!(validate_body_path("tmp/evil.md").is_none());
+    }
+
+    #[test]
+    fn validate_body_path_accepts_valid_path() {
+        assert_eq!(
+            validate_body_path("Works/my-novel/Stories/ch01.md").as_deref(),
+            Some("Works/my-novel/Stories/ch01.md")
+        );
+    }
+
+    #[test]
+    fn validate_body_path_rejects_control_chars() {
+        assert!(validate_body_path("Works/novel/Stories/ch\x01.md").is_none());
+    }
+
+    // R-V144P0-008: typed error variant
+    #[test]
+    fn world_required_for_extract_error_display() {
+        let err = crate::errors::CliError::WorldRequiredForExtract {
+            work_id: "wrk_test123".to_string(),
+        };
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("422 world_required_for_extract"),
+            "error must contain error code: {msg}"
+        );
+        assert!(
+            msg.contains("wrk_test123"),
+            "error must contain work_id: {msg}"
+        );
+        assert!(
+            msg.contains("Suggestion:"),
+            "error must contain suggestion: {msg}"
+        );
     }
 }

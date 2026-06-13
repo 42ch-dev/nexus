@@ -126,6 +126,12 @@ pub enum CliError {
         suggestion: String,
     },
 
+    /// Extract mode requires a World-bound Work (DF-69, spec §3.2).
+    WorldRequiredForExtract {
+        /// Work ID that is worldless
+        work_id: String,
+    },
+
     Other(String),
 }
 
@@ -202,6 +208,15 @@ impl fmt::Display for CliError {
             | Self::SessionExpired { message, suggestion, .. }
             | Self::PermissionDenied { message, suggestion, .. } => {
                 write!(f, "{message}\n\n  Suggestion: {suggestion}")
+            }
+
+            Self::WorldRequiredForExtract { work_id } => {
+                write!(
+                    f,
+                    "422 world_required_for_extract: Work {work_id} is not World-bound.\n\n  \
+                     Suggestion: Extract mode requires a Work with an associated World. \
+                     Bind the Work to a World first, or use --mode review for worldless Works."
+                )
             }
 
             // Use #[error] messages for other variants
