@@ -87,6 +87,10 @@ pub struct WorkFields {
     /// V1.40 P3: `world_id` from Work row. Populated for World-bound Works.
     /// When `None`, the persist stage skips World KB promotion (legacy V1.39).
     pub world_id: Option<String>,
+    /// V1.44 P2 (F-004): Volume number for multi-volume Works.
+    /// When set, `build_preset_input` includes a `volume` template var so that
+    /// the `novel-writing` preset preserves cross-volume context.
+    pub volume: Option<i32>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -206,6 +210,14 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
                 serde_json::Value::String(wid.clone()),
             )
         });
+    }
+
+    // V1.44 P2 (F-004): inject volume for multi-volume Works.
+    // The `novel-writing` preset can use `{{preset.input.volume}}` to preserve
+    // cross-volume context (e.g. "Volume 2, Chapter 3").
+    if let Some(vol) = fields.volume {
+        map.as_object_mut()
+            .map(|o| o.insert("volume".to_string(), serde_json::Value::Number(vol.into())));
     }
 
     map
@@ -596,6 +608,7 @@ mod tests {
             workspace_dir: None,
             world_kb_block: None,
             world_id: None,
+            volume: None,
         }
     }
 
@@ -771,6 +784,7 @@ mod tests {
             workspace_dir: None,
             world_kb_block: None,
             world_id: None,
+            volume: None,
         }
     }
 
@@ -836,6 +850,7 @@ mod tests {
             workspace_dir: None,
             world_kb_block: None,
             world_id: None,
+            volume: None,
         };
         let input = build_preset_input(&fields);
         assert!(input.get("chapter").is_none());
@@ -1000,6 +1015,7 @@ mod tests {
             workspace_dir: Some(ws.to_string_lossy().to_string()),
             world_kb_block: None,
             world_id: None,
+            volume: None,
         };
 
         let input = build_preset_input(&fields);
@@ -1028,6 +1044,7 @@ mod tests {
             workspace_dir: None,
             world_kb_block: None,
             world_id: None,
+            volume: None,
         };
 
         let input = build_preset_input(&fields);

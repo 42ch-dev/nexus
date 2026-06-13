@@ -689,7 +689,7 @@ async fn resume_auto_chain_work(
     work: &nexus_local_db::works::WorkRecord,
 ) -> Result<String, String> {
     nexus_orchestration::auto_chain::enqueue_auto_chain_schedule(
-        pool, creator_id, work_id, stage, chapter, work,
+        pool, creator_id, work_id, stage, chapter, None, work,
     )
     .await
     .map_err(|e| e.to_string())
