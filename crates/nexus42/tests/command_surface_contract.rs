@@ -1003,7 +1003,6 @@ fn v135_creator_help_mentions_kb_namespaces() {
         "V1.35 P3: creator kb --help must reference scope model"
     );
 }
-<<<<<<< HEAD
 
 // V1.45: `v135_chain_novel_writing_defaults_true`,
 // `v135_chain_novel_writing_opt_out_syntax_accepted`,
