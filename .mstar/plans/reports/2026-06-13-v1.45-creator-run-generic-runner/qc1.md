@@ -6,8 +6,8 @@ plan_id: 2026-06-13-v1.45-creator-run-generic-runner
 secondary_plan_ids:
   - 2026-06-13-v1.45-delete-bespoke-run-subcommands
   - 2026-06-13-v1.45-creator-bootstrap-and-works-migration
-verdict: Request Changes
-generated_at: 2026-06-14T00:30:00Z
+verdict: Approve
+generated_at: 2026-06-14T02:40:00+08:00
 review_range: "merge-base: 76a9eb79; tip: 79f540dc; equivalent: git diff 76a9eb79...79f540dc"
 working_branch: iteration/v1.45
 review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
@@ -216,3 +216,66 @@ Live hint strings are correctly updated to V1.45 surface:
 **Verdict**: Request Changes
 
 The Critical finding (C-1) must be resolved before approval: the generic runner's non-FL-E dispatch path does not inject `work_id` into the schedule request input, causing all gated non-FL-E presets to fail with 422. This breaks the core P0 deliverable. The Warning findings (W-1 through W-3) are strong maintainability concerns that should be addressed in the same fix round — W-1 in particular represents ~1300 lines of dead code that contradicts the P1 plan's stated "hard delete" approach.
+
+---
+
+## Revalidation (B1 fix round, 2026-06-14)
+
+### Re-review scope
+- Review range: `954d628f..HEAD` (= `61082146`); equivalent `git diff 954d628f...61082146` (fix commits only, NOT full B1 range)
+- Working branch (verified): `iteration/v1.45`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+- HEAD at re-review: `610821466a104bba152a23c398ecd32defe0c3fd`
+- Fix commits reviewed (6 fix + 1 merge):
+  - `695d0a3a` — C-1 (work_id injection) + W-3 (resolve_work_id dedup) + W-2 (--flag=value syntax)
+  - `d68b637b` — W-1 (delete ~1523 lines of dead legacy code from run.rs)
+  - `90374e4e` — QC3 W-1 (preset fast-path lookup) + QC3 W-2 (rollback error propagation)
+  - `0ea6e67a` — new tests (C-1 ×3, W-2 ×7, QC3 W-2 ×1 wiremock)
+  - `4c82432b` — nightly fmt
+  - `7749d8eb` — clippy pedantic fix (if-let for single-arm match)
+  - `61082146` — merge commit
+- Diff stat: 5 files changed, +431 / -1581
+
+### Original findings — fix verification
+
+| ID | Original | Status | Evidence |
+|----|----------|--------|----------|
+| C-1 | `work_id` not injected into `AddScheduleRequest.input` for non-FL-E presets | **FIXED** | 4 `or_insert("work_id")` sites confirmed (run.rs:148 main path; 968/988/1006 stage_advance paths). Injection placed after `parse_preset_cli_args`, before request build. 3 unit tests in `0ea6e67a` (`work_id_injection_into_parsed_input`, `work_id_injection_does_not_override_explicit`, `work_id_injection_into_empty_input`). |
+| W-1 | ~1300 lines of dead legacy code retained in `run.rs` | **FIXED** | `wc -l run.rs` = **1107** (was 2356). `rg -n 'audit-chapter\|review-master\|RunCommand::(Start\|Continue\|Stage\|Resume\|AuditChapter\|ReviewMaster\|ReconcileChapters)'` returns **0 matches**. Commit `d68b637b` removed 1523 lines (-1523/+7). Live helpers (`stage_advance`, `validate_produce_chapter_context`, `reject_produce_when_novel_complete`, `assemble_world_kb_block`) retained. |
+| W-2 | `--flag=value` inline syntax not supported | **FIXED** | `split_once('=')` at run.rs:221. Boolean accepts `--flag=true/false`; integer/string consume inline value or fall back to next token. 5 new tests in `0ea6e67a` (`parse_preset_cli_args_inline_equals_integer/string/boolean_true/boolean_false`, `parse_preset_cli_args_mixed_inline_and_space_syntax`). |
+| W-3 | `resolve_work_id` duplicated between `run.rs` and `works/mod.rs` | **FIXED** | Single definition: `resolve_active_work_id` in `work_utils.rs:19` (new shared module). Both `run.rs:106` and `works/mod.rs` (4 call sites: `handle_inspire`, `handle_reopen`, `handle_resume_chain`, `handle_reconcile_chapters`) now use `super::work_utils::resolve_active_work_id`. `rg -n 'fn resolve_work_id'` returns 0 matches. |
+| P1 AC#2 | (cross-cite) No references to legacy variant strings in `run.rs` | **LITERALLY MET** | Same `rg` as W-1 returns 0 matches for `audit-chapter`, `review-master`, and all `RunCommand::*` legacy variants. |
+| QC3 W-1 | Preset directory re-scanned on every `creator run` call | **FIXED** | `lookup_preset_by_id` added at `nexus-orchestration/src/preset/mod.rs:197` — O(1) direct path lookup (`<nexus_home>/presets/<id>/preset.yaml` → embedded fallback) before `resolve_preset` full scan. Wired in `run.rs:128`. System-qualified IDs (`_system.*`) correctly excluded from fast path (fall through to full scan). Tracing instrumentation on hit/miss/fallback. |
+| QC3 W-2 | `stage_advance` rollback PATCH result silently discarded | **FIXED** | run.rs:667 — rollback result captured into `rollback_result`, matched on `Ok`/`Err`. Dual-failure path (run.rs:676) chains both `schedule_error` and `rollback_error` with operator guidance ("Work {work_id} may be in inconsistent state — run `nexus42 creator works status {work_id}`"). 1 wiremock integration test in `0ea6e67a` asserts `err_msg.contains("rollback_error")`. |
+
+### Suggestions (deferred, non-blocking)
+
+- **QC1.S-1** (`works_start_handler_returns_clear_error` test tautology) — deferred; follow-up polish.
+- **QC1.S-2** (`--help-args` dynamic help) — deferred.
+- **QC1.S-3** (split `RunCommand` into smaller Args structs) — deferred.
+- **QC3.S-1** (release note for hard delete of bespoke subcommands) — defer to P3 (quickstart) or P-last.
+- **QC3.S-2 / S-3 / S-4** — deferred.
+
+These remain non-blocking. PM may register them in `residual_findings[2026-06-13-v1.45-creator-run-generic-runner]` if tracking is desired.
+
+### Re-validation gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Format | `cargo +nightly fmt --all -- --check` | **PASS** (clean, no output) |
+| Lint | `cargo clippy --all -- -D warnings` | **PASS** (`Finished dev profile`, exit 0) |
+| Unit (nexus42 lib) | `cargo test -p nexus42 --lib -- --test-threads=1` | **PASS** (664 passed, 0 failed; net -1 from 665 = −12 dead legacy tests + 11 new) |
+| Contract | `cargo test -p nexus42 --test command_surface_contract` | **PASS** (37 passed, 0 failed) |
+| Orchestration | `cargo test -p nexus-orchestration --lib preset` | **PASS** (207 passed, 0 failed) |
+
+### Re-verdict
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (all resolved) |
+| 🟢 Suggestion | 3 (QC1, deferred) + 4 (QC3, deferred) |
+
+**Verdict**: **Approve**
+
+All Critical and Warning findings from the initial QC1 (C-1, W-1, W-2, W-3) and the cross-review QC3 findings (W-1, W-2) are resolved with verified evidence — source-level greps, commit diffs, and new test coverage. The B1 atomic merge is now architecturally clean: the generic runner correctly injects `work_id`, the ~1300 lines of dead legacy code are gone (P1 AC#2 literally met), the CLI parser supports standard `--flag=value` syntax, and the two maintainability/utility issues (dedup + fast-path) are addressed. CI is fully green. Remaining Suggestions are non-blocking polish items.
