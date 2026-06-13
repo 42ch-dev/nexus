@@ -71,12 +71,24 @@
         {
             "plan_id": "2026-06-13-v1.45-quickstart-and-author-spec",
             "title": "P3 \u2014 Quickstart + author spec rewrite",
-            "status": "Todo",
+            "status": "Done",
             "working_branch": "feature/v1.45-quickstart-and-author-spec",
             "merge_target": "iteration/v1.45",
             "plan_file": ".mstar/plans/2026-06-13-v1.45-quickstart-and-author-spec.md",
             "depends_on": "2026-06-13-v1.45-creator-run-generic-runner",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+            "merge_commits": [
+                "8f330834",
+                "03baf31e"
+            ],
+            "done_at": "2026-06-14T01:50:00+08:00",
+            "qc_reports": {
+                "qc1": "Approve (after 1 fix round; W-1/W-2/S-1 + cross-ref fixed)",
+                "qc2": "Approve (initial; 0 Critical, 0 Warning, 0 Suggestion)",
+                "qc3": "Approve (after 1 fix round; W-1/W-2 fixed)"
+            },
+            "qa_report": "PASS (initial)",
+            "completion_report": "P3 + P3 fix: 5+5=10 docs commits; 3 .md files modified; migration section added; run.rs:334 hint fixed"
         },
         {
             "plan_id": "2026-06-13-v1.45-author-desk-status-ux",
@@ -165,7 +177,7 @@
             ".mstar/knowledge/specs/novel-work-pool.md"
         ],
         "iteration_compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-        "pre_implement_gate": "B1 FIXED + APPROVED 2026-06-14 \u2014 QC1 re-review Approve; QC2/QC3 Approve; QA PASS; C-1 + W-1/2/3 + QC3 W-1/W-2 all fixed (commits 695d0a3a/d68b637b/90374e4e/0ea6e67a/4c82432b/7749d8eb + merge 61082146 + qc revalidation 6b10f4b1). 7 deferred Suggestions registered as residuals. P0/P1/P2 \u2192 Done. B2 P3 dispatch next.",
+        "pre_implement_gate": "B2 P3 FIXED + APPROVED 2026-06-14 \u2014 QC1+QC3 re-review Approve; QC2 Approve; QA PASS. C-1 fix + W-1/2/3 + QC3 W-1/2 all addressed. Migration section added to quickstart. 5 residuals registered (broader spec-tree migration gaps for P-last). P3 \u2192 Done. B3 P-last dispatch next.",
         "v1_43_ship": {
             "merge_commit": "0004d85f",
             "pr": 56,
@@ -191,7 +203,7 @@
             ],
             "pr_url": "https://github.com/42ch-dev/nexus/pull/57"
         },
-        "updated_at": "2026-06-14T00:55:00+08:00"
+        "updated_at": "2026-06-14T01:50:00+08:00"
     },
     "residual_findings": {
         "2026-06-04-v1.33-work-model-and-creator-run": [
@@ -1599,6 +1611,28 @@
                 "title": "V1.45 hard-delete DEPRECATED novel-manuscript-audit parent preset dir (resolved by P1 T2)",
                 "severity": "n/a",
                 "lifecycle": "resolved (V1.45 B1)"
+            }
+        ],
+        "2026-06-13-v1.45-quickstart-and-author-spec": [
+            {
+                "id": "R-V145B2-001",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc1 P3 revalidation",
+                "title": "Broader spec-tree migration gaps: other specs (novel-workflow-profile.md, creator-workflow.md, cli-spec.md body) still reference deleted creator run subcommands; requires dedicated spec-hygiene pass",
+                "decision": "defer to P-last",
+                "owner": "@fullstack-dev or @writing-specialist",
+                "target": "P-last (hygiene-and-closeout)"
+            },
+            {
+                "id": "R-V145B2-002",
+                "severity": "low",
+                "lifecycle": "open",
+                "source": "qc3 P3 revalidation",
+                "title": "Cross-link check between quickstart and the spec tree should be re-run after P-last spec promotion",
+                "decision": "defer",
+                "owner": "@writing-specialist",
+                "target": "P-last"
             }
         ]
     }
