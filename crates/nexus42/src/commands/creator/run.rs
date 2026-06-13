@@ -250,30 +250,26 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
                             ))
                         })?;
                         parsed.insert(arg.name.clone(), serde_json::json!(b));
-                        i += 1;
                     }
                     None => {
                         parsed.insert(arg.name.clone(), serde_json::json!(true));
-                        i += 1;
                     }
                 }
+                i += 1; // boolean: always 1 token (--flag or --flag=value)
             }
             PresetCliArgType::Integer => {
-                let val = match inline_value {
-                    Some(v) => {
-                        i += 1;
-                        v
-                    }
+                let (val, advance) = match inline_value {
+                    Some(v) => (v, 1), // --flag=value: 1 token
                     None => {
-                        i += 1;
-                        raw.get(i)
+                        let next = raw
+                            .get(i + 1)
                             .cloned()
                             .ok_or_else(|| {
                                 crate::errors::CliError::Config(format!(
                                     "Flag '--{name}' requires an integer value"
                                 ))
-                            })?
-                            .clone()
+                            })?;
+                        (next, 2) // --flag value: 2 tokens
                     }
                 };
                 let n: i64 = val.parse().map_err(|_| {
@@ -282,28 +278,25 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
                     ))
                 })?;
                 parsed.insert(arg.name.clone(), serde_json::json!(n));
-                i += 1;
+                i += advance;
             }
             PresetCliArgType::String => {
-                let val = match inline_value {
-                    Some(v) => {
-                        i += 1;
-                        v
-                    }
+                let (val, advance) = match inline_value {
+                    Some(v) => (v, 1), // --flag=value: 1 token
                     None => {
-                        i += 1;
-                        raw.get(i)
+                        let next = raw
+                            .get(i + 1)
                             .cloned()
                             .ok_or_else(|| {
                                 crate::errors::CliError::Config(format!(
                                     "Flag '--{name}' requires a string value"
                                 ))
-                            })?
-                            .clone()
+                            })?;
+                        (next, 2) // --flag value: 2 tokens
                     }
                 };
                 parsed.insert(arg.name.clone(), serde_json::json!(val));
-                i += 1;
+                i += advance;
             }
         }
     }
@@ -886,6 +879,255 @@ mod tests {
         assert!(
             msg.contains("Suggestion:"),
             "error must contain suggestion: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.45 B1 (QC1 W-2): parse_preset_cli_args --flag=value support
+    // -----------------------------------------------------------------------
+
+    /// Helper: build a PresetCliArg with sensible defaults.
+    fn make_arg(name: &str, ty: PresetCliArgType) -> PresetCliArg {
+        PresetCliArg {
+            name: name.to_string(),
+            r#type: ty,
+            required: false,
+            default: None,
+            description: String::new(),
+        }
+    }
+
+    #[test]
+    fn parse_preset_cli_args_inline_equals_integer() {
+        let cli_args = vec![
+            make_arg("chapter", PresetCliArgType::Integer),
+            make_arg("volume", PresetCliArgType::Integer),
+        ];
+        let raw = vec!["--chapter=5".to_string(), "--volume=2".to_string()];
+        let result = parse_preset_cli_args(&cli_args, &raw).unwrap();
+        assert_eq!(result["chapter"], 5);
+        assert_eq!(result["volume"], 2);
+    }
+
+    #[test]
+    fn parse_preset_cli_args_inline_equals_string() {
+        let cli_args = vec![make_arg("note", PresetCliArgType::String)];
+        let raw = vec!["--note=hello world".to_string()];
+        let result = parse_preset_cli_args(&cli_args, &raw).unwrap();
+        assert_eq!(result["note"], "hello world");
+    }
+
+    #[test]
+    fn parse_preset_cli_args_inline_equals_boolean_true() {
+        let cli_args = vec![make_arg("verbose", PresetCliArgType::Boolean)];
+        let raw = vec!["--verbose=true".to_string()];
+        let result = parse_preset_cli_args(&cli_args, &raw).unwrap();
+        assert_eq!(result["verbose"], true);
+    }
+
+    #[test]
+    fn parse_preset_cli_args_inline_equals_boolean_false() {
+        let cli_args = vec![make_arg("verbose", PresetCliArgType::Boolean)];
+        let raw = vec!["--verbose=false".to_string()];
+        let result = parse_preset_cli_args(&cli_args, &raw).unwrap();
+        assert_eq!(result["verbose"], false);
+    }
+
+    #[test]
+    fn parse_preset_cli_args_mixed_inline_and_space_syntax() {
+        let cli_args = vec![
+            make_arg("chapter", PresetCliArgType::Integer),
+            make_arg("note", PresetCliArgType::String),
+            make_arg("verbose", PresetCliArgType::Boolean),
+        ];
+        let raw = vec![
+            "--chapter=3".to_string(),
+            "--note=my note".to_string(),
+            "--verbose".to_string(),
+        ];
+        let result = parse_preset_cli_args(&cli_args, &raw).unwrap();
+        assert_eq!(result["chapter"], 3);
+        assert_eq!(result["note"], "my note");
+        assert_eq!(result["verbose"], true);
+    }
+
+    #[test]
+    fn parse_preset_cli_args_space_syntax_regression() {
+        // Regression: ensure the original space-separated syntax still works.
+        let cli_args = vec![make_arg("chapter", PresetCliArgType::Integer)];
+        let raw = vec!["--chapter".to_string(), "7".to_string()];
+        let result = parse_preset_cli_args(&cli_args, &raw).unwrap();
+        assert_eq!(result["chapter"], 7);
+    }
+
+    #[test]
+    fn parse_preset_cli_args_boolean_presence_regression() {
+        // Regression: bare --flag without value still means true.
+        let cli_args = vec![make_arg("dry-run", PresetCliArgType::Boolean)];
+        let raw = vec!["--dry-run".to_string()];
+        let result = parse_preset_cli_args(&cli_args, &raw).unwrap();
+        assert_eq!(result["dry-run"], true);
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.45 B1 (C-1): work_id injection into AddScheduleRequest.input
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn work_id_injection_into_parsed_input() {
+        // Simulate the injection logic from handle_run (C-1 fix).
+        let mut input = serde_json::json!({"chapter": 5, "volume": 1});
+        let resolved_work_id = "wrk_abc123";
+
+        if let serde_json::Value::Object(ref mut map) = input {
+            map.entry("work_id".to_string())
+                .or_insert(serde_json::Value::String(resolved_work_id.to_string()));
+        }
+
+        assert_eq!(
+            input["work_id"], "wrk_abc123",
+            "work_id must be present in input"
+        );
+        assert_eq!(input["chapter"], 5, "existing args must be preserved");
+        assert_eq!(input["volume"], 1, "existing args must be preserved");
+    }
+
+    #[test]
+    fn work_id_injection_does_not_override_explicit() {
+        // If the preset's cli_args somehow already includes work_id, the
+        // injection must NOT override it (or_insert semantics).
+        let mut input = serde_json::json!({"work_id": "wrk_explicit"});
+        let resolved_work_id = "wrk_abc123";
+
+        if let serde_json::Value::Object(ref mut map) = input {
+            map.entry("work_id".to_string())
+                .or_insert(serde_json::Value::String(resolved_work_id.to_string()));
+        }
+
+        assert_eq!(
+            input["work_id"], "wrk_explicit",
+            "explicit work_id must not be overridden"
+        );
+    }
+
+    #[test]
+    fn work_id_injection_into_empty_input() {
+        // Presets with no cli_args produce an empty object — work_id must
+        // still be injected.
+        let mut input = serde_json::json!({});
+        let resolved_work_id = "wrk_xyz";
+
+        if let serde_json::Value::Object(ref mut map) = input {
+            map.entry("work_id".to_string())
+                .or_insert(serde_json::Value::String(resolved_work_id.to_string()));
+        }
+
+        assert_eq!(input["work_id"], "wrk_xyz");
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.45 B1 (QC3 W-2): stage_advance rollback error propagation
+    // -----------------------------------------------------------------------
+
+    /// When both schedule creation and rollback fail, the error surfaces both
+    /// failure messages (QC3 W-2). Uses wiremock to mock the daemon.
+    #[tokio::test]
+    async fn rollback_failure_surfaces_both_errors() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock = MockServer::start().await;
+        let work_id = "wrk_rollback_test";
+
+        // GET /v1/local/works/{work_id} — work at intake/complete.
+        let work_body = serde_json::json!({
+            "work_id": work_id,
+            "current_stage": "intake",
+            "stage_status": "complete",
+            "intake_status": "complete",
+            "creative_brief": "test brief",
+            "inspiration_log": "[]",
+            "title": "Test Work",
+        });
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/local/works/{work_id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(work_body))
+            .mount(&mock)
+            .await;
+
+        // Stage-advance PATCH — body contains "active" → 200.
+        let stage_ok_body = serde_json::json!({
+            "work_id": work_id,
+            "current_stage": "research",
+            "stage_status": "active",
+            "title": "Test Work",
+        });
+        Mock::given(method("PATCH"))
+            .and(path(format!("/v1/local/works/{work_id}")))
+            .and(body_string_contains("active"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(stage_ok_body))
+            .mount(&mock)
+            .await;
+
+        // Rollback PATCH — body contains "complete" → 500.
+        Mock::given(method("PATCH"))
+            .and(path(format!("/v1/local/works/{work_id}")))
+            .and(body_string_contains("complete"))
+            .respond_with(
+                ResponseTemplate::new(500).set_body_string("rollback daemon error"),
+            )
+            .mount(&mock)
+            .await;
+
+        // POST schedule — fail with 500.
+        Mock::given(method("POST"))
+            .and(path("/v1/local/orchestration/schedules"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_string("daemon schedule creation failed"),
+            )
+            .mount(&mock)
+            .await;
+
+        let client = crate::api::DaemonClient::new(&mock.uri());
+        let config = CliConfig {
+            active_creator_id: Some("creator_test".to_string()),
+            daemon_url: mock.uri(),
+            ..Default::default()
+        };
+
+        let result = stage_advance(
+            work_id,
+            "research",
+            false,
+            false,
+            None,
+            false,
+            &config,
+            &client,
+        )
+        .await;
+
+        let err = result.expect_err(
+            "stage_advance should fail when schedule creation fails and rollback also fails",
+        );
+        let err_msg = err.to_string();
+
+        assert!(
+            err_msg.contains("schedule creation failed AND stage rollback failed"),
+            "error must indicate both failures: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("schedule_error"),
+            "error must contain schedule_error: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("rollback_error"),
+            "error must contain rollback_error: {err_msg}"
+        );
+        assert!(
+            err_msg.contains(work_id),
+            "error must contain work_id: {err_msg}"
         );
     }
 }
