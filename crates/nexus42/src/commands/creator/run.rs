@@ -103,7 +103,8 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     } = cmd;
 
     // Resolve work_id: if omitted, try the pool active Work.
-    let resolved_work_id = resolve_work_id(&client, work_id).await?;
+    let resolved_work_id =
+        super::work_utils::resolve_active_work_id(&client, work_id).await?;
 
     // FL-E stage-advance presets: dispatch to stage_advance.
     if let Some(target_stage) = stage_for_preset(&preset_id) {
@@ -140,7 +141,16 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
         })?;
 
     // Parse trailing args against preset.cli_args declarations.
-    let input = parse_preset_cli_args(&loaded.manifest.preset.cli_args, &extra)?;
+    let mut input = parse_preset_cli_args(&loaded.manifest.preset.cli_args, &extra)?;
+
+    // C-1 fix: inject resolved work_id so the daemon can evaluate gates and
+    // execute the preset. Gated presets (all three audit presets +
+    // novel-review-master) return 422 when input["work_id"] is absent.
+    // work_id is NOT in RESERVED_INPUT_KEYS (schedules.rs:72).
+    if let serde_json::Value::Object(ref mut map) = input {
+        map.entry("work_id".to_string())
+            .or_insert(serde_json::Value::String(resolved_work_id.clone()));
+    }
 
     let resolved_creator_id = config
         .active_creator_id
@@ -179,34 +189,14 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     Ok(())
 }
 
-/// Resolve `work_id` from CLI arg or the pool active Work.
-async fn resolve_work_id(
-    client: &crate::api::DaemonClient,
-    work_id: Option<String>,
-) -> Result<String> {
-    if let Some(id) = work_id {
-        return Ok(id);
-    }
-    let resp: serde_json::Value = client
-        .get::<serde_json::Value>("/v1/local/works?limit=1&status=active")
-        .await?;
-    resp.get("works")
-        .and_then(|v| v.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|w| w.get("work_id"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .ok_or_else(|| {
-            crate::errors::CliError::Config(
-                "No active Work found. Specify <work_id> or run `nexus42 creator works use <work_id>`.".to_string(),
-            )
-        })
-}
-
 /// Parse trailing CLI args against `preset.cli_args` declarations (V1.45 §3.3).
 ///
 /// Returns a JSON object mapping arg names to coerced values, suitable for
 /// `AddScheduleRequest.input`.
+///
+/// Supports both `--flag value` (space-separated) and `--flag=value` (inline
+/// equals) syntaxes. Boolean flags accept `--flag` (presence = true) and
+/// `--flag=true`/`--flag=false` (explicit).
 fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<serde_json::Value> {
     use std::collections::HashMap;
 
@@ -219,17 +209,23 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
     let lookup: HashMap<&str, &PresetCliArg> =
         cli_args.iter().map(|a| (a.name.as_str(), a)).collect();
 
-    // Parse `--name value` pairs from the raw trailing args.
+    // Parse `--name value` / `--name=value` pairs from the raw trailing args.
     let mut parsed: HashMap<String, serde_json::Value> = HashMap::new();
     let mut i = 0;
     while i < raw.len() {
         let token = &raw[i];
-        let name = token.strip_prefix("--").ok_or_else(|| {
+        let stripped = token.strip_prefix("--").ok_or_else(|| {
             crate::errors::CliError::Config(format!(
                 "Unexpected positional '{token}' in preset args. \
                      Preset-specific args must use --flag syntax."
             ))
         })?;
+
+        // Split on `=` to support `--flag=value` inline syntax (QC1 W-2).
+        let (name, inline_value) = match stripped.split_once('=') {
+            Some((n, v)) => (n, Some(v.to_string())),
+            None => (stripped, None),
+        };
 
         let arg = lookup.get(name).ok_or_else(|| {
             crate::errors::CliError::Config(format!(
@@ -245,17 +241,41 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
 
         match arg.r#type {
             PresetCliArgType::Boolean => {
-                // Boolean flags don't consume a value (presence = true).
-                parsed.insert(arg.name.clone(), serde_json::json!(true));
-                i += 1;
+                // Boolean flags: `--flag` (presence = true) or `--flag=true/false`.
+                match inline_value {
+                    Some(v) => {
+                        let b: bool = v.parse().map_err(|_| {
+                            crate::errors::CliError::Config(format!(
+                                "Flag '--{name}' expects a boolean (true/false); got '{v}'"
+                            ))
+                        })?;
+                        parsed.insert(arg.name.clone(), serde_json::json!(b));
+                        i += 1;
+                    }
+                    None => {
+                        parsed.insert(arg.name.clone(), serde_json::json!(true));
+                        i += 1;
+                    }
+                }
             }
             PresetCliArgType::Integer => {
-                i += 1;
-                let val = raw.get(i).ok_or_else(|| {
-                    crate::errors::CliError::Config(format!(
-                        "Flag '--{name}' requires an integer value"
-                    ))
-                })?;
+                let val = match inline_value {
+                    Some(v) => {
+                        i += 1;
+                        v
+                    }
+                    None => {
+                        i += 1;
+                        raw.get(i)
+                            .cloned()
+                            .ok_or_else(|| {
+                                crate::errors::CliError::Config(format!(
+                                    "Flag '--{name}' requires an integer value"
+                                ))
+                            })?
+                            .clone()
+                    }
+                };
                 let n: i64 = val.parse().map_err(|_| {
                     crate::errors::CliError::Config(format!(
                         "Flag '--{name}' expects an integer; got '{val}'"
@@ -265,12 +285,23 @@ fn parse_preset_cli_args(cli_args: &[PresetCliArg], raw: &[String]) -> Result<se
                 i += 1;
             }
             PresetCliArgType::String => {
-                i += 1;
-                let val = raw.get(i).ok_or_else(|| {
-                    crate::errors::CliError::Config(format!(
-                        "Flag '--{name}' requires a string value"
-                    ))
-                })?;
+                let val = match inline_value {
+                    Some(v) => {
+                        i += 1;
+                        v
+                    }
+                    None => {
+                        i += 1;
+                        raw.get(i)
+                            .cloned()
+                            .ok_or_else(|| {
+                                crate::errors::CliError::Config(format!(
+                                    "Flag '--{name}' requires a string value"
+                                ))
+                            })?
+                            .clone()
+                    }
+                };
                 parsed.insert(arg.name.clone(), serde_json::json!(val));
                 i += 1;
             }
