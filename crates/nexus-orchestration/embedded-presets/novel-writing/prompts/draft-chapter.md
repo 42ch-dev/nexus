@@ -49,6 +49,13 @@ world_refs: []
 ---
 ```
 
+**Frontmatter fields**:
+- `title` — chapter title (plain text, no markdown)
+- `chapter` — chapter number (integer, matches outline)
+- `status` — `draft` (first write), `revised`, or `finalized`
+- `word_count` — auto-calculated from body length after writing
+- `world_refs` — list of World KB anchor IDs referenced in this chapter (e.g. `["wka_char_alice"]`)
+
 ## Content Guidelines
 
 1. Read the chapter outline from `{{outline_path}}` first
