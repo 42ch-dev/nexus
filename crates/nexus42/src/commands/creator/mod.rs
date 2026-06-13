@@ -3,11 +3,16 @@
 //! `creator` is the primary entry for agent identity, Work lifecycle, and local assets.
 //! Per cli-command-ia.md §3.1, subcommands are organized in tiers:
 //!
-//! - **Primary**: `run`, `register`, `use`, `list`
+//! - **Three-plane IA (V1.45)**:
+//!   - `bootstrap` — composite Work onboarding (create Work + schedule intake)
+//!   - `works` — atomic single-purpose ops (inspire, reopen, resume-chain, …)
+//!   - `run <preset_id>` — strategy / preset dispatch
+//! - **Primary**: `register`, `use`, `list`
 //! - **Assets**: `workspace`, `soul`, `memory`, `kb`, `knowledge`, `reference`, `world`
 //! - **Platform bridge**: `status`, `pair`, `unpair`, `credentials`
 //! - **Maintenance**: `demo-seed`, `logout`
 
+pub mod bootstrap;
 pub mod kb;
 pub mod knowledge;
 pub mod memory;
@@ -439,19 +444,21 @@ fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
 
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
-    // ── Primary tier (first-run and daily use) ──────────────────────
-    /// Run a preset (V1.45 generic runner: `creator run <preset_id> [<work_id>]`).
+    // ── Three-plane IA (V1.45) ──────────────────────────────────────
+    /// Composite Work onboarding — create Work + schedule intake/production
     ///
-    /// Launches any preset by ID. FL-E stage-advance presets are dispatched to
-    /// the stage machinery; all other presets are scheduled directly.
-    Run {
-        #[command(flatten)]
-        command: run::RunCommand,
-    },
+    /// Creates a new Work and optionally schedules init preset, intake,
+    /// and production. The sole composite entry for new Work creation.
+    /// For atomic Work operations, use `creator works`.
+    /// For preset dispatch, use `creator run <preset_id>`.
+    ///
+    /// See docs/novel-writing-quickstart.md Part I for a guided walkthrough.
+    Bootstrap(bootstrap::BootstrapArgs),
 
-    /// Work management and pool (DF-60 §6.2H).
+    /// Work management and pool — atomic single-purpose ops (DF-60 §6.2H).
     ///
     /// List, inspect, and manage your Works and the selection pool.
+    /// Each subcommand is strictly single-purpose (one business function).
     /// Shows progress, chapter status, open findings, and completion state.
     /// See docs/novel-writing-quickstart.md §4–§6 for usage patterns.
     Works {
@@ -459,6 +466,19 @@ pub enum CreatorCommand {
         command: works::WorksCommand,
     },
 
+    /// Preset dispatch — run a preset by id (V1.45 P0)
+    ///
+    /// Generic runner: `creator run <preset_id> [<work_id>]`.
+    /// Any resolvable preset id (embedded, user, or system) can be dispatched.
+    /// No CLI preset whitelist — adding a preset changes YAML, not Rust.
+    /// FL-E stage-advance presets (`research`, `novel-writing`,
+    /// `reflection-loop`, `kb-extract`) preserve stage-advance semantics.
+    Run {
+        #[command(flatten)]
+        command: run::RunCommand,
+    },
+
+    // ── Primary tier ────────────────────────────────────────────────
     /// Register a new Creator entity
     ///
     /// Creates a Creator identity on the platform and stores credentials locally.
@@ -662,6 +682,7 @@ pub enum CredentialsAction {
 #[allow(clippy::future_not_send)]
 pub async fn run(cmd: CreatorCommand, config: &CliConfig) -> Result<()> {
     match cmd {
+        CreatorCommand::Bootstrap(args) => bootstrap::handle_bootstrap(args, config).await,
         CreatorCommand::Register {
             name,
             source,
