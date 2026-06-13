@@ -96,6 +96,52 @@ pub struct PresetHeader {
     /// evaluated at enqueue time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gates: Vec<crate::local::orchestration::preset_gate::Gate>,
+    /// Preset-specific CLI argument declarations (V1.45 §3.3).
+    ///
+    /// When non-empty, the generic `creator run <preset_id>` runner parses
+    /// these flags from trailing CLI args and maps them to
+    /// `AddScheduleRequest.input`. Presets without `cli_args` accept no
+    /// preset-specific flags.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cli_args: Vec<PresetCliArg>,
+}
+
+// ---------------------------------------------------------------------------
+// PresetCliArg (V1.45 §3.3)
+// ---------------------------------------------------------------------------
+
+/// A single preset-specific CLI argument declared in `preset.yaml` (V1.45 §3.3).
+///
+/// The generic `creator run <preset_id>` runner parses these from trailing
+/// CLI args and maps them to `AddScheduleRequest.input`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PresetCliArg {
+    /// Flag name without the `--` prefix (e.g. `"chapter"`).
+    pub name: String,
+    /// Value type — determines parsing and JSON coercion.
+    pub r#type: PresetCliArgType,
+    /// Whether the flag is required (`true`) or optional (`false`).
+    #[serde(default)]
+    pub required: bool,
+    /// Default value applied when the flag is omitted (optional only).
+    /// Stored as a raw JSON value to support all types uniformly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    /// Human-readable help text shown in `--help` output.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+/// Value types supported by `PresetCliArg` (V1.45 §3.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PresetCliArgType {
+    /// String value.
+    String,
+    /// Integer value.
+    Integer,
+    /// Boolean flag.
+    Boolean,
 }
 
 /// Preset kind discriminator.
@@ -959,6 +1005,7 @@ roles:
                 license: None,
                 initial_action: None,
                 gates: vec![],
+                cli_args: vec![],
             },
             states: vec![
                 StateDefinition {

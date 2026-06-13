@@ -158,6 +158,9 @@ pub fn validate_preset_semantic(
     // A5: Run intents checks (V1.33 §5)
     check_run_intents(manifest, &mut result);
 
+    // A6: CLI args checks (V1.45 §3.3)
+    check_cli_args(manifest, &mut result);
+
     result
 }
 
@@ -918,8 +921,73 @@ fn check_run_intents(manifest: &PresetManifest, result: &mut ValidationResult) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// A6: CLI args checks (V1.45 §3.3)
 // ---------------------------------------------------------------------------
+
+/// Validate `preset.cli_args` declarations (V1.45 §3.3).
+///
+/// Checks:
+/// - Flag names match `^[a-z][a-z0-9-]*$` (kebab-case, no leading digit).
+/// - No duplicate names within the same preset.
+/// - `required: true` flags must not declare a `default`.
+fn check_cli_args(manifest: &PresetManifest, result: &mut ValidationResult) {
+    let cli_args = &manifest.preset.cli_args;
+    if cli_args.is_empty() {
+        return;
+    }
+
+    let mut seen: HashSet<&str> = HashSet::new();
+
+    for arg in cli_args {
+        // Name format check
+        let name_valid = arg
+            .name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase())
+            && arg
+                .name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+
+        if !name_valid {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: "preset.cli_args".to_string(),
+                message: format!(
+                    "cli_arg name '{}' must be kebab-case (lowercase letters, digits, hyphens; must start with a letter)",
+                    arg.name
+                ),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::Structural,
+            });
+        }
+
+        // Duplicate name check
+        if !seen.insert(arg.name.as_str()) {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: "preset.cli_args".to_string(),
+                message: format!("duplicate cli_arg name '{}'", arg.name),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::Structural,
+            });
+        }
+
+        // required + default conflict
+        if arg.required && arg.default.is_some() {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: "preset.cli_args".to_string(),
+                message: format!(
+                    "cli_arg '{}' is 'required: true' but also declares a 'default'; required args cannot have defaults",
+                    arg.name
+                ),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::Structural,
+            });
+        }
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -1556,6 +1624,22 @@ pub fn default_preset_for_stage(stage: &str) -> Option<&'static str> {
         .iter()
         .find(|(s, _)| *s == stage)
         .map(|(_, presets)| presets[0])
+}
+
+/// Reverse mapping: given a preset ID, return the FL-E stage it belongs to.
+///
+/// Used by the generic `creator run <preset_id>` runner (V1.45 §4) to
+/// determine whether a preset is an FL-E stage-advance preset and, if so,
+/// which stage to advance.
+///
+/// Returns `None` for preset IDs that are not in any FL-E stage allowlist
+/// (e.g. `novel-brainstorm`, `novel-review-master`, audit presets).
+#[must_use]
+pub fn stage_for_preset(preset_id: &str) -> Option<&'static str> {
+    STAGE_PRESET_ALLOWLIST
+        .iter()
+        .find(|(_, presets)| presets.contains(&preset_id))
+        .map(|(stage, _)| *stage)
 }
 
 /// Returns all allowed preset IDs for a given FL-E stage.
