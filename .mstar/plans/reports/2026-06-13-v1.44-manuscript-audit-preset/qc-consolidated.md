@@ -12,18 +12,27 @@ review_range: "068135ed..9d471bdc"
 
 # QC Consolidated Report — V1.44 P0 (`novel-manuscript-audit` preset + CLI entry)
 
-## Verdict: **Request Changes**
+## Verdict: **Approve** (post fix-wave + targeted re-review + PM-committed plan §6 fix)
 
-All three reviewers raised **Request Changes**. **One Critical finding** (qc-specialist-3 F-001) blocks merge; **8 Warning** findings across reviewers require targeted re-review after fix wave.
+After targeted re-review by qc-specialist + qc-specialist-2 + qc-specialist-3, the original 1 Critical (R-V144P0-001 extract mode unreachable) and 10 Warning residuals (R-V144P0-002..010) are resolved. qc-specialist flagged R-V144P0-006 (plan §6 verification uncommitted); PM committed the plan file update (`43550686`) directly to close the residual.
 
-## Reviewer verdicts
+## Reviewer verdicts (initial wave)
 
 | Reviewer | Focus | Verdict | Critical | Warning | Suggestion |
 | --- | --- | --- | --- | --- | --- |
 | qc-specialist | Architecture / maintainability | Request Changes | 0 | 3 | 4 |
 | qc-specialist-2 | Security / correctness | Request Changes | 0 | 2 | 3 |
 | qc-specialist-3 | Performance / reliability | Request Changes | 1 | 6 | 3 |
-| **Total** | | **Request Changes** | **1** | **11** | **10** |
+| **Total (initial)** | | **Request Changes** | **1** | **11** | **10** |
+
+## Reviewer verdicts (targeted re-review, post-fix-wave)
+
+| Reviewer | Focus | Re-verdict | Notes |
+| --- | --- | --- | --- |
+| qc-specialist | Architecture / maintainability | Approve (post PM plan-file commit) | W3 (R-V144P0-006) flagged as uncommitted; PM committed `43550686`; resolved. |
+| qc-specialist-2 | Security / correctness | Approve | F-QC2-001/002 fully resolved by extract preset split + validate_body_path + typed error. |
+| qc-specialist-3 | Performance / reliability | Approve | F-001 Critical fully resolved (extract preset reachable + invokes kb.extract_work); F-002..F-007 all closed. |
+| **Consolidated** | | **Approve** | All blocking findings closed. Proceed to QA. |
 
 ## Critical findings (merge-blocking)
 
