@@ -23,9 +23,9 @@
       "plan_file": ".mstar/plans/2026-06-13-v1.44-manuscript-audit-preset.md",
       "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
       "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-      "review_sha_range": "068135ed..9d471bdc",
+      "review_sha_range": "9d471bdc..44a12a6e",
       "notes": [
-        "Implemented 5 commits (83905581..bce2e81a); merged to iteration/v1.44 at 9d471bdc; awaiting QC tri-review."
+        "Implemented 5 commits (83905581..bce2e81a) merged at 9d471bdc; QC tri-review Request Changes (1 Critical, 11 Warning); fix wave 3 commits (d6b9400e..fc9f2f6d) resolved R-V144P0-001..010; re-merged to iteration/v1.44 at 44a12a6e; awaiting targeted QC re-review."
       ]
     },
     {
@@ -37,23 +37,24 @@
       "plan_file": ".mstar/plans/2026-06-13-v1.44-review-master-cli-surface.md",
       "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
       "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-      "review_sha_range": "9d471bdc..c54b1aa6",
+      "review_sha_range": "c54b1aa6..a9262c33",
       "notes": [
-        "Implemented 3 commits (a7b70ebf..73850ddb); merged to iteration/v1.44 at c54b1aa6 (P0/P1 conflict on run.rs and cli-spec.md resolved by PM preserving both subcommands); awaiting QC tri-review."
+        "Implemented 3 commits (a7b70ebf..73850ddb) merged at c54b1aa6 (P0/P1 conflict on run.rs and cli-spec.md resolved by PM preserving both subcommands); QC tri-review Request Changes (qc1+qc3 RC; qc2 Approve-with-nits); fix wave 2 commits (9e953abd..a5a9bd7e) resolved R-V144P1-001..006; re-merged to iteration/v1.44 at a9262c33; awaiting targeted QC re-review."
       ]
     },
     {
       "plan_id": "2026-06-13-v1.44-multi-volume-hardening",
       "title": "P2 — multi-volume completion + supervisor volume context",
-      "status": "InReview",
+      "status": "Done",
       "working_branch": "feature/v1.44-multi-volume-hardening",
       "merge_target": "iteration/v1.44",
       "plan_file": ".mstar/plans/2026-06-13-v1.44-multi-volume-hardening.md",
       "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
       "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
       "review_sha_range": "c54b1aa6..9c53d8f6",
+      "done_at": "2026-06-13T15:00:00+08:00",
       "notes": [
-        "Implemented 3 commits (22324ddc..b7d27aa7); merged to iteration/v1.44 at 9c53d8f6; auto-merged with no conflicts (disjoint crates); awaiting QC tri-review."
+        "Implemented 3 commits (22324ddc..b7d27aa7) merged at 9c53d8f6; QC tri-review Approve (all 3 reviewers); QA verification Approve (commit 1ecd8358). R-V142P1-QC1-F-002/F-004 resolved (formal lifecycle closure is P-last scope). Plan complete; Profile B compact in P-last."
       ]
     },
     {
