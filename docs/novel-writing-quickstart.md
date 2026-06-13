@@ -2,6 +2,24 @@
 
 Follow this guide to write a novel with Nexus from a clean install — no platform account, no cloud sync, no harness knowledge required. Everything runs locally.
 
+## Migrating from V1.44
+
+V1.45 hard-deletes the V1.33–V1.44 `creator run` subcommands. If you used any of these in V1.44 scripts or workflows, use the V1.45 equivalent:
+
+| V1.44 (deleted) | V1.45 equivalent |
+|------------------|-------------------|
+| `creator run start --idea "..."` | `creator bootstrap --idea "..."` |
+| `creator run continue --note "..."` | `creator works inspire [<work_id>] --note "..."` |
+| `creator run resume --reopen` | `creator works reopen [<work_id>] --reason "..."` |
+| `creator run reconcile-chapters` | `creator works reconcile-chapters [<work_id>]` |
+| `creator run stage list` | `creator works status` |
+| `creator run stage advance --stage <name>` | `creator run <preset_id> [<work_id>]` (e.g. `research`, `novel-writing`, `reflection-loop`, `kb-extract`) |
+| `creator run audit-chapter --mode review` | `creator run novel-manuscript-audit-review [<work_id>] --chapter N [--volume V]` |
+| `creator run audit-chapter --mode extract` | `creator run novel-manuscript-audit-extract [<work_id>] --chapter N [--volume V]` |
+| `creator run review-master` | `creator run novel-review-master [<work_id>] [--finding-id ID] [--auto-schedule]` |
+
+For the full migration table and rationale, see the [V1.45 compass migration appendix](../.mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md).
+
 ## Prerequisites
 
 - **Nexus installed** — see [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, or use a pre-built binary.
