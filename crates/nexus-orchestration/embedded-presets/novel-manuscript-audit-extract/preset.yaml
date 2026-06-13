@@ -1,16 +1,31 @@
-# DEPRECATED: Use novel-manuscript-audit-review or novel-manuscript-audit-extract instead.
+# Novel Manuscript Audit — Extract Mode (V1.44 P0 fix, DF-69)
 #
-# This unified preset is retained for backward compatibility only.
-# The CLI dispatches to the correct split preset based on mode.
-# Direct schedule creation with this preset ID is no longer documented.
+# On-demand World KB extraction: read chapter body → synchronous
+# kb.extract_work (no queue ceremony). World-bound only.
+# Does NOT enter the FL-E auto-chain driver.
 #
-# See: novel-manuscript-audit-review/ and novel-manuscript-audit-extract/
+# Input variables (passed via schedule input):
+#   work_id:           Work entity ID (wrk_...).
+#   work_ref:          Human-readable short reference (directory name).
+#   chapter:           Integer chapter number (required).
+#   volume:            Volume number (default 1; required for multi-volume).
+#   body_path:         Override path; default resolved from work_chapters.
+#   world_id:          Bound World ID (required — preset gate enforces this).
+#   creator_id:        Creator ID for kb.extract_work capability.
+#
+# State machine: load_chapter → extract_sync → done
+#
+# Launch:
+#   nexus42 creator run audit-chapter <work_id> --mode extract [--chapter N]
+#
+# Precondition: Work must be World-bound (world_id non-null).
+#   Worldless Works receive 422 world_required_for_extract.
 
 preset:
-  id: novel-manuscript-audit
+  id: novel-manuscript-audit-extract
   version: 1
   kind: creator
-  description: "On-demand chapter audit: structured review report and/or synchronous World KB extract (no FL-E auto-chain)"
+  description: "On-demand chapter KB extract: synchronous kb.extract_work for World-bound Works (no FL-E auto-chain, no queue ceremony)"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
@@ -20,7 +35,7 @@ preset:
   initial: load_chapter
   terminal: done
   world_binding:
-    mode: optional
+    mode: required  # R-V144P0-002: enforce World-bound at preset gate level
   gates:
     - kind: work_field
       field: work_profile
@@ -32,7 +47,7 @@ preset:
 
 states:
   - id: load_chapter
-    description: "Load chapter body from resolved path; branch on mode"
+    description: "Load chapter body from resolved path for KB extraction"
     enter:
       - kind: capability
         name: creator.inject_prompt
@@ -41,30 +56,12 @@ states:
           vars:
             work_ref: "{{preset.input.work_ref}}"
             work_id: "{{preset.input.work_id}}"
-            mode: "{{preset.input.mode}}"
             chapter: "{{preset.input.chapter}}"
             volume: "{{preset.input.volume}}"
             body_path: "{{preset.input.body_path}}"
     exit_when:
       kind: manual
-    next: review_report
-
-  - id: review_report
-    description: "Review mode: run 五問 structured review, write report under Logs/review/"
-    enter:
-      - kind: capability
-        name: creator.inject_prompt
-        args:
-          prompt_file: prompts/review-report.md
-          vars:
-            work_ref: "{{preset.input.work_ref}}"
-            work_id: "{{preset.input.work_id}}"
-            chapter: "{{preset.input.chapter}}"
-            volume: "{{preset.input.volume}}"
-            upsert_findings: "{{preset.input.upsert_findings}}"
-    exit_when:
-      kind: manual
-    next: done
+    next: extract_sync
 
   - id: extract_sync
     description: "Extract mode: synchronous kb.extract_work for World-bound Works (no queue ceremony)"
