@@ -50,12 +50,13 @@ nexus42 creator world create --title "Neon River"
 
 # This prints a world_id (e.g. wld_abc123). Use it below.
 
-# 7. Start a new novel Work and scaffold the project structure.
+# 7. Bootstrap a new novel Work — this creates the Work, runs the init preset
+#    (which scaffolds the project structure), and chains intake → produce.
 #    The init preset asks interactive questions:
 #    - Working title / directory name
 #    - How many chapters you plan
 #    - Confirm or override the World to bind
-nexus42 creator run start \
+nexus42 creator bootstrap \
   --idea "A solarpunk noir detective story set in a floating canal city" \
   --init-preset novel-project-init
 ```
@@ -74,29 +75,26 @@ Works/<your-work-ref>/
   Logs/                (process logs)
 ```
 
-> If you already have a World, list available ones with `nexus42 creator world list` and pass `--world-id <world_id>` to the start command.
+> If you already have a World, list available ones with `nexus42 creator world list` and pass `--world-id <world_id>` to the bootstrap command.
 
 ### §3 First Chapter
 
-With the scaffold ready, proceed through the FL-E stages: **intake → produce**. The intake stage captures your creative brief; produce drafts your first chapter.
+`creator bootstrap` chains the init preset → intake → produce automatically. Check your status:
 
 ```bash
-# 8. Run the creative brief intake (if not already done by the init flow).
-#    The daemon processes the intake preset and marks intake complete.
-#    (If you used --init-preset in §2, intake may already be chained.)
-#    Check status to see where you are:
+# 8. Bootstrap already chained intake. Confirm progress:
 nexus42 creator works status
 
 # 9. If intake is complete and the chapter is "not_started",
 #    trigger the production preset to outline → draft → finalize chapter 1:
-nexus42 creator run continue <work_id> --note "Let's begin chapter 1"
+nexus42 creator run novel-writing <work_id>
 ```
 
 The `novel-writing` preset will:
 
 1. **Outline** the chapter (saved to `Outlines/chapters/ch01-outline.md`).
 2. **Draft** the chapter body (saved to `Stories/ch01-<slug>.md`).
-3. **Finalize** after passing a built-in quality check (the 五问 gate). If the gate returns **NOGO**, add more direction with `creator run continue <work_id> --note "..."` and re-run.
+3. **Finalize** after passing a built-in quality check (the 五问 gate). If the gate returns **NOGO**, add more direction with `creator works inspire <work_id> --note "..."` and re-run `creator run novel-writing <work_id>`.
 
 ```bash
 # Check progress at any time
