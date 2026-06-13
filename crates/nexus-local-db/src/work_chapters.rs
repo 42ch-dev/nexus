@@ -744,17 +744,20 @@ pub async fn seed_chapters_multi_volume_tx(
 
 /// Check whether a Work is completed per novel-workflow-profile §6.1.
 ///
-/// For **novel-profile** Works (`work_profile == 'novel'`): always runs the
-/// full §6.1 check — all rows finalized, row count == `total_planned_chapters`,
-/// `current_chapter >= total_planned_chapters`, and `intake_status == 'complete'`.
+/// For **novel-profile** Works (`work_profile == 'novel'`): runs the volume-aware
+/// §6.1 check — all chapter rows across **all volumes** must be `finalized`,
+/// total row count must match `total_planned_chapters`, and `intake_status`
+/// must be `'complete'`. V1.44 P2 (F-002): replaces the flat
+/// `current_chapter >= total` predicate which was fragile for multi-volume Works
+/// where chapter numbers reset per volume.
 ///
 /// For **non-novel** Works (V1.36 backwards compat): returns `true` immediately
 /// if `works.status == 'completed'` — the early exit preserves legacy behaviour.
 ///
 /// Returns `false` if:
 /// - `total_planned_chapters` is NULL or 0
-/// - Any chapter is not in `finalized` status
-/// - `current_chapter < total_planned_chapters`
+/// - Chapter row count does not match `total_planned_chapters`
+/// - Any chapter row is not in `finalized` status
 /// - `intake_status` is not `'complete'`
 /// - The work or chapters don't exist
 ///
@@ -764,7 +767,7 @@ pub async fn seed_chapters_multi_volume_tx(
 pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool, LocalDbError> {
     // SAFETY: SELECT against works — runtime query.
     let row = sqlx::query(
-        "SELECT status, work_profile, total_planned_chapters, current_chapter, intake_status \
+        "SELECT status, work_profile, total_planned_chapters, intake_status \
          FROM works WHERE work_id = ?",
     )
     .bind(work_id)
@@ -796,22 +799,27 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
         return Ok(false);
     }
 
-    // §6.1: current_chapter >= total_planned_chapters.
-    let current: Option<i32> = row.get("current_chapter");
-    let current = match current {
-        Some(c) if c >= 0 => c,
-        _ => 0,
-    };
-    if current < total {
-        return Ok(false);
-    }
+    // V1.44 P2 (F-002): Volume-aware completion check.
+    // Instead of the flat `current_chapter >= total` + `list_chapters` comparison
+    // (which breaks when chapter numbers reset across volumes), use a single
+    // DB query that counts total rows and finalized rows across ALL volumes.
+    // SAFETY: SELECT COUNT against work_chapters — runtime query.
+    let count_row = sqlx::query(
+        "SELECT \
+             COUNT(*) AS total_rows, \
+             SUM(CASE WHEN status = 'finalized' THEN 1 ELSE 0 END) AS finalized_rows \
+         FROM work_chapters WHERE work_id = ?",
+    )
+    .bind(work_id)
+    .fetch_one(pool)
+    .await?;
 
-    let chapters = list_chapters(pool, work_id).await?;
-    if chapters.len() != usize::try_from(total).unwrap_or(0) {
-        return Ok(false);
-    }
+    let total_rows: i64 = count_row.get("total_rows");
+    let finalized_rows: i64 = count_row.get("finalized_rows");
 
-    Ok(chapters.iter().all(|c| c.status == "finalized"))
+    // §6.1: row count must match total_planned_chapters and ALL must be finalized.
+    let expected = i64::from(total);
+    Ok(total_rows == expected && finalized_rows == expected)
 }
 
 /// Parse chapter number from a filename like `ch01-introduction.md`.

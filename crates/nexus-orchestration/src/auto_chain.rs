@@ -217,12 +217,17 @@ pub async fn evaluate_after_persist_volume_aware(
 ///
 /// Constructs a correctly-shaped `AddScheduleRequest` using the shared
 /// [`stage_gates::build_schedule_for_stage`] facade.
+///
+/// V1.44 P2 (F-004): `volume` is threaded through to `WorkFields` so the
+/// `novel-writing` preset input includes a `volume` template var for
+/// cross-volume context preservation.
 #[allow(clippy::missing_panics_doc)] // panic only on invalid stage names, which we validate
 pub fn build_auto_chain_schedule(
     stage: &str,
     creator_id: &str,
     work: &WorkRecord,
     chapter: Option<i32>,
+    volume: Option<i32>,
 ) -> Option<AddScheduleRequest> {
     let work_ref = work.work_ref.clone();
     let chapter_label = chapter.map(stage_gates::chapter_label);
@@ -253,6 +258,7 @@ pub fn build_auto_chain_schedule(
         workspace_dir: None,
         world_kb_block: None,
         world_id: work.world_id.clone(),
+        volume,
     };
 
     stage_gates::build_schedule_for_stage(stage, creator_id, &fields)
@@ -494,10 +500,11 @@ pub async fn enqueue_auto_chain_schedule(
     work_id: &str,
     stage: &str,
     chapter: Option<i32>,
+    volume: Option<i32>,
     work: &WorkRecord,
 ) -> Result<String, AutoChainError> {
     let schedule_req =
-        build_auto_chain_schedule(stage, creator_id, work, chapter).ok_or_else(|| {
+        build_auto_chain_schedule(stage, creator_id, work, chapter, volume).ok_or_else(|| {
             AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
         })?;
 
@@ -878,7 +885,7 @@ mod tests {
     #[test]
     fn build_auto_chain_schedule_produce_includes_chapter() {
         let work = work_at("produce", "active", 2, 5);
-        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(2))
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(2), None)
             .expect("produce should have a preset");
         assert_eq!(req.preset_id, "novel-writing");
         let input = req.input.expect("input should be set");
@@ -889,7 +896,7 @@ mod tests {
     #[test]
     fn build_auto_chain_schedule_research() {
         let work = work_at("research", "active", 0, 5);
-        let req = build_auto_chain_schedule("research", "ctr_test", &work, None)
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None)
             .expect("research should have a preset");
         assert_eq!(req.preset_id, "research");
     }
@@ -929,7 +936,7 @@ mod tests {
             .unwrap();
 
         let sid =
-            enqueue_auto_chain_schedule(&pool, "ctr_test", "wrk_test", "research", None, &work)
+            enqueue_auto_chain_schedule(&pool, "ctr_test", "wrk_test", "research", None, None, &work)
                 .await
                 .unwrap();
 
@@ -987,6 +994,7 @@ mod tests {
             "wrk_test",
             "unknown_stage_xyz",
             None,
+            None,
             &work,
         )
         .await;
@@ -1006,7 +1014,7 @@ mod tests {
     #[test]
     fn research_schedule_seed_includes_context_for_produce() {
         let work = work_at("research", "active", 0, 5);
-        let req = build_auto_chain_schedule("research", "ctr_test", &work, None)
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None)
             .expect("research should have a preset");
         assert_eq!(req.preset_id, "research");
 
@@ -1027,7 +1035,7 @@ mod tests {
     #[test]
     fn produce_schedule_seed_carries_research_enrichable_fields() {
         let work = work_at("produce", "active", 1, 5);
-        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1))
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1), None)
             .expect("produce should have a preset");
         assert_eq!(req.preset_id, "novel-writing");
 
@@ -1047,7 +1055,7 @@ mod tests {
         let mut work = work_at("produce", "active", 1, 5);
         // Simulate: driver_schedule_id is the research schedule that just completed
         work.driver_schedule_id = Some("ACH20260609120000000".to_string());
-        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1))
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1), None)
             .expect("produce should have a preset");
 
         let input = req.input.expect("input must be set");
@@ -1069,7 +1077,7 @@ mod tests {
     fn research_schedule_does_not_include_research_artifacts_dir() {
         let mut work = work_at("research", "active", 0, 5);
         work.driver_schedule_id = Some("SCH_prev_research".to_string());
-        let req = build_auto_chain_schedule("research", "ctr_test", &work, None)
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None)
             .expect("research should have a preset");
 
         let input = req.input.expect("input must be set");
