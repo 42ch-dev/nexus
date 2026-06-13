@@ -477,7 +477,7 @@ impl ScheduleSupervisor {
                 ref next_stage,
             } => {
                 if let Err(e) = self
-                    .enqueue_auto_chain_step(creator_id, work_id, next_stage, None, &work)
+                    .enqueue_auto_chain_step(creator_id, work_id, next_stage, None, None, &work)
                     .await
                 {
                     tracing::warn!(
@@ -504,6 +504,8 @@ impl ScheduleSupervisor {
                         "auto-chain: next chapter (volume-aware)"
                     );
                 }
+                // V1.44 P2 (F-004): pass volume through to enqueue so the
+                // `novel-writing` preset input includes `volume` template var.
                 // Next chapter starts at produce stage
                 if let Err(e) = self
                     .enqueue_auto_chain_step(
@@ -511,6 +513,7 @@ impl ScheduleSupervisor {
                         work_id,
                         "produce",
                         Some(*next_chapter),
+                        Some(next_volume),
                         &work,
                     )
                     .await
@@ -586,12 +589,13 @@ impl ScheduleSupervisor {
         work_id: &str,
         stage: &str,
         chapter: Option<i32>,
+        volume: Option<i32>,
         work: &nexus_local_db::works::WorkRecord,
     ) -> Result<(), SupervisorError> {
         use crate::auto_chain::{self, AutoChainError};
 
         match auto_chain::enqueue_auto_chain_schedule(
-            &self.pool, creator_id, work_id, stage, chapter, work,
+            &self.pool, creator_id, work_id, stage, chapter, volume, work,
         )
         .await
         {

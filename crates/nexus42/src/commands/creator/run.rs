@@ -1059,6 +1059,7 @@ async fn stage_advance(
         workspace_dir: None,
         world_kb_block,
         world_id,
+        volume: None,
     };
 
     if let Some(mut request) =
