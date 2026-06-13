@@ -812,25 +812,6 @@ fn v133_system_preset_list_flags() {
     );
 }
 
-/// Verify `creator --help` shows `run` as a subcommand.
-#[test]
-fn v133_creator_shows_run() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("run"),
-        "V1.33 creator: expected 'run' subcommand in --help"
-    );
-}
-
 // =============================================================================
 // Part 7: V1.35 P2 — platform sync migration & deprecation contract tests
 // =============================================================================
@@ -922,9 +903,9 @@ fn v135_root_help_shows_five_groups_with_sync_hidden() {
     );
 }
 
-/// V1.35 P2: Root `--long-about` mentions `creator run start` and `workspace init`.
+/// V1.35 P2: Root `--long-about` mentions `creator works status` and `workspace init`.
 #[test]
-fn v135_root_long_about_mentions_creator_run_and_workspace() {
+fn v135_root_long_about_mentions_creator_works_and_workspace() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .args(["--help"])
@@ -937,8 +918,8 @@ fn v135_root_long_about_mentions_creator_run_and_workspace() {
     let help_text = String::from_utf8(output).unwrap();
 
     assert!(
-        help_text.contains("creator run"),
-        "V1.35: root help must mention 'creator run'"
+        help_text.contains("creator works status"),
+        "V1.35: root help must mention 'creator works status'"
     );
     assert!(
         help_text.contains("workspace init"),
@@ -1002,50 +983,6 @@ fn v135_knowledge_help_disambiguates_from_kb() {
     );
 }
 
-/// V1.35 P3: `creator --help` surfaces `run` within the first 3 listed subcommands.
-#[test]
-fn v135_creator_help_run_is_primary() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // Extract the Commands: section
-    let commands_start = help_text
-        .find("Commands:")
-        .expect("Commands: section present");
-    let commands_section = &help_text[commands_start..];
-
-    // `run` must appear early — we check that it's in the commands section at all
-    // and verify it appears before `workspace` (which is assets tier).
-    let run_pos = commands_section
-        .find("run")
-        .expect("'run' subcommand present");
-    let workspace_pos = commands_section
-        .find("workspace")
-        .expect("'workspace' subcommand present");
-
-    assert!(
-        run_pos < workspace_pos,
-        "V1.35 P3: 'run' must appear before 'workspace' in creator --help (primary tier first)"
-    );
-
-    // Verify `register` also appears early (primary tier)
-    let register_pos = commands_section
-        .find("register")
-        .expect("'register' subcommand present");
-    assert!(
-        register_pos < workspace_pos,
-        "V1.35 P3: 'register' must appear before 'workspace' in creator --help"
-    );
-}
-
 /// V1.35 P3: `creator --help` mentions tier grouping hints in descriptions.
 #[test]
 fn v135_creator_help_mentions_kb_namespaces() {
@@ -1066,6 +1003,7 @@ fn v135_creator_help_mentions_kb_namespaces() {
         "V1.35 P3: creator kb --help must reference scope model"
     );
 }
+<<<<<<< HEAD
 
 // V1.45: `v135_chain_novel_writing_defaults_true`,
 // `v135_chain_novel_writing_opt_out_syntax_accepted`,

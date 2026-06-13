@@ -147,7 +147,7 @@ pub enum WorksCommand {
 pub enum CompletionLockCommand {
     /// Release `.completion-lock.json` for a Work.
     ///
-    /// After release, `creator run resume --reopen` can be used on the Work.
+    /// After release, `creator works reopen --reason "..."` can be used on the Work.
     Release {
         /// Work ID (wrk_...) to release the completion lock for
         work_id: String,
@@ -1263,9 +1263,7 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
 
     // Review action hint — cite quickstart §5 (sanitize work_id for defense in depth).
     let safe_work_id = sanitize_for_terminal(work_id);
-    println!(
-        "  Address findings or run: nexus42 creator run stage advance {safe_work_id} --stage review"
-    );
+    println!("  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}");
     println!("  See docs/novel-writing-quickstart.md §5");
 }
 
@@ -1477,7 +1475,7 @@ mod tests {
             }
             let safe_work_id = sanitize_for_terminal(work_id);
             lines.push(format!(
-                "  Address findings or run: nexus42 creator run stage advance {safe_work_id} --stage review"
+                "  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}"
             ));
             lines.push("  See docs/novel-writing-quickstart.md §5".to_string());
         }
