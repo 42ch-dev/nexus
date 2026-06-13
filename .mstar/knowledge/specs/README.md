@@ -102,8 +102,8 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [novel-workflow-profile.md](novel-workflow-profile.md) | Feature line | **Shipped (V1.36 → V1.42)** — World KB §3.5.1; V1.41 §6.4 multi-work; V1.42 §4.5.4–7 multi-volume PK + outlines + tests |
 | [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) | Feature line | **Shipped (V1.41 → V1.42 P0)** — §4.2 runtime_lock production wiring implemented V1.42 P0 |
 | [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
-| [novel-quality-loop.md](novel-quality-loop.md) | Draft overlay | **Draft (V1.39 → V1.44)** — full quality loop + §3.4 review-master CLI overlay (P1) |
-| [novel-manuscript-audit.md](novel-manuscript-audit.md) | Draft overlay | **Draft (V1.44)** — DF-69 on-demand chapter audit (review + extract) |
+| [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.44)** — V1.39 baseline + §3.4 review-master CLI overlay (P1); R-V143P0-002 closed |
+| [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
 | [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.43)** — BL-10 quickstart contract + CLI copy map + author visibility |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

@@ -1,8 +1,9 @@
 # Novel Manuscript Audit — Normative Specification v1
 
-**Status**: Draft (V1.44 — 2026-06-13)  
-**Document class**: Draft overlay  
+**Status**: Shipped (V1.44 — 2026-06-13)  
+**Document class**: Feature line (DF-69 audit supplement)  
 **Created**: 2026-06-13  
+**Last updated**: 2026-06-13 (V1.44 P-last — promoted from Draft overlay to Shipped Feature line; DF-69 shipped)  
 **Scope**: On-demand chapter audit for `work_profile: novel` — structured review report and/or World KB extract **without** entering the full FL-E auto-chain driver  
 **Coordinates with**:
 

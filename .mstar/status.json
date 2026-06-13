@@ -1,79 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-13T14:00:00+08:00",
+  "updated_at": "2026-06-13T18:00:00+08:00",
   "plans": [
-    {
-      "plan_id": "2026-06-13-v1.44-harness-docs-prepare",
-      "title": "P-1 — V1.44 compass, plans, specs, tracker, status (docs-only)",
-      "status": "Done",
-      "working_branch": "iteration/v1.44",
-      "merge_target": "iteration/v1.44",
-      "plan_file": ".mstar/plans/2026-06-13-v1.44-harness-docs-prepare.md",
-      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-      "notes": [
-        "2026-06-13 — V1.44 grill-me closure (large hybrid: audit + review-master + multi-volume + author-desk). Harness prepare on iteration/v1.44 from main (V1.43 shipped PR #56)."
-      ]
-    },
-    {
-      "plan_id": "2026-06-13-v1.44-manuscript-audit-preset",
-      "title": "P0 — DF-69 novel-manuscript-audit preset + CLI entry",
-      "status": "Done",
-      "working_branch": "feature/v1.44-manuscript-audit-preset",
-      "merge_target": "iteration/v1.44",
-      "plan_file": ".mstar/plans/2026-06-13-v1.44-manuscript-audit-preset.md",
-      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
-      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-      "review_sha_range": "068135ed..43550686",
-      "done_at": "2026-06-13T16:00:00+08:00",
-      "notes": [
-        "Implemented 5 commits (83905581..bce2e81a) merged at 9d471bdc; QC initial Request Changes (1 Critical R-V144P0-001 extract mode unreachable, 11 Warning); fix wave 3 commits (d6b9400e..fc9f2f6d) resolved R-V144P0-001..010; re-merged at 44a12a6e; plan §6 verification commit 43550686; targeted QC re-review Approve (all 3); QA Approve (5a0548c5). DF-69 ship; archive closure is P-last scope."
-      ]
-    },
-    {
-      "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
-      "title": "P1 — R-V143P0-002 review-master CLI + quickstart convergence",
-      "status": "Done",
-      "working_branch": "feature/v1.44-review-master-cli-surface",
-      "merge_target": "iteration/v1.44",
-      "plan_file": ".mstar/plans/2026-06-13-v1.44-review-master-cli-surface.md",
-      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
-      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-      "review_sha_range": "9d471bdc..a9262c33",
-      "done_at": "2026-06-13T16:00:00+08:00",
-      "notes": [
-        "Implemented 3 commits (a7b70ebf..73850ddb) merged at c54b1aa6 (P0/P1 conflict on run.rs and cli-spec.md resolved by PM preserving both subcommands); QC initial Request Changes (qc1+qc3 RC; qc2 Approve-with-nits); fix wave 2 commits (9e953abd..a5a9bd7e) resolved R-V144P1-001..006; re-merged at a9262c33; targeted QC re-review Approve (qc-specialist + qc-specialist-3); QA Approve (420df8e1). R-V143P0-002 lifecycle:resolved; archive closure is P-last scope."
-      ]
-    },
-    {
-      "plan_id": "2026-06-13-v1.44-multi-volume-hardening",
-      "title": "P2 — multi-volume completion + supervisor volume context",
-      "status": "Done",
-      "working_branch": "feature/v1.44-multi-volume-hardening",
-      "merge_target": "iteration/v1.44",
-      "plan_file": ".mstar/plans/2026-06-13-v1.44-multi-volume-hardening.md",
-      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
-      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-      "review_sha_range": "c54b1aa6..9c53d8f6",
-      "done_at": "2026-06-13T15:00:00+08:00",
-      "notes": [
-        "Implemented 3 commits (22324ddc..b7d27aa7) merged at 9c53d8f6; QC tri-review Approve (all 3 reviewers); QA verification Approve (commit 1ecd8358). R-V142P1-QC1-F-002/F-004 resolved (formal lifecycle closure is P-last scope). Plan complete; Profile B compact in P-last."
-      ]
-    },
-    {
-      "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence",
-      "title": "P3 — author-desk UX residual whitelist",
-      "status": "Done",
-      "working_branch": "feature/v1.44-author-desk-residual-convergence",
-      "merge_target": "iteration/v1.44",
-      "plan_file": ".mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md",
-      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
-      "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
-      "review_sha_range": "cbb18e25..ca2ac052",
-      "done_at": "2026-06-13T17:00:00+08:00",
-      "notes": [
-        "Implemented 4 commits (d5ebbe6c..19497b45): R-V141P0-04 integration test (7 tests), R-V138P1-02 frontmatter docs, R-V138P1-07 tracing span, status.json residual updates; merged to iteration/v1.44 at ca2ac052; QC tri-review Approve (all 3 reviewers); qc-consolidated Approve (commit 116f0aa6); QA Approve (commit c8008bd0). R-V141P1-15 deferred (no implement, status note only). 7 Suggestions tracked as residual for P-last closure."
-      ]
-    },
     {
       "plan_id": "2026-06-13-v1.44-hygiene-and-closeout",
       "title": "P-last — spec promotion + tracker/status closeout",
@@ -86,7 +14,7 @@
     }
   ],
   "v1_43_iteration_complete": true,
-  "v1_44_iteration_complete": false,
+  "v1_44_iteration_complete": true,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -98,51 +26,34 @@
     "last_integration_branch": "iteration/v1.43",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
-    "latest_shipped_iteration": "v1.43",
-    "latest_shipped_at": "2026-06-12T23:39:10+08:00",
+    "latest_shipped_iteration": "v1.44",
+    "latest_shipped_at": "2026-06-13T18:00:00+08:00",
     "latest_active_iteration": "v1.44",
     "latest_active_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
     "integration_branch_retired": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-13T14:00:00+08:00",
-      "total_open": 86,
+      "updated_at": "2026-06-13T18:00:00+08:00",
+      "total_open": 77,
       "by_severity": {
         "critical": 0,
-        "high": 0,
+        "high": 2,
         "medium": 7,
-        "low": 63,
-        "nit": 16
+        "low": 58,
+        "nit": 10
       },
       "by_target": {
-        "v1.43": 0,
-        "v1.42": 9,
-        "v1.41": 7,
-        "backlog": 58,
-        "v1.44": 8
+        "V1.33": 3,
+        "V1.31": 5,
+        "V1.30": 9,
+        "V1.34": 6,
+        "V1.38": 5,
+        "V1.39": 22,
+        "V1.40": 1,
+        "V1.41": 21,
+        "V1.42": 5
       },
-      "by_plan": {
-        "creator-run": 3,
-        "tech-debt": 9,
-        "and-stages": 5,
-        "tool-implementation": 1,
-        "foundation-first": 1,
-        "selection-status": 5,
-        "writing-parameterization": 7,
-        "chain-engine": 5,
-        "stage-wiring": 9,
-        "v138-hardening": 3,
-        "review-routing": 6,
-        "v1.40-hygiene": 1,
-        "work-switch": 12,
-        "selection-pool": 19,
-        "author-experience": 5,
-        "manuscript-audit": 1,
-        "review-master-cli": 1,
-        "multi-volume-hardening": 2,
-        "author-desk": 4
-      },
-      "notes": "V1.44 harness prepare + compass review 2026-06-13: DF-69 → P0; R-V143P0-002 → P1; R-V142P1-F-002/F-004 → P2 (F-003 closed V1.43); P3 whitelist trimmed to R-V141P0-04, R-V138P1-02/07, R-V141P1-15 defer; waived R-V138P0-02, R-V141P0-05, R-V141P1-14 → P-last formal close. by_target.v1.44 = 8 (1+1+2+4). JSON residual_findings SSOT on conflict."
+      "notes": "V1.44 ship closeout (2026-06-13): DF-69 → shipped archive; R-V143P0-002 closed; R-V141P0-04 / R-V138P1-02 / R-V138P1-07 resolved in P3; R-V141P0-05 / R-V141P1-14 formally waived; R-V142P1-QC1-F-002 / F-004 resolved in P2; R-V144P0-001..010 (P0 fix-wave) + R-V144P1-001..006 (P1 fix-wave) resolved; Suggestions S01.. (P0/P1/P2/P3) deferred to next iteration. 5/5 V1.44 implement plans Done; PR iteration/v1.44 → main pending (T7)."
     },
     "wave_0_spec": ".mstar/knowledge/specs/novel-manuscript-audit.md",
     "spec_refs": [
@@ -176,6 +87,18 @@
       "merge_commit": "279ec7b3",
       "pr": 55,
       "residual": "R-V142-MERGE-CI-001"
+    },
+    "v1_44_ship": {
+      "merge_commit": null,
+      "pr": null,
+      "shipped_at": "2026-06-13T18:00:00+08:00",
+      "5_plans": [
+        "P-1 harness-docs-prepare",
+        "P0 manuscript-audit-preset (DF-69)",
+        "P1 review-master-cli-surface (R-V143P0-002)",
+        "P2 multi-volume-hardening (R-V142P1-QC1-F-002/004)",
+        "P3 author-desk-residual-convergence (R-V141P0-04, R-V138P1-02, R-V138P1-07; waived R-V141P0-05, R-V141P1-14)"
+      ]
     }
   },
   "residual_findings": {
@@ -992,8 +915,9 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.43+",
-        "lifecycle": "open",
-        "closure_note": "V1.42 P-last T1: waived — --from-work is on Start; --reopen/--extend-chapters are on Resume. These are separate commands used sequentially. No combined single-command path is needed. Each works correctly in isolation."
+        "lifecycle": "waived",
+        "closure_note": "V1.44 P-last formal close (V1.44 compass §1.6 P3 whitelist: waived items confirmed waived; deferred to next iteration if re-opened). See .mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md §2.",
+        "closed_at": "2026-06-13T17:00:00+08:00"
       },
       {
         "id": "R-V141P0-06",
@@ -1227,8 +1151,9 @@
         "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last",
-        "lifecycle": "open",
-        "closure_note": "V1.42 P-last T1: waived — cosmetic help text split; no user-facing behavior change. Each PoolAction already has its own doc comment. Defer to V1.43+."
+        "lifecycle": "waived",
+        "closure_note": "V1.44 P-last formal close (V1.44 compass §1.6 P3 whitelist: waived items confirmed waived; deferred to next iteration if re-opened). See .mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md §2.",
+        "closed_at": "2026-06-13T17:00:00+08:00"
       },
       {
         "id": "R-V141P1-15",
@@ -1377,14 +1302,20 @@
       {
         "id": "R-V142P1-QC1-F-002",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "is_work_completed uses flat current_chapter comparison — correct under current invariants but architecturally fragile",
         "source": "qc1.md F-002 (qc-specialist)",
         "scope": "crates/nexus-local-db/src/work_chapters.rs::is_work_completed (flat current_chapter + list_chapters len vs total_planned_chapters)",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.44 P2 (2026-06-13-v1.44-multi-volume-hardening)",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]",
+        "closed_at": "2026-06-13T17:00:00+08:00",
+        "closure_note": "V1.44 P2 multi-volume hardening shipped. Predicate hardened to volume-aware COUNT query; supervisor `next_volume` threaded through enqueue_auto_chain_step / WorkFields / preset input. Verified by hermetic tests in supervisor_cross_volume.rs (8 tests) and nexus-local-db (190 tests).",
+        "resolution": {
+          "commit": "22324ddc",
+          "plan_id": "2026-06-13-v1.44-multi-volume-hardening"
+        }
       },
       {
         "id": "R-V142P1-QC1-F-003",
@@ -1404,14 +1335,20 @@
       {
         "id": "R-V142P1-QC1-F-004",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "Supervisor NextChapter match arm ignores next_volume — volume context lost before schedule enqueue",
         "source": "qc1.md F-004 (qc-specialist)",
         "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs NextChapter arm; build_auto_chain_schedule / WorkFields.volume",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.44 P2 (2026-06-13-v1.44-multi-volume-hardening)",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]",
+        "closed_at": "2026-06-13T17:00:00+08:00",
+        "closure_note": "V1.44 P2 multi-volume hardening shipped. Predicate hardened to volume-aware COUNT query; supervisor `next_volume` threaded through enqueue_auto_chain_step / WorkFields / preset input. Verified by hermetic tests in supervisor_cross_volume.rs (8 tests) and nexus-local-db (190 tests).",
+        "resolution": {
+          "commit": "22324ddc",
+          "plan_id": "2026-06-13-v1.44-multi-volume-hardening"
+        }
       },
       {
         "id": "R-V142-MERGE-CI-001",
