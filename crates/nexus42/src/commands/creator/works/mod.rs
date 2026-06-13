@@ -585,29 +585,7 @@ async fn handle_use(client: &DaemonClient, work_id: &str) -> Result<()> {
 
 // ── V1.45 P2: atomic Work operations ──────────────────────────────────
 
-/// Resolve an optional `work_id` to a concrete ID.
-///
-/// If `work_id` is `None`, queries the pool for the active Work.
-/// Returns an error with a helpful message if no active Work exists.
-async fn resolve_work_id(client: &DaemonClient, work_id: Option<String>) -> Result<String> {
-    if let Some(id) = work_id {
-        return Ok(id);
-    }
-    let resp: serde_json::Value = client
-        .get::<serde_json::Value>("/v1/local/works?limit=1&status=active")
-        .await?;
-    resp.get("works")
-        .and_then(|v| v.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|w| w.get("work_id"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .ok_or_else(|| {
-            crate::errors::CliError::Config(
-                "No active Work found. Specify <work_id> or run `nexus42 creator works use <work_id>`.".to_string(),
-            )
-        })
-}
+// resolve_active_work_id is shared via super::work_utils (QC1 W-3 dedup).
 
 /// Handle `creator works inspire` — POST inspiration note (V1.45 P2).
 ///
@@ -619,7 +597,7 @@ async fn handle_inspire(
     note: &str,
     json: bool,
 ) -> Result<()> {
-    let resolved_id = resolve_work_id(client, work_id).await?;
+    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
     let body = serde_json::json!({ "note": note });
     let resp: serde_json::Value = client
         .post::<serde_json::Value, _>(&format!("/v1/local/works/{resolved_id}/inspiration"), &body)
@@ -659,7 +637,7 @@ async fn handle_reopen(
         ));
     }
 
-    let resolved_id = resolve_work_id(client, work_id).await?;
+    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
 
     let mut patch = serde_json::json!({
         "novel_completion_status": "reopened",
@@ -702,7 +680,7 @@ async fn handle_resume_chain(
     work_id: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let resolved_id = resolve_work_id(client, work_id).await?;
+    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
 
     let patch = serde_json::json!({
         "auto_chain_interrupted": false,
@@ -752,7 +730,7 @@ async fn handle_reconcile_chapters(
     work_id: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let resolved_id = resolve_work_id(client, work_id).await?;
+    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
 
     let report: serde_json::Value = client
         .post(
