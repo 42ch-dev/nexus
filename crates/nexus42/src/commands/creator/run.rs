@@ -1636,6 +1636,19 @@ async fn stage_advance(
         })
         .unwrap_or_default();
 
+    // V1.44 P3 (R-V138P1-07): audit-log chapter context extraction to aid
+    // production debugging when chapter selection behaves unexpectedly.
+    tracing::debug!(
+        target: "fl_e.stage",
+        work_id = %work_id,
+        next_chapter = ?next_chapter,
+        chapter_label = ?chapter_label,
+        outline_path = ?outline_path,
+        body_path = ?body_path,
+        slug = ?slug,
+        "stage_advance chapter context extracted"
+    );
+
     // W-1 fix: fail fast when novel-writing ("produce") expects chapter context
     // but the daemon response is missing the chapters[] array or the selected
     // chapter row. Without outline_path and body_path, template rendering would
