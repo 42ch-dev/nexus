@@ -676,9 +676,9 @@ The reference-system executor concepts map to Nexus presets and surfaces as foll
 | Reference executor concept | Nexus preset / stage | CLI status surface | V1.37 P3 disposition |
 | --- | --- | --- | --- |
 | `write` | Existing `novel-writing` (`produce` stage) | `creator run status <work_id>` chapter progress and active schedule summary | Existing path remains; findings may later enrich prompt context, but no behavior change in P3 |
-| `brainstorm` | Future `novel-brainstorm` preset (FL-E `intake` or `research` analog) | Future `creator run brainstorm <work_id>` or `creator run stage advance --stage research --preset novel-brainstorm`; status shows open findings driving brainstorm prompts | Future implementation only |
-| `none` | No preset; user or reviewer acknowledges, resolves, or marks `wont_fix` | `creator run status <work_id>` lists the finding with `next_action: none` / manual decision | Future implementation only |
-| `master` | Future `novel-review-master` preset (FL-E `review` analog) | Future `creator run review-master <work_id>`; status shows master-decision banner and open findings requiring approval | Future implementation only |
+| `brainstorm` | `novel-brainstorm` preset (Shipped V1.39) | `creator run brainstorm <work_id>` or `creator run stage advance --stage research --preset novel-brainstorm`; status shows open findings driving brainstorm prompts | Shipped V1.39 |
+| `none` | No preset; user or reviewer acknowledges, resolves, or marks `wont_fix` | `creator run status <work_id>` lists the finding with `next_action: none` / manual decision | Shipped V1.39 |
+| `master` | `novel-review-master` preset (Shipped V1.39); CLI `creator run review-master <work_id>` (Shipped V1.44) | `creator run review-master <work_id>`; status shows master-decision banner and open findings requiring approval | Shipped V1.39 (preset) / V1.44 (CLI) |
 
 `novel-brainstorm` should turn open findings into ideation prompts without writing chapter正文 directly. `novel-review-master` should surface findings, relevant rules, and proposed actions to the user for final approval. Neither preset replaces `novel-writing`; they are auxiliary quality-loop surfaces layered around the single-role V1.36 path.
 
@@ -686,7 +686,7 @@ The reference-system executor concepts map to Nexus presets and surfaces as foll
 
 The reference-system pattern escalates a finding if it remains `open` for 96 hours. Nexus OSS maps this to local persistence and daemon lifecycle instead of Redis, cron, or platform workers:
 
-1. A future `nexus-daemon-runtime` lifecycle/scheduler task runs every 24 hours while the daemon is healthy.
+1. A `nexus-daemon-runtime` lifecycle/scheduler task runs every 24 hours while the daemon is healthy.
 2. It queries `findings` for rows where `status = 'open'` and `created_at < now - 96h`.
 3. It emits a structured log entry with `work_id`, `chapter`, `finding_id`, `age_hours`, and suggested command.
 4. `creator run status <work_id>` shows a banner such as:
@@ -696,7 +696,9 @@ The reference-system pattern escalates a finding if it remains `open` for 96 hou
    Next action: run `nexus42 creator run review-master <work_id>` to make a master decision.
    ```
 
-5. Automatic escalation is **user opt-in** through a future CLI flag or Work-level setting. By default, the daemon performs no auto-action; the user explicitly runs `creator run review-master <work_id>`.
+5. Automatic escalation is **user opt-in** through `--auto-schedule` CLI flag or Work-level `auto_review_master_on_timeout` setting. By default, the daemon performs no auto-action; the user explicitly runs `creator run review-master <work_id>`.
+
+**Shipped V1.39** (daemon watcher + preset); **Shipped V1.44** (CLI `review-master` subcommand).
 
 This keeps the OSS path local-first: local DB + daemon scheduled task + CLI status banner. It explicitly does not reintroduce Redis, external cron, platform queues, or platform workers.
 

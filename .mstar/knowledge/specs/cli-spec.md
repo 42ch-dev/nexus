@@ -358,6 +358,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 | `nexus42 creator run stage …` | FL-E stage list/advance (see §6.2E) |
 | `nexus42 creator run resume [<work_id>]` | Resume checkpointed auto-chain |
 | `nexus42 creator run reconcile-chapters <work_id>` | Rebuild `work_chapters` from filesystem |
+| `nexus42 creator run review-master <work_id> [--finding-id <id>] [--auto-schedule]` | Master-decision review on open findings (V1.44); enqueues `novel-review-master` preset |
 
 Rules:
 
