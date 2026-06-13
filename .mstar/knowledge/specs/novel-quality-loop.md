@@ -105,7 +105,7 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 ## 6. Master-decision timeout (DF-67)
 
 1. Daemon task every 24h queries open findings with `created_at < now - 96h`.
-2. `creator run status` banner lists stale count + `novel-review-master` hint.
+2. `creator works status` banner lists stale count + `novel-review-master` hint.
 3. Automatic `novel-review-master` schedule: **opt-in only** (Work setting or CLI flag).
 
 ---
