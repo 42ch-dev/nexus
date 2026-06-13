@@ -62,15 +62,16 @@
     {
       "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence",
       "title": "P3 — author-desk UX residual whitelist",
-      "status": "InReview",
+      "status": "Done",
       "working_branch": "feature/v1.44-author-desk-residual-convergence",
       "merge_target": "iteration/v1.44",
       "plan_file": ".mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md",
       "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
       "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
       "review_sha_range": "cbb18e25..ca2ac052",
+      "done_at": "2026-06-13T17:00:00+08:00",
       "notes": [
-        "Implemented 4 commits (d5ebbe6c..19497b45): R-V141P0-04 integration test (7 tests), R-V138P1-02 frontmatter docs, R-V138P1-07 tracing span, status.json residual updates; merged to iteration/v1.44 at ca2ac052; awaiting QC tri-review."
+        "Implemented 4 commits (d5ebbe6c..19497b45): R-V141P0-04 integration test (7 tests), R-V138P1-02 frontmatter docs, R-V138P1-07 tracing span, status.json residual updates; merged to iteration/v1.44 at ca2ac052; QC tri-review Approve (all 3 reviewers); qc-consolidated Approve (commit 116f0aa6); QA Approve (commit c8008bd0). R-V141P1-15 deferred (no implement, status note only). 7 Suggestions tracked as residual for P-last closure."
       ]
     },
     {
