@@ -165,7 +165,9 @@ pub enum RunCommand {
         /// Run review-master preset scoped to a specific finding
         #[arg(long)]
         finding_id: Option<String>,
-        /// Opt-in: enqueue novel-review-master when 96h stale findings exist
+        /// Opt-in: enqueue novel-review-master when this Work has stale
+        /// (96h+) findings. Scoped to the supplied `work_id` — only stale
+        /// findings belonging to this Work trigger the schedule.
         #[arg(long, default_value_t = false)]
         auto_schedule: bool,
         /// Emit machine-readable JSON instead of human text
@@ -748,6 +750,36 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 
 // ── Review-master CLI (V1.44 P1) ────────────────────────────────────────────
 
+/// Fetch common work context fields for review-master schedule input.
+///
+/// Returns `(work_ref, topic, world_id, work_json)` where `work_json` is the
+/// full Work response (used by `--finding-id` path for `body_path` extraction).
+/// Extracted to avoid duplicate Work fetch in `--finding-id` and
+/// `--auto-schedule` paths (R-V144P1-005).
+async fn fetch_work_context(
+    client: &crate::api::DaemonClient,
+    work_id: &str,
+) -> Result<(String, String, Option<String>, serde_json::Value)> {
+    let work: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .await?;
+    let work_ref = work
+        .get("work_ref")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let topic = work
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("novel")
+        .to_string();
+    let world_id = work
+        .get("world_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Ok((work_ref, topic, world_id, work))
+}
+
 /// Handle `creator run review-master <work_id>` (V1.44 P1).
 ///
 /// Lists open findings with `target_executor=master` and optionally enqueues
@@ -766,10 +798,15 @@ async fn handle_review_master(
     config: &CliConfig,
     client: &crate::api::DaemonClient,
 ) -> Result<()> {
-    // Fetch open findings for the Work
+    // Fetch open findings for the Work.
+    // Uses limit=200 to reduce truncation risk for high-volume works;
+    // client-side filter to master-targeted findings follows.
+    // For works with >200 open findings, the summary may be incomplete
+    // (R-V144P1-006: documented cap; daemon-side target_executor filter
+    // is deferred to a future iteration).
     let findings: Vec<serde_json::Value> = client
         .get::<Vec<serde_json::Value>>(&format!(
-            "/v1/local/works/{work_id}/findings?status=open&limit=50"
+            "/v1/local/works/{work_id}/findings?status=open&limit=200"
         ))
         .await?;
 
@@ -840,25 +877,24 @@ async fn handle_review_master(
             .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}/findings/{fid}"))
             .await?;
 
+        // R-V144P1-004: assert the finding is master-targeted before enqueuing
+        let target_executor = finding.get("target_executor").and_then(|v| v.as_str());
+        if target_executor != Some("master") {
+            let actual = target_executor.unwrap_or("(missing)");
+            return Err(crate::errors::CliError::Config(format!(
+                "finding {fid} has target_executor={actual}, not 'master'; \
+                 review-master only enqueues master-targeted findings"
+            )));
+        }
+
         let finding_title = finding
             .get("title")
             .and_then(|v| v.as_str())
             .unwrap_or("(untitled)");
 
-        // Fetch work info for work_ref and other context
-        let work: serde_json::Value = client
-            .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
-            .await?;
+        // R-V144P1-005: use shared work context helper (avoids duplicate fetch)
+        let (work_ref, topic, world_id, work) = fetch_work_context(client, work_id).await?;
 
-        let work_ref = work
-            .get("work_ref")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let topic = work
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("novel");
-        let world_id = work.get("world_id").and_then(|v| v.as_str());
         let body_path = finding
             .get("chapter")
             .and_then(serde_json::Value::as_i64)
@@ -884,10 +920,7 @@ async fn handle_review_master(
         });
         if let Some(wid) = world_id {
             if let Some(o) = input.as_object_mut() {
-                o.insert(
-                    "world_id".to_string(),
-                    serde_json::Value::String(wid.to_string()),
-                );
+                o.insert("world_id".to_string(), serde_json::Value::String(wid));
             }
         }
         if let Some(bp) = body_path {
@@ -937,42 +970,37 @@ async fn handle_review_master(
         }
     }
 
-    // --auto-schedule: opt-in enqueue when 96h stale findings exist
+    // --auto-schedule: opt-in enqueue when 96h stale findings exist for this Work
     if auto_schedule {
         let creator_id = config
             .active_creator_id
             .as_deref()
             .ok_or(crate::errors::CliError::CreatorNotSelected)?;
 
-        // Check for stale findings
+        // R-V144P1-003: scope stale check to the current Work.
+        // The daemon /stale endpoint is creator-global; we filter client-side
+        // to count only stale findings belonging to this work_id, so that
+        // auto-schedule fires only when this Work has stale master findings.
         let stale: serde_json::Value = client
             .get::<serde_json::Value>("/v1/local/findings/stale")
             .await?;
 
-        let stale_count = stale
-            .get("stale_count")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
+        let stale_findings = stale
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .map_or(&[] as &[serde_json::Value], |v| v.as_slice());
+        let work_stale_count = stale_findings
+            .iter()
+            .filter(|f| f.get("work_id").and_then(|v| v.as_str()) == Some(work_id))
+            .count();
 
-        if stale_count == 0 {
+        if work_stale_count == 0 {
             if !json {
-                println!("No stale findings — auto-schedule skipped.");
+                println!("No stale findings for this Work — auto-schedule skipped.");
             }
         } else {
-            // Fetch work info for context
-            let work: serde_json::Value = client
-                .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
-                .await?;
-
-            let work_ref = work
-                .get("work_ref")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-            let topic = work
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("novel");
-            let world_id = work.get("world_id").and_then(|v| v.as_str());
+            // R-V144P1-005: use shared work context helper
+            let (work_ref, topic, world_id, _work) = fetch_work_context(client, work_id).await?;
 
             // Fetch open master findings for the input
             let open_findings_json = serde_json::to_string(&master_findings)?;
@@ -985,10 +1013,7 @@ async fn handle_review_master(
             });
             if let Some(wid) = world_id {
                 if let Some(o) = input.as_object_mut() {
-                    o.insert(
-                        "world_id".to_string(),
-                        serde_json::Value::String(wid.to_string()),
-                    );
+                    o.insert("world_id".to_string(), serde_json::Value::String(wid));
                 }
             }
 
@@ -1021,14 +1046,16 @@ async fn handle_review_master(
                 let output = serde_json::json!({
                     "work_id": work_id,
                     "auto_schedule": true,
-                    "stale_count": stale_count,
+                    "stale_count": work_stale_count,
                     "schedule_id": schedule_id,
                     "preset": "novel-review-master",
                 });
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
                 println!();
-                println!("Auto-scheduled novel-review-master for {stale_count} stale finding(s).");
+                println!(
+                    "Auto-scheduled novel-review-master for {work_stale_count} stale finding(s) in this Work."
+                );
                 println!("  Schedule ID: {schedule_id}");
             }
         }
