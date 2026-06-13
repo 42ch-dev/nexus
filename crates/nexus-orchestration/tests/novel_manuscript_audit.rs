@@ -1,11 +1,12 @@
-//! Hermetic tests for novel-manuscript-audit embedded preset (V1.44 P0, DF-69).
+//! Hermetic tests for the legacy novel-manuscript-audit embedded preset (V1.44 P0, DF-69).
 //!
-//! Validates:
-//! 1. Preset loads via `load_embedded_preset` and passes validation.
-//! 2. Review mode state machine wiring (load_chapter → review_report → done).
-//! 3. Extract mode state machine wiring (load_chapter → extract_sync → done).
-//! 4. No FL-E driver schedule fields in preset output.
-//! 5. CLI handler: worldless extract returns 422.
+//! Note: The unified preset is retained for backward compatibility but the CLI
+//! now dispatches to novel-manuscript-audit-review or novel-manuscript-audit-extract
+//! based on mode. New tests for split presets are in:
+//!   - novel_manuscript_audit_review.rs
+//!   - novel_manuscript_audit_extract.rs
+//!
+//! This file validates the legacy preset still loads correctly.
 
 use nexus_orchestration::capability::CapabilityRegistry;
 use nexus_orchestration::preset::load_embedded_preset;

@@ -1,20 +1,30 @@
-# DEPRECATED: Use novel-manuscript-audit-review or novel-manuscript-audit-extract instead.
+# Novel Manuscript Audit — Review Mode (V1.44 P0 fix, DF-69)
 #
-# This unified preset is retained for backward compatibility only.
-# The CLI dispatches to the correct split preset based on mode.
-# Direct schedule creation with this preset ID is no longer documented.
+# On-demand chapter review: read chapter body → structured 五問 review →
+# write report under Logs/review/ + optional findings upsert.
+# Does NOT enter the FL-E auto-chain driver.
 #
-# See: novel-manuscript-audit-review/ and novel-manuscript-audit-extract/
+# Input variables (passed via schedule input):
+#   work_id:           Work entity ID (wrk_...).
+#   work_ref:          Human-readable short reference (directory name).
+#   chapter:           Integer chapter number (required).
+#   volume:            Volume number (default 1; required for multi-volume).
+#   body_path:         Override path; default resolved from work_chapters.
+#   upsert_findings:   Boolean (default true).
+#
+# State machine: load_chapter → review_report → done
+#
+# Launch:
+#   nexus42 creator run audit-chapter <work_id> --mode review [--chapter N]
 
 preset:
-  id: novel-manuscript-audit
+  id: novel-manuscript-audit-review
   version: 1
   kind: creator
-  description: "On-demand chapter audit: structured review report and/or synchronous World KB extract (no FL-E auto-chain)"
+  description: "On-demand chapter review: structured 五問 review report under Logs/review/ (no FL-E auto-chain)"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
-    - kb.extract_work
   run_intents:
     - work_continue
   initial: load_chapter
@@ -32,7 +42,7 @@ preset:
 
 states:
   - id: load_chapter
-    description: "Load chapter body from resolved path; branch on mode"
+    description: "Load chapter body from resolved path for review"
     enter:
       - kind: capability
         name: creator.inject_prompt
@@ -41,7 +51,6 @@ states:
           vars:
             work_ref: "{{preset.input.work_ref}}"
             work_id: "{{preset.input.work_id}}"
-            mode: "{{preset.input.mode}}"
             chapter: "{{preset.input.chapter}}"
             volume: "{{preset.input.volume}}"
             body_path: "{{preset.input.body_path}}"
@@ -50,7 +59,7 @@ states:
     next: review_report
 
   - id: review_report
-    description: "Review mode: run 五問 structured review, write report under Logs/review/"
+    description: "Run 五問 structured review, write report under Logs/review/"
     enter:
       - kind: capability
         name: creator.inject_prompt
@@ -64,22 +73,6 @@ states:
             upsert_findings: "{{preset.input.upsert_findings}}"
     exit_when:
       kind: manual
-    next: done
-
-  - id: extract_sync
-    description: "Extract mode: synchronous kb.extract_work for World-bound Works (no queue ceremony)"
-    enter:
-      - kind: capability
-        name: kb.extract_work
-        args:
-          creator_id: "{{preset.input.creator_id}}"
-          work_id: "{{preset.input.work_id}}"
-          world_id: "{{preset.input.world_id}}"
-          profile_hint: "novel"
-          source_kind: "work_chapter"
-          source_locator: "{{preset.input.body_path}}"
-    exit_when:
-      kind: rule
     next: done
 
   - id: done
