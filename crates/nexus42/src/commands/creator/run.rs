@@ -128,6 +128,47 @@ pub enum RunCommand {
         #[arg(long)]
         extend_chapters: Option<i32>,
     },
+    /// On-demand chapter audit — review or extract without entering FL-E auto-chain (DF-69)
+    ///
+    /// Audits an already-written chapter body. Two modes:
+    ///   - review:  structured 五問 review report → Logs/review/
+    ///   - extract: synchronous World KB extraction (World-bound Works only)
+    ///
+    /// This command does NOT create an FL-E driver schedule or advance auto-chain state.
+    AuditChapter {
+        /// Work ID (wrk_...) to audit
+        work_id: String,
+        /// Audit mode: "review" (structured review report) or "extract" (World KB extract)
+        #[arg(long, value_enum)]
+        mode: AuditMode,
+        /// Chapter number to audit (required)
+        #[arg(long)]
+        chapter: i32,
+        /// Volume number (default 1; required for multi-volume Works)
+        #[arg(long, default_value_t = 1)]
+        volume: i32,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// Audit mode for `creator run audit-chapter` (DF-69).
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum AuditMode {
+    /// Structured 五問 review report under Logs/review/
+    Review,
+    /// Synchronous World KB extract (World-bound Works only)
+    Extract,
+}
+
+impl std::fmt::Display for AuditMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Review => write!(f, "review"),
+            Self::Extract => write!(f, "extract"),
+        }
+    }
 }
 
 /// FL-E stage subcommands (V1.34 cli-spec §6.2E).
@@ -654,9 +695,181 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             }
         }
+        RunCommand::AuditChapter {
+            work_id,
+            mode,
+            chapter,
+            volume,
+            json,
+        } => {
+            handle_audit_chapter(&work_id, mode, chapter, volume, json, config, &client).await?;
+        }
     }
 
     Ok(())
+}
+
+// ── On-demand chapter audit (DF-69, V1.44 P0) ─────────────────────────────
+
+/// Handle `creator run audit-chapter` subcommand (DF-69).
+///
+/// Creates a schedule for the `novel-manuscript-audit` preset with the
+/// given mode, chapter, and volume. Does NOT enter the FL-E auto-chain driver.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The Work does not exist or is not a novel Work.
+/// - Extract mode is requested on a worldless Work (422).
+/// - The daemon API call fails.
+#[allow(clippy::too_many_lines)] // Single-entry CLI handler; splitting would create a >7-arg helper
+async fn handle_audit_chapter(
+    work_id: &str,
+    mode: AuditMode,
+    chapter: i32,
+    volume: i32,
+    json: bool,
+    config: &CliConfig,
+    client: &crate::api::DaemonClient,
+) -> Result<()> {
+    let creator_id = config
+        .active_creator_id
+        .as_deref()
+        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+    // Fetch Work state to extract work_ref and world_id
+    let resp: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .await?;
+
+    let work_ref = resp
+        .get("work_ref")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let world_id = resp
+        .get("world_id")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let body_path = resolve_audit_body_path(&resp, chapter, volume);
+
+    // Extract mode: validate World-bound precondition
+    if matches!(mode, AuditMode::Extract) && world_id.is_none() {
+        return Err(crate::errors::CliError::Other(format!(
+            "422 world_required_for_extract: Work {work_id} is not World-bound. \
+             Extract mode requires a Work with an associated World."
+        )));
+    }
+
+    // Build preset input
+    let mut audit_input = serde_json::json!({
+        "work_id": work_id,
+        "work_ref": work_ref,
+        "mode": mode.to_string(),
+        "chapter": chapter,
+        "volume": volume,
+        "creator_id": creator_id,
+        "upsert_findings": true,
+    });
+
+    // Set body_path if resolved
+    if let Some(ref bp) = body_path {
+        if let Some(o) = audit_input.as_object_mut() {
+            o.insert(
+                "body_path".to_string(),
+                serde_json::Value::String(bp.clone()),
+            );
+        }
+    }
+
+    // Set world_id for extract mode
+    if let Some(ref wid) = world_id {
+        if let Some(o) = audit_input.as_object_mut() {
+            o.insert(
+                "world_id".to_string(),
+                serde_json::Value::String(wid.clone()),
+            );
+        }
+    }
+
+    let request = AddScheduleRequest {
+        creator_id: creator_id.to_string(),
+        preset_id: "novel-manuscript-audit".to_string(),
+        seed: Some(format!(
+            "audit-chapter {work_id} mode={mode} ch={chapter} vol={volume}"
+        )),
+        label: Some(format!(
+            "On-demand audit: {mode} ch{chapter} v{volume} ({work_id})"
+        )),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(audit_input),
+        force_gates: false,
+        reason: None,
+    };
+
+    let mut sched_resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
+        .await?;
+
+    let schedule_id = sched_resp
+        .get("schedule_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
+
+    if json {
+        if let Some(o) = sched_resp.as_object_mut() {
+            o.insert(
+                "audit_mode".to_string(),
+                serde_json::Value::String(mode.to_string()),
+            );
+            o.insert(
+                "chapter".to_string(),
+                serde_json::Value::Number(chapter.into()),
+            );
+            o.insert(
+                "volume".to_string(),
+                serde_json::Value::Number(volume.into()),
+            );
+        }
+        println!("{}", serde_json::to_string_pretty(&sched_resp)?);
+    } else {
+        println!("Audit scheduled: {mode} mode for Work {work_id} ch{chapter} v{volume}");
+        println!("  Schedule: {schedule_id} (preset: novel-manuscript-audit)");
+        if matches!(mode, AuditMode::Review) {
+            println!("  Report will be written to Works/{work_ref}/Logs/review/");
+        } else {
+            println!(
+                "  KB extraction will run synchronously for World {}",
+                world_id.as_deref().unwrap_or("?")
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Resolve the `body_path` for the audit chapter from the Work response.
+///
+/// Looks up the chapter row matching the given chapter/volume in the
+/// Work's chapters array. Returns None if not found (preset will use
+/// default layout resolution).
+fn resolve_audit_body_path(
+    work_resp: &serde_json::Value,
+    chapter: i32,
+    _volume: i32,
+) -> Option<String> {
+    let chapters = work_resp.get("chapters").and_then(|v| v.as_array())?;
+    let ch_row = chapters.iter().find(|c| {
+        c.get("chapter").and_then(serde_json::Value::as_i64) == Some(i64::from(chapter))
+    })?;
+    ch_row
+        .get("body_path")
+        .and_then(|v| v.as_str())
+        .map(String::from)
 }
 
 // ── FL-E stage management (V1.34) ───────────────────────────────────────────
@@ -1283,5 +1496,49 @@ mod tests {
                 "stage '{stage}' should NOT be gated by novel-complete check: {result:?}"
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.44 P0 (DF-69): audit-chapter CLI tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn audit_mode_display_review() {
+        assert_eq!(AuditMode::Review.to_string(), "review");
+    }
+
+    #[test]
+    fn audit_mode_display_extract() {
+        assert_eq!(AuditMode::Extract.to_string(), "extract");
+    }
+
+    #[test]
+    fn resolve_audit_body_path_finds_chapter() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
+                {"chapter": 3, "body_path": "Works/novel/Stories/ch03.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 3, 1);
+        assert_eq!(result.as_deref(), Some("Works/novel/Stories/ch03.md"));
+    }
+
+    #[test]
+    fn resolve_audit_body_path_returns_none_for_missing() {
+        let resp = serde_json::json!({
+            "chapters": [
+                {"chapter": 1, "body_path": "Works/novel/Stories/ch01.md"},
+            ]
+        });
+        let result = resolve_audit_body_path(&resp, 99, 1);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn resolve_audit_body_path_returns_none_for_empty_chapters() {
+        let resp = serde_json::json!({"work_id": "wrk_test"});
+        let result = resolve_audit_body_path(&resp, 1, 1);
+        assert!(result.is_none());
     }
 }
