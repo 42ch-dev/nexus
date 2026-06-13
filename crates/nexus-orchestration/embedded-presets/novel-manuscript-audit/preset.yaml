@@ -1,0 +1,86 @@
+# DEPRECATED: Use novel-manuscript-audit-review or novel-manuscript-audit-extract instead.
+#
+# This unified preset is retained for backward compatibility only.
+# The CLI dispatches to the correct split preset based on mode.
+# Direct schedule creation with this preset ID is no longer documented.
+#
+# See: novel-manuscript-audit-review/ and novel-manuscript-audit-extract/
+
+preset:
+  id: novel-manuscript-audit
+  version: 1
+  kind: creator
+  description: "On-demand chapter audit: structured review report and/or synchronous World KB extract (no FL-E auto-chain)"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - kb.extract_work
+  run_intents:
+    - work_continue
+  initial: load_chapter
+  terminal: done
+  world_binding:
+    mode: optional
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+
+states:
+  - id: load_chapter
+    description: "Load chapter body from resolved path; branch on mode"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/load-chapter.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            mode: "{{preset.input.mode}}"
+            chapter: "{{preset.input.chapter}}"
+            volume: "{{preset.input.volume}}"
+            body_path: "{{preset.input.body_path}}"
+    exit_when:
+      kind: manual
+    next: review_report
+
+  - id: review_report
+    description: "Review mode: run 五問 structured review, write report under Logs/review/"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/review-report.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            chapter: "{{preset.input.chapter}}"
+            volume: "{{preset.input.volume}}"
+            upsert_findings: "{{preset.input.upsert_findings}}"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: extract_sync
+    description: "Extract mode: synchronous kb.extract_work for World-bound Works (no queue ceremony)"
+    enter:
+      - kind: capability
+        name: kb.extract_work
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          work_id: "{{preset.input.work_id}}"
+          world_id: "{{preset.input.world_id}}"
+          profile_hint: "novel"
+          source_kind: "work_chapter"
+          source_locator: "{{preset.input.body_path}}"
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true

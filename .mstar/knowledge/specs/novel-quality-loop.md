@@ -1,17 +1,20 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Draft (V1.39 — 2026-06-09)  
-**Document class**: Draft overlay  
+**Status**: Shipped (V1.44 — 2026-06-13; V1.39 baseline retained)  
+**Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation  
+**Last updated**: 2026-06-13 (V1.44 P-last — promoted from Draft overlay to Shipped Feature line; §3.4 review-master CLI overlay folded in; R-V143P0-002 closed)  
+**Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
 - [novel-workflow-profile.md](novel-workflow-profile.md) — §5.5 roadmap promoted to implement contract here for V1.39
 - [creator-workflow.md](creator-workflow.md) — FL-E `review` stage and auto-chain
 - [orchestration-engine.md](orchestration-engine.md) — presets, daemon scheduled tasks
 - [cli-spec.md](cli-spec.md) — status/banner surfaces
+- [novel-manuscript-audit.md](novel-manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
+- [novel-author-experience.md](novel-author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
 
-**Iteration compass**: [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md)
+**Iteration compass**: [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) · [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) (P1 overlay)
 
 ---
 
@@ -59,6 +62,32 @@ Auto-chain must not fork driver when routing spawns auxiliary schedules; at most
 | `reflection-loop` | Default FL-E `review` stage (shipped) |
 | `novel-brainstorm` | Ideation from open findings (V1.39 P2) |
 | `novel-review-master` | Master decision surface (V1.39 P2) |
+| `novel-manuscript-audit` | On-demand chapter audit — review and/or extract (V1.44 P0; see [novel-manuscript-audit.md](novel-manuscript-audit.md)) |
+
+### 3.4 Review-master CLI surface (V1.44 P1 — R-V143P0-002)
+
+V1.43 shipped `novel-review-master` preset and daemon 96h banner, but authors still used the workaround `creator run stage advance --stage review` per [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) line 174. V1.44 P1 **converged** a dedicated author-facing command.
+
+**Normative CLI** (Shipped V1.44):
+
+```bash
+nexus42 creator run review-master <work_id> [--finding-id <id>] [--auto-schedule]
+```
+
+| Behavior | Requirement |
+| --- | --- |
+| Default | Lists open findings with `target_executor=master` and prints next action |
+| `--finding-id` | Runs or enqueues `novel-review-master` preset scoped to one finding |
+| `--auto-schedule` | Opt-in: enqueue `novel-review-master` when 96h stale findings exist (mirrors DF-67 Work setting) |
+| Driver interaction | Must not fork or cancel active FL-E auto-chain driver |
+
+**Presentation** (minimum):
+
+- Stdout summary: open master findings count + top 3 by severity
+- On empty: single line "No master findings" + quickstart §5 link
+- Quickstart §5 updated to cite this command as primary path (V1.44)
+
+**Residual**: R-V143P0-002 — resolved V1.44 P1; close in P-last hygiene.
 
 ---
 

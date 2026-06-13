@@ -70,6 +70,7 @@ Authors must be able to answer without reading JSON APIs:
 | Is the Work complete? | Clear terminal/completed marker per novel-workflow-profile §6 | — [x] Shipped (V1.43 P2) — completed banner with `COMPLETED` marker, quickstart §6 link |
 | Are there open findings? | Count + severity summary; link to review preset name | — [x] Shipped (V1.43 P2) — `findings:` line with severity breakdown, top findings, review hint |
 | Is 96h master-review banner active? | Existing daemon banner; ensure visible in status path | — [x] Shipped (V1.39 P4 T3) — already wired in `creator works status`; verified V1.43 P2 |
+| How do I run master-decision review? | `creator run review-master <work_id>` — lists open master findings, optionally enqueues `novel-review-master` preset for a specific finding or on opt-in auto-schedule | — [x] Shipped (V1.44 P1) — see [novel-quality-loop.md](novel-quality-loop.md) §3.4 |
 
 Normative detail remains in [novel-quality-loop.md](novel-quality-loop.md); P2 implements **presentation** only unless a spec gap is found (then amend loop spec in same plan).
 
@@ -87,4 +88,5 @@ At V1.43 P5/P-last hygiene:
 
 - [x] **Kept as Feature line supplement** — §2–§4 map quickstart sections to CLI surfaces and shipped implementation status. No merge into cli-spec.md required; this document continues to serve as the author-experience normative supplement.
 - [x] **Status promoted to Shipped (V1.43)** — all P0/P1/P2 surfaces implemented; §2 row 4 amended (`creator run status` → `creator works status` per R-V143P0-001).
-- [ ] Merge deferred rows (review-master surface per R-V143P0-002) into V1.44+ compass when reopened.
+- [x] **R-V143P0-002 registered in V1.44 compass** — [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) P1; implement via [novel-quality-loop.md](novel-quality-loop.md) §3.4.
+- [ ] **DF-69 audit entry** — quickstart §5 cross-ref when P0 ships ([novel-manuscript-audit.md](novel-manuscript-audit.md)).

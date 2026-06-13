@@ -102,7 +102,8 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [novel-workflow-profile.md](novel-workflow-profile.md) | Feature line | **Shipped (V1.36 → V1.42)** — World KB §3.5.1; V1.41 §6.4 multi-work; V1.42 §4.5.4–7 multi-volume PK + outlines + tests |
 | [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) | Feature line | **Shipped (V1.41 → V1.42 P0)** — §4.2 runtime_lock production wiring implemented V1.42 P0 |
 | [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
-| [novel-quality-loop.md](novel-quality-loop.md) | Draft overlay | **Shipped (V1.39 → V1.40)** — full quality loop + V1.40 P3 extract persistence |
+| [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.44)** — V1.39 baseline + §3.4 review-master CLI overlay (P1); R-V143P0-002 closed |
+| [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
 | [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.43)** — BL-10 quickstart contract + CLI copy map + author visibility |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
@@ -151,7 +152,7 @@ When specs disagree, higher row wins:
 | Creator workflow stages / chain | creator-workflow | work-experience-model, novel-workflow-profile (produce) |
 | Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
 | Schedule / core_context | creator-schedule-and-core-context | orchestration-engine sessions |
-| Conditional routing | preset-conditional-routing | orchestration-engine §7.5 stub |
+| On-demand chapter audit (DF-69) | novel-manuscript-audit | novel-quality-loop §3, cli-spec §6.2 |
 | Agent `nexus.*` tools | agent-nexus-tool-bridge | acp-capability-set, agent-host |
 | ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
 | KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |

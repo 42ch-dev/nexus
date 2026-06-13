@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.43 Shipped** (2026-06-12 — BL-10 + CLI copy P1 + author visibility P2 + P-last hygiene) · **V1.42 Shipped** (2026-06-12) · **V1.41 Shipped** (PR #53) · Platform **paused** · v1.42.1 hotfix **on main** (PR #55) · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.44 Shipped** (2026-06-13) · **V1.43 Shipped** (2026-06-12) · **V1.42 Shipped** (2026-06-12) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: Shipped (V1.43 — 2026-06-12)
+**Status**: Active (V1.44 harness prepare — 2026-06-13)
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-12 (V1.43 Shipped: BL-10 + CLI copy + author visibility + P-last hygiene; residuals R-V137P0-01, R-V142P1-F-003, R-V143P0-001 closed; R-V142P0-QC-W-01, R-V142P0-QC-W-001 waived; R-V143P0-002 deferred to V1.44+)
+**Last updated**: 2026-06-13 (V1.44 P-last closeout: DF-69 → shipped archive; R-V143P0-002 closed; compass [v1.44](../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) shipped)
 
 ---
 
@@ -91,7 +91,6 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-66 | Per-chapter log subdirectories at `Works/<work_ref>/Logs/` | V1.36 distill | **V1.39 P3 Shipped** | S | V1.36→V1.37→V1.39 | Same plan as DF-65. Implemented: `Logs/{brainstorm,write,review,publish}/` subdirs scaffolded; novel-writing writes to `Logs/write/`; sync exclusion documented. PR #50 merged ad9725d8. |
 | DF-67 | Master-decision timeout (96h finding escalation) | V1.36 distill | **V1.39 P4 Shipped** | S | V1.36→V1.37→V1.39 | Plan: [2026-06-09-v1.39-master-decision-timeout.md](../plans/2026-06-09-v1.39-master-decision-timeout.md). Implemented: 24h-interval daemon task (env-var override); `find_resumable_works` stale-finding DAO; CLI status banner `⏰ N findings stale (>96h)`; per-Work `auto_review_master_on_timeout` opt-in (default false); RVM-prefixed review-master schedule helper; 7 hermetic tests. PR #50 merged ad9725d8. |
 | ~~BL-10~~ | Novel writing author quickstart (`docs/novel-writing-quickstart.md`) | V1.41 prepare | **V1.43 Shipped** | M | V1.41→V1.43 | **Shipped V1.43** on `iteration/v1.43` (merge `340423e5`, 2026-06-12). Plan: [2026-06-12-v1.43-novel-writing-quickstart.md](../plans/2026-06-12-v1.43-novel-writing-quickstart.md). Spec: [novel-author-experience.md](specs/novel-author-experience.md). P-last residuals: R-V143P0-001 closed (spec amendment); R-V143P0-002 deferred to V1.44+ (review-master surface). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md). |
-| DF-69 | **Standalone manuscript audit preset** (review report **or** KB extract on chapter正文) | V1.43 grill-me | **Post-V1.43** | M | V1.43 | Dual-mode embedded preset (or preset pair) invoked **on demand** against existing `Works/<work_ref>/Stories/ch*.md` — **without** entering full FL-E auto-chain. **`mode=review`**: read chapter body → structured review (五问 baseline + optional extended checks) → write human-readable report under `Logs/review/` and optionally upsert `findings` rows. **`mode=extract`**: same `work_id` + `body_path` / chapter locator → `kb.extract_work` for World-bound Works (promote KeyBlocks) without `kb_extract_jobs` queue ceremony. **Distinct from shipped**: `novel-writing` finalize `llm_judge` (inline gate only); `reflection-loop` (FL-E `review` stage default); `novel-review-master` (master decisions on **existing** findings); `kb-extract` preset (queue claim → job lifecycle). **Entry sketch** (spec TBD): `creator run audit-chapter --mode review|extract` or `daemon schedule add --preset novel-manuscript-audit`. Natural follow-up after V1.43 author visibility (P2); spec overlay candidate: extend [novel-quality-loop.md](specs/novel-quality-loop.md) §3 or [world-kb-runtime-architecture.md](world-kb-runtime-architecture.md) §extract-on-demand. |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -287,7 +286,8 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.43** (Shipped 2026-06-12): [v1.43-novel-author-experience-delivery-compass-v1.md](../iterations/v1.43-novel-author-experience-delivery-compass-v1.md) — BL-10 author quickstart + CLI copy P1 + author visibility P2 + P-last hygiene; `iteration/v1.43`.
+- **V1.44** (Active harness prepare 2026-06-13): [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) — DF-69 P0 audit + R-V143P0-002 P1 review-master + P2 multi-volume + P3 author-desk; `iteration/v1.44`.
+- **V1.43** (Shipped 2026-06-12): [v1.43-novel-author-experience-delivery-compass-v1.md](../iterations/v1.43-novel-author-experience-delivery-compass-v1.md) — BL-10 author quickstart + CLI copy P1 + author visibility P2 + P-last hygiene; `iteration/v1.43` retired.
 - **V1.42** (Shipped 2026-06-12): [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) — P0 runtime_lock + P1 DF-62 + P2 DF-56 + P3 DF-47 + P-last UX.
 - **V1.41** (Shipped 2026-06-11): [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) — PR #53; DF-60/61 archived.
 - **V1.40** (Shipped 2026-06-11 via PR #52 merged): [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) — DF-63 closed; `iteration/v1.40` retired.
@@ -320,4 +320,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-12 (V1.43 Shipped: BL-10 + CLI copy + author visibility + P-last hygiene; spec stamps applied; residuals closed/waived/deferred). Status: **V1.43 Shipped**; V1.42 Shipped; BL-10 shipped; R-V143P0-002 deferred to V1.44+.*
+*Last updated: 2026-06-13 (V1.44 compass code review: implementation baseline §0.3; P0∥P1∥P2; P3 whitelist trimmed; F-002 scope corrected to work_chapters.rs). Status: **V1.44 Active (harness prepare + review-amended)**; V1.43 Shipped.*

@@ -347,3 +347,115 @@ async fn f001_volume_aware_evaluator_work_complete() {
         "should mark work complete when all volumes finalized"
     );
 }
+
+// ── V1.44 P2 (F-004): Volume propagation through supervisor chain ───────
+
+/// AC2 (F-004): After the supervisor enqueues a produce schedule for
+/// volume 2 chapter 1, the schedule's preset input should include the
+/// `volume` template var (alongside `chapter` and `work_id`).
+#[tokio::test]
+async fn f004_supervisor_enqueue_includes_volume_in_preset_input() {
+    use nexus_orchestration::auto_chain;
+
+    let pool = test_pool().await;
+
+    // Work: 2 volumes × 3 chapters = 6 total
+    let work = test_work("wrk_f004_1", 3, 6, true);
+    works::create_work(&pool, &work).await.unwrap();
+
+    // Seed: vol 1 all finalized, vol 2 all not_started
+    seed_multi_volume_chapters(&pool, "wrk_f004_1", 2, 3, 1, 3).await;
+
+    // Build the schedule request via the volume-aware path
+    let schedule_req = auto_chain::build_auto_chain_schedule(
+        "produce",
+        "ctr_test",
+        &work,
+        Some(1), // next chapter is vol 2 ch 1
+        Some(2), // volume 2
+    )
+    .expect("should produce a schedule for produce stage");
+
+    assert_eq!(schedule_req.preset_id, "novel-writing");
+    let input = schedule_req.input.expect("input should be set");
+    assert_eq!(input["chapter"], 1, "chapter should be 1 (vol 2 ch 1)");
+    assert_eq!(
+        input["volume"], 2,
+        "F-004: volume should be 2 in preset input"
+    );
+    assert_eq!(input["work_id"], "wrk_f004_1");
+}
+
+/// F-004 (negative): Single-volume enqueue should have volume = None
+/// (not present in preset input).
+#[tokio::test]
+async fn f004_single_volume_enqueue_has_no_volume_in_input() {
+    let pool = test_pool().await;
+
+    let work = test_work("wrk_f004_2", 1, 3, true);
+    works::create_work(&pool, &work).await.unwrap();
+
+    seed_multi_volume_chapters(&pool, "wrk_f004_2", 1, 3, 1, 1).await;
+
+    let schedule_req = auto_chain::build_auto_chain_schedule(
+        "produce",
+        "ctr_test",
+        &work,
+        Some(2), // next chapter in vol 1
+        None,    // single-volume — no volume context
+    )
+    .expect("should produce a schedule");
+
+    let input = schedule_req.input.expect("input should be set");
+    assert_eq!(input["chapter"], 2);
+    assert!(
+        input.get("volume").is_none(),
+        "F-004: single-volume preset input should NOT have volume key"
+    );
+}
+
+/// AC1 (F-002): is_work_completed returns true for 2-volume Work with all
+/// rows finalized across both volumes.
+#[tokio::test]
+async fn f002_multi_volume_work_completed_all_volumes_finalized() {
+    let pool = test_pool().await;
+
+    let mut work = test_work("wrk_f002_1", 6, 6, true);
+    work.intake_status = "complete".to_string();
+    works::create_work(&pool, &work).await.unwrap();
+
+    // Seed 2 volumes × 3 chapters = 6 rows
+    seed_multi_volume_chapters(&pool, "wrk_f002_1", 2, 3, 2, 3).await;
+
+    let completed = nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_1")
+        .await
+        .unwrap();
+
+    assert!(
+        completed,
+        "F-002: 2-volume Work with all 6 chapters finalized should be completed"
+    );
+}
+
+/// AC1 (F-002 negative): is_work_completed returns false when vol 2 has
+/// unfinished chapters even though vol 1 is complete.
+#[tokio::test]
+async fn f002_multi_volume_work_not_completed_partial_vol2() {
+    let pool = test_pool().await;
+
+    let mut work = test_work("wrk_f002_2", 3, 6, true);
+    work.intake_status = "complete".to_string();
+    works::create_work(&pool, &work).await.unwrap();
+
+    // Seed with only vol 1 finalized
+    seed_multi_volume_chapters(&pool, "wrk_f002_2", 2, 3, 1, 3).await;
+
+    let completed = nexus_local_db::work_chapters::is_work_completed(&pool, "wrk_f002_2")
+        .await
+        .unwrap();
+
+    assert!(
+        !completed,
+        "F-002: vol 1 finalized but vol 2 not_started → should NOT be completed"
+    );
+}

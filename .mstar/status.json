@@ -1,8 +1,9 @@
 {
   "version": 1,
-  "updated_at": "2026-06-12T23:45:00+08:00",
+  "updated_at": "2026-06-13T19:00:00+08:00",
   "plans": [],
   "v1_43_iteration_complete": true,
+  "v1_44_iteration_complete": true,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -10,54 +11,43 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
+    "integration_branch": "iteration/v1.44",
     "last_integration_branch": "iteration/v1.43",
     "integration_merge_target": "main",
-    "integration_branch_role": "retired",
-    "latest_shipped_iteration": "v1.43",
-    "latest_shipped_at": "2026-06-12T23:39:10+08:00",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
-    "integration_branch_retired": "iteration/v1.43",
+    "integration_branch_role": "active",
+    "latest_shipped_iteration": "v1.44",
+    "latest_shipped_at": "2026-06-13T18:00:00+08:00",
+    "latest_active_iteration": "v1.44",
+    "latest_active_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+    "integration_branch_retired": null,
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
-      "updated_at": "2026-06-12T23:45:00+08:00",
-      "total_open": 86,
+      "updated_at": "2026-06-13T18:00:00+08:00",
+      "total_open": 77,
       "by_severity": {
         "critical": 0,
-        "high": 0,
+        "high": 2,
         "medium": 7,
-        "low": 63,
-        "nit": 16
+        "low": 58,
+        "nit": 10
       },
       "by_target": {
-        "v1.43": 2,
-        "v1.42": 9,
-        "v1.41": 7,
-        "backlog": 65,
-        "v1.44": 3
+        "V1.33": 3,
+        "V1.31": 5,
+        "V1.30": 9,
+        "V1.34": 6,
+        "V1.38": 5,
+        "V1.39": 22,
+        "V1.40": 1,
+        "V1.41": 21,
+        "V1.42": 5
       },
-      "by_plan": {
-        "creator-run": 3,
-        "tech-debt": 9,
-        "and-stages": 5,
-        "tool-implementation": 1,
-        "foundation-first": 1,
-        "selection-status": 5,
-        "writing-parameterization": 7,
-        "chain-engine": 5,
-        "stage-wiring": 9,
-        "v138-hardening": 3,
-        "review-routing": 6,
-        "v1.40-hygiene": 1,
-        "work-switch": 12,
-        "selection-pool": 19,
-        "author-experience": 5
-      },
-      "notes": "V1.43 P-last: closed R-V137P0-01 (fix), R-V142P1-F-003 (fix), R-V142P0-QC-W-01 (waive), R-V142P0-QC-W-001 (waive), R-V143P0-001 (fix). R-V143P0-002 deferred to V1.44+. R-V138 chain-engine already fixed. Spec stamps: preset-conditional-routing → Shipped V1.42, novel-workflow-profile → Shipped V1.42, novel-author-experience → Shipped V1.43."
+      "notes": "V1.44 ship closeout (2026-06-13): DF-69 → shipped archive; R-V143P0-002 closed; R-V141P0-04 / R-V138P1-02 / R-V138P1-07 resolved in P3; R-V141P0-05 / R-V141P1-14 formally waived; R-V142P1-QC1-F-002 / F-004 resolved in P2; R-V144P0-001..010 (P0 fix-wave) + R-V144P1-001..006 (P1 fix-wave) resolved; Suggestions S01.. (P0/P1/P2/P3) deferred to next iteration. 5/5 V1.44 implement plans Done; PR iteration/v1.44 → main pending (T7)."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-author-experience.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-manuscript-audit.md",
     "spec_refs": [
+      ".mstar/knowledge/specs/novel-manuscript-audit.md",
+      ".mstar/knowledge/specs/novel-quality-loop.md",
       ".mstar/knowledge/specs/novel-author-experience.md",
       ".mstar/knowledge/specs/novel-workflow-profile.md",
       ".mstar/knowledge/specs/entity-scope-model.md",
@@ -69,19 +59,37 @@
       ".mstar/knowledge/specs/novel-writing-sync-contract.md",
       ".mstar/knowledge/specs/local-db-schema.md",
       ".mstar/knowledge/specs/preset-conditional-routing.md",
-      ".mstar/knowledge/specs/novel-quality-loop.md",
       ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
       ".mstar/knowledge/specs/orchestration-engine.md",
       ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
       ".mstar/knowledge/specs/novel-work-pool.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md",
-    "pre_implement_gate": "satisfied — v1.42.1 hotfix on main (279ec7b3, PR #55); iteration/v1.43 based on 955c4cbc",
+    "iteration_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+    "pre_implement_gate": "CLOSED — V1.44 iteration complete 2026-06-13 (5 implement plans + P-last hygiene all Done on iteration/v1.44; PR to main pending user push authorization).",
+    "v1_43_ship": {
+      "merge_commit": "0004d85f",
+      "pr": 56,
+      "shipped_at": "2026-06-12T23:39:10+08:00"
+    },
     "v1_42_1_hotfix": {
       "plan_id": "2026-06-12-v1.42.1-runtime-lock-acquire-order",
       "merge_commit": "279ec7b3",
       "pr": 55,
       "residual": "R-V142-MERGE-CI-001"
+    },
+    "v1_44_ship": {
+      "merge_commit": "pending PR #57 review + merge",
+      "pr": 57,
+      "shipped_at": "2026-06-13T18:00:00+08:00",
+      "5_plans": [
+        "P-1 harness-docs-prepare",
+        "P0 manuscript-audit-preset (DF-69)",
+        "P1 review-master-cli-surface (R-V143P0-002)",
+        "P2 multi-volume-hardening (R-V142P1-QC1-F-002/004)",
+        "P3 author-desk-residual-convergence (R-V141P0-04, R-V138P1-02, R-V138P1-07; waived R-V141P0-05, R-V141P1-14)",
+        "P-last hygiene-and-closeout"
+      ],
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/57"
     }
   },
   "residual_findings": {
@@ -459,7 +467,14 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "backlog",
-        "note": "Old template contained a bulleted list explaining each frontmatter field (title, chapter, status, word_count, world_refs). New template drops this entirely; frontmatter example block remains but field descriptions are gone. Restore compact 1-2 line summary of required frontmatter fields in a follow-up."
+        "note": "Old template contained a bulleted list explaining each frontmatter field (title, chapter, status, word_count, world_refs). New template drops this entirely; frontmatter example block remains but field descriptions are gone. Restore compact 1-2 line summary of required frontmatter fields in a follow-up.",
+        "lifecycle": "resolved",
+        "closure_note": "V1.44 P3 T3: restored compact frontmatter field docs in draft-chapter.md — added bulleted list explaining title, chapter, status, word_count, and world_refs after the YAML example block. Commit 6b834ae8.",
+        "closed_at": "2026-06-13",
+        "resolution": {
+          "commit": "6b834ae8",
+          "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence"
+        }
       },
       {
         "id": "R-V138P1-03",
@@ -518,7 +533,14 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target_date": "V1.39+ observability",
-        "note": "Add tracing::info! or debug! span showing the selected chapter context (chapter_label, outline_path, body_path, slug) to aid production debugging when chapter selection behaves unexpectedly."
+        "note": "Add tracing::info! or debug! span showing the selected chapter context (chapter_label, outline_path, body_path, slug) to aid production debugging when chapter selection behaves unexpectedly.",
+        "lifecycle": "resolved",
+        "closure_note": "V1.44 P3 T4: added tracing::debug! span (target: fl_e.stage) after chapter context extraction in stage_advance(). Logs work_id, next_chapter, chapter_label, outline_path, body_path, and slug. Commit 93db2288.",
+        "closed_at": "2026-06-13",
+        "resolution": {
+          "commit": "93db2288",
+          "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence"
+        }
       }
     ],
     "2026-06-09-v1.39-fl-e-auto-chain-engine": [
@@ -865,7 +887,15 @@
         "scope": "crates/nexus42/tests/integration/ (does not exist); need an end-to-end CLI test against running daemon",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "post this fix wave"
+        "target": "post this fix wave",
+        "lifecycle": "resolved",
+        "closure_note": "V1.44 P3 T2: added hermetic CLI surface tests in crates/nexus42/tests/creator_works.rs (7 tests covering works use, completion-lock help text, required-argument validation, and subcommand enumeration). Commit d5ebbe6c.",
+        "closed_at": "2026-06-13",
+        "resolution": {
+          "commit": "d5ebbe6c",
+          "plan_id": "2026-06-13-v1.44-author-desk-residual-convergence",
+          "test_file": "crates/nexus42/tests/creator_works.rs"
+        }
       },
       {
         "id": "R-V141P0-05",
@@ -876,8 +906,9 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.43+",
-        "lifecycle": "open",
-        "closure_note": "V1.42 P-last T1: waived — --from-work is on Start; --reopen/--extend-chapters are on Resume. These are separate commands used sequentially. No combined single-command path is needed. Each works correctly in isolation."
+        "lifecycle": "waived",
+        "closure_note": "V1.44 P-last formal close (V1.44 compass §1.6 P3 whitelist: waived items confirmed waived; deferred to next iteration if re-opened). See .mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md §2.",
+        "closed_at": "2026-06-13T17:00:00+08:00"
       },
       {
         "id": "R-V141P0-06",
@@ -1111,8 +1142,9 @@
         "decision": "accept",
         "owner": "@fullstack-dev",
         "target": "V1.42 P-last",
-        "lifecycle": "open",
-        "closure_note": "V1.42 P-last T1: waived — cosmetic help text split; no user-facing behavior change. Each PoolAction already has its own doc comment. Defer to V1.43+."
+        "lifecycle": "waived",
+        "closure_note": "V1.44 P-last formal close (V1.44 compass §1.6 P3 whitelist: waived items confirmed waived; deferred to next iteration if re-opened). See .mstar/plans/2026-06-13-v1.44-author-desk-residual-convergence.md §2.",
+        "closed_at": "2026-06-13T17:00:00+08:00"
       },
       {
         "id": "R-V141P1-15",
@@ -1122,7 +1154,9 @@
         "scope": "novel_pool_entries.rs + inspiration_items.rs + handlers",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.41 P-last"
+        "target": "V1.41 P-last",
+        "lifecycle": "open",
+        "closure_note": "V1.44 P3 T5: deferred to next iteration. Low-severity observability improvement; no user-facing behavior change. Pool/inspiration mutation tracing will be addressed in a future observability hardening plan."
       },
       {
         "id": "R-V141P1-16",
@@ -1259,14 +1293,20 @@
       {
         "id": "R-V142P1-QC1-F-002",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "is_work_completed uses flat current_chapter comparison — correct under current invariants but architecturally fragile",
         "source": "qc1.md F-002 (qc-specialist)",
-        "scope": "crates/nexus-orchestration/src/auto_chain.rs is_work_completed (current_chapter flat comparison vs per-volume)",
+        "scope": "crates/nexus-local-db/src/work_chapters.rs::is_work_completed (flat current_chapter + list_chapters len vs total_planned_chapters)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last or future refactor (non-blocking)",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+        "target": "V1.44 P2 (2026-06-13-v1.44-multi-volume-hardening)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]",
+        "closed_at": "2026-06-13T17:00:00+08:00",
+        "closure_note": "V1.44 P2 multi-volume hardening shipped. Predicate hardened to volume-aware COUNT query; supervisor `next_volume` threaded through enqueue_auto_chain_step / WorkFields / preset input. Verified by hermetic tests in supervisor_cross_volume.rs (8 tests) and nexus-local-db (190 tests).",
+        "resolution": {
+          "commit": "22324ddc",
+          "plan_id": "2026-06-13-v1.44-multi-volume-hardening"
+        }
       },
       {
         "id": "R-V142P1-QC1-F-003",
@@ -1286,14 +1326,20 @@
       {
         "id": "R-V142P1-QC1-F-004",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "title": "Supervisor NextChapter match arm ignores next_volume — volume context lost before schedule enqueue",
         "source": "qc1.md F-004 (qc-specialist)",
-        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs NextChapter match arm",
+        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs NextChapter arm; build_auto_chain_schedule / WorkFields.volume",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.42 P-last or future (non-blocking)",
-        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]"
+        "target": "V1.44 P2 (2026-06-13-v1.44-multi-volume-hardening)",
+        "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-multi-volume]",
+        "closed_at": "2026-06-13T17:00:00+08:00",
+        "closure_note": "V1.44 P2 multi-volume hardening shipped. Predicate hardened to volume-aware COUNT query; supervisor `next_volume` threaded through enqueue_auto_chain_step / WorkFields / preset input. Verified by hermetic tests in supervisor_cross_volume.rs (8 tests) and nexus-local-db (190 tests).",
+        "resolution": {
+          "commit": "22324ddc",
+          "plan_id": "2026-06-13-v1.44-multi-volume-hardening"
+        }
       },
       {
         "id": "R-V142-MERGE-CI-001",
@@ -1342,6 +1388,25 @@
       }
     ],
     "2026-06-11-v1.42-agent-tool-production-wiring": [],
-    "2026-06-11-v1.42-ux-polish": []
+    "2026-06-11-v1.42-ux-polish": [],
+    "2026-06-13-v1.44-review-master-cli-surface": [
+      {
+        "id": "R-V143P0-002",
+        "title": "Spec/CLI drift: novel-workflow-profile §5.5.3 and novel-quality-loop §6 reference future review-master CLI; preset shipped V1.39 but subcommand missing",
+        "severity": "low",
+        "source": "V1.43 QA AC1 fail; archived 2026-06-12-v1.43-novel-writing-quickstart.json",
+        "scope": "crates/nexus42/src/commands/creator/run.rs + .mstar/knowledge/specs/novel-workflow-profile.md §5.5.2–5.5.3 + docs/novel-writing-quickstart.md §5",
+        "decision": "fix",
+        "owner": "@fullstack-dev",
+        "target": "V1.44 P1 (2026-06-13-v1.44-review-master-cli-surface)",
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "a7b70ebf",
+          "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
+          "note": "Shipped creator run review-master CLI subcommand (T1), quickstart §5 updated (T4), spec amendments (T5), hermetic tests green (T6). Archive in P-last."
+        },
+        "note": "stage advance --stage review runs reflection-loop, not novel-review-master. P1 wired creator run review-master to novel-review-master preset."
+      }
+    ]
   }
 }
