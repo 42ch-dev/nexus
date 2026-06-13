@@ -55,7 +55,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.41-multi-work-author-desk-delivery-compass-v1.md](v1.41-multi-work-author-desk-delivery-compass-v1.md) | V1.41 | **Shipped** (2026-06-11) — PR [#53](https://github.com/42ch-dev/nexus/pull/53); DF-60/61 archived; post-merge security fixes |
 | [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](v1.42-multi-volume-serial-writing-delivery-compass-v1.md) | V1.42 | **Shipped** (2026-06-12) — P0 runtime_lock + P1 DF-62 multi-volume + P2 DF-56 + P3 DF-47 + P-last UX; `iteration/v1.42` |
 | [v1.43-novel-author-experience-delivery-compass-v1.md](v1.43-novel-author-experience-delivery-compass-v1.md) | V1.43 | **Shipped** (2026-06-12) — BL-10 author quickstart (ongoing serial) + CLI copy + author visibility + P-last hygiene; `iteration/v1.43` |
-| [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) | V1.44 | **Active** (harness prepare + code review 2026-06-13) — DF-69 P0 greenfield + review-master CLI P1 + multi-volume P2 + trimmed author-desk P3; `iteration/v1.44` |
+| [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) | V1.44 | **Shipped** (2026-06-13) — DF-69 P0 greenfield + review-master CLI P1 + multi-volume P2 + trimmed author-desk P3 + P-last hygiene; `iteration/v1.44`; PR pending |
 
 ### Reference compasses
 
