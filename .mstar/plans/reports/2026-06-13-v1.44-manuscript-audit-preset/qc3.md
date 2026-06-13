@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-13-v1.44-manuscript-audit-preset"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-13"
 ---
 
@@ -18,15 +18,16 @@ generated_at: "2026-06-13"
 
 ## Scope
 - plan_id: `2026-06-13-v1.44-manuscript-audit-preset`
-- Review range / Diff basis: `068135ed..9d471bdc` (verbatim from Assignment)
+- Review range / Diff basis: `9d471bdc..44a12a6e` (verbatim from Assignment — fix wave revalidation)
 - Working branch (verified): `iteration/v1.44`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
-- Files reviewed: 6 changed files in range
-- Commit range: `068135ed..9d471bdc`
+- Files reviewed: 12 changed files in fix wave (split presets, CLI handler, errors, integration tests, plan update)
+- Commit range: `9d471bdc..44a12a6e`
 - Tools run:
-  - `cargo clippy -p nexus42 -p nexus-orchestration -- -D warnings` — PASS
-  - `cargo test -p nexus42 --lib` — PASS (640 passed)
-  - `cargo test -p nexus-orchestration --test novel_manuscript_audit` — PASS (14 passed)
+  - `cargo clippy --all -- -D warnings` — PASS
+  - `cargo test -p nexus-orchestration --test novel_manuscript_audit --test novel_manuscript_audit_review --test novel_manuscript_audit_extract` — PASS (14 + 10 + 7)
+  - `cargo test -p nexus42 --lib` — PASS (648 passed)
+  - `cargo test -p nexus42 --test integration audit_chapter` — PASS (3 passed)
   - `cargo +nightly fmt --all --check` — PASS
 
 ## Findings
@@ -107,6 +108,35 @@ generated_at: "2026-06-13"
 - **Improvement**: The schedule seed is `audit-chapter {work_id} mode={mode} ch={chapter} vol={volume}`. This is fine for display, but if the daemon ever deduplicates schedules by seed, note that `mode` uses the `Display` impl (lowercase). This is acceptable as-is but worth documenting.
 - **Source Trace**: `run.rs:819-821`.
 
+## Revalidation (fix wave `9d471bdc..44a12a6e`)
+
+Re-checked the three fix commits `d6b9400e`, `3297d925`, `fc9f2f6d` and the fix-merge `44a12a6e` on `iteration/v1.44`.
+
+### Per-finding disposition
+
+| Finding | Residual | Fix commit(s) | Disposition | Evidence |
+|---|---|---|---|---|
+| **F-001 Critical** | R-V144P0-001 | `d6b9400e`, `44a12a6e` | **Resolved** | New `novel-manuscript-audit-extract` preset has state machine `load_chapter → extract_sync → done`; `extract_sync` calls `kb.extract_work` with `source_locator: "{{preset.input.body_path}}"`; CLI dispatches to the split preset based on `mode`. Tests: `extract_state_machine_load_chapter_to_extract_sync`, `extract_sync_calls_kb_extract_work`, `extract_sync_passes_world_id_and_work_id`. |
+| F-002 | R-V144P0-005 | `3297d925` | **Resolved** | CLI output now reads "Audit schedule created ... status: pending" and "The daemon will execute this schedule asynchronously." The messaging no longer advertises review/extract as synchronous; behavior remains async schedule creation, accurately described. |
+| F-003 | R-V144P0-003 | `3297d925` | **Resolved** | `resolve_audit_body_path` now filters by `(chapter, volume)` tuple and falls back to chapter-only for Works without a `volume` field. Tests: `resolve_audit_body_path_filters_by_volume`, `resolve_audit_body_path_falls_back_without_volume_field`. |
+| F-004 | R-V144P0-007 | `3297d925` | **Resolved** | Handler fails fast with `CliError::Config` when the chapter cannot be resolved, before any schedule is created. |
+| F-005 | R-V144P0-008 | `3297d925` | **Resolved** | New `CliError::WorldRequiredForExtract { work_id }` variant in `crates/nexus42/src/errors.rs`; its `Display` includes `422 world_required_for_extract`. Test: `world_required_for_extract_error_display`. |
+| F-006 | R-V144P0-006,009 | `fc9f2f6d` | **Resolved** | Plan §6 verification now lists the real test files (`novel_manuscript_audit_review.rs`, `novel_manuscript_audit_extract.rs`, `run::tests`). `crates/nexus42/tests/integration.rs` adds 3 CLI integration tests: `audit_chapter_help_shows_mode_and_chapter`, `audit_chapter_requires_mode_and_chapter`, `audit_chapter_requires_work_id`. |
+| F-007 | R-V144P0-010 | `3297d925` | **Resolved** | `handle_audit_chapter` doc comment documents the runtime-lock invariant: CLI creates a schedule (not a direct Work mutation); daemon supervisor serializes execution per `Serial` concurrency; the extract preset's `world_binding: required` gate adds an additional boundary. |
+
+### Validation commands run
+
+- `cargo clippy --all -- -D warnings` — PASS
+- `cargo test -p nexus-orchestration --test novel_manuscript_audit --test novel_manuscript_audit_review --test novel_manuscript_audit_extract` — PASS (14 + 10 + 7 tests)
+- `cargo test -p nexus42 --lib` — PASS (648 passed)
+- `cargo test -p nexus42 --test integration audit_chapter` — PASS (3 passed)
+- `cargo +nightly fmt --all --check` — PASS
+- `git log --oneline 9d471bdc..44a12a6e` — confirms fix commits `d6b9400e`, `3297d925`, `fc9f2f6d`, merge `44a12a6e`
+
+### Outstanding items
+
+The original S-001..S-003 suggestions remain deferred as `R-V144P0-S01..S10` (post-V1.44 / P-last) per `qc-consolidated.md`; no new Critical/Warning findings were introduced by the fix wave.
+
 ## Source Trace
 
 | Finding ID | Source Type | Source Reference | Confidence |
@@ -126,10 +156,10 @@ generated_at: "2026-06-13"
 
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 1 |
-| 🟡 Warning | 6 |
-| 🟢 Suggestion | 3 |
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 3 (deferred to post-V1.44 / P-last) |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-The P0 implementation is clean structurally and passes lint/tests, but the preset state machine does not branch on `mode`, making `extract` mode unreachable. This is a ship-blocking correctness defect. Additionally, the CLI's async schedule-return path does not deliver the synchronous/on-demand experience described in the spec, and several reliability gaps (volume-aware lookup, missing-body-path strict-render failure, unstructured 422, missing CLI integration test, runtime-lock invariant) should be addressed or explicitly dispositioned before merge.
+The fix wave resolves the ship-blocking Critical finding (F-001 / R-V144P0-001) by splitting the preset and wiring CLI dispatch so that extract mode actually invokes `kb.extract_work`. All seven originally raised Warning findings are dispositioned resolved with test and lint evidence. Suggestions remain tracked as deferred residual items and do not block merge.
