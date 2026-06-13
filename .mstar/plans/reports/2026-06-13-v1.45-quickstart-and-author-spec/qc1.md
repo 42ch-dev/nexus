@@ -3,8 +3,8 @@ report_kind: qc-review
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-13-v1.45-quickstart-and-author-spec
-verdict: Request Changes
-generated_at: 2026-06-14T13:10:00Z
+verdict: Approve
+generated_at: 2026-06-14T15:30:00Z
 review_range: "merge-base: 997ebd8a; tip: HEAD (8f330834); equivalent: git diff 997ebd8a...HEAD"
 working_branch: iteration/v1.45
 review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
@@ -161,3 +161,42 @@ The third bullet ("On empty findings: single line 'No master findings'") was car
 **Verdict**: Request Changes
 
 Two unresolved Warning findings remain. Both are one-line fixes in documentation that P3 already surgically edited but left with stale V1.44 semantics. The migration is otherwise comprehensive and architecturally sound — the three-plane IA is consistently applied, spec↔quickstart command surfaces agree (except for the two stale references noted), no out-of-scope files were touched, and all CI gates pass. Once W-1 and W-2 are corrected, this plan should be ready for approval.
+
+---
+
+## Revalidation (P3 fix round, 2026-06-14)
+
+### Re-review scope
+- Review range: `54d80e07..HEAD` (= `03baf31e` on `iteration/v1.45`); equivalent `git diff 54d80e07...HEAD` (fix commits only)
+- Fix commits reviewed: 5 (`fa438f95`, `076b431e`, `8bd86369`, `e8f2f5e1`, `1fc2c2d6`) + 1 merge (`03baf31e`)
+- Files changed: 3 (`docs/novel-writing-quickstart.md`, `.mstar/knowledge/specs/novel-quality-loop.md`, `crates/nexus42/src/commands/creator/run.rs`); +27 / -6
+- Working branch (verified): `iteration/v1.45`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+
+### Original findings — fix verification
+
+| ID | Original | Status | Evidence |
+|----|----------|--------|----------|
+| W-1 | "List master findings (default)" misleading inline comment | **FIXED** | `076b431e`: comment rewritten to "Enqueue a master-decision review schedule" / "Enqueue master-decision review scoped to a specific finding"; added explicit `> **novel-review-master is enqueue-only**` blockquote with cross-link to `creator works status` for listing |
+| W-2 | stale `creator run status` in `novel-quality-loop.md` §6 | **FIXED** | `e8f2f5e1`: `novel-quality-loop.md:108` now reads `creator works status` banner |
+| S-1 | orphaned "On empty findings" presentation requirement | **FIXED** | `1fc2c2d6`: `novel-quality-loop.md:87` clarified — `creator works status [<work_id>]` surfaces a clear "no findings yet" message and suggests `creator run novel-review-master` |
+| Cross-ref hint | `run.rs:334` stale hint string | **FIXED** | `fa438f95`: hint now `creator works status` + `creator bootstrap`; added V1.45 migration parenthetical |
+| QC3 W-1 | (cross-cite, same as W-2) | **FIXED** | covered by `e8f2f5e1` (T2) |
+| QC3 W-2 | missing migration section in quickstart | **FIXED** | `8bd86369`: added `## Migrating from V1.44` section at top of `docs/novel-writing-quickstart.md` with 9-row table mapping all deleted `creator run` subcommands to V1.45 equivalents |
+
+### Re-validation gates
+- `cargo +nightly fmt --all -- --check`: **PASS** (exit 0, clean)
+- `cargo clippy --all -- -D warnings`: **PASS** (exit 0, 0 warnings)
+- `cargo test -p nexus42 --test command_surface_contract`: **PASS** (37/37, exit 0)
+
+### Re-verdict
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (after fix) |
+| 🟢 Suggestion | 0 (after fix) |
+
+**Verdict**: Approve
+
+P3 docs are now clean. All 4 original QC1 findings (W-1, W-2, S-1, cross-ref hint) and both cross-cited QC3 findings (W-1, W-2) are verified fixed across the 5 fix commits. The migration table in the quickstart top section provides a complete 9-row V1.44→V1.45 command mapping. The broader spec-tree migration gaps (other specs like `novel-workflow-profile.md`, `creator-workflow.md`, `cli-spec.md` body) are out of P3 scope — track in `residual_findings[2026-06-13-v1.45-quickstart-and-author-spec]` for the V1.45 P-last hygiene pass.
