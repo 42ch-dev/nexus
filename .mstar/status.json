@@ -17,29 +17,31 @@
     {
       "plan_id": "2026-06-13-v1.44-manuscript-audit-preset",
       "title": "P0 — DF-69 novel-manuscript-audit preset + CLI entry",
-      "status": "InReview",
+      "status": "Done",
       "working_branch": "feature/v1.44-manuscript-audit-preset",
       "merge_target": "iteration/v1.44",
       "plan_file": ".mstar/plans/2026-06-13-v1.44-manuscript-audit-preset.md",
       "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
       "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
       "review_sha_range": "068135ed..43550686",
+      "done_at": "2026-06-13T16:00:00+08:00",
       "notes": [
-        "Implemented 5 commits (83905581..bce2e81a) merged at 9d471bdc; QC initial Request Changes; fix wave 3 commits (d6b9400e..fc9f2f6d) resolved R-V144P0-001..010; re-merged at 44a12a6e; plan §6 verification commit 43550686 closes R-V144P0-006; targeted QC re-review Approve (all 3 reviewers); awaiting QA."
+        "Implemented 5 commits (83905581..bce2e81a) merged at 9d471bdc; QC initial Request Changes (1 Critical R-V144P0-001 extract mode unreachable, 11 Warning); fix wave 3 commits (d6b9400e..fc9f2f6d) resolved R-V144P0-001..010; re-merged at 44a12a6e; plan §6 verification commit 43550686; targeted QC re-review Approve (all 3); QA Approve (5a0548c5). DF-69 ship; archive closure is P-last scope."
       ]
     },
     {
       "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
       "title": "P1 — R-V143P0-002 review-master CLI + quickstart convergence",
-      "status": "InReview",
+      "status": "Done",
       "working_branch": "feature/v1.44-review-master-cli-surface",
       "merge_target": "iteration/v1.44",
       "plan_file": ".mstar/plans/2026-06-13-v1.44-review-master-cli-surface.md",
       "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
       "compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
       "review_sha_range": "9d471bdc..a9262c33",
+      "done_at": "2026-06-13T16:00:00+08:00",
       "notes": [
-        "Implemented 3 commits (a7b70ebf..73850ddb) merged at c54b1aa6 (P0/P1 conflict on run.rs and cli-spec.md resolved by PM preserving both subcommands); QC initial Request Changes (qc1+qc3 RC, qc2 Approve-with-nits); fix wave 2 commits (9e953abd..a5a9bd7e) resolved R-V144P1-001..006; re-merged at a9262c33; targeted QC re-review Approve (qc-specialist + qc-specialist-3); awaiting QA."
+        "Implemented 3 commits (a7b70ebf..73850ddb) merged at c54b1aa6 (P0/P1 conflict on run.rs and cli-spec.md resolved by PM preserving both subcommands); QC initial Request Changes (qc1+qc3 RC; qc2 Approve-with-nits); fix wave 2 commits (9e953abd..a5a9bd7e) resolved R-V144P1-001..006; re-merged at a9262c33; targeted QC re-review Approve (qc-specialist + qc-specialist-3); QA Approve (420df8e1). R-V143P0-002 lifecycle:resolved; archive closure is P-last scope."
       ]
     },
     {
