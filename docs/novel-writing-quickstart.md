@@ -168,10 +168,17 @@ nexus42 creator works status
 A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
 
 ```bash
-nexus42 creator run stage advance <work_id> --stage review
+# Primary path — run the master-decision review on open findings
+nexus42 creator run review-master <work_id>
+
+# List master findings (default), then enqueue the review for a specific finding:
+nexus42 creator run review-master <work_id> --finding-id <finding_id>
+
+# Opt-in: auto-schedule review when stale findings exist:
+nexus42 creator run review-master <work_id> --auto-schedule
 ```
 
-> The spec describes a future `review-master` surface ([novel-workflow-profile.md](../.mstar/knowledge/specs/novel-workflow-profile.md) §5.5.3) that consolidates the master-decision review flow. Until that ships, `creator run stage advance --stage review` advances to the FL-E `review` stage which is the available remediation path.
+> `review-master` enqueues the `novel-review-master` preset for master decisions on **existing** findings. This is distinct from `creator run stage advance --stage review`, which runs the `reflection-loop` FL-E review stage to **generate** new findings from chapter content. Use `stage advance --stage review` to produce findings, then `review-master` to decide on them.
 >
 > The quality loop uses local SQLite and the daemon — no Redis, no cron, no cloud dependency.
 
