@@ -440,13 +440,12 @@ fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {
 #[derive(Debug, Subcommand)]
 pub enum CreatorCommand {
     // ── Primary tier (first-run and daily use) ──────────────────────
-    /// Work lifecycle — start, continue, stage, and resume Works
+    /// Run a preset (V1.45 generic runner: `creator run <preset_id> [<work_id>]`).
     ///
-    /// Start a new novel project, continue writing, advance chapters, or resume
-    /// an interrupted work session. For a guided walkthrough, see
-    /// docs/novel-writing-quickstart.md Part I §1–§3.
+    /// Launches any preset by ID. FL-E stage-advance presets are dispatched to
+    /// the stage machinery; all other presets are scheduled directly.
     Run {
-        #[command(subcommand)]
+        #[command(flatten)]
         command: run::RunCommand,
     },
 

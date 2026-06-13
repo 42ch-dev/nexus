@@ -1,21 +1,316 @@
-//! `nexus42 creator run` — Work lifecycle CLI (V1.33 §7.3, V1.34 FL-E §3).
+//! `nexus42 creator run <preset_id>` — generic preset runner (V1.45 §4).
 //!
-//! Subcommands:
-//! - `start` — Create a new Work and run the initial preset
-//! - `continue` — Append inspiration / direction to an existing Work
-//! - `list` — List all Works for the active creator
-//! - `status` — Show details of a single Work
-//! - `stage` — FL-E stage management (V1.34): list, advance
+//! Replaces the V1.33–V1.44 bespoke subcommand dispatch (`start`, `continue`,
+//! `stage`, `resume`, `audit-chapter`, `review-master`) with a single generic
+//! entry point:
+//!
+//! `nexus42 creator run <preset_id> [<work_id>] [global flags] [preset args...]`
+//!
+//! FL-E stage-advance presets (`research`, `novel-writing`, `reflection-loop`,
+//! `kb-extract`) are dispatched to `stage_advance`; all other presets are
+//! scheduled directly via the daemon Local API.
+//!
+//! Legacy handler code is preserved as `#[allow(dead_code)]` for P1/P2
+//! migration reference.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
-use clap::Subcommand;
-use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
+use nexus_contracts::local::orchestration::preset::{PresetCliArg, PresetCliArgType};
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
+use nexus_orchestration::preset::validation::stage_for_preset;
 use nexus_orchestration::stage_gates::{self, WorkFields, WorkStageState};
 
-#[derive(Debug, Subcommand)]
-pub enum RunCommand {
+// Legacy imports (preserved for P1/P2 migration).
+#[allow(unused_imports)]
+use clap::Subcommand;
+#[allow(unused_imports)]
+use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
+
+// ── V1.45 generic RunCommand struct ─────────────────────────────────────────
+
+/// `nexus42 creator run <preset_id> [<work_id>]` — generic preset dispatch.
+///
+/// Global flags (`--json`, `--force-gates`, `--reason`) must appear before
+/// preset-specific trailing args. Once trailing args start consuming, all
+/// remaining tokens (including `--flag`-shaped values) are captured into
+/// `extra` verbatim.
+#[derive(Debug, clap::Args)]
+pub struct RunCommand {
+    /// Preset ID to run (e.g. `novel-brainstorm`, `novel-manuscript-audit-review`)
+    pub preset_id: String,
+
+    /// Work ID (`wrk_...`). If omitted, the active pool Work is used.
+    pub work_id: Option<String>,
+
+    /// Emit machine-readable JSON instead of human text
+    #[arg(long, default_value_t = false)]
+    pub json: bool,
+
+    /// Force gate bypass with audit reason (requires `--reason`)
+    #[arg(long, default_value_t = false)]
+    pub force_gates: bool,
+
+    /// Audit reason for `--force-gates` (required when `--force-gates` is set)
+    #[arg(long)]
+    pub reason: Option<String>,
+
+    /// Preset-specific trailing args (captured after global flags; parsed
+    /// against `preset.cli_args` at runtime). Everything after the last
+    /// recognized positional is captured verbatim.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+    pub extra: Vec<String>,
+}
+
+// ── V1.45 generic handle_run ────────────────────────────────────────────────
+
+/// Run the `creator run <preset_id>` generic dispatch (V1.45 §4).
+///
+/// # Errors
+///
+/// Returns an error if the daemon API call fails, the preset is unknown,
+/// or required CLI args are missing.
+pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
+    let client = crate::api::DaemonClient::from_config(config);
+
+    // Validate --force-gates requires --reason (same rule as legacy `start`).
+    if cmd.force_gates && cmd.reason.is_none() {
+        return Err(crate::errors::CliError::Config(
+            "--force-gates requires --reason \"<text>\" (audit-logged)".to_string(),
+        ));
+    }
+    // W-5: Cap and sanitize reason.
+    if let Some(ref r) = cmd.reason {
+        if r.len() > 512 {
+            return Err(crate::errors::CliError::Config(format!(
+                "--reason exceeds maximum length (512 chars); got {} chars",
+                r.len()
+            )));
+        }
+        if r.contains('\x1b') || r.chars().any(|c| c.is_control() && c != '\n') {
+            return Err(crate::errors::CliError::Config(
+                "--reason contains ANSI escape sequences or control characters".to_string(),
+            ));
+        }
+    }
+
+    let RunCommand {
+        preset_id,
+        work_id,
+        json,
+        force_gates,
+        reason,
+        extra,
+    } = cmd;
+
+    // Resolve work_id: if omitted, try the pool active Work.
+    let resolved_work_id = resolve_work_id(&client, work_id).await?;
+
+    // FL-E stage-advance presets: dispatch to stage_advance.
+    if let Some(target_stage) = stage_for_preset(&preset_id) {
+        tracing::info!(
+            preset_id = %preset_id,
+            stage = %target_stage,
+            "FL-E stage-advance preset; dispatching to stage_advance"
+        );
+        return stage_advance(
+            &resolved_work_id,
+            target_stage,
+            false, // force: stage ordering is enforced for generic dispatch
+            force_gates,
+            reason.as_deref(),
+            json,
+            config,
+            &client,
+        )
+        .await;
+    }
+
+    // Non-FL-E preset: resolve manifest to get cli_args schema, parse trailing
+    // args, build AddScheduleRequest, POST to daemon.
+    let nexus_home = crate::config::nexus_home()
+        .map_err(|e| crate::errors::CliError::Config(format!("Cannot resolve nexus home: {e}")))?;
+    let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+
+    let loaded = nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps)
+        .map_err(|e| {
+            crate::errors::CliError::Config(format!(
+                "Unknown preset '{preset_id}': {e}. \
+                 Run `nexus42 creator presets list` to see available presets."
+            ))
+        })?;
+
+    // Parse trailing args against preset.cli_args declarations.
+    let input = parse_preset_cli_args(&loaded.manifest.preset.cli_args, &extra)?;
+
+    let resolved_creator_id = config
+        .active_creator_id
+        .clone()
+        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+    let request = AddScheduleRequest {
+        creator_id: resolved_creator_id,
+        preset_id: preset_id.clone(),
+        seed: None,
+        label: None,
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(input),
+        force_gates,
+        reason,
+    };
+
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>(
+            "/v1/local/orchestration/schedules",
+            &request,
+        )
+        .await?;
+
+    let schedule_id = resp
+        .get("schedule_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("Preset '{preset_id}' scheduled: {schedule_id}");
+        println!("Work: {resolved_work_id}");
+    }
+
+    Ok(())
+}
+
+/// Resolve `work_id` from CLI arg or the pool active Work.
+async fn resolve_work_id(
+    client: &crate::api::DaemonClient,
+    work_id: Option<String>,
+) -> Result<String> {
+    if let Some(id) = work_id {
+        return Ok(id);
+    }
+    let resp: serde_json::Value = client
+        .get::<serde_json::Value>("/v1/local/works?limit=1&status=active")
+        .await?;
+    resp.get("works")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|w| w.get("work_id"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .ok_or_else(|| {
+            crate::errors::CliError::Config(
+                "No active Work found. Specify <work_id> or run `nexus42 creator works use <work_id>`.".to_string(),
+            )
+        })
+}
+
+/// Parse trailing CLI args against `preset.cli_args` declarations (V1.45 §3.3).
+///
+/// Returns a JSON object mapping arg names to coerced values, suitable for
+/// `AddScheduleRequest.input`.
+fn parse_preset_cli_args(
+    cli_args: &[PresetCliArg],
+    raw: &[String],
+) -> Result<serde_json::Value> {
+    use std::collections::HashMap;
+
+    // If the preset declares no cli_args, ignore trailing args silently.
+    if cli_args.is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    // Build a lookup: kebab-name → PresetCliArg
+    let lookup: HashMap<&str, &PresetCliArg> = cli_args
+        .iter()
+        .map(|a| (a.name.as_str(), a))
+        .collect();
+
+    // Parse `--name value` pairs from the raw trailing args.
+    let mut parsed: HashMap<String, serde_json::Value> = HashMap::new();
+    let mut i = 0;
+    while i < raw.len() {
+        let token = &raw[i];
+        let name = token
+            .strip_prefix("--")
+            .ok_or_else(|| {
+                crate::errors::CliError::Config(format!(
+                    "Unexpected positional '{token}' in preset args. \
+                     Preset-specific args must use --flag syntax."
+                ))
+            })?;
+
+        let arg = lookup.get(name).ok_or_else(|| {
+            crate::errors::CliError::Config(format!(
+                "Unknown preset flag '--{name}'. \
+                 This preset accepts: {}",
+                cli_args
+                    .iter()
+                    .map(|a| format!("--{}", a.name))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?;
+
+        match arg.r#type {
+            PresetCliArgType::Boolean => {
+                // Boolean flags don't consume a value (presence = true).
+                parsed.insert(arg.name.clone(), serde_json::json!(true));
+                i += 1;
+            }
+            PresetCliArgType::Integer => {
+                i += 1;
+                let val = raw.get(i).ok_or_else(|| {
+                    crate::errors::CliError::Config(format!(
+                        "Flag '--{name}' requires an integer value"
+                    ))
+                })?;
+                let n: i64 = val.parse().map_err(|_| {
+                    crate::errors::CliError::Config(format!(
+                        "Flag '--{name}' expects an integer; got '{val}'"
+                    ))
+                })?;
+                parsed.insert(arg.name.clone(), serde_json::json!(n));
+                i += 1;
+            }
+            PresetCliArgType::String => {
+                i += 1;
+                let val = raw.get(i).ok_or_else(|| {
+                    crate::errors::CliError::Config(format!(
+                        "Flag '--{name}' requires a string value"
+                    ))
+                })?;
+                parsed.insert(arg.name.clone(), serde_json::json!(val));
+                i += 1;
+            }
+        }
+    }
+
+    // Apply defaults and check required args.
+    for arg in cli_args {
+        if parsed.contains_key(&arg.name) {
+            continue;
+        }
+        if let Some(ref default) = arg.default {
+            parsed.insert(arg.name.clone(), default.clone());
+        } else if arg.required {
+            return Err(crate::errors::CliError::Config(format!(
+                "Required flag '--{}' is missing for preset",
+                arg.name
+            )));
+        }
+    }
+
+    Ok(serde_json::Value::Object(parsed.into_iter().collect()))
+}
+
+// ── Legacy enum + handlers (preserved for P1/P2 migration) ──────────────────
+
+/// Legacy subcommand enum (V1.33–V1.44). Preserved for P1/P2 migration.
+#[allow(dead_code)]
+#[derive(Debug, clap::Subcommand)]
+pub enum LegacyRunCommand {
     /// Start a new Work and run the initial preset.
     ///
     /// When all chapters of a novel Work are finalized, the daemon auto-promotes
@@ -176,7 +471,8 @@ pub enum RunCommand {
     },
 }
 
-/// Audit mode for `creator run audit-chapter` (DF-69).
+/// Audit mode for `creator run audit-chapter` (DF-69). Preserved for P1/P2.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum AuditMode {
     /// Structured 五問 review report under Logs/review/
@@ -194,8 +490,9 @@ impl std::fmt::Display for AuditMode {
     }
 }
 
-/// FL-E stage subcommands (V1.34 cli-spec §6.2E).
-#[derive(Debug, Subcommand)]
+/// FL-E stage subcommands (V1.34 cli-spec §6.2E). Preserved for P1/P2.
+#[allow(dead_code)]
+#[derive(Debug, clap::Subcommand)]
 pub enum StageCommand {
     /// List FL-E stages and current status for a Work
     List {
@@ -230,16 +527,19 @@ pub enum StageCommand {
 
 /// Run the `creator run` command.
 ///
+/// Legacy handler for V1.33–V1.44 subcommand dispatch. Preserved for P1/P2.
+///
 /// # Errors
 ///
 /// Returns an error if the daemon API call fails.
+#[allow(dead_code)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::missing_panics_doc)] // expect on constant URL string; never panics
-pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
+async fn handle_run_legacy(cmd: LegacyRunCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
     match cmd {
-        RunCommand::Start {
+        LegacyRunCommand::Start {
             idea,
             preset,
             title,
@@ -576,7 +876,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("Next: nexus42 creator run continue {work_id} --note \"<direction>\"");
             }
         }
-        RunCommand::Continue {
+        LegacyRunCommand::Continue {
             work_id,
             note,
             preset: _preset,
@@ -596,8 +896,8 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("Inspiration appended to {work_id}");
             }
         }
-        RunCommand::Stage { command } => handle_stage(command, config, &client).await?,
-        RunCommand::ReconcileChapters { work_id, json } => {
+        LegacyRunCommand::Stage { command } => handle_stage(command, config, &client).await?,
+        LegacyRunCommand::ReconcileChapters { work_id, json } => {
             let report: serde_json::Value = client
                 .post(
                     &format!("/v1/local/works/{work_id}/reconcile-chapters"),
@@ -626,7 +926,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 println!("  Preserved: {preserved}");
             }
         }
-        RunCommand::Resume {
+        LegacyRunCommand::Resume {
             work_id,
             json,
             reopen,
@@ -718,7 +1018,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
                 }
             }
         }
-        RunCommand::AuditChapter {
+        LegacyRunCommand::AuditChapter {
             work_id,
             mode,
             chapter,
@@ -727,7 +1027,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
         } => {
             handle_audit_chapter(&work_id, mode, chapter, volume, json, config, &client).await?;
         }
-        RunCommand::ReviewMaster {
+        LegacyRunCommand::ReviewMaster {
             work_id,
             finding_id,
             auto_schedule,
@@ -756,6 +1056,8 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 /// full Work response (used by `--finding-id` path for `body_path` extraction).
 /// Extracted to avoid duplicate Work fetch in `--finding-id` and
 /// `--auto-schedule` paths (R-V144P1-005).
+/// Fetch common work context fields for review-master schedule input. (P1/P2)
+#[allow(dead_code)]
 async fn fetch_work_context(
     client: &crate::api::DaemonClient,
     work_id: &str,
@@ -780,7 +1082,7 @@ async fn fetch_work_context(
     Ok((work_ref, topic, world_id, work))
 }
 
-/// Handle `creator run review-master <work_id>` (V1.44 P1).
+/// Handle `creator run review-master <work_id>` (V1.44 P1). Preserved for P1/P2.
 ///
 /// Lists open findings with `target_executor=master` and optionally enqueues
 /// the `novel-review-master` preset for a specific finding or on opt-in
@@ -789,6 +1091,7 @@ async fn fetch_work_context(
 /// # Errors
 ///
 /// Returns an error if the daemon API call fails or the work is not found.
+#[allow(dead_code)]
 #[allow(clippy::too_many_lines)]
 async fn handle_review_master(
     work_id: &str,
@@ -1087,6 +1390,7 @@ async fn handle_review_master(
 /// - Extract mode is requested on a worldless Work (422).
 /// - The chapter cannot be resolved (missing `body_path`).
 /// - The daemon API call fails.
+#[allow(dead_code)]
 #[allow(clippy::too_many_lines)] // Single-entry CLI handler; splitting would create a >7-arg helper
 async fn handle_audit_chapter(
     work_id: &str,
@@ -1243,6 +1547,8 @@ async fn handle_audit_chapter(
 ///
 /// Rejects paths that are absolute, contain `..`, or do not start with
 /// the expected `Works/` layout prefix.
+/// Resolve chapter body path for audit (P1/P2). Preserved for P1/P2.
+#[allow(dead_code)]
 fn resolve_audit_body_path(
     work_resp: &serde_json::Value,
     chapter: i32,
@@ -1276,6 +1582,8 @@ fn resolve_audit_body_path(
 /// Validate a resolved `body_path` against path traversal and layout rules.
 ///
 /// Returns `Some(path)` if the path is safe, `None` if it fails validation.
+/// Validate body path safety (P1/P2). Preserved for P1/P2.
+#[allow(dead_code)]
 fn validate_body_path(path: &str) -> Option<String> {
     // Reject absolute paths
     if path.starts_with('/') {
@@ -1298,11 +1606,12 @@ fn validate_body_path(path: &str) -> Option<String> {
 
 // ── FL-E stage management (V1.34) ───────────────────────────────────────────
 
-/// Handle `creator run stage` subcommands (V1.34 FL-E §3, cli-spec §6.2E).
+/// Handle `creator run stage` subcommands (V1.34 FL-E §3, cli-spec §6.2E). Preserved for P1/P2.
 ///
 /// # Errors
 ///
 /// Returns an error if the daemon API call fails or stage validation rejects the advance.
+#[allow(dead_code)]
 async fn handle_stage(
     cmd: StageCommand,
     config: &CliConfig,
@@ -1354,10 +1663,11 @@ async fn handle_stage(
     }
 }
 
-/// List FL-E stages and current status for a Work.
+/// List FL-E stages and current status for a Work. Preserved for P1/P2.
 ///
 /// Fetches the Work from the daemon and displays all stages with
 /// markers for the current stage and status.
+#[allow(dead_code)]
 async fn stage_list(work_id: &str, json: bool, client: &crate::api::DaemonClient) -> Result<()> {
     let resp: serde_json::Value = client
         .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
