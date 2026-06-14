@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-14-v1.46-research-auto-chain-e2e"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-15"
 ---
 
@@ -14,7 +14,8 @@ generated_at: "2026-06-15"
 - Runtime Agent ID: qc-specialist-3
 - Runtime Model: kimi-for-coding/k2p7
 - Review Perspective: Performance and reliability risk — determinism, hermetic isolation, test runtime cost, supervisor-state robustness under CI.
-- Report Timestamp: 2026-06-15T02:55:00+08:00
+- Report Timestamp: 2026-06-15T10:30:00+08:00
+- **Revalidation round**: targeted re-review (qc-specialist-3 only) after W-1 fix. Initial-wave report sections above `## Revalidation` remain unchanged.
 
 ## Scope
 - plan_id: `2026-06-14-v1.46-research-auto-chain-e2e`
@@ -75,6 +76,21 @@ None.
 | 🟢 Suggestion | 2 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+- **Round**: targeted re-review (qc-specialist-3 only; qc1/qc2 stay Approve)
+- **Review basis**: `git diff 87f00619..9cbb1002` (P3 fix + qc docs); fix-only slice is `53873da2..9cbb1002` = 1 file (`research_supervisor_e2e.rs`)
+- **Prior findings status**:
+  - **W-1** (Debug-output assertion): **Resolved in this round** at commit `a3fb417a` (merge `9cbb1002`). Evidence: typed pattern matching on `Gate::WorkField { field, op: GateOp::Equals { value } }` + `GateOp::Required`; both semantic assertions preserved (`intake_status == "complete"` and `work_ref` required). This fix also resolves qc1 S-2 (same Debug-substring pattern).
+  - **S-1** (raw SQL fixture): **Still open — deferred to residual `R-V146P3-QC3-S1`**. Not touched in fix round.
+  - **S-2** (`fetch_one` panic): **Still open — deferred to residual `R-V146P3-QC3-S2`**. Not touched in fix round.
+- **Fix-round regressions**: None (1 file changed; only `research_supervisor_e2e.rs` gate assertion block).
+- **CI gates**:
+  - `cargo test -p nexus-orchestration --test research_supervisor_e2e` → 5 passed, 0 failed
+  - `cargo clippy -p nexus-orchestration --test research_supervisor_e2e -- -D warnings` → clean
+  - `cargo +nightly fmt --all --check` → clean
+- **Updated verdict**: Approve
 
 ## Notes
 
