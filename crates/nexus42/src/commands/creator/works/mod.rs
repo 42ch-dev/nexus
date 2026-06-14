@@ -377,16 +377,10 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
         let is_novel =
             resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
         let (findings_vec, stale) = if is_novel {
-            let f = match fetch_open_findings(client, &resolved_id).await {
-                FindingsResult::Fetched(v) => Some(v),
-                FindingsResult::Unavailable => None,
-            };
-            // findings_stale — best-effort, parity with the human stale banner.
-            let s = client
-                .get::<serde_json::Value>("/v1/local/findings/stale")
-                .await
-                .ok();
-            (f, s)
+            // qc3 F-001: run the two independent daemon subcalls (findings +
+            // stale) concurrently via tokio::join! to avoid stacking their
+            // worst-case latencies on the JSON hot path.
+            fetch_novel_findings_and_stale(client, &resolved_id).await
         } else {
             (None, None)
         };
@@ -1077,6 +1071,13 @@ const FINDINGS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// Hard cap on the number of findings fetched from the daemon.
 const FINDINGS_FETCH_LIMIT: usize = 50;
 
+/// Stale-fetch subcall timeout — mirrors `FINDINGS_FETCH_TIMEOUT` so the
+/// JSON-path `/v1/local/findings/stale` fetch cannot block the status hot
+/// path longer than the findings fetch (qc3 F-002; resolves the timeout
+/// asymmetry flagged in qc1 S-3). Previously the stale fetch inherited the
+/// default 30s `DEFAULT_REQUEST_TIMEOUT`, six times the findings cap.
+const STALE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Result of fetching open findings from the daemon.
 ///
 /// Distinguishes "successfully fetched 0 findings" from "fetch failed",
@@ -1111,6 +1112,53 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
         })
 }
 
+/// Fetch the creator-global stale-findings summary for the JSON status path —
+/// best-effort, returns `None` on any failure (parity with the human stale banner).
+///
+/// Extracted so the JSON path can run this subcall **concurrently** with
+/// `fetch_open_findings` via `tokio::join!` (qc3 F-001), avoiding stacked
+/// worst-case latency on the status hot path.
+///
+/// qc3 F-002: uses a dedicated short-timeout client (`STALE_FETCH_TIMEOUT`,
+/// 5s) instead of the supplied client's default 30s, so a degraded stale
+/// endpoint cannot block the JSON status command longer than the findings
+/// fetch. Mirrors `fetch_open_findings`'s timeout policy.
+async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value> {
+    let stale_client = DaemonClient::with_timeouts(
+        client.base_url(),
+        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+        STALE_FETCH_TIMEOUT,
+    );
+    stale_client
+        .get::<serde_json::Value>("/v1/local/findings/stale")
+        .await
+        .ok()
+}
+
+/// Fetch both the work-scoped open findings and the creator-global stale
+/// summary for a novel work's JSON status, running the two independent daemon
+/// subcalls **concurrently** via `tokio::join!` (qc3 F-001).
+///
+/// Avoids stacking the two worst-case latencies on the status hot path
+/// (was ~5 s findings + ~30 s stale sequential; now bounded by the slower of
+/// the two). Both subcalls are best-effort: a failed findings fetch yields
+/// `None` (graceful degradation, `findings` omitted downstream); a failed
+/// stale fetch yields `None` (`findings_stale` omitted downstream).
+async fn fetch_novel_findings_and_stale(
+    client: &DaemonClient,
+    work_id: &str,
+) -> (Option<Vec<serde_json::Value>>, Option<serde_json::Value>) {
+    let (findings_res, stale_opt) = tokio::join!(
+        fetch_open_findings(client, work_id),
+        fetch_stale_findings(client)
+    );
+    let findings = match findings_res {
+        FindingsResult::Fetched(v) => Some(v),
+        FindingsResult::Unavailable => None,
+    };
+    (findings, stale_opt)
+}
+
 /// V1.46 P0: enrich the daemon GET work payload with novel-only findings.
 ///
 /// For `work_profile=novel` only (Grill #6), inserts a root-level `findings`
@@ -1123,6 +1171,9 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
 ///             `None` when the endpoint was unreachable — `findings` is then
 ///             omitted for graceful degradation (mirrors the human "unavailable"
 ///             path), since fabricating an empty array would mask a daemon fault.
+///             When `slice.len() == FINDINGS_FETCH_LIMIT`, a `findings_truncated`
+///             boolean is also inserted so JSON consumers can detect that more
+///             open findings may exist beyond the fetched page (qc3 F-003).
 ///
 /// `stale`: the `/v1/local/findings/stale` payload; `findings_stale` is inserted
 ///          only when its `stale_count` is greater than zero.
@@ -1139,10 +1190,20 @@ fn enrich_status_json(
         return resp;
     };
     if let Some(arr) = findings {
+        let is_truncated = arr.len() == FINDINGS_FETCH_LIMIT;
         obj.insert(
             "findings".to_string(),
             serde_json::Value::Array(arr.to_vec()),
         );
+        // qc3 F-003: surface the 50-item fetch cap so JSON consumers can
+        // distinguish "exactly 50 open findings" from "50+ open findings".
+        // Omitted when not at the cap (consumers treat absence as not-truncated).
+        if is_truncated {
+            obj.insert(
+                "findings_truncated".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
     }
     if let Some(stale_obj) = stale {
         let stale_count = stale_obj
@@ -1306,10 +1367,6 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         let display_title = truncate_with_ellipsis(&safe_title, 48);
         println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
     }
-
-    // V1.46 P0 (Grill #7): per-finding routing_hint is the only remediation;
-    // no blanket reflection-loop footer (work_id unused when findings exist).
-    let _ = work_id;
 }
 
 /// Print per-chapter status table for novel works.
@@ -1683,6 +1740,57 @@ mod tests {
             out.get("findings").is_none(),
             "findings key omitted when unavailable"
         );
+        // qc3 F-003: truncation marker must also be absent when findings
+        // were not fetched at all.
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings unavailable"
+        );
+    }
+
+    // ── qc3 F-003: findings_truncated marker tests ───────────────────────
+
+    #[test]
+    fn enrich_findings_truncated_marker_set_when_at_limit() {
+        // When the daemon returns exactly FINDINGS_FETCH_LIMIT (50) rows,
+        // there may be more open findings beyond the fetched page. Surface
+        // a `findings_truncated: true` flag so JSON consumers can detect
+        // the cap (qc3 F-003).
+        let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
+            .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
+            .collect();
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        assert_eq!(
+            out.get("findings_truncated")
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "findings_truncated must be true when findings.len() == FINDINGS_FETCH_LIMIT"
+        );
+    }
+
+    #[test]
+    fn enrich_findings_truncated_omitted_when_below_limit() {
+        // Below the cap, the marker is omitted (not false) so consumers can
+        // distinguish "truncation known to be false" from "not applicable".
+        let findings = vec![
+            finding_json("major", "Plot hole", "→ write"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings.len() < FINDINGS_FETCH_LIMIT"
+        );
+    }
+
+    #[test]
+    fn enrich_findings_truncated_omitted_when_empty() {
+        // Empty findings (fetched successfully, none open) — not truncated.
+        let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings is empty"
+        );
     }
 
     #[test]
@@ -1749,6 +1857,154 @@ mod tests {
             Some("novel")
         );
         assert!(out.get("chapters").and_then(|v| v.as_array()).is_some());
+    }
+
+    // ── V1.46 P0 qc-fix: concurrent findings+stale fetch (qc3 F-001) ──────
+
+    #[tokio::test]
+    async fn fetch_novel_findings_and_stale_runs_concurrently() {
+        // qc3 F-001: the two daemon subcalls must run concurrently, not
+        // sequentially. Both endpoints delay 400ms; if run sequentially the
+        // total is ~800ms, if concurrent (tokio::join!) it is ~400ms. Assert
+        // the elapsed wall-clock is well below the sequential sum.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let per_endpoint_delay = std::time::Duration::from_millis(400);
+
+        // Findings endpoint (path includes query string in the request, but the
+        // wiremock `path` matcher matches the path component only).
+        Mock::given(method("GET"))
+            .and(path("/v1/local/works/wrk_concurrent/findings"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([]))
+                    .set_delay(per_endpoint_delay),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // Stale endpoint.
+        Mock::given(method("GET"))
+            .and(path("/v1/local/findings/stale"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "stale_count": 0 }))
+                    .set_delay(per_endpoint_delay),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+
+        let start = std::time::Instant::now();
+        let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_concurrent").await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            findings.is_some(),
+            "findings fetched successfully (concurrent path)"
+        );
+        assert!(
+            stale.is_some(),
+            "stale fetched successfully (concurrent path)"
+        );
+        // Concurrent: elapsed ≈ max(400ms, 400ms) = 400ms. Sequential would be
+        // ~800ms. Threshold 700ms gives slack for scheduling/CI while still
+        // proving the two fetches overlapped.
+        assert!(
+            elapsed < std::time::Duration::from_millis(700),
+            "fetches ran concurrently (elapsed {elapsed:?} < 700ms; \
+             sequential would be ~800ms)",
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_novel_findings_and_stale_degrades_when_findings_fail() {
+        // qc3 F-001/F-003: when the findings endpoint is unreachable the
+        // helper returns None for findings (graceful degradation) while the
+        // stale subcall still runs concurrently and may succeed.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // No findings mock mounted → wiremock returns 404 → get() errors →
+        // FindingsResult::Unavailable → None.
+        Mock::given(method("GET"))
+            .and(path("/v1/local/findings/stale"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "stale_count": 2 })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_none").await;
+
+        assert!(findings.is_none(), "findings None when endpoint 404s");
+        assert!(
+            stale.is_some(),
+            "stale still fetched even when findings fail (concurrent, independent)"
+        );
+        assert_eq!(
+            stale
+                .unwrap()
+                .get("stale_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(2)
+        );
+    }
+
+    // ── V1.46 P0 qc-fix: stale fetch short timeout (qc3 F-002) ────────────
+
+    #[test]
+    fn stale_fetch_timeout_matches_findings_fetch_timeout() {
+        // qc3 F-002 (resolves qc1 S-3 timeout asymmetry): the JSON-path
+        // stale fetch must use a short timeout consistent with the findings
+        // fetch, NOT the default 30 s. Lock the policy here so the asymmetry
+        // cannot silently return. (The actual ~5 s bound is documented in
+        // spec §4.1; a wall-clock timeout test would needlessly add ~5 s to
+        // every test run, so the constant-parity guard is the chosen
+        // regression surface.)
+        assert_eq!(
+            STALE_FETCH_TIMEOUT, FINDINGS_FETCH_TIMEOUT,
+            "stale fetch timeout must match findings fetch timeout (no asymmetry)"
+        );
+        assert!(
+            STALE_FETCH_TIMEOUT < crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT,
+            "stale fetch timeout ({:?}) must be shorter than the default request timeout ({:?})",
+            STALE_FETCH_TIMEOUT,
+            crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_stale_findings_returns_none_on_endpoint_error() {
+        // qc3 F-002 wiring: the dedicated short-timeout client must still
+        // follow the best-effort contract (None on any failure). A 500 from
+        // the stale endpoint yields None rather than propagating.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/local/findings/stale"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_json(serde_json::json!({ "error": "internal" })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let stale = fetch_stale_findings(&client).await;
+        assert!(
+            stale.is_none(),
+            "stale fetch returns None on endpoint error (best-effort, short-timeout client)"
+        );
     }
 
     // ── sanitize_for_terminal tests ──────────────────────────────────────
