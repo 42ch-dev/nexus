@@ -177,12 +177,12 @@ pub async fn add_schedule(
         })?;
 
         if completed_count > 0 {
-            // V1.43 (P1 §3 remediation — work completed): cite quickstart §6.
+            // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
             return Err((
                 StatusCode::CONFLICT,
-                "This Work is complete; see docs/novel-writing-quickstart.md §6. \
-                 To start a new Work, use `nexus42 creator run start --init-preset \
-                 novel-project-init` (see docs/novel-writing-quickstart.md §2)"
+                "This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md. \
+                 To start a new Work, use `nexus42 creator bootstrap --init-preset \
+                 novel-project-init` (see .mstar/knowledge/specs/creator-run-preset-entry.md)"
                     .to_string(),
             ));
         }
@@ -337,7 +337,7 @@ pub async fn add_schedule(
                                             remediation:
                                                 "Pass work_id via input.work_id or seed.work_id, \
                                          or use force_gates=true with a reason. \
-                                         See docs/novel-writing-quickstart.md §2 or §3"
+                                         See .mstar/knowledge/specs/creator-run-preset-entry.md"
                                                     .to_string(),
                                         },
                                     ],
@@ -518,7 +518,7 @@ pub async fn add_schedule(
                                             actual: "not found".to_string(),
                                             remediation:
                                                 "Ensure the work_id refers to an existing Work. \
-                                         See docs/novel-writing-quickstart.md §2 or §3"
+                                         See .mstar/knowledge/specs/creator-run-preset-entry.md"
                                                     .to_string(),
                                         },
                                     ],
@@ -1576,20 +1576,20 @@ mod tests {
         assert!(sql.contains("status = 'completed'"));
     }
 
-    /// V1.43 (P1 §3 remediation — work completed): the completion-guard
-    /// error message cites quickstart §6.
+    /// V1.46 P1 (spec hygiene): the completion-guard error message cites
+    /// the spec paths, not the deleted quickstart.
     #[test]
-    fn completion_guard_message_cites_quickstart_section_6() {
-        let msg = "This Work is complete; see docs/novel-writing-quickstart.md §6. \
-                   To start a new Work, use `nexus42 creator run start --init-preset \
-                   novel-project-init` (see docs/novel-writing-quickstart.md §2)";
+    fn completion_guard_message_cites_spec_paths() {
+        let msg = "This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md. \
+                   To start a new Work, use `nexus42 creator bootstrap --init-preset \
+                   novel-project-init` (see .mstar/knowledge/specs/creator-run-preset-entry.md)";
         assert!(
-            msg.contains("novel-writing-quickstart.md §6"),
-            "completion guard should cite quickstart §6"
+            msg.contains("novel-author-experience.md"),
+            "completion guard should cite the author-experience spec"
         );
         assert!(
-            msg.contains("novel-writing-quickstart.md §2"),
-            "completion guard should cite quickstart §2 for new Work"
+            msg.contains("creator-run-preset-entry.md"),
+            "completion guard should cite the preset-entry spec for new Work"
         );
     }
 }
