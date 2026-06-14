@@ -556,20 +556,24 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
 
-        let _guard = tracing::subscriber::set_default(subscriber);
-        promote_to_active(&pool, "ctr_test", "wrk_001")
-            .await
-            .unwrap();
-        drop(_guard);
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            promote_to_active(&pool, "ctr_test", "wrk_001")
+                .await
+                .unwrap();
+        } // _guard dropped here
 
-        let messages = captured.lock().unwrap();
-        assert!(
-            messages.iter().any(|m| {
-                m.contains("operation=pool_promote_to_active")
-                    && m.contains("creator_id=ctr_test")
-                    && m.contains("work_id=wrk_001")
-            }),
-            "expected structured info trace for pool_promote_to_active, got: {messages:?}"
-        );
+        {
+            let messages = captured.lock().unwrap();
+            assert!(
+                messages.iter().any(|m| {
+                    m.contains("operation=pool_promote_to_active")
+                        && m.contains("creator_id=ctr_test")
+                        && m.contains("work_id=wrk_001")
+                }),
+                "expected structured info trace for pool_promote_to_active, got: {messages:?}"
+            );
+            drop(messages);
+        }
     }
 }
