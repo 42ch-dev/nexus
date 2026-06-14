@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.46 Active (harness prepare complete 2026-06-14)** · **V1.45 Shipped** (2026-06-14, P-last closeout) · **V1.44 Shipped** (2026-06-13, PR #57) · **V1.43 Shipped** (2026-06-12) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.46 Shipped** (2026-06-15, P-last closeout) · **V1.45 Shipped** (2026-06-14, P-last closeout) · **V1.44 Shipped** (2026-06-13, PR #57) · **V1.43 Shipped** (2026-06-12) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: Active (V1.46 harness prepare complete 2026-06-14)
+**Status**: V1.46 Shipped (2026-06-15 P-last closeout); awaiting V1.47 compass authoring
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-14 (V1.46 harness prepare: compass + 7 plans + spec overlays; Pre-implement GO)
+**Last updated**: 2026-06-15 (V1.46 P-last closeout: 5 lifecycle residuals closed; 22 low-severity V1.46 residuals + 1 pre-existing V1.45 clippy PM-override carried forward to V1.47)
 
 ---
 
