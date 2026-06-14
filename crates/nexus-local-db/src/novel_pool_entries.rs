@@ -144,6 +144,12 @@ pub async fn promote_to_active(
     creator_id: &str,
     work_id: &str,
 ) -> Result<PoolEntry, LocalDbError> {
+    tracing::info!(
+        operation = "pool_promote_to_active",
+        creator_id = %creator_id,
+        work_id = %work_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut tx: Transaction<'_, Sqlite> = pool.begin().await?;
@@ -214,6 +220,12 @@ pub async fn archive_pool_entry(
     entry_id: &str,
     creator_id: &str,
 ) -> Result<PoolEntry, LocalDbError> {
+    tracing::info!(
+        operation = "pool_archive",
+        entry_id = %entry_id,
+        creator_id = %creator_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.
@@ -249,6 +261,11 @@ pub async fn mark_pool_entry_completed(
     pool: &SqlitePool,
     entry_id: &str,
 ) -> Result<(), LocalDbError> {
+    tracing::info!(
+        operation = "pool_mark_completed",
+        entry_id = %entry_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.
@@ -273,6 +290,12 @@ pub async fn mark_pool_entry_completed_for_work(
     creator_id: &str,
     work_id: &str,
 ) -> Result<(), LocalDbError> {
+    tracing::info!(
+        operation = "pool_mark_completed_for_work",
+        creator_id = %creator_id,
+        work_id = %work_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.

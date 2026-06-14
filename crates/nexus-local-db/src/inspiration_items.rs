@@ -150,6 +150,12 @@ pub async fn create_inspiration_row(
     title: &str,
     created_at: &str,
 ) -> Result<InspirationItem, LocalDbError> {
+    tracing::info!(
+        operation = "inspiration_create_row",
+        item_id = %item_id,
+        creator_id = %creator_id,
+        "inspiration mutation"
+    );
     // SAFETY: dynamic SQL — compile-time macro not applicable.
     sqlx::query(
         "INSERT INTO inspiration_items (item_id, creator_id, rel_path, title, status, promoted_work_id, created_at, promoted_at) \
@@ -219,6 +225,14 @@ pub async fn create_inspiration_with_scaffold(
         }
     };
 
+    tracing::info!(
+        operation = "inspiration_create_with_scaffold",
+        item_id = %item_id,
+        creator_id = %creator_id,
+        rel_path = %rel_path,
+        "inspiration mutation"
+    );
+
     // Step 1: Write MD file (tmp + rename)
     let frontmatter = format!("---\ntitle: {title}\nstatus: idea\ncreated_at: {created_at}\n---\n");
 
@@ -267,6 +281,12 @@ pub async fn promote_inspiration(
     promoted_work_id: &str,
     promoted_at: &str,
 ) -> Result<InspirationItem, LocalDbError> {
+    tracing::info!(
+        operation = "inspiration_promote",
+        item_id = %item_id,
+        promoted_work_id = %promoted_work_id,
+        "inspiration mutation"
+    );
     // SAFETY: dynamic SQL — compile-time macro not applicable.
     sqlx::query(
         "UPDATE inspiration_items SET status = 'promoted', promoted_work_id = ?, promoted_at = ? \
@@ -300,6 +320,14 @@ pub async fn inspiration_promote_atomic(
     now: &str,
 ) -> Result<crate::novel_pool_entries::PoolEntry, LocalDbError> {
     use sqlx::Connection;
+
+    tracing::info!(
+        operation = "inspiration_promote_atomic",
+        creator_id = %creator_id,
+        work_id = %work_id,
+        item_id = %item_id,
+        "inspiration mutation"
+    );
 
     let mut conn = pool.acquire().await?;
     let mut tx = conn.begin().await?;
@@ -421,6 +449,12 @@ pub async fn archive_inspiration(
     item_id: &str,
     creator_id: &str,
 ) -> Result<InspirationItem, LocalDbError> {
+    tracing::info!(
+        operation = "inspiration_archive",
+        item_id = %item_id,
+        creator_id = %creator_id,
+        "inspiration mutation"
+    );
     // SAFETY: dynamic SQL — compile-time macro not applicable.
     let result = sqlx::query(
         "UPDATE inspiration_items SET status = 'archived' WHERE item_id = ? AND creator_id = ?",
