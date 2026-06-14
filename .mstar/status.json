@@ -183,6 +183,20 @@
         }
     },
     "residual_findings": {
+        "pre-existing-v1.45-orchestration-clippy": [
+            {
+                "id": "R-V145-PRE-CLIPPY-001",
+                "title": "Pre-existing cargo clippy --all -- -D warnings failures in nexus-orchestration (60+ errors in tasks/mod.rs + worker/registry.rs)",
+                "severity": "high",
+                "source": "P3 implementer (fullstack-dev) on iteration/v1.46 HEAD 87f00619; pre-existing claim verified by PM against origin/main HEAD 63b36a32 (V1.45 main)",
+                "scope": "crates/nexus-orchestration/src/tasks/mod.rs (last touched V1.42 P3 aa0574cc), crates/nexus-orchestration/src/worker/registry.rs, plus 2 test files (auto_chain + novel_project_init)",
+                "decision": "risk-accepted (PM-override per .mstar/AGENTS.md 'Pre-existing claim verification protocol')",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46 P-last hygiene (or pre-merge fix branch)",
+                "tracking_link": ".mstar/status.json residual_findings[pre-existing-v1.45-orchestration-clippy]",
+                "note": "PM-override basis: failure reproduces on origin/main HEAD 63b36a32 (V1.45 main, post-V1.45 PR #58 merge). Failure is NOT introduced by V1.46 P0/P1/P2/P3/P4. V1.46 P3 work (hermetic research_supervisor_e2e.rs) is clippy-clean in isolation. P3 implementer provided base-SHA repro: `cargo +nightly clippy -p nexus-orchestration --tests -- -D warnings` on 1d776d23 yields 57 lib errors + 4 auto_chain test + 5 novel_project_init test = ~66 errors, all in code untouched by V1.46 plans. To unblock V1.46 ship, fix in pre-merge hygiene branch or fold into P-last scope."
+            }
+        ],
         "2026-06-14-v1.46-novel-runtime-ux-edges": [
             {
                 "id": "R-V146P2-QC2-W",
