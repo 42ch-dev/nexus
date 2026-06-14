@@ -64,7 +64,7 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 | Entry | Role |
 | --- | --- |
 | `creator run <preset_id> [<work_id>]` | Generic preset dispatch; see [creator-run-preset-entry.md](creator-run-preset-entry.md) |
-| `creator bootstrap …` | Composite Work onboarding (Removed in V1.45: replaces `creator run start`; see changelog) |
+| `creator bootstrap …` | Composite Work onboarding (V1.45 generic runner; see creator-run-preset-entry.md) |
 | `creator works …` | Atomic Work ops only (`inspire`, `reopen`, `resume-chain`, `reconcile-chapters`, …) |
 
 **Removed in V1.45 (hard delete):** `review-master`, `audit-chapter`, `stage`, `start`, `continue`, `resume`, `reconcile-chapters` under `creator run`.
