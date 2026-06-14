@@ -348,54 +348,44 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 - **Session control ownership:** `daemon schedule ...` is the primary orchestration CLI surface. It exercises the full sessions control plane through schedule operations: `current_session_id` points at the active orchestration session, and schedule signals cascade through the supervisor to the active session as described in [`creator-schedule-and-core-context.md`](./creator-schedule-and-core-context.md) §3.3.
 - **Removed:** `daemon orchestrate ...` is not a shipped compatibility surface. Do not document `daemon orchestrate run` in new plans or runbooks; use `daemon schedule ...` for shipped orchestration control unless a future plan intentionally introduces a new session-control wrapper.
 
-### 6.2D `nexus42 creator run` (Work experience — V1.33 target)
+### 6.2D `nexus42 creator run` (Work experience — V1.33 target, V1.45 generic runner)
 
-**Single-Work actions** on the active or specified Work. Hides `daemon schedule` details for the default product path. Normative model: [work-experience-model.md](./work-experience-model.md). Work **management** (`list`, `status`, pool, default pointer) lives under **`creator works`** (§6.2H).
+**V1.45 rewrite:** The bespoke subcommand dispatch (`start`, `continue`, `stage`, `resume`, `reconcile-chapters`, `audit-chapter`, `review-master`) is replaced by a single generic entry point:
+
+```
+nexus42 creator run <PRESET_ID> [<WORK_ID>] [global flags] [preset args...]
+```
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator run start --idea "<text>"` | Create a **Work** (`work_id`), run Creative Brief Intake, then primary preset (default `novel-writing`) |
-| `nexus42 creator run continue [<work_id>] [--note "<text>"]` | Append inspiration/direction on **same** Work; optional `work_id` defaults to pool `active` |
-| `nexus42 creator run stage …` | FL-E stage list/advance (see §6.2E) |
-| `nexus42 creator run resume [<work_id>]` | Resume checkpointed auto-chain |
-| `nexus42 creator run reconcile-chapters <work_id>` | Rebuild `work_chapters` from filesystem |
-| `nexus42 creator run audit-chapter <work_id> --mode {review\|extract} --chapter N [--volume N]` | On-demand chapter audit via `novel-manuscript-audit` preset (DF-69, V1.44 P0). Review mode: five-question structured report. Extract mode: synchronous `kb.extract_work` for World-bound Works (422 if worldless). Does NOT enter FL-E auto-chain driver. |
-| `nexus42 creator run review-master <work_id> [--finding-id <id>] [--auto-schedule]` | Master-decision review on open findings (V1.44 P1); enqueues `novel-review-master` preset. Distinct from `stage advance --stage review` which runs `reflection-loop`. |
+| `nexus42 creator run <preset_id> [<work_id>]` | Generic preset dispatch. FL-E stage-advance presets (`research`, `novel-writing`, `reflection-loop`, `kb-extract`) are routed to `stage_advance`; all other presets are scheduled directly via daemon Local API. `<work_id>` optional — defaults to pool `active` Work. |
+
+**Global flags:**
+
+| Flag | Purpose |
+| --- | --- |
+| `--json` | Machine-readable JSON output. |
+| `--force-gates --reason "<text>"` | Bypass preset admission gates (audited). `--reason` required when `--force-gates` is set. |
+| Trailing args (`--chapter N`, `--volume N`, etc.) | Preset-specific args parsed against `preset.cli_args` declarations (V1.45 §3.3). Global flags must precede trailing args. |
+
+**Preset-specific CLI args (declared in `preset.yaml`):**
+
+Presets may declare `cli_args` with name, type (`integer`/`string`/`boolean`), `required`, and `default`. The generic runner parses trailing args against this schema and maps them to `AddScheduleRequest.input`.
+
+| Preset | CLI args |
+| --- | --- |
+| `novel-manuscript-audit-review` | `--chapter` (integer, required), `--volume` (integer, optional, default 1) |
+| `novel-manuscript-audit-extract` | `--chapter` (integer, required), `--volume` (integer, optional, default 1) |
+| `novel-review-master` | `--finding-id` (string, optional), `--auto-schedule` (boolean, optional, default false) |
 
 Rules:
 
 - Only presets declaring `run_intents` including `work_init` may be used as the **first** run on a new Work (see [orchestration-engine.md](./orchestration-engine.md) §7.7).
-- `work_continue` presets require completed intake unless `--force` (audited).
 - `creator run` creates/updates schedules via daemon Local API; it does **not** replace `daemon schedule` for power users.
-- When `work_id` is optional and omitted, resolve [novel-work-pool.md](./novel-work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
-- Multiple Works may run concurrently; runtime lock prevents **same** Work mutation from two processes (lifecycle spec §4).
+- When `work_id` is omitted, resolve [novel-work-pool.md](./novel-work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
+- FL-E presets are identified via `stage_for_preset()` reverse mapping; the runner calls `stage_advance` with `force: false` (stage ordering enforced).
 
-**Shipped (V1.33 P1 + P2):** `creator run start / continue` wired in `crates/nexus42/src/commands/creator/run.rs`. **V1.41:** `list` / `status` **hard-removed** from `creator run` → `creator works` (§6.2H); **no** deprecated alias (grill-me). **V1.44 (DF-69):** `audit-chapter` subcommand added (dual-mode review/extract, embedded `novel-manuscript-audit` preset).
-
-**V1.36 flags (`creator run start` — novel project init):**
-
-| Flag | Purpose |
-| --- | --- |
-| `--init-preset <name>` | Run a `work_init` preset before primary preset chain. V1.36 supported value: `novel-project-init` (creates `Works/<work_ref>/` scaffold, seeds `work_chapters`, PATCHes `works`). See [novel-workflow-profile.md §5.4](./novel-workflow-profile.md). |
-| `--world-id <uuid>` | Bind the new Work to an existing World (cross-link [novel-workflow-profile.md §3.5](./novel-workflow-profile.md)). Required for V1.40 Work creation/init unless the init flow creates a new World first; omit/`none` is accepted only for legacy V1.39-and-earlier reads, not new Work creation. |
-| `--force-gates --reason "<text>"` | Bypass `run_intents` / preset admission gates (`orchestration-engine.md` §7.9). `--reason` is **required** when `--force-gates` is passed; the override is audited in `creator_prompt_injections` and surfaced in `creator works status`. |
-
-**V1.36 flags (`creator run stage advance`):**
-
-| Flag | Purpose |
-| --- | --- |
-| `--force --reason "<text>"` | Skip the prior-stage `complete` check (FL-E §6.2E). Audited; `--reason` required. V1.36 stub — full implementation tracked under V1.36 P5 (FL-E hardening). |
-
-**V1.44 flags (`creator run audit-chapter` — DF-69):**
-
-| Flag | Purpose |
-| --- | --- |
-| `--mode {review\|extract}` | Audit mode. `review`: structured five-question report (written to `Works/<ref>/Logs/review/`). `extract`: synchronous `kb.extract_work` upsert into World KB. Required. |
-| `--chapter <N>` | Target chapter number (1-based). Required. |
-| `--volume <N>` | Target volume number. Default: `1`. |
-| `--json` | Machine-readable JSON output (includes `audit_mode`, `chapter`, `volume` in response). |
-
-Preset: `novel-manuscript-audit` (embedded, dual-mode). State machine: `load_chapter` → `review_report` (review) or `extract_sync` (extract) → `done`. Does NOT trigger FL-E `enqueue_auto_chain_step`.
+**V1.45 shipped:** Generic `RunCommand` struct replaces enum; `creator/mod.rs` uses `#[command(flatten)]` instead of `#[command(subcommand)]`. Legacy handler code preserved as `#[allow(dead_code)]` for P1/P2 migration. Old `start`/`continue`/`stage`/`resume`/`audit-chapter`/`review-master` subcommands are no longer exposed.
 
 
 
@@ -1116,3 +1106,12 @@ v1 至少应保证：
 - ~~workspace 是否支持多 world 共存~~。**Closed（C2）**：支持；以 `world_id` 显式参数隔离并发；单运行时 **一个活跃 `creator_id`（`creator use`）** + 在该 Creator 下 **一个活跃 `workspace_slug`（`creator workspace use`，默认 `default`）**（见 §6.2C C2、nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14、nexus-platform `v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md`）。
 - `sync` 是否允许默认后台定时拉取
 - skills export 的目标格式优先级
+
+---
+
+## V1.45 supersession (P-last promotion)
+
+**Superseded by**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Shipped Master V1.45). The §6.2D/E `creator run` preset-entry table, FL-E stage advance mapping, preset-id examples, and global flags on `creator run` are now part of the canonical Master body.
+
+> **Note on §6.2D/E body**: The shipped V1.33–V1.44 text in §6.2D/E below has not been rewritten in this P-last pass (out of plan scope; the overlay was the canonical update channel). The Master [creator-run-preset-entry.md](./creator-run-preset-entry.md) is the authoritative reference for the V1.45 surface. A follow-up spec-hygiene pass should rewrite the §6.2D/E body to match. Tracked as residual `R-V145B3-001`.
+

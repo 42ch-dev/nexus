@@ -1,9 +1,9 @@
 # Novel Author Experience — Normative Supplement v1
 
-**Status**: Shipped (V1.43 — 2026-06-12)  
+**Status**: Shipped (V1.43 — 2026-06-12; V1.45 overlay 2026-06-14)  
 **Document class**: Feature line (author experience supplement)  
 **Created**: 2026-06-12  
-**Last updated**: 2026-06-12 (V1.43 P-last — promoted from Draft overlay to Shipped Feature line; §2 row 4 amended)
+**Last updated**: 2026-06-14 (V1.45 P3 — CLI surface updated to preset-id commands per compass §2 migration appendix)
 **Scope**: End-user **ongoing serial** happy path — maps [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) (BL-10) to normative CLI surfaces and P1/P2 implement contracts  
 **Coordinates with**:
 
@@ -30,7 +30,7 @@ V1.36–V1.42 implemented novel-writing **capabilities** across crates. V1.43 do
 
 | Section | Title | Implement owner |
 | --- | --- | --- |
-| Part I §1 | Prerequisites & bootstrap (`system doctor` … `creator run start`) | P0 doc; P1 copy |
+| Part I §1 | Prerequisites & bootstrap (`system doctor` … `creator bootstrap`) | P0 doc; P1 copy |
 | Part I §2 | World + `novel-project-init` | P0 doc; P1 gate/scaffold errors |
 | Part I §3 | First chapter: outline → draft → finalize | P0 doc |
 | Part I §4 | Serial: auto-chain, `creator works status`, chapter N | P0 doc; P2 visibility |
@@ -70,7 +70,7 @@ Authors must be able to answer without reading JSON APIs:
 | Is the Work complete? | Clear terminal/completed marker per novel-workflow-profile §6 | — [x] Shipped (V1.43 P2) — completed banner with `COMPLETED` marker, quickstart §6 link |
 | Are there open findings? | Count + severity summary; link to review preset name | — [x] Shipped (V1.43 P2) — `findings:` line with severity breakdown, top findings, review hint |
 | Is 96h master-review banner active? | Existing daemon banner; ensure visible in status path | — [x] Shipped (V1.39 P4 T3) — already wired in `creator works status`; verified V1.43 P2 |
-| How do I run master-decision review? | `creator run review-master <work_id>` — lists open master findings, optionally enqueues `novel-review-master` preset for a specific finding or on opt-in auto-schedule | — [x] Shipped (V1.44 P1) — see [novel-quality-loop.md](novel-quality-loop.md) §3.4 |
+| How do I run master-decision review? | `creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]` — enqueues the `novel-review-master` preset for master decisions on open findings; use `creator works status` to list findings first | — [x] Shipped (V1.45 P0–P2) — see [novel-quality-loop.md](novel-quality-loop.md) §3.4 |
 
 Normative detail remains in [novel-quality-loop.md](novel-quality-loop.md); P2 implements **presentation** only unless a spec gap is found (then amend loop spec in same plan).
 

@@ -105,6 +105,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.44)** — V1.39 baseline + §3.4 review-master CLI overlay (P1); R-V143P0-002 closed |
 | [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
 | [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.43)** — BL-10 quickstart contract + CLI copy map + author visibility |
+| [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
 ### ACP and agent integration
@@ -147,7 +148,7 @@ When specs disagree, higher row wins:
 | --- | --- | --- |
 | Top-level CLI groups | cli-spec §6.0B | cli-command-ia (Shipped V1.35 supplement) |
 | First-run / local vs platform | cli-spec §7 | creator-centric-entry-model (Shipped V1.35 supplement), compass audit appendix |
-| Work / `creator run` | work-experience-model | cli-spec §6.2, orchestration run_intents |
+| Work / `creator run` | [creator-run-preset-entry.md](creator-run-preset-entry.md) (V1.45 Draft) | work-experience-model, cli-spec §6.2 |
 | Novel profile / `Works/<work_ref>/` layout | novel-workflow-profile | work-experience-model, novel-writing-sync-contract, cli-spec §13.1 |
 | Creator workflow stages / chain | creator-workflow | work-experience-model, novel-workflow-profile (produce) |
 | Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |

@@ -44,6 +44,17 @@ preset:
     - kind: work_field
       field: work_ref
       op: required
+  # V1.45 §3.3: CLI args parsed by the generic `creator run` runner.
+  cli_args:
+    - name: chapter
+      type: integer
+      required: true
+      description: "Chapter number to extract"
+    - name: volume
+      type: integer
+      required: false
+      default: 1
+      description: "Volume number (default 1)"
 
 states:
   - id: load_chapter

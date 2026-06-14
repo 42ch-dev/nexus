@@ -1077,3 +1077,10 @@ External (stable, public):
 ---
 
 *End of specification. The companion knowledge documents ([daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)) fill in details that would otherwise clutter this document; read them together when extending orchestration.*
+
+---
+
+## V1.45 supersession (P-last promotion)
+
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The `run_intents` dispatch via generic `creator run <preset_id>` and `--force-gates --reason` semantics are now part of the canonical Master body.
+

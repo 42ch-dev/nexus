@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Shipped (V1.44 — 2026-06-13; V1.39 baseline retained)  
+**Status**: Shipped (V1.44 — 2026-06-13; V1.39 baseline retained; V1.45 overlay 2026-06-14)  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-13 (V1.44 P-last — promoted from Draft overlay to Shipped Feature line; §3.4 review-master CLI overlay folded in; R-V143P0-002 closed)  
+**Last updated**: 2026-06-14 (V1.45 P3 — §3.4/§6 updated to preset-id commands per compass §2 migration appendix)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
@@ -64,28 +64,27 @@ Auto-chain must not fork driver when routing spawns auxiliary schedules; at most
 | `novel-review-master` | Master decision surface (V1.39 P2) |
 | `novel-manuscript-audit` | On-demand chapter audit — review and/or extract (V1.44 P0; see [novel-manuscript-audit.md](novel-manuscript-audit.md)) |
 
-### 3.4 Review-master CLI surface (V1.44 P1 — R-V143P0-002)
+### 3.4 Review-master CLI surface (V1.45 P0–P2 — generic preset dispatch)
 
-V1.43 shipped `novel-review-master` preset and daemon 96h banner, but authors still used the workaround `creator run stage advance --stage review` per [docs/novel-writing-quickstart.md](../../../docs/novel-writing-quickstart.md) line 174. V1.44 P1 **converged** a dedicated author-facing command.
+V1.44 shipped a dedicated `review-master` subcommand. V1.45 replaces it with the generic `creator run <preset_id>` entry — `creator run novel-review-master` is the preset-id form. Findings listing moves to `creator works status` (P4 enhancement).
 
-**Normative CLI** (Shipped V1.44):
+**Normative CLI** (Shipped V1.45):
 
 ```bash
-nexus42 creator run review-master <work_id> [--finding-id <id>] [--auto-schedule]
+nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]
 ```
 
 | Behavior | Requirement |
 | --- | --- |
-| Default | Lists open findings with `target_executor=master` and prints next action |
 | `--finding-id` | Runs or enqueues `novel-review-master` preset scoped to one finding |
 | `--auto-schedule` | Opt-in: enqueue `novel-review-master` when 96h stale findings exist (mirrors DF-67 Work setting) |
 | Driver interaction | Must not fork or cancel active FL-E auto-chain driver |
 
 **Presentation** (minimum):
 
-- Stdout summary: open master findings count + top 3 by severity
-- On empty: single line "No master findings" + quickstart §5 link
-- Quickstart §5 updated to cite this command as primary path (V1.44)
+- Use `creator works status` to list open findings with severity breakdown
+- Quickstart §5 updated to cite `creator run novel-review-master` as primary path (V1.45 P3)
+- On empty findings: `creator works status [<work_id>]` surfaces a clear "no findings yet" message and suggests `creator run novel-review-master` to enqueue a master-decision review
 
 **Residual**: R-V143P0-002 — resolved V1.44 P1; close in P-last hygiene.
 
@@ -106,8 +105,8 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 ## 6. Master-decision timeout (DF-67)
 
 1. Daemon task every 24h queries open findings with `created_at < now - 96h`.
-2. `creator run status` banner lists stale count + `review-master` hint.
-3. Automatic `review-master` schedule: **opt-in only** (Work setting or CLI flag).
+2. `creator works status` banner lists stale count + `novel-review-master` hint.
+3. Automatic `novel-review-master` schedule: **opt-in only** (Work setting or CLI flag).
 
 ---
 
@@ -121,3 +120,10 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 ---
 
 *Draft overlay for V1.39. Merge into novel-workflow-profile §5.5 at iteration P5 hygiene if section stabilizes.*
+
+---
+
+## V1.45 supersession (P-last promotion)
+
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.
+

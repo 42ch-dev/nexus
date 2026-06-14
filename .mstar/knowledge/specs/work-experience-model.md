@@ -278,3 +278,10 @@ FL-E reuses V1.33 `creator run start/continue/list/status` and does not replace 
 ---
 
 *Normative product model for Work + FL-E. V1.33 plans: `.mstar/plans/2026-06-04-v1.33-*`. V1.34: `.mstar/plans/2026-06-04-v1.34-*`.*
+
+---
+
+## V1.45 supersession (P-last promotion)
+
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The side-input lane (`creator works inspire`), `run_intents` enforcement at schedule creation, and the `creator bootstrap`-only new-Work rule are now part of the canonical Master body.
+

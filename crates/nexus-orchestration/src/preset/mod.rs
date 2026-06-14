@@ -173,6 +173,84 @@ pub fn resolve_preset(
     }
 }
 
+/// Direct O(1) preset lookup by ID (QC3 W-1 optimization).
+///
+/// Tries common-case direct bundle paths before falling back to the full
+/// [`resolve_preset`] scan. This avoids scanning the entire user/system
+/// preset directory tree for a single known preset ID.
+///
+/// Search order:
+/// 1. **User preset** — `<nexus_home>/presets/<id>/preset.yaml`
+/// 2. **Embedded preset** — compiled-in `embedded-presets/<id>/preset.yaml`
+/// 3. Returns `None` — caller should fall back to [`resolve_preset`] (which
+///    also handles system presets with `_system.` qualified IDs).
+///
+/// System presets (`_system.<name>`) are intentionally **not** handled here
+/// because their directory layout differs (`_system/<name>/`). The full scan
+/// in [`resolve_preset`] covers that path.
+///
+/// # Arguments
+///
+/// * `id` — The preset ID (must NOT start with `_system.`)
+/// * `nexus_home` — Path to `~/.nexus42/`
+/// * `caps` — Capability registry for validation
+pub fn lookup_preset_by_id(
+    id: &str,
+    nexus_home: &Path,
+    caps: &CapabilityRegistry,
+) -> Option<LoadedPreset> {
+    // System-qualified IDs require the full scan — bail early.
+    if id.starts_with("_system.") {
+        return None;
+    }
+
+    // 1. Direct user preset path.
+    let user_yaml = nexus_home.join("presets").join(id).join("preset.yaml");
+    if user_yaml.is_file() {
+        match std::fs::read_to_string(&user_yaml) {
+            Ok(yaml) => match load_preset_from_str(&yaml, caps) {
+                Ok(loaded) => {
+                    tracing::debug!(preset_id = %id, source = "user-direct", "resolved preset via direct path");
+                    return Some(loaded);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        preset_id = %id,
+                        ?user_yaml,
+                        error = %e,
+                        "direct user preset path exists but failed to load; falling back to full scan"
+                    );
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    preset_id = %id,
+                    ?user_yaml,
+                    error = %e,
+                    "failed to read user preset file; falling back to full scan"
+                );
+            }
+        }
+    }
+
+    // 2. Embedded preset.
+    match load_embedded_preset(id, caps) {
+        Ok(loaded) => {
+            tracing::debug!(preset_id = %id, source = "embedded-direct", "resolved preset via direct embedded lookup");
+            Some(loaded)
+        }
+        Err(PresetLoadError::NotFound { .. }) => None,
+        Err(e) => {
+            tracing::warn!(
+                preset_id = %id,
+                error = %e,
+                "embedded preset load error; falling back to full scan"
+            );
+            None
+        }
+    }
+}
+
 /// List all available embedded preset IDs.
 ///
 /// Returns the names of all subdirectories under `embedded-presets/`

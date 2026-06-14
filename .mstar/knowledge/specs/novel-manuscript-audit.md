@@ -135,3 +135,10 @@ At V1.44 P-last hygiene:
 ---
 
 *Draft overlay for V1.44 P0. P0 implement plan is scope authority for preset YAML and exact CLI flags.*
+
+---
+
+## V1.45 supersession (P-last promotion)
+
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). The split preset ids (`novel-manuscript-audit-review` / `novel-manuscript-audit-extract`), DEPRECATED parent dir deletion, and `cli_args` declaration are now part of the canonical Master body.
+

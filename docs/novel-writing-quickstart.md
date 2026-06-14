@@ -2,6 +2,24 @@
 
 Follow this guide to write a novel with Nexus from a clean install — no platform account, no cloud sync, no harness knowledge required. Everything runs locally.
 
+## Migrating from V1.44
+
+V1.45 hard-deletes the V1.33–V1.44 `creator run` subcommands. If you used any of these in V1.44 scripts or workflows, use the V1.45 equivalent:
+
+| V1.44 (deleted) | V1.45 equivalent |
+|------------------|-------------------|
+| `creator run start --idea "..."` | `creator bootstrap --idea "..."` |
+| `creator run continue --note "..."` | `creator works inspire [<work_id>] --note "..."` |
+| `creator run resume --reopen` | `creator works reopen [<work_id>] --reason "..."` |
+| `creator run reconcile-chapters` | `creator works reconcile-chapters [<work_id>]` |
+| `creator run stage list` | `creator works status` |
+| `creator run stage advance --stage <name>` | `creator run <preset_id> [<work_id>]` (e.g. `research`, `novel-writing`, `reflection-loop`, `kb-extract`) |
+| `creator run audit-chapter --mode review` | `creator run novel-manuscript-audit-review [<work_id>] --chapter N [--volume V]` |
+| `creator run audit-chapter --mode extract` | `creator run novel-manuscript-audit-extract [<work_id>] --chapter N [--volume V]` |
+| `creator run review-master` | `creator run novel-review-master [<work_id>] [--finding-id ID] [--auto-schedule]` |
+
+For the full migration table and rationale, see the [V1.45 compass migration appendix](../.mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md).
+
 ## Prerequisites
 
 - **Nexus installed** — see [CONTRIBUTING.md](CONTRIBUTING.md) for build instructions, or use a pre-built binary.
@@ -50,12 +68,13 @@ nexus42 creator world create --title "Neon River"
 
 # This prints a world_id (e.g. wld_abc123). Use it below.
 
-# 7. Start a new novel Work and scaffold the project structure.
+# 7. Bootstrap a new novel Work — this creates the Work, runs the init preset
+#    (which scaffolds the project structure), and chains intake → produce.
 #    The init preset asks interactive questions:
 #    - Working title / directory name
 #    - How many chapters you plan
 #    - Confirm or override the World to bind
-nexus42 creator run start \
+nexus42 creator bootstrap \
   --idea "A solarpunk noir detective story set in a floating canal city" \
   --init-preset novel-project-init
 ```
@@ -74,29 +93,26 @@ Works/<your-work-ref>/
   Logs/                (process logs)
 ```
 
-> If you already have a World, list available ones with `nexus42 creator world list` and pass `--world-id <world_id>` to the start command.
+> If you already have a World, list available ones with `nexus42 creator world list` and pass `--world-id <world_id>` to the bootstrap command.
 
 ### §3 First Chapter
 
-With the scaffold ready, proceed through the FL-E stages: **intake → produce**. The intake stage captures your creative brief; produce drafts your first chapter.
+`creator bootstrap` chains the init preset → intake → produce automatically. Check your status:
 
 ```bash
-# 8. Run the creative brief intake (if not already done by the init flow).
-#    The daemon processes the intake preset and marks intake complete.
-#    (If you used --init-preset in §2, intake may already be chained.)
-#    Check status to see where you are:
+# 8. Bootstrap already chained intake. Confirm progress:
 nexus42 creator works status
 
 # 9. If intake is complete and the chapter is "not_started",
 #    trigger the production preset to outline → draft → finalize chapter 1:
-nexus42 creator run continue <work_id> --note "Let's begin chapter 1"
+nexus42 creator run novel-writing <work_id>
 ```
 
 The `novel-writing` preset will:
 
 1. **Outline** the chapter (saved to `Outlines/chapters/ch01-outline.md`).
 2. **Draft** the chapter body (saved to `Stories/ch01-<slug>.md`).
-3. **Finalize** after passing a built-in quality check (the 五问 gate). If the gate returns **NOGO**, add more direction with `creator run continue <work_id> --note "..."` and re-run.
+3. **Finalize** after passing a built-in quality check (the 五问 gate). If the gate returns **NOGO**, add more direction with `creator works inspire <work_id> --note "..."` and re-run `creator run novel-writing <work_id>`.
 
 ```bash
 # Check progress at any time
@@ -123,7 +139,7 @@ nexus42 creator works status
 While auto-chain runs, you can inject inspiration at any time:
 
 ```bash
-nexus42 creator run continue <work_id> --note "New plot twist idea: the detective's partner is the informant"
+nexus42 creator works inspire <work_id> --note "New plot twist idea: the detective's partner is the informant"
 ```
 
 This does **not** interrupt the current chapter; it merges into the next chapter’s prompt context.
@@ -131,13 +147,13 @@ This does **not** interrupt the current chapter; it merges into the next chapter
 If the daemon restarts, resume where you left off:
 
 ```bash
-nexus42 creator run resume <work_id>
+nexus42 creator works resume-chain <work_id>
 ```
 
 If chapter files get out of sync with the database, reconcile them:
 
 ```bash
-nexus42 creator run reconcile-chapters <work_id>
+nexus42 creator works reconcile-chapters <work_id>
 ```
 
 ### §5 Quality Loop
@@ -161,24 +177,26 @@ nexus42 creator works status
 #   findings: 2 open (1 blocker, 1 minor) — highest: blocker
 #     #1 [blocker] "Continuity error in chapter 5" → write
 #     #2 [minor] "Style inconsistency" → none
-#     Address findings or run: nexus42 creator run stage advance <work_id> --stage review
+#     Address findings or run: nexus42 creator run reflection-loop <work_id>
 #     See docs/novel-writing-quickstart.md §5
 ```
 
 A **96-hour master-decision banner** appears if any finding stays `open` too long. The daemon will prompt you to run a master-decision review:
 
 ```bash
-# Primary path — run the master-decision review on open findings
-nexus42 creator run review-master <work_id>
+# Enqueue a master-decision review schedule on open findings
+nexus42 creator run novel-review-master <work_id>
 
-# List master findings (default), then enqueue the review for a specific finding:
-nexus42 creator run review-master <work_id> --finding-id <finding_id>
+# Enqueue master-decision review scoped to a specific finding:
+nexus42 creator run novel-review-master <work_id> --finding-id <finding_id>
 
 # Opt-in: auto-schedule review when stale findings exist:
-nexus42 creator run review-master <work_id> --auto-schedule
+nexus42 creator run novel-review-master <work_id> --auto-schedule
 ```
 
-> `review-master` enqueues the `novel-review-master` preset for master decisions on **existing** findings. This is distinct from `creator run stage advance --stage review`, which runs the `reflection-loop` FL-E review stage to **generate** new findings from chapter content. Use `stage advance --stage review` to produce findings, then `review-master` to decide on them.
+> **`novel-review-master` is enqueue-only** — it dispatches the `novel-review-master` preset as a schedule. It does **not** list findings. To **list** open findings, use `nexus42 creator works status [<work_id>]` (documented above in §3 and §5).
+
+> `novel-review-master` enqueues the `novel-review-master` preset for master decisions on **existing** findings. This is distinct from `creator run reflection-loop`, which runs the FL-E review stage to **generate** new findings from chapter content. Use `creator run reflection-loop` to produce findings, then `creator run novel-review-master` to decide on them.
 >
 > The quality loop uses local SQLite and the daemon — no Redis, no cron, no cloud dependency.
 
@@ -206,7 +224,7 @@ nexus42 creator works status
 #   This Work is complete; see docs/novel-writing-quickstart.md §6
 #
 #   To start a new Work, run:
-#     nexus42 creator run start \
+#     nexus42 creator bootstrap \
 #       --init-preset novel-project-init --idea "..."
 # ═════════════════════════════════════════════════════
 ```
@@ -214,14 +232,15 @@ nexus42 creator works status
 To start a **new** novel in the same World:
 
 ```bash
-nexus42 creator run start --idea "..." --init-preset novel-project-init --world-id <world_id>
+nexus42 creator bootstrap --idea "..." --init-preset novel-project-init --world-id <world_id>
 ```
 
 To **reopen** a completed Work (e.g., to add bonus chapters):
 
 ```bash
 nexus42 creator works completion-lock release <work_id>
-nexus42 creator run resume <work_id> --reopen --reason "Adding epilogue"
+nexus42 creator works reopen <work_id> --reason "Adding epilogue"
+nexus42 creator works resume-chain <work_id>
 ```
 
 ---
@@ -277,7 +296,7 @@ As you write, inspiration notes accumulate in the Work's **inspiration log**. Th
 
 ```bash
 # Add inspiration at any time — even during auto-chain
-nexus42 creator run continue <work_id> --note "Character X should have a hidden motive from chapter 3 onward"
+nexus42 creator works inspire <work_id> --note "Character X should have a hidden motive from chapter 3 onward"
 ```
 
 Inspiration notes are:

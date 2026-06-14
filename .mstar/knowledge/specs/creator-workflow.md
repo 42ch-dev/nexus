@@ -193,4 +193,10 @@ Invariant: at most one active FL-E stage driver schedule per Work remains enforc
 
 ---
 
+## V1.45 supersession (P-last promotion)
+
+**Superseded by**: [creator-run-preset-entry.md](creator-run-preset-entry.md) (Shipped Master V1.45). FL-E CLI table is now part of the canonical Master body — see §3.3 (`research` / `novel-writing` / `reflection-loop` / `kb-extract` preset ids) and §2 three-plane IA.
+
+---
+
 *Normative staged creator workflow. Shipped V1.34 via `.mstar/plans/2026-06-04-v1.34-*`.*
