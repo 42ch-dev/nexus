@@ -4,6 +4,20 @@
 //! tracking active/queued/completed Work references.
 //!
 //! Spec: novel-work-pool.md §2, local-db-schema.md §4.1.5.
+//!
+//! # Instrumented mutation paths (V1.46 P4 audit)
+//!
+//! The following `pub fn` mutate the `novel_pool_entries` table and are
+//! instrumented with `tracing::info!`:
+//!
+//! - [`promote_to_active`]
+//! - [`archive_pool_entry`]
+//! - [`mark_pool_entry_completed`]
+//! - [`mark_pool_entry_completed_for_work`]
+//!
+//! Read-only functions (`list_pool_entries`, `count_pool_entries`,
+//! `get_pool_entry`, `get_pool_entry_by_work`, `get_active_pool_entry`) are
+//! intentionally not traced.
 
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
@@ -130,6 +144,12 @@ pub async fn promote_to_active(
     creator_id: &str,
     work_id: &str,
 ) -> Result<PoolEntry, LocalDbError> {
+    tracing::info!(
+        operation = "pool_promote_to_active",
+        creator_id = %creator_id,
+        work_id = %work_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     let mut tx: Transaction<'_, Sqlite> = pool.begin().await?;
@@ -200,6 +220,12 @@ pub async fn archive_pool_entry(
     entry_id: &str,
     creator_id: &str,
 ) -> Result<PoolEntry, LocalDbError> {
+    tracing::info!(
+        operation = "pool_archive",
+        entry_id = %entry_id,
+        creator_id = %creator_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.
@@ -235,6 +261,11 @@ pub async fn mark_pool_entry_completed(
     pool: &SqlitePool,
     entry_id: &str,
 ) -> Result<(), LocalDbError> {
+    tracing::info!(
+        operation = "pool_mark_completed",
+        entry_id = %entry_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.
@@ -259,6 +290,12 @@ pub async fn mark_pool_entry_completed_for_work(
     creator_id: &str,
     work_id: &str,
 ) -> Result<(), LocalDbError> {
+    tracing::info!(
+        operation = "pool_mark_completed_for_work",
+        creator_id = %creator_id,
+        work_id = %work_id,
+        "pool mutation"
+    );
     let now = chrono::Utc::now().to_rfc3339();
 
     // SAFETY: dynamic SQL — compile-time macro not applicable.
@@ -469,5 +506,70 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(entry.status, "completed");
+    }
+
+    // V1.46 P4 (R-V141P1-15): verify pool mutation emits structured tracing.
+    #[tokio::test]
+    async fn test_promote_to_active_emits_trace() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct CaptureLayer {
+            messages: Arc<Mutex<Vec<String>>>,
+        }
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if event.metadata().level() == &tracing::Level::INFO {
+                    let mut visitor = CaptureVisitor(String::new());
+                    event.record(&mut visitor);
+                    let mut msgs = self.messages.lock().unwrap();
+                    msgs.push(visitor.0);
+                }
+            }
+        }
+        struct CaptureVisitor(String);
+        impl tracing::field::Visit for CaptureVisitor {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                use std::fmt::Write;
+                let _ = write!(&mut self.0, "{}={:?} ", field.name(), value);
+            }
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                use std::fmt::Write;
+                let _ = write!(&mut self.0, "{}={} ", field.name(), value);
+            }
+        }
+
+        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let layer = CaptureLayer {
+            messages: captured.clone(),
+        };
+        let subscriber =
+            <tracing_subscriber::Registry as tracing_subscriber::layer::SubscriberExt>::with(
+                tracing_subscriber::registry::Registry::default(),
+                layer,
+            );
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
+
+        let _guard = tracing::subscriber::set_default(subscriber);
+        promote_to_active(&pool, "ctr_test", "wrk_001")
+            .await
+            .unwrap();
+        drop(_guard);
+
+        let messages = captured.lock().unwrap();
+        assert!(
+            messages.iter().any(|m| {
+                m.contains("operation=pool_promote_to_active")
+                    && m.contains("creator_id=ctr_test")
+                    && m.contains("work_id=wrk_001")
+            }),
+            "expected structured info trace for pool_promote_to_active, got: {messages:?}"
+        );
     }
 }

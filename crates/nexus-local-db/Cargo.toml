@@ -29,3 +29,4 @@ async-trait.workspace = true
 [dev-dependencies]
 tempfile = "3"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }
+tracing-subscriber = { workspace = true }
