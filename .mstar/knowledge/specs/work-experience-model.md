@@ -151,7 +151,7 @@ Loader **must** reject unknown intent strings. Embedded presets updated in V1.33
 | `soul-experience-refresh` | `work_maintenance` |
 | `reflection-loop` | `work_continue` |
 
-Policy: only presets with `work_init` appear in `creator run start --preset` default list.
+Policy: only presets with `work_init` appear in the default bootstrap intake list.
 
 ---
 
@@ -161,10 +161,10 @@ Policy: only presets with `work_init` appear in `creator run start --preset` def
 
 Same as [cli-spec.md](cli-spec.md) §7: workspace init, daemon start, ACP agent use, active creator.
 
-### 6.2 Start Work (`creator run start`)
+### 6.2 Start Work (`creator bootstrap`)
 
 ```text
-creator run start --idea "<text>" [--preset novel-writing] [--world-id <id>]
+creator bootstrap --idea "<text>" [--preset novel-writing] [--world-id <id>]
 ```
 
 Behavior:
@@ -251,7 +251,7 @@ Closed loop requires daemon routes for review + fragments (P4).
 
 ## 10. Generic creator workflow — V1.34
 
-**Normative SSOT**: [creator-workflow.md](creator-workflow.md) (stages, preset chain, stage advance).
+**Normative SSOT**: [creator-workflow.md](creator-workflow.md) (stages, preset chain, preset runner stage-gate validation).
 
 V1.34 extends Work with:
 
@@ -260,9 +260,9 @@ V1.34 extends Work with:
 | `current_stage` | enum | `intake` \| `research` \| `produce` \| `review` \| `persist` |
 | `stage_status` | enum or map | Per-stage `pending` \| `active` \| `complete` \| `skipped` \| `failed` |
 
-Stage progression is **explicit** via `creator run stage advance` (not default auto-chain — see DF-53).
+Stage progression is **explicit** via `creator run <preset_id>` (the preset runner validates stage gates and PATCHes Work stage fields before enqueue — not default auto-chain; see DF-53).
 
-FL-E reuses V1.33 `creator run start/continue/list/status` and does not replace `daemon schedule`.
+FL-E reuses V1.33 `creator bootstrap` (composite onboarding) and `creator run <preset_id>` (strategy execution) and does not replace `daemon schedule`.
 
 ---
 
@@ -273,7 +273,7 @@ FL-E reuses V1.33 `creator run start/continue/list/status` and does not replace 
 | `works` DDL | Shipped V1.33 P1; stage columns V1.34 P1 |
 | `creative-brief-intake` standalone preset | Shipped V1.33 P2 |
 | Brief JSON from orchestration | Shipped V1.33 P2 |
-| Auto-start `novel-writing` after intake | V1.33 `--chain-novel-writing`; V1.34 uses **stage advance** for produce |
+| Auto-start `novel-writing` after intake | V1.33 `--chain-novel-writing`; V1.34+ uses the preset runner for `produce` |
 
 ---
 

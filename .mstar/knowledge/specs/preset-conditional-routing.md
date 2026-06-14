@@ -18,7 +18,7 @@
 
 ## 1. Purpose
 
-Authors need presets that branch on runtime signals (judge outcome, tool result, user input) without spawning separate schedules or manual `creator run stage advance` calls.
+Authors need presets that branch on runtime signals (judge outcome, tool result, user input) without spawning separate schedules or a manual `creator run <preset_id>` dispatch.
 
 **V1.42 P2 shipped minimal slice** (2026-06-11):
 
@@ -31,7 +31,7 @@ Authors need presets that branch on runtime signals (judge outcome, tool result,
 Pre-V1.42 state:
 
 - Preset loader rejected `next.kind: conditional` with `ConditionalNotYetSupported`.
-- Shipped creator workflow uses linear stage enum + explicit `creator run stage advance` (DF-53 auto-chain still open).
+- Shipped creator workflow uses linear stage enum + explicit `creator run <preset_id>` dispatch (DF-53 auto-chain still open).
 - V1.32 validator catches invalid preset graphs at load time for **linear** graphs only.
 
 ---
@@ -41,7 +41,7 @@ Pre-V1.42 state:
 | Area | State |
 | --- | --- |
 | Preset loader | Accepts `next: { go: <state>, nogo: <state> }` on `llm_judge` states; still rejects expression-based `ConditionalNotYetSupported` |
-| Creator workflow stages | Linear enum; explicit `creator run stage advance` |
+| Creator workflow stages | Linear enum; explicit `creator run <preset_id>` dispatch |
 | Quality gate | V1.32 validator: reachability, terminal consistency, asset sandbox (linear graphs) |
 | Conditional edge runtime | `graph_flow::add_conditional_edge` reads `_judge_result` from context |
 | Open deferrals | DF-29 (`registry.refresh`), DF-31 (`workspace.*`), **DF-56** (full expression routing — post-V1.42) |

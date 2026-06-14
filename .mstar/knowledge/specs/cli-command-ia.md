@@ -64,7 +64,7 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see �
 | Entry | Role |
 | --- | --- |
 | `creator run <preset_id> [<work_id>]` | Generic preset dispatch; see [creator-run-preset-entry.md](creator-run-preset-entry.md) |
-| `creator bootstrap …` | Composite Work onboarding (replaces `creator run start`) |
+| `creator bootstrap …` | Composite Work onboarding (Removed in V1.45: replaces `creator run start`; see changelog) |
 | `creator works …` | Atomic Work ops only (`inspire`, `reopen`, `resume-chain`, `reconcile-chapters`, …) |
 
 **Removed in V1.45 (hard delete):** `review-master`, `audit-chapter`, `stage`, `start`, `continue`, `resume`, `reconcile-chapters` under `creator run`.
@@ -150,7 +150,7 @@ Detailed steps: cli-spec §7. Normative split:
 | **Local-first** (§7.1) | Default; `platform_integration = paused` | Not required |
 | **Platform-mounted** (§7.2) | User wants cloud worlds / sync | Required |
 
-Local-first must reach `creator run start` in ≤7 commands (see creator-centric-entry-model §3.1).
+Local-first must reach `creator bootstrap` in ≤7 commands (see creator-centric-entry-model §3.1).
 
 ---
 
