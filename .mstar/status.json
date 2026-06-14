@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "updated_at": "2026-06-14T18:00:00+08:00",
+    "updated_at": "2026-06-14T15:55:44+08:00",
     "plans": [
         {
             "plan_id": "2026-06-14-v1.46-harness-docs-prepare",
@@ -14,7 +14,7 @@
         {
             "plan_id": "2026-06-14-v1.46-author-desk-status-ux",
             "title": "P0 — Author desk delta (works status findings + --json)",
-            "status": "Todo",
+            "status": "InReview",
             "working_branch": "feature/v1.46-author-desk-status-ux",
             "merge_target": "iteration/v1.46",
             "plan_file": ".mstar/plans/2026-06-14-v1.46-author-desk-status-ux.md",
@@ -183,6 +183,56 @@
         }
     },
     "residual_findings": {
+        "2026-06-14-v1.46-author-desk-status-ux": [
+            {
+                "id": "R-V146P0-QC1-S2",
+                "title": "capture_findings_output test helper duplicates print_findings_summary formatting logic",
+                "severity": "low",
+                "source": "qc1 (architecture/maintainability) S-2",
+                "scope": "crates/nexus42/src/commands/creator/works/mod.rs (production lines 1264-1313; test helper lines 1485-1529)",
+                "decision": "defer",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46+",
+                "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
+                "note": "Pre-existing pattern worsened by V1.46 P0; future refactor should extract pure fn format_findings_summary(result, work_id) -> String shared between production and tests."
+            },
+            {
+                "id": "R-V146P0-QC2-S1",
+                "title": "enrich_status_json tests use minimal finding_json helper; full element shape fidelity not asserted",
+                "severity": "low",
+                "source": "qc2 (security/correctness) S-1",
+                "scope": "crates/nexus42/src/commands/creator/works/mod.rs:1638-1752 (enrich_* tests) + helper at 1411",
+                "decision": "defer",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46+",
+                "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
+                "note": "Production path is direct to_vec() passthrough so no behavioral risk; this is test-coverage hygiene to harden the 'verbatim fidelity' claim. Fold into R-V146P0-QC1-S2 refactor when addressed."
+            },
+            {
+                "id": "R-V146P0-QC3-S2",
+                "title": "JSON-path findings/stale degradation paths lack tracing observability",
+                "severity": "low",
+                "source": "qc3 (performance/reliability) S-002",
+                "scope": "crates/nexus42/src/commands/creator/works/mod.rs:380-388 (silent .ok() swallowing on fetch failures)",
+                "decision": "defer",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46+",
+                "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
+                "note": "Best-effort degradation is intentional; add tracing::debug! / tracing::warn! with endpoint + work_id + elapsed_ms so operators can diagnose daemon degradation without changing user-facing contract."
+            },
+            {
+                "id": "R-V146P0-QC3-S3",
+                "title": "Consider skipping stale fetch when findings fetch already failed",
+                "severity": "low",
+                "source": "qc3 (performance/reliability) S-003",
+                "scope": "crates/nexus42/src/commands/creator/works/mod.rs:379-389",
+                "decision": "defer",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46+",
+                "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
+                "note": "Low-confidence perf micro-opt under daemon overload. Skip stale call when findings unavailable to further reduce hot-path overhead."
+            }
+        ],
         "2026-06-04-v1.33-work-model-and-creator-run": [
             {
                 "id": "R-V133P1-03",
