@@ -1,16 +1,78 @@
 {
     "version": 1,
-    "updated_at": "2026-06-14T14:30:00+08:00",
+    "updated_at": "2026-06-14T18:00:00+08:00",
     "plans": [
         {
-            "plan_id": "2026-06-13-v1.45-author-desk-status-ux",
-            "title": "P4 — Author desk + findings in works status (optional)",
+            "plan_id": "2026-06-14-v1.46-harness-docs-prepare",
+            "title": "P-1 — V1.46 compass, plans, spec overlays, tracker, status (docs-only)",
+            "status": "Done",
+            "working_branch": "iteration/v1.46",
+            "merge_target": "iteration/v1.46",
+            "plan_file": ".mstar/plans/2026-06-14-v1.46-harness-docs-prepare.md",
+            "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md"
+        },
+        {
+            "plan_id": "2026-06-14-v1.46-author-desk-status-ux",
+            "title": "P0 — Author desk delta (works status findings + --json)",
             "status": "Todo",
-            "working_branch": "feature/v1.45-author-desk-status-ux",
-            "merge_target": "iteration/v1.45",
-            "plan_file": ".mstar/plans/2026-06-13-v1.45-author-desk-status-ux.md",
-            "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md"
+            "working_branch": "feature/v1.46-author-desk-status-ux",
+            "merge_target": "iteration/v1.46",
+            "plan_file": ".mstar/plans/2026-06-14-v1.46-author-desk-status-ux.md",
+            "depends_on": "2026-06-14-v1.46-harness-docs-prepare",
+            "supersedes": "2026-06-13-v1.45-author-desk-status-ux",
+            "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md"
+        },
+        {
+            "plan_id": "2026-06-14-v1.46-spec-cli-hygiene",
+            "title": "P1 — Spec sweep + quickstart delete + runtime remediation chains",
+            "status": "Todo",
+            "working_branch": "feature/v1.46-spec-cli-hygiene",
+            "merge_target": "iteration/v1.46",
+            "plan_file": ".mstar/plans/2026-06-14-v1.46-spec-cli-hygiene.md",
+            "depends_on": "2026-06-14-v1.46-author-desk-status-ux",
+            "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md"
+        },
+        {
+            "plan_id": "2026-06-14-v1.46-novel-runtime-ux-edges",
+            "title": "P2 — On-disk chapter hints + dynamic clap cli_args help",
+            "status": "Todo",
+            "working_branch": "feature/v1.46-novel-runtime-ux-edges",
+            "merge_target": "iteration/v1.46",
+            "plan_file": ".mstar/plans/2026-06-14-v1.46-novel-runtime-ux-edges.md",
+            "depends_on": "2026-06-14-v1.46-spec-cli-hygiene",
+            "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md"
+        },
+        {
+            "plan_id": "2026-06-14-v1.46-research-auto-chain-e2e",
+            "title": "P3 — Hermetic supervisor research E2E",
+            "status": "Todo",
+            "working_branch": "feature/v1.46-research-auto-chain-e2e",
+            "merge_target": "iteration/v1.46",
+            "plan_file": ".mstar/plans/2026-06-14-v1.46-research-auto-chain-e2e.md",
+            "depends_on": "2026-06-14-v1.46-spec-cli-hygiene",
+            "parallel_with": "2026-06-14-v1.46-pool-observability",
+            "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md"
+        },
+        {
+            "plan_id": "2026-06-14-v1.46-pool-observability",
+            "title": "P4 — Pool/inspiration mutation tracing",
+            "status": "Todo",
+            "working_branch": "feature/v1.46-pool-observability",
+            "merge_target": "iteration/v1.46",
+            "plan_file": ".mstar/plans/2026-06-14-v1.46-pool-observability.md",
+            "depends_on": "2026-06-14-v1.46-spec-cli-hygiene",
+            "parallel_with": "2026-06-14-v1.46-research-auto-chain-e2e",
+            "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md"
+        },
+        {
+            "plan_id": "2026-06-14-v1.46-hygiene-and-closeout",
+            "title": "P-last — Spec promotion, tracker snapshot, Profile B compaction",
+            "status": "Todo",
+            "working_branch": "feature/v1.46-hygiene-and-closeout",
+            "merge_target": "iteration/v1.46",
+            "plan_file": ".mstar/plans/2026-06-14-v1.46-hygiene-and-closeout.md",
+            "depends_on": "2026-06-14-v1.46-author-desk-status-ux,2026-06-14-v1.46-spec-cli-hygiene,2026-06-14-v1.46-novel-runtime-ux-edges,2026-06-14-v1.46-research-auto-chain-e2e,2026-06-14-v1.46-pool-observability",
+            "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md"
         }
     ],
     "v1_43_iteration_complete": true,
@@ -23,14 +85,14 @@
             "plan_topic": "feature/{ver}-{plan-slug}",
             "iteration_integration": "iteration/{ver}"
         },
-        "integration_branch": "main",
+        "integration_branch": "iteration/v1.46",
         "last_integration_branch": "iteration/v1.45",
         "integration_merge_target": "main",
         "integration_branch_role": "active",
         "latest_shipped_iteration": "v1.45",
         "latest_shipped_at": "2026-06-14T13:54:43+08:00 (PR #58 merged to main)",
-        "latest_active_iteration": null,
-        "latest_active_compass": null,
+        "latest_active_iteration": "v1.46",
+        "latest_active_compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md",
         "integration_branch_retired": "iteration/v1.45 (PR #58 MERGED at 9514bfdc 2026-06-14 13:54:43+08:00; integration merged to main)",
         "platform_integration": "paused — local-only until further notice",
         "tech_debt_summary": {
@@ -50,8 +112,9 @@
             },
             "notes": "V1.45 Shipped 2026-06-14 (PR #58 merged 9514bfdc). Recomputed 2026-06-14 from `residual_findings` open entries (lifecycle == \"open\"). Replaces stale V1.40 closeout count."
         },
-        "wave_0_spec": ".mstar/knowledge/specs/creator-run-preset-entry.md",
+        "wave_0_spec": ".mstar/knowledge/specs/novel-author-experience.md",
         "spec_refs": [
+            ".mstar/knowledge/specs/novel-author-experience.md",
             ".mstar/knowledge/specs/creator-run-preset-entry.md",
             ".mstar/knowledge/specs/cli-spec.md",
             ".mstar/knowledge/specs/cli-command-ia.md",
@@ -71,8 +134,8 @@
             ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
             ".mstar/knowledge/specs/novel-work-pool.md"
         ],
-        "iteration_compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-        "pre_implement_gate": "V1.45 Shipped 2026-06-14 (PR #58 MERGED at 9514bfdc; integration_branch retired to main). No active iteration; awaiting V1.46 compass.",
+        "iteration_compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md",
+        "pre_implement_gate": "V1.46 harness prepare complete 2026-06-14 — Pre-implement GO; P0–P-last Todo on iteration/v1.46",
         "v1_43_ship": {
             "merge_commit": "0004d85f",
             "pr": 56,
@@ -116,7 +179,7 @@
             "merge_commit": "9514bfdc49a78a5f650ec3893231bf3077ab2732",
             "merged_at": "2026-06-14T13:54:43+08:00 (2026-06-14T05:54:43Z)",
             "shipped_at": "2026-06-14T13:54:43+08:00 (PR #58 merged to main)",
-            "p4_disposition": "OUT of V1.45 scope (optional); deferred to V1.46+"
+            "p4_disposition": "Superseded by 2026-06-14-v1.46-author-desk-status-ux (V1.46 P0 delta scope)"
         }
     },
     "residual_findings": {

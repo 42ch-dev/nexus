@@ -79,7 +79,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [cli-spec.md](cli-spec.md) | Master | Normative — V1.40 Shipped §6.2G (creator world mandatory binding) + §creator kb queue-extract --chapter N |
+| [cli-spec.md](cli-spec.md) | Master | Normative — V1.40 Shipped §6.2G + **Draft V1.46 overlay** (§6.2E superseded — delete in P1) |
 | [cli-command-ia.md](cli-command-ia.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 | [creator-centric-entry-model.md](creator-centric-entry-model.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 
@@ -104,7 +104,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
 | [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.44)** — V1.39 baseline + §3.4 review-master CLI overlay (P1); R-V143P0-002 closed |
 | [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
-| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.43)** — BL-10 quickstart contract + CLI copy map + author visibility |
+| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Draft (V1.46)** — wave-0 overlay; §3 embedded author path; BL-10 quickstart retired P1 |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

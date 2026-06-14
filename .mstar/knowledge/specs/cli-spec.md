@@ -5,7 +5,9 @@
 **V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
 **V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).  
 **V1.41 Draft amendments:** §6.2H `creator works` (list/status/use/pool); `creator run` single-Work actions only; `creator run start --from-work`; completion-lock + runtime lock (DF-60/61).
-**V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver.
+**V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver.  
+**V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface.  
+**V1.46 Draft overlay (2026-06-14):** **Delete** entire §6.2E block `nexus42 creator run stage` (FL-E subcommands) and stale `creator run start` / `resume` flag tables therein — superseded by generic preset runner (P1 implement). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md). Until P1 merges, treat §6.2E as **non-authoritative stale text** (R-V145B3-001).
 
 ## 0. 文档定位
 
@@ -389,7 +391,9 @@ Rules:
 
 
 
-### 6.2E `nexus42 creator run stage` (FL-E — V1.34 target)
+### 6.2E `nexus42 creator run stage` (FL-E — V1.34 target) — **SUPERSEDED (V1.46 P1: delete this section)**
+
+> **V1.46 Draft overlay:** This entire subsection is **stale** — V1.45 removed `creator run stage` / `start` / `resume` subcommands from the clap surface. Implement plan `2026-06-14-v1.46-spec-cli-hygiene` deletes this block. **Do not implement** from this section. Authoritative IA: [creator-run-preset-entry.md](./creator-run-preset-entry.md).
 
 Normative stage model: [creator-workflow.md](./creator-workflow.md).
 
