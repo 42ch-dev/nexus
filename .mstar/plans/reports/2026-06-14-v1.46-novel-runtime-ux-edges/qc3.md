@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-14-v1.46-novel-runtime-ux-edges"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-15"
 ---
 
@@ -14,7 +14,8 @@ generated_at: "2026-06-15"
 - Runtime Agent ID: qc-specialist-3
 - Runtime Model: kimi-for-coding/k2p7
 - Review Perspective: Performance and reliability risk — `exists()` per-chapter cost, help-intercept startup overhead, manifest load laziness/caching, test suite reliability
-- Report Timestamp: 2026-06-15T00:00:00+08:00
+- Report Timestamp: 2026-06-15T10:00:00+08:00
+- **Note**: Revalidation round (targeted re-review of W-001 fix; qc1/qc2 retain initial-wave Approve)
 
 ## Scope
 - plan_id: `2026-06-14-v1.46-novel-runtime-ux-edges`
@@ -112,3 +113,18 @@ $ cargo test -p nexus42
 $ cargo +nightly fmt --all --check
 (no output)
 ```
+
+## Revalidation
+- **Round**: targeted re-review (qc-specialist-3 only; qc1/qc2 stay Approve)
+- **Review basis**: git diff 008e6bd8..ce58d005 (P2 fix + qc docs); fix-only slice is 70587add..ce58d005 = 1 file (`crates/nexus42/src/commands/creator/works/mod.rs`)
+- **Prior findings status**:
+  - **W-001** (per-chapter `exists()` latency in `print_chapter_table`): **Resolved in this round** at commit `eca490a2` (merge `ce58d005`). Evidence: `CHAPTER_PATH_HINT_CAP = 50` const bounds the synchronous `Path::exists()` loop; `tracing::info_span!("chapter_path_hints", total_chapters, capped = hint_cap)` records chapter count and effective cap; elapsed-ms log fires when the loop exceeds 100 ms; a `+ N more (paths not checked)` summary line covers chapters beyond the cap; `chapter_path_missing_hint` still checks both `body_path` and `outline_path` for the first `hint_cap` rows, preserving Grill #9 behavior for those rows.
+  - **S-001** (stdout flush before `exit(0)`): **Still open — deferred to residual `R-V146P2-QC3-S1`**. Fix round only touched `works/mod.rs`; `run.rs` was not modified.
+  - **S-002** (`CapabilityRegistry` rebuilt per help intercept): **Still open — deferred to residual `R-V146P2-QC3-S2`**. Fix round only touched `works/mod.rs`; `run.rs` was not modified.
+- **Fix-round regressions**: None. Only `works/mod.rs` changed in `70587add..ce58d005`; no behavior outside the chapter hint path was modified.
+- **CI gates** (re-run on `iteration/v1.46` HEAD `ce58d005`):
+  - `cargo clippy --all -- -D warnings` — clean
+  - `cargo test -p nexus42` — 843 passed, 0 failed (840 baseline + 3 new cap/summary tests)
+  - `cargo +nightly fmt --all --check` — clean
+- **Open residuals remain tracked**: The 5 low-severity residuals (`R-V146P2-QC2-W`, `R-V146P2-QC1-S1`, `R-V146P2-QC1-S2`, `R-V146P2-QC3-S1`, `R-V146P2-QC3-S2`) are still present in `.mstar/status.json` `residual_findings["2026-06-14-v1.46-novel-runtime-ux-edges"]` and were not closed by this round.
+- **Updated verdict**: Approve
