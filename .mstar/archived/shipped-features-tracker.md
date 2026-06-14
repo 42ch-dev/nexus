@@ -466,6 +466,8 @@ When a version ships, append new closed rows here and remove them from the activ
 
 | Aspect | Detail |
 |---|---|
+| **PR / Merge** | PR [#58](https://github.com/42ch-dev/nexus/pull/58) MERGED at 9514bfdc (2026-06-14T13:54:43+08:00); CI 8/8 PASS (Rust fmt+clippy · Rust tests · Schema Consistency · TypeScript typecheck · Validate JSON Schemas · Verify Codegen · Verify daemon-runtime linkage · Verify sqlx offline metadata) |
+|---|---|
 | **Theme** | **Creator Run Preset Unification** — CLI IA correction: `creator run <preset_id>` as the sole preset dispatch entry; delete hardcoded `RunCommand` subcommands; **`creator bootstrap`** for composite Work onboarding; **atomic `creator works`** for non-preset ops; quickstart/spec convergence; (P4 author-desk deferred). |
 | **Compass** | [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md) — 20 grill-me decisions locked; atomic merge required (Grill #19). |
 | **Active spec** | [creator-run-preset-entry.md](../knowledge/specs/creator-run-preset-entry.md) promoted Draft → **Shipped Master V1.45** (P-last T1). |

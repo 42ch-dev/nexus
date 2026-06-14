@@ -31,7 +31,7 @@
         "latest_shipped_at": "2026-06-14T02:50:00+08:00 (PR #58 opened; merge to main pending)",
         "latest_active_iteration": null,
         "latest_active_compass": null,
-        "integration_branch_retired": "iteration/v1.45 (post-PR-merge)",
+        "integration_branch_retired": "iteration/v1.45 (PR #58 merged 2026-06-14 13:54:43+08:00 / 05:54:43Z; integration merged to main at 9514bfdc)",
         "platform_integration": "paused \u2014 local-only until further notice",
         "tech_debt_summary": {
             "updated_at": "2026-06-13T23:00:00+08:00",
@@ -79,7 +79,7 @@
             ".mstar/knowledge/specs/novel-work-pool.md"
         ],
         "iteration_compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-        "pre_implement_gate": "V1.45 Shipped 2026-06-14 (PR #58 OPEN; awaiting merge to main). No active iteration; next: V1.46 (TBD).",
+        "pre_implement_gate": "V1.45 Shipped 2026-06-14 (PR #58 MERGED at 9514bfdc; integration_branch retired). No active iteration; awaiting V1.46 compass.",
         "v1_43_ship": {
             "merge_commit": "0004d85f",
             "pr": 56,
@@ -105,7 +105,7 @@
             ],
             "pr_url": "https://github.com/42ch-dev/nexus/pull/57"
         },
-        "updated_at": "2026-06-14T02:50:00+08:00",
+        "updated_at": "2026-06-14T14:00:00+08:00",
         "v1_45_iteration_complete": true,
         "v1_45_ship": {
             "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
@@ -119,9 +119,10 @@
             "plan_count_optional_deferred": 1,
             "pr": 58,
             "pr_url": "https://github.com/42ch-dev/nexus/pull/58",
-            "pr_state": "OPEN",
-            "merge_commit": null,
-            "shipped_at": "2026-06-14T02:50:00+08:00 (PR opened; pending merge to main)",
+            "pr_state": "MERGED",
+            "merge_commit": "9514bfdc49a78a5f650ec3893231bf3077ab2732",
+            "merged_at": "2026-06-14T13:54:43+08:00 (2026-06-14T05:54:43Z)",
+            "shipped_at": "2026-06-14T13:54:43+08:00 (PR #58 merged to main)",
             "p4_disposition": "OUT of V1.45 scope (optional); deferred to V1.46+"
         }
     },
