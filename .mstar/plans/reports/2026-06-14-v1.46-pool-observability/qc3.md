@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-14-v1.46-pool-observability"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-15"
 ---
 
@@ -14,7 +14,7 @@ generated_at: "2026-06-15"
 - Runtime Agent ID: qc-specialist-3
 - Runtime Model: kimi-for-coding/k2p7
 - Review Perspective: Performance and reliability risk
-- Report Timestamp: 2026-06-15
+- Report Timestamp: 2026-06-15 (Revalidation round)
 
 ## Scope
 - plan_id: `2026-06-14-v1.46-pool-observability`
@@ -113,3 +113,18 @@ For future operators, consider adding a short note (module doc or `AGENTS.md`) t
 **Verdict**: Request Changes
 
 Rationale: W-01 is a P4-introduced CI lint failure under the exact gate the assignment required to be clean. Until the two clippy errors in the new test are resolved, the P4 crate cannot pass `cargo clippy -p nexus-local-db --tests -- -D warnings`. All functional tests pass and formatting is clean.
+
+## Revalidation
+
+- **Round**: targeted re-review (qc-specialist-3 only; qc1 re-check opportunistic; qc2 stays Approve)
+- **Review basis**: `git diff 8e85432e..0c4e4d46` (P4 fix + qc docs); fix-only slice is `9fa5812a..0c4e4d46` = 1 file (`novel_pool_entries.rs`)
+- **Prior findings status**:
+  - **W-01** (2 P4-introduced clippy errors): **Resolved in this round** at commit `16bb8296` (merge `0c4e4d46`). Evidence: `cargo clippy -p nexus-local-db --tests -- -D warnings` now shows 0 P4-introduced errors (8 pre-existing unchanged in untouched files); `cargo test -p nexus-local-db` still green (201 passed). Implementer note: the actual `significant_drop_tightening` was on the `MutexGuard`, not the subscriber guard — both now scoped.
+  - **S-1** (expand trace coverage): **Still open — deferred to residual `R-V146P4-QC3-S1`**.
+  - **S-2** (document INFO level intent): **Still open — deferred to residual `R-V146P4-QC3-S2`**.
+- **Fix-round regressions**: None (1 file changed; only `novel_pool_entries.rs`).
+- **CI gates**:
+  - `cargo test -p nexus-local-db` → 201 passed, 0 failed.
+  - `cargo clippy -p nexus-local-db --tests -- -D warnings` → 8 pre-existing errors in untouched files (`kb_extract_job.rs`, `work_chapters.rs`, `works.rs`, `tests/v142_migration_fixes.rs`); 0 P4-introduced errors.
+  - `cargo +nightly fmt --all --check` → clean.
+- **Updated verdict**: **Approve**
