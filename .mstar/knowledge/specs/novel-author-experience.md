@@ -1,9 +1,9 @@
 # Novel Author Experience — Normative Supplement v1
 
-**Status**: **Draft (V1.46)** — overlay active; baseline **Shipped (V1.43)** + V1.45 CLI IA amendments  
+**Status**: **Shipped (V1.46)** — overlay merged into Master; baseline **Shipped (V1.43)** + V1.45 CLI IA amendments  
 **Document class**: Feature line (author experience supplement)  
 **Created**: 2026-06-12  
-**Last updated**: 2026-06-14 (V1.46 harness — BL-10 quickstart retired; author path embedded §3; findings JSON §4.1)  
+**Last updated**: 2026-06-15 (V1.46 P-last — promoted from Draft (V1.46) to Shipped; P0 author desk delta + P1 spec sweep + P2 chapter hints shipped)  
 **Scope**: End-user **ongoing serial** happy path — normative CLI surfaces, remediation chains, and author visibility (spec-only SSOT; **no** `docs/novel-writing-quickstart.md` after P1)  
 **Coordinates with**:
 
