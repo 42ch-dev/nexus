@@ -357,9 +357,11 @@ fn work_field_remediation(field: &str) -> String {
         "work_ref" => "Run `creator bootstrap --init-preset novel-project-init` to set work_ref. \
              See .mstar/knowledge/specs/creator-run-preset-entry.md"
             .to_string(),
-        "intake_status" => "Complete intake via `creator bootstrap --preset creative-brief-intake`. \
+        "intake_status" => {
+            "Complete intake via `creator bootstrap --preset creative-brief-intake`. \
              See .mstar/knowledge/specs/novel-author-experience.md §3"
-            .to_string(),
+                .to_string()
+        }
         "world_id" => "Create the World first via `nexus42 creator world create --title \"...\"` \
              or pick an existing one via `nexus42 creator world list`. \
              See .mstar/knowledge/specs/creator-run-preset-entry.md"
