@@ -1071,6 +1071,13 @@ const FINDINGS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// Hard cap on the number of findings fetched from the daemon.
 const FINDINGS_FETCH_LIMIT: usize = 50;
 
+/// Stale-fetch subcall timeout — mirrors `FINDINGS_FETCH_TIMEOUT` so the
+/// JSON-path `/v1/local/findings/stale` fetch cannot block the status hot
+/// path longer than the findings fetch (qc3 F-002; resolves the timeout
+/// asymmetry flagged in qc1 S-3). Previously the stale fetch inherited the
+/// default 30s `DEFAULT_REQUEST_TIMEOUT`, six times the findings cap.
+const STALE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Result of fetching open findings from the daemon.
 ///
 /// Distinguishes "successfully fetched 0 findings" from "fetch failed",
@@ -1110,10 +1117,19 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
 ///
 /// Extracted so the JSON path can run this subcall **concurrently** with
 /// `fetch_open_findings` via `tokio::join!` (qc3 F-001), avoiding stacked
-/// worst-case latency on the status hot path. Uses the supplied client's
-/// configured timeout (qc3 F-002 tightens this — see `STALE_FETCH_TIMEOUT`).
+/// worst-case latency on the status hot path.
+///
+/// qc3 F-002: uses a dedicated short-timeout client (`STALE_FETCH_TIMEOUT`,
+/// 5s) instead of the supplied client's default 30s, so a degraded stale
+/// endpoint cannot block the JSON status command longer than the findings
+/// fetch. Mirrors `fetch_open_findings`'s timeout policy.
 async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value> {
-    client
+    let stale_client = DaemonClient::with_timeouts(
+        client.base_url(),
+        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+        STALE_FETCH_TIMEOUT,
+    );
+    stale_client
         .get::<serde_json::Value>("/v1/local/findings/stale")
         .await
         .ok()
@@ -1939,6 +1955,55 @@ mod tests {
                 .get("stale_count")
                 .and_then(serde_json::Value::as_u64),
             Some(2)
+        );
+    }
+
+    // ── V1.46 P0 qc-fix: stale fetch short timeout (qc3 F-002) ────────────
+
+    #[test]
+    fn stale_fetch_timeout_matches_findings_fetch_timeout() {
+        // qc3 F-002 (resolves qc1 S-3 timeout asymmetry): the JSON-path
+        // stale fetch must use a short timeout consistent with the findings
+        // fetch, NOT the default 30 s. Lock the policy here so the asymmetry
+        // cannot silently return. (The actual ~5 s bound is documented in
+        // spec §4.1; a wall-clock timeout test would needlessly add ~5 s to
+        // every test run, so the constant-parity guard is the chosen
+        // regression surface.)
+        assert_eq!(
+            STALE_FETCH_TIMEOUT, FINDINGS_FETCH_TIMEOUT,
+            "stale fetch timeout must match findings fetch timeout (no asymmetry)"
+        );
+        assert!(
+            STALE_FETCH_TIMEOUT < crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT,
+            "stale fetch timeout ({:?}) must be shorter than the default request timeout ({:?})",
+            STALE_FETCH_TIMEOUT,
+            crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_stale_findings_returns_none_on_endpoint_error() {
+        // qc3 F-002 wiring: the dedicated short-timeout client must still
+        // follow the best-effort contract (None on any failure). A 500 from
+        // the stale endpoint yields None rather than propagating.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/local/findings/stale"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_json(serde_json::json!({ "error": "internal" })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let stale = fetch_stale_findings(&client).await;
+        assert!(
+            stale.is_none(),
+            "stale fetch returns None on endpoint error (best-effort, short-timeout client)"
         );
     }
 
