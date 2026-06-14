@@ -372,7 +372,20 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
         .await?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+        // V1.46 P0 (T1): novel-only findings enrichment (Grill #6/#8; spec §4.1).
+        // Generic / non-novel works stay findings-free (novel-only gate).
+        let is_novel =
+            resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
+        let findings_vec = if is_novel {
+            match fetch_open_findings(client, &resolved_id).await {
+                FindingsResult::Fetched(v) => Some(v),
+                FindingsResult::Unavailable => None,
+            }
+        } else {
+            None
+        };
+        let output = enrich_status_json(resp, findings_vec.as_deref());
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
@@ -1090,6 +1103,36 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
         .map_or(FindingsResult::Unavailable, |v| {
             FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
         })
+}
+
+/// V1.46 P0: enrich the daemon GET work payload with novel-only findings.
+///
+/// For `work_profile=novel` only (Grill #6), inserts a root-level `findings`
+/// array matching the findings list-API element shape verbatim (spec §4.1).
+/// Generic / non-novel works are returned unchanged (novel-only gate).
+///
+/// `findings`: `Some(slice)` when the findings fetch succeeded (possibly empty);
+///             `None` when the endpoint was unreachable — `findings` is then
+///             omitted for graceful degradation (mirrors the human "unavailable"
+///             path), since fabricating an empty array would mask a daemon fault.
+fn enrich_status_json(
+    mut resp: serde_json::Value,
+    findings: Option<&[serde_json::Value]>,
+) -> serde_json::Value {
+    let is_novel = resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
+    if !is_novel {
+        return resp;
+    }
+    let Some(obj) = resp.as_object_mut() else {
+        return resp;
+    };
+    if let Some(arr) = findings {
+        obj.insert(
+            "findings".to_string(),
+            serde_json::Value::Array(arr.to_vec()),
+        );
+    }
+    resp
 }
 
 /// Parsed open-findings summary for display formatting.
