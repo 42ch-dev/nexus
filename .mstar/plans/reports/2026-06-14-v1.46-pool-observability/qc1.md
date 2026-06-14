@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-14-v1.46-pool-observability"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-15"
 ---
 
@@ -14,7 +14,7 @@ generated_at: "2026-06-15"
 - Runtime Agent ID: qc-specialist
 - Runtime Model: zhipuai-coding-plan/glm-5.2
 - Review Perspective: Architecture coherence and maintainability risk
-- Report Timestamp: 2026-06-15T03:10:00Z
+- Report Timestamp: 2026-06-15T03:10:00Z (initial wave); 2026-06-15 revalidation — Opportunistic revalidation (qc1 re-checks own W-1 fix; qc3 already Approve via `33225306`)
 
 ## Scope
 - plan_id: `2026-06-14-v1.46-pool-observability`
@@ -158,3 +158,23 @@ let subscriber = tracing_subscriber::registry().with(layer);
 **Out of scope**: the 8 pre-existing clippy errors in `findings.rs`, `kb_extract_job.rs`, `tests/v142_migration_fixes.rs`, `work_chapters.rs`, `works.rs` (verified at pre-P4 baseline `1d776d23`) belong to a separate hygiene plan. P3 (research-auto-chain-e2e) is also out of scope. `R-V145-PRE-CLIPPY-001` is in `nexus-orchestration`, not `nexus-local-db` — unrelated.
 
 **Targeted re-review scope after fix**: W-1 only. Re-run `cargo clippy -p nexus-local-db --tests -- -D warnings` against the fix-wave delta; expect 0 P4-introduced errors remaining. S-1 and S-2 are optional follow-ups and do not require re-review.
+
+## Revalidation
+
+- **Round**: opportunistic re-check (qc1 verifies own W-1 fix; qc3 already Approve via `33225306`)
+- **Review basis**: `git diff 8e85432e..33225306` (P4 fix + qc docs); fix-only slice is `9fa5812a..0c4e4d46` = 1 file (`novel_pool_entries.rs`, +19/-15 lines)
+- **Prior findings status**:
+  - **W-1** (2 P4-introduced clippy errors `used_underscore_binding` + `significant_drop_tightening`): **Resolved in this round** at commit `16bb8296` (merge `0c4e4d46`). The implementer adopted my recommended Option B (scope `_guard` in a block so it is never explicitly referenced) AND additionally scoped the `messages` `MutexGuard` in its own block with explicit `drop(messages)` — the latter being the actual site of `significant_drop_tightening` (on the `MutexGuard`, not the subscriber guard; qc3's revalidation independently noted the same). Evidence: `cargo clippy -p nexus-local-db --tests -- -D warnings` now reports **0 findings in `novel_pool_entries.rs`** (grep-confirmed); the 10 remaining errors are all in pre-existing untouched files (8 lib-test target: `findings.rs:608`, `kb_extract_job.rs:709` ×2, `work_chapters.rs:1403` ×2, `works.rs:1796,1797` ×3; 2 v142-test target: `tests/v142_migration_fixes.rs:7,116`) — matching the initial-wave out-of-scope list verbatim. `cargo test -p nexus-local-db` still green (201 passed = 1 + 191 + 2 + 2 + 2 + 3; 0 failed). qc3 independently verified the same fix.
+  - **S-1** (only `promote_to_active` has tracing assertion): **Still open — deferred to residual `R-V146P4-QC1-S1`** (verified untouched: the other 8 instrumented mutation paths still lack capture-layer assertions; only the guard scoping in the single existing test changed).
+  - **S-2** (verbose UFCS subscriber construction at lines 550-554): **Still open — deferred to residual `R-V146P4-QC1-S2`** (verified untouched: lines 550-554 still contain the `<tracing_subscriber::Registry as ...>::with(...)` UFCS form).
+- **Fix-round regressions**: None. The fix is truly surgical — only `novel_pool_entries.rs` modified in the `9fa5812a..0c4e4d46` slice; no test logic change (assertion still checks `operation=pool_promote_to_active`, `creator_id=ctr_test`, `work_id=wrk_001`); no opportunistic refactoring; no audit-doc or instrumentation-site changes.
+- **Architecture & maintainability re-check on fix delta**:
+  - Scoping discipline is correct — tightening the `MutexGuard` lifetime beyond silencing the lint also reduces (minor) lock contention, which aligns with the P4 observability intent.
+  - The `_guard` block + `messages` block pattern is idiomatic for `tracing-subscriber` capture tests and does not degrade readability.
+  - No new dependencies; no contract drift; no behavior change.
+- **CI gates**:
+  - `cargo test -p nexus-local-db` → **201 passed, 0 failed** (matches initial wave).
+  - `cargo clippy -p nexus-local-db --tests -- -D warnings` → **0 P4-introduced errors** (grep on `novel_pool_entries.rs` returns 0 matches); 10 pre-existing errors unchanged in untouched files.
+  - `cargo +nightly fmt --all --check` → **clean** (exit 0).
+- **Residuals tracked**: 4 open low-severity residuals confirmed in `.mstar/status.json` → `residual_findings["2026-06-14-v1.46-pool-observability"]` (`R-V146P4-QC1-S1`, `R-V146P4-QC1-S2`, `R-V146P4-QC3-S1`, `R-V146P4-QC3-S2`); all `lifecycle: open`.
+- **Updated verdict**: **Approve** — per `mstar-review-qc` gate rule (Critical=0 and Warning=0 after W-1 resolution).
