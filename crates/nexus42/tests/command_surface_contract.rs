@@ -717,50 +717,8 @@ fn daemon_orchestrate_run_is_removed() {
 // Part 6: V1.33 Work Experience Loop contract tests (must pass immediately)
 // =============================================================================
 
-/// Verify `creator run --help` shows start, continue, list, status subcommands.
-#[test]
-fn v133_creator_run_subcommands() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    for subcmd in &["start", "continue"] {
-        assert!(
-            help_text.contains(subcmd),
-            "V1.33 creator run: expected subcommand '{subcmd}'"
-        );
-    }
-    // DF-60 (V1.41): `list` and `status` moved to `creator works`.
-    // They should not appear as standalone subcommand entries in the Commands: section.
-    // (The word "list" may still appear in other subcommand descriptions, e.g. "list stages".)
-    let lines: Vec<&str> = help_text.lines().collect();
-    let mut found_list_cmd = false;
-    let mut found_status_cmd = false;
-    for line in &lines {
-        // Subcommand lines start with whitespace and the command name
-        let trimmed = line.trim();
-        if trimmed.starts_with("list ") || trimmed == "list" {
-            found_list_cmd = true;
-        }
-        if trimmed.starts_with("status ") || trimmed == "status" {
-            found_status_cmd = true;
-        }
-    }
-    assert!(
-        !found_list_cmd,
-        "V1.41 creator run: 'list' should no longer be a subcommand (moved to `creator works`)"
-    );
-    assert!(
-        !found_status_cmd,
-        "V1.41 creator run: 'status' should no longer be a subcommand (moved to `creator works`)"
-    );
-}
+// V1.45: `v133_creator_run_subcommands` removed — old subcommands (start, continue,
+// etc.) replaced by generic `creator run <preset_id>` dispatch.
 
 /// Verify `creator works` subcommands exist (DF-60 §6.2H, V1.41).
 #[test]
@@ -783,106 +741,9 @@ fn v141_creator_works_subcommands() {
     }
 }
 
-/// Verify `creator run start` includes --from-work and --set-default flags (DF-60, V1.41).
-#[test]
-fn v141_creator_run_start_from_work_flags() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "start", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--from-work"),
-        "V1.41 creator run start: must have --from-work flag"
-    );
-    assert!(
-        help_text.contains("--set-default"),
-        "V1.41 creator run start: must have --set-default flag"
-    );
-}
-
-/// Verify `creator run resume` includes --reopen and --extend-chapters flags (DF-60, V1.41).
-#[test]
-fn v141_creator_run_resume_reopen_flags() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "resume", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--reopen"),
-        "V1.41 creator run resume: must have --reopen flag"
-    );
-    assert!(
-        help_text.contains("--extend-chapters"),
-        "V1.41 creator run resume: must have --extend-chapters flag"
-    );
-}
-
-/// TC7 (DF-60 T8): Verify `creator run start` accepts `--from-work` for lineage.
-/// This validates the CLI surface; the daemon-level lineage flow is tested
-/// separately in nexus-daemon-runtime integration tests.
-#[test]
-fn v141_run_start_from_work_accepts_work_id() {
-    // Verify the flag appears in help
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "start", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--from-work"),
-        "TC7: --from-work flag must exist in creator run start"
-    );
-    // The help text should mention lineage or completed work
-    assert!(
-        help_text.contains("lineage") || help_text.contains("completed"),
-        "TC7: --from-work help should explain lineage semantics"
-    );
-}
-
-/// TC8 (DF-60 T8): Verify `creator run resume --reopen` requires --reason.
-/// Without --reason, --reopen alone should fail with a validation error.
-#[test]
-fn v141_resume_reopen_without_reason_rejects() {
-    // We can't fully test this without a running daemon, but we can verify
-    // that the CLI argument parsing accepts --reopen and --reason.
-    // The actual validation (reason required with --reopen) happens at runtime.
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "resume", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    // Verify --reopen exists and mentions --reason requirement
-    assert!(
-        help_text.contains("--reopen"),
-        "TC8: --reopen flag must exist in creator run resume"
-    );
-    assert!(
-        help_text.contains("--reason"),
-        "TC8: --reason flag must exist in creator run resume"
-    );
-}
+// V1.45: `v141_creator_run_start_from_work_flags`, `v141_creator_run_resume_reopen_flags`,
+// `v141_run_start_from_work_accepts_work_id`, `v141_resume_reopen_without_reason_rejects`
+// removed — old subcommands replaced by generic dispatch.
 
 /// AC5 (V1.41 QA blocker): `creator works pool inspiration add --help` must document
 /// that the pool is distinct from per-Work `works.inspiration_log`.
@@ -904,84 +765,8 @@ fn v141_pool_inspiration_help_disambiguates_from_work_log() {
     );
 }
 
-/// Verify `creator run start --help` includes required --idea flag.
-#[test]
-fn v133_creator_run_start_requires_idea() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "start", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--idea"),
-        "V1.33 creator run start: must have --idea flag"
-    );
-    assert!(
-        help_text.contains("--preset"),
-        "V1.33 creator run start: must have --preset flag"
-    );
-    assert!(
-        help_text.contains("--json"),
-        "V1.33 creator run start: must have --json flag"
-    );
-}
-
-/// Verify `creator run continue --help` includes required --note flag.
-#[test]
-fn v133_creator_run_continue_requires_note() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "continue", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--note"),
-        "V1.33 creator run continue: must have --note flag"
-    );
-}
-
-/// V1.36 P1 (F7, R-V136P1-01): Verify `creator run start --help` exposes
-/// `--init-preset` and `--world-id`. The CLI flags must remain visible so
-/// users can opt into the novel-project-init flow.
-#[test]
-fn v136_creator_run_start_has_init_preset_flag() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "start", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--init-preset"),
-        "V1.36 creator run start: must have --init-preset flag"
-    );
-    assert!(
-        help_text.contains("--world-id"),
-        "V1.36 creator run start: must have --world-id flag"
-    );
-    assert!(
-        help_text.contains("--force-gates"),
-        "V1.36 creator run start: must have --force-gates flag"
-    );
-    assert!(
-        help_text.contains("--reason"),
-        "V1.36 creator run start: must have --reason flag"
-    );
-}
+// V1.45: `v133_creator_run_start_requires_idea`, `v133_creator_run_continue_requires_note`,
+// `v136_creator_run_start_has_init_preset_flag` removed — old subcommands replaced by generic dispatch.
 
 /// Verify `system preset --help` shows list and validate subcommands.
 #[test]
@@ -1024,25 +809,6 @@ fn v133_system_preset_list_flags() {
     assert!(
         help_text.contains("--json"),
         "V1.33 system preset list: must have --json flag"
-    );
-}
-
-/// Verify `creator --help` shows `run` as a subcommand.
-#[test]
-fn v133_creator_shows_run() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("run"),
-        "V1.33 creator: expected 'run' subcommand in --help"
     );
 }
 
@@ -1137,9 +903,9 @@ fn v135_root_help_shows_five_groups_with_sync_hidden() {
     );
 }
 
-/// V1.35 P2: Root `--long-about` mentions `creator run start` and `workspace init`.
+/// V1.35 P2: Root `--long-about` mentions `creator works status` and `workspace init`.
 #[test]
-fn v135_root_long_about_mentions_creator_run_and_workspace() {
+fn v135_root_long_about_mentions_creator_works_and_workspace() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
         .args(["--help"])
@@ -1152,8 +918,8 @@ fn v135_root_long_about_mentions_creator_run_and_workspace() {
     let help_text = String::from_utf8(output).unwrap();
 
     assert!(
-        help_text.contains("creator run"),
-        "V1.35: root help must mention 'creator run'"
+        help_text.contains("creator works status"),
+        "V1.35: root help must mention 'creator works status'"
     );
     assert!(
         help_text.contains("workspace init"),
@@ -1217,50 +983,6 @@ fn v135_knowledge_help_disambiguates_from_kb() {
     );
 }
 
-/// V1.35 P3: `creator --help` surfaces `run` within the first 3 listed subcommands.
-#[test]
-fn v135_creator_help_run_is_primary() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-
-    // Extract the Commands: section
-    let commands_start = help_text
-        .find("Commands:")
-        .expect("Commands: section present");
-    let commands_section = &help_text[commands_start..];
-
-    // `run` must appear early — we check that it's in the commands section at all
-    // and verify it appears before `workspace` (which is assets tier).
-    let run_pos = commands_section
-        .find("run")
-        .expect("'run' subcommand present");
-    let workspace_pos = commands_section
-        .find("workspace")
-        .expect("'workspace' subcommand present");
-
-    assert!(
-        run_pos < workspace_pos,
-        "V1.35 P3: 'run' must appear before 'workspace' in creator --help (primary tier first)"
-    );
-
-    // Verify `register` also appears early (primary tier)
-    let register_pos = commands_section
-        .find("register")
-        .expect("'register' subcommand present");
-    assert!(
-        register_pos < workspace_pos,
-        "V1.35 P3: 'register' must appear before 'workspace' in creator --help"
-    );
-}
-
 /// V1.35 P3: `creator --help` mentions tier grouping hints in descriptions.
 #[test]
 fn v135_creator_help_mentions_kb_namespaces() {
@@ -1282,117 +1004,22 @@ fn v135_creator_help_mentions_kb_namespaces() {
     );
 }
 
-/// V1.35 P4: `creator run start --help` shows --chain-novel-writing with default true.
-#[test]
-fn v135_chain_novel_writing_defaults_true() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "start", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("--chain-novel-writing"),
-        "V1.35 P4: creator run start --help must list --chain-novel-writing"
-    );
-    // Bool flags don't get [default: true] annotation; check description text instead.
-    assert!(
-        help_text.contains("Default true"),
-        "V1.35 P4: --chain-novel-writing help must mention 'Default true'"
-    );
-}
-
-/// V1.35 P4: documented opt-out `--chain-novel-writing=false` is accepted by clap.
-/// Verifies the C-1 fix wave: value parser added to the boolean flag.
-#[test]
-fn v135_chain_novel_writing_opt_out_syntax_accepted() {
-    // `--chain-novel-writing=false` must NOT be a parse error.
-    // We don't need a successful run — the daemon may not be running in the test
-    // env. The key is that arg parsing succeeds (no clap "unexpected value" error).
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args([
-            "creator",
-            "run",
-            "start",
-            "--idea",
-            "test opt-out parse smoke",
-            "--chain-novel-writing=false",
-        ])
-        .assert()
-        .get_output()
-        .clone();
-
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        !stderr.contains("unexpected value 'false'"),
-        "V1.35 P4: --chain-novel-writing=false must be accepted by clap (got: {stderr})"
-    );
-
-    // `--chain-novel-writing=true` (explicit default) is also accepted.
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args([
-            "creator",
-            "run",
-            "start",
-            "--idea",
-            "test opt-in parse smoke",
-            "--chain-novel-writing=true",
-        ])
-        .assert()
-        .get_output()
-        .clone();
-
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        !stderr.contains("unexpected value 'true'"),
-        "V1.35 P4: --chain-novel-writing=true must be accepted by clap (got: {stderr})"
-    );
-}
-
-/// V1.36 P4 (T3): `creator run start --help` mentions auto-completion semantics.
-#[test]
-fn v136_start_help_mentions_auto_completion() {
-    let output = Command::cargo_bin("nexus42")
-        .unwrap()
-        .args(["creator", "run", "start", "--help"])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let help_text = String::from_utf8(output).unwrap();
-    assert!(
-        help_text.contains("auto-promotes"),
-        "V1.36 P4: creator run start --help must mention 'auto-promotes' completion semantics"
-    );
-    assert!(
-        help_text.contains("completed"),
-        "V1.36 P4: creator run start --help must reference 'completed' Work status"
-    );
-}
+// V1.45: `v135_chain_novel_writing_defaults_true`,
+// `v135_chain_novel_writing_opt_out_syntax_accepted`,
+// `v136_start_help_mentions_auto_completion`,
+// `v137_stage_advance_has_force_gates_flags`, `v137_run_start_has_force_gates_flags`
+// removed — old subcommands replaced by generic dispatch with --force-gates/--reason.
 
 // =============================================================================
-// Part N: V1.37 force-gates / gate-reason flags on `creator stage advance`
+// Part V1.45: Generic `creator run <preset_id>` surface tests
 // =============================================================================
 
-/// V1.37 T5/T6: `creator run stage advance --help` must surface `--force-gates` and
-/// `--gate-reason` flags.
+/// V1.45: `creator run --help` shows `<PRESET_ID>` as a positional arg.
 #[test]
-fn v137_stage_advance_has_force_gates_flags() {
+fn v145_creator_run_shows_preset_id_positional() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
-        .arg("creator")
-        .arg("run")
-        .arg("stage")
-        .arg("advance")
-        .arg("--help")
+        .args(["creator", "run", "--help"])
         .assert()
         .success()
         .get_output()
@@ -1401,25 +1028,17 @@ fn v137_stage_advance_has_force_gates_flags() {
 
     let help_text = String::from_utf8(output).unwrap();
     assert!(
-        help_text.contains("--force-gates"),
-        "V1.37: 'creator run stage advance --help' must list --force-gates flag"
-    );
-    assert!(
-        help_text.contains("--gate-reason"),
-        "V1.37: 'creator run stage advance --help' must list --gate-reason flag"
+        help_text.contains("PRESET_ID") || help_text.contains("preset_id"),
+        "V1.45: creator run --help must show PRESET_ID positional arg"
     );
 }
 
-/// V1.37 T5/T6: `creator run start --help` must surface `--force-gates` and
-/// `--reason` flags (these were added for the Start command in V1.37).
+/// V1.45: `creator run --help` shows global flags (--json, --force-gates, --reason).
 #[test]
-fn v137_run_start_has_force_gates_flags() {
+fn v145_creator_run_has_global_flags() {
     let output = Command::cargo_bin("nexus42")
         .unwrap()
-        .arg("creator")
-        .arg("run")
-        .arg("start")
-        .arg("--help")
+        .args(["creator", "run", "--help"])
         .assert()
         .success()
         .get_output()
@@ -1428,11 +1047,43 @@ fn v137_run_start_has_force_gates_flags() {
 
     let help_text = String::from_utf8(output).unwrap();
     assert!(
+        help_text.contains("--json"),
+        "V1.45: creator run --help must list --json flag"
+    );
+    assert!(
         help_text.contains("--force-gates"),
-        "V1.37: 'creator run start --help' must list --force-gates flag"
+        "V1.45: creator run --help must list --force-gates flag"
     );
     assert!(
         help_text.contains("--reason"),
-        "V1.37: 'creator run start --help' must list --reason flag"
+        "V1.45: creator run --help must list --reason flag"
     );
+}
+
+/// V1.45: `creator run --help` does NOT show old subcommands (start, continue, etc.).
+#[test]
+fn v145_creator_run_no_legacy_subcommands() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "run", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+    for old_subcmd in &[
+        "start",
+        "continue",
+        "stage",
+        "resume",
+        "audit-chapter",
+        "review-master",
+    ] {
+        assert!(
+            !help_text.contains(&format!("\n  {old_subcmd} ")),
+            "V1.45: creator run --help must not list old subcommand '{old_subcmd}'"
+        );
+    }
 }
