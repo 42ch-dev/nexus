@@ -372,7 +372,26 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
         .await?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+        // V1.46 P0 (T1+T2): novel-only findings enrichment (Grill #6/#8; spec §4.1).
+        // Generic / non-novel works stay findings-free (novel-only gate).
+        let is_novel =
+            resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
+        let (findings_vec, stale) = if is_novel {
+            let f = match fetch_open_findings(client, &resolved_id).await {
+                FindingsResult::Fetched(v) => Some(v),
+                FindingsResult::Unavailable => None,
+            };
+            // findings_stale — best-effort, parity with the human stale banner.
+            let s = client
+                .get::<serde_json::Value>("/v1/local/findings/stale")
+                .await
+                .ok();
+            (f, s)
+        } else {
+            (None, None)
+        };
+        let output = enrich_status_json(resp, findings_vec.as_deref(), stale.as_ref());
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
@@ -1092,6 +1111,51 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
         })
 }
 
+/// V1.46 P0: enrich the daemon GET work payload with novel-only findings.
+///
+/// For `work_profile=novel` only (Grill #6), inserts a root-level `findings`
+/// array matching the findings list-API element shape verbatim (spec §4.1),
+/// and an optional `findings_stale` object when the 96h master-review stale
+/// banner would show (human parity). Generic / non-novel works are returned
+/// unchanged (novel-only gate).
+///
+/// `findings`: `Some(slice)` when the findings fetch succeeded (possibly empty);
+///             `None` when the endpoint was unreachable — `findings` is then
+///             omitted for graceful degradation (mirrors the human "unavailable"
+///             path), since fabricating an empty array would mask a daemon fault.
+///
+/// `stale`: the `/v1/local/findings/stale` payload; `findings_stale` is inserted
+///          only when its `stale_count` is greater than zero.
+fn enrich_status_json(
+    mut resp: serde_json::Value,
+    findings: Option<&[serde_json::Value]>,
+    stale: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let is_novel = resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
+    if !is_novel {
+        return resp;
+    }
+    let Some(obj) = resp.as_object_mut() else {
+        return resp;
+    };
+    if let Some(arr) = findings {
+        obj.insert(
+            "findings".to_string(),
+            serde_json::Value::Array(arr.to_vec()),
+        );
+    }
+    if let Some(stale_obj) = stale {
+        let stale_count = stale_obj
+            .get("stale_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if stale_count > 0 {
+            obj.insert("findings_stale".to_string(), stale_obj.clone());
+        }
+    }
+    resp
+}
+
 /// Parsed open-findings summary for display formatting.
 ///
 /// Extracted as a struct to enable hermetic unit testing of
@@ -1195,6 +1259,7 @@ impl FindingsSummary {
 /// Per cli-spec §7.1: clear, non-jargon formatting.
 ///
 /// - `FindingsResult::Fetched(vec)` with empty vec → "findings: none open"
+///   + suggests `creator run novel-review-master` (V1.46 P0, Grill #7)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     let findings = match result {
@@ -1208,7 +1273,10 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
     let summary = FindingsSummary::from_findings_json(findings, is_truncated);
     if summary.open_count == 0 {
+        // V1.46 P0 (Grill #7): empty findings → suggest a master-decision pass.
+        let safe_work_id = sanitize_for_terminal(work_id);
         println!("findings: none open");
+        println!("  Run: nexus42 creator run novel-review-master {safe_work_id}");
         return;
     }
 
@@ -1239,10 +1307,9 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
     }
 
-    // Review action hint — cite quickstart §5 (sanitize work_id for defense in depth).
-    let safe_work_id = sanitize_for_terminal(work_id);
-    println!("  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}");
-    println!("  See docs/novel-writing-quickstart.md §5");
+    // V1.46 P0 (Grill #7): per-finding routing_hint is the only remediation;
+    // no blanket reflection-loop footer (work_id unused when findings exist).
+    let _ = work_id;
 }
 
 /// Print per-chapter status table for novel works.
@@ -1422,7 +1489,12 @@ mod tests {
         let mut lines = Vec::new();
 
         if summary.open_count == 0 {
+            // V1.46 P0 (Grill #7): empty → suggest review-master.
+            let safe_work_id = sanitize_for_terminal(work_id);
             lines.push("findings: none open".to_string());
+            lines.push(format!(
+                "  Run: nexus42 creator run novel-review-master {safe_work_id}"
+            ));
         } else {
             let count_display = if summary.is_truncated {
                 format!("{}+", summary.open_count)
@@ -1451,11 +1523,6 @@ mod tests {
                     i + 1
                 ));
             }
-            let safe_work_id = sanitize_for_terminal(work_id);
-            lines.push(format!(
-                "  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}"
-            ));
-            lines.push("  See docs/novel-writing-quickstart.md §5".to_string());
         }
 
         lines.join("\n")
@@ -1465,6 +1532,9 @@ mod tests {
     fn display_no_open_findings() {
         let output = capture_findings_output(&[], "wrk_test");
         assert!(output.contains("findings: none open"));
+        // V1.46 P0 (Grill #7): empty → suggest review-master.
+        assert!(output.contains("novel-review-master"));
+        assert!(output.contains("wrk_test"));
         assert!(!output.contains("highest"));
     }
 
@@ -1481,8 +1551,15 @@ mod tests {
         assert!(output.contains("highest: blocker"));
         assert!(output.contains("#1 [blocker] \"Continuity error\" → write"));
         assert!(output.contains("#2 [minor] \"Style issue\" → none"));
-        assert!(output.contains("wrk_abc123"));
-        assert!(output.contains("quickstart"));
+        // V1.46 P0 (Grill #7): per-finding hint only; no blanket footer.
+        assert!(
+            !output.contains("reflection-loop"),
+            "blanket reflection-loop footer removed"
+        );
+        assert!(
+            !output.contains("quickstart"),
+            "quickstart reference removed from findings summary"
+        );
     }
 
     #[test]
@@ -1503,6 +1580,7 @@ mod tests {
         // When no findings exist, the summary line should say "none open".
         let output = capture_findings_output(&[], "wrk_completed");
         assert!(output.contains("findings: none open"));
+        assert!(output.contains("novel-review-master"));
     }
 
     // ── Truncation tests ─────────────────────────────────────────────────
@@ -1534,6 +1612,143 @@ mod tests {
             !output.contains(&format!("findings: {} open", FINDINGS_FETCH_LIMIT)),
             "should not show exact count without '+' when truncated"
         );
+    }
+
+    // ── V1.46 P0 enrich_status_json tests (novel-only gate + JSON contract) ──
+
+    fn novel_work_resp() -> serde_json::Value {
+        serde_json::json!({
+            "work_id": "wrk_novel_1",
+            "title": "Test Novel",
+            "work_profile": "novel",
+            "status": "writing",
+            "current_chapter": 3,
+        })
+    }
+
+    fn generic_work_resp() -> serde_json::Value {
+        serde_json::json!({
+            "work_id": "wrk_generic_1",
+            "title": "Generic Work",
+            "work_profile": "generic",
+            "status": "active",
+        })
+    }
+
+    #[test]
+    fn enrich_novel_with_findings_inserts_array() {
+        let findings = vec![
+            finding_json("major", "Plot hole", "→ write"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present for novel work");
+        assert_eq!(arr.len(), 2);
+        // Same element shape as list API (verbatim).
+        assert_eq!(
+            arr[0].get("severity").and_then(|v| v.as_str()),
+            Some("major")
+        );
+        assert_eq!(
+            arr[0].get("routing_hint").and_then(|v| v.as_str()),
+            Some("→ write")
+        );
+        // Daemon work fields preserved.
+        assert_eq!(
+            out.get("title").and_then(|v| v.as_str()),
+            Some("Test Novel")
+        );
+        assert_eq!(out.get("current_chapter").and_then(|v| v.as_i64()), Some(3));
+    }
+
+    #[test]
+    fn enrich_novel_empty_findings_inserts_empty_array() {
+        let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present (empty) for novel work");
+        assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn enrich_novel_unavailable_findings_omits_key() {
+        // When the findings endpoint is unreachable (None), omit findings[]
+        // rather than fabricating an empty array (graceful degradation).
+        let out = enrich_status_json(novel_work_resp(), None, None);
+        assert!(
+            out.get("findings").is_none(),
+            "findings key omitted when unavailable"
+        );
+    }
+
+    #[test]
+    fn enrich_generic_work_omits_findings_gate() {
+        // Novel-only gate (Grill #6): generic works never get findings.
+        let findings = vec![finding_json("major", "Plot hole", "→ write")];
+        let out = enrich_status_json(generic_work_resp(), Some(findings.as_slice()), None);
+        assert!(
+            out.get("findings").is_none(),
+            "generic work must not include findings"
+        );
+        assert!(out.get("findings_stale").is_none());
+    }
+
+    #[test]
+    fn enrich_missing_work_profile_omits_findings() {
+        // A work with no work_profile field is treated as non-novel.
+        let resp = serde_json::json!({ "work_id": "wrk_x", "title": "Mystery" });
+        let findings = vec![finding_json("info", "x", "→ none")];
+        let out = enrich_status_json(resp, Some(findings.as_slice()), None);
+        assert!(out.get("findings").is_none());
+    }
+
+    #[test]
+    fn enrich_novel_stale_inserts_findings_stale() {
+        let stale = serde_json::json!({ "stale_count": 3, "threshold_seconds": 345600 });
+        let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
+        let stale_out = out
+            .get("findings_stale")
+            .expect("findings_stale present when stale_count > 0");
+        assert_eq!(
+            stale_out.get("stale_count").and_then(|v| v.as_u64()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn enrich_novel_zero_stale_omits_findings_stale() {
+        let stale = serde_json::json!({ "stale_count": 0, "threshold_seconds": 345600 });
+        let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
+        assert!(
+            out.get("findings_stale").is_none(),
+            "findings_stale omitted when stale_count is 0"
+        );
+    }
+
+    #[test]
+    fn enrich_preserves_daemon_work_fields() {
+        // Daemon GET work payload fields must be unchanged (spec §4.1).
+        let resp = serde_json::json!({
+            "work_id": "wrk_full",
+            "title": "Full",
+            "work_profile": "novel",
+            "status": "writing",
+            "chapters": [{"chapter_number": 1, "status": "finalized"}],
+        });
+        let out = enrich_status_json(resp, Some(&[]), None);
+        assert_eq!(
+            out.get("work_id").and_then(|v| v.as_str()),
+            Some("wrk_full")
+        );
+        assert_eq!(
+            out.get("work_profile").and_then(|v| v.as_str()),
+            Some("novel")
+        );
+        assert!(out.get("chapters").and_then(|v| v.as_array()).is_some());
     }
 
     // ── sanitize_for_terminal tests ──────────────────────────────────────
