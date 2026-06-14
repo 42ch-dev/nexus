@@ -1614,6 +1614,143 @@ mod tests {
         );
     }
 
+    // ── V1.46 P0 enrich_status_json tests (novel-only gate + JSON contract) ──
+
+    fn novel_work_resp() -> serde_json::Value {
+        serde_json::json!({
+            "work_id": "wrk_novel_1",
+            "title": "Test Novel",
+            "work_profile": "novel",
+            "status": "writing",
+            "current_chapter": 3,
+        })
+    }
+
+    fn generic_work_resp() -> serde_json::Value {
+        serde_json::json!({
+            "work_id": "wrk_generic_1",
+            "title": "Generic Work",
+            "work_profile": "generic",
+            "status": "active",
+        })
+    }
+
+    #[test]
+    fn enrich_novel_with_findings_inserts_array() {
+        let findings = vec![
+            finding_json("major", "Plot hole", "→ write"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present for novel work");
+        assert_eq!(arr.len(), 2);
+        // Same element shape as list API (verbatim).
+        assert_eq!(
+            arr[0].get("severity").and_then(|v| v.as_str()),
+            Some("major")
+        );
+        assert_eq!(
+            arr[0].get("routing_hint").and_then(|v| v.as_str()),
+            Some("→ write")
+        );
+        // Daemon work fields preserved.
+        assert_eq!(
+            out.get("title").and_then(|v| v.as_str()),
+            Some("Test Novel")
+        );
+        assert_eq!(out.get("current_chapter").and_then(|v| v.as_i64()), Some(3));
+    }
+
+    #[test]
+    fn enrich_novel_empty_findings_inserts_empty_array() {
+        let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present (empty) for novel work");
+        assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn enrich_novel_unavailable_findings_omits_key() {
+        // When the findings endpoint is unreachable (None), omit findings[]
+        // rather than fabricating an empty array (graceful degradation).
+        let out = enrich_status_json(novel_work_resp(), None, None);
+        assert!(
+            out.get("findings").is_none(),
+            "findings key omitted when unavailable"
+        );
+    }
+
+    #[test]
+    fn enrich_generic_work_omits_findings_gate() {
+        // Novel-only gate (Grill #6): generic works never get findings.
+        let findings = vec![finding_json("major", "Plot hole", "→ write")];
+        let out = enrich_status_json(generic_work_resp(), Some(findings.as_slice()), None);
+        assert!(
+            out.get("findings").is_none(),
+            "generic work must not include findings"
+        );
+        assert!(out.get("findings_stale").is_none());
+    }
+
+    #[test]
+    fn enrich_missing_work_profile_omits_findings() {
+        // A work with no work_profile field is treated as non-novel.
+        let resp = serde_json::json!({ "work_id": "wrk_x", "title": "Mystery" });
+        let findings = vec![finding_json("info", "x", "→ none")];
+        let out = enrich_status_json(resp, Some(findings.as_slice()), None);
+        assert!(out.get("findings").is_none());
+    }
+
+    #[test]
+    fn enrich_novel_stale_inserts_findings_stale() {
+        let stale = serde_json::json!({ "stale_count": 3, "threshold_seconds": 345600 });
+        let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
+        let stale_out = out
+            .get("findings_stale")
+            .expect("findings_stale present when stale_count > 0");
+        assert_eq!(
+            stale_out.get("stale_count").and_then(|v| v.as_u64()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn enrich_novel_zero_stale_omits_findings_stale() {
+        let stale = serde_json::json!({ "stale_count": 0, "threshold_seconds": 345600 });
+        let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
+        assert!(
+            out.get("findings_stale").is_none(),
+            "findings_stale omitted when stale_count is 0"
+        );
+    }
+
+    #[test]
+    fn enrich_preserves_daemon_work_fields() {
+        // Daemon GET work payload fields must be unchanged (spec §4.1).
+        let resp = serde_json::json!({
+            "work_id": "wrk_full",
+            "title": "Full",
+            "work_profile": "novel",
+            "status": "writing",
+            "chapters": [{"chapter_number": 1, "status": "finalized"}],
+        });
+        let out = enrich_status_json(resp, Some(&[]), None);
+        assert_eq!(
+            out.get("work_id").and_then(|v| v.as_str()),
+            Some("wrk_full")
+        );
+        assert_eq!(
+            out.get("work_profile").and_then(|v| v.as_str()),
+            Some("novel")
+        );
+        assert!(out.get("chapters").and_then(|v| v.as_array()).is_some());
+    }
+
     // ── sanitize_for_terminal tests ──────────────────────────────────────
 
     #[test]

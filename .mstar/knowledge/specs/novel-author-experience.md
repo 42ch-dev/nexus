@@ -148,6 +148,12 @@ For **`work_profile=novel`** only, `creator works status <work_id> --json` **ext
 
 Generic (non-novel) works: **omit** `findings` fetch; json output is work API only.
 
+**Best-effort degradation**: `findings` is fetched via the daemon findings endpoint
+with a short timeout. When that endpoint is unreachable, `findings` is **omitted**
+(rather than fabricated as an empty array) so a JSON consumer can distinguish a
+genuinely findings-free Work from a transient daemon fault. `findings_stale`
+follows the same novel-only, best-effort contract.
+
 ---
 
 ## 5. CLI copy alignment (remediation SSOT)
