@@ -1306,10 +1306,6 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         let display_title = truncate_with_ellipsis(&safe_title, 48);
         println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
     }
-
-    // V1.46 P0 (Grill #7): per-finding routing_hint is the only remediation;
-    // no blanket reflection-loop footer (work_id unused when findings exist).
-    let _ = work_id;
 }
 
 /// Print per-chapter status table for novel works.
