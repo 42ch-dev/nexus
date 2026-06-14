@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-14-v1.46-spec-cli-hygiene"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-15"
 ---
 
@@ -14,7 +14,7 @@ generated_at: "2026-06-15"
 - Runtime Agent ID: qc-specialist
 - Runtime Model: zhipuai-coding-plan/glm-5.2
 - Review Perspective: Architecture coherence and maintainability risk — spec-vs-runtime consistency, contract clarity, module boundary preservation, message/doc copy coherence, AC-to-implementation traceability, atomic-delivery discipline.
-- Report Timestamp: 2026-06-15T01:30:00+08:00
+- Report Timestamp: 2026-06-15T01:30:00+08:00 (initial wave); 2026-06-15T02:05:00+08:00 (Revalidation round — targeted re-review after W-1 fix)
 
 ## Scope
 - plan_id: `2026-06-14-v1.46-spec-cli-hygiene`
@@ -189,3 +189,30 @@ The column header promises the V1.33 model, but `creator works inspire` did not 
 The P1 atomic delivery is mechanically sound: all 4 ACs pass, all CI gates are green, W-1/W-2 are properly reconciled, BL-10 supersede is clean, and the runtime remediation preserves message semantics while pointing at specs. The one blocking finding (W-1) is a contract-clarity regression on a normative IA spec caused by AC-filter gaming — the active `creator bootstrap` row is annotated "Removed in V1.45" purely to pass the mechanical filter, which is misleading in exactly the way this reviewer's focus (architecture coherence / maintainability) exists to catch. The fix is a one-line surgical edit that removes the stale token rather than masking it with an exclusion phrase. The three Suggestions (S-1 filter-gaming sibling, S-2 stale function name, S-3 anachronistic table cell) are non-blocking polish items.
 
 This seat's Request Changes is independent of the sibling Approve verdicts (qc2 security, qc3 performance): W-1 is neither a correctness nor a performance concern, so their lenses correctly did not surface it. PM consolidation should weigh the one-line fix cost against a targeted re-review of this seat only.
+
+## Revalidation
+
+- **Round**: targeted re-review (qc-specialist only; qc2/qc3 stay Approve)
+- **Review basis**: `git diff acabca53..a5769fce` (P1 fix + qc docs); fix-only slice is `ade7e5e3..a5769fce` = 1 line in `cli-command-ia.md`
+- **Working branch (re-verified)**: `iteration/v1.46` at HEAD `a5769fce` (`git branch --show-current` + `git log -1 --oneline`); `git rev-parse --show-toplevel` = `/Users/bibi/workspace/organizations/42ch/nexus`
+- **Prior findings status**:
+  - **W-1** (`cli-command-ia.md:67` filter-gaming): **Resolved in this round** at commit `483d1940` (merge `a5769fce`). The new phrasing on line 67 is `| \`creator bootstrap …\` | Composite Work onboarding (V1.45 generic runner; see creator-run-preset-entry.md) |`. Verified:
+    - (a) contains NO `creator run start` token (the stale command that was being masked);
+    - (b) contains NONE of the AC2 exclusion phrases (`Removed in V1.45`, `Superseded by`, `changelog`);
+    - (c) is non-stale and accurate — "V1.45 generic runner" describes the live `creator run` unification that bootstrap dispatches into;
+    - (d) is non-filter-gaming — the line passes AC2 **organically** because it contains no stale token to suppress;
+    - (e) is consistent with the surrounding table — line 66 also cross-references `creator-run-preset-entry.md`, so the bootstrap row now aligns with the row above rather than pointing at a changelog. Arguably a better cross-reference than the originally suggested `(see changelog)`.
+    - AC2 organic verification: `rg -n 'creator run start|creator run stage|stage advance' .mstar/knowledge/specs/ --glob '*.md' | rg -v 'Removed in V1\.45|Superseded by|changelog'` → exit 1, **zero hits** (PASS, without relying on the exclusion filter).
+  - **S-1** (`creator-run-preset-entry.md:110` filter-gaming sibling): **Still open — deferred to residual R-V146P1-QC1-S1** (Shipped Master amend, V1.46+). Verified source line untouched in the fix round (`git diff ade7e5e3..a5769fce --name-only` lists only `cli-command-ia.md`; line 110 still reads `…apply **stage advance** semantics before enqueue: … (Removed in V1.45; the explicit \`creator run stage advance\` CLI was replaced by this generic runner — see changelog).`).
+  - **S-2** (stale `daemon_not_reachable_quickstart` fn name in `errors.rs:261`): **Still open — deferred to residual R-V146P1-QC1-S2**. Verified `errors.rs` was NOT touched in the fix round; name unchanged.
+  - **S-3** (`creator-workflow.md` §3.2 anachronistic V1.33 column): **Still open — deferred to residual R-V146P1-QC1-S3**. Verified `creator-workflow.md` was NOT touched; column header `Work model (V1.33)` still present.
+- **Fix-round regressions**: None. `git diff ade7e5e3..a5769fce --stat` shows only `.mstar/knowledge/specs/cli-command-ia.md` (1 insertion, 1 deletion). No runtime file, no other spec file, no test file modified. The fix is truly surgical.
+- **Surgical-scope verification** (scope discipline, anti-piggyback): the broader `acabca53..a5769fce` range touches 6 files, but 5 of them are harness/docs artifacts of the QC cycle itself (`qc-consolidated.md`, `qc1.md`, `qc2.md`, `qc3.md`, `status.json`) — not code/spec under this seat's architecture/maintainability focus. The only normative-content change in the fix round is the 1-line `cli-command-ia.md:67` edit. No scope creep.
+- **CI gates (fix-round)**:
+  - AC2 (zero stale-token hits, organic): **PASS** — exit 1, zero hits.
+  - AC3 (`rg 'novel-writing-quickstart' crates/ docs/`): **PASS** — exit 1, zero hits (unchanged by this fix).
+  - AC1 (`test ! -f docs/novel-writing-quickstart.md`): unchanged by this fix (file was deleted in the initial wave).
+  - AC4 (`docs/ARCHITECTURE.md` links): unchanged by this fix.
+  - `cargo clippy --all -- -D warnings` / `cargo test --all` / `cargo +nightly fmt --all --check`: **N/A** for the fix delta — no Rust touched in `ade7e5e3..a5769fce`. The initial-wave CI evidence (clippy clean, 99 test blocks pass, fmt exit 0) in `## Verification Evidence` above still covers the full P1 Rust surface; this 1-line markdown spec change cannot regress Rust gates.
+- **Residual lifecycle verification**: All 9 open residuals remain tracked in `.mstar/status.json` → `residual_findings["2026-06-14-v1.46-spec-cli-hygiene"][]` with `lifecycle=open` (verified via `python3 -c` read of the JSON): R-V146P1-QC1-S1/S2/S3, R-V146P1-QC2-S1/S2, R-V146P1-QC3-S1/S2/S3/S4. None were closed, archived, or weakened by this fix round.
+- **Updated verdict**: **Approve** — per `mstar-review-qc` gate rule (Critical=0 and Warning=0 after resolving W-1; the 3 remaining Suggestions are non-blocking and properly tracked as low-severity open residuals).
