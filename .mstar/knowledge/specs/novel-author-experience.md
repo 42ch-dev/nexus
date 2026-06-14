@@ -150,10 +150,14 @@ For **`work_profile=novel`** only, `creator works status <work_id> --json` **ext
 Generic (non-novel) works: **omit** `findings` fetch; json output is work API only.
 
 **Best-effort degradation**: `findings` is fetched via the daemon findings endpoint
-with a short timeout. When that endpoint is unreachable, `findings` is **omitted**
-(rather than fabricated as an empty array) so a JSON consumer can distinguish a
-genuinely findings-free Work from a transient daemon fault. `findings_stale`
-follows the same novel-only, best-effort contract.
+with a short timeout (`FINDINGS_FETCH_TIMEOUT`, 5 s). When that endpoint is
+unreachable, `findings` is **omitted** (rather than fabricated as an empty array)
+so a JSON consumer can distinguish a genuinely findings-free Work from a
+transient daemon fault. `findings_stale` follows the same novel-only,
+best-effort contract and uses a matching short timeout (`STALE_FETCH_TIMEOUT`,
+5 s; qc3 F-002) so neither subcall can block the JSON status command beyond ~5 s.
+The two subcalls run concurrently (`tokio::join!`; qc3 F-001), bounding the
+JSON-path fetch by the slower of the two rather than their sum.
 
 ---
 
