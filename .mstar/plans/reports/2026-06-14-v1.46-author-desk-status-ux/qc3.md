@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-14-v1.46-author-desk-status-ux"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-14"
 ---
 
@@ -14,7 +14,8 @@ generated_at: "2026-06-14"
 - Runtime Agent ID: qc-specialist-3
 - Runtime Model: kimi-for-coding/k2p7
 - Review Perspective: Performance and reliability risk — hot-path overhead, resource lifecycle, back-pressure on degraded paths, retry/error semantics, observability, `findings_stale` opt-in perf cost, novel-only gate avoiding wasted work, daemon responsiveness.
-- Report Timestamp: 2026-06-14T15:55:00+08:00
+- Report Timestamp: 2026-06-14T17:10:00+08:00
+- Note: Revalidation round (targeted re-review after fix merge)
 
 ## Scope
 - plan_id: `2026-06-14-v1.46-author-desk-status-ux`
@@ -127,3 +128,29 @@ None.
 - F-003 silently truncates the machine-readable `findings[]` array without metadata, creating a contract reliability hazard.
 
 No Critical findings were identified. The novel-only gate correctly short-circuits before any findings work for non-novel works, satisfying Grill #6. CI gates (`cargo clippy --all -- -D warnings`, `cargo test -p nexus42 --lib -- 'works::tests'`, `cargo +nightly fmt --all --check`) all pass.
+
+## Revalidation
+
+- **Round**: targeted re-review (`qc-specialist` + `qc-specialist-3`)
+- **Review basis**: `git diff c9fb1abb..52a7330d` (P0 + fix round); fix-only delta is `399cd296..52a7330d` (5 commits + merge)
+- **Prior findings status**:
+  - **F-001** (sequential I/O → parallelize via `tokio::join!`): **Resolved in this round** at commit `34c26c13`. Evidence: `handle_status` JSON branch now calls `fetch_novel_findings_and_stale`, which runs `fetch_open_findings` and `fetch_stale_findings` concurrently via `tokio::join!`. The new async test `fetch_novel_findings_and_stale_runs_concurrently` wires two 400 ms-delayed endpoints and asserts elapsed < 700 ms (vs ~800 ms sequential), proving the fetches overlap.
+  - **F-002** (asymmetric 30 s timeout → short 5 s): **Resolved in this round** at commit `04bd7aca`. Evidence: `fetch_stale_findings` now builds a dedicated short-timeout `DaemonClient` using `STALE_FETCH_TIMEOUT = 5 s`, mirroring `FINDINGS_FETCH_TIMEOUT`. The unit test `stale_fetch_timeout_matches_findings_fetch_timeout` asserts the two constants are equal and are both shorter than `DEFAULT_REQUEST_TIMEOUT`. Spec §4.1 best-effort paragraph documents the matching timeout policy.
+  - **F-003** (silent 50-item truncation → `findings_truncated` marker): **Resolved in this round** at commit `ae7c10be`. Evidence: `enrich_status_json` inserts `findings_truncated: true` when `findings.len() == FINDINGS_FETCH_LIMIT` and omits the key otherwise. Three new unit tests cover truncated, below-limit, and empty paths; the existing `enrich_novel_unavailable_findings_omits_key` test also asserts the marker is absent when findings are unavailable. Spec §4.1 table now documents the `findings_truncated` field.
+  - **S-001** (plan verification command matched zero tests): **Resolved in this round** at commit `36b96205`. Evidence: plan §6 now lists `cargo test -p nexus42 --lib -- 'works::tests'`, which matches the 47 tests in the module. The previously listed `cargo test -p nexus42 -- works_status` filter ran 0 tests.
+- **Fix-round regressions**: None identified.
+  - Note: `S-002` (JSON-path observability) and `S-003` (skip stale when findings unavailable) remain open low-severity residuals (`R-V146P0-QC3-S2` / `R-V146P0-QC3-S3`) per `qc-consolidated.md` and are explicitly out of P0 fix scope; they were not re-flagged.
+- **New tests verified**:
+  - `fetch_novel_findings_and_stale_runs_concurrently`
+  - `fetch_novel_findings_and_stale_degrades_when_findings_fail`
+  - `fetch_stale_findings_returns_none_on_endpoint_error`
+  - `stale_fetch_timeout_matches_findings_fetch_timeout`
+  - `enrich_findings_truncated_marker_set_when_at_limit`
+  - `enrich_findings_truncated_omitted_when_below_limit`
+  - `enrich_findings_truncated_omitted_when_empty`
+- **CI gates**:
+  - `cargo clippy --all -- -D warnings` — clean
+  - `cargo test -p nexus42 --lib -- 'works::tests'` — 47 passed, 0 failed
+  - `cargo test -p nexus42 -- works_status` — 0 tests (confirms S-001 plan doc accuracy)
+  - `cargo +nightly fmt --all --check` — clean
+- **Updated verdict**: Approve
