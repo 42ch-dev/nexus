@@ -1263,8 +1263,8 @@ mod tests {
     #[test]
     fn extract_run_help_target_basic_preset_then_help() {
         let argv: Vec<String> = ["nexus42", "creator", "run", "novel-review-master", "--help"]
-            .iter()
-            .map(|s| s.to_string())
+            .into_iter()
+            .map(String::from)
             .collect();
         assert_eq!(
             extract_run_help_target(&argv).as_deref(),
@@ -1282,8 +1282,8 @@ mod tests {
             "wrk_abc",
             "--help",
         ]
-        .iter()
-        .map(|s| s.to_string())
+        .into_iter()
+        .map(String::from)
         .collect();
         assert_eq!(
             extract_run_help_target(&argv).as_deref(),
@@ -1294,8 +1294,8 @@ mod tests {
     #[test]
     fn extract_run_help_target_short_h_flag() {
         let argv: Vec<String> = ["nexus42", "-v", "creator", "run", "novel-writing", "-h"]
-            .iter()
-            .map(|s| s.to_string())
+            .into_iter()
+            .map(String::from)
             .collect();
         assert_eq!(
             extract_run_help_target(&argv).as_deref(),
@@ -1307,8 +1307,8 @@ mod tests {
     fn extract_run_help_target_help_without_preset_returns_none() {
         // `creator run --help` → generic clap help; no preset_id before help.
         let argv: Vec<String> = ["nexus42", "creator", "run", "--help"]
-            .iter()
-            .map(|s| s.to_string())
+            .into_iter()
+            .map(String::from)
             .collect();
         assert!(extract_run_help_target(&argv).is_none());
     }
@@ -1318,8 +1318,8 @@ mod tests {
         // `creator run --help novel-x` → clap shows help before reading the
         // preset_id; the intercept must NOT fire (mirrors clap ordering).
         let argv: Vec<String> = ["nexus42", "creator", "run", "--help", "novel-x"]
-            .iter()
-            .map(|s| s.to_string())
+            .into_iter()
+            .map(String::from)
             .collect();
         assert!(extract_run_help_target(&argv).is_none());
     }
@@ -1333,8 +1333,8 @@ mod tests {
             "novel-review-master",
             "wrk_abc",
         ]
-        .iter()
-        .map(|s| s.to_string())
+        .into_iter()
+        .map(String::from)
         .collect();
         assert!(extract_run_help_target(&argv).is_none());
     }
@@ -1342,8 +1342,8 @@ mod tests {
     #[test]
     fn extract_run_help_target_non_run_subcommand_returns_none() {
         let argv: Vec<String> = ["nexus42", "creator", "works", "list", "--help"]
-            .iter()
-            .map(|s| s.to_string())
+            .into_iter()
+            .map(String::from)
             .collect();
         assert!(extract_run_help_target(&argv).is_none());
     }
@@ -1351,23 +1351,13 @@ mod tests {
     #[test]
     fn extract_run_help_target_no_creator_token_returns_none() {
         let argv: Vec<String> = ["nexus42", "daemon", "start", "--help"]
-            .iter()
-            .map(|s| s.to_string())
+            .into_iter()
+            .map(String::from)
             .collect();
         assert!(extract_run_help_target(&argv).is_none());
     }
 
     // ── format_preset_run_help: pure formatter ────────────────────────────
-
-    fn cli_arg(name: &str, ty: PresetCliArgType) -> PresetCliArg {
-        PresetCliArg {
-            name: name.to_string(),
-            r#type: ty,
-            required: false,
-            default: None,
-            description: String::new(),
-        }
-    }
 
     #[test]
     fn format_help_lists_preset_cli_args_flags() {
