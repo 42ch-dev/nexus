@@ -372,19 +372,25 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
         .await?;
 
     if json {
-        // V1.46 P0 (T1): novel-only findings enrichment (Grill #6/#8; spec §4.1).
+        // V1.46 P0 (T1+T2): novel-only findings enrichment (Grill #6/#8; spec §4.1).
         // Generic / non-novel works stay findings-free (novel-only gate).
         let is_novel =
             resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
-        let findings_vec = if is_novel {
-            match fetch_open_findings(client, &resolved_id).await {
+        let (findings_vec, stale) = if is_novel {
+            let f = match fetch_open_findings(client, &resolved_id).await {
                 FindingsResult::Fetched(v) => Some(v),
                 FindingsResult::Unavailable => None,
-            }
+            };
+            // findings_stale — best-effort, parity with the human stale banner.
+            let s = client
+                .get::<serde_json::Value>("/v1/local/findings/stale")
+                .await
+                .ok();
+            (f, s)
         } else {
-            None
+            (None, None)
         };
-        let output = enrich_status_json(resp, findings_vec.as_deref());
+        let output = enrich_status_json(resp, findings_vec.as_deref(), stale.as_ref());
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
@@ -1108,16 +1114,22 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
 /// V1.46 P0: enrich the daemon GET work payload with novel-only findings.
 ///
 /// For `work_profile=novel` only (Grill #6), inserts a root-level `findings`
-/// array matching the findings list-API element shape verbatim (spec §4.1).
-/// Generic / non-novel works are returned unchanged (novel-only gate).
+/// array matching the findings list-API element shape verbatim (spec §4.1),
+/// and an optional `findings_stale` object when the 96h master-review stale
+/// banner would show (human parity). Generic / non-novel works are returned
+/// unchanged (novel-only gate).
 ///
 /// `findings`: `Some(slice)` when the findings fetch succeeded (possibly empty);
 ///             `None` when the endpoint was unreachable — `findings` is then
 ///             omitted for graceful degradation (mirrors the human "unavailable"
 ///             path), since fabricating an empty array would mask a daemon fault.
+///
+/// `stale`: the `/v1/local/findings/stale` payload; `findings_stale` is inserted
+///          only when its `stale_count` is greater than zero.
 fn enrich_status_json(
     mut resp: serde_json::Value,
     findings: Option<&[serde_json::Value]>,
+    stale: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     let is_novel = resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
     if !is_novel {
@@ -1131,6 +1143,15 @@ fn enrich_status_json(
             "findings".to_string(),
             serde_json::Value::Array(arr.to_vec()),
         );
+    }
+    if let Some(stale_obj) = stale {
+        let stale_count = stale_obj
+            .get("stale_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if stale_count > 0 {
+            obj.insert("findings_stale".to_string(), stale_obj.clone());
+        }
     }
     resp
 }
