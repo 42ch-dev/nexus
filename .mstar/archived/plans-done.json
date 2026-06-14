@@ -182,7 +182,8 @@
     "2026-06-14-v1.46-spec-cli-hygiene",
     "2026-06-14-v1.46-novel-runtime-ux-edges",
     "2026-06-14-v1.46-research-auto-chain-e2e",
-    "2026-06-14-v1.46-pool-observability"
+    "2026-06-14-v1.46-pool-observability",
+    "2026-06-14-v1.46-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
