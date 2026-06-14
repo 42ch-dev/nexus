@@ -1,0 +1,31 @@
+{
+  "plan_id": "2026-06-14-v1.46-pool-observability",
+  "archived_at": "2026-06-15T04:00:00+08:00",
+  "archived_by": "P-last (hygiene-and-closeout)",
+  "residual_findings": [
+    {
+      "id": "R-V141P1-15",
+      "title": "pool tracing",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "V1.46 P-last closeout (2026-06-15); 2026-06-14-v1.46-pool-observability",
+      "scope": "see 2026-06-14-v1.46-pool-observability qc-consolidated + QA report",
+      "decision": "closed",
+      "owner": "V1.46 P-last",
+      "closed_at": "2026-06-15T04:00:00+08:00",
+      "closure_note": "Closed in V1.46 P4 (d17c2fe9 + 8e85432e); tracing::info! added to 4 pool + 5 inspiration mutation paths in nexus-local-db; capture test test_promote_to_active_emits_trace verifies structured fields; QA PASS (f1c60143)."
+    },
+    {
+      "id": "R-V141P1-10",
+      "title": "dual round-trip (waived)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "V1.46 P-last closeout (2026-06-15); 2026-06-14-v1.46-pool-observability",
+      "scope": "see 2026-06-14-v1.46-pool-observability qc-consolidated + QA report",
+      "decision": "closed",
+      "owner": "V1.46 P-last",
+      "closed_at": "2026-06-15T04:00:00+08:00",
+      "closure_note": "WAIVED per V1.46 P4 plan §1 (no code added; P-last adds this waive doc note in shipped tracker per compass Grill #15). P4 implementation explicitly omitted the dual round-trip; future hygiene plan may revisit if needed."
+    }
+  ]
+}
