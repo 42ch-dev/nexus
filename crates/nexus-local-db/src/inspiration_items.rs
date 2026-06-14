@@ -4,6 +4,22 @@
 //! items with optional markdown file scaffold under `{workspace}/Pool/Ideas/`.
 //!
 //! Spec: novel-work-pool.md §3, local-db-schema.md §4.1.5.
+//!
+//! # Instrumented mutation paths (V1.46 P4 audit)
+//!
+//! The following `pub fn` mutate the `inspiration_items` table (or perform
+//! the atomic promotion that also inserts a Work and a pool entry) and are
+//! instrumented with `tracing::info!`:
+//!
+//! - [`create_inspiration_row`]
+//! - [`create_inspiration_with_scaffold`]
+//! - [`promote_inspiration`]
+//! - [`inspiration_promote_atomic`]
+//! - [`archive_inspiration`]
+//!
+//! Read-only functions (`list_inspiration`, `count_inspiration`,
+//! `get_inspiration`) and helpers (`title_to_slug`, `generate_fallback_slug`)
+//! are intentionally not traced.
 
 use sqlx::{Row, SqlitePool};
 

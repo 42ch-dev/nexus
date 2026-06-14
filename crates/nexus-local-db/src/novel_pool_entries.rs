@@ -4,6 +4,20 @@
 //! tracking active/queued/completed Work references.
 //!
 //! Spec: novel-work-pool.md §2, local-db-schema.md §4.1.5.
+//!
+//! # Instrumented mutation paths (V1.46 P4 audit)
+//!
+//! The following `pub fn` mutate the `novel_pool_entries` table and are
+//! instrumented with `tracing::info!`:
+//!
+//! - [`promote_to_active`]
+//! - [`archive_pool_entry`]
+//! - [`mark_pool_entry_completed`]
+//! - [`mark_pool_entry_completed_for_work`]
+//!
+//! Read-only functions (`list_pool_entries`, `count_pool_entries`,
+//! `get_pool_entry`, `get_pool_entry_by_work`, `get_active_pool_entry`) are
+//! intentionally not traced.
 
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
