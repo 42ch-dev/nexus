@@ -164,6 +164,7 @@
         "2026-06-12-v1.43-novel-writing-quickstart",
         "2026-06-13-v1.44-author-desk-residual-convergence",
         "2026-06-13-v1.44-harness-docs-prepare",
+        "2026-06-13-v1.45-harness-docs-prepare",
         "2026-06-13-v1.44-hygiene-and-closeout",
         "2026-06-13-v1.44-manuscript-audit-preset",
         "2026-06-13-v1.44-multi-volume-hardening",
@@ -171,106 +172,11 @@
         "v1-tech-debt-cleanup",
         "v1-tech-debt-cleanup-milestone-cd-2026-04-10",
         "v1.2-program-review",
-        {
-            "plan_id": "2026-06-13-v1.45-creator-run-generic-runner",
-            "title": "P0 — Generic creator run <preset_id>",
-            "status": "Done",
-            "working_branch": "feature/v1.45-creator-run-generic-runner",
-            "merge_target": "iteration/v1.45",
-            "merge_commits": [
-                "7f9767f9",
-                "61082146"
-            ],
-            "completion_report": "P0 Completion Report v2 received; 4 commits d0e1b94c/f4841a69/e9a996c1/4aa5aa53; T1-T6 PASS; cli_args schema + RunCommand struct + 39 surface tests + 207 preset tests",
-            "plan_file": ".mstar/plans/2026-06-13-v1.45-creator-run-generic-runner.md",
-            "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-            "done_at": "2026-06-14T00:55:00+08:00",
-            "qc_reports": {
-                "qc1": "Approve (after fix round; C-1 + W-1/2/3 fixed)",
-                "qc2": "Approve (initial; 0 Critical, 2 pre-existing Warning)",
-                "qc3": "Approve (initial; 0 Critical, 2 Warning fixed in B1 fix round)"
-            },
-            "qa_report": "PASS (initial + accepts fix round)"
-        },
-        {
-            "plan_id": "2026-06-13-v1.45-delete-bespoke-run-subcommands",
-            "title": "P1 — Delete bespoke creator run subcommands",
-            "status": "Done",
-            "working_branch": "feature/v1.45-delete-bespoke-run-subcommands",
-            "merge_target": "iteration/v1.45",
-            "merge_commits": [
-                "00084b92",
-                "61082146"
-            ],
-            "completion_report": "P1 Completion Report v2 received; 6 commits e3ca5a47/609e92d2/8e1928c3/ef1f7c47/a3e45b30/f95ce3ff; T1-T5 PASS; DEPRECATED parent dir + memory-review allowlist + hint strings updated; 628 lib tests PASS single-threaded (pre-existing env-var race unrelated)",
-            "plan_file": ".mstar/plans/2026-06-13-v1.45-delete-bespoke-run-subcommands.md",
-            "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-            "done_at": "2026-06-14T00:55:00+08:00",
-            "qc_reports": {
-                "qc1": "Approve (after fix round; C-1 + W-1/2/3 fixed)",
-                "qc2": "Approve (initial; 0 Critical, 2 pre-existing Warning)",
-                "qc3": "Approve (initial; 0 Critical, 2 Warning fixed in B1 fix round)"
-            },
-            "qa_report": "PASS (initial + accepts fix round)"
-        },
-        {
-            "plan_id": "2026-06-13-v1.45-creator-bootstrap-and-works-migration",
-            "title": "P2 — creator bootstrap + works atomic ops",
-            "status": "Done",
-            "working_branch": "feature/v1.45-creator-bootstrap-and-works-migration",
-            "merge_target": "iteration/v1.45",
-            "merge_commits": [
-                "69cb9e1e",
-                "61082146"
-            ],
-            "completion_report": "P2 Completion Report v2 received; 1 commit 6c078f53; T1-T5 PASS; bootstrap.rs + 4 new works subcommands + 18 hermetic tests; 665 lib tests",
-            "plan_file": ".mstar/plans/2026-06-13-v1.45-creator-bootstrap-and-works-migration.md",
-            "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-            "done_at": "2026-06-14T00:55:00+08:00",
-            "qc_reports": {
-                "qc1": "Approve (after fix round; C-1 + W-1/2/3 fixed)",
-                "qc2": "Approve (initial; 0 Critical, 2 pre-existing Warning)",
-                "qc3": "Approve (initial; 0 Critical, 2 Warning fixed in B1 fix round)"
-            },
-            "qa_report": "PASS (initial + accepts fix round)"
-        },
-        {
-            "plan_id": "2026-06-13-v1.45-quickstart-and-author-spec",
-            "title": "P3 — Quickstart + author spec rewrite",
-            "status": "Done",
-            "working_branch": "feature/v1.45-quickstart-and-author-spec",
-            "merge_target": "iteration/v1.45",
-            "plan_file": ".mstar/plans/2026-06-13-v1.45-quickstart-and-author-spec.md",
-            "depends_on": "2026-06-13-v1.45-creator-run-generic-runner",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-            "merge_commits": [
-                "8f330834",
-                "03baf31e"
-            ],
-            "done_at": "2026-06-14T01:50:00+08:00",
-            "qc_reports": {
-                "qc1": "Approve (after 1 fix round; W-1/W-2/S-1 + cross-ref fixed)",
-                "qc2": "Approve (initial; 0 Critical, 0 Warning, 0 Suggestion)",
-                "qc3": "Approve (after 1 fix round; W-1/W-2 fixed)"
-            },
-            "qa_report": "PASS (initial)",
-            "completion_report": "P3 + P3 fix: 5+5=10 docs commits; 3 .md files modified; migration section added; run.rs:334 hint fixed"
-        },
-        {
-            "plan_id": "2026-06-13-v1.45-hygiene-and-closeout",
-            "title": "P-last — Spec promotion + tracker closeout",
-            "status": "Done",
-            "working_branch": "feature/v1.45-hygiene-and-closeout",
-            "merge_target": "iteration/v1.45",
-            "plan_file": ".mstar/plans/2026-06-13-v1.45-hygiene-and-closeout.md",
-            "depends_on": "2026-06-13-v1.45-quickstart-and-author-spec",
-            "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-            "done_at": "2026-06-14T02:30:00+08:00",
-            "qc_status": "PM signoff (no QC required for hygiene plan)"
-        }
+        "2026-06-13-v1.45-creator-run-generic-runner",
+        "2026-06-13-v1.45-delete-bespoke-run-subcommands",
+        "2026-06-13-v1.45-creator-bootstrap-and-works-migration",
+        "2026-06-13-v1.45-quickstart-and-author-spec",
+        "2026-06-13-v1.45-hygiene-and-closeout"
     ],
     "iteration_summaries": {
         "v1.45": {

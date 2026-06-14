@@ -122,7 +122,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 **V1.42 P0 defer carry-forward** (from V1.41 P-last hygiene): R-V140P0-S3, R-V140P1-S6, R-V140P2-S2, R-V140P3-S1/S2/S3, R-V140P4-INFRA — see [2026-06-11-v1.42-runtime-lock-and-hygiene.md](../plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md) §2.
 
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-11**; `tech_debt_summary.updated_at` **2026-06-11**; V1.40 closeout, Profile B compaction applied). Do **not** mirror full rows here — JSON wins on conflict. This section is a human pointer only; use `status.json` for current totals, severity buckets, and target buckets.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-14**; `tech_debt_summary.updated_at` **2026-06-14**; V1.45 Shipped, post-merge cleanup, Profile B compaction applied — `plans-done.json` index is string-only, full JSON in `archived/plans/<id>.json`). Do **not** mirror full rows here — JSON wins on conflict. This section is a human pointer only; use `status.json` for current totals, severity buckets, and target buckets.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
@@ -284,27 +284,26 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest shipped iteration**
 
-- V1.35 delivery compass: [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) (Shipped 2026-06-07; PR [#43](https://github.com/42ch-dev/nexus/pull/43) awaiting merge to main)
+- **V1.45** (Shipped 2026-06-14): [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md) — CLI IA: `creator run <preset_id>` + `creator bootstrap` + atomic `creator works`; PR [#58](https://github.com/42ch-dev/nexus/pull/58) merged `9514bfdc`. 6 plans Done; 3 trackers closed (BL-12, BL-13, DF-52); `creator-run-preset-entry.md` Draft → **Shipped Master V1.45**; 6 V1.45 Draft overlays replaced with `Superseded by:` stubs; 10 low-severity open residuals carry-forward to V1.46+.
 
 **Latest active iteration**
 
-- **V1.45** (Active harness prepare 2026-06-13): [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md) — CLI IA: `creator run <preset_id>` + `creator bootstrap` + atomic `creator works`; `iteration/v1.45`.
-- **V1.44** (Shipped 2026-06-13): [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) — DF-69 + review-master CLI + multi-volume + author-desk; PR #57 merged `76a9eb79`.
-- **V1.43** (Shipped 2026-06-12): [v1.43-novel-author-experience-delivery-compass-v1.md](../iterations/v1.43-novel-author-experience-delivery-compass-v1.md) — BL-10 author quickstart + CLI copy P1 + author visibility P2 + P-last hygiene; `iteration/v1.43` retired.
-- **V1.42** (Shipped 2026-06-12): [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) — P0 runtime_lock + P1 DF-62 + P2 DF-56 + P3 DF-47 + P-last UX.
-- **V1.41** (Shipped 2026-06-11): [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) — PR #53; DF-60/61 archived.
-- **V1.40** (Shipped 2026-06-11 via PR #52 merged): [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) — DF-63 closed; `iteration/v1.40` retired.
-- **V1.39** (Shipped 2026-06-09): [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) — **DF-53 full auto-chain + DF-68 daemon continuation + DF-64/65/66/67 quality loop**; P0..P5 on `iteration/v1.39`; PR #50 merged ad9725d8.
-- **V1.38** (Shipped 2026-06-09): [v1.38-multi-chapter-serial-writing-delivery-compass-v1.md](../iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md) — DF-62 first slice shipped (PR #49).
-- **V1.37** (Shipped 2026-06-08): [v1.37-novel-writing-foundation-delivery-compass-v1.md](../iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md) — **Novel Writing UX foundation-first**: P0 shipped init `preset.input` plumbing, runtime `gates:` evaluation, scaffold atomicity, and first-run remediation; P1/P2/P3 roadmap multi-chapter DF-62, World KB DF-63, and quality-loop DF-64/65/66/67.
-- **V1.36** (Shipped 2026-06-07): [v1.36-novel-writing-ux-delivery-compass-v1.md](../iterations/v1.36-novel-writing-ux-delivery-compass-v1.md) — **novel-writing正文产出 UX** (5 implement plans P0–P4 + prepare P-1 all Done; PM-validate path used for P1–P4 under time pressure; DF-57/58 closed; DF-53 partial again on top of V1.35 P4; DF-47 stays conditional not P0; DF-59 backlog); single-chapter MVP (outline_chapter → draft_chapter → finalize with llm_judge 五问) + completion stop + `Works/<work_ref>/` layout + `work_chapters` DB SSOT + `creator run reconcile-chapters` + `--force-gates` gate override
-- **V1.35** (Shipped 2026-06-07): [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) — CLI IA (5 groups; sync→platform), creator hub polish, critical residual P0 (6 criticals + R-CURSOR-PR42-03 + 5 backlog), FL-E UX polish (chain default true); 5 implement plans P0/P2/P3/P4/P5 + prepare P-1 + P1 docs all Done; DF-47 later reclassified as conditional, not V1.36 P0
-- **V1.34** (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E + Agent tools; DF-47 carried forward to V1.35 and later reclassified as conditional
+- _None — V1.45 just shipped; awaiting V1.46 compass._
 
 **Recent shipped compasses** (detail in archive §2)
 
-- V1.34: [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E + Agent tools (8 `nexus.*` tool bridge); **Shipped 2026-06-05** (5 plans P0–P5 all Done); DF-47 later reclassified as conditional rather than novel UX P0
-- V1.33: [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) — narrative Work loop, Creative Brief Intake, `creator run`, `llm_judge` fix, memory review closed loop; **Shipped 2026-06-04** (5 plans P1–P5 all Done)
+- V1.44 (Shipped 2026-06-13): [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) — DF-69 + review-master CLI + multi-volume + author-desk; PR #57 merged `76a9eb79`.
+- V1.43 (Shipped 2026-06-12): [v1.43-novel-author-experience-delivery-compass-v1.md](../iterations/v1.43-novel-author-experience-delivery-compass-v1.md) — BL-10 author quickstart + CLI copy P1 + author visibility P2 + P-last hygiene; `iteration/v1.43` retired.
+- V1.42 (Shipped 2026-06-12): [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) — P0 runtime_lock + P1 DF-62 + P2 DF-56 + P3 DF-47 + P-last UX.
+- V1.41 (Shipped 2026-06-11): [v1.41-multi-work-author-desk-delivery-compass-v1.md](../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) — PR #53; DF-60/61 archived.
+- V1.40 (Shipped 2026-06-11 via PR #52 merged): [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md) — DF-63 closed; `iteration/v1.40` retired.
+- V1.39 (Shipped 2026-06-09): [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) — **DF-53 full auto-chain + DF-68 daemon continuation + DF-64/65/66/67 quality loop**; P0..P5 on `iteration/v1.39`; PR #50 merged ad9725d8.
+- V1.38 (Shipped 2026-06-09): [v1.38-multi-chapter-serial-writing-delivery-compass-v1.md](../iterations/v1.38-multi-chapter-serial-writing-delivery-compass-v1.md) — DF-62 first slice shipped (PR #49).
+- V1.37 (Shipped 2026-06-08): [v1.37-novel-writing-foundation-delivery-compass-v1.md](../iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md) — **Novel Writing UX foundation-first**: P0 shipped init `preset.input` plumbing, runtime `gates:` evaluation, scaffold atomicity, and first-run remediation; P1/P2/P3 roadmap multi-chapter DF-62, World KB DF-63, and quality-loop DF-64/65/66/67.
+- V1.36 (Shipped 2026-06-07): [v1.36-novel-writing-ux-delivery-compass-v1.md](../iterations/v1.36-novel-writing-ux-delivery-compass-v1.md) — **novel-writing正文产出 UX** (5 implement plans P0–P4 + prepare P-1 all Done; PM-validate path used for P1–P4 under time pressure; DF-57/58 closed; DF-53 partial again on top of V1.35 P4; DF-47 stays conditional not P0; DF-59 backlog); single-chapter MVP (outline_chapter → draft_chapter → finalize with llm_judge 五问) + completion stop + `Works/<work_ref>/` layout + `work_chapters` DB SSOT + `creator run reconcile-chapters` + `--force-gates` gate override
+- V1.35 (Shipped 2026-06-07): [v1.35-cli-ia-and-product-polish-delivery-compass-v1.md](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md) — CLI IA (5 groups; sync→platform), creator hub polish, critical residual P0 (6 criticals + R-CURSOR-PR42-03 + 5 backlog), FL-E UX polish (chain default true); 5 implement plans P0/P2/P3/P4/P5 + prepare P-1 + P1 docs all Done; DF-47 later reclassified as conditional, not V1.36 P0
+- V1.34 (Shipped 2026-06-05): [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) — FL-E + Agent tools; DF-47 carried forward to V1.35 and later reclassified as conditional
+- V1.33 (Shipped 2026-06-04): [v1.33-work-experience-loop-delivery-compass-v1.md](../iterations/v1.33-work-experience-loop-delivery-compass-v1.md) — narrative Work loop, Creative Brief Intake, `creator run`, `llm_judge` fix, memory review closed loop; 5 plans P1–P5 all Done
 - V1.32: [v1.32-preset-quality-gate-delivery-compass-v1.md](../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md)
 - V1.31: [v1.31-agentic-design-patterns-delivery-compass-v1.md](../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
 - V1.30: [v1.30-residual-convergence-delivery-compass-v1.md](../iterations/v1.30-residual-convergence-delivery-compass-v1.md)
@@ -312,15 +311,15 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 **Knowledge & specs**
 
 - Shipped history archive: [shipped-features-tracker.md](../archived/shipped-features-tracker.md)
-- Done plans index: [archived/plans-done.json](../archived/plans-done.json)
-- CLI IA (V1.35): [specs/cli-command-ia.md](specs/cli-command-ia.md), [specs/creator-centric-entry-model.md](specs/creator-centric-entry-model.md), [specs/preset-conditional-routing.md](specs/preset-conditional-routing.md); audit evidence in [v1.35 compass Appendix A](../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-a-cli-usability-audit-v135)
+- Done plans index: [archived/plans-done.json](../archived/plans-done.json) (string list of plan_ids; full JSON in [archived/plans/](archived/plans/))
+- CLI IA (V1.45): [specs/creator-run-preset-entry.md](specs/creator-run-preset-entry.md) (**Shipped Master V1.45**); three-plane IA superseded the V1.35 [specs/cli-command-ia.md](specs/cli-command-ia.md) overlay
 - Orchestration engine: [specs/orchestration-engine.md](specs/orchestration-engine.md)
 - Creator schedule & core context: [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md)
 - Iteration index: [iterations/README.md](../iterations/README.md)
-- Machine state: [status.json](../status.json)
+- Machine state: [status.json](../status.json) (SSOT for residuals, iteration complete flags, ship records)
 
 External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{platform-designs}/roadmap.md`
 
 ---
 
-*Last updated: 2026-06-14 (V1.45 P-last closeout: BL-12/DF-52/BL-13 archived; iteration Shipped; full V1.45 delivery snapshot in archive). Status: **V1.45 Shipped**.*
+*Last updated: 2026-06-14 (V1.45 P-last closeout + post-merge cleanup: §5 Related index updated to reflect V1.45 as Latest shipped; "Latest active iteration" marked None; P-1 archive backfill; Profile B layout invariant documented in [.mstar/AGENTS.md](../AGENTS.md)). Status: **V1.45 Shipped**.*

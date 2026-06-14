@@ -67,7 +67,32 @@ When an active delivery compass has **two or more** locked implement plans in th
 
 ### Plan compaction profile
 
-**Profile B** — Morning Star `mstar-plan-conventions` → `references/done-compaction.md` (Template B). `status.json.plans[]` keeps **non-`Done`** plans only; historical `Done` discovery uses `archived/plans-done.json` and `archived/plans/<plan-id>.json`.
+**Profile B** — Morning Star `mstar-plan-conventions` → `references/done-compaction.md` (Template B). `status.json.plans[]` keeps **non-`Done`** plans only; historical `Done` plans live in the archive.
+
+**Layout invariant** (enforce on every Profile B compaction):
+
+| File | Schema | Content |
+|---|---|---|
+| `.mstar/status.json` → `plans[]` | array of plan objects | **non-`Done` plans only** (the SSOT for active work) |
+| `.mstar/archived/plans-done.json` → `plans` | **array of `plan_id` strings** (e.g. `"2026-06-13-v1.45-harness-docs-prepare"`) | **index only** — every entry MUST be a string, not a dict |
+| `.mstar/archived/plans/<plan-id>.json` | one full plan object per file | **single source of truth** for the Done plan's full data (status, qc_reports, merge_commits, completion_report, etc.) |
+
+**Per-iteration closeout checklist** (P-last / Profile B step):
+
+1. For each `Done` plan in `status.json.plans[]`:
+   - Read the plan object (`status.json` row)
+   - Write a copy to `.mstar/archived/plans/<plan-id>.json` (preserve all fields)
+   - Append `"<plan-id>"` (string, **not** the object) to `plans-done.json`'s `plans` array
+2. Remove the plan row from `status.json.plans[]` (only non-`Done` plans remain)
+3. `iteration_summaries[<ver>]` block stays in `plans-done.json` (delivery snapshot; or move to `shipped-features-tracker.md` §2 — pick one and be consistent)
+4. Verify with `python3 -c "import json; d=json.load(open('.mstar/archived/plans-done.json')); assert all(isinstance(p, str) for p in d['plans'])"`
+
+**Anti-patterns**:
+
+- ❌ Appending the full plan object to `plans-done.json` (one occurrence in V1.45 P-last script; fixed 2026-06-14)
+- ❌ Forgetting the per-file JSON (one occurrence in V1.45 P-1 closeout; backfilled 2026-06-14)
+- ❌ Mixing strings and dicts in the same `plans` array
+- ❌ Editing `archived/plans-done.json` directly when adding a single plan mid-iteration (use the same pattern even for one-off additions)
 
 ### Residual detail prose (`plans/residuals/`)
 
