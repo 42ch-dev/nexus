@@ -24,6 +24,7 @@
 //! - Live preset state-machine execution (needs ACP/LLM).
 
 use nexus_contracts::local::orchestration::preset::{ExitWhen, PresetKind, RunIntent};
+use nexus_contracts::local::orchestration::preset_gate::{Gate, GateOp};
 use nexus_contracts::local::schedule::ScheduleStatus;
 use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chain;
@@ -253,21 +254,36 @@ async fn research_preset_loads_and_structurally_valid() {
     assert!(loaded.manifest.states[3].terminal, "done is terminal");
 
     // Preset gates — evaluated at enqueue time; the test Work below satisfies them.
+    // Asserted via typed pattern matching on the generated `Gate` / `GateOp` wire
+    // types (Debug formatting is not a stable contract; see qc3 W-1). The two
+    // semantic checks below must hold:
+    //   - one `WorkField { field: "intake_status", op: Equals("complete") }`
+    //   - one `WorkField { field: "work_ref", op: Required }`
     let gates = &loaded.manifest.preset.gates;
+    let mut has_intake_status_complete = false;
+    let mut has_work_ref_required = false;
+    for g in gates {
+        match g {
+            Gate::WorkField {
+                field,
+                op: GateOp::Equals { value },
+            } if field.as_str() == "intake_status" && value.as_str() == Some("complete") => {
+                has_intake_status_complete = true;
+            }
+            Gate::WorkField {
+                field,
+                op: GateOp::Required,
+            } if field.as_str() == "work_ref" => {
+                has_work_ref_required = true;
+            }
+            _ => {}
+        }
+    }
     assert!(
-        gates.iter().any(|g| {
-            let s = format!("{g:?}");
-            s.contains("intake_status")
-        }),
-        "research gate: intake_status == complete",
+        has_intake_status_complete,
+        "research gate: intake_status == \"complete\"",
     );
-    assert!(
-        gates.iter().any(|g| {
-            let s = format!("{g:?}");
-            s.contains("work_ref")
-        }),
-        "research gate: work_ref required",
-    );
+    assert!(has_work_ref_required, "research gate: work_ref required");
 }
 
 // ── T1: research schedule request + preset input contract ───────────────────
