@@ -1259,6 +1259,7 @@ impl FindingsSummary {
 /// Per cli-spec §7.1: clear, non-jargon formatting.
 ///
 /// - `FindingsResult::Fetched(vec)` with empty vec → "findings: none open"
+///   + suggests `creator run novel-review-master` (V1.46 P0, Grill #7)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     let findings = match result {
@@ -1272,7 +1273,10 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
     let summary = FindingsSummary::from_findings_json(findings, is_truncated);
     if summary.open_count == 0 {
+        // V1.46 P0 (Grill #7): empty findings → suggest a master-decision pass.
+        let safe_work_id = sanitize_for_terminal(work_id);
         println!("findings: none open");
+        println!("  Run: nexus42 creator run novel-review-master {safe_work_id}");
         return;
     }
 
@@ -1303,10 +1307,9 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
     }
 
-    // Review action hint — cite quickstart §5 (sanitize work_id for defense in depth).
-    let safe_work_id = sanitize_for_terminal(work_id);
-    println!("  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}");
-    println!("  See docs/novel-writing-quickstart.md §5");
+    // V1.46 P0 (Grill #7): per-finding routing_hint is the only remediation;
+    // no blanket reflection-loop footer (work_id unused when findings exist).
+    let _ = work_id;
 }
 
 /// Print per-chapter status table for novel works.
@@ -1486,7 +1489,12 @@ mod tests {
         let mut lines = Vec::new();
 
         if summary.open_count == 0 {
+            // V1.46 P0 (Grill #7): empty → suggest review-master.
+            let safe_work_id = sanitize_for_terminal(work_id);
             lines.push("findings: none open".to_string());
+            lines.push(format!(
+                "  Run: nexus42 creator run novel-review-master {safe_work_id}"
+            ));
         } else {
             let count_display = if summary.is_truncated {
                 format!("{}+", summary.open_count)
@@ -1515,11 +1523,6 @@ mod tests {
                     i + 1
                 ));
             }
-            let safe_work_id = sanitize_for_terminal(work_id);
-            lines.push(format!(
-                "  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}"
-            ));
-            lines.push("  See docs/novel-writing-quickstart.md §5".to_string());
         }
 
         lines.join("\n")
@@ -1529,6 +1532,9 @@ mod tests {
     fn display_no_open_findings() {
         let output = capture_findings_output(&[], "wrk_test");
         assert!(output.contains("findings: none open"));
+        // V1.46 P0 (Grill #7): empty → suggest review-master.
+        assert!(output.contains("novel-review-master"));
+        assert!(output.contains("wrk_test"));
         assert!(!output.contains("highest"));
     }
 
@@ -1545,8 +1551,15 @@ mod tests {
         assert!(output.contains("highest: blocker"));
         assert!(output.contains("#1 [blocker] \"Continuity error\" → write"));
         assert!(output.contains("#2 [minor] \"Style issue\" → none"));
-        assert!(output.contains("wrk_abc123"));
-        assert!(output.contains("quickstart"));
+        // V1.46 P0 (Grill #7): per-finding hint only; no blanket footer.
+        assert!(
+            !output.contains("reflection-loop"),
+            "blanket reflection-loop footer removed"
+        );
+        assert!(
+            !output.contains("quickstart"),
+            "quickstart reference removed from findings summary"
+        );
     }
 
     #[test]
@@ -1567,6 +1580,7 @@ mod tests {
         // When no findings exist, the summary line should say "none open".
         let output = capture_findings_output(&[], "wrk_completed");
         assert!(output.contains("findings: none open"));
+        assert!(output.contains("novel-review-master"));
     }
 
     // ── Truncation tests ─────────────────────────────────────────────────
