@@ -527,7 +527,9 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 print_findings_summary(&open_findings, &resolved_id);
 
                 // Per-chapter table
-                print_chapter_table(ch_list);
+                // V1.46 P2 (Grill #9): pass work_id so on-disk path hints can
+                // render a `works reconcile-chapters` remediation command.
+                print_chapter_table(ch_list, &resolved_id);
             }
         } else {
             // Non-novel or generic work display
@@ -1369,7 +1371,20 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
 }
 
 /// Print per-chapter status table for novel works.
-fn print_chapter_table(chapters: &[serde_json::Value]) {
+///
+/// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort on-disk check of each
+/// chapter's configured `body_path` / `outline_path`. When a configured
+/// path is missing on disk, a ⚠ marker plus a `works reconcile-chapters`
+/// remediation hint is printed below the row. The daemon reconcile pass
+/// remains authoritative; this is a CLI-only surfacing hint. All
+/// filesystem errors are swallowed (best-effort) and never fail the status
+/// command.
+fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
+    // Resolve the operational workspace dir once (best-effort). When this
+    // cannot be resolved (no active creator, no home dir, etc.), on-disk
+    // hints are silently skipped — the table still renders normally.
+    let ws_dir = operational_workspace_dir_from_config();
+
     println!();
     println!(
         "{:<5} {:<30} {:<14} {:<14}",
@@ -1388,7 +1403,59 @@ fn print_chapter_table(chapters: &[serde_json::Value]) {
         let ch_updated = ch.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
         let display_title = truncate_with_ellipsis(ch_title, 28);
         println!("{num:<5} {display_title:<30} {ch_status:<14} {ch_updated:<14}");
+
+        // V1.46 P2 (Grill #9): on-disk path hint, best-effort.
+        if let Some(ref dir) = ws_dir {
+            if let Some(reason) = chapter_path_missing_hint(ch, dir) {
+                let safe_work_id = sanitize_for_terminal(work_id);
+                println!(
+                    "  ⚠ {reason} — run: nexus42 creator works reconcile-chapters {safe_work_id}"
+                );
+            }
+        }
     }
+}
+
+/// V1.46 P2 (Grill #9): resolve the operational workspace directory from
+/// the active CLI config. Returns `None` on any failure (best-effort) —
+/// callers must treat `None` as "skip on-disk hints".
+fn operational_workspace_dir_from_config() -> Option<std::path::PathBuf> {
+    let cfg = crate::config::CliConfig::load().ok()?;
+    let creator_id = cfg.active_creator_id.as_ref()?;
+    let ws_slug = cfg.active_workspace_slug_by_creator.get(creator_id)?;
+    let home = dirs::home_dir()?;
+    Some(nexus_home_layout::operational_workspace_dir(
+        &home, creator_id, ws_slug,
+    ))
+}
+
+/// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort check of a chapter's
+/// configured `body_path` / `outline_path` against the filesystem.
+///
+/// Returns `Some(reason)` when at least one configured path is missing on
+/// disk; `None` when both paths exist, when neither is configured, or when
+/// the workspace cannot be resolved. `Path::exists()` semantics swallow
+/// permission/IO errors as `false`, which is the desired best-effort
+/// behavior (a missing file and an unreadable file both warrant reconcile).
+///
+/// Pure over `(chapter JSON, ws_dir)` — hermetically testable with a
+/// tempdir for `ws_dir`.
+fn chapter_path_missing_hint(ch: &serde_json::Value, ws_dir: &std::path::Path) -> Option<String> {
+    let body = ch.get("body_path").and_then(serde_json::Value::as_str);
+    let outline = ch.get("outline_path").and_then(serde_json::Value::as_str);
+    let body_missing = body.is_some_and(|p| !ws_dir.join(p).exists());
+    let outline_missing = outline.is_some_and(|p| !ws_dir.join(p).exists());
+    if !body_missing && !outline_missing {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if body_missing {
+        parts.push("body_path");
+    }
+    if outline_missing {
+        parts.push("outline_path");
+    }
+    Some(format!("{} missing on disk", parts.join(", ")))
 }
 
 /// V1.42 P-last (R-V141P0-06): best-effort on-disk completion-lock file check.
@@ -2289,5 +2356,141 @@ mod tests {
         );
         // Suppress unused variable warning
         let _ = result;
+    }
+
+    // ── V1.46 P2 (Grill #9): on-disk chapter path hint tests ──────────────
+
+    fn chapter_with_paths(body: Option<&str>, outline: Option<&str>) -> serde_json::Value {
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "chapter_number".to_string(),
+            serde_json::Value::Number(1.into()),
+        );
+        obj.insert(
+            "title".to_string(),
+            serde_json::Value::String("Intro".into()),
+        );
+        obj.insert(
+            "status".to_string(),
+            serde_json::Value::String("writing".into()),
+        );
+        if let Some(b) = body {
+            obj.insert("body_path".to_string(), serde_json::Value::String(b.into()));
+        }
+        if let Some(o) = outline {
+            obj.insert(
+                "outline_path".to_string(),
+                serde_json::Value::String(o.into()),
+            );
+        }
+        serde_json::Value::Object(obj)
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_body_missing_on_disk() {
+        // body_path configured but file does not exist → hint should fire
+        // and mention body_path.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(Some("Works/my-novel/Stories/ch01-intro.md"), None);
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        let hint = hint.expect("hint present when body_path missing on disk");
+        assert!(
+            hint.contains("body_path"),
+            "hint should mention body_path: {hint}"
+        );
+        assert!(hint.contains("missing on disk"));
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_outline_missing_on_disk() {
+        // outline_path configured but file does not exist → hint fires.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(
+            None,
+            Some("Works/my-novel/Outlines/chapters/ch01-outline.md"),
+        );
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        let hint = hint.expect("hint present when outline_path missing on disk");
+        assert!(
+            hint.contains("outline_path"),
+            "hint should mention outline_path: {hint}"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_both_present_no_hint() {
+        // Both paths configured AND present on disk → no hint (None).
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Create the files so exists() returns true.
+        let body_rel = "Works/my-novel/Stories/ch01.md";
+        let outline_rel = "Works/my-novel/Outlines/chapters/ch01-outline.md";
+        std::fs::create_dir_all(dir.path().join("Works/my-novel/Stories"))
+            .expect("mkdir body parent");
+        std::fs::create_dir_all(dir.path().join("Works/my-novel/Outlines/chapters"))
+            .expect("mkdir outline parent");
+        std::fs::write(dir.path().join(body_rel), "body").expect("write body");
+        std::fs::write(dir.path().join(outline_rel), "outline").expect("write outline");
+
+        let ch = chapter_with_paths(Some(body_rel), Some(outline_rel));
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        assert!(
+            hint.is_none(),
+            "no hint when both configured paths exist on disk (got {hint:?})"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_no_paths_configured_no_hint() {
+        // Neither body_path nor outline_path in the JSON → None (nothing to
+        // check; daemon has not assigned file paths yet).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(None, None);
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        assert!(
+            hint.is_none(),
+            "no hint when neither path is configured (got {hint:?})"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_both_missing_mentions_both() {
+        // Both configured, neither exists → hint mentions both fields.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(
+            Some("Works/x/Stories/ch01.md"),
+            Some("Works/x/Outlines/chapters/ch01-outline.md"),
+        );
+        let hint =
+            chapter_path_missing_hint(&ch, dir.path()).expect("hint present when both missing");
+        assert!(
+            hint.contains("body_path"),
+            "hint should mention body_path: {hint}"
+        );
+        assert!(
+            hint.contains("outline_path"),
+            "hint should mention outline_path: {hint}"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_exists_failure_is_silent() {
+        // Best-effort contract: `Path::exists()` returns false (rather than
+        // panicking) for unreadable / permission-denied paths. The hint
+        // surfaces "missing on disk" for such cases too — reconcile is the
+        // correct remediation regardless. This test pins the "swallow"
+        // behavior: a path pointing into a tempdir that was just removed
+        // still yields Some (treated as missing), never panics.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dir_path = dir.path().to_path_buf();
+        let ch = chapter_with_paths(Some("nonexistent/ch01.md"), None);
+        // Drop the tempdir handle but keep the path; the files never existed.
+        drop(dir);
+        let hint = chapter_path_missing_hint(&ch, &dir_path);
+        // After drop the tempdir may still exist on disk (cleanup is
+        // best-effort), but the inner file definitely does not → Some.
+        assert!(
+            hint.is_some(),
+            "missing file surfaces as Some (best-effort, never panics)"
+        );
     }
 }
