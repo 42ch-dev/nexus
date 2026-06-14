@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "updated_at": "2026-06-15T02:00:00+08:00",
+    "updated_at": "2026-06-15T02:30:00+08:00",
     "plans": [
         {
             "plan_id": "2026-06-14-v1.46-harness-docs-prepare",
@@ -45,7 +45,7 @@
         {
             "plan_id": "2026-06-14-v1.46-research-auto-chain-e2e",
             "title": "P3 — Hermetic supervisor research E2E",
-            "status": "Todo",
+            "status": "InReview",
             "working_branch": "feature/v1.46-research-auto-chain-e2e",
             "merge_target": "iteration/v1.46",
             "plan_file": ".mstar/plans/2026-06-14-v1.46-research-auto-chain-e2e.md",
@@ -183,6 +183,44 @@
         }
     },
     "residual_findings": {
+        "2026-06-14-v1.46-research-auto-chain-e2e": [
+            {
+                "id": "R-V146P3-QC1-S1",
+                "title": "preset_version = 2 magic number duplicated across test assertion and seed SQL",
+                "severity": "low",
+                "source": "qc1 (architecture/maintainability) S-1",
+                "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:184 (assertion) + :123 (seed SQL)",
+                "decision": "defer",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46+",
+                "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
+                "note": "Coupling enforced only by author discipline. Consider exporting the version constant from the preset loader."
+            },
+            {
+                "id": "R-V146P3-QC3-S1",
+                "title": "Raw SQL fixture duplicates schema knowledge (insert_research_schedule)",
+                "severity": "low",
+                "source": "qc3 (performance/reliability) S-1",
+                "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:108-135",
+                "decision": "defer",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46+",
+                "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
+                "note": "Hardcoded column order. Wrap in DAO-style helper or reuse auto_chain::insert_driver_schedule with preset_id parameter. At minimum, add migration-file reference comment."
+            },
+            {
+                "id": "R-V146P3-QC3-S2",
+                "title": "schedule_status helper panics on missing row (fetch_one(...).unwrap())",
+                "severity": "low",
+                "source": "qc3 (performance/reliability) S-2",
+                "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:138-145",
+                "decision": "defer",
+                "owner": "@fullstack-dev",
+                "target_date": "V1.46+",
+                "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
+                "note": "Return Option<String> and let caller expect() with descriptive message, or use fetch_optional + unwrap_or_else."
+            }
+        ],
         "pre-existing-v1.45-orchestration-clippy": [
             {
                 "id": "R-V145-PRE-CLIPPY-001",
