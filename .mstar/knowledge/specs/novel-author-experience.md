@@ -144,6 +144,7 @@ For **`work_profile=novel`** only, `creator works status <work_id> --json` **ext
 | --- | --- | --- | --- |
 | *(work fields)* | object | yes | Unchanged from daemon GET `/v1/local/works/{id}` |
 | `findings` | array | yes | Same element shape as findings list API; empty array if none |
+| `findings_truncated` | boolean | no | Present (and `true`) only when `findings[]` hit the fetch cap (`FINDINGS_FETCH_LIMIT = 50`); signals more open findings may exist beyond the fetched page. Omitted otherwise (qc3 F-003) |
 | `findings_stale` | object | no | Present when 96h master-review stale banner would show (human parity) |
 
 Generic (non-novel) works: **omit** `findings` fetch; json output is work API only.

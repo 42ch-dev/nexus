@@ -1123,6 +1123,9 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
 ///             `None` when the endpoint was unreachable — `findings` is then
 ///             omitted for graceful degradation (mirrors the human "unavailable"
 ///             path), since fabricating an empty array would mask a daemon fault.
+///             When `slice.len() == FINDINGS_FETCH_LIMIT`, a `findings_truncated`
+///             boolean is also inserted so JSON consumers can detect that more
+///             open findings may exist beyond the fetched page (qc3 F-003).
 ///
 /// `stale`: the `/v1/local/findings/stale` payload; `findings_stale` is inserted
 ///          only when its `stale_count` is greater than zero.
@@ -1139,10 +1142,20 @@ fn enrich_status_json(
         return resp;
     };
     if let Some(arr) = findings {
+        let is_truncated = arr.len() == FINDINGS_FETCH_LIMIT;
         obj.insert(
             "findings".to_string(),
             serde_json::Value::Array(arr.to_vec()),
         );
+        // qc3 F-003: surface the 50-item fetch cap so JSON consumers can
+        // distinguish "exactly 50 open findings" from "50+ open findings".
+        // Omitted when not at the cap (consumers treat absence as not-truncated).
+        if is_truncated {
+            obj.insert(
+                "findings_truncated".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
     }
     if let Some(stale_obj) = stale {
         let stale_count = stale_obj
@@ -1678,6 +1691,57 @@ mod tests {
         assert!(
             out.get("findings").is_none(),
             "findings key omitted when unavailable"
+        );
+        // qc3 F-003: truncation marker must also be absent when findings
+        // were not fetched at all.
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings unavailable"
+        );
+    }
+
+    // ── qc3 F-003: findings_truncated marker tests ───────────────────────
+
+    #[test]
+    fn enrich_findings_truncated_marker_set_when_at_limit() {
+        // When the daemon returns exactly FINDINGS_FETCH_LIMIT (50) rows,
+        // there may be more open findings beyond the fetched page. Surface
+        // a `findings_truncated: true` flag so JSON consumers can detect
+        // the cap (qc3 F-003).
+        let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
+            .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
+            .collect();
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        assert_eq!(
+            out.get("findings_truncated")
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "findings_truncated must be true when findings.len() == FINDINGS_FETCH_LIMIT"
+        );
+    }
+
+    #[test]
+    fn enrich_findings_truncated_omitted_when_below_limit() {
+        // Below the cap, the marker is omitted (not false) so consumers can
+        // distinguish "truncation known to be false" from "not applicable".
+        let findings = vec![
+            finding_json("major", "Plot hole", "→ write"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings.len() < FINDINGS_FETCH_LIMIT"
+        );
+    }
+
+    #[test]
+    fn enrich_findings_truncated_omitted_when_empty() {
+        // Empty findings (fetched successfully, none open) — not truncated.
+        let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings is empty"
         );
     }
 
