@@ -1370,6 +1370,14 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     }
 }
 
+/// V1.46 P2 QC fix W-001: maximum number of chapters that receive
+/// per-row on-disk path hints in `print_chapter_table`. Bounds the
+/// synchronous `Path::exists()` syscall cost on large works (100+
+/// chapters). Chapters beyond this cap are summarized in a single
+/// line; the per-chapter `exists()` behavior itself (Grill #9) is
+/// preserved for the first `CHAPTER_PATH_HINT_CAP` rows.
+const CHAPTER_PATH_HINT_CAP: usize = 50;
+
 /// Print per-chapter status table for novel works.
 ///
 /// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort on-disk check of each
@@ -1379,6 +1387,10 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
 /// remains authoritative; this is a CLI-only surfacing hint. All
 /// filesystem errors are swallowed (best-effort) and never fail the status
 /// command.
+///
+/// V1.46 P2 QC fix W-001: per-chapter `exists()` hints are capped at
+/// `CHAPTER_PATH_HINT_CAP` to prevent tail latency on large works; a
+/// summary line covers chapters beyond the cap.
 fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
     // Resolve the operational workspace dir once (best-effort). When this
     // cannot be resolved (no active creator, no home dir, etc.), on-disk
@@ -1390,28 +1402,72 @@ fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
         "{:<5} {:<30} {:<14} {:<14}",
         "CH", "TITLE", "STATUS", "UPDATED"
     );
-    for ch in chapters {
-        let num = ch
-            .get("chapter_number")
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(0);
-        let ch_title = ch
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(untitled)");
-        let ch_status = ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-        let ch_updated = ch.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
-        let display_title = truncate_with_ellipsis(ch_title, 28);
-        println!("{num:<5} {display_title:<30} {ch_status:<14} {ch_updated:<14}");
 
-        // V1.46 P2 (Grill #9): on-disk path hint, best-effort.
-        if let Some(ref dir) = ws_dir {
-            if let Some(reason) = chapter_path_missing_hint(ch, dir) {
-                let safe_work_id = sanitize_for_terminal(work_id);
-                println!(
-                    "  ⚠ {reason} — run: nexus42 creator works reconcile-chapters {safe_work_id}"
-                );
+    // V1.46 P2 QC fix W-001: bound per-chapter `Path::exists()` hints at
+    // `CHAPTER_PATH_HINT_CAP` to prevent synchronous-filesystem-syscall
+    // tail latency on large works (100+ chapters on slower storage).
+    // Chapters beyond the cap are summarized in a single line below the
+    // table; the per-chapter `exists()` behavior (Grill #9) is preserved
+    // for the first `hint_cap` rows.
+    let total_chapters = chapters.len();
+    let hint_cap = total_chapters.min(CHAPTER_PATH_HINT_CAP);
+
+    // tracing span records chapter count + effective cap; the >100ms
+    // threshold log below surfaces slow loops without spamming fast SSDs.
+    let hint_loop_elapsed_ms = {
+        let span = tracing::info_span!("chapter_path_hints", total_chapters, capped = hint_cap,);
+        let _enter = span.enter();
+        let start = std::time::Instant::now();
+
+        for (idx, ch) in chapters.iter().enumerate() {
+            let num = ch
+                .get("chapter_number")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let ch_title = ch
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(untitled)");
+            let ch_status = ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+            let ch_updated = ch.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
+            let display_title = truncate_with_ellipsis(ch_title, 28);
+            println!("{num:<5} {display_title:<30} {ch_status:<14} {ch_updated:<14}");
+
+            // V1.46 P2 (Grill #9): on-disk path hint, best-effort; capped
+            // by CHAPTER_PATH_HINT_CAP (W-001). Chapters beyond `hint_cap`
+            // still render their row above, but skip the exists() check.
+            if idx < hint_cap {
+                if let Some(ref dir) = ws_dir {
+                    if let Some(reason) = chapter_path_missing_hint(ch, dir) {
+                        let safe_work_id = sanitize_for_terminal(work_id);
+                        println!(
+                            "  ⚠ {reason} — run: nexus42 creator works reconcile-chapters {safe_work_id}"
+                        );
+                    }
+                }
             }
+        }
+
+        start.elapsed().as_millis()
+    };
+
+    if hint_loop_elapsed_ms > 100 {
+        tracing::info!(
+            elapsed_ms = hint_loop_elapsed_ms,
+            chapters_checked = hint_cap,
+            "chapter path hint loop took >100ms",
+        );
+    }
+
+    // V1.46 P2 QC fix W-001: summary line for chapters beyond the cap.
+    // Emitted only when the workspace was resolved (otherwise the entire
+    // hint feature was silently skipped and a summary would mislead the
+    // user into thinking paths were checked).
+    if ws_dir.is_some() {
+        if let Some(summary) =
+            chapter_path_hint_skipped_summary(total_chapters.saturating_sub(hint_cap))
+        {
+            println!("  {summary}");
         }
     }
 }
@@ -1456,6 +1512,15 @@ fn chapter_path_missing_hint(ch: &serde_json::Value, ws_dir: &std::path::Path) -
         parts.push("outline_path");
     }
     Some(format!("{} missing on disk", parts.join(", ")))
+}
+
+/// V1.46 P2 QC fix W-001: pure helper that formats the `"+ N more
+/// (paths not checked)"` summary line for chapters beyond the hint cap.
+/// Returns `None` when `skipped == 0` so the caller can skip rendering.
+///
+/// Pure over `skipped` — unit-tested independently of `print_chapter_table`.
+fn chapter_path_hint_skipped_summary(skipped: usize) -> Option<String> {
+    (skipped > 0).then(|| format!("+ {skipped} more (paths not checked)"))
 }
 
 /// V1.42 P-last (R-V141P0-06): best-effort on-disk completion-lock file check.
@@ -2491,6 +2556,93 @@ mod tests {
         assert!(
             hint.is_some(),
             "missing file surfaces as Some (best-effort, never panics)"
+        );
+    }
+
+    // ── V1.46 P2 QC fix W-001: chapter hint cap + summary tests ──────────
+
+    #[test]
+    fn chapter_path_hint_skipped_summary_format() {
+        // Format contract for the "+ N more (paths not checked)" line.
+        assert_eq!(
+            chapter_path_hint_skipped_summary(1).as_deref(),
+            Some("+ 1 more (paths not checked)"),
+        );
+        assert_eq!(
+            chapter_path_hint_skipped_summary(10).as_deref(),
+            Some("+ 10 more (paths not checked)"),
+        );
+        // Zero skipped → no summary line (caller must not render one).
+        assert!(
+            chapter_path_hint_skipped_summary(0).is_none(),
+            "no summary when skipped == 0"
+        );
+    }
+
+    #[test]
+    fn chapter_path_hint_cap_only_first_50_chapters_get_hints() {
+        // 60-chapter work, all with missing body_path. Without the cap,
+        // every chapter would emit a ⚠ hint (and incur a synchronous
+        // `exists()` syscall). The cap bounds the inspected set at
+        // `CHAPTER_PATH_HINT_CAP` and summarizes the remainder.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chapters: Vec<serde_json::Value> = (1..=60)
+            .map(|i| chapter_with_paths(Some(&format!("Works/x/Stories/ch{i:02}.md")), None))
+            .collect();
+        assert_eq!(chapters.len(), 60);
+
+        // Mirror print_chapter_table's cap math.
+        let hint_cap = chapters.len().min(CHAPTER_PATH_HINT_CAP);
+        assert_eq!(
+            hint_cap, CHAPTER_PATH_HINT_CAP,
+            "60-chapter work hits the cap"
+        );
+
+        // Only the first `hint_cap` chapters are inspected for path hints.
+        let capped_hint_count = chapters[..hint_cap]
+            .iter()
+            .filter_map(|ch| chapter_path_missing_hint(ch, dir.path()))
+            .count();
+        assert_eq!(
+            capped_hint_count, 50,
+            "all 50 capped chapters have missing body_path → 50 hints"
+        );
+
+        // Prove the cap is actually bounding something real: the skipped
+        // chapters WOULD have generated hints if the cap weren't in place.
+        let would_have_hinted = chapters[hint_cap..]
+            .iter()
+            .filter_map(|ch| chapter_path_missing_hint(ch, dir.path()))
+            .count();
+        assert_eq!(
+            would_have_hinted, 10,
+            "skipped chapters would have hinted without the cap"
+        );
+
+        // Summary line covers exactly the skipped count.
+        let skipped = chapters.len().saturating_sub(hint_cap);
+        assert_eq!(skipped, 10);
+        let summary =
+            chapter_path_hint_skipped_summary(skipped).expect("summary present when skipped > 0");
+        assert_eq!(summary, "+ 10 more (paths not checked)");
+    }
+
+    #[test]
+    fn chapter_path_hint_cap_not_triggered_under_50() {
+        // A 10-chapter work is well under the cap: no chapter is skipped,
+        // no summary line is rendered, and the existing per-chapter
+        // behavior is fully preserved.
+        let chapters: Vec<serde_json::Value> = (1..=10)
+            .map(|i| chapter_with_paths(Some(&format!("Works/x/Stories/ch{i:02}.md")), None))
+            .collect();
+        let hint_cap = chapters.len().min(CHAPTER_PATH_HINT_CAP);
+        assert_eq!(hint_cap, 10, "10-chapter work does not hit the cap");
+
+        let skipped = chapters.len().saturating_sub(hint_cap);
+        assert_eq!(skipped, 0);
+        assert!(
+            chapter_path_hint_skipped_summary(skipped).is_none(),
+            "no summary when skipped == 0"
         );
     }
 }
