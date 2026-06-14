@@ -256,7 +256,7 @@ Additive columns on existing `works` table. Normative: [novel-multi-work-lifecyc
 | `completion_locked_at` | `TEXT` | no | DB mirror of `.completion-lock.json` |
 | `runtime_lock_holder` | `TEXT` | no | `pid:<pid>:<uuid>` while mutating command holds Work |
 | `runtime_lock_acquired_at` | `TEXT` | no | ISO-8601 |
-| `lineage_from_work_id` | `TEXT` | no | Set on new Work from `creator run start --from-work` |
+| `lineage_from_work_id` | `TEXT` | no | Set on new Work from `creator bootstrap --from-work` |
 
 #### 4.1.5 Novel work pool tables (V1.41 Draft — DF-61)
 

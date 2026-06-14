@@ -28,8 +28,8 @@ Authors track multiple novel ideas and one **default** writing target for CLI co
 | **Means** | Default `work_id` when `creator run` omits `work_id` |
 | **Does not mean** | Only one Work may run auto-chain or schedules globally |
 | **Enforced** | At most **one** `novel_pool_entries.status = active` per `creator_id` |
-| **Set by** | `creator works use`, `pool promote --set-default`, `run start --set-default` |
-| **Created on start** | `creator run start` auto-inserts `queued` row unless `--no-pool-row` |
+| **Set by** | `creator works use`, `pool promote --set-default`, `creator bootstrap --set-default` |
+| **Created on start** | `creator bootstrap` auto-inserts `queued` row unless `--no-pool-row` |
 | **Prior active on change** | Demoted to **`queued`** (not `completed` unless Work already completed) |
 
 ---

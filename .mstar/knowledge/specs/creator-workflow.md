@@ -9,7 +9,7 @@
 
 - [work-experience-model.md](work-experience-model.md) — Work entity, intake, run_intents
 - [novel-workflow-profile.md](novel-workflow-profile.md) — novel `produce` artifacts and completion (Draft V1.36)
-- [cli-spec.md](cli-spec.md) — `creator run` and `creator run stage`
+- [cli-spec.md](cli-spec.md) — `creator run <preset_id>` (see §6.2D) and `creator bootstrap`
 - [orchestration-engine.md](orchestration-engine.md) — presets, schedules, capabilities
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — Agent-initiated context/tools (parallel channel)
 
@@ -25,7 +25,7 @@ The Work loop shipped in V1.33 centered on Creative Brief Intake and `novel-writ
 intake → research → produce → review → persist
 ```
 
-without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P4, `creator run start` chains intake → produce by default (`--chain-novel-writing`, default true). **V1.39** ships full-stage `--auto-chain` (default **true**, opt-out `--no-auto-chain`): while the daemon is online, stages advance through `research → produce → review → persist` per chapter without manual `stage advance` at each boundary. Daemon restart resumes from a Work continuation checkpoint (DF-68).
+without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P4, `creator bootstrap` chains intake → produce by default (`--chain-novel-writing`, default true). **V1.39** ships full-stage `--auto-chain` (default **true**, opt-out `--no-auto-chain`): while the daemon is online, stages advance through `research → produce → review → persist` per chapter without a manual preset dispatch at each boundary. Daemon restart resumes from a Work continuation checkpoint (DF-68).
 
 ---
 
@@ -34,9 +34,9 @@ without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P
 | Concept | Work model (V1.33) | Staged workflow (this spec) |
 | --- | --- | --- |
 | Work container | Shipped | Extended with `stage`, `stage_status` |
-| Entry | `creator run start` | Unchanged; intake still `work_init` |
-| Continue inspiration | `creator run continue --note` | Unchanged |
-| Stage progression | N/A | **`creator run stage advance --stage <id>`** |
+| Entry | `creator bootstrap` | Composite onboarding; intake still `work_init` |
+| Continue inspiration | `creator works inspire --note` | Unchanged |
+| Stage progression | N/A | **`creator run <preset_id>`** (preset runner applies stage gates before enqueue) |
 | Primary produce preset | `novel-writing` | Default for `produce` stage |
 | Generic multi-stage workflow | Deferred | **Shipped V1.34** |
 
@@ -89,9 +89,8 @@ Advance from stage `S` to `S+1` requires:
 CLI:
 
 ```text
-creator run stage list <work_id>
-creator run stage advance <work_id> --stage <stage_id> [--force]
 creator works status [<work_id>]    # includes current_stage + stage_status (V1.41; default = pool active)
+creator run <preset_id> [<work_id>] # e.g. creator run research, creator run novel-writing
 ```
 
 ---
@@ -116,12 +115,12 @@ P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
 
 ```text
 creator workspace init && daemon start && acp agent use
-creator run start --idea "..."
+creator bootstrap --idea "..."
   → intake schedule → brief complete
-creator run stage advance --stage research
-creator run stage advance --stage produce
-creator run stage advance --stage review
-creator run stage advance --stage persist
+creator run research <work_id>      # preset runner validates stage gates, PATCHes Work stage
+creator run novel-writing <work_id>
+creator run reflection-loop <work_id>
+creator run kb-extract <work_id>
 creator memory review <id>
 creator kb queue-extract --world-id <work.world_id>  # World-bound novel Works (V1.40 P3)
 ```
@@ -138,13 +137,13 @@ Does **not** advance `current_stage`; merges into `inspiration_log` and schedule
 
 ### 5.3 Power user
 
-`daemon schedule` remains valid; schedules created via `creator run` / stage advance **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation).
+`daemon schedule` remains valid; schedules created via `creator run <preset>` **must** record `work_id` and stage id in schedule seed/metadata (wire key `fl_e_stage` in V1.34 implementation).
 
 ### 5.4 Daemon-attached auto-chain (V1.39 extension)
 
 When `auto_chain_enabled` on a Work (default true for new starts):
 
-1. **Online**: on stage/chapter completion, the engine enqueues the next FL-E driver schedule without CLI `stage advance`.
+1. **Online**: on stage/chapter completion, the engine enqueues the next FL-E driver schedule without a manual `creator run <preset>` dispatch.
 2. **Chapter outer loop**: after `persist` for chapter N, auto-enqueue `produce` for chapter N+1 until Work completion (novel profile).
 3. **Checkpoint**: persist `stage`, `chapter`, `driver_schedule_id`, and `auto_chain_interrupted` on daemon shutdown or unexpected pause.
 4. **Boot resume**: daemon restart auto-resumes only schedules tied to checkpointed auto-chain Works; other schedules remain paused (safe default).
@@ -172,7 +171,7 @@ Invariant: at most one active FL-E stage driver schedule per Work remains enforc
 | Work vs `creator kb --scope work` | Index entries may tag `work_id`; index does not define Work |
 | Agent tools vs presets | Agent may read/patch Work via `nexus.work.*`; production presets still run via orchestration |
 | Conditional routing | **Not** used for stage selection (DF-56) |
-| `--auto-chain` | **V1.39 target (DF-53)**: default true for full FL-E chain + chapter outer loop; `--no-auto-chain` opt-out; manual `stage advance` still valid for power users |
+| `--auto-chain` | **V1.39 target (DF-53)**: default true for full FL-E chain + chapter outer loop; `--no-auto-chain` opt-out; manual `creator run <preset>` dispatch still valid for power users |
 | Novel project init | Separate preset `novel-project-init` (DF-58); **not** part of `novel-writing` auto-chain |
 | Novel completion | Work `status == completed` stops further `novel-writing`; V1.41 extends `mark_work_completed` per [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) (DF-60) |
 | Completion-lock | While `.completion-lock.json` exists, auto-chain **must not** tick that Work; after release, `resume --reopen` may resume same `work_id` (V1.41 P0) |
@@ -187,7 +186,7 @@ Invariant: at most one active FL-E stage driver schedule per Work remains enforc
 ## 7. Acceptance (spec-level)
 
 1. Stage enum and preset mapping are stable in cli-spec and this document.
-2. `creator run stage advance` rejects wrong stage order without `--force`.
+2. The preset runner rejects wrong stage order without `--force-gates` (stage gate validation inside `creator run <preset_id>`).
 3. Demo path in V1.34 compass §4 is achievable on integration branch.
 4. No contradiction with [work-experience-model.md](work-experience-model.md) §3–7.
 

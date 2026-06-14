@@ -393,7 +393,7 @@ Operational semantics:
 - **Graceful stop**: lifecycle HSM `Stopping` state sends a terminal IPC `shutdown` frame; worker finalises current prompt if any, closes ACP session via `cancel`, exits within 5 s; otherwise `SIGTERM` → `SIGKILL` path per `acp-client-tech-spec.md` §2.3.
 - **Crash recovery**: `daemon` restart reads `orchestration_sessions` table, finds sessions in `running` / `waiting_for_input` state that were owned by a now-dead worker, marks them `paused` with reason `worker_crash`, and exposes them to the user for manual resume (B-track may auto-resume on configured strategies).
 - **Boot schedule policy (V1.39 — DF-68)**: Today, boot calls `resume_running_as_paused("daemon_restart")` for all running schedules. V1.39 replaces this for **auto-chain driver schedules** tied to a Work continuation checkpoint: those schedules auto-resume when `auto_chain_enabled` and checkpoint `auto_chain_interrupted` is set. Schedules without a checkpoint remain paused. Work checkpoint fields live on `works` or an adjunct table per [creator-workflow.md](creator-workflow.md) §5.4.
-- **on_complete auto-chain (V1.39 — DF-53)**: When a stage driver schedule completes and Work `auto_chain_enabled`, the supervisor enqueues the next FL-E stage preset (or next chapter `produce` after `persist`) without CLI `stage advance`. At most one active stage driver per Work remains enforced.
+- **on_complete auto-chain (V1.39 — DF-53)**: When a stage driver schedule completes and Work `auto_chain_enabled`, the supervisor enqueues the next FL-E stage preset (or next chapter `produce` after `persist`) without a manual `creator run <preset_id>` dispatch. At most one active stage driver per Work remains enforced.
 
 ### 6.2 One worker per creator (MVP)
 
@@ -719,7 +719,7 @@ Loader rules (V1.33):
 
 - Reject unknown intent strings.
 - `_system.*` presets must include `system_maintenance`.
-- `creator run start` filters presets where `work_init ∈ run_intents`.
+- `creator bootstrap` filters intake presets where `work_init ∈ run_intents`.
 - `creator run continue` filters presets where `work_continue ∈ run_intents`.
 
 Normative classification table: [work-experience-model.md](work-experience-model.md) §5.2.
@@ -767,7 +767,7 @@ preset:
 1. **Load-time validation** (§7.6 facade): each gate is schema-validated. Unknown `kind` → error. Unknown `op` → error. `field` must be a known column on `works` table (or a known entity extension column). `path` must pass path-safety (no `..` escape, no absolute path).
 2. **Enqueue-time evaluation**: the engine evaluates the gate list **immediately before enqueuing** a preset for execution (after preset-input-var binding, before the first state runs). All gates must pass.
 3. **Failure behavior**:
-   - Return a structured error to the caller (`creator run start` / `creator run stage advance` / schedule API):
+   - Return a structured error to the caller (`creator bootstrap` / `creator run <preset_id>` / schedule API):
 
      ```json
      {
@@ -776,14 +776,14 @@ preset:
        "work_id": "wrk_abc",
        "failed_gates": [
          { "kind": "filesystem", "path": "Works/cozy-mystery/", "must_exist": true, "actual": "missing",
-           "remediation": "Run `creator run start --init-preset novel-project-init` first." },
+           "remediation": "Run `creator bootstrap --init-preset novel-project-init` first." },
          { "kind": "work_field", "field": "intake_status", "op": "equals", "expected": "complete", "actual": "pending",
-           "remediation": "Complete intake via `creator run stage advance --stage intake`." }
+           "remediation": "Complete intake via `creator bootstrap --preset creative-brief-intake`." }
        ]
      }
      ```
    - Preset is **not enqueued**; no state runs.
-4. **`--force` override** (audit-logged): `creator run start --force-gates` or `creator run stage advance --force` skips gate evaluation. The override records `forced: true`, the user identity, and a free-text reason (when provided) to the audit log. Forced runs still respect the engine's other invariants (capability registry, run_intents, etc.).
+4. **`--force` override** (audit-logged): `creator bootstrap --force-gates` or `creator run <preset_id> --force-gates` skips gate evaluation. The override records `forced: true`, the user identity, and a free-text reason (when provided) to the audit log. Forced runs still respect the engine's other invariants (capability registry, run_intents, etc.).
 5. **Idempotency**: gate evaluation is read-only; it does not mutate Work state. A failed gate check leaves no side effects.
 
 #### 7.9.3 Relationship to other constraints
@@ -793,7 +793,7 @@ preset:
 | `run_intents` (V1.33) | Coarse: which `creator run` subcommand surfaces the preset | CLI dispatch time | §7.8, [work-experience-model.md](work-experience-model.md) §5 |
 | `requires_capabilities` (V1.4) | Capability availability at engine startup | Loader | §7.2 |
 | `gates` (V1.36) | Per-invocation preconditions (Work fields, filesystem, prior-preset) | Enqueue time | §7.9 |
-| `stage` gates (V1.34) | FL-E linear stage ordering (`intake → research → produce → review → persist`) | `creator run stage advance` | [creator-workflow.md](creator-workflow.md) §3.3 |
+| `stage` gates (V1.34) | FL-E linear stage ordering (`intake → research → produce → review → persist`) | `creator run <preset_id>` (preset runner validates before enqueue) | [creator-workflow.md](creator-workflow.md) §3.3 |
 
 Gates are **additive** to `run_intents` and `stage` gates; they do not replace either. A preset can declare any combination. Profile-specific gate sets (e.g. novel profile's `Works/<work_ref>/` requirement) live in the profile overlay spec, not in this Master.
 

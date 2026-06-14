@@ -9,7 +9,7 @@
 - [novel-workflow-profile.md](novel-workflow-profile.md) — §6 completion criteria
 - [novel-work-pool.md](novel-work-pool.md) — default Work pointer (`novel_pool_entries.status = active`)
 - [creator-workflow.md](creator-workflow.md) — auto-chain pause during completion-lock; runtime lock on mutating paths
-- [cli-spec.md](cli-spec.md) — `creator works`, `creator run start --from-work`, `resume --reopen`
+- [cli-spec.md](cli-spec.md) — `creator works`, `creator bootstrap --from-work`, resume reopen
 - [work-experience-model.md](work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
 
@@ -71,7 +71,7 @@ Minimum schema:
 | Rule | Behavior |
 | --- | --- |
 | Presence | Daemon **must not** start new auto-chain ticks on this Work while lock exists |
-| Mutating CLI/API | `continue`, `stage advance`, `resume` (without prior release), `nexus.work.patch`, schedule enqueue **fail closed** |
+| Mutating CLI/API | `creator run <preset_id>` (preset dispatch), `creator works resume-chain` (without prior release), `nexus.work.patch`, schedule enqueue **fail closed** |
 | Read-only | `creator works status`, `creator works list` always allowed |
 
 ### 3.1 Release
@@ -98,7 +98,7 @@ creator run resume <work_id> --reopen --reason "<text>"
 2. Sets `works.status = active`, clears `novel_completion_status`.
 3. Re-enables auto-chain per V1.39 rules (does not delete `work_chapters` rows).
 4. If §6 completion criteria still hold (all chapters `finalized` and `current_chapter >= total`), **`--extend-chapters <new_total>`** is **required** where `new_total > total_planned_chapters`; seeds new `work_chapters` rows before resume enqueue.
-5. Distinct from `creator run start --from-work` (new Work + `lineage_from_work_id`).
+5. Distinct from `creator bootstrap --from-work` (new Work + `lineage_from_work_id`).
 
 **OUT**: silent reopen without `--reopen`.
 
@@ -147,13 +147,13 @@ Daemon Local API and `nexus.work.patch` **must** use the same acquire/release pa
 
 Full flags in [cli-spec.md](cli-spec.md) §6.2D / §6.2H.
 
-### 5.1 `creator run` — single-Work actions
+### 5.1 `creator run <preset_id>` — strategy execution
 
-- Subcommands: `start`, `continue`, `stage`, `resume`, `reconcile-chapters`.
+- Generic preset dispatch via `creator run <preset_id> [<work_id>]` (V1.45).
 - Optional `work_id`: omit → pool `active` → bound `work_id`; if none, fail → `creator works use`.
-- **No** `list` / `status` on `run` (hard-removed V1.41).
+- **No** `list` / `status` on `run` (hard-removed V1.41); use `creator works list` / `creator works status`.
 
-### 5.2 `creator run start --from-work <completed_work_id>`
+### 5.2 `creator bootstrap --from-work <completed_work_id>`
 
 - Creates **new** Work; sets `works.lineage_from_work_id` on the new row.
 - **Validation (shipped `12753eb8`)**: `completed_work_id` must exist, belong to the active creator, and be in `completed` status; otherwise **422** before INSERT.

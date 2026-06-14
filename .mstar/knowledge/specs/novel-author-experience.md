@@ -143,9 +143,9 @@ For **`work_profile=novel`** only, `creator works status <work_id> --json` **ext
 | Field | Type | Required | Notes |
 | --- | --- | --- | --- |
 | *(work fields)* | object | yes | Unchanged from daemon GET `/v1/local/works/{id}` |
-| `findings` | array | yes | Same element shape as findings list API; empty array if none |
+| `findings` | array | conditional | Three-state: present-with-data when the findings endpoint is reachable; present-empty when reachable but no open findings; **omitted** when the daemon findings endpoint is unreachable (best-effort degradation). See §4.1 best-effort paragraph (W-1 reconcile) |
 | `findings_truncated` | boolean | no | Present (and `true`) only when `findings[]` hit the fetch cap (`FINDINGS_FETCH_LIMIT = 50`); signals more open findings may exist beyond the fetched page. Omitted otherwise (qc3 F-003) |
-| `findings_stale` | object | no | Present when 96h master-review stale banner would show (human parity) |
+| `findings_stale` | object | no | Present when 96h master-review stale banner would show (human parity). **Creator-global scope** (not work-scoped): the payload mirrors the human-path stale banner which is printed before the work block and spans all of the creator's works. A JSON consumer must not assume `findings_stale.stale_count` is scoped to the queried `work_id` (W-2 reconcile) |
 
 Generic (non-novel) works: **omit** `findings` fetch; json output is work API only.
 

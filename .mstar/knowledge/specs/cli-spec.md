@@ -4,10 +4,10 @@
 **Document class**: Master  
 **V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
 **V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).  
-**V1.41 Draft amendments:** §6.2H `creator works` (list/status/use/pool); `creator run` single-Work actions only; `creator run start --from-work`; completion-lock + runtime lock (DF-60/61).
+**V1.41 Shipped amendments:** §6.2H `creator works` (list/status/use/pool); completion-lock + runtime lock (DF-60/61). Lineage via `--from-work` migrated to `creator works use` + `creator run <preset>` in V1.45.
 **V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver.  
 **V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface.  
-**V1.46 Draft overlay (2026-06-14):** **Delete** entire §6.2E block `nexus42 creator run stage` (FL-E subcommands) and stale `creator run start` / `resume` flag tables therein — superseded by generic preset runner (P1 implement). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md). Until P1 merges, treat §6.2E as **non-authoritative stale text** (R-V145B3-001).
+**V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).
 
 ## 0. 文档定位
 
@@ -391,39 +391,9 @@ Rules:
 
 
 
-### 6.2E `nexus42 creator run stage` (FL-E — V1.34 target) — **SUPERSEDED (V1.46 P1: delete this section)**
+### 6.2E `nexus42 creator run stage` — Superseded by V1.45 generic preset runner
 
-> **V1.46 Draft overlay:** This entire subsection is **stale** — V1.45 removed `creator run stage` / `start` / `resume` subcommands from the clap surface. Implement plan `2026-06-14-v1.46-spec-cli-hygiene` deletes this block. **Do not implement** from this section. Authoritative IA: [creator-run-preset-entry.md](./creator-run-preset-entry.md).
-
-Normative stage model: [creator-workflow.md](./creator-workflow.md).
-
-| Command | Purpose |
-| --- | --- |
-| `nexus42 creator run stage list [<work_id>]` | List FL-E stages and `stage_status` for the Work |
-| `nexus42 creator run stage advance [<work_id>] --stage <id>` | Start the preset chain for stage `research` \| `produce` \| `review` \| `persist` |
-
-Rules:
-
-- Stage order: `intake` → `research` → `produce` → `review` → `persist` (linear; no conditional routing).
-- Advance requires prior stage `complete` unless `--force` (audited).
-- At most one active FL-E stage schedule per Work.
-**V1.39 flags (`creator run start` / auto-chain — DF-53):**
-
-| Flag | Purpose |
-| --- | --- |
-| `--auto-chain` | Default **true**. Full FL-E stage chain + novel chapter outer loop while daemon online. |
-| `--no-auto-chain` | Opt out of automatic stage/chapter enqueue; checkpoint still written. |
-| `creator run resume [<work_id>] [--reopen --reason "<text>" [--extend-chapters N]]` | Resume auto-chain; on `works.status=completed`, requires `--reopen` + audited `--reason` after completion-lock release; if §6 still satisfied, `--extend-chapters` required (lifecycle spec §3.2). |
-
-**V1.41 `creator run start` extension:**
-
-| Flag | Purpose |
-| --- | --- |
-| `--from-work <completed_work_id>` | Start new Work lineage after completed Work (see [novel-multi-work-lifecycle.md](./novel-multi-work-lifecycle.md) §5.2). Distinct from `continue` (same-Work inspiration). |
-| `--set-default` | After start, set pool `active` to new Work (`works use` equivalent). |
-| `--no-pool-row` | Skip auto-insert of `novel_pool_entries` row on start (power user). |
-
-**Shipped (V1.34 P1):** stage commands in `crates/nexus42/src/commands/creator/run.rs`. **Shipped (V1.39 P0):** auto-chain and resume surfaces per plan `2026-06-09-v1.39-fl-e-auto-chain-engine`. **V1.41:** status UX fields moved to `creator works status` (§6.2H).
+> **Removed in V1.45.** The FL-E `creator run stage list` / `stage advance` subcommands were deleted from the clap surface and replaced by the generic **`creator run <preset_id>`** runner. Stage-gate validation and Work stage PATCH now happen inside the preset runner before enqueue. Authoritative IA: [creator-run-preset-entry.md](./creator-run-preset-entry.md) §4 (Execution flow). See changelog: V1.45 compass migration appendix.
 
 ### 6.2G `nexus42 creator world` (V1.40 — DF-63 P0)
 
@@ -440,7 +410,7 @@ Rules:
 - `create` is idempotent by name only when PM/plan defines dedup policy; default is new row per invocation pre-1.0.
 - No local fork or platform merge mutations (PD-01).
 - V1.40 Work creation/init must bind a World: either run `nexus42 creator world create --title "..."` and pass/bind the returned `world_id`, or pick an existing id from `nexus42 creator world list`.
-- `creator run start --world-id <uuid>` validates existence via same store as `show`; missing `world_id` on new Work creation fails closed with remediation to `creator world create --title` or `creator world list` (not skip/stay worldless).
+- World binding on new Work creation is enforced by `creator bootstrap` (V1.45); missing `world_id` fails closed with remediation to `creator world create --title` or `creator world list` (not skip/stay worldless).
 - `show` for a nonexistent `world_id` prints remediation pointing to `creator world create --title` or `creator world list`.
 
 **Target (V1.40 P0):** plan `2026-06-10-v1.40-world-create-and-validation`.
@@ -561,7 +531,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 
 V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = paused` 时）与 **挂载 Platform** 两条路径。Creator 中心化规则见 [creator-centric-entry-model.md](creator-centric-entry-model.md)。
 
-### 7.1 纯本地路径（Local-first，≤7 步到 `creator run start`）
+### 7.1 纯本地路径（Local-first，≤7 步到 `creator bootstrap`）
 
 1. 安装 `nexus42`
 2. `nexus42 system doctor`
@@ -569,7 +539,7 @@ V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = pau
 4. `nexus42 creator use <creator_id_or_handle>`
 5. `nexus42 creator workspace init`
 6. `nexus42 daemon start` + `nexus42 acp agent use <agent>`
-7. `nexus42 creator run start --idea "..."`
+7. `nexus42 creator bootstrap --idea "..."`
 
 **不需要** `platform auth login` 或 sync。`daemon schedule` 不是首次使用入口。
 

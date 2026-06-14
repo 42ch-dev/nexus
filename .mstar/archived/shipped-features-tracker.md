@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-12
+**Last updated**: 2026-06-15
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -79,6 +79,7 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~DF-O~~ | **Cancelled** | 2026-04-21 (V1.7 planning) | DF-05 — Full ACP permission policy engine UI (web-based). Not core product value. |
 | ~~DF-P~~ | **Superseded** | 2026-04-21 (V1.7 planning) | DF-06 — Preset hot-reload. Snapshot semantics correct; real need → DF-17. |
 | ~~DF-15~~ | **Cancelled** | V1.13 (governance closure) | OpenAPI export work. Nexus is not an OpenAPI-first product boundary for runtime value delivery; V1.13 resolves tracker ambiguity as governance-only closure with no implementation scope. |
+| ~~BL-10~~ | **Superseded** | V1.46 P1 (2026-06-15) | `docs/novel-writing-quickstart.md` retired. Content migrated to specs only: narrative happy path → [novel-author-experience.md](../knowledge/specs/novel-author-experience.md) §3; CLI workflow → [creator-run-preset-entry.md](../knowledge/specs/creator-run-preset-entry.md) (Shipped Master V1.45). Runtime remediation strings updated to cite spec paths. No replacement file; `docs/ARCHITECTURE.md` links to specs. Plan: [2026-06-14-v1.46-spec-cli-hygiene.md](../plans/2026-06-14-v1.46-spec-cli-hygiene.md). |
 
 ### Tech-debt residuals shipped (V1.30)
 

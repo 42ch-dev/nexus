@@ -403,12 +403,11 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 .unwrap_or(96 * 60 * 60);
             if stale_count > 0 {
                 let threshold_hours = threshold_secs / 3600;
-                // V1.43 (P1 §3 remediation — open findings blocking progress):
-                // cite quickstart §5.
+                // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
                 println!(
                     "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
                      address open findings or run a review pass; \
-                     see docs/novel-writing-quickstart.md §5"
+                     see .mstar/knowledge/specs/novel-author-experience.md §4"
                 );
                 println!();
             }
@@ -471,7 +470,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 println!();
                 // V1.43 P2: findings summary in completed view (spec §4 row 3).
                 print_findings_summary(&open_findings, &resolved_id);
-                println!("  This Work is complete; see docs/novel-writing-quickstart.md §6");
+                println!("  This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md §3");
                 println!();
                 println!("  To start a new Work, run:");
                 // V1.45 P2: hint updated from `run start` to `creator bootstrap`.
