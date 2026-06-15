@@ -766,6 +766,10 @@ async fn handle_reconcile_chapters(
             .get("updated")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
+        let resynced = report
+            .get("resynced")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         let preserved = report
             .get("preserved")
             .and_then(serde_json::Value::as_u64)
@@ -773,6 +777,7 @@ async fn handle_reconcile_chapters(
         println!("Reconcile complete for Work {resolved_id}:");
         println!("  Created:   {created}");
         println!("  Updated:   {updated}");
+        println!("  Resynced:  {resynced}");
         println!("  Preserved: {preserved}");
     }
 

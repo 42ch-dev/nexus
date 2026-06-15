@@ -183,12 +183,17 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
     .await
     .unwrap();
 
-    // ch01: DB status preserved (SSOT), word_count mirrored → counts as updated.
+    // ch01: DB status preserved (SSOT), word_count mirrored, frontmatter
+    // re-synced → counts as both updated and resynced.
     // ch02: new row from file → counts as created.
     assert_eq!(report.created, 1, "ch02 file should create one new DB row");
     assert_eq!(
         report.updated, 1,
         "ch01 word_count should be mirrored while DB status is preserved"
+    );
+    assert_eq!(
+        report.resynced, 1,
+        "ch01 frontmatter should be re-synced to DB status"
     );
     assert_eq!(
         report.preserved, 0,
