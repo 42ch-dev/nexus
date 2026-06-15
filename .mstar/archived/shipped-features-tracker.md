@@ -505,7 +505,7 @@ When a version ships, append new closed rows here and remove them from the activ
 
 | Aspect | Detail |
 |---|---|
-| **PR / Merge** | **Pending** — `iteration/v1.47` integration branch ready at final HEAD; PR creation is user-owned per `.mstar/AGENTS.md` "Merge discipline" (no local `git merge` directly to `main`) |
+| **PR / Merge** | PR [#60](https://github.com/42ch-dev/nexus/pull/60) MERGED at `8f4f9f2b` (2026-06-15T16:12:05Z); `iteration/v1.47` integration branch retired post-merge |
 | **Theme** | **Novel Quality Loop Closure** — reflection-loop → findings producer (P0: `novel-chapter-review` preset, idempotency, closed enum) + remediation/gate audit (P1) + §4.5.7 acceptance tests #1–#3 + completion edge disposition (P2; R-V138P1-01 archived) + author-workflow-quality-loop spec reconcile (P3) + `nexus-orchestration` clippy cleanup (P-last) + bounded residual triage + spec promotion Draft → Shipped (P-last) |
 | **Compass** | [v1.47-novel-quality-loop-closure-delivery-compass-v1.md](../iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md) — 15 grill-me decisions locked (Grill #1–15); 5 implement + P-1 + P-last |
 | **Active specs promoted Draft → Shipped (V1.47)** | [novel-quality-loop.md](../knowledge/specs/novel-quality-loop.md) (§8 output contract: `kind/severity/target_executor/rule_suggestion` per `ReviewVerdictFinding` schema) + [novel-workflow-profile.md](../knowledge/specs/novel-workflow-profile.md) §5.5.4 two-layer rules (Layer 2 = `Works/<work_ref>/AGENTS.md`; Layer 3 history removed from normative text) + §5.5.6 normative reflection→findings (`novel-chapter-review` both auto-chain and on-demand paths) |

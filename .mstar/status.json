@@ -12,15 +12,15 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.47",
-    "last_integration_branch": "iteration/v1.46",
+    "integration_branch": "main",
+    "last_integration_branch": "iteration/v1.47",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
     "latest_shipped_iteration": "v1.47",
-    "latest_shipped_at": "2026-06-15 (PR pending per .mstar/AGENTS.md merge discipline)",
+    "latest_shipped_at": "2026-06-15 (PR #60 merged to main at 8f4f9f2b)",
     "latest_active_iteration": "v1.48 (awaiting prepare)",
     "latest_active_compass": ".mstar/iterations/ (V1.48 not yet created)",
-    "integration_branch_retired": "iteration/v1.47 (ready for PR — see .mstar/archived/shipped-features-tracker.md V1.47 snapshot)",
+    "integration_branch_retired": "iteration/v1.47 (PR #60 MERGED at 8f4f9f2b 2026-06-15T16:12:05Z; integration merged to main)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-06-15",
@@ -92,7 +92,8 @@
       ".mstar/knowledge/specs/novel-work-pool.md"
     ],
     "iteration_compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
-    "pre_implement_gate": "V1.47 harness prepare complete 2026-06-15 — Pre-implement GO; P0–P-last Todo on iteration/v1.47",
+    "pre_implement_gate": "V1.47 Shipped 2026-06-15 (PR #60 MERGED at 8f4f9f2b; integration_branch retired to main). Awaiting V1.48 prepare.",
+    "v1_47_pre_implement_gate_historical": "GO — V1.47 harness prepare complete 2026-06-15; P0–P-last executed on iteration/v1.47",
     "v1_43_ship": {
       "merge_commit": "0004d85f",
       "pr": 56,
@@ -176,9 +177,12 @@
       "plan_count_optional_deferred": 0,
       "p4_disposition": "Done",
       "iteration_complete": true,
-      "shipped_at": "2026-06-15 (PR #59 opened; merge to main pending maintainer action)",
+      "shipped_at": "2026-06-15 (PR #59 merged to main)",
+      "pr": 59,
       "pr_url": "https://github.com/42ch-dev/nexus/pull/59",
-      "pr_state": "OPEN (awaiting maintainer merge)"
+      "pr_state": "MERGED",
+      "merge_commit": "e7c8656cb0a29c2a4ac0498b1a5fa312d10c32c8",
+      "merged_at": "2026-06-15T05:43:21Z"
     },
     "v1_47_harness_prepare": {
       "status": "complete",
@@ -192,6 +196,29 @@
       "prepared_at": "2026-06-15",
       "integration_branch": "iteration/v1.47",
       "pre_implement_base": "main @ 72eba21b (V1.46 merged)"
+    },
+    "v1_47_ship": {
+      "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
+      "specs_promoted": [
+        "novel-quality-loop.md Draft (V1.47) -> Shipped (V1.47)",
+        "novel-workflow-profile.md §5.5.4/§5.5.6 Draft (V1.47) -> Shipped (V1.47)"
+      ],
+      "whitelist_residuals_closed": [
+        "R-V145-PRE-CLIPPY-001",
+        "R-V146P1-QC3-S1",
+        "R-V146P1-QC3-S4",
+        "R-V145B2-001",
+        "R-V145B2-002"
+      ],
+      "plan_count_done": 6,
+      "plan_count_optional_deferred": 0,
+      "pr": 60,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/60",
+      "pr_state": "MERGED",
+      "merge_commit": "8f4f9f2b3ff8f3f7b21c7b88e4123c59ad45888b",
+      "merged_at": "2026-06-15T16:12:05Z",
+      "shipped_at": "2026-06-15 (PR #60 merged to main)",
+      "iteration_complete": true
     }
   },
   "residual_findings": {
@@ -2061,5 +2088,5 @@
     ]
   },
   "v1_46_iteration_complete": true,
-  "v1_47_pre_implement_gate": "GO — V1.47 harness prepare complete 2026-06-15; P0–P-last Todo on iteration/v1.47"
+  "v1_47_iteration_complete": true
 }

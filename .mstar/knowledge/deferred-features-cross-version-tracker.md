@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.47 Active** (2026-06-15, harness prepare) · **V1.46 Shipped** (2026-06-15, PR #59 merged) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.48 awaiting prepare** · **V1.47 Shipped** (2026-06-15, PR #60 merged) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
 **Status**: V1.47 Shipped (2026-06-15, P-last closeout); V1.48 Active (awaiting prepare)
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-15 (V1.47 closeout: 5 whitelist residuals closed; 33 V1.45/V1.46 lows deferred to V1.48; PR pending per .mstar/AGENTS.md merge discipline)
+**Last updated**: 2026-06-15 (V1.47 post-merge: PR #60 merged to `main` at `8f4f9f2b`; integration branch retired; 5 whitelist residuals closed; 33 V1.45/V1.46 lows deferred to V1.48)
 
 ---
 
@@ -284,13 +284,15 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.47** (Active 2026-06-15, harness prepare): [v1.47-novel-quality-loop-closure-delivery-compass-v1.md](../iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md) — Novel quality loop closure (reflection-loop → findings) + remediation audit + serial hardening + spec reconcile; 6 plans P-1 Done + P0–P-last Todo on `iteration/v1.47`; wave-0 `novel-quality-loop.md` Draft V1.47; Layer 2 rules normative path `Works/<work_ref>/AGENTS.md`.
+- **V1.48** (awaiting prepare) — compass not yet authored; expected focus: V1.47 follow-ups (R-V147P0-* / R-V147P1-01) + deferred V1.45/V1.46 lows (`target: V1.48`).
 
 **Latest shipped iteration**
 
-- **V1.46** (Shipped 2026-06-15, P-last closeout): [v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md](../iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md) — Novel author maturity + spec hygiene + narrow runtime edges; PR [#59](https://github.com/42ch-dev/nexus/pull/59) MERGED to `main` at `72eba21b` (2026-06-15); integration branch `iteration/v1.46` retired. 7 plans all Done (P-1 harness prepare + P0 author desk delta + P1 spec CLI hygiene + P2 runtime UX edges + P3 research E2E + P4 pool observability + P-last closeout); 5 QC tri-reviews + 5 fix rounds (one per implement plan); all 5 qa reports PASS. Wave-0 overlay `novel-author-experience.md` Draft → **Shipped (V1.46)** (P-last T1); `cli-spec.md` V1.46 Shipped amendment (P1 §6.2E deletion). 5 lifecycle residuals closed (R-V139P5-S1, R-V139P5-N1, R-V145B1-002, R-V141P1-15, R-V141P1-10 waive); pre-existing V1.45 clippy PM-override (R-V145-PRE-CLIPPY-001, risk-accepted, carry-forward to V1.47); 22 open low-severity V1.46 plan residuals + 1 pre-existing V1.45 clippy = 23 open. Profile B compaction complete. Supersedes V1.45 P4 author-desk optional plan (resolved by V1.46 P0).
+- **V1.47** (Shipped 2026-06-15, P-last closeout): [v1.47-novel-quality-loop-closure-delivery-compass-v1.md](../iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md) — Novel quality loop closure (`reflection-loop` → `novel-chapter-review` findings producer) + remediation audit + §4.5.7 acceptance tests + spec reconcile; PR [#60](https://github.com/42ch-dev/nexus/pull/60) MERGED to `main` at `8f4f9f2b` (2026-06-15); integration branch `iteration/v1.47` retired. 6 plans all Done (P-1 + P0–P-last); 5 whitelist residuals closed (R-V145-PRE-CLIPPY-001, R-V146P1-QC3-S1/S4, R-V145B2-001/002); 33 V1.45/V1.46 lows deferred to V1.48; `novel-quality-loop.md` + `novel-workflow-profile.md` Draft → **Shipped (V1.47)**; Profile B compaction complete.
 
 **Recent shipped compasses** (detail in archive §2)
+
+- **V1.46** (Shipped 2026-06-15, P-last closeout): [v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md](../iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md) — Novel author maturity + spec hygiene + narrow runtime edges; PR [#59](https://github.com/42ch-dev/nexus/pull/59) MERGED to `main` at `72eba21b` (2026-06-15); integration branch `iteration/v1.46` retired. 7 plans all Done (P-1 harness prepare + P0 author desk delta + P1 spec CLI hygiene + P2 runtime UX edges + P3 research E2E + P4 pool observability + P-last closeout); 5 QC tri-reviews + 5 fix rounds (one per implement plan); all 5 qa reports PASS. Wave-0 overlay `novel-author-experience.md` Draft → **Shipped (V1.46)** (P-last T1); `cli-spec.md` V1.46 Shipped amendment (P1 §6.2E deletion). 5 lifecycle residuals closed (R-V139P5-S1, R-V139P5-N1, R-V145B1-002, R-V141P1-15, R-V141P1-10 waive); pre-existing V1.45 clippy PM-override (R-V145-PRE-CLIPPY-001, risk-accepted, carry-forward to V1.47); 22 open low-severity V1.46 plan residuals + 1 pre-existing V1.45 clippy = 23 open. Profile B compaction complete. Supersedes V1.45 P4 author-desk optional plan (resolved by V1.46 P0).
 
 - V1.44 (Shipped 2026-06-13): [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) — DF-69 + review-master CLI + multi-volume + author-desk; PR #57 merged `76a9eb79`.
 - V1.43 (Shipped 2026-06-12): [v1.43-novel-author-experience-delivery-compass-v1.md](../iterations/v1.43-novel-author-experience-delivery-compass-v1.md) — BL-10 author quickstart + CLI copy P1 + author visibility P2 + P-last hygiene; `iteration/v1.43` retired.
