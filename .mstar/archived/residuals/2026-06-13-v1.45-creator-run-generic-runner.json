@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-13-v1.45-creator-run-generic-runner",
+  "entries": [
+    {
+      "id": "R-V145B1-001",
+      "severity": "low",
+      "lifecycle": "open",
+      "source": "qc1.md S-1",
+      "title": "works_start_handler_returns_clear_error test is a tautology (does not actually invoke handler)",
+      "decision": "defer",
+      "owner": "unassigned",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V145B1-002",
+      "severity": "low",
+      "lifecycle": "open",
+      "source": "qc1.md S-2",
+      "title": "creator run <preset_id> --help does not surface preset cli_args help text (consider --help-args subcommand)",
+      "decision": "defer",
+      "owner": "unassigned",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V145B1-003",
+      "severity": "low",
+      "lifecycle": "open",
+      "source": "qc1.md S-3",
+      "title": "Consider splitting RunCommand into smaller Args structs (GlobalRunFlags + RunArgs) for clarity",
+      "decision": "defer",
+      "owner": "unassigned",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V145B1-004",
+      "severity": "low",
+      "lifecycle": "open",
+      "source": "qc3.md S-1",
+      "title": "Announce hard deletion of legacy creator run subcommands in V1.45 release notes (V1.44 callers will break)",
+      "decision": "defer",
+      "owner": "@writing-specialist",
+      "target": "P3 (quickstart) or P-last (closeout)",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V145B1-005",
+      "severity": "low",
+      "lifecycle": "open",
+      "source": "qc3.md S-2",
+      "title": "parse_preset_cli_args HashMaps should use with_capacity(cli_args.len())",
+      "decision": "defer",
+      "owner": "unassigned",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V145B1-006",
+      "severity": "low",
+      "lifecycle": "open",
+      "source": "qc3.md S-3",
+      "title": "sanitize_for_terminal recompiles ANSI regex on every call; cache via once_cell::sync::Lazy",
+      "decision": "defer",
+      "owner": "unassigned",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V145B1-007",
+      "severity": "low",
+      "lifecycle": "open",
+      "source": "qc3.md S-4",
+      "title": "World KB block assembly on every world-bound stage advance; bound query or cache when KB rows unchanged",
+      "decision": "defer",
+      "owner": "unassigned",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 7,
+  "sweep_note": "7 entries merged from status.json residual_findings"
+}

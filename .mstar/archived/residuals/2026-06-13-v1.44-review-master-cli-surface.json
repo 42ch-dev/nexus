@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
+  "entries": [
+    {
+      "id": "R-V143P0-002",
+      "title": "Spec/CLI drift: novel-workflow-profile §5.5.3 and novel-quality-loop §6 reference future review-master CLI; preset shipped V1.39 but subcommand missing",
+      "severity": "low",
+      "source": "V1.43 QA AC1 fail; archived 2026-06-12-v1.43-novel-writing-quickstart.json",
+      "scope": "crates/nexus42/src/commands/creator/run.rs + .mstar/knowledge/specs/novel-workflow-profile.md §5.5.2–5.5.3 + docs/novel-writing-quickstart.md §5",
+      "decision": "fix",
+      "owner": "@fullstack-dev",
+      "target": "V1.44 P1 (2026-06-13-v1.44-review-master-cli-surface)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "commit": "a7b70ebf",
+        "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
+        "note": "Shipped creator run review-master CLI subcommand (T1), quickstart §5 updated (T4), spec amendments (T5), hermetic tests green (T6). Archive in P-last."
+      },
+      "note": "stage advance --stage review runs reflection-loop, not novel-review-master. P1 wired creator run review-master to novel-review-master preset.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 1,
+  "sweep_note": "1 entries merged from status.json residual_findings"
+}

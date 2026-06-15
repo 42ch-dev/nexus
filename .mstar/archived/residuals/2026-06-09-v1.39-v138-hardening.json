@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-09-v1.39-v138-hardening",
+  "entries": [
+    {
+      "id": "R-V139P5-N1",
+      "title": "R-V138P0-02 follow-up: CLI status command should surface on-disk missing-file hints",
+      "severity": "low",
+      "source": "qc1 W-002 (V1.39 P5 review)",
+      "scope": "crates/nexus42/src/commands/creator/run.rs (status command)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 UX",
+      "closure_note": "V1.40 P4 T4: waived — daemon reconcile-chapters is the validation authority; CLI displays body_path for human cross-check only. Commit 69250f10.",
+      "note": "DB SSOT preserved; reconcile-chapters covers remediation. Add explicit check-and-emit in status arm in a follow-up.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P5-N2",
+      "title": "R-V138P0-04 follow-up: WorkApiDto.chapters vector size cap or pagination (defense-in-depth)",
+      "severity": "low",
+      "source": "qc1 W-002 + qc3 S-2 (V1.39 P5 review)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (enrich_with_chapters)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 UX",
+      "closure_note": "V1.40 P4 T4: deferred — structural feature requiring schema/API changes. Documented in works handler. Commit 69250f10.",
+      "note": "At typical novel scales (<=100 chapters) this is fine; not a practical concern.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P5-N3",
+      "title": "R-V138P1-04 follow-up: outline_path/body_path required with no defaults for non-CLI callers",
+      "severity": "low",
+      "source": "qc1 W-002 (V1.39 P5 review)",
+      "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/prompts/outline-chapter.md, draft-chapter.md",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hardening",
+      "closure_note": "V1.40 P4 T4: waived — daemon already validates via evaluate_gates and POST /v1/local/presets:validate. Documented in preset_management.rs. Commit 69250f10.",
+      "note": "If a non-CLI caller (e.g., e2e test, daemon, or future API) constructs preset.input directly without going through CLI stage_advance, the required: true constraint means template rendering fails.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 3,
+  "sweep_note": "3 entries merged from status.json residual_findings"
+}

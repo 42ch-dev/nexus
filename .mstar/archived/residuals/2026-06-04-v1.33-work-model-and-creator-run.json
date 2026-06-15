@@ -1,9 +1,21 @@
 {
   "schema_version": 1,
   "description": "Archived resolved residuals from v1.33-work-model-and-creator-run plan. V1.34 P0 (`2026-06-04-v1.34-residual-convergence`) closed these 4 items in fix wave 1; qc1 + qc3 (W-001/W-002) on count_works + R-P2-01 schema addressed in follow-up fix wave.",
-  "archived_at": "2026-06-05",
+  "archived_at": "2026-06-15T16:49:53Z",
   "plan_id": "2026-06-04-v1.33-work-model-and-creator-run",
   "entries": [
+    {
+      "id": "R-V133P1-03",
+      "title": "API contract tests for /v1/local/works endpoints present but not literal 6-status-code matrix per endpoint",
+      "severity": "medium",
+      "source": "qc2-wave2 PARTIAL (also qc1-wave2 W-001)",
+      "scope": "crates/nexus-daemon-runtime/tests/works_api.rs (547 lines, 16 tests, hermetic)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.33+",
+      "note": "Fix wave (95470aa) added 16 works_api.rs tests covering 200/201/401/404 + creator isolation + idempotency replay. MISSING literal 400/409 asserts (409 not needed: race resolves to 200; 400 not yet for PATCH enum). T1 §7.5 said cover 200/201/400/401/404/409; coverage is strong but not literal 6/endpoint. CLOSE-as-fixed for 4 Critical (R-03 original = 'no tests'); keep this entry open for the literal-matrix gap.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
     {
       "id": "R-V133P1-05",
       "title": "run_intents validation: empty-creator now Error, but system cross-claim (work_init on system) still Warning not Error",
@@ -39,6 +51,30 @@
       "closure_note": "Resolved by V1.34 P0 commit (see closure_evidence). Test verification: cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate passes with 0 CapabilityArgDrift warnings for creator.inject_prompt. 5/5 run_intents_validation tests pass."
     },
     {
+      "id": "R-V133P1-08",
+      "title": "system preset list logic inlined in system/mod.rs (151-line edit) and only surfaces embedded presets",
+      "severity": "low",
+      "source": "qc2 F-008 (re-confirmed in wave 2; also qc1 S-001)",
+      "scope": "crates/nexus42/src/commands/system/mod.rs (list_system_presets); T1 contract §7.3 named crates/nexus42/src/commands/system/preset.rs as a new file",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.33+",
+      "note": "T1 contract specified new file crates/nexus42/src/commands/system/preset.rs; actual change inlined into system/mod.rs. list_system_presets labels everything 'embedded' even though /v1/local/presets returns embedded+system+user. Fix: refactor to specified file layout + make list merge all 3 groups.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V133P1-09",
+      "title": "nexus-local-db::works uses runtime sqlx::query for static DML, bypassing compile-time contract",
+      "severity": "medium",
+      "source": "qc1 W-002 (re-confirmed in wave 2; explicitly deferred in plan §8)",
+      "scope": "crates/nexus-local-db/src/works.rs (entire file); nexus-local-db/AGENTS.md, nexus-daemon-runtime/AGENTS.md require compile-time checked queries",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.33+",
+      "note": "Static INSERT/SELECT/UPDATE/DELETE use sqlx::query / query_as (runtime) with `// SAFETY:` comments. Conflicts with crate AGENTS.md mandatory compile-time macros. Deferred in P1 fix wave (requires DATABASE_URL workflow for cargo sqlx prepare). Spot check in wave 2 confirmed no SQL injection vectors (only bound params after constant column lists).",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
       "id": "R-V133P1-11",
       "title": "list_works total field returns page size, not total row count — misleading pagination",
       "severity": "low",
@@ -72,5 +108,8 @@
       "lifecycle": "resolved",
       "closure_note": "Resolved by V1.34 P0 commit (see closure_evidence). Test verification: cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate passes with 0 CapabilityArgDrift warnings for creator.inject_prompt. 5/5 run_intents_validation tests pass."
     }
-  ]
+  ],
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 7,
+  "sweep_note": "3 entries merged from status.json residual_findings"
 }

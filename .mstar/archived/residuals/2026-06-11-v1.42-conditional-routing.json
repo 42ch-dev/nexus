@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-11-v1.42-conditional-routing",
+  "entries": [
+    {
+      "id": "R-V142P2-QC1-W-001",
+      "severity": "low",
+      "lifecycle": "open",
+      "title": "_judge_result / _judge_reason context keys as bare string literals across two modules — maintainability risk (non-blocking)",
+      "source": "qc1.md W-001 (qc-specialist, architecture coherence and maintainability risk)",
+      "scope": "crates/nexus-orchestration/src/preset/loader.rs (lines using _judge_result/_judge_reason); crates/nexus-orchestration/src/tasks/mod.rs (judge_next_action)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.42 P-last or future hygiene (non-blocking)",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V142P2-QC3-W-QC3-01",
+      "severity": "low",
+      "lifecycle": "open",
+      "title": "Observability gap in conditional edge branch selection — no tracing for which go/nogo branch is taken (non-blocking)",
+      "source": "qc3.md W-QC3-01 (qc-specialist-3, performance and reliability risk)",
+      "scope": "crates/nexus-orchestration/src/preset/loader.rs (add_conditional_edge); crates/nexus-orchestration/src/tasks/mod.rs (executor branch selection)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.42 P-last or future (non-blocking; recommend follow-up enhancement)",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-conditional-routing]",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 2,
+  "sweep_note": "2 entries merged from status.json residual_findings"
+}

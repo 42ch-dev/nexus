@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-13-v1.45-quickstart-and-author-spec",
+  "entries": [
+    {
+      "id": "R-V145B2-001",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "source": "qc1 P3 revalidation",
+      "title": "Broader spec-tree migration gaps: other specs (novel-workflow-profile.md, creator-workflow.md, cli-spec.md body) still reference deleted creator run subcommands; requires dedicated spec-hygiene pass",
+      "decision": "defer to P-last",
+      "owner": "@fullstack-dev or @writing-specialist",
+      "target": "P-last (hygiene-and-closeout)",
+      "closed_at": "2026-06-15",
+      "closure_note": "Superseded by V1.47 P0 spec sweep + P3 docs reconcile (reflection-loop → novel-chapter-review).",
+      "closure_evidence": "V1.47 P-last whitelist closure",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V145B2-002",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "source": "qc3 P3 revalidation",
+      "title": "Cross-link check between quickstart and the spec tree should be re-run after P-last spec promotion",
+      "decision": "defer",
+      "owner": "@writing-specialist",
+      "target": "P-last",
+      "closed_at": "2026-06-15",
+      "closure_note": "Resolved by V1.47 P3 docs-only spec reconcile (1b78d596) which re-aligned inbound cross-refs in novel-author-experience §3.4, novel-workflow-profile §5.5.4/§5.5.6, and novel-quality-loop §3/§8 to the V1.46 shipped quickstart-derived content.",
+      "closure_evidence": "commit 1b78d596 on feature/v1.47-quality-loop-spec-reconcile",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 2,
+  "sweep_note": "2 entries merged from status.json residual_findings"
+}

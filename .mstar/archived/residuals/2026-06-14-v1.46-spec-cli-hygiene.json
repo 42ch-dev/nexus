@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-14-v1.46-spec-cli-hygiene",
+  "entries": [
+    {
+      "id": "R-V146P1-QC3-S1",
+      "title": "intake_status gate remediation suggests command that does not complete intake on existing Work",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-1",
+      "scope": "crates/nexus-orchestration/src/preset_gates.rs (intake_status remediation fn)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.46+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
+      "note": "Verify remediation command (`creator bootstrap --preset creative-brief-intake`) actually achieves the intended action (intake completion) on an existing Work; replace with a semantically valid command if not.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-15",
+      "closure_note": "Fixed by V1.47 P1 gate-remediation-audit: intake_status gate now honestly cites 'nexus42 creator bootstrap' per creator-run-preset-entry.md §3.2; explicit test intake_status_remediation_cites_executable_bootstrap added; R-V146P1-QC3-S1 explanatory comment in preset_gates.rs:361–372 documents the --preset vs intake-hardcode architecture.",
+      "closure_evidence": "commit 9a3ac5a9 on feature/v1.47-gate-remediation-audit",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V146P1-QC3-S4",
+      "title": "Runtime remediation strings cite repo-internal .mstar/... paths (consider user-facing alternative)",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-4",
+      "scope": "crates/nexus42/.../errors.rs, crates/nexus-orchestration/preset_gates.rs, crates/nexus42/commands/creator/{works,mod,run}.rs (6 runtime files)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.46+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
+      "note": "For product users (not harness maintainers), citing `.mstar/knowledge/specs/...` paths may be opaque. Consider exposing a user-facing equivalent or stripping the .mstar prefix in user-facing messages. Cross-cuts R-V146P1-QC2-S1/S-2 (test snapshots).",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-15",
+      "closure_note": "Fixed by V1.47 P1: 15 user-facing remediation emit sites across 6 files now cite stable spec names (e.g. 'creator-run-preset-entry spec', 'novel-author-experience §3') instead of raw .mstar/knowledge/specs/... paths. Comprehensive guard test no_gate_remediation_embeds_raw_dotmstar_paths added in preset_gates.rs:1161–1265.",
+      "closure_evidence": "commit 9a3ac5a9 on feature/v1.47-gate-remediation-audit",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 2,
+  "sweep_note": "2 entries merged from status.json residual_findings"
+}

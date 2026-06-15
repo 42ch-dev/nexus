@@ -9,6 +9,21 @@
       "closed_at": "2026-06-11",
       "closure_note": ".sqlx/ offline cache refresh: ops-engineer scoped. sqlx-cli now available. V1.42.",
       "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P4-W2",
+      "title": "Restore compile-time sqlx::query_as! macros in supervisor.rs (PM-accepted waiver; run cargo sqlx prepare --workspace --all after schema refresh)",
+      "severity": "medium",
+      "source": "qc3 W-2 (V1.40 P4 re-validation); PM sign-off",
+      "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (active_schedules + completed_ids queries)",
+      "decision": "risk-accepted",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.41+ (with .sqlx/ cache refresh)",
+      "archived_at": "2026-06-15T16:49:53Z"
     }
-  ]
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 2,
+  "sweep_note": "1 entries merged from status.json residual_findings"
 }

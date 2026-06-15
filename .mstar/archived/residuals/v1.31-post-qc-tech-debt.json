@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "description": "Archived resolved residuals from V1.31 post-QC tech-debt batch. V1.35 P0 (commits aafe1f8, 26b2fa8) closed TD-V131-01, TD-V131-03, TD-V131-04.",
-  "archived_at": "2026-06-07T12:30:00+08:00",
+  "archived_at": "2026-06-15T16:49:53Z",
   "plan_id": "v1.31-post-qc-tech-debt",
   "entries": [
     {
@@ -20,6 +20,18 @@
       "archived_at": "2026-06-07T12:30:00+08:00",
       "lifecycle": "resolved",
       "closure_note": "Resolved per closure_evidence: commit aafe1f8 on feature/v1.35-critical-residual-convergence; prompt_injection tests cover concurrent claim path.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    },
+    {
+      "id": "TD-V131-02",
+      "title": "Keyword LIKE pattern doesn't escape special characters",
+      "severity": "low",
+      "source": "qc1 W-003",
+      "scope": "crates/nexus-local-db/src/memory_fragment.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Add escape_sql_like helper for user-supplied keyword values.",
+      "archived_at": "2026-06-15T16:49:53Z"
     },
     {
       "id": "TD-V131-03",
@@ -54,6 +66,57 @@
       "archived_at": "2026-06-07T12:30:00+08:00",
       "lifecycle": "resolved",
       "closure_note": "Resolved per closure_evidence: commit 26b2fa8 on feature/v1.35-critical-residual-convergence; context_summarize tests assert 256 KiB cap.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    },
+    {
+      "id": "TD-V131-05",
+      "title": "Missing prompt injection queue cleanup — table growth",
+      "severity": "low",
+      "source": "qc3 W-001",
+      "scope": "crates/nexus-local-db/src/prompt_injection.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Add daemon maintenance cleanup for expired/consumed rows.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V131-06",
+      "title": "JSON LIKE query performance on memory_fragments degrades with scale",
+      "severity": "nit",
+      "source": "qc3 W-004",
+      "scope": "crates/nexus-local-db/src/memory_fragment.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Pre-release volumes low. Consider FTS5 or keyword index at scale.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V131-07",
+      "title": "parse_judge_response keyword matching can produce false positives from LLM output",
+      "severity": "low",
+      "source": "pr-review O-3",
+      "scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "GO/NOGO word list matches substrings in LLM output. Consider regex anchors or parse first word of response.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V131-08",
+      "title": "memory-augmented preset exit_when kind:rule without rule expression — may need explicit always_true",
+      "severity": "nit",
+      "source": "pr-review O-4",
+      "scope": "crates/nexus-orchestration/embedded-presets/memory-augmented/preset.yaml",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "P2 resolved: exit_when kind:rule is explicit always-true, locked by test memory_augmented_rule_exit_is_explicit_always_true. Loader treats empty rule as always-true (correct for this preset). Documented in YAML comments and embedded-presets/README.md.",
+      "archived_at": "2026-06-15T16:49:53Z"
     }
-  ]
+  ],
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 8,
+  "sweep_note": "5 entries merged from status.json residual_findings"
 }

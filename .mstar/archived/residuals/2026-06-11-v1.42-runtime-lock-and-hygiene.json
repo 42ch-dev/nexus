@@ -3,6 +3,39 @@
   "schema_version": 1,
   "entries": [
     {
+      "id": "R-V142-MERGE-CI-002",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "title": "[RESOLVED via retrospective] V1.41 P-last PM-override 'pre-existing works_api failures' claim invalidated by V1.42 merge CI",
+      "source": "PR #54 CI run 27394800917; same 2 works_api tests (handler_append_inspiration_returns_404_for_unknown + patch_work_stage_change_is_auditable) pass on origin/main e69d2a65 (V1.41) but fail on c0f6cd62 (V1.42 merge)",
+      "scope": ".mstar/plans/2026-06-11-v1.42-ux-polish.md (P-last PM-override section referencing V1.41 P-last defer-7 disposition); .mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md (P0 qa referencing pre-existing); .mstar/plans/2026-06-11-v1.42-multi-volume.md (P1 qa); .mstar/plans/2026-06-11-v1.42-ux-polish.md (P-last qa); commit 0b76fb2f (V1.41 P-last PM-override)",
+      "decision": "defer",
+      "owner": "@project-manager",
+      "target": "Document that V1.41 P-last R-V141P0-W2 disposition (pre-existing on c249c902) was based on a stale base; with V1.41 merged into main, the 2 failures disappeared on main; V1.42 reintroduced them. The 'pre-existing' was a real failure mode at V1.41 era but masked by other V1.41 fixes; V1.42 P0 runtime_lock wiring exposed the latent bug in mutating handlers. Do NOT cite 'pre-existing works_api failures' as a V1.42 carry-forward; the new R-V142-MERGE-CI-001 is the canonical entry.",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+      "resolution": {
+        "commit": "279ec7b3 (PR #55)",
+        "plan_id": "2026-06-12-v1.42.1-runtime-lock-acquire-order",
+        "fixes": "V1.41 P-last pre-existing claim is now fully explained: P0 T2 wiring (e8993870) introduced the regression; not pre-existing on c249c902 base; the claim was a process error during V1.41 PM-override",
+        "resolved_at": "2026-06-12T13:09:26+08:00",
+        "resolved_by": "@project-manager (post-merge retrospective)"
+      },
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V142.1-ARCH-LESSON",
+      "severity": "low",
+      "lifecycle": "open",
+      "title": "Architectural lesson: RuntimeLockGuard relies on explicit release; future handler additions must pattern-match the 5-site fix or use a defer/scopeguard wrapper",
+      "source": "V1.42.1 hotfix post-mortem (5 sites, same bug class)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (RuntimeLockGuard + 3 mutating handlers); future handlers that acquire runtime_lock",
+      "decision": "defer",
+      "owner": "@architect",
+      "target": "Consider refactoring RuntimeLockGuard to use tokio::task::spawn in Drop for async release, or wrap acquire+release in a closure helper. Either pattern would eliminate the entire class of leak bug. For now, document the rule in the harness AGENTS.md and add a clippy lint or custom macro if feasible.",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
       "id": "R-V142P0-01",
       "severity": "medium",
       "lifecycle": "resolved",
@@ -19,6 +52,68 @@
       "closure_note": "V1.41 P-last defer-7 carry-forward disposition: all 7 items remain waived/deferred (test-only, non-surgical). Per-item: R-V140P0-S3 waived (sqlx metadata churn; sqlx-cli now available); R-V140P1-S6 defer (validation benchmarks; no perf concern); R-V140P2-S2 defer (E2E world_kb_block integration test; non-surgical); R-V140P3-S1 defer (cross-creator job_id claim test; test-only); R-V140P3-S2 defer (failure-injection test; test-only); R-V140P3-S3 defer (AC3 empty world_id test; test-only); R-V140P4-INFRA defer (.sqlx/ refresh; no schema touched in V1.42 P0).",
       "closure_evidence": "plan-2026-06-11-v1.42-runtime-lock-and-hygiene T6; cursor-closeout-29179b2e; pm-residual-fix-post-merge",
       "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V142P0-PROC",
+      "severity": "high",
+      "lifecycle": "open",
+      "title": "Process violation: Cursor (Auto.Wood) direct-committed to integration branch and marked P0 Done without QC/QA gates; integration HEAD had no code until PM merge",
+      "source": "cursor-parallel-agent (Auto.Wood <hk@btang.cn>; Co-authored-by: Cursor)",
+      "scope": ".mstar/status.json (plans[1].status flip Todo→Done), .mstar/knowledge/specs/novel-multi-work-lifecycle.md (§4.2 stamp: gap→Implemented), .mstar/plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md (status: Todo→Done), .mstar/knowledge/specs/README.md (status line update), .mstar/archived/plans-done.json (Profile B migration: object-array → id catalog + delete misplaced archived/plans/plans-done.json)",
+      "decision": "risk-accepted",
+      "owner": "@project-manager",
+      "target": "V1.42 P0 closeout — process gap accepted per user directive (Option B); QC tri-review (N=3) + PM merge now in progress to restore gate discipline",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V142P0-QC-W-001",
+      "severity": "medium",
+      "lifecycle": "waived",
+      "title": "Stale-recovery concurrent-acquire race on force_stale=true path — check-then-act on holder column without prior-holder predicate",
+      "source": "qc2.md W-001 (qc-specialist-2, security and correctness risk)",
+      "scope": "crates/nexus-local-db/src/runtime_lock.rs (acquire_runtime_lock force-clear path + early-exit check in patch_work); spec novel-multi-work-lifecycle.md §4.2 (single-writer model)",
+      "decision": "waive",
+      "owner": "@fullstack-dev",
+      "target": "Waived — local-only single-user model; impact low unless multi-terminal use becomes common",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+      "closure_note": "V1.43 P-last T6: waived. Local-only single-writer invariant documented in R-V138P0-01. Race only under concurrent multi-terminal invocation which is out of scope for local-first product. Reopen if multi-terminal becomes common.",
+      "closed_at": "2026-06-12",
+      "closure_evidence": "Local-only invariant documented; same rationale as R-V138P0-01 waive",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V142P0-QC-W-01",
+      "severity": "medium",
+      "lifecycle": "waived",
+      "title": "RuntimeLockGuard Drop is best-effort; panic or cancellation leaks lock until TTL",
+      "source": "qc1.md W-01 (qc-specialist, architecture coherence and maintainability risk)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs RuntimeLockGuard Drop impl (lines 108-123); production acquire contract spec novel-multi-work-lifecycle.md §4.2",
+      "decision": "waive",
+      "owner": "@fullstack-dev",
+      "target": "Waived — V1.42.1 hotfix (279ec7b3) + TTL sufficient for local-only model",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+      "closure_note": "V1.43 P-last T6: waived. V1.42.1 hotfix resolved the 5-site release leak class. TTL-based cleanup is sufficient for local-only single-user model. Future hardening (tokio::task::spawn in Drop or scopeguard wrapper) tracked in R-V142.1-ARCH-LESSON.",
+      "closed_at": "2026-06-12",
+      "closure_evidence": "V1.42.1 hotfix 279ec7b3 — 5-site fix + regression tests + TTL sufficient",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V142P0-QC-W-02",
+      "severity": "low",
+      "lifecycle": "open",
+      "title": "patch_work handler complexity — pre-existing too_many_lines suppression now carries additional lock logic",
+      "source": "qc1.md W-02 (qc-specialist)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs patch_work handler (lines 998-1132)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "Future refactor plan (V1.43+ or P-last); not blocking",
+      "tracking": ".mstar/status.json residual_findings[2026-06-11-v1.42-runtime-lock-and-hygiene]",
+      "archived_at": "2026-06-15T16:49:53Z"
     }
-  ]
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 8,
+  "sweep_note": "6 entries merged from status.json residual_findings"
 }

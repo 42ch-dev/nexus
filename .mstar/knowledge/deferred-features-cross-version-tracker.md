@@ -7,7 +7,7 @@
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-15 (V1.47 post-merge: PR #60 merged to `main` at `8f4f9f2b`; integration branch retired; 5 whitelist residuals closed; 33 V1.45/V1.46 lows deferred to V1.48)
+**Last updated**: 2026-06-16 (V1.47 post-merge + residual_findings hygiene: 150→31 open; legacy archived)
 
 ---
 
@@ -122,21 +122,14 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 **V1.42 P0 defer carry-forward** (from V1.41 P-last hygiene): R-V140P0-S3, R-V140P1-S6, R-V140P2-S2, R-V140P3-S1/S2/S3, R-V140P4-INFRA — see [2026-06-11-v1.42-runtime-lock-and-hygiene.md](../plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md) §2.
 
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-14**; `tech_debt_summary.updated_at` **2026-06-14**; V1.45 Shipped, post-merge cleanup, Profile B compaction applied — `plans-done.json` index is string-only, full JSON in `archived/plans/<id>.json`). Do **not** mirror full rows here — JSON wins on conflict. This section is a human pointer only; use `status.json` for current totals, severity buckets, and target buckets.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-16**; `tech_debt_summary.updated_at` **2026-06-16**; **31 open** carry-forward items after hygiene sweep — V1.46 lows + V1.47 follow-ups only; **117 legacy pre-V1.46 rows archived** to `.mstar/archived/residuals/`). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.30 post-QC | 9 | `v1.30-post-qc-tech-debt` (V1.35 P0 closed 2: TD-V130-02, TD-V130-06) |
-| V1.31 post-QC | 5 | `v1.31-post-qc-tech-debt` (V1.35 P0 closed 3: TD-V131-01, TD-V131-03, TD-V131-04) |
-| V1.33 work model (P1) | 3 | `2026-06-04-v1.33-work-model-and-creator-run` (R-V133P1-03/08/09; partial / defer; not P0) |
-| V1.33 llm_judge (P3) | 2 | `2026-06-04-v1.33-llm-judge-runtime-fix` (V1.35 P0 closed 2 critical: R-V133P3-01, R-V133P3-02; remaining 2 medium: R-V133P3-03/04) |
-| V1.33 memory review (P4) | 3 | `2026-06-04-v1.33-memory-review-closed-loop` (V1.35 P0 closed 4 critical: R-V133P4-01, R-V133P4-02, R-V133P4-03, R-V133P4-07; remaining 3 medium: R-V133P4-04, R-V133P4-05, R-V133P4-06) |
-| V1.34 FL-E stages (P1) | 5 | `2026-06-04-v1.34-fl-e-run-intents-and-stages` (R-FL-E-DDL/DEAD/LIST/FNAME/ENDP, all low; not P0) |
-| V1.34 agent tool (P4) | 1 | `2026-06-04-v1.34-agent-tool-implementation` (DF-47 production caller wiring → conditional V1.36+) |
-| V1.36 novel init (P1) | 2 | `2026-06-07-v1.36-novel-project-init-preset` (`R-V136P1-01`, `R-V136P1-02`; V1.37 P0 targets both) |
-| V1.36 novel layout (P2) | 3 | `2026-06-07-v1.36-novel-artifact-layout-and-templates` (low; path helper / fixture / P3 handoff items) |
-| V1.36 novel pipeline (P3) | 2 | `2026-06-07-v1.36-novel-chapter-drafting-pipeline` (`R-V136P3-01`, `R-V136P3-02`; V1.37 P0 targets runtime gates) |
-| **Total** | See JSON | See `metadata.tech_debt_summary.total_open`; do not recompute in Markdown |
+| V1.45 hygiene (cli-spec §6.2D/E) | 1 | `2026-06-13-v1.45-hygiene-and-closeout` |
+| V1.46 plan QC deferrals → V1.48 | 23 | `2026-06-14-v1.46-*` (4 plan groups) |
+| V1.47 follow-ups → V1.48+ | 7 | `2026-06-15-v1.47-reflection-loop-findings`, `2026-06-15-v1.47-gate-remediation-audit` |
+| **Total open** | **31** | See `metadata.tech_debt_summary.total_open`; legacy V1.30–V1.45 rows **archived** (not in status.json) |
 
 **Closed / historical residuals**
 

@@ -1,9 +1,21 @@
 {
   "schema_version": 1,
   "description": "Archived resolved residuals from V1.30 post-QC tech-debt batch. V1.35 P0 (commits aafe1f8, 26b2fa8) closed TD-V130-02 and TD-V130-06.",
-  "archived_at": "2026-06-07T12:30:00+08:00",
+  "archived_at": "2026-06-15T16:49:53Z",
   "plan_id": "v1.30-post-qc-tech-debt",
   "entries": [
+    {
+      "id": "TD-V130-01",
+      "title": "SessionCapture RwLock uses write() for all accesses — cosmetic under single-threaded IPC",
+      "severity": "low",
+      "source": "qc3 W-002",
+      "scope": "crates/nexus42/src/commands/acp_worker/mod.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Benign in current single-threaded IPC model. Revisit if worker becomes concurrent. Consider parking_lot::RwLock.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
     {
       "id": "TD-V130-02",
       "title": "cleanup_row fire-and-forget — DELETE failure silently lost, dangling registry rows possible",
@@ -22,6 +34,42 @@
       "closure_note": "Resolved per closure_evidence: commit aafe1f8 on feature/v1.35-critical-residual-convergence; tracing error log added to cleanup_row; clippy clean.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
     },
     {
+      "id": "TD-V130-03",
+      "title": "JobLifecycleGuard FSM — no RAII guard to ensure mark_done/mark_failed called exactly once",
+      "severity": "low",
+      "source": "qc2 S-003",
+      "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Mark_done now runs before KeyBlock insert (W-001 fix), reducing risk. Full guard would eliminate the class.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V130-04",
+      "title": "Drop timeout 150ms may be insufficient for heavy LLM children — make configurable",
+      "severity": "low",
+      "source": "qc3 S-001",
+      "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "PID existence check added (C-4 fix). Configurable timeout via TimeoutConfig would improve safety.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V130-05",
+      "title": "LIST_BY_WORLD_LIMIT=500 silently truncates — no truncation indicator to caller",
+      "severity": "low",
+      "source": "qc3 S-002",
+      "scope": "crates/nexus-local-db/src/kb_store.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Pre-release volumes well under 500. Add total_count or has_more field when scale requires it.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
       "id": "TD-V130-06",
       "title": "mark_running lacks WHERE status guard — can revert done/failed jobs",
       "severity": "low",
@@ -37,6 +85,69 @@
       "archived_at": "2026-06-07T12:30:00+08:00",
       "lifecycle": "resolved",
       "closure_note": "Resolved per closure_evidence: commit aafe1f8 on feature/v1.35-critical-residual-convergence; kb_extract_job tests cover queued→running transition and reject done/failed.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    },
+    {
+      "id": "TD-V130-07",
+      "title": "claim_job re-fetches row after commit solely for started_at timestamp",
+      "severity": "nit",
+      "source": "qc3 S-005",
+      "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Extra DB round-trip for started_at. Could compute in Rust post-commit. Low priority optimization.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V130-08",
+      "title": "insert_with_retry returns generic Configuration error on collision — should use dedicated type",
+      "severity": "nit",
+      "source": "qc2 S-005",
+      "scope": "crates/nexus-local-db/src/kb_extract_job.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "UUIDv4 makes collision near-impossible. Error type improvement for API clarity.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V130-09",
+      "title": "Dynamic SQL (format!) in reference_source::list and kb_store::list_by_world — not parameterized",
+      "severity": "low",
+      "source": "qc1 S-001, qc2 S-001",
+      "scope": "crates/nexus-local-db/src/reference_source.rs, crates/nexus-local-db/src/kb_store.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Limit/offset now clamped (C-2 fix). format! needed because sqlx offline mode cannot bind LIMIT/OFFSET. Document exception.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V130-10",
+      "title": "Extraction prompt format!() doubles memory for large work entries",
+      "severity": "nit",
+      "source": "qc3 S-003",
+      "scope": "crates/nexus-orchestration/src/capability/builtins/kb_extract_work.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target_date": "backlog",
+      "note": "Typical work entries are small structured summaries. Streaming approach if large-file support added.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "TD-V130-11",
+      "title": "sqlx prepare CI enforcement — ensure offline metadata stays green after query changes",
+      "severity": "low",
+      "source": "qc2 S-008",
+      "scope": "CI pipeline",
+      "decision": "defer",
+      "owner": "@ops-engineer",
+      "target_date": "backlog",
+      "note": ".sqlx/ metadata churn in diff expected after query changes. Add CI step to verify sqlx prepare is current.",
+      "archived_at": "2026-06-15T16:49:53Z"
     }
-  ]
+  ],
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 11,
+  "sweep_note": "9 entries merged from status.json residual_findings"
 }

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-07-v1.37-novel-foundation-first",
+  "entries": [
+    {
+      "id": "R-V137P0-01",
+      "title": "novel-writing preset.yaml had gates at YAML top-level instead of under preset: — gates silently ignored before fix",
+      "severity": "low",
+      "source": "QC1/QC2/QC3 fix wave — discovered during gate_failure_returns_422 test debugging",
+      "scope": "crates/nexus-orchestration/embedded-presets/novel-writing/preset.yaml",
+      "decision": "fix",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.43 P-last",
+      "note": "Root cause fixed in this commit (gates moved under preset: key). Residual tracks the broader concern: serde silently ignores unknown top-level keys in YAML, so misplaced sections cause no error. Consider adding a strict-mode serde guard or loader validation that warns on unknown top-level keys in preset.yaml.",
+      "lifecycle": "resolved",
+      "closure_note": "V1.43 P-last T2: added warn_unknown_top_level_keys() in loader.rs — checks serde_yaml::Value top-level keys against KNOWN_TOP_LEVEL_KEYS (preset, states, inner_graphs, signals, roles); non-fatal tracing::warn!. Added test warn_unknown_top_level_keys_detects_misplaced_gates. Commit 445e0f1d.",
+      "closed_at": "2026-06-12",
+      "closure_evidence": "crates/nexus-orchestration/src/preset/loader.rs — warn_unknown_top_level_keys + test",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 1,
+  "sweep_note": "1 entries merged from status.json residual_findings"
+}
