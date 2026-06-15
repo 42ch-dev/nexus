@@ -349,6 +349,7 @@ async fn ac3_rule_suggestion_field_exists_and_round_trips() {
         rule_suggestion: Some(
             "Consider a Layer 2 rule: pin POV per chapter in AGENTS.md.".to_string(),
         ),
+        source_schedule_id: None,
     };
     let finding_id = findings::create_finding_from_review(&pool, &verdict)
         .await
@@ -362,5 +363,65 @@ async fn ac3_rule_suggestion_field_exists_and_round_trips() {
     assert_eq!(
         fetched.rule_suggestion.as_deref(),
         Some("Consider a Layer 2 rule: pin POV per chapter in AGENTS.md.")
+    );
+}
+
+// ── AC5: Idempotency — repeating the review terminal hook does not duplicate ─
+
+/// V1.47 P0 fix (qc1 W-2 / qc2 W-1 / qc3 W-2): calling the review terminal
+/// hook twice on the same chapter + schedule must produce exactly **one**
+/// finding row. The `source_schedule_id` partial unique index guarantees this
+/// at the DB level; `create_finding_from_review` uses `ON CONFLICT DO NOTHING`
+/// and returns the existing finding id on conflict.
+#[tokio::test]
+async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
+    let pool = test_pool().await;
+    let sup = Arc::new(ScheduleSupervisor::new(Arc::new(pool.clone())));
+
+    let work = novel_work("wrk_ac5", 3, 5);
+    works::create_work(&pool, &work).await.unwrap();
+
+    insert_schedule(
+        &pool,
+        "sch_ac5_review",
+        "novel-chapter-review",
+        "running",
+        "wrk_ac5",
+    )
+    .await;
+    auto_chain::set_driver(&pool, CREATOR, "wrk_ac5", "sch_ac5_review", "review")
+        .await
+        .unwrap();
+
+    // Pre-state: no findings.
+    assert_eq!(count_findings(&pool, "wrk_ac5").await, 0);
+
+    // First terminal transition — creates the finding.
+    sup.on_schedule_terminal("sch_ac5_review", ScheduleStatus::Completed)
+        .await
+        .unwrap();
+    let n1 = count_findings(&pool, "wrk_ac5").await;
+    assert_eq!(n1, 1, "first terminal must create exactly 1 finding; got {n1}");
+
+    // Simulate a second terminal transition for the SAME schedule (e.g.
+    // supervisor retry or double-fire). The schedule row was already flipped
+    // to 'completed' by the first call, so we reset it to 'running' to make
+    // the second on_schedule_terminal accept the transition.
+    sqlx::query("UPDATE creator_schedules SET status = 'running' WHERE schedule_id = ?")
+        .bind("sch_ac5_review")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sup.on_schedule_terminal("sch_ac5_review", ScheduleStatus::Completed)
+        .await
+        .unwrap();
+
+    // AC5: still exactly 1 finding — the ON CONFLICT DO NOTHING guard
+    // prevented the duplicate.
+    let n2 = count_findings(&pool, "wrk_ac5").await;
+    assert_eq!(
+        n2, 1,
+        "second terminal for the same schedule must NOT create a duplicate; got {n2}"
     );
 }

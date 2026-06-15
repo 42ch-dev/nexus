@@ -107,6 +107,36 @@ pub fn mint_finding_id() -> String {
     format!("fnd_{}", uuid::Uuid::new_v4().simple())
 }
 
+/// V1.47 P0 fix (qc2 W-2): normalize and cap `rule_suggestion` text.
+///
+/// Trims leading/trailing whitespace, collapses internal runs of whitespace
+/// to single spaces, and caps the length at `RULE_SUGGESTION_MAX_LEN` (4 KiB).
+/// Returns `None` when the input is `None` or empty after trimming.
+///
+/// This guard prevents accidentally persisting unbounded whitespace or
+/// oversized blobs on the finding row. The P0 synthesized finding always
+/// passes `None`, but the public DAO surface exists for future callers.
+pub fn normalize_rule_suggestion(s: Option<&str>) -> Option<String> {
+    let trimmed = s?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let collapsed: String = trimmed
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if collapsed.len() > RULE_SUGGESTION_MAX_LEN {
+        Some(collapsed[..RULE_SUGGESTION_MAX_LEN].to_string())
+    } else {
+        Some(collapsed)
+    }
+}
+
+/// V1.47 P0 fix (qc2 W-2): maximum accepted length for `rule_suggestion`
+/// text (4 KiB). Longer inputs are truncated by
+/// [`normalize_rule_suggestion`].
+pub const RULE_SUGGESTION_MAX_LEN: usize = 4096;
+
 /// Validate finding enum fields. Returns [`LocalDbError::ConstraintViolation`] on invalid values.
 ///
 /// R-V139P1-W-1: Runtime validation is the **sole enforcement mechanism** for
@@ -597,6 +627,14 @@ pub struct ReviewVerdictFinding {
     /// V1.47 §8.2: optional prose suggestion for Layer 2 rules.
     /// Persisted on the finding row only; V1.47 P0 does not write `AGENTS.md`.
     pub rule_suggestion: Option<String>,
+    /// V1.47 P0 fix (qc1 W-2): the originating `creator_schedules.schedule_id`
+    /// when the finding was synthesized by the review terminal hook.
+    /// When `Some`, the INSERT is idempotent — a second call with the same
+    /// `(work_id, chapter, source_schedule_id)` triple is a no-op that returns
+    /// the existing finding id (partial unique index
+    /// `findings_unique_review_per_chapter`). `None` for the manual CRUD path
+    /// (no idempotency guard).
+    pub source_schedule_id: Option<String>,
 }
 
 /// Create a finding from a review-stage verdict (T3 minimal path).
@@ -605,15 +643,28 @@ pub struct ReviewVerdictFinding {
 /// logged by the caller; findings creation must not fork or block the
 /// auto-chain driver schedule (AC4).
 ///
+/// **Idempotency** (V1.47 P0 fix — qc1 W-2 / qc2 W-1 / qc3 W-2):
+/// When `verdict.source_schedule_id` is `Some`, the INSERT uses
+/// `ON CONFLICT DO NOTHING` against the partial unique index
+/// `findings_unique_review_per_chapter`. If the conflict target is hit
+/// (a finding already exists for this `(work_id, chapter, source_schedule_id)`
+/// triple), the existing finding id is returned — the call is a no-op. This
+/// guarantees that calling the review terminal hook twice on the same chapter
+/// does not create duplicate findings (novel-quality-loop.md §8.3 decision).
+///
+/// When `verdict.source_schedule_id` is `None` (manual CRUD / API path), the
+/// standard insert is used with no idempotency guard.
+///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails.
+/// Returns `LocalDbError` if the database query fails or the finding enum
+/// fields are invalid.
 pub async fn create_finding_from_review(
     pool: &SqlitePool,
     verdict: &ReviewVerdictFinding,
 ) -> Result<String, LocalDbError> {
-    let finding_id = mint_finding_id();
-    let now = chrono::Utc::now().timestamp();
+    validate_finding_enums(&verdict.severity, "open", &verdict.target_executor)?;
+
     // V1.47 §8.2: `kind` defaults to `"craft"` when empty (defensive — callers
     // should set it explicitly, but the spec lists `craft` as a safe default).
     let kind = if verdict.kind.is_empty() {
@@ -621,23 +672,90 @@ pub async fn create_finding_from_review(
     } else {
         verdict.kind.clone()
     };
-    let f = Finding {
-        finding_id: finding_id.clone(),
-        work_id: verdict.work_id.clone(),
-        chapter: verdict.chapter,
-        severity: verdict.severity.clone(),
-        status: "open".to_string(),
-        title: verdict.title.clone(),
-        description: verdict.description.clone(),
-        target_executor: verdict.target_executor.clone(),
-        creator_id: verdict.creator_id.clone(),
-        kind,
-        rule_suggestion: verdict.rule_suggestion.clone(),
-        created_at: now,
-        updated_at: now,
-    };
-    create_finding(pool, &f).await?;
-    Ok(finding_id)
+    let now = chrono::Utc::now().timestamp();
+
+    let rule_suggestion = normalize_rule_suggestion(verdict.rule_suggestion.as_deref());
+
+    match &verdict.source_schedule_id {
+        // Idempotent path: review terminal hook with a source schedule.
+        Some(source_schedule_id) => {
+            let finding_id = mint_finding_id();
+            // SAFETY: dynamic SQL — ON CONFLICT clause with a partial-index
+            // conflict target is not supported by sqlx compile-time macros.
+            let result = sqlx::query(
+                "INSERT INTO findings
+                   (finding_id, work_id, chapter, severity, status, title,
+                    description, target_executor, creator_id, kind,
+                    rule_suggestion, source_schedule_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (work_id, chapter, source_schedule_id)
+                   WHERE source_schedule_id IS NOT NULL
+                   DO NOTHING",
+            )
+            .bind(&finding_id)
+            .bind(&verdict.work_id)
+            .bind(verdict.chapter)
+            .bind(&verdict.severity)
+            .bind(&verdict.title)
+            .bind(&verdict.description)
+            .bind(&verdict.target_executor)
+            .bind(&verdict.creator_id)
+            .bind(&kind)
+            .bind(&rule_suggestion)
+            .bind(source_schedule_id)
+            .bind(now)
+            .bind(now)
+            .execute(pool)
+            .await?;
+
+            if result.rows_affected() == 1 {
+                return Ok(finding_id);
+            }
+
+            // Conflict — the finding already exists. Fetch its id.
+            // SAFETY: dynamic SQL — fetch by the unique triple.
+            let existing: Option<String> =
+                sqlx::query_scalar(
+                    "SELECT finding_id FROM findings
+                     WHERE work_id = ? AND chapter IS ? AND source_schedule_id = ?",
+                )
+                .bind(&verdict.work_id)
+                .bind(verdict.chapter)
+                .bind(source_schedule_id)
+                .fetch_optional(pool)
+                .await?;
+
+            existing.ok_or_else(|| {
+                LocalDbError::ConstraintViolation {
+                    table: "findings".to_string(),
+                    constraint: "idempotent insert reported 0 rows but existing finding not found"
+                        .to_string(),
+                }
+            })
+        }
+
+        // Standard path: manual CRUD / API (no idempotency guard).
+        None => {
+            let finding_id = mint_finding_id();
+            let f = Finding {
+                finding_id: finding_id.clone(),
+                work_id: verdict.work_id.clone(),
+                chapter: verdict.chapter,
+                severity: verdict.severity.clone(),
+                status: "open".to_string(),
+                title: verdict.title.clone(),
+                description: verdict.description.clone(),
+                target_executor: verdict.target_executor.clone(),
+                creator_id: verdict.creator_id.clone(),
+                kind,
+                rule_suggestion,
+                created_at: now,
+                updated_at: now,
+            };
+            create_finding(pool, &f).await?;
+            Ok(finding_id)
+        }
+    }
 }
 
 #[cfg(test)]

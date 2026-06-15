@@ -321,6 +321,8 @@ pub async fn create_from_review_handler(
         creator_id: creator_id.clone(),
         kind: body.kind,
         rule_suggestion: body.rule_suggestion,
+        // Manual API path — no originating schedule; no idempotency guard.
+        source_schedule_id: None,
     };
     let finding_id = findings::create_finding_from_review(state.pool(), &verdict)
         .await
