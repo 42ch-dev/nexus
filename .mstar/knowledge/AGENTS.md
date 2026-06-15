@@ -25,7 +25,7 @@ End-user docs stay in repo-root `docs/`.
 
 All normative OSS specs are **flat** under `specs/`. Rules for creating, merging, and retiring specs: [`specs/AGENTS.md`](specs/AGENTS.md).
 
-When implementing runtime behavior, read **`status.json`** wave-0 / spec_refs first, then the cited spec bodies. Platform ADRs live in **`nexus-platform`** when this repo points outward.
+When implementing runtime behavior, read the active iteration compass (or `metadata.latest_ship.compass` between iterations), [specs/README.md](specs/README.md), then the cited spec bodies. Platform ADRs live in **`nexus-platform`** when this repo points outward.
 
 **Do not silently diverge** from a cited spec; record change via spec revision, plan residual, or ADR.
 

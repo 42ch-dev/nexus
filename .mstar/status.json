@@ -16,12 +16,21 @@
     "last_integration_branch": "iteration/v1.47",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
+    "integration_branch_retired": "iteration/v1.47 (PR #60 @ 8f4f9f2b)",
     "latest_shipped_iteration": "v1.47",
-    "latest_shipped_at": "2026-06-15 (PR #60 merged to main at 8f4f9f2b)",
+    "latest_shipped_at": "2026-06-15 (PR #60 @ 8f4f9f2b)",
     "latest_active_iteration": "v1.48 (awaiting prepare)",
-    "latest_active_compass": ".mstar/iterations/ (V1.48 not yet created)",
-    "integration_branch_retired": "iteration/v1.47 (PR #60 MERGED at 8f4f9f2b 2026-06-15T16:12:05Z; integration merged to main)",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
+    "pre_implement_gate": "V1.47 Shipped — awaiting V1.48 prepare",
+    "spec_refs_index": ".mstar/knowledge/specs/README.md",
+    "latest_ship": {
+      "iteration": "v1.47",
+      "pr": 60,
+      "merge_commit": "8f4f9f2b3ff8f3f7b21c7b88e4123c59ad45888b",
+      "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
+      "shipped_at": "2026-06-15"
+    },
     "tech_debt_summary": {
       "updated_at": "2026-06-16",
       "total_open": 31,
@@ -46,159 +55,7 @@
         "2026-06-15-v1.47-gate-remediation-audit": 1,
         "2026-06-15-v1.47-reflection-loop-findings": 6
       },
-      "notes": "Residual hygiene sweep 2026-06-16: archived 117 legacy pre-V1.46 plan residuals + 38 closed rows; status.json retains 31 open V1.48/V1.47 carry-forward items only."
-    },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-quality-loop.md",
-    "spec_refs": [
-      ".mstar/knowledge/specs/novel-quality-loop.md",
-      ".mstar/knowledge/specs/novel-workflow-profile.md",
-      ".mstar/knowledge/specs/creator-run-preset-entry.md",
-      ".mstar/knowledge/specs/cli-spec.md",
-      ".mstar/knowledge/specs/cli-command-ia.md",
-      ".mstar/knowledge/specs/creator-workflow.md",
-      ".mstar/knowledge/specs/work-experience-model.md",
-      ".mstar/knowledge/specs/orchestration-engine.md",
-      ".mstar/knowledge/specs/novel-quality-loop.md",
-      ".mstar/knowledge/specs/novel-manuscript-audit.md",
-      ".mstar/knowledge/specs/novel-author-experience.md",
-      ".mstar/knowledge/specs/novel-workflow-profile.md",
-      ".mstar/knowledge/specs/entity-scope-model.md",
-      ".mstar/knowledge/specs/creator-centric-entry-model.md",
-      ".mstar/knowledge/specs/novel-writing-sync-contract.md",
-      ".mstar/knowledge/specs/local-db-schema.md",
-      ".mstar/knowledge/specs/preset-conditional-routing.md",
-      ".mstar/knowledge/specs/creator-schedule-and-core-context.md",
-      ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
-      ".mstar/knowledge/specs/novel-work-pool.md"
-    ],
-    "iteration_compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
-    "pre_implement_gate": "V1.47 Shipped 2026-06-15 (PR #60 MERGED at 8f4f9f2b; integration_branch retired to main). Awaiting V1.48 prepare.",
-    "v1_47_pre_implement_gate_historical": "GO — V1.47 harness prepare complete 2026-06-15; P0–P-last executed on iteration/v1.47",
-    "v1_43_ship": {
-      "merge_commit": "0004d85f",
-      "pr": 56,
-      "shipped_at": "2026-06-12T23:39:10+08:00"
-    },
-    "v1_42_1_hotfix": {
-      "plan_id": "2026-06-12-v1.42.1-runtime-lock-acquire-order",
-      "merge_commit": "279ec7b3",
-      "pr": 55,
-      "residual": "R-V142-MERGE-CI-001"
-    },
-    "v1_44_ship": {
-      "merge_commit": "76a9eb79",
-      "pr": 57,
-      "shipped_at": "2026-06-13T18:00:00+08:00",
-      "5_plans": [
-        "P-1 harness-docs-prepare",
-        "P0 manuscript-audit-preset (DF-69)",
-        "P1 review-master-cli-surface (R-V143P0-002)",
-        "P2 multi-volume-hardening (R-V142P1-QC1-F-002/004)",
-        "P3 author-desk-residual-convergence",
-        "P-last hygiene-and-closeout"
-      ],
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/57"
-    },
-    "updated_at": "2026-06-15T04:00:00+08:00",
-    "v1_45_iteration_complete": true,
-    "v1_45_ship": {
-      "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
-      "spec_master_promoted": ".mstar/knowledge/specs/creator-run-preset-entry.md",
-      "closed_trackers": [
-        "BL-12",
-        "BL-13",
-        "DF-52"
-      ],
-      "plan_count_done": 6,
-      "plan_count_optional_deferred": 1,
-      "pr": 58,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/58",
-      "pr_state": "MERGED",
-      "merge_commit": "9514bfdc49a78a5f650ec3893231bf3077ab2732",
-      "merged_at": "2026-06-14T13:54:43+08:00 (2026-06-14T05:54:43Z)",
-      "shipped_at": "2026-06-14T13:54:43+08:00 (PR #58 merged to main)",
-      "p4_disposition": "Superseded by 2026-06-14-v1.46-author-desk-status-ux (V1.46 P0 delta scope)"
-    },
-    "v1_46_ship": {
-      "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md",
-      "specs_promoted": [
-        "novel-author-experience.md Draft (V1.46) -> Shipped (V1.46) (P-last commit 6aae25fc)"
-      ],
-      "spec_overlays_dropped_at_close": [
-        "cli-spec.md V1.46 Shipped amendment: §6.2E FL-E stage subcommand block deleted (P1 commit ac49de8e + W-1 fix adjacent)"
-      ],
-      "bl10_status": "Retired V1.46 (supersede note in shipped-features-tracker.md line 82; quickstart file deleted; content migrated to specs)",
-      "residual_lifecycle_closures_in_plast": [
-        "R-V139P5-S1 (supervisor+boot E2E) -> closed",
-        "R-V139P5-N1 (chapter body_path hint) -> closed",
-        "R-V145B1-002 (cli_args in --help) -> closed",
-        "R-V141P1-15 (pool tracing) -> closed",
-        "R-V141P1-10 (dual round-trip) -> waived (doc note in shipped tracker)"
-      ],
-      "open_residuals_at_ship": {
-        "total": 26,
-        "by_severity": {
-          "low": 25,
-          "high": 1,
-          "critical": 0,
-          "medium": 0,
-          "nit": 0
-        },
-        "notes": "25 low-severity V1.46 plan residuals (defer to V1.47); 1 high-severity pre-existing V1.45 clippy (PM-override R-V145-PRE-CLIPPY-001, decision: risk-accepted, fix in V1.47 hygiene plan)"
-      },
-      "pre_existing_clippy_pm_override": {
-        "residual_id": "R-V145-PRE-CLIPPY-001",
-        "decision": "risk-accepted",
-        "basis": "Per .mstar/AGENTS.md 'Pre-existing claim verification protocol': failure reproduces on integration_merge_target (origin/main HEAD 63b36a32 = V1.45 main post PR #58 merge)",
-        "verification": "PM verified by running `cargo +nightly clippy -p nexus-orchestration --tests -- -D warnings` on detached worktree at origin/main 63b36a32: 60+ errors in tasks/mod.rs + worker/registry.rs + 2 test files",
-        "ship_decision": "V1.46 ships with the PM-override; clippy failures carried forward to V1.47 hygiene plan"
-      },
-      "plan_count_done": 6,
-      "plan_count_optional_deferred": 0,
-      "p4_disposition": "Done",
-      "iteration_complete": true,
-      "shipped_at": "2026-06-15 (PR #59 merged to main)",
-      "pr": 59,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/59",
-      "pr_state": "MERGED",
-      "merge_commit": "e7c8656cb0a29c2a4ac0498b1a5fa312d10c32c8",
-      "merged_at": "2026-06-15T05:43:21Z"
-    },
-    "v1_47_harness_prepare": {
-      "status": "complete",
-      "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
-      "spec_overlays": [
-        "novel-quality-loop.md Draft (V1.47) §8",
-        "novel-workflow-profile.md §5.5.4 / §5.5.6 Draft overlay",
-        "novel-author-experience.md §3.4 V1.47 implement note"
-      ],
-      "plan_count_registered": 6,
-      "prepared_at": "2026-06-15",
-      "integration_branch": "iteration/v1.47",
-      "pre_implement_base": "main @ 72eba21b (V1.46 merged)"
-    },
-    "v1_47_ship": {
-      "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
-      "specs_promoted": [
-        "novel-quality-loop.md Draft (V1.47) -> Shipped (V1.47)",
-        "novel-workflow-profile.md §5.5.4/§5.5.6 Draft (V1.47) -> Shipped (V1.47)"
-      ],
-      "whitelist_residuals_closed": [
-        "R-V145-PRE-CLIPPY-001",
-        "R-V146P1-QC3-S1",
-        "R-V146P1-QC3-S4",
-        "R-V145B2-001",
-        "R-V145B2-002"
-      ],
-      "plan_count_done": 6,
-      "plan_count_optional_deferred": 0,
-      "pr": 60,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/60",
-      "pr_state": "MERGED",
-      "merge_commit": "8f4f9f2b3ff8f3f7b21c7b88e4123c59ad45888b",
-      "merged_at": "2026-06-15T16:12:05Z",
-      "shipped_at": "2026-06-15 (PR #60 merged to main)",
-      "iteration_complete": true
+      "notes": "31 open V1.48/V1.47 carry-forward; legacy residuals in archived/residuals/."
     }
   },
   "residual_findings": {

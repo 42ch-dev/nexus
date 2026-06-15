@@ -85,7 +85,8 @@ When an active delivery compass has **two or more** locked implement plans in th
    - Append `"<plan-id>"` (string, **not** the object) to `plans-done.json`'s `plans` array
 2. Remove the plan row from `status.json.plans[]` (only non-`Done` plans remain)
 3. `iteration_summaries[<ver>]` block stays in `plans-done.json` (delivery snapshot; or move to `shipped-features-tracker.md` §2 — pick one and be consistent)
-4. Verify with `python3 -c "import json; d=json.load(open('.mstar/archived/plans-done.json')); assert all(isinstance(p, str) for p in d['plans'])"`
+4. Drop verbose per-iteration `metadata.v1_*_ship` blocks from `status.json` after P-last (history lives in git, [shipped-features-tracker.md](archived/shipped-features-tracker.md) §2, and iteration compasses); keep `metadata.latest_ship` + branch/gate pointers only
+5. Verify with `python3 -c "import json; d=json.load(open('.mstar/archived/plans-done.json')); assert all(isinstance(p, str) for p in d['plans'])"`
 
 **Anti-patterns**:
 

@@ -54,7 +54,7 @@ Every spec declares **`Document class`** in its header (with **`Status`**).
 | **Draft (Vx.xx)** | Overlay locked in active compass | Free until iteration P5 |
 | **Exploration** | Design only | Promote to Draft when compass locks implement |
 
-On **Exploration → Draft → Shipped**: update README index and `status.json` spec_refs if wave-0.
+On **Exploration → Draft → Shipped**: update README index; wave-0 authority lives in the iteration compass §Normative specs.
 
 ---
 

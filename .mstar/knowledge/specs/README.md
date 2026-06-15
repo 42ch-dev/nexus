@@ -3,7 +3,7 @@
 Functional and normative specifications for the Nexus OSS repo.
 
 **Rules (invariants):** [AGENTS.md](AGENTS.md)  
-**Machine state (wave-0, spec_refs):** [`.mstar/status.json`](../../status.json)  
+**Machine state:** [`.mstar/status.json`](../../status.json) → `metadata.latest_ship` / `metadata.latest_active_compass`; wave-0 spec per active compass §Normative specs; full index is this README  
 **Not here:** trackers and schema-boundary policy → [knowledge root](../README.md); delivery evidence → [iterations](../../iterations/README.md)
 
 ---
@@ -208,5 +208,5 @@ When adding, renaming, or archiving a spec:
 
 1. Set header **`Status`**, **`Document class`**, and **`Coordinates with`** in the spec file.
 2. Update the domain table in this README.
-3. Update `status.json` `spec_refs` / `wave_0_spec` if wave-0.
+3. Update this README index when specs are added, retired, or promoted; on Prepare, record wave-0 in the iteration compass (not `status.json`).
 4. Do **not** add file lists to AGENTS.md.
