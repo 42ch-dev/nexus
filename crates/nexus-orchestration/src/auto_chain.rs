@@ -26,6 +26,13 @@ use crate::completion_lock::{self, CompletionLock};
 /// R-V139P0-W-B: per-process monotonic counter for ACH schedule ID collision resistance.
 static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// R-V147P0-05 (hotfix H-1): per-process monotonic counter for `RVM` schedule
+/// ID collision resistance. The previous `enqueue_review_master_schedule` minted
+/// `RVM<ts_ms>` which collided when the stale-findings watcher (or repeated
+/// sweeps within one tick) enqueued two opt-in Works in the same millisecond.
+/// Mirrors the `ACH_COUNTER` fix (R-V139P0-W-B) for the same class of bug.
+static RVM_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 use crate::stage_gates::{self, WorkFields};
 
 /// Result of an `on_schedule_complete` evaluation.
@@ -804,7 +811,17 @@ pub async fn enqueue_review_master_schedule(
     creator_id: &str,
     work_id: &str,
 ) -> Result<String, AutoChainError> {
-    let schedule_id = format!("RVM{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+    // R-V147P0-05 (hotfix H-1): append a per-process monotonic counter suffix
+    // (mirrors `ACH_COUNTER` / R-V139P0-W-B) so two enqueues in the same
+    // millisecond produce distinct PKs. Without this, the
+    // `master_decision_timeout::repeated_sweeps_remain_stable` test flakes
+    // when both sweeps land in the same `%Y%m%d%H%M%S%3f` granule.
+    let counter = RVM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let schedule_id = format!(
+        "RVM{}{:06x}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S%3f"),
+        counter & 0x00FF_FFFF
+    );
     let now_ts = chrono::Utc::now().timestamp();
     let label = format!("auto-review-master: {work_id}");
     let preset_version = preset_version_for_id("novel-review-master");
@@ -1175,6 +1192,67 @@ mod tests {
         assert!(
             matches!(err, AutoChainError::InvalidState(_)),
             "should be InvalidState: {err:?}"
+        );
+    }
+
+    // ── R-V147P0-05 (hotfix H-1): RVM schedule_id PK collision regression ────
+
+    /// Regression for R-V147P0-05: two `enqueue_review_master_schedule` calls
+    /// landing in the same `%Y%m%d%H%M%S%3f` millisecond granule MUST produce
+    /// distinct `schedule_id` PKs. Before the fix, the second INSERT collided
+    /// on the PK and surfaced as a flake in
+    /// `master_decision_timeout::repeated_sweeps_remain_stable`.
+    ///
+    /// The per-process `RVM_COUNTER` provides the unique suffix without adding
+    /// a new crate dependency (mirrors the `ACH_COUNTER` fix, R-V139P0-W-B).
+    #[tokio::test]
+    async fn rvm_schedule_ids_are_unique_within_same_millisecond() {
+        let db = tempfile::Builder::new()
+            .prefix("rvm_pk_collision_")
+            .suffix(".db")
+            .tempfile()
+            .unwrap();
+        let db_path = db.path().to_path_buf();
+        std::mem::forget(db);
+
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let work = work_at("review", "active", 1, 3);
+        nexus_local_db::works::create_work(&pool, &work)
+            .await
+            .unwrap();
+
+        // Fire two enqueues back-to-back. Even if both land in the same ms
+        // granule, the counter suffix must keep the PKs distinct.
+        let sid_a = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
+            .await
+            .expect("first RVM enqueue must succeed");
+        let sid_b = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
+            .await
+            .expect("second RVM enqueue must succeed even in the same ms");
+
+        assert!(
+            sid_a != sid_b,
+            "RVM schedule ids must be distinct; got sid_a={sid_a} sid_b={sid_b}"
+        );
+        assert!(
+            sid_a.starts_with("RVM") && sid_b.starts_with("RVM"),
+            "both ids must keep the RVM prefix: sid_a={sid_a} sid_b={sid_b}"
+        );
+
+        // Both rows must be present in the table (no PK collision).
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM creator_schedules \
+             WHERE preset_id = 'novel-review-master' AND work_id = ?",
+        )
+        .bind("wrk_test")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            n, 2,
+            "both RVM schedules must be persisted without PK collision; got count={n}"
         );
     }
 
