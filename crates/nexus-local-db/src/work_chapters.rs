@@ -355,6 +355,8 @@ pub struct ReconcileReport {
     pub created: u32,
     /// Number of existing chapter rows updated.
     pub updated: u32,
+    /// Number of chapter files re-synced to the DB status (DB-as-SSOT).
+    pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,
 }
@@ -504,12 +506,14 @@ pub async fn reconcile_from_filesystem(
         return Ok(ReconcileReport {
             created: 0,
             updated: 0,
+            resynced: 0,
             preserved: 0,
         });
     }
 
     let mut created: u32 = 0;
     let mut updated: u32 = 0;
+    let mut resynced: u32 = 0;
     let mut preserved: u32 = 0;
 
     let entries = std::fs::read_dir(&stories_dir).map_err(|e| LocalDbError::IoWithPath {
@@ -605,9 +609,13 @@ pub async fn reconcile_from_filesystem(
                 // instead re-sync the file so prompt-visible state catches up
                 // without inventing an extra chapter transition.
                 let status_conflicts = fm_status.as_ref().is_some_and(|s| s != &db_status);
-                if status_conflicts {
+                let file_resynced = if status_conflicts {
                     sync_frontmatter_status(&path, &db_status)?;
-                }
+                    resynced += 1;
+                    true
+                } else {
+                    false
+                };
 
                 // Mirror word_count from file to DB when present and different.
                 // This is not a status transition; it only updates the cached
@@ -626,7 +634,7 @@ pub async fn reconcile_from_filesystem(
                     )
                     .await?;
                     updated += 1;
-                } else {
+                } else if !file_resynced {
                     preserved += 1;
                 }
             }
@@ -636,6 +644,7 @@ pub async fn reconcile_from_filesystem(
     Ok(ReconcileReport {
         created,
         updated,
+        resynced,
         preserved,
     })
 }
@@ -1399,10 +1408,15 @@ mod tests {
         .await
         .unwrap();
 
-        // ch01: DB status stays `not_started` (SSOT), but word_count is mirrored.
+        // ch01: DB status stays `not_started` (SSOT), but word_count is mirrored
+        // and the file frontmatter is re-synced.
         assert_eq!(
             report.updated, 1,
             "word_count should be mirrored from file to DB"
+        );
+        assert_eq!(
+            report.resynced, 1,
+            "status-conflict file should be re-synced to DB status"
         );
         assert_eq!(report.preserved, 2, "ch02 and ch03 are unchanged");
         assert_eq!(report.created, 0);
@@ -1444,6 +1458,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(report2.updated, 0);
+        assert_eq!(report2.resynced, 0);
         assert_eq!(report2.preserved, 3);
     }
 
