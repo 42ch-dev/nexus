@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-16-v1.48-serial-hardening"
-verdict: "Request Changes"
-generated_at: "2026-06-16"
+verdict: "Approve"
+generated_at: "2026-06-16T18:00:00Z"
 ---
 
 # Code Review Report
@@ -114,3 +114,71 @@ P4 correctly implements the §4.5.3 DB-as-status-SSOT semantics and the §4.5.7 
 3. The synchronous, lock-held reconcile command needs a documented scaling ceiling and preferably lighter I/O.
 
 The two suggestions (idempotency assertion in the hermetic test and CRLF preservation) are optional but recommended.
+
+## Revalidation
+
+- Re-review timestamp: 2026-06-16T18:00:00Z
+- Re-review scope: P4-fix1 commits `561d372e` (W-1 qc3) + `80a73eee` (W-2 qc3) only; merge `d65e36fc` is a no-op for fix content
+- Review range / Diff basis: `merge-base: 5a64502b (pre-fix integration HEAD) + tip: 91b6a85e (current integration HEAD)`
+- Working branch (verified): `iteration/v1.48`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+- Re-review verdict: **Approve**
+
+### W-1 (qc3) — `ReconcileReport` counter correction
+
+**Status**: Fixed
+
+- Commit: `561d372e`
+- Change made:
+  - Added `resynced: u32` to `ReconcileReport` in `crates/nexus-local-db/src/work_chapters.rs`.
+  - `reconcile_from_filesystem` now initializes `resynced: 0` and increments it (instead of `preserved`) when `sync_frontmatter_status` is called for a status conflict.
+  - CLI output in `crates/nexus42/src/commands/creator/works/mod.rs` now prints the new `Resynced:` count from the daemon JSON response.
+- Tests verifying the fix:
+  - `cargo test -p nexus-local-db --lib test_reconcile_update_and_idempotent`
+  - `cargo test -p nexus-local-db -- v148_serial` (specifically `v148_serial_reconcile_preserves_db_status_and_creates_missing`)
+- Evidence: Both unit and hermetic tests assert `report.resynced == 1` for a status-conflict re-sync and `report.resynced == 0` on the idempotent second pass.
+
+### W-2 (qc3) — `RuntimeLockGuard` leak on daemon reconcile error path
+
+**Status**: Fixed
+
+- Commit: `80a73eee`
+- Change made:
+  - `crates/nexus-daemon-runtime/src/api/handlers/works.rs::reconcile_chapters` restructured to use an explicit `match` on the `reconcile_from_filesystem` result.
+  - The lock is released with `lock.release().await` on the `Err` arm before returning the error, and again on the success path before returning `Ok`.
+  - The pattern is explicitly documented as mirroring the V1.42.1 hotfix rule codified in `crates/nexus-daemon-runtime/AGENTS.md` (Rule 2: explicit `lock.release().await` on every exit path).
+- Tests verifying the fix:
+  - `cargo test -p nexus-daemon-runtime --test runtime_lock` (specifically `test_reconcile_chapters_releases_lock_on_error`)
+- Evidence: The new Unix hermetic test makes `Stories/` unreadable after lock acquisition, forces an error, and asserts `runtime_lock_holder` is `None` after the handler returns.
+
+### W-3 (qc3) — synchronous lock-held reconcile scaling
+
+**Status**: Deferred to V1.49 residual (not blocking)
+
+- Per PM consolidated decision and plan §9, W-3 remains open as a `medium` residual targeting V1.49 (batched / async chunked processing; handler refactor). It is outside the P4-fix1 scope and was not re-reviewed.
+
+### Suggestions disposition
+
+- S-1 (idempotency assertion in hermetic test #5): Acknowledged; `test_reconcile_update_and_idempotent` covers idempotency at unit level; hermetic test still verifies the primary reconcile behavior.
+- S-2 (CRLF normalization in `sync_frontmatter_status`): Acknowledged as low-priority pre-1.0 local-first behavior.
+
+### Revalidation lint + test summary
+
+- `cargo clippy --all -- -D warnings`: clean
+- `cargo +nightly fmt --all --check`: clean
+- `cargo test -p nexus-local-db -- v148_serial`: 2/2 passed (run twice)
+- `cargo test -p nexus-local-db --lib test_reconcile_update_and_idempotent`: passed (run twice)
+- `cargo test -p nexus-daemon-runtime --test runtime_lock`: 7/7 passed (run twice)
+- `cargo test -p nexus42 -- reconcile`: 0 filtered matches (reconcile coverage remains in `nexus-local-db`)
+
+### Updated Summary
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 1 |
+| 🟢 Suggestion | 2 |
+
+**Verdict**: Approve
+
+P4-fix1 fully addresses the two qc3 blocking findings (W-1 resynced counter, W-2 lock release). W-3 is explicitly deferred as a V1.49 residual per PM consolidated decision. No new findings.
