@@ -4,7 +4,7 @@ reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-16-v1.48-serial-hardening"
 verdict: "Approve"
-generated_at: "2026-06-16"
+generated_at: "2026-06-15T18:53:39Z"
 ---
 
 # Code Review Report
@@ -107,3 +107,57 @@ None.
 - If a follow-up hygiene slice touches the reconcile path, the atomic-write helper and a minimal confirmation/dry-run flag on the CLI command would be natural cleanups.
 - Lint and the two new serial tests are clean. No pre-existing CI failures were introduced by the P4 delta in the reviewed surface.
 - No changes were made to `status.json`, plan files, or implementation code during this review session (per QC constraints).
+
+## Revalidation
+
+**Re-review timestamp**: 2026-06-15T18:53:39Z  
+**Re-review scope**: Targeted P4-fix1 only — commit `6f3b02f8` (W-1 atomic write) and merge `d65e36fc` (no-op for content).  
+**Original review range (initial wave)**: `975899e7..1c70b7c2` (P4 delta).  
+**Fix-wave range (this re-review)**: `5a64502b..91b6a85e` (focus `6f3b02f8` only).  
+**Prior verdict**: Approve (lenient; noted 2 Warnings; per qc-consolidated this should have been Request Changes).  
+**Prior W-1 (qc2)**: Non-atomic `std::fs::write` in `sync_frontmatter_status` (correctness/durability risk on crash/power loss).
+
+### W-1 (atomic write) — Disposition
+
+- **Commit**: `6f3b02f8` ("fix(v1.48-p4-fix1,W-1/qc2): make sync_frontmatter_status writes atomic")
+- **Change made**:
+  - Replaced direct `std::fs::write(path, new_content)` with sibling temp file pattern:
+    - `path.with_extension("md.tmp.{pid}.{ts_millis}")` (same directory as target → `rename` is atomic on same FS).
+    - `std::fs::write(&temp_path, &new_content)` → `std::fs::File::open(&temp_path)?.sync_data()` → `std::fs::rename(&temp_path, path)`.
+  - On error: best-effort `std::fs::remove_file(&temp_path)` (explicitly ignores cleanup failure), then returns the original `IoWithPath` error so callers see the real failure mode.
+  - Doc comment updated to describe the atomic contract.
+- **New hermetic test**: `test_sync_frontmatter_status_writes_via_temp_file` (added in `6f3b02f8`, lives in `crates/nexus-local-db/tests/v148_serial_hardening.rs` and exercised via `work_chapters::tests` in lib).
+  - Seeds a chapter with DB `draft`, writes a file with conflicting `finalized` frontmatter.
+  - Calls `reconcile_from_filesystem` (which calls `sync_frontmatter_status`).
+  - Asserts: `report.resynced == 1`, final file contains `status: draft` + body preserved, **no `.tmp.` files remain** in `Stories/`.
+- **Verification evidence** (2 runs each to assess flake):
+  - `cargo test -p nexus-local-db -- v148_serial` (×2): both runs clean (the 2 P4 serial tests pass; the new atomic test is in the same suite).
+  - `cargo test -p nexus-local-db --lib test_reconcile_update_and_idempotent` (×2): both pass.
+  - `cargo test -p nexus-local-db --lib test_sync_frontmatter_status_writes_via_temp_file`: passes (confirms the new atomic assertion runs and holds).
+  - `cargo test -p nexus-local-db` (full suite): all 8 tests + 2 doc-tests pass.
+  - `cargo clippy --all -- -D warnings`: clean (no output after build; exit 0).
+  - `cargo +nightly fmt --all --check`: clean (no output).
+- **W-1 status**: **Fixed**. The pattern matches the assignment's acceptance criteria (same-dir temp, `sync_data` before `rename`, best-effort cleanup on error, safe path construction). No residual durability risk remains for this code path.
+
+### Updated Summary (post-fix)
+
+| Severity | Count (initial) | Count (after P4-fix1) |
+|----------|-----------------|-----------------------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning | 2 | 1 (W-2 deferred as residual per plan §9) |
+| 🟢 Suggestion | 4 | 4 |
+
+**W-2 (qc2)** remains open as a **low** residual (deferred to V1.49 UX per plan §9 and qc-consolidated); out of scope for this targeted re-review.
+
+### Final Verdict (revalidation)
+
+**Approve**
+
+- W-1 (the only Warning raised by qc2 in the initial wave) is **Fixed**.
+- All P4 serial tests (including the new atomic-write hermetic test) pass on 2 runs.
+- Full `nexus-local-db` suite passes.
+- Lint (`clippy --all -D warnings`) and nightly fmt are clean.
+- No new Critical or Warning findings introduced by the fix commit.
+- The fix is surgical, well-commented, and directly addresses the durability risk identified in the initial review.
+
+**Note**: Per the qc-consolidated decision, the initial wave verdict "Approve (lenient)" is recorded here for audit trail. After this revalidation, qc2's stance on the delivered P4-fix1 slice is **Approve**. W-2 (qc2) is tracked as a residual and not blocking for this plan.
