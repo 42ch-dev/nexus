@@ -85,18 +85,20 @@ On-disk chapter files: see [novel-workflow-profile.md](novel-workflow-profile.md
 
 ### 3.4 Quality loop — dual preset table (Grill #19)
 
+> **V1.47 shipped**: Review preset produces findings per [novel-quality-loop.md §8](novel-quality-loop.md#8-reflection-loop-output-contract-v147-draft) (P0). The preset is named `novel-chapter-review` (replaces the former generic `reflection-loop` demo).
+
 | Intent | Preset id | When |
 | --- | --- | --- |
-| Generate / refresh findings | `reflection-loop` | After draft milestones; produces candidate findings |
+| Generate / refresh findings | `novel-chapter-review` | After draft milestones; produces candidate findings |
 | Master decision on open findings | `novel-review-master` | When findings need accept/reject/defer |
 
 ```bash
 nexus42 creator works status                              # list open findings (human)
 nexus42 creator run novel-review-master <work_id>         # enqueue master review
-nexus42 creator run reflection-loop <work_id>           # optional: generate findings
+nexus42 creator run novel-chapter-review <work_id>           # optional: generate findings
 ```
 
-**Remediation (P0, Grill #7)**: `works status` uses **per-finding `routing_hint`** only — no blanket footer pointing only at `reflection-loop`. When **zero** open findings, suggest `creator run novel-review-master <work_id>` if author may need a master pass.
+**Remediation (P0, Grill #7)**: `works status` uses **per-finding `routing_hint`** only — no blanket footer pointing only at `novel-chapter-review`. When **zero** open findings, suggest `creator run novel-review-master <work_id>` if author may need a master pass.
 
 96h master-review banner: visible on `creator works status` (V1.39 P4 baseline).
 

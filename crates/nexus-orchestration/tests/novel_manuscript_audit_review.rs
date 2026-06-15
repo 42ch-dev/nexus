@@ -2,10 +2,10 @@
 //!
 //! Validates:
 //! 1. Preset loads via `load_embedded_preset` and passes validation.
-//! 2. Review mode state machine: load_chapter → review_report → done.
+//! 2. Review mode state machine: `load_chapter` → `review_report` → done.
 //! 3. No FL-E driver schedule fields in preset output.
-//! 4. No kb.extract_work capability in review preset.
-//! 5. world_binding is optional (review works on worldless Works).
+//! 4. No `kb.extract_work` capability in review preset.
+//! 5. `world_binding` is optional (review works on worldless Works).
 
 use nexus_orchestration::capability::CapabilityRegistry;
 use nexus_orchestration::preset::load_embedded_preset;
@@ -108,20 +108,22 @@ fn review_no_fl_e_driver_fields() {
 
     for state in &loaded.manifest.states {
         for action in &state.enter {
-            if let manifest::EnterAction::Capability { args, .. } = action {
-                if let Some(args) = args {
-                    for (key, _) in args.as_object().unwrap_or(&serde_json::Map::new()) {
-                        assert!(
-                            !key.contains("fl_e_stage"),
-                            "review preset must not set fl_e_stage: found in state '{}'",
-                            state.id
-                        );
-                        assert!(
-                            !key.contains("auto_chain"),
-                            "review preset must not reference auto_chain: found in state '{}'",
-                            state.id
-                        );
-                    }
+            if let manifest::EnterAction::Capability {
+                args: Some(args), ..
+            } = action
+            {
+                let empty_map = serde_json::Map::new();
+                for (key, _) in args.as_object().unwrap_or(&empty_map) {
+                    assert!(
+                        !key.contains("fl_e_stage"),
+                        "review preset must not set fl_e_stage: found in state '{}'",
+                        state.id
+                    );
+                    assert!(
+                        !key.contains("auto_chain"),
+                        "review preset must not reference auto_chain: found in state '{}'",
+                        state.id
+                    );
                 }
             }
         }

@@ -12,7 +12,7 @@ This directory contains embedded presets compiled into the `nexus42` binary at b
 | `kb-extract` | Knowledge extraction | loading → extracting → done | Extract structured KeyBlocks from work-scope KB entries |
 | `memory-augmented` | Memory recall + persist | recall → generate → persist → done | Recall memories, generate content, persist as new memory |
 | `novel-writing` | Chapter-scoped pipeline | outline_chapter → draft_chapter → finalize → done | Single-chapter outline→draft→finalize with llm_judge 五问 gate (V1.36) |
-| `reflection-loop` | Self-reflection | draft → revise → summarize → done | Generate, critique, revise, and summarize with LLM judge |
+| `novel-chapter-review` | FL-E review stage (V1.47) | load_chapter → review → done | Novel/work/chapter-aware 五問 review; persists ≥1 finding per pass via the supervisor terminal hook (V1.47 P0; replaces the generic `reflection-loop` demo) |
 | `research` | Research workflow | scanning → extracting → synthesizing → done | Scan references, extract content, produce structured reports |
 | `soul-experience-refresh` | SOUL maintenance | aggregate → done | Aggregate long-term memories into SOUL Experience section |
 | `novel-brainstorm` | Quality loop ideation | gather → synthesize → done | Consume open findings (target_executor=brainstorm), generate ideation prompts (V1.39 P2) |
@@ -23,11 +23,8 @@ This directory contains embedded presets compiled into the `nexus42` binary at b
 All presets are invoked via the daemon scheduler:
 
 ```bash
-# Example: run reflection-loop
-nexus42 daemon schedule add \
-  --preset reflection-loop \
-  --creator <creator-id> \
-  --seed "Explain quantum computing in simple terms"
+# Example: run novel-chapter-review (the FL-E `review` stage producer)
+nexus42 creator run novel-chapter-review <work_id>
 
 # Example: run memory-augmented
 nexus42 daemon schedule add \
@@ -113,7 +110,7 @@ All presets are embedded at compile time and validated by the loader at startup.
 cargo test -p nexus-orchestration -- all_embedded_presets_pass
 
 # Run preset-specific tests
-cargo test -p nexus-orchestration -- reflection_loop
+cargo test -p nexus-orchestration -- novel_chapter_review
 cargo test -p nexus-orchestration -- memory_augmented
 cargo test -p nexus-orchestration -- kb_extract
 cargo test -p nexus-orchestration -- novel_brainstorm
@@ -129,7 +126,6 @@ cargo clippy -p nexus-orchestration -- -D warnings
 - All presets are **linear state machines** with no conditional routing (`ConditionalNotYetSupported` remains enforced)
 - Multi-agent presets (novel-writing, research) use the `roles` section; others are single-agent
 - Prompt templates use Handlebars syntax (`{{preset.input.*}}`)
-- The `context.summarize` capability in reflection-loop requires a worker at runtime; in standalone mode it returns `WorkerUnavailable`
 - The `creator.read_memory` / `creator.write_memory` capabilities work in standalone mode (return stubs) and with a pool (real persistence)
 - `exit_when: kind: rule` with no expression is the explicit always-true (immediate transition) form — the state advances as soon as its enter action completes
 
@@ -148,7 +144,7 @@ intake → research → produce → review → persist
 | `intake` | `creative-brief-intake` | N/A (first stage) | `work_init` |
 | `research` | `research` | Skips research gate | `work_continue` |
 | `produce` | `novel-writing` | Skips produce gate | `work_continue` |
-| `review` | `reflection-loop` | Skips review gate | `work_continue` |
+| `review` | `novel-chapter-review` | Skips review gate | `work_continue` |
 | `persist` | `kb-extract` | Skips persist gate | `knowledge_ingest` |
 
 ### Stage Advance Flow

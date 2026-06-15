@@ -45,12 +45,8 @@ fn fl_e_chain_happy_path_all_stages_advance() {
     // Start at intake with complete intake
     let mut current = work_state("intake", "complete", "complete");
 
-    // Collect the full chain of stages
-    let chain_stages: Vec<&str> = FL_E_STAGES.iter().copied().collect();
-
-    for i in 1..chain_stages.len() {
-        let target = chain_stages[i];
-
+    // Advance through each stage after intake
+    for &target in FL_E_STAGES.iter().skip(1) {
         // Gate check should pass
         assert!(
             check_stage_advance(&current, target, false).is_ok(),
@@ -187,7 +183,7 @@ fn fl_e_chain_preset_input_fields_propagate_across_stages() {
     );
     let log: serde_json::Value =
         serde_json::from_str(input["inspiration_log"].as_str().unwrap()).unwrap();
-    assert_eq!(log.as_array().map(|a| a.len()), Some(1));
+    assert_eq!(log.as_array().map(Vec::len), Some(1));
 }
 
 // ── Case 6: End-to-end stage → preset → input resolution ────────────────────
@@ -198,7 +194,7 @@ fn fl_e_chain_e2e_resolve_presets_and_inputs() {
         ("intake", "creative-brief-intake"),
         ("research", "research"),
         ("produce", "novel-writing"),
-        ("review", "reflection-loop"),
+        ("review", "novel-chapter-review"),
         ("persist", "kb-extract"),
     ];
 

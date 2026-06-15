@@ -369,12 +369,13 @@ mod tests {
 
         #[cfg(unix)]
         {
+            use std::os::unix::fs::PermissionsExt;
+
             // On Unix, we expect an error because the skills dir is read-only
             // and creating subdirectories inside it will fail.
             assert!(result.is_err(), "sync should fail on read-only directory");
 
             // Restore permissions so the temp dir can be cleaned up.
-            use std::os::unix::fs::PermissionsExt;
             let mut perms = fs::metadata(&skills_dir).expect("metadata").permissions();
             perms.set_mode(0o755);
             let _ = fs::set_permissions(&skills_dir, perms);

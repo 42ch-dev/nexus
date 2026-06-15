@@ -37,7 +37,7 @@ pub fn chapter_label(chapter: i32) -> String {
 /// | intake    | `creative-brief-intake` |
 /// | research  | `research`              |
 /// | produce   | `novel-writing`         |
-/// | review    | `reflection-loop`       |
+/// | review    | `novel-chapter-review`  |
 /// | persist   | `kb-extract`            |
 #[must_use]
 pub fn preset_for_stage(stage: &str) -> Option<&'static str> {
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn preset_for_stage_review() {
-        assert_eq!(preset_for_stage("review"), Some("reflection-loop"));
+        assert_eq!(preset_for_stage("review"), Some("novel-chapter-review"));
     }
 
     #[test]
@@ -582,7 +582,7 @@ mod tests {
         // produce → review
         let produce_done = work_state("produce", "complete", "complete");
         assert!(check_stage_advance(&produce_done, "review", false).is_ok());
-        assert_eq!(preset_for_stage("review"), Some("reflection-loop"));
+        assert_eq!(preset_for_stage("review"), Some("novel-chapter-review"));
 
         // review → persist
         let review_done = work_state("review", "complete", "complete");
@@ -678,14 +678,14 @@ mod tests {
 
     #[test]
     fn preset_input_review_receives_work_id() {
-        // T2 verification: reflection-loop (review) receives work_id for context
+        // T2 verification: novel-chapter-review (review) receives work_id for context
         let fields = demo_work_fields("review");
         let input = build_preset_input(&fields);
         assert!(
             input.get("work_id").is_some(),
             "review preset input must include work_id"
         );
-        assert_eq!(preset_for_stage("review"), Some("reflection-loop"));
+        assert_eq!(preset_for_stage("review"), Some("novel-chapter-review"));
     }
 
     #[test]
@@ -729,7 +729,7 @@ mod tests {
         let fields = demo_work_fields("review");
         let req = build_schedule_for_stage("review", "ctr_test", &fields)
             .expect("review should have a preset");
-        assert_eq!(req.preset_id, "reflection-loop");
+        assert_eq!(req.preset_id, "novel-chapter-review");
     }
 
     #[test]
@@ -762,7 +762,7 @@ mod tests {
 
     // ── V1.38 P1: chapter context parameterization tests ─────────────────────
 
-    /// Helper: produce WorkFields for a given chapter number.
+    /// Helper: produce `WorkFields` for a given chapter number.
     fn chapter_work_fields(chapter: i32, work_ref: &str) -> WorkFields {
         let ch_label = chapter_label(chapter);
         WorkFields {

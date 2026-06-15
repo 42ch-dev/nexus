@@ -1076,7 +1076,7 @@ mod tests {
         assert_eq!(out["intakeStatus"], "complete");
     }
 
-    /// Standalone mode: invalid JSON in brief_text should fail.
+    /// Standalone mode: invalid JSON in `brief_text` should fail.
     #[tokio::test]
     async fn write_brief_standalone_invalid_json() {
         let cap = CreatorWriteBrief::new();
@@ -1177,7 +1177,7 @@ mod tests {
         );
     }
 
-    /// W-V133P2-04: missing brief_schema_version should fail.
+    /// W-V133P2-04: missing `brief_schema_version` should fail.
     #[tokio::test]
     async fn write_brief_standalone_missing_schema_version() {
         let cap = CreatorWriteBrief::new();
@@ -1208,7 +1208,7 @@ mod tests {
         );
     }
 
-    /// W-V133P2-04: wrong brief_schema_version should fail.
+    /// W-V133P2-04: wrong `brief_schema_version` should fail.
     #[tokio::test]
     async fn write_brief_standalone_wrong_schema_version() {
         let cap = CreatorWriteBrief::new();
@@ -1239,7 +1239,7 @@ mod tests {
         );
     }
 
-    /// Integration: write_brief with store writes to Work entity.
+    /// Integration: `write_brief` with store writes to Work entity.
     #[tokio::test]
     async fn write_brief_with_store_roundtrip() {
         let (pool, _dir) = fresh_pool().await;
