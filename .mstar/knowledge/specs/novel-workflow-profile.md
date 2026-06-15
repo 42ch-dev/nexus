@@ -755,7 +755,7 @@ Write discipline:
 
 #### 5.5.6 `novel-chapter-review` feeding findings (V1.47 normative)
 
-**Status**: **V1.47 implement** (plan `2026-06-15-v1.47-reflection-loop-findings`). Supersedes “future implementation” wording below.
+**Status**: **V1.47 shipped (P0)** (plan `2026-06-15-v1.47-reflection-loop-findings`). Supersedes “future implementation” wording below.
 
 The FL-E `review` stage preset (`novel-chapter-review`) MUST:
 
@@ -987,7 +987,7 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
   - 96h master-decision timeout mapped to local DB + daemon scheduled task + `creator run status` banner with opt-in escalation (§5.5.3).
   - Three-layer rules architecture and SOUL / World KB boundaries documented (§5.5.4).
   - `Logs/brainstorm|write|review|publish` roadmap structure documented while reaffirming `Logs/**` sync exclusion (§5.5.5).
-  - `reflection-loop` → findings / rule-suggestion integration documented as future implementation (§5.5.6).
+  - `reflection-loop` → findings / rule-suggestion integration documented as future implementation (§5.5.6 — **superseded V1.47 P0**; §5.5.6 is now normative).
 
 ---
 
