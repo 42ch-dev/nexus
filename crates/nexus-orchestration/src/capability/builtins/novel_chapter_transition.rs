@@ -438,4 +438,177 @@ Body text here.";
         assert!(updated.contains("status: finalized"));
         assert!(!updated.contains("status: draft"));
     }
+
+    // =======================================================================
+    // §4.5.7 #2 (V1.47 P2): current_chapter finalize-only advance
+    // novel-workflow-profile §4.5.2 invariant:
+    //   "works.current_chapter is updated only on transition to finalized.
+    //    Its value is the chapter number of the latest finalized row, not the
+    //    chapter currently being outlined or drafted."
+    // =======================================================================
+
+    /// Create a fresh test DB with migrations and return the pool.
+    async fn fresh_pool() -> sqlx::SqlitePool {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("open pool");
+        nexus_local_db::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        // Keep the tempdir alive for the test lifetime via leak (test-only).
+        std::mem::forget(dir);
+        pool
+    }
+
+    /// Insert a minimal work row with `current_chapter = 0`.
+    async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str) {
+        // SAFETY: INSERT against works — runtime query.
+        sqlx::query(
+            "INSERT INTO works (work_id, creator_id, workspace_slug, status, title, \
+             long_term_goal, initial_idea, intake_status, inspiration_log, \
+             primary_preset_id, schedule_ids, current_chapter, total_planned_chapters, \
+             created_at, updated_at) \
+             VALUES (?, 'ctr_test', 'default', 'draft', 'Test', 'Goal', 'Idea', \
+             'complete', '[]', 'novel-writing', '[]', 0, 3, ?, ?)",
+        )
+        .bind(work_id)
+        .bind("2026-06-15T10:00:00Z")
+        .bind("2026-06-15T10:00:00Z")
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Read `works.current_chapter` for a work.
+    async fn read_current_chapter(pool: &sqlx::SqlitePool, work_id: &str) -> i32 {
+        // SAFETY: SELECT against works — runtime query.
+        let row: (i32,) = sqlx::query_as("SELECT current_chapter FROM works WHERE work_id = ?")
+            .bind(work_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        row.0
+    }
+
+    /// §4.5.7 #2 — `current_chapter` advances ONLY on transition to `finalized`
+    /// and takes the just-finalized chapter number. Non-finalize transitions
+    /// (not_started → outlined, outlined → draft) do NOT change
+    /// `works.current_chapter`.
+    #[tokio::test]
+    async fn spec_4_5_7_current_chapter_advances_only_on_finalize() {
+        let pool = fresh_pool().await;
+        insert_test_work(&pool, "wrk_457_cc").await;
+
+        // Seed 3 chapters (ch1, ch2, ch3 — all not_started, volume=1).
+        nexus_local_db::work_chapters::seed_chapters(
+            &pool,
+            "wrk_457_cc",
+            "my-novel",
+            3,
+            "2026-06-15T10:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        let cap = NovelChapterTransition::with_pool(pool.clone());
+
+        // Initial state: current_chapter = 0
+        assert_eq!(
+            read_current_chapter(&pool, "wrk_457_cc").await,
+            0,
+            "initial current_chapter should be 0"
+        );
+
+        // Transition ch1: not_started → outlined — current_chapter must NOT change.
+        cap.run(serde_json::json!({
+            "work_id": "wrk_457_cc",
+            "creator_id": "ctr_test",
+            "chapter": 1,
+            "volume": 1,
+            "from_status": "not_started",
+            "to_status": "outlined",
+        }))
+        .await
+        .unwrap();
+        assert_eq!(
+            read_current_chapter(&pool, "wrk_457_cc").await,
+            0,
+            "§4.5.2 invariant: not_started→outlined must NOT advance current_chapter"
+        );
+
+        // Transition ch1: outlined → draft — current_chapter must NOT change.
+        cap.run(serde_json::json!({
+            "work_id": "wrk_457_cc",
+            "creator_id": "ctr_test",
+            "chapter": 1,
+            "volume": 1,
+            "from_status": "outlined",
+            "to_status": "draft",
+        }))
+        .await
+        .unwrap();
+        assert_eq!(
+            read_current_chapter(&pool, "wrk_457_cc").await,
+            0,
+            "§4.5.2 invariant: outlined→draft must NOT advance current_chapter"
+        );
+
+        // Transition ch1: draft → finalized — current_chapter becomes 1.
+        cap.run(serde_json::json!({
+            "work_id": "wrk_457_cc",
+            "creator_id": "ctr_test",
+            "chapter": 1,
+            "volume": 1,
+            "from_status": "draft",
+            "to_status": "finalized",
+            "actual_word_count": 4000,
+        }))
+        .await
+        .unwrap();
+        assert_eq!(
+            read_current_chapter(&pool, "wrk_457_cc").await,
+            1,
+            "§4.5.2 invariant: draft→finalized advances current_chapter to 1"
+        );
+
+        // Transition ch3: not_started → draft (skip ch2) — current_chapter
+        // must NOT jump to 3. It stays at 1 because draft is not finalize.
+        // This verifies the "never skips ahead" clause.
+        cap.run(serde_json::json!({
+            "work_id": "wrk_457_cc",
+            "creator_id": "ctr_test",
+            "chapter": 3,
+            "volume": 1,
+            "from_status": "not_started",
+            "to_status": "draft",
+        }))
+        .await
+        .unwrap();
+        assert_eq!(
+            read_current_chapter(&pool, "wrk_457_cc").await,
+            1,
+            "§4.5.2 invariant: drafting ch3 must NOT advance current_chapter (only finalize does)"
+        );
+
+        // Transition ch2: not_started → finalized (out of order) —
+        // current_chapter becomes 2 (just-finalized chapter number).
+        cap.run(serde_json::json!({
+            "work_id": "wrk_457_cc",
+            "creator_id": "ctr_test",
+            "chapter": 2,
+            "volume": 1,
+            "from_status": "not_started",
+            "to_status": "finalized",
+            "actual_word_count": 3500,
+        }))
+        .await
+        .unwrap();
+        assert_eq!(
+            read_current_chapter(&pool, "wrk_457_cc").await,
+            2,
+            "§4.5.2 invariant: finalize ch2 → current_chapter becomes 2 (just-finalized)"
+        );
+    }
 }
