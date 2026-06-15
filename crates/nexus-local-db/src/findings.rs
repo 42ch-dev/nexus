@@ -12,7 +12,13 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use crate::error::LocalDbError;
 
 /// Finding record — mirrors DB row.
-#[derive(Debug, Clone, serde::Serialize)]
+///
+/// V1.48 P1: derives `Deserialize` so the CLI can round-trip finding rows
+/// fetched from the daemon Local API (`GET /v1/local/works/{id}/findings`)
+/// back into the orchestration builder
+/// ([`nexus_orchestration::findings_block::build_open_findings_block`])
+/// without a parallel DTO struct.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Finding {
     /// Unique identifier (ULID).
     pub finding_id: String,
