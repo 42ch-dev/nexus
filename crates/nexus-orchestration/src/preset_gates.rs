@@ -349,22 +349,30 @@ fn describe_actual(value: Option<&serde_json::Value>) -> String {
 }
 
 fn work_field_remediation(field: &str) -> String {
+    // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
     // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
     match field {
         "work_profile" => "Ensure the Work has `work_profile: novel` set. \
-             See .mstar/knowledge/specs/creator-run-preset-entry.md"
+             See the creator-run-preset-entry spec"
             .to_string(),
         "work_ref" => "Run `creator bootstrap --init-preset novel-project-init` to set work_ref. \
-             See .mstar/knowledge/specs/creator-run-preset-entry.md"
+             See the creator-run-preset-entry spec"
             .to_string(),
-        "intake_status" => {
-            "Complete intake via `creator bootstrap --preset creative-brief-intake`. \
-             See .mstar/knowledge/specs/novel-author-experience.md §3"
-                .to_string()
-        }
+        // R-V146P1-QC3-S1: the previous remediation suggested
+        // `creator bootstrap --preset creative-brief-intake`, which is wrong:
+        // `--preset` overrides the PRODUCTION preset (not intake — intake is
+        // always `creative-brief-intake` and hardcoded in bootstrap), and
+        // `creator bootstrap` creates a NEW Work rather than completing
+        // intake on the existing one. Per creator-run-preset-entry §3.2,
+        // intake is triggered only via `creator bootstrap`. The honest
+        // remediation is to tell the user intake runs via bootstrap.
+        "intake_status" => "Intake (`creative-brief-intake`) has not completed on this Work. \
+             Intake runs automatically during `nexus42 creator bootstrap`. \
+             See novel-author-experience §3.2 for the onboarding path."
+            .to_string(),
         "world_id" => "Create the World first via `nexus42 creator world create --title \"...\"` \
              or pick an existing one via `nexus42 creator world list`. \
-             See .mstar/knowledge/specs/creator-run-preset-entry.md"
+             See the creator-run-preset-entry spec"
             .to_string(),
         "workspace_slug" => "Ensure the workspace has a valid slug.".to_string(),
         _ => format!("Adjust the `{field}` field and retry."),
@@ -372,12 +380,13 @@ fn work_field_remediation(field: &str) -> String {
 }
 
 fn filesystem_remediation(must_exist: bool, path: &str) -> String {
+    // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
     // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
     if must_exist {
         if path.contains("Outlines") || path.contains("Stories") {
             format!(
                 "Run `creator bootstrap --init-preset novel-project-init` to scaffold `{path}`. \
-                 See .mstar/knowledge/specs/creator-run-preset-entry.md"
+                 See the creator-run-preset-entry spec"
             )
         } else {
             format!("Ensure the path `{path}` exists before scheduling this preset.")
@@ -388,13 +397,14 @@ fn filesystem_remediation(must_exist: bool, path: &str) -> String {
 }
 
 fn previous_preset_remediation(preset: &str) -> String {
+    // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
     // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
     match preset {
         "novel-project-init" => "Run `creator bootstrap --init-preset novel-project-init` first. \
-             See .mstar/knowledge/specs/creator-run-preset-entry.md"
+             See the creator-run-preset-entry spec"
             .to_string(),
         "novel-writing" => "Run `creator bootstrap` with a novel-writing preset first. \
-             See .mstar/knowledge/specs/novel-author-experience.md §3"
+             See novel-author-experience §3"
             .to_string(),
         _ => format!("Ensure preset '{preset}' has completed for this Work."),
     }
@@ -975,8 +985,14 @@ mod tests {
         assert!(
             err.failed_gates[0]
                 .remediation
-                .contains("creator-run-preset-entry.md"),
+                .contains("creator-run-preset-entry"),
             "work_field remediation should cite the spec: {:?}",
+            err.failed_gates[0].remediation
+        );
+        // R-V146P1-QC3-S4: no raw .mstar/ paths in user-facing copy.
+        assert!(
+            !err.failed_gates[0].remediation.contains(".mstar/"),
+            "work_field remediation must not cite raw .mstar/ paths: {:?}",
             err.failed_gates[0].remediation
         );
     }
@@ -1004,8 +1020,13 @@ mod tests {
         assert!(
             err.failed_gates[0]
                 .remediation
-                .contains("creator-run-preset-entry.md"),
+                .contains("creator-run-preset-entry"),
             "scaffold remediation should cite the preset-entry spec: {:?}",
+            err.failed_gates[0].remediation
+        );
+        assert!(
+            !err.failed_gates[0].remediation.contains(".mstar/"),
+            "scaffold remediation must not cite raw .mstar/ paths: {:?}",
             err.failed_gates[0].remediation
         );
     }
@@ -1034,8 +1055,13 @@ mod tests {
         assert!(
             err.failed_gates[0]
                 .remediation
-                .contains("creator-run-preset-entry.md"),
+                .contains("creator-run-preset-entry"),
             "previous_preset init remediation should cite the spec: {:?}",
+            err.failed_gates[0].remediation
+        );
+        assert!(
+            !err.failed_gates[0].remediation.contains(".mstar/"),
+            "previous_preset init remediation must not cite raw .mstar/ paths: {:?}",
             err.failed_gates[0].remediation
         );
     }
@@ -1064,9 +1090,179 @@ mod tests {
         assert!(
             err.failed_gates[0]
                 .remediation
-                .contains("novel-author-experience.md"),
+                .contains("novel-author-experience"),
             "previous_preset writing remediation should cite the spec: {:?}",
             err.failed_gates[0].remediation
         );
+        assert!(
+            !err.failed_gates[0].remediation.contains(".mstar/"),
+            "previous_preset writing remediation must not cite raw .mstar/ paths: {:?}",
+            err.failed_gates[0].remediation
+        );
+    }
+
+    // ── V1.47 P1 intake remediation tests (R-V146P1-QC3-S1) ──────────────
+
+    /// R-V146P1-QC3-S1: the `intake_status` gate remediation must cite an
+    /// executable `creator bootstrap` command, not the broken
+    /// `creator bootstrap --preset creative-brief-intake` (which misuses
+    /// `--preset` — that flag overrides the PRODUCTION preset, not intake).
+    ///
+    /// Per `creator-run-preset-entry.md` §3.2, intake is triggered only via
+    /// `creator bootstrap`; the remediation must reference that command
+    /// without the misleading `--preset creative-brief-intake` suffix.
+    #[tokio::test]
+    async fn intake_status_remediation_cites_executable_bootstrap() {
+        let gates = vec![Gate::WorkField {
+            field: "intake_status".to_string(),
+            op: GateOp::Equals {
+                value: serde_json::json!("complete"),
+            },
+        }];
+        let mut work = make_work();
+        // Force intake to be incomplete so the gate actually fails.
+        work.intake_status = Some("pending".to_string());
+        let input = make_input();
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        let result = evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+            .await
+            .unwrap();
+        let err = result.unwrap_err();
+        let remediation = &err.failed_gates[0].remediation;
+
+        // Must cite an executable `creator bootstrap` command.
+        assert!(
+            remediation.contains("creator bootstrap"),
+            "intake_status remediation should cite `creator bootstrap`: {remediation:?}"
+        );
+        // Must NOT suggest the broken `--preset creative-brief-intake`
+        // (that overrides the production preset, not intake).
+        assert!(
+            !remediation.contains("--preset creative-brief-intake"),
+            "intake_status remediation must not suggest broken `--preset creative-brief-intake`: {remediation:?}"
+        );
+        // Must not cite raw .mstar/ paths.
+        assert!(
+            !remediation.contains(".mstar/"),
+            "intake_status remediation must not cite raw .mstar/ paths: {remediation:?}"
+        );
+    }
+
+    /// R-V146P1-QC3-S4 regression guard: no user-facing remediation string
+    /// produced by any gate helper may embed raw `.mstar/knowledge/specs/`
+    /// paths. Exercises every `work_field_remediation` branch plus the
+    /// filesystem and previous_preset helpers.
+    #[tokio::test]
+    async fn no_gate_remediation_embeds_raw_dotmstar_paths() {
+        let lookup = MockPreviousLookup {
+            found: false,
+            complete: false,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Collect remediation strings from every gate helper path.
+        let mut all_remediations: Vec<String> = Vec::new();
+
+        // work_field gates — each branch in the match.
+        for (field, op_value) in [
+            ("work_profile", serde_json::json!("essay")),
+            ("work_ref", serde_json::json!("some-ref")),
+            ("intake_status", serde_json::json!("complete")),
+            ("world_id", serde_json::json!("wld_abc")),
+            ("workspace_slug", serde_json::json!("my-slug")),
+        ] {
+            let gates = vec![Gate::WorkField {
+                field: field.to_string(),
+                op: GateOp::Equals { value: op_value },
+            }];
+            let work = make_work();
+            let input = make_input();
+            if let Err(err) =
+                evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+                    .await
+                    .unwrap()
+            {
+                for g in &err.failed_gates {
+                    all_remediations.push(g.remediation.clone());
+                }
+            }
+        }
+
+        // Force-collect the intake_status remediation explicitly (the
+        // default make_work has intake_status=complete, so the gate above
+        // passes without producing a remediation string).
+        {
+            let gates = vec![Gate::WorkField {
+                field: "intake_status".to_string(),
+                op: GateOp::Equals {
+                    value: serde_json::json!("complete"),
+                },
+            }];
+            let mut work = make_work();
+            work.intake_status = Some("pending".to_string());
+            let input = make_input();
+            if let Err(err) =
+                evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+                    .await
+                    .unwrap()
+            {
+                for g in &err.failed_gates {
+                    all_remediations.push(g.remediation.clone());
+                }
+            }
+        }
+
+        // filesystem gate — scaffold path.
+        let gates = vec![Gate::Filesystem {
+            path: "Works/{{work_ref}}/Outlines/ch01-outline.md".to_string(),
+            must_exist: true,
+        }];
+        let work = make_work();
+        let input = make_input();
+        if let Err(err) =
+            evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+                .await
+                .unwrap()
+        {
+            for g in &err.failed_gates {
+                all_remediations.push(g.remediation.clone());
+            }
+        }
+
+        // previous_preset gates — both documented branches.
+        for preset in ["novel-project-init", "novel-writing"] {
+            let gates = vec![Gate::PreviousPreset {
+                preset: preset.to_string(),
+                status: PreviousPresetStatus::Complete,
+                scope: "work".to_string(),
+            }];
+            let work = make_work();
+            let input = make_input();
+            if let Err(err) =
+                evaluate_gates(&gates, "novel-writing", &work, &input, tmp.path(), &lookup)
+                    .await
+                    .unwrap()
+            {
+                for g in &err.failed_gates {
+                    all_remediations.push(g.remediation.clone());
+                }
+            }
+        }
+
+        assert!(
+            !all_remediations.is_empty(),
+            "test harness should have collected at least some remediation strings"
+        );
+        for msg in &all_remediations {
+            assert!(
+                !msg.contains(".mstar/"),
+                "gate remediation must not embed raw .mstar/ paths: {msg:?}"
+            );
+        }
     }
 }

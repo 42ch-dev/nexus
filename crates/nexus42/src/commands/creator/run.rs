@@ -505,9 +505,10 @@ fn reject_produce_when_novel_complete(
     work_id: &str,
 ) -> crate::errors::Result<()> {
     if target_stage == "produce" && next_chapter.is_none() {
+        // V1.47 P1: normalize user-facing copy — spec name, not repo path.
         // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
         return Err(crate::errors::CliError::Other(format!(
-            "This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md §3. \
+            "This Work is complete; see novel-author-experience §3. \
               Use `nexus42 creator works status {work_id}` or advance to the 'persist' stage."
         )));
     }
@@ -958,8 +959,13 @@ mod tests {
             "error should say 'Work is complete': {err_msg}"
         );
         assert!(
-            err_msg.contains("novel-author-experience.md"),
+            err_msg.contains("novel-author-experience"),
             "error should cite the author-experience spec: {err_msg}"
+        );
+        // R-V146P1-QC3-S4: no raw .mstar/ paths in user-facing copy.
+        assert!(
+            !err_msg.contains(".mstar/"),
+            "work-complete remediation must not cite raw .mstar/ paths: {err_msg}"
         );
         assert!(
             err_msg.contains("persist"),
