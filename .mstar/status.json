@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-15T05:00:00+08:00",
+  "updated_at": "2026-06-15T05:30:00+08:00",
   "plans": [],
   "v1_43_iteration_complete": true,
   "v1_44_iteration_complete": true,
@@ -1921,5 +1921,6 @@
       }
     ]
   },
-  "v1_46_iteration_complete": true
+  "v1_46_iteration_complete": true,
+  "v1_47_pre_implement_gate": "not_yet (V1.47 compass not yet authored; awaiting PM direction)"
 }

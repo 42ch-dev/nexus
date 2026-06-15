@@ -282,13 +282,13 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 ## 5) Related index
 
-**Latest active iteration**
-
-- **V1.46** (harness prepare complete 2026-06-14): [v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md](../iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md) — Novel author maturity + spec hygiene; integration branch `iteration/v1.46`; wave-0 `novel-author-experience.md` Draft overlay; 7 plans (P-1 Done, P0–P-last Todo); supersedes V1.45 P4 author-desk optional plan.
-
 **Latest shipped iteration**
 
-- **V1.45** (Shipped 2026-06-14): [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md) — CLI IA: `creator run <preset_id>` + `creator bootstrap` + atomic `creator works`; PR [#58](https://github.com/42ch-dev/nexus/pull/58) merged `9514bfdc`. 6 plans Done; P4 superseded by V1.46 P0; 3 trackers closed (BL-12, BL-13, DF-52); `creator-run-preset-entry.md` Draft → **Shipped Master V1.45**.
+- **V1.46** (Shipped 2026-06-15, P-last closeout): [v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md](../iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md) — Novel author maturity + spec hygiene + narrow runtime edges; PR [#59](https://github.com/42ch-dev/nexus/pull/59) MERGED at `e7c8656c` (2026-06-15); integration branch `iteration/v1.46` retired. 7 plans all Done (P-1 harness prepare + P0 author desk delta + P1 spec CLI hygiene + P2 runtime UX edges + P3 research E2E + P4 pool observability + P-last closeout); 5 QC tri-reviews + 5 fix rounds (one per implement plan); all 5 qa reports PASS. Wave-0 overlay `novel-author-experience.md` Draft → **Shipped (V1.46)** (P-last T1); `cli-spec.md` V1.46 Shipped amendment (P1 §6.2E deletion). 5 lifecycle residuals closed (R-V139P5-S1, R-V139P5-N1, R-V145B1-002, R-V141P1-15, R-V141P1-10 waive); pre-existing V1.45 clippy PM-override (R-V145-PRE-CLIPPY-001, risk-accepted, carry-forward to V1.47); 22 open low-severity V1.46 plan residuals + 1 pre-existing V1.45 clippy = 23 open. Profile B compaction complete. Supersedes V1.45 P4 author-desk optional plan (resolved by V1.46 P0).
+
+**Latest active iteration**
+
+- **V1.47** (placeholder; not yet authored) — expected focus: pre-existing V1.45 clippy hygiene + V1.46 residual triage + new V1.47 scope.
 
 **Recent shipped compasses** (detail in archive §2)
 
