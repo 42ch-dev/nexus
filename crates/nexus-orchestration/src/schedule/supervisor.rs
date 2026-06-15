@@ -335,10 +335,14 @@ impl ScheduleSupervisor {
             _ => unreachable!(),
         };
 
-        // Fetch creator_id for the schedule before removing from running set
+        // Fetch creator_id + preset_id for the schedule before removing from running set.
+        // V1.47 P0 fix (qc3 W-1): preset_id is inspected here so the review-findings
+        // hook can be short-circuited for non-review presets without an extra
+        // round-trip inside persist_review_findings_for_schedule.
         let schedule_id_owned = schedule_id.to_owned();
-        let row = sqlx::query_scalar!(
-            "SELECT creator_id FROM creator_schedules WHERE schedule_id = ?",
+        let schedule_row = sqlx::query!(
+            "SELECT creator_id as \"creator_id!\", preset_id as \"preset_id!\"
+             FROM creator_schedules WHERE schedule_id = ?",
             schedule_id_owned
         )
         .fetch_optional(&*self.pool)
@@ -358,7 +362,8 @@ impl ScheduleSupervisor {
         .await?;
 
         // Remove from running cache
-        if let Some(ref creator_id) = row {
+        if let Some(ref row) = schedule_row {
+            let creator_id = &row.creator_id;
             let mut inner = self.inner.lock().await;
             if let Some(ids) = inner.running_by_creator.get_mut(creator_id) {
                 ids.remove(&ScheduleId(schedule_id.to_string()));
@@ -368,7 +373,8 @@ impl ScheduleSupervisor {
         // V1.42 P0 (T3): Release runtime lock held by this schedule.
         // The holder format is `daemon:schedule:<schedule_id>`.
         // Look up the Work that was driven by this schedule and release its lock.
-        if let Some(ref creator_id) = &row {
+        if let Some(ref row) = schedule_row {
+            let creator_id = &row.creator_id;
             let holder = format!("daemon:schedule:{schedule_id}");
             // Best-effort: if the schedule wasn't a Work driver, this is a no-op.
             if let Err(e) = release_daemon_schedule_lock(&self.pool, creator_id, &holder).await {
@@ -384,8 +390,37 @@ impl ScheduleSupervisor {
         // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
         // Only on success — failed/cancelled schedules do not trigger auto-chain.
         if terminal_status == ScheduleStatus::Completed {
-            if let Some(ref creator_id) = row {
-                self.process_auto_chain_after_terminal(schedule_id, creator_id)
+            // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
+            // when a `novel-chapter-review` schedule completes. This is the
+            // **single code path** covering both the auto-chain driver and
+            // on-demand `creator run novel-chapter-review <work_id>` runs.
+            // It runs BEFORE `process_auto_chain_after_terminal` so findings
+            // exist before advancing to the persist stage. Best-effort:
+            // errors are logged and do NOT block the terminal transition
+            // (spec §8.4 invariant — finding creation must not fork/cancel
+            // the active driver).
+            //
+            // V1.47 P0 fix (qc3 W-1): only call the hook when the schedule's
+            // preset_id is `novel-chapter-review`. Other presets are a no-op
+            // and the guard avoids the extra schedule-row lookup that
+            // persist_review_findings_for_schedule would otherwise perform.
+            if schedule_row
+                .as_ref()
+                .is_some_and(|r| r.preset_id == "novel-chapter-review")
+            {
+                use crate::auto_chain;
+                if let Err(e) =
+                    auto_chain::persist_review_findings_for_schedule(&self.pool, schedule_id).await
+                {
+                    tracing::warn!(
+                        schedule_id,
+                        error = %e,
+                        "review-findings: persist hook failed (non-fatal)"
+                    );
+                }
+            }
+            if let Some(ref row) = schedule_row {
+                self.process_auto_chain_after_terminal(schedule_id, &row.creator_id)
                     .await;
             }
         }

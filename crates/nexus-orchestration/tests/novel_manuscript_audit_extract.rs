@@ -2,11 +2,11 @@
 //!
 //! Validates:
 //! 1. Preset loads via `load_embedded_preset` and passes validation.
-//! 2. Extract mode state machine: load_chapter → extract_sync → done.
-//! 3. extract_sync calls kb.extract_work with correct args.
+//! 2. Extract mode state machine: `load_chapter` → `extract_sync` → done.
+//! 3. `extract_sync` calls `kb.extract_work` with correct args.
 //! 4. No FL-E driver schedule fields in preset output.
-//! 5. world_binding is required (R-V144P0-002: daemon-side enforcement).
-//! 6. No review_report state in extract preset.
+//! 5. `world_binding` is required (R-V144P0-002: daemon-side enforcement).
+//! 6. No `review_report` state in extract preset.
 
 use nexus_orchestration::capability::CapabilityRegistry;
 use nexus_orchestration::preset::load_embedded_preset;
@@ -116,17 +116,18 @@ fn extract_sync_passes_world_id_and_work_id() {
         })
         .expect("must have kb.extract_work action");
 
-    if let manifest::EnterAction::Capability { args, .. } = extract_action {
-        if let Some(args) = args {
-            let has_world_id = args
-                .get("world_id")
-                .is_some_and(|v| v.as_str().is_some_and(|s| s.contains("world_id")));
-            let has_work_id = args
-                .get("work_id")
-                .is_some_and(|v| v.as_str().is_some_and(|s| s.contains("work_id")));
-            assert!(has_world_id, "kb.extract_work args must reference world_id");
-            assert!(has_work_id, "kb.extract_work args must reference work_id");
-        }
+    if let manifest::EnterAction::Capability {
+        args: Some(args), ..
+    } = extract_action
+    {
+        let has_world_id = args
+            .get("world_id")
+            .is_some_and(|v| v.as_str().is_some_and(|s| s.contains("world_id")));
+        let has_work_id = args
+            .get("work_id")
+            .is_some_and(|v| v.as_str().is_some_and(|s| s.contains("work_id")));
+        assert!(has_world_id, "kb.extract_work args must reference world_id");
+        assert!(has_work_id, "kb.extract_work args must reference work_id");
     }
 }
 
@@ -172,20 +173,22 @@ fn extract_no_fl_e_driver_fields() {
 
     for state in &loaded.manifest.states {
         for action in &state.enter {
-            if let manifest::EnterAction::Capability { args, .. } = action {
-                if let Some(args) = args {
-                    for (key, _) in args.as_object().unwrap_or(&serde_json::Map::new()) {
-                        assert!(
-                            !key.contains("fl_e_stage"),
-                            "extract preset must not set fl_e_stage: found in state '{}'",
-                            state.id
-                        );
-                        assert!(
-                            !key.contains("auto_chain"),
-                            "extract preset must not reference auto_chain: found in state '{}'",
-                            state.id
-                        );
-                    }
+            if let manifest::EnterAction::Capability {
+                args: Some(args), ..
+            } = action
+            {
+                let empty_map = serde_json::Map::new();
+                for (key, _) in args.as_object().unwrap_or(&empty_map) {
+                    assert!(
+                        !key.contains("fl_e_stage"),
+                        "extract preset must not set fl_e_stage: found in state '{}'",
+                        state.id
+                    );
+                    assert!(
+                        !key.contains("auto_chain"),
+                        "extract preset must not reference auto_chain: found in state '{}'",
+                        state.id
+                    );
                 }
             }
         }

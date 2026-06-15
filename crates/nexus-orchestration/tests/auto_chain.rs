@@ -4,7 +4,7 @@
 //! - AC1: Full auto-chain stage flow (intake → research → produce → review → persist)
 //! - AC2: Chapter outer loop (persist ch.N → produce ch.N+1)
 //! - AC3: Work completion after last chapter
-//! - AC4: Boot recovery (find_resumable_works)
+//! - AC4: Boot recovery (`find_resumable_works`)
 //! - AC6: --no-auto-chain still writes checkpoint fields
 
 use nexus_local_db::works::{self, WorkRecord};
@@ -82,8 +82,7 @@ async fn test_pool() -> SqlitePool {
 
 #[tokio::test]
 async fn ac1_intake_to_research_chain_action() {
-    let work = test_work("wrk_ac1", 0, 3, true);
-    let mut w = work.clone();
+    let mut w = test_work("wrk_ac1", 0, 3, true);
     w.current_stage = "intake".to_string();
     w.stage_status = "complete".to_string();
 
@@ -366,7 +365,7 @@ fn test_supervisor(pool: SqlitePool) -> Arc<ScheduleSupervisor> {
     Arc::new(ScheduleSupervisor::new(Arc::new(pool)))
 }
 
-/// Helper: insert a minimal schedule row directly (bypasses insert_pending validation).
+/// Helper: insert a minimal schedule row directly (bypasses `insert_pending` validation).
 async fn insert_driver_schedule(
     pool: &SqlitePool,
     schedule_id: &str,
@@ -408,7 +407,7 @@ async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> Option<String>
 }
 
 /// Helper: seed chapter rows for a work (required by volume-aware auto-chain).
-/// Chapter 1..=finalized are marked "finalized"; the rest are "not_started".
+/// Chapter 1..=finalized are marked "finalized"; the rest are "`not_started`".
 async fn seed_chapters(
     pool: &SqlitePool,
     work_id: &str,

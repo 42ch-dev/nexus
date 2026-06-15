@@ -403,11 +403,12 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 .unwrap_or(96 * 60 * 60);
             if stale_count > 0 {
                 let threshold_hours = threshold_secs / 3600;
+                // V1.47 P1: normalize user-facing copy — spec name, not repo path.
                 // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
                 println!(
                     "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
                      address open findings or run a review pass; \
-                     see .mstar/knowledge/specs/novel-author-experience.md §4"
+                     see novel-author-experience §4"
                 );
                 println!();
             }
@@ -470,7 +471,8 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 println!();
                 // V1.43 P2: findings summary in completed view (spec §4 row 3).
                 print_findings_summary(&open_findings, &resolved_id);
-                println!("  This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md §3");
+                // V1.47 P1: normalize user-facing copy — spec name, not repo path.
+                println!("  This Work is complete; see novel-author-experience §3");
                 println!();
                 println!("  To start a new Work, run:");
                 // V1.45 P2: hint updated from `run start` to `creator bootstrap`.
@@ -1741,8 +1743,8 @@ mod tests {
         assert!(output.contains("#2 [minor] \"Style issue\" → none"));
         // V1.46 P0 (Grill #7): per-finding hint only; no blanket footer.
         assert!(
-            !output.contains("reflection-loop"),
-            "blanket reflection-loop footer removed"
+            !output.contains("novel-chapter-review"),
+            "blanket novel-chapter-review footer removed"
         );
         assert!(
             !output.contains("quickstart"),
@@ -1759,6 +1761,39 @@ mod tests {
         assert!(output.contains("findings: 1 open"));
         assert!(output.contains("1 info"));
         assert!(output.contains("highest: info"));
+    }
+
+    /// V1.47 P1 regression guard (AC4): V1.46 per-finding `routing_hint`
+    /// behavior must be unchanged by the gate-remediation copy sweep.
+    /// Verifies that each finding row surfaces its own `routing_hint` and
+    /// that the summary does **not** inject a blanket footer pointing only
+    /// at `novel-chapter-review` (Grill #7 design).
+    #[test]
+    fn v146_routing_hint_behavior_unchanged() {
+        let findings = vec![
+            finding_json("blocker", "Continuity error", "→ write"),
+            finding_json("major", "Pacing drag", "→ outline"),
+            finding_json("minor", "Typo", "→ copyedit"),
+        ];
+        let output = capture_findings_output(&findings, "wrk_regression");
+        // Each per-finding hint appears verbatim in the output.
+        assert!(
+            output.contains("→ write"),
+            "per-finding routing_hint '→ write' must appear: {output}"
+        );
+        assert!(
+            output.contains("→ outline"),
+            "per-finding routing_hint '→ outline' must appear: {output}"
+        );
+        assert!(
+            output.contains("→ copyedit"),
+            "per-finding routing_hint '→ copyedit' must appear: {output}"
+        );
+        // No blanket novel-chapter-review footer (Grill #7).
+        assert!(
+            !output.contains("novel-chapter-review"),
+            "no blanket novel-chapter-review footer (Grill #7): {output}"
+        );
     }
 
     // ── Completion display tests ─────────────────────────────────────────

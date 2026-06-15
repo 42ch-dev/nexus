@@ -89,6 +89,8 @@ async fn seed_open_finding(pool: &SqlitePool, finding_id: &str, work_id: &str, a
         description: "Past the master-decision SLA".to_string(),
         target_executor: "master".to_string(),
         creator_id: TEST_CREATOR.to_string(),
+        kind: "craft".to_string(),
+        rule_suggestion: None,
         created_at: now - age_seconds,
         updated_at: now - age_seconds,
     };

@@ -448,8 +448,8 @@ mod tests {
                     manifest::EnterAction::Capability { args, .. } => {
                         args.as_ref()?.get("prompt_file")?.as_str()
                     }
-                    manifest::EnterAction::InnerGraph { .. } => None,
-                    manifest::EnterAction::HostTool { .. } => None,
+                    manifest::EnterAction::InnerGraph { .. }
+                    | manifest::EnterAction::HostTool { .. } => None,
                 })
             })
             .collect();
@@ -667,11 +667,11 @@ states:
     // ── P3: Agentic Pattern Preset tests ────────────────────────────────
 
     #[test]
-    fn list_embedded_presets_includes_reflection_loop() {
+    fn list_embedded_presets_includes_novel_chapter_review() {
         let presets = list_embedded_presets();
         assert!(
-            presets.iter().any(|p| p == "reflection-loop"),
-            "expected 'reflection-loop' in embedded presets: {presets:?}"
+            presets.iter().any(|p| p == "novel-chapter-review"),
+            "expected 'novel-chapter-review' in embedded presets: {presets:?}"
         );
     }
 
@@ -685,45 +685,17 @@ states:
     }
 
     #[test]
-    fn embedded_reflection_loop_loads_and_validates() {
+    fn embedded_novel_chapter_review_loads_and_validates() {
         let caps = CapabilityRegistry::with_builtins();
-        let loaded = load_embedded_preset("reflection-loop", &caps).unwrap();
+        let loaded = load_embedded_preset("novel-chapter-review", &caps).unwrap();
 
-        assert_eq!(loaded.id, "reflection-loop");
+        assert_eq!(loaded.id, "novel-chapter-review");
         assert_eq!(loaded.version, 1);
 
-        // Linear state machine: draft → revise → summarize → done
-        assert!(loaded.outer_graph.get_task("draft").is_some());
-        assert!(loaded.outer_graph.get_task("revise").is_some());
-        assert!(loaded.outer_graph.get_task("summarize").is_some());
+        // Linear state machine: load_chapter → review → done
+        assert!(loaded.outer_graph.get_task("load_chapter").is_some());
+        assert!(loaded.outer_graph.get_task("review").is_some());
         assert!(loaded.outer_graph.get_task("done").is_some());
-
-        // Two inner graphs: draft_graph, revise_graph
-        assert!(
-            loaded.inner_graphs.contains_key("draft_graph"),
-            "expected draft_graph inner graph"
-        );
-        assert!(
-            loaded.inner_graphs.contains_key("revise_graph"),
-            "expected revise_graph inner graph"
-        );
-
-        // Verify inner graph structure
-        let draft_graph = &loaded.inner_graphs["draft_graph"];
-        assert!(draft_graph.get_task("generate").is_some());
-
-        let revise_graph = &loaded.inner_graphs["revise_graph"];
-        assert!(revise_graph.get_task("apply_critique").is_some());
-
-        // Output bindings
-        assert_eq!(
-            loaded.output_bindings.get("draft_graph").unwrap(),
-            "generate.text"
-        );
-        assert_eq!(
-            loaded.output_bindings.get("revise_graph").unwrap(),
-            "apply_critique.text"
-        );
 
         // Source hash is non-trivial
         assert!(!loaded.source_hash.is_empty());
@@ -732,69 +704,37 @@ states:
         // Single-agent preset — no roles
         assert!(
             loaded.roles.is_empty(),
-            "reflection-loop should not have roles"
+            "novel-chapter-review should not have roles"
         );
     }
 
     #[test]
-    fn reflection_loop_has_llm_judge_exit_conditions() {
+    fn novel_chapter_review_uses_creator_inject_prompt_capability() {
         let caps = CapabilityRegistry::with_builtins();
-        let loaded = load_embedded_preset("reflection-loop", &caps).unwrap();
+        let loaded = load_embedded_preset("novel-chapter-review", &caps).unwrap();
 
-        // draft state uses llm_judge
-        let draft = loaded
+        // load_chapter state uses capability enter (creator.inject_prompt)
+        let load_chapter = loaded
             .manifest
             .states
             .iter()
-            .find(|s| s.id == "draft")
-            .unwrap();
-        match &draft.exit_when {
-            Some(manifest::ExitWhen::LlmJudge {
-                template_file,
-                judge_capability,
-                ..
-            }) => {
-                assert_eq!(
-                    template_file.as_deref(),
-                    Some("prompts/draft-quality-check.md")
-                );
-                assert_eq!(judge_capability.as_deref(), Some("judge.llm"));
-            }
-            other => panic!("expected llm_judge exit_when for draft, got: {other:?}"),
-        }
-
-        // revise state also uses llm_judge
-        let revise = loaded
-            .manifest
-            .states
-            .iter()
-            .find(|s| s.id == "revise")
-            .unwrap();
-        match &revise.exit_when {
-            Some(manifest::ExitWhen::LlmJudge {
-                template_file,
-                judge_capability,
-                ..
-            }) => {
-                assert_eq!(
-                    template_file.as_deref(),
-                    Some("prompts/revise-quality-check.md")
-                );
-                assert_eq!(judge_capability.as_deref(), Some("judge.llm"));
-            }
-            other => panic!("expected llm_judge exit_when for revise, got: {other:?}"),
-        }
-
-        // summarize state uses manual exit
-        let summarize = loaded
-            .manifest
-            .states
-            .iter()
-            .find(|s| s.id == "summarize")
+            .find(|s| s.id == "load_chapter")
             .unwrap();
         assert!(
-            matches!(summarize.exit_when, Some(manifest::ExitWhen::Manual)),
-            "expected manual exit_when for summarize"
+            !load_chapter.enter.is_empty(),
+            "load_chapter state should have enter capability"
+        );
+
+        // review state uses capability enter (creator.inject_prompt)
+        let review = loaded
+            .manifest
+            .states
+            .iter()
+            .find(|s| s.id == "review")
+            .unwrap();
+        assert!(
+            !review.enter.is_empty(),
+            "review state should have enter capability"
         );
 
         // done is terminal
@@ -808,40 +748,46 @@ states:
     }
 
     #[test]
-    fn reflection_loop_has_correct_prompt_files() {
+    fn novel_chapter_review_has_correct_prompt_files() {
+        use nexus_contracts::local::orchestration::preset::EnterAction;
+
         let caps = CapabilityRegistry::with_builtins();
-        let loaded = load_embedded_preset("reflection-loop", &caps).unwrap();
+        let loaded = load_embedded_preset("novel-chapter-review", &caps).unwrap();
 
-        // Verify prompt files referenced in inner_graph nodes
-        let _draft_graph = &loaded.inner_graphs["draft_graph"];
-        let _revise_graph = &loaded.inner_graphs["revise_graph"];
-
-        // draft_graph.generate should reference prompts/generate-draft.md
-        // (verified via inner graph node template_file)
-        if let Some(ref igs) = loaded.manifest.inner_graphs {
-            let draft_nodes = &igs["draft_graph"].nodes;
-            assert_eq!(draft_nodes[0].id, "generate");
-            assert_eq!(
-                draft_nodes[0].template_file.as_deref(),
-                Some("prompts/generate-draft.md")
-            );
-
-            let revise_nodes = &igs["revise_graph"].nodes;
-            assert_eq!(revise_nodes[0].id, "apply_critique");
-            assert_eq!(
-                revise_nodes[0].template_file.as_deref(),
-                Some("prompts/apply-critique.md")
-            );
-        }
-
-        // Verify all 5 prompt files exist in the embedded directory
+        // Verify the two prompt files referenced by the manifest exist.
         let prompts_dir = EMBEDDED_PRESETS
-            .get_dir("reflection-loop/prompts")
-            .expect("reflection-loop/prompts dir should exist");
+            .get_dir("novel-chapter-review/prompts")
+            .expect("novel-chapter-review/prompts dir should exist");
+        let prompt_count = prompts_dir.files().count();
         assert_eq!(
-            prompts_dir.files().count(),
-            5,
-            "expected 5 embedded prompt files for reflection-loop"
+            prompt_count, 2,
+            "expected 2 embedded prompt files for novel-chapter-review, got {prompt_count}"
+        );
+
+        // The manifest references prompts/load-chapter.md and prompts/review-report.md
+        // via `EnterAction::Capability { args: { prompt_file: ... } }`.
+        let prompt_refs: Vec<String> = loaded
+            .manifest
+            .states
+            .iter()
+            .flat_map(|s| {
+                s.enter.iter().filter_map(|step| match step {
+                    EnterAction::Capability { args, .. } => args
+                        .as_ref()
+                        .and_then(|args| args.get("prompt_file"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    _ => None,
+                })
+            })
+            .collect();
+        assert!(
+            prompt_refs.iter().any(|p| p == "prompts/load-chapter.md"),
+            "expected load-chapter.md prompt reference, got: {prompt_refs:?}"
+        );
+        assert!(
+            prompt_refs.iter().any(|p| p == "prompts/review-report.md"),
+            "expected review-report.md prompt reference, got: {prompt_refs:?}"
         );
     }
 
@@ -990,10 +936,11 @@ states:
     fn two_new_presets_in_registry_iteration() {
         let presets = list_embedded_presets();
 
-        // Must contain both new presets
+        // Must contain both new presets (V1.47: reflection-loop renamed to
+        // novel-chapter-review per compass §0.1 #6).
         assert!(
-            presets.iter().any(|p| p == "reflection-loop"),
-            "reflection-loop must be in embedded presets"
+            presets.iter().any(|p| p == "novel-chapter-review"),
+            "novel-chapter-review must be in embedded presets"
         );
         assert!(
             presets.iter().any(|p| p == "memory-augmented"),
@@ -1011,7 +958,7 @@ states:
         );
 
         // Total count: at least novel-writing + kb-extract + research +
-        // soul-experience-refresh + reflection-loop + memory-augmented = 6
+        // soul-experience-refresh + novel-chapter-review + memory-augmented = 6
         assert!(
             presets.len() >= 6,
             "expected at least 6 embedded presets, got {}: {presets:?}",
@@ -1163,8 +1110,7 @@ states:
             .collect();
         assert!(
             orphan_warnings.is_empty(),
-            "extraction_graph should NOT be orphan: {:?}",
-            orphan_warnings
+            "extraction_graph should NOT be orphan: {orphan_warnings:?}",
         );
     }
 
@@ -1273,16 +1219,13 @@ states:
         // kb.extract_work requires creator_id (omitted) → Error-severity
         // CapabilityArgDrift. Must NOT be downgraded (only creator.inject_prompt
         // gets the downgrade).
-        let drift_errors: Vec<_> = result
-            .errors()
-            .filter(|d| {
-                d.category == validation::DiagnosticCategory::CapabilityArgDrift
-                    && d.message.contains("capability 'kb.extract_work'")
-            })
-            .collect();
+        let has_drift_error = result.errors().any(|d| {
+            d.category == validation::DiagnosticCategory::CapabilityArgDrift
+                && d.message.contains("capability 'kb.extract_work'")
+        });
 
         assert!(
-            !drift_errors.is_empty(),
+            has_drift_error,
             "kb.extract_work CapabilityArgDrift should NOT be downgraded; expected at least one error, got: {:?}",
             result.diagnostics
         );
