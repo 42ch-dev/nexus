@@ -154,25 +154,29 @@
       "id": "2026-06-15-v1.47-quality-loop-spec-reconcile",
       "title": "P3 — Quality loop spec reconcile (docs-only)",
       "file": ".mstar/plans/2026-06-15-v1.47-quality-loop-spec-reconcile.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@writing-specialist",
       "agents": [
         "@writing-specialist",
         "@project-manager"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.47",
         "docs"
       ],
       "created_at": "2026-06-15",
       "updated_at": "2026-06-15",
-      "done_at": null,
+      "done_at": "2026-06-15",
       "notes": "",
       "metadata": {
         "working_branch": "feature/v1.47-quality-loop-spec-reconcile",
         "merge_target": "iteration/v1.47",
-        "depends_on": "2026-06-15-v1.47-serial-completion-hardening"
+        "depends_on": "2026-06-15-v1.47-serial-completion-hardening",
+        "qc_status": "skipped (docs-only per mstar-roles §Non-Bypass Constraints)",
+        "qa_status": "Pass",
+        "qa_commit": "9317790e",
+        "merge_commit": "1cc3d6e5"
       }
     },
     {
