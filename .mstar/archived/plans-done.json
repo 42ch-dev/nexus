@@ -189,7 +189,9 @@
     "2026-06-15-v1.47-gate-remediation-audit",
     "2026-06-15-v1.47-serial-completion-hardening",
     "2026-06-15-v1.47-quality-loop-spec-reconcile",
-    "2026-06-15-v1.47-hygiene-and-closeout"
+    "2026-06-15-v1.47-hygiene-and-closeout",
+    "2026-06-16-v1.48-findings-producer",
+    "2026-06-16-v1.48-serial-hardening"
   ],
   "iteration_summaries": {
     "v1.45": {
