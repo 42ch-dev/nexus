@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16T02:50:13+08:00",
+  "updated_at": "2026-06-16T07:29:29+08:00",
   "plans": [
     {
       "id": "2026-06-16-v1.48-harness-docs-prepare",
@@ -45,7 +45,7 @@
         "p0"
       ],
       "created_at": "2026-06-16",
-      "updated_at": "2026-06-16T02:09:19+08:00",
+      "updated_at": "2026-06-16T07:29:29+08:00",
       "metadata": {
         "commits": [
           "cb893a91",
@@ -58,7 +58,12 @@
           "e1b9da55"
         ],
         "merge_commit": "e2e51823",
-        "qc_status": "pending"
+        "qc_status": "approved",
+        "qc_re_review_commits": {
+          "findings-producer": "3d7fd300",
+          "serial-hardening-qc2": "aa0d7d7b",
+          "serial-hardening-qc3": "f9eaf857"
+        }
       },
       "working_branch": "feature/v1.48-findings-producer",
       "merge_target": "iteration/v1.48",
@@ -79,6 +84,11 @@
           "at": "2026-06-16",
           "event": "in_review",
           "evidence": "QC tri-review dispatched"
+        },
+        {
+          "at": "2026-06-16",
+          "event": "qc_tri_review_approved",
+          "evidence": "qc1+qc2+qc3 verdicts; targeted re-review on fix wave for qc3 findings"
         }
       ]
     },
@@ -183,7 +193,7 @@
         "p4"
       ],
       "created_at": "2026-06-16",
-      "updated_at": "2026-06-16T02:09:19+08:00",
+      "updated_at": "2026-06-16T07:29:29+08:00",
       "metadata": {
         "commits": [
           "2b75aa81",
@@ -193,7 +203,11 @@
           "f3893a19"
         ],
         "merge_commit": "bfc1f332",
-        "qc_status": "pending"
+        "qc_status": "approved",
+        "qc_re_review_commits": {
+          "qc2": "aa0d7d7b",
+          "qc3": "f9eaf857"
+        }
       },
       "working_branch": "feature/v1.48-serial-hardening",
       "merge_target": "iteration/v1.48",
@@ -214,6 +228,11 @@
           "at": "2026-06-16",
           "event": "in_review",
           "evidence": "QC tri-review dispatched"
+        },
+        {
+          "at": "2026-06-16",
+          "event": "qc_tri_review_approved",
+          "evidence": "qc1+qc2+qc3 verdicts; targeted re-review on fix wave for qc3 findings"
         }
       ]
     },
