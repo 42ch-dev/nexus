@@ -478,7 +478,7 @@ Locations searched (in order):
 
 1. `$XDG_CONFIG_HOME/nexus42/presets/<id>/` (user-installed)
 2. `$HOME/.nexus42/presets/<id>/`             (legacy / dev)
-3. Preset shipped in the binary (via `include_dir!`) under `nexus-orchestration/embedded-presets/<id>/` (currently `_system.maintenance`, `novel-writing`, `reflection-loop`, `memory-augmented`)
+3. Preset shipped in the binary (via `include_dir!`) under `nexus-orchestration/embedded-presets/<id>/` (currently `_system.maintenance`, `novel-writing`, `novel-chapter-review`, `memory-augmented`)
 
 ### 7.2 `preset.yaml` schema (v1)
 
@@ -694,7 +694,7 @@ The binary includes embedded presets under `crates/nexus-orchestration/embedded-
 | `research` | Reference ingest + synthesis | scanning → extracting → synthesizing → done | `creator.inject_prompt`, `acp.prompt`, `judge.llm` |
 | `kb-extract` | Work → World KB extraction | loading → extracting → done | `kb.extract_work`, `acp.prompt` |
 | `soul-experience-refresh` | SOUL Experience (deterministic) | aggregate → done | `soul.experience.aggregate` |
-| `reflection-loop` | Reflection demonstrator | draft → revise → summarize → done | `acp.prompt`, `judge.llm`, `context.summarize` |
+| `novel-chapter-review` | FL-E `review` stage — novel/work/chapter-aware review producer (findings writer, V1.47) | load_chapter → review → done | `creator.inject_prompt`, `acp.prompt` |
 | `memory-augmented` | Memory demonstrator | recall → generate → persist → done | `creator.*`, `judge.rule` |
 | `creative-brief-intake` | **V1.33 Shipped** (`2026-06-04-v1.33-creative-brief-intake-preset` P2 plan) — grill-me intake preset | intake → done | `acp.prompt` |
 

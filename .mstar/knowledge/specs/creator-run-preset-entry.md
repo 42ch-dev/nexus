@@ -72,7 +72,7 @@ Documented FL-E defaults (quickstart only):
 | --- | --- |
 | `research` | `research` |
 | `produce` | `novel-writing` |
-| `review` | `reflection-loop` |
+| `review` | `novel-chapter-review` |
 | `persist` | `kb-extract` |
 
 `intake` is triggered only via **`creator bootstrap`**, not manual `creator run`.
@@ -107,7 +107,7 @@ The generic runner maps parsed flags to `AddScheduleRequest.input`. P0 ships `cl
 1. Resolve `<preset_id>` (fail if unknown).
 2. Resolve `<work_id>`: positional arg or pool `active`; if none, fail with remediation → `creator bootstrap` or `creator works use`.
 3. Build schedule request (preset input from `cli_args`, Work-derived context from daemon).
-4. For FL-E default presets (`research`, `novel-writing`, `reflection-loop`, `kb-extract`), apply **stage advance** semantics before enqueue: validate stage gates, PATCH Work stage fields, then create schedule (Removed in V1.45; the explicit `creator run stage advance` CLI was replaced by this generic runner — see changelog).
+4. For FL-E default presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`), apply **stage advance** semantics before enqueue: validate stage gates, PATCH Work stage fields, then create schedule (Removed in V1.45; the explicit `creator run stage advance` CLI was replaced by this generic runner — see changelog).
 5. `POST /v1/local/orchestration/schedules` — orchestration validates `run_intents` and `gates`.
 6. Print schedule id (human or JSON).
 
