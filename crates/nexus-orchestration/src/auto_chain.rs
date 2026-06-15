@@ -111,8 +111,9 @@ pub async fn find_work_for_driver(
 /// 4. **V1.48 P0 T2**: when `workspace_dir` is `Some`, reads
 ///    `Works/<work_ref>/Logs/review/review-report.md` and parses it via
 ///    [`crate::review_report::parse_review_report`]. When ≥1 finding parses,
-///    each row is persisted via [`findings::create_finding_from_review`] with
-///    the parsed `kind` / `severity` / `body` / optional `rule_suggestion`
+///    each row is persisted via [`findings::create_finding_from_review_tx`]
+///    inside a single transaction with the parsed `kind` / `severity` /
+///    `body` / optional `rule_suggestion`
 ///    (per `.mstar/knowledge/specs/novel-findings-maturity.md` §1.2).
 /// 5. **Fallback** (V1.47 placeholder shape): when the report is missing,
 ///    unparsable, or yields zero findings — OR when `workspace_dir` is
@@ -328,7 +329,9 @@ async fn persist_placeholder_finding(
 ///   synthesis path (spec §1.3).
 ///
 /// Each non-`None` failure branch emits a `tracing::warn!` with the
-/// schedule/work context so operators can see the degrade.
+/// schedule/work context so operators can see the degrade. V1.48 P0-fix1
+/// (qc3 W-3): every fallback `warn!` includes `chapter` per spec §1.3
+/// (operator-debugging field for chapter-scoped review passes).
 async fn try_persist_parsed_findings(
     pool: &SqlitePool,
     workspace_dir: &std::path::Path,
@@ -368,6 +371,7 @@ async fn try_persist_parsed_findings(
                 schedule_id,
                 work_id,
                 work_ref,
+                chapter = ?chapter,
                 "review-findings: review-report.md parsed but contained no issues; \
                  falling back to V1.47 placeholder synthesis"
             );
@@ -378,6 +382,7 @@ async fn try_persist_parsed_findings(
                 schedule_id,
                 work_id,
                 work_ref,
+                chapter = ?chapter,
                 "review-findings: review-report.md not found; \
                  falling back to V1.47 placeholder synthesis"
             );
@@ -387,6 +392,7 @@ async fn try_persist_parsed_findings(
             tracing::warn!(
                 schedule_id,
                 work_id,
+                chapter = ?chapter,
                 path = %path.display(),
                 error = %e,
                 "review-findings: failed to read review-report.md; \
@@ -399,8 +405,27 @@ async fn try_persist_parsed_findings(
                 schedule_id,
                 work_id,
                 work_ref,
+                chapter = ?chapter,
                 parse_error = %reason,
                 "review-findings: review-report.md failed to parse; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+        // V1.48 P0-fix1 (qc3 W-1): bounded-read cap exceeded. `chapter`
+        // included per spec §1.3 (qc3 W-3 adds it to every fallback arm).
+        Err(ReportLoadError::TooLarge {
+            size_bytes,
+            cap_bytes,
+        }) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                chapter = ?chapter,
+                size_bytes,
+                cap_bytes,
+                "review-findings: review-report.md exceeds bounded-read cap; \
                  falling back to V1.47 placeholder synthesis"
             );
             Ok(None)
@@ -421,7 +446,23 @@ enum ReportLoadError {
     Read(std::path::PathBuf, std::io::Error),
     /// File was read but the parser rejected it.
     Parse(String),
+    /// V1.48 P0-fix1 (qc3 W-1): file size exceeds the bounded-read cap.
+    /// Falling back to placeholder synthesis is the documented safe degrade.
+    TooLarge { size_bytes: u64, cap_bytes: u64 },
 }
+
+/// Upper bound on how many bytes of `review-report.md` the supervisor will
+/// buffer into memory on the `on_schedule_terminal` hot path.
+///
+/// V1.48 P0-fix1 (qc3 W-1): a malformed or runaway LLM report must not
+/// consume unbounded memory on the producer path. The cap is sized for
+/// ~50 findings × ~2 KiB of prose (≈ 100 KiB typical) with a 2.5× headroom.
+/// The downstream [`persist_parsed_findings`] truncates each finding body to
+/// 2 000 chars anyway, so the persisted footprint stays bounded even when
+/// this cap is reached. If a legitimate report ever exceeds this, operators
+/// see a `tracing::warn!` with `size_bytes` / `cap_bytes` and the producer
+/// degrades to the V1.47 placeholder.
+const MAX_REVIEW_REPORT_BYTES: u64 = 256 * 1024;
 
 /// Resolve `<workspace_dir>/Works/<work_ref>/Logs/review/review-report.md`,
 /// read it, and parse it via [`crate::review_report::parse_review_report`].
@@ -429,14 +470,31 @@ enum ReportLoadError {
 /// Hermetic-friendly: takes an explicit `workspace_dir` so callers (and tests)
 /// control the FS root. The path layout is provided by `nexus-home-layout`
 /// (`work_logs_subdir`).
+///
+/// V1.48 P0-fix1 (qc3 W-1): the read is bounded by [`MAX_REVIEW_REPORT_BYTES`].
+/// `metadata()` is used for both missing-detection and the size check, so the
+/// happy path is two syscalls (stat + read). This also incidentally closes
+/// qc3 S-2 (drops the redundant `exists()` pre-check that previously made the
+/// path 3 syscalls).
 fn load_and_parse_review_report(
     workspace_dir: &std::path::Path,
     work_ref: &str,
 ) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
     let review_dir = nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
     let report_path = review_dir.join("review-report.md");
-    if !report_path.exists() {
-        return Err(ReportLoadError::Missing);
+    let metadata = match std::fs::metadata(&report_path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ReportLoadError::Missing);
+        }
+        Err(e) => return Err(ReportLoadError::Read(report_path, e)),
+    };
+    let size_bytes = metadata.len();
+    if size_bytes > MAX_REVIEW_REPORT_BYTES {
+        return Err(ReportLoadError::TooLarge {
+            size_bytes,
+            cap_bytes: MAX_REVIEW_REPORT_BYTES,
+        });
     }
     let content = match std::fs::read_to_string(&report_path) {
         Ok(c) => c,
@@ -457,6 +515,16 @@ fn load_and_parse_review_report(
 /// path uses the bare `schedule_id` (no suffix), so the two paths never
 /// collide on the index.
 ///
+/// V1.48 P0-fix1 (qc3 W-2): all parsed rows for one review report are
+/// persisted inside a **single `SQLite` transaction** (`BEGIN; …; COMMIT;`)
+/// via [`findings::create_finding_from_review_tx`]. This replaces the
+/// previous N-sequential-`INSERT` round-trips with one transaction boundary
+/// so a 20-issue report is now one DB round-trip envelope instead of 20.
+/// Idempotency semantics (`ON CONFLICT DO NOTHING` on the partial unique
+/// index) are unchanged. Per-row insert failures are still logged and do not
+/// abort the transaction (`SQLite` does not poison the tx on a statement-level
+/// error); whatever succeeded commits at the end.
+///
 /// Returns the count of rows actually inserted (best-effort: rows that hit
 /// the idempotent conflict are not counted).
 async fn persist_parsed_findings(
@@ -468,6 +536,26 @@ async fn persist_parsed_findings(
     schedule_id: &str,
 ) -> Result<usize, AutoChainError> {
     let mut inserted = 0usize;
+    // V1.48 P0-fix1 (qc3 W-2): one transaction wraps the whole batch so N
+    // parsed findings cost one DB round-trip envelope (BEGIN + N inserts via
+    // the `_tx` DAO variant + COMMIT) instead of N independent round-trips.
+    let mut tx = pool.begin().await.map_err(|e| {
+        let db_err = nexus_local_db::LocalDbError::from(e);
+        tracing::warn!(
+            schedule_id,
+            work_id,
+            error = %db_err,
+            "review-findings: failed to begin parsed-findings transaction; \
+             falling back to placeholder synthesis"
+        );
+        AutoChainError::from(db_err)
+    })?;
+    tracing::debug!(
+        schedule_id,
+        work_id,
+        finding_count = parsed.findings.len(),
+        "review-findings: persisting parsed findings in single transaction"
+    );
     for (idx, finding) in parsed.findings.iter().enumerate() {
         // Truncate body to a safe upper bound to avoid DB bloat. The from-review
         // DAO already enforces rule_suggestion size; the body uses the same
@@ -498,7 +586,8 @@ async fn persist_parsed_findings(
             rule_suggestion: finding.rule_suggestion.clone(),
             source_schedule_id: Some(source_schedule_id),
         };
-        match findings::create_finding_from_review(pool, &verdict).await {
+        // `_tx` variant executes against the shared transaction.
+        match findings::create_finding_from_review_tx(&mut tx, &verdict).await {
             Ok(_) => inserted += 1,
             Err(e) => {
                 tracing::warn!(
@@ -510,6 +599,9 @@ async fn persist_parsed_findings(
             }
         }
     }
+    tx.commit()
+        .await
+        .map_err(|e| AutoChainError::from(nexus_local_db::LocalDbError::from(e)))?;
     Ok(inserted)
 }
 
