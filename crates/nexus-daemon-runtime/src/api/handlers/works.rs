@@ -1527,7 +1527,12 @@ pub async fn reconcile_chapters(
     let workspace_root = std::path::Path::new(&workspace_path_str);
 
     let now = chrono::Utc::now().to_rfc3339();
-    let report = nexus_local_db::work_chapters::reconcile_from_filesystem(
+
+    // V1.48 P4-fix1 (W-2 qc3): release the lock on both Ok and Err paths.
+    // The previous `?` propagation on the reconcile call could return early
+    // without releasing the runtime lock, leaving the Work unwritable until
+    // restart. Mirrors the V1.42.1 hotfix pattern (R-V142-MERGE-CI-001).
+    let report = match nexus_local_db::work_chapters::reconcile_from_filesystem(
         pool,
         &work_id,
         work_ref,
@@ -1535,10 +1540,16 @@ pub async fn reconcile_chapters(
         &now,
     )
     .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: format!("reconcile failed: {e}"),
-    })?;
+    {
+        Ok(r) => r,
+        Err(e) => {
+            lock.release().await;
+            return Err(NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("reconcile failed: {e}"),
+            });
+        }
+    };
 
     // V1.42 P0 (T2): Release runtime lock before returning.
     lock.release().await;
