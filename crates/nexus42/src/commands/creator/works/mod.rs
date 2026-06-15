@@ -1741,8 +1741,8 @@ mod tests {
         assert!(output.contains("#2 [minor] \"Style issue\" → none"));
         // V1.46 P0 (Grill #7): per-finding hint only; no blanket footer.
         assert!(
-            !output.contains("reflection-loop"),
-            "blanket reflection-loop footer removed"
+            !output.contains("novel-chapter-review"),
+            "blanket novel-chapter-review footer removed"
         );
         assert!(
             !output.contains("quickstart"),

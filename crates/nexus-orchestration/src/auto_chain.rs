@@ -16,6 +16,7 @@
 
 use nexus_contracts::local::orchestration::{stage_index, FL_E_STAGES};
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
+use nexus_local_db::findings::{self, ReviewVerdictFinding};
 use nexus_local_db::novel_pool_entries;
 use nexus_local_db::works::{self, WorkPatch, WorkRecord};
 use sqlx::SqlitePool;
@@ -82,6 +83,165 @@ pub async fn find_work_for_driver(
     .map_err(nexus_local_db::LocalDbError::from)?;
 
     Ok(row.as_ref().map(works::row_to_work_record))
+}
+
+/// V1.47 P0 — Review-stage findings producer hook.
+///
+/// This is the **single code path** (spec §5.5.6 "Trigger paths — both
+/// required") that persists ≥1 finding row when a `novel-chapter-review`
+/// schedule reaches terminal status. It is called from the supervisor's
+/// `on_schedule_terminal(Completed)` for **both** the auto-chain driver
+/// schedule and on-demand `creator run novel-chapter-review <work_id>`
+/// schedules, satisfying acceptance criteria #1 and #2 of the V1.47 P0 plan.
+///
+/// # Behavior
+///
+/// 1. Loads the schedule row to read `preset_id`, `work_id`, `creator_id`.
+/// 2. Returns `Ok(0)` early when the preset is not `novel-chapter-review`
+///    (no-op for non-review schedules).
+/// 3. Loads the Work record for `chapter` context (`work.current_chapter`).
+/// 4. Synthesizes ≥1 `ReviewVerdictFinding` and persists it via
+///    [`findings::create_finding_from_review`]. The synthesized finding uses
+///    safe defaults (`kind=craft`, `severity=info`, `target_executor=none`)
+///    because the LLM judge output is not directly observable at the
+///    supervisor layer in P0 (the agent writes a richer report under
+///    `Works/<work_ref>/Logs/review/` as a side-effect; a follow-up slice
+///    can parse that artifact for richer findings).
+///
+/// Spec §8.4 invariant: finding creation MUST NOT fork or cancel the active
+/// FL-E driver schedule. This function performs only a DB INSERT and does
+/// not touch `driver_schedule_id`.
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the schedule/Work lookup or the
+/// finding INSERT fails. Errors are logged by the caller and do **not**
+/// block the supervisor terminal transition.
+pub async fn persist_review_findings_for_schedule(
+    pool: &SqlitePool,
+    schedule_id: &str,
+) -> Result<usize, AutoChainError> {
+    const REVIEW_PRESET_ID: &str = "novel-chapter-review";
+
+    // SAFETY: dynamic SQL — single-row schedule lookup by PK. `work_id` is
+    // nullable (added in 202606080002_creator_schedules_work_id.sql), so we
+    // cannot use `as "work_id!"` (NOT NULL assertion). `creator_id` and
+    // `preset_id` are NOT NULL per the original 20260419 migration.
+    let row = sqlx::query(
+        "SELECT preset_id, work_id, creator_id
+         FROM creator_schedules
+         WHERE schedule_id = ?",
+    )
+    .bind(schedule_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(nexus_local_db::LocalDbError::from)?;
+
+    let Some(row) = row else {
+        // Schedule row missing — nothing to do (caller already updated status).
+        tracing::debug!(
+            schedule_id,
+            "review-findings: schedule row not found; skipping"
+        );
+        return Ok(0);
+    };
+
+    // SAFETY: dynamic-SQL row → typed fields via ColumnIndex + TypeCheck.
+    // Columns are positional/named; sqlx runtime decode is fine for this
+    // nullable schema.
+    let preset_id: String = sqlx::Row::try_get(&row, "preset_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode preset_id: {e}")))?;
+    let creator_id: String = sqlx::Row::try_get(&row, "creator_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode creator_id: {e}")))?;
+    let work_id: Option<String> = sqlx::Row::try_get(&row, "work_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode work_id: {e}")))?;
+
+    if preset_id != REVIEW_PRESET_ID {
+        // Not a review schedule — no-op.
+        return Ok(0);
+    }
+
+    let Some(work_id) = work_id else {
+        tracing::warn!(
+            schedule_id,
+            "review-findings: schedule has NULL work_id; skipping"
+        );
+        return Ok(0);
+    };
+
+    // Work row may be missing for malformed schedules; log + return.
+    let work = match works::get_work(pool, &creator_id, &work_id).await {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            tracing::warn!(
+                schedule_id,
+                work_id = %work_id,
+                "review-findings: work not found; skipping"
+            );
+            return Ok(0);
+        }
+        Err(e) => return Err(AutoChainError::from(e)),
+    };
+
+    // Derive chapter context from Work's current_chapter (V1.38 §4.5.2).
+    // `current_chapter` is 0 until first finalize; treat 0 as Work-level.
+    let chapter: Option<i64> = if work.current_chapter > 0 {
+        Some(i64::from(work.current_chapter))
+    } else {
+        None
+    };
+
+    // Synthesize the minimum viable review finding per spec §8.2.
+    let chapter_ctx = chapter.map_or_else(|| "work-level".to_string(), |c| format!("chapter {c}"));
+    let title = format!("Review pass completed ({chapter_ctx})");
+    let work_ref_or_id = work.work_ref.as_deref().unwrap_or(&work_id);
+    let description = format!(
+        "Automated review pass for Work '{}' ({}) — {chapter_ctx}.\n\
+         The full review report is written under Works/{}/Logs/review/.\n\
+         \n\
+         (V1.47 P0: synthesized finding — the LLM review output is not parsed\n\
+         at the supervisor layer in this slice. A follow-up will parse the\n\
+         structured review artifact for richer kind/severity/rule_suggestion.)",
+        work.title, work_ref_or_id, work_ref_or_id,
+    );
+
+    let verdict = ReviewVerdictFinding {
+        work_id: work_id.clone(),
+        chapter,
+        // Safe defaults per spec §8.2 + §2.1; the synthesized finding is
+        // intentionally non-disruptive (`info` severity, `none` executor).
+        severity: "info".to_string(),
+        title,
+        description,
+        target_executor: "none".to_string(),
+        creator_id,
+        kind: "craft".to_string(),
+        // Optional — no rule suggestion in the synthesized path.
+        rule_suggestion: None,
+    };
+
+    match findings::create_finding_from_review(pool, &verdict).await {
+        Ok(finding_id) => {
+            tracing::info!(
+                schedule_id,
+                work_id = %work_id,
+                finding_id = %finding_id,
+                "review-findings: persisted finding for review pass"
+            );
+            Ok(1)
+        }
+        Err(e) => {
+            // R-V139P1-W-6: log + propagate so the caller can record the
+            // failure without blocking the terminal transition.
+            tracing::warn!(
+                schedule_id,
+                work_id = %work_id,
+                error = %e,
+                "review-findings: failed to persist finding"
+            );
+            Err(AutoChainError::from(e))
+        }
+    }
 }
 
 /// Determine the next chain action after a schedule completes.
@@ -609,6 +769,11 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         "novel-writing" => 7,
         "research" | "novel-review-master" => 2,
         "kb-extract" => 3,
+        // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
+        // per compass §0.1 #6). Bumped to version 1 (was already 1 as
+        // `reflection-loop`); the state-machine contract is intentionally new
+        // (load_chapter → review → done) but ships at v1 because no prior
+        // consumer depends on the old `reflection-loop` version.
         // All other presets default to version 1
         _ => 1,
     }

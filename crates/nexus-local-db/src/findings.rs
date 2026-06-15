@@ -1,9 +1,10 @@
 //! Finding CRUD operations for the quality-loop (novel-quality-loop §2.1, V1.39 P1).
 //!
 //! Manages the `findings` table — quality issues surfaced by the
-//! review/reflection-loop stage during auto-chain. Each finding is
-//! scoped to a Work (and optionally a chapter), carries a severity
-//! and status lifecycle, and provides a routing hint (`target_executor`)
+//! review stage (`novel-chapter-review` preset, V1.47) during auto-chain
+//! or on-demand `creator run`. Each finding is scoped to a Work (and
+//! optionally a chapter), carries a `kind`, severity, status lifecycle,
+//! optional `rule_suggestion`, and a routing hint (`target_executor`)
 //! indicating which preset should address it.
 
 use sqlx::SqlitePool;
@@ -31,6 +32,12 @@ pub struct Finding {
     pub target_executor: String,
     /// Owning creator (isolation).
     pub creator_id: String,
+    /// V1.47: finding category (`continuity`, `craft`, `plot_hole`,
+    /// `world_inconsistency`, …). NOT NULL with default `'craft'`.
+    pub kind: String,
+    /// V1.47: optional prose suggestion for Layer 2 rules; persisted on the
+    /// finding row only (no `AGENTS.md` write in P0).
+    pub rule_suggestion: Option<String>,
     /// Creation timestamp (Unix epoch).
     pub created_at: i64,
     /// Last update timestamp (Unix epoch).
@@ -50,6 +57,11 @@ pub struct FindingPatch {
     pub description: Option<String>,
     /// New routing hint.
     pub target_executor: Option<String>,
+    /// V1.47: new `kind` (optional).
+    pub kind: Option<String>,
+    /// V1.47: new `rule_suggestion` (optional; pass `Some(None)` via separate
+    /// sentinel is not supported — `None` means "do not patch").
+    pub rule_suggestion: Option<String>,
 }
 
 /// Filters for listing findings.
@@ -77,6 +89,14 @@ pub const VALID_STATUSES: &[&str] = &["open", "resolved", "wont_fix"];
 
 /// Valid `target_executor` values (R-V139P1-W-1).
 pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
+
+/// V1.47 §2.1 / §8.2: suggested minimum `kind` vocabulary for findings.
+///
+/// Open vocabulary — callers MAY use other kind strings; this list is the
+/// suggested minimum enumerated in the spec. Validation does **not** reject
+/// unknown kinds (the column is `TEXT`, not `CHECK`-constrained).
+pub const SUGGESTED_FINDING_KINDS: &[&str] =
+    &["continuity", "craft", "plot_hole", "world_inconsistency"];
 
 /// R-V139P1-W-2: Single source of truth for finding ID generation.
 ///
@@ -143,8 +163,8 @@ pub fn validate_finding_enums(
 pub async fn create_finding(pool: &SqlitePool, f: &Finding) -> Result<(), LocalDbError> {
     validate_finding_enums(&f.severity, &f.status, &f.target_executor)?;
     sqlx::query!(
-        "INSERT INTO findings (finding_id, work_id, chapter, severity, status, title, description, target_executor, creator_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO findings (finding_id, work_id, chapter, severity, status, title, description, target_executor, creator_id, kind, rule_suggestion, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         f.finding_id,
         f.work_id,
         f.chapter,
@@ -154,6 +174,8 @@ pub async fn create_finding(pool: &SqlitePool, f: &Finding) -> Result<(), LocalD
         f.description,
         f.target_executor,
         f.creator_id,
+        f.kind,
+        f.rule_suggestion,
         f.created_at,
         f.updated_at
     )
@@ -187,6 +209,7 @@ pub async fn list_findings(
                 title as \"title!\", description as \"description!\",
                 target_executor as \"target_executor!\",
                 creator_id as \"creator_id!\",
+                kind as \"kind!\", rule_suggestion,
                 created_at as \"created_at!\", updated_at as \"updated_at!\"
          FROM findings
          WHERE creator_id = ?
@@ -223,6 +246,8 @@ pub async fn list_findings(
             description: r.description,
             target_executor: r.target_executor,
             creator_id: r.creator_id,
+            kind: r.kind,
+            rule_suggestion: r.rule_suggestion,
             created_at: r.created_at,
             updated_at: r.updated_at,
         })
@@ -245,6 +270,7 @@ pub async fn get_finding(
                 title as \"title!\", description as \"description!\",
                 target_executor as \"target_executor!\",
                 creator_id as \"creator_id!\",
+                kind as \"kind!\", rule_suggestion,
                 created_at as \"created_at!\", updated_at as \"updated_at!\"
          FROM findings
          WHERE creator_id = ? AND finding_id = ?",
@@ -264,6 +290,8 @@ pub async fn get_finding(
         description: r.description,
         target_executor: r.target_executor,
         creator_id: r.creator_id,
+        kind: r.kind,
+        rule_suggestion: r.rule_suggestion,
         created_at: r.created_at,
         updated_at: r.updated_at,
     }))
@@ -325,6 +353,8 @@ pub async fn update_finding(
              title           = COALESCE(?, title),
              description     = COALESCE(?, description),
              target_executor = COALESCE(?, target_executor),
+             kind            = COALESCE(?, kind),
+             rule_suggestion = COALESCE(?, rule_suggestion),
              updated_at      = ?
          WHERE creator_id = ? AND finding_id = ?",
         patch.severity,
@@ -332,6 +362,8 @@ pub async fn update_finding(
         patch.title,
         patch.description,
         patch.target_executor,
+        patch.kind,
+        patch.rule_suggestion,
         now_epoch,
         creator_id,
         finding_id
@@ -558,6 +590,13 @@ pub struct ReviewVerdictFinding {
     pub target_executor: String,
     /// Owning creator.
     pub creator_id: String,
+    /// V1.47 §2.1 / §8.2: finding category. Callers SHOULD pick from
+    /// [`SUGGESTED_FINDING_KINDS`] but any non-empty string is accepted.
+    /// Defaults to `"craft"` when empty.
+    pub kind: String,
+    /// V1.47 §8.2: optional prose suggestion for Layer 2 rules.
+    /// Persisted on the finding row only; V1.47 P0 does not write `AGENTS.md`.
+    pub rule_suggestion: Option<String>,
 }
 
 /// Create a finding from a review-stage verdict (T3 minimal path).
@@ -575,6 +614,13 @@ pub async fn create_finding_from_review(
 ) -> Result<String, LocalDbError> {
     let finding_id = mint_finding_id();
     let now = chrono::Utc::now().timestamp();
+    // V1.47 §8.2: `kind` defaults to `"craft"` when empty (defensive — callers
+    // should set it explicitly, but the spec lists `craft` as a safe default).
+    let kind = if verdict.kind.is_empty() {
+        "craft".to_string()
+    } else {
+        verdict.kind.clone()
+    };
     let f = Finding {
         finding_id: finding_id.clone(),
         work_id: verdict.work_id.clone(),
@@ -585,6 +631,8 @@ pub async fn create_finding_from_review(
         description: verdict.description.clone(),
         target_executor: verdict.target_executor.clone(),
         creator_id: verdict.creator_id.clone(),
+        kind,
+        rule_suggestion: verdict.rule_suggestion.clone(),
         created_at: now,
         updated_at: now,
     };

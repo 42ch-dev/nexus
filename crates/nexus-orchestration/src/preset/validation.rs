@@ -1608,7 +1608,7 @@ pub const STAGE_PRESET_ALLOWLIST: &[(&str, &[&str])] = &[
     ("intake", &["creative-brief-intake"]),
     ("research", &["research"]),
     ("produce", &["novel-writing"]),
-    ("review", &["reflection-loop"]),
+    ("review", &["novel-chapter-review"]),
     // R-FL-E-06: persist stage default is kb-extract (via queue)
     ("persist", &["kb-extract"]),
 ];
@@ -1692,7 +1692,10 @@ mod stage_tests {
         );
         assert_eq!(default_preset_for_stage("research"), Some("research"));
         assert_eq!(default_preset_for_stage("produce"), Some("novel-writing"));
-        assert_eq!(default_preset_for_stage("review"), Some("reflection-loop"));
+        assert_eq!(
+            default_preset_for_stage("review"),
+            Some("novel-chapter-review")
+        );
         assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
     }
 

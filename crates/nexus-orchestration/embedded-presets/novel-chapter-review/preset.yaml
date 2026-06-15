@@ -1,0 +1,101 @@
+# Novel Chapter Review Preset — FL-E `review` Stage (V1.47 P0)
+#
+# Replaces the generic `reflection-loop` demo (V1.31) per V1.47 compass §0.1 #6.
+# This is the novel/work/chapter-aware review that persists ≥1 finding per
+# review pass via the supervisor's terminal hook (novel-quality-loop.md §8).
+#
+# State machine: load_chapter → review → done
+# - `load_chapter`: surface chapter body + outline + rules + World KB context
+#   to the review agent via `creator.inject_prompt`.
+# - `review`: structured 五问 review; the agent writes a report under
+#   `Works/<work_ref>/Logs/review/` as a side-effect.
+# - `done` (terminal): the supervisor's `on_schedule_terminal` hook keys off
+#   `preset_id == "novel-chapter-review"` and synthesizes ≥1 finding row via
+#   `create_finding_from_review`. Both auto-chain and on-demand
+#   `creator run novel-chapter-review <work_id>` reach the same code path.
+#
+# Input variables (populated by `stage_gates::build_preset_input`):
+#   work_id:         Work entity ID (wrk_...).
+#   work_ref:        Human-readable short reference (directory name).
+#   chapter:         Integer chapter number under review.
+#   chapter_label:   Zero-padded chapter label (e.g. "01").
+#   body_path:       Path to the chapter body file.
+#   outline_path:    Path to the chapter outline file.
+#   slug:            Chapter slug from `work_chapters.slug`.
+#   creative_brief:  Work-level creative brief JSON (may be empty).
+#   inspiration_log: Work-level inspiration log JSON (may be "[]").
+#   rules_content:   Layer 1 + Layer 2 writing-craft rules (best-effort).
+#   world_kb_block:  World KB YAML block (empty for worldless Works).
+#
+# Manual run command:
+#   nexus42 creator run novel-chapter-review <work_id>
+
+preset:
+  id: novel-chapter-review
+  version: 1
+  kind: creator
+  description: "FL-E review stage: novel/work/chapter-aware 五问 review that persists findings via the supervisor terminal hook"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+  run_intents:
+    - work_continue
+  initial: load_chapter
+  terminal: done
+  world_binding:
+    mode: optional
+  gates:
+    # V1.47 §5.5.6: review runs only on novel Works.
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+
+states:
+  - id: load_chapter
+    description: "Surface chapter body + outline + rules + World KB context to the review agent"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/load-chapter.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            chapter: "{{preset.input.chapter}}"
+            chapter_label: "{{preset.input.chapter_label}}"
+            body_path: "{{preset.input.body_path}}"
+            outline_path: "{{preset.input.outline_path}}"
+            slug: "{{preset.input.slug}}"
+            creative_brief: "{{preset.input.creative_brief}}"
+            inspiration_log: "{{preset.input.inspiration_log}}"
+            rules_content: "{{preset.input.rules_content}}"
+            world_kb_block: "{{preset.input.world_kb_block}}"
+    exit_when:
+      kind: manual
+    next: review
+
+  - id: review
+    description: "Run structured 五问 review and write report under Logs/review/"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/review-report.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            chapter: "{{preset.input.chapter}}"
+            chapter_label: "{{preset.input.chapter_label}}"
+            slug: "{{preset.input.slug}}"
+            rules_content: "{{preset.input.rules_content}}"
+            world_kb_block: "{{preset.input.world_kb_block}}"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: done
+    terminal: true
