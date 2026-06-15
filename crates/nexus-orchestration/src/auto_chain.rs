@@ -232,8 +232,16 @@ pub async fn persist_review_findings_for_schedule(
     }
 
     // ── V1.47 placeholder synthesis (fallback per spec §1.3) ───────────────
-    persist_placeholder_finding(pool, &work, &work_id, &creator_id, chapter, &work_ref_or_id, schedule_id)
-        .await
+    persist_placeholder_finding(
+        pool,
+        &work,
+        &work_id,
+        &creator_id,
+        chapter,
+        &work_ref_or_id,
+        schedule_id,
+    )
+    .await
 }
 
 /// Persist the V1.47 single placeholder finding (spec §8.2 safe defaults).
@@ -425,8 +433,7 @@ fn load_and_parse_review_report(
     workspace_dir: &std::path::Path,
     work_ref: &str,
 ) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
-    let review_dir =
-        nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
+    let review_dir = nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
     let report_path = review_dir.join("review-report.md");
     if !report_path.exists() {
         return Err(ReportLoadError::Missing);
@@ -435,7 +442,8 @@ fn load_and_parse_review_report(
         Ok(c) => c,
         Err(e) => return Err(ReportLoadError::Read(report_path, e)),
     };
-    crate::review_report::parse_review_report(&content).map_err(|e| ReportLoadError::Parse(e.to_string()))
+    crate::review_report::parse_review_report(&content)
+        .map_err(|e| ReportLoadError::Parse(e.to_string()))
 }
 
 /// Persist each parsed finding as its own row via the from-review DAO.

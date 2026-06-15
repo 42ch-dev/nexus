@@ -165,8 +165,7 @@ pub fn parse_review_report(content: &str) -> Result<ParsedReviewReport, ParseErr
     let findings_section = sections
         .iter()
         .find(|(heading, _)| heading_eq(heading, "issues"))
-        .map(|(_, body)| body.as_str())
-        .unwrap_or("");
+        .map_or("", |(_, body)| body.as_str());
 
     let findings = parse_issues_bullets(findings_section);
 
@@ -202,7 +201,10 @@ fn split_sections(content: &str) -> Vec<(String, String)> {
             .or_else(|| trimmed.strip_prefix("## "))
         {
             if saw_any_heading || !current_body.trim().is_empty() {
-                out.push((std::mem::take(&mut current_heading), std::mem::take(&mut current_body)));
+                out.push((
+                    std::mem::take(&mut current_heading),
+                    std::mem::take(&mut current_body),
+                ));
             } else {
                 // First ever content was a heading — no preamble to push.
                 current_heading.clear();
@@ -227,10 +229,7 @@ fn heading_eq(actual: &str, expected_lower: &str) -> bool {
 
 /// Parse bullets inside the `## Issues` section body into findings.
 fn parse_issues_bullets(section_body: &str) -> Vec<ParsedFinding> {
-    section_body
-        .lines()
-        .filter_map(parse_issue_line)
-        .collect()
+    section_body.lines().filter_map(parse_issue_line).collect()
 }
 
 /// Parse one `- ...` (or `* ...`) bullet into a finding.
@@ -251,14 +250,13 @@ fn parse_issue_line(line: &str) -> Option<ParsedFinding> {
         return None;
     }
 
-    let kind_raw = tags.get("kind").map(String::as_str).unwrap_or("");
+    let kind_raw = tags.get("kind").map_or("", String::as_str);
     let kind = map_kind(kind_raw).unwrap_or("craft").to_string();
-    let severity = map_severity(tags.get("severity").map(String::as_str).unwrap_or(""));
+    let severity = map_severity(tags.get("severity").map_or("", String::as_str));
     let target_executor = map_target_executor(
         tags.get("executor")
             .or_else(|| tags.get("target_executor"))
-            .map(String::as_str)
-            .unwrap_or(""),
+            .map_or("", String::as_str),
         &kind,
     )
     .to_string();
@@ -417,7 +415,10 @@ mod tests {
     #[test]
     fn parse_empty_content_is_an_error() {
         assert_eq!(parse_review_report("").unwrap_err(), ParseError::Empty);
-        assert_eq!(parse_review_report("   \n\t ").unwrap_err(), ParseError::Empty);
+        assert_eq!(
+            parse_review_report("   \n\t ").unwrap_err(),
+            ParseError::Empty
+        );
     }
 
     #[test]
@@ -522,7 +523,10 @@ Adequate; no actionable issues.
 ";
         let parsed = parse_review_report(report).expect("must parse");
         assert!(parsed.findings.is_empty());
-        assert_eq!(parsed.overall_assessment.as_deref(), Some("Adequate; no actionable issues."));
+        assert_eq!(
+            parsed.overall_assessment.as_deref(),
+            Some("Adequate; no actionable issues.")
+        );
     }
 
     #[test]
@@ -546,7 +550,11 @@ Adequate; no actionable issues.
 - Also real. kind: plot_hole, severity: minor
 ";
         let parsed = parse_review_report(report).expect("must parse");
-        assert_eq!(parsed.findings.len(), 2, "middle bullet (tag-only) is dropped");
+        assert_eq!(
+            parsed.findings.len(),
+            2,
+            "middle bullet (tag-only) is dropped"
+        );
         assert_eq!(parsed.findings[0].kind, "craft");
         assert_eq!(parsed.findings[1].kind, "plot_hole");
     }

@@ -102,7 +102,10 @@ async fn insert_review_schedule(pool: &SqlitePool, schedule_id: &str, work_id: &
     .unwrap();
 }
 
-async fn list_work_findings(pool: &SqlitePool, work_id: &str) -> Vec<nexus_local_db::findings::Finding> {
+async fn list_work_findings(
+    pool: &SqlitePool,
+    work_id: &str,
+) -> Vec<nexus_local_db::findings::Finding> {
     let filters = FindingListFilters {
         work_id: Some(work_id.to_string()),
         ..Default::default()
@@ -209,13 +212,9 @@ rule_suggestion: Pin dialect per region in AGENTS.md
 ";
     let ws_root = write_report_file("rule-novel", report);
 
-    auto_chain::persist_review_findings_for_schedule(
-        &pool,
-        "sch_rule_review",
-        Some(&ws_root),
-    )
-    .await
-    .unwrap();
+    auto_chain::persist_review_findings_for_schedule(&pool, "sch_rule_review", Some(&ws_root))
+        .await
+        .unwrap();
 
     let rows = list_work_findings(&pool, "wrk_rule").await;
     assert_eq!(rows.len(), 1);
@@ -246,13 +245,9 @@ async fn parsed_report_applies_executor_default_when_omitted() {
 ";
     let ws_root = write_report_file("exec-novel", report);
 
-    auto_chain::persist_review_findings_for_schedule(
-        &pool,
-        "sch_exec_review",
-        Some(&ws_root),
-    )
-    .await
-    .unwrap();
+    auto_chain::persist_review_findings_for_schedule(&pool, "sch_exec_review", Some(&ws_root))
+        .await
+        .unwrap();
 
     let rows = list_work_findings(&pool, "wrk_exec").await;
     assert_eq!(rows.len(), 2);
@@ -342,13 +337,10 @@ Adequate; no actionable issues this pass.
 ";
     let ws_root = write_report_file("empty-novel", report);
 
-    let count = auto_chain::persist_review_findings_for_schedule(
-        &pool,
-        "sch_empty_review",
-        Some(&ws_root),
-    )
-    .await
-    .expect("zero-findings report must NOT fail the persist call");
+    let count =
+        auto_chain::persist_review_findings_for_schedule(&pool, "sch_empty_review", Some(&ws_root))
+            .await
+            .expect("zero-findings report must NOT fail the persist call");
     assert!(
         count >= 1,
         "zero-findings fallback must persist ≥1 placeholder; got {count}"
@@ -415,13 +407,10 @@ async fn non_review_preset_is_noop_with_workspace_dir() {
 
     let ws_root = tempfile::tempdir().unwrap().keep();
 
-    let count = auto_chain::persist_review_findings_for_schedule(
-        &pool,
-        "sch_nonrev",
-        Some(&ws_root),
-    )
-    .await
-    .expect("non-review call must succeed (early no-op)");
+    let count =
+        auto_chain::persist_review_findings_for_schedule(&pool, "sch_nonrev", Some(&ws_root))
+            .await
+            .expect("non-review call must succeed (early no-op)");
 
     assert_eq!(count, 0, "non-review preset must be a no-op");
     let rows = list_work_findings(&pool, "wrk_nonrev").await;
