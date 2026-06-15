@@ -7,7 +7,7 @@
 //! optional `rule_suggestion`, and a routing hint (`target_executor`)
 //! indicating which preset should address it.
 
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
@@ -765,12 +765,43 @@ pub struct ReviewVerdictFinding {
 /// When `verdict.source_schedule_id` is `None` (manual CRUD / API path), the
 /// standard insert is used with no idempotency guard.
 ///
+/// V1.48 P0-fix1 (qc3 W-2): this pool-based entrypoint opens its own
+/// single-statement transaction and delegates to [`create_finding_from_review_tx`].
+/// Batched callers (e.g. the parsed-report path in `nexus-orchestration`) should
+/// use [`create_finding_from_review_tx`] directly so N rows share one transaction
+/// instead of N round-trips.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails or the finding enum
 /// fields are invalid.
 pub async fn create_finding_from_review(
     pool: &SqlitePool,
+    verdict: &ReviewVerdictFinding,
+) -> Result<String, LocalDbError> {
+    let mut tx = pool.begin().await?;
+    let finding_id = create_finding_from_review_tx(&mut tx, verdict).await?;
+    tx.commit().await?;
+    Ok(finding_id)
+}
+
+/// Transaction-scoped variant of [`create_finding_from_review`].
+///
+/// V1.48 P0-fix1 (qc3 W-2): introduced so the parsed-report persistence loop
+/// in `nexus-orchestration::auto_chain::persist_parsed_findings` can insert
+/// N findings inside a single `SQLite` transaction (one `BEGIN`/`COMMIT` pair)
+/// instead of N sequential round-trips.
+///
+/// The semantics are identical to [`create_finding_from_review`]; only the
+/// executor differs (`&mut Transaction` vs `&SqlitePool`). Callers own the
+/// transaction boundary and must `commit()` after all rows are inserted.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails or the finding enum
+/// fields are invalid.
+pub async fn create_finding_from_review_tx(
+    tx: &mut Transaction<'_, Sqlite>,
     verdict: &ReviewVerdictFinding,
 ) -> Result<String, LocalDbError> {
     validate_finding_enums(&verdict.severity, "open", &verdict.target_executor)?;
@@ -819,7 +850,7 @@ pub async fn create_finding_from_review(
         .bind(source_schedule_id)
         .bind(now)
         .bind(now)
-        .execute(pool)
+        .execute(&mut **tx)
         .await?;
 
         if result.rows_affected() == 1 {
@@ -835,7 +866,7 @@ pub async fn create_finding_from_review(
         .bind(&verdict.work_id)
         .bind(verdict.chapter)
         .bind(source_schedule_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut **tx)
         .await?;
 
         existing.ok_or_else(|| LocalDbError::ConstraintViolation {
@@ -845,22 +876,35 @@ pub async fn create_finding_from_review(
         })
     } else {
         // Standard path: manual CRUD / API (no idempotency guard).
-        let f = Finding {
-            finding_id: finding_id.clone(),
-            work_id: verdict.work_id.clone(),
-            chapter: verdict.chapter,
-            severity: verdict.severity.clone(),
-            status: "open".to_string(),
-            title: verdict.title.clone(),
-            description: verdict.description.clone(),
-            target_executor: verdict.target_executor.clone(),
-            creator_id: verdict.creator_id.clone(),
-            kind,
-            rule_suggestion,
-            created_at: now,
-            updated_at: now,
-        };
-        create_finding(pool, &f).await?;
+        // Mirrors `create_finding`'s INSERT, inlined here so the `_tx`
+        // variant does not need to reach back through the pool-based
+        // `create_finding` (which would open its own nested transaction).
+        // SAFETY: runtime query — mirrors the compile-time-checked INSERT in
+        // `create_finding`; the `.sqlx` cache is not warmed for the `_tx`
+        // variant's executor shape (see nexus-local-db AGENTS.md waiver
+        // R-V140P0-S3). The column list + bind order match `create_finding`.
+        sqlx::query(
+            "INSERT INTO findings
+               (finding_id, work_id, chapter, severity, status, title,
+                description, target_executor, creator_id, kind,
+                rule_suggestion, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&finding_id)
+        .bind(&verdict.work_id)
+        .bind(verdict.chapter)
+        .bind(&verdict.severity)
+        .bind("open")
+        .bind(&verdict.title)
+        .bind(&verdict.description)
+        .bind(&verdict.target_executor)
+        .bind(&verdict.creator_id)
+        .bind(&kind)
+        .bind(&rule_suggestion)
+        .bind(now)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
         Ok(finding_id)
     }
 }
