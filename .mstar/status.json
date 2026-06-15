@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-15T14:00:00+08:00",
+  "updated_at": "2026-06-15",
   "plans": [
     {
       "id": "2026-06-15-v1.47-harness-docs-prepare",
@@ -8,9 +8,16 @@
       "file": ".mstar/plans/2026-06-15-v1.47-harness-docs-prepare.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@project-manager", "@writing-specialist"],
+      "agents": [
+        "@project-manager",
+        "@writing-specialist"
+      ],
       "progress": 100,
-      "tags": ["v1.47", "harness", "docs"],
+      "tags": [
+        "v1.47",
+        "harness",
+        "docs"
+      ],
       "created_at": "2026-06-15",
       "updated_at": "2026-06-15",
       "done_at": "2026-06-15",
@@ -25,18 +32,39 @@
       "id": "2026-06-15-v1.47-reflection-loop-findings",
       "title": "P0 — Novel review preset → findings",
       "file": ".mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
-      "progress": 0,
-      "tags": ["v1.47", "feature", "quality-loop"],
+      "agents": [
+        "@fullstack-dev"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.47",
+        "feature",
+        "quality-loop"
+      ],
       "created_at": "2026-06-15",
       "updated_at": "2026-06-15",
-      "done_at": null,
+      "done_at": "2026-06-15",
       "notes": "",
       "metadata": {
         "working_branch": "feature/v1.47-reflection-loop-findings",
-        "merge_target": "iteration/v1.47"
+        "merge_target": "iteration/v1.47",
+        "implementation_commits": [
+          "d0cf8a7a4f2c063880062172121d7aa01957b8e1"
+        ],
+        "implementation_completed_at": "2026-06-15",
+        "review_range": "merge-base: origin/main",
+        "review_tip": "HEAD (d0cf8a7a)",
+        "qc_status": "Approve (3/3, after targeted re-review)",
+        "qa_status": "Pass",
+        "qc_review_commits": [
+          "453b825b",
+          "350ff6e8",
+          "222653ee"
+        ],
+        "qa_commit": "c26fd7a4",
+        "merge_commit": "82bc904c"
       }
     },
     {
@@ -45,9 +73,14 @@
       "file": ".mstar/plans/2026-06-15-v1.47-gate-remediation-audit.md",
       "status": "Todo",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 0,
-      "tags": ["v1.47", "feature"],
+      "tags": [
+        "v1.47",
+        "feature"
+      ],
       "created_at": "2026-06-15",
       "updated_at": "2026-06-15",
       "done_at": null,
@@ -64,9 +97,14 @@
       "file": ".mstar/plans/2026-06-15-v1.47-serial-completion-hardening.md",
       "status": "Todo",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 0,
-      "tags": ["v1.47", "feature"],
+      "tags": [
+        "v1.47",
+        "feature"
+      ],
       "created_at": "2026-06-15",
       "updated_at": "2026-06-15",
       "done_at": null,
@@ -83,9 +121,15 @@
       "file": ".mstar/plans/2026-06-15-v1.47-quality-loop-spec-reconcile.md",
       "status": "Todo",
       "owner": "@writing-specialist",
-      "agents": ["@writing-specialist", "@project-manager"],
+      "agents": [
+        "@writing-specialist",
+        "@project-manager"
+      ],
       "progress": 0,
-      "tags": ["v1.47", "docs"],
+      "tags": [
+        "v1.47",
+        "docs"
+      ],
       "created_at": "2026-06-15",
       "updated_at": "2026-06-15",
       "done_at": null,
@@ -102,9 +146,16 @@
       "file": ".mstar/plans/2026-06-15-v1.47-hygiene-and-closeout.md",
       "status": "Todo",
       "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@writing-specialist", "@project-manager"],
+      "agents": [
+        "@fullstack-dev",
+        "@writing-specialist",
+        "@project-manager"
+      ],
       "progress": 0,
-      "tags": ["v1.47", "hygiene"],
+      "tags": [
+        "v1.47",
+        "hygiene"
+      ],
       "created_at": "2026-06-15",
       "updated_at": "2026-06-15",
       "done_at": null,
@@ -2041,6 +2092,74 @@
         "decision": "defer",
         "owner": "@fullstack-dev or @writing-specialist",
         "target": "V1.46 or later"
+      }
+    ],
+    "2026-06-15-v1.47-reflection-loop-findings": [
+      {
+        "id": "R-V147P0-01",
+        "title": "V1.48+ — Parse review-report.md for richer finding kind/severity/rule_suggestion (synthesized placeholder)",
+        "severity": "low",
+        "source": "qc1 S-1 (durable roadmap gate)",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs::persist_review_findings_for_schedule",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.48+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-01]"
+      },
+      {
+        "id": "R-V147P0-02",
+        "title": "V1.48+ — Findings retention/cleanup policy (qc3 W-2 residue; unique index now blocks duplicates but no TTL)",
+        "severity": "low",
+        "source": "qc3 W-2 residue",
+        "scope": "crates/nexus-local-db/src/findings.rs + migrations/",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.48+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-02]"
+      },
+      {
+        "id": "R-V147P0-03",
+        "title": "V1.48+ — FindingPatch.rule_suggestion clear-to-NULL path (COALESCE semantics; cannot clear once set)",
+        "severity": "low",
+        "source": "qc1 S-2",
+        "scope": "crates/nexus-local-db/src/findings.rs::update_finding",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.48+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-03]"
+      },
+      {
+        "id": "R-V147P0-04",
+        "title": "V1.48+ — rule_suggestion accepted-path → Works/<work_ref>/AGENTS.md mutation (compass §0.1 #7 deferred)",
+        "severity": "low",
+        "source": "compass §0.1 #7 + qc1 S-1",
+        "scope": "spec layer only in V1.47; runtime deferred",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.48+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-04]"
+      },
+      {
+        "id": "R-V147P0-05",
+        "title": "Hotfix — master_decision_timeout::repeated_sweeps_remain_stable PK collision flake (enqueue_review_master_schedule mints RVM<ts> with no collision counter)",
+        "severity": "medium",
+        "source": "dev pre-implement discovery + .mstar/AGENTS.md pre-existing claim verification",
+        "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (or relevant enqueue site)",
+        "decision": "defer (separate hotfix)",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.47 hotfix",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-05]"
+      },
+      {
+        "id": "R-V147P0-06",
+        "title": "V1.48+ — Preset-id literal duplicated in 3 locations (REVIEW_PRESET_ID const, STAGE_PRESET_ALLOWLIST, supervisor hook guard)",
+        "severity": "low",
+        "source": "qc1 S-3 + qc1 re-review carry-forward",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs, crates/nexus-orchestration/src/preset/validation.rs, crates/nexus-orchestration/src/schedule/supervisor.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.48+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-06]"
       }
     ]
   },
