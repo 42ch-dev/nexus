@@ -268,7 +268,7 @@ mod tests {
 
     // ── J2: With mock provider — GO response ──────────────────────────
 
-    /// Mock provider that records the creator_id it was called with,
+    /// Mock provider that records the `creator_id` it was called with,
     /// enabling identity-spoof regression tests.
     struct MockGoProvider {
         captured_creator_id: std::sync::Mutex<String>,
@@ -357,11 +357,14 @@ mod tests {
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
         // The worker must have received "default", NOT "spoofed_creator"
-        let captured = provider.captured_creator_id.lock().unwrap();
-        assert_eq!(
-            *captured, "default",
-            "SEC-V131-01: raw creator_id leaked through"
-        );
+        {
+            let captured = provider.captured_creator_id.lock().unwrap();
+            assert_eq!(
+                *captured, "default",
+                "SEC-V131-01: raw creator_id leaked through"
+            );
+            drop(captured);
+        }
     }
 
     /// Proves context-injected `_creator_id` / `_session_id` are used.
@@ -376,8 +379,11 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
-        let captured = provider.captured_creator_id.lock().unwrap();
-        assert_eq!(*captured, "legit_creator");
+        {
+            let captured = provider.captured_creator_id.lock().unwrap();
+            assert_eq!(*captured, "legit_creator");
+            drop(captured);
+        }
     }
 
     /// Proves context-injected identity wins even when raw args are present.
@@ -394,10 +400,13 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert_eq!(result["result"], true);
-        let captured = provider.captured_creator_id.lock().unwrap();
-        assert_eq!(
-            *captured, "legit_creator",
-            "SEC-V131-01: context ID must win over raw spoof"
-        );
+        {
+            let captured = provider.captured_creator_id.lock().unwrap();
+            assert_eq!(
+                *captured, "legit_creator",
+                "SEC-V131-01: context ID must win over raw spoof"
+            );
+            drop(captured);
+        }
     }
 }
