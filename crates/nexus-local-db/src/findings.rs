@@ -387,6 +387,85 @@ pub async fn list_findings(
         .collect())
 }
 
+/// V1.48 P1 — chapter-scoped open findings query for `novel-writing` prompt
+/// injection (`novel-findings-maturity.md` §2 Consumer).
+///
+/// Returns all **open** findings for a Work that should influence the
+/// `novel-writing` outline/draft prompt for chapter `N`:
+///
+/// - rows where `work_id` matches AND `status = 'open'`
+///   AND (`chapter = N` OR `chapter IS NULL`)
+///
+/// Work-level findings (`chapter IS NULL`) are included so a Work-wide
+/// quality issue (e.g. a continuity break that spans chapters) reaches
+/// every chapter's prompt, per overlay §2.1.
+///
+/// **Ordering** (overlay §2.1): `severity` DESC (blocker first, then
+/// major, minor, info), then `created_at` ASC (oldest first within a
+/// severity bucket). The DAO does NOT impose a count cap — the
+/// orchestration builder ([`nexus_orchestration::findings_block`])
+/// truncates per the overlay §2.2 limits.
+///
+/// The function is creator-scoped for the same isolation reasons as
+/// [`list_findings`] and [`list_stale_open_findings`].
+///
+/// # Errors
+///
+/// Returns [`LocalDbError`] if the database query fails.
+pub async fn list_open_findings_for_chapter(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    chapter: i64,
+) -> Result<Vec<Finding>, LocalDbError> {
+    let rows = sqlx::query!(
+        "SELECT finding_id as \"finding_id!\", work_id as \"work_id!\", chapter,
+                severity as \"severity!\", status as \"status!\",
+                title as \"title!\", description as \"description!\",
+                target_executor as \"target_executor!\",
+                creator_id as \"creator_id!\",
+                kind as \"kind!\", rule_suggestion,
+                created_at as \"created_at!\", updated_at as \"updated_at!\"
+         FROM findings
+         WHERE creator_id = ?
+           AND work_id = ?
+           AND status = 'open'
+           AND (chapter = ? OR chapter IS NULL)
+         ORDER BY
+           CASE severity
+             WHEN 'blocker' THEN 4
+             WHEN 'major'   THEN 3
+             WHEN 'minor'   THEN 2
+             ELSE                1
+           END DESC,
+           created_at ASC",
+        creator_id,
+        work_id,
+        chapter,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| Finding {
+            finding_id: r.finding_id,
+            work_id: r.work_id,
+            chapter: r.chapter,
+            severity: r.severity,
+            status: r.status,
+            title: r.title,
+            description: r.description,
+            target_executor: r.target_executor,
+            creator_id: r.creator_id,
+            kind: r.kind,
+            rule_suggestion: r.rule_suggestion,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        })
+        .collect())
+}
+
 /// Get a single finding by ID, scoped to a creator.
 ///
 /// # Errors
