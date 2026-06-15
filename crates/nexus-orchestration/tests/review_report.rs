@@ -25,6 +25,11 @@ use nexus_local_db::works::{self, WorkRecord};
 use nexus_orchestration::auto_chain;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tracing::field::{Field, Visit};
+use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::Registry;
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -125,6 +130,48 @@ fn write_report_file(work_ref: &str, content: &str) -> PathBuf {
     let report_path = review_dir.join("review-report.md");
     std::fs::write(&report_path, content).unwrap();
     ws_root
+}
+
+// ── W-3 (qc3): tracing field-name capture helper ──────────────────────────
+//
+// Minimal self-contained tracing capture for asserting that fallback
+// `tracing::warn!` events emitted by `try_persist_parsed_findings` carry the
+// `chapter` field per `.mstar/knowledge/specs/novel-findings-maturity.md`
+// §1.3. Uses only workspace deps (`tracing` + `tracing-subscriber`); no new
+// dev-dependency.
+
+/// One captured event: its level + the structured field names attached.
+#[derive(Debug, Clone)]
+struct CapturedEvent {
+    level: tracing::Level,
+    fields: Vec<String>,
+}
+
+/// Records each captured event's level + structured field names.
+#[derive(Default, Clone)]
+struct FieldNamesCapture(Arc<Mutex<Vec<CapturedEvent>>>);
+
+/// `tracing::field::Visit` impl that collects field names (values discarded).
+struct FieldNameCollector(Vec<String>);
+
+impl Visit for FieldNameCollector {
+    // The default `record_*` impls in tracing 0.1.44 all delegate here, so
+    // implementing only `record_debug` covers every field type (`?` Debug,
+    // `%` Display, str, i64, …).
+    fn record_debug(&mut self, field: &Field, _value: &dyn std::fmt::Debug) {
+        self.0.push(field.name().to_string());
+    }
+}
+
+impl Layer<Registry> for FieldNamesCapture {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, Registry>) {
+        let mut collector = FieldNameCollector(Vec::new());
+        event.record(&mut collector);
+        self.0.lock().unwrap().push(CapturedEvent {
+            level: *event.metadata().level(),
+            fields: collector.0,
+        });
+    }
 }
 
 // ── Parsed path (spec §1.2) ────────────────────────────────────────────────
@@ -534,4 +581,66 @@ async fn non_review_preset_is_noop_with_workspace_dir() {
         rows.is_empty(),
         "non-review preset must not persist any findings"
     );
+}
+
+// ── W-3 (qc3): chapter field in fallback tracing spans ───────────────────
+
+/// AC (W-3, qc3): every fallback `tracing::warn!` in the producer path
+/// includes the `chapter` field per spec §1.3 (operator-debugging field for
+/// chapter-scoped review passes).
+///
+/// Exercises the missing-report fallback with `chapter = Some(2)` and asserts
+/// the captured warn event carries `chapter` in its structured fields. The
+/// `set_default` guard scopes the capturing subscriber to this thread; the
+/// current-thread `#[tokio::test]` runtime resumes `.await` on the same
+/// thread, so the guard stays active across the await.
+#[tokio::test]
+async fn fallback_warn_includes_chapter_field() {
+    let pool = test_pool().await;
+    let work = novel_work("wrk_chapter_field", "chapter-field-novel", 2, 4);
+    works::create_work(&pool, &work).await.unwrap();
+    insert_review_schedule(&pool, "sch_chapter_field", "wrk_chapter_field").await;
+
+    // Empty workspace dir → guarantees the missing-report fallback fires.
+    let ws_root = tempfile::tempdir().unwrap().keep();
+
+    let capture = FieldNamesCapture::default();
+    let subscriber = Registry::default().with(capture.clone());
+    let guard = tracing::subscriber::set_default(subscriber);
+
+    let _ = auto_chain::persist_review_findings_for_schedule(
+        &pool,
+        "sch_chapter_field",
+        Some(&ws_root),
+    )
+    .await
+    .expect("missing-report fallback must not fail");
+
+    drop(guard);
+
+    let events = capture.0.lock().unwrap().clone();
+    assert!(
+        !events.is_empty(),
+        "expected ≥1 tracing event from the fallback path; got none"
+    );
+
+    // Filter to WARN-level events (the fallback `warn!` calls). The success
+    // `info!` from `persist_placeholder_finding` also carries `schedule_id`
+    // but is not a fallback warn, so filter on level to isolate the warns.
+    let warn_events: Vec<&CapturedEvent> = events
+        .iter()
+        .filter(|e| e.level == tracing::Level::WARN)
+        .collect();
+    assert!(
+        !warn_events.is_empty(),
+        "expected ≥1 WARN-level fallback event; got events: {events:?}"
+    );
+    for (i, ev) in warn_events.iter().enumerate() {
+        assert!(
+            ev.fields.iter().any(|f| f == "chapter"),
+            "fallback warn event #{i} is missing the `chapter` field; \
+             got fields: {:?}",
+            ev.fields
+        );
+    }
 }
