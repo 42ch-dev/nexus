@@ -128,7 +128,9 @@ pub async fn persist_review_findings_for_schedule(
     pool: &SqlitePool,
     schedule_id: &str,
 ) -> Result<usize, AutoChainError> {
-    const REVIEW_PRESET_ID: &str = "novel-chapter-review";
+    // R-V147P0-06 (V1.48 P0 T3): hoisted to `preset_ids` SSOT; referenced
+    // from the supervisor terminal guard and the STAGE_PRESET_ALLOWLIST too.
+    use crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID as REVIEW_PRESET_ID;
 
     // SAFETY: dynamic SQL — single-row schedule lookup by PK. `work_id` is
     // nullable (added in 202606080002_creator_schedules_work_id.sql), so we
