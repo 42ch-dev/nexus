@@ -26,6 +26,13 @@ use crate::completion_lock::{self, CompletionLock};
 /// R-V139P0-W-B: per-process monotonic counter for ACH schedule ID collision resistance.
 static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// R-V147P0-05 (hotfix H-1): per-process monotonic counter for `RVM` schedule
+/// ID collision resistance. The previous `enqueue_review_master_schedule` minted
+/// `RVM<ts_ms>` which collided when the stale-findings watcher (or repeated
+/// sweeps within one tick) enqueued two opt-in Works in the same millisecond.
+/// Mirrors the `ACH_COUNTER` fix (R-V139P0-W-B) for the same class of bug.
+static RVM_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 use crate::stage_gates::{self, WorkFields};
 
 /// Result of an `on_schedule_complete` evaluation.
@@ -99,17 +106,22 @@ pub async fn find_work_for_driver(
 /// 1. Loads the schedule row to read `preset_id`, `work_id`, `creator_id`.
 /// 2. Returns `Ok(0)` early when the preset is not `novel-chapter-review`
 ///    (no-op for non-review schedules).
-/// 3. Loads the Work record for `chapter` context (`work.current_chapter`).
-/// 4. Synthesizes ≥1 `ReviewVerdictFinding` and persists it via
-///    [`findings::create_finding_from_review`]. The synthesized finding uses
+/// 3. Loads the Work record for `chapter` context (`work.current_chapter`)
+///    and `work_ref` (for the report path).
+/// 4. **V1.48 P0 T2**: when `workspace_dir` is `Some`, reads
+///    `Works/<work_ref>/Logs/review/review-report.md` and parses it via
+///    [`crate::review_report::parse_review_report`]. When ≥1 finding parses,
+///    each row is persisted via [`findings::create_finding_from_review`] with
+///    the parsed `kind` / `severity` / `body` / optional `rule_suggestion`
+///    (per `.mstar/knowledge/specs/novel-findings-maturity.md` §1.2).
+/// 5. **Fallback** (V1.47 placeholder shape): when the report is missing,
+///    unparsable, or yields zero findings — OR when `workspace_dir` is
+///    `None` (e.g. hermetic DB-only tests) — synthesizes ≥1 finding with
 ///    safe defaults (`kind=craft`, `severity=info`, `target_executor=none`)
-///    because the LLM judge output is not directly observable at the
-///    supervisor layer in P0 (the agent writes a richer report under
-///    `Works/<work_ref>/Logs/review/` as a side-effect; a follow-up slice
-///    can parse that artifact for richer findings).
+///    and emits `tracing::warn!` so operators can see the degrade (spec §1.3).
 ///
 /// Spec §8.4 invariant: finding creation MUST NOT fork or cancel the active
-/// FL-E driver schedule. This function performs only a DB INSERT and does
+/// FL-E driver schedule. This function performs only DB INSERT(s) and does
 /// not touch `driver_schedule_id`.
 ///
 /// # Errors
@@ -120,8 +132,11 @@ pub async fn find_work_for_driver(
 pub async fn persist_review_findings_for_schedule(
     pool: &SqlitePool,
     schedule_id: &str,
+    workspace_dir: Option<&std::path::Path>,
 ) -> Result<usize, AutoChainError> {
-    const REVIEW_PRESET_ID: &str = "novel-chapter-review";
+    // R-V147P0-06 (V1.48 P0 T3): hoisted to `preset_ids` SSOT; referenced
+    // from the supervisor terminal guard and the STAGE_PRESET_ALLOWLIST too.
+    use crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID as REVIEW_PRESET_ID;
 
     // SAFETY: dynamic SQL — single-row schedule lookup by PK. `work_id` is
     // nullable (added in 202606080002_creator_schedules_work_id.sql), so we
@@ -191,10 +206,61 @@ pub async fn persist_review_findings_for_schedule(
         None
     };
 
+    // V1.48 P0 T2: parse `Works/<work_ref>/Logs/review/review-report.md`
+    // when a workspace_dir is available. Spec
+    // (`.mstar/knowledge/specs/novel-findings-maturity.md` §1.2) — parsed
+    // findings persist with their `kind` / `severity` / `body` / optional
+    // `rule_suggestion`. Any failure (missing file, read error, parse error,
+    // zero parsed findings) falls through to the V1.47 placeholder synthesis
+    // below with a `tracing::warn!` per spec §1.3.
+    let work_ref_or_id = work.work_ref.as_deref().unwrap_or(&work_id).to_string();
+
+    if let Some(ws_dir) = workspace_dir {
+        if let Some(count) = try_persist_parsed_findings(
+            pool,
+            ws_dir,
+            &work_ref_or_id,
+            &work_id,
+            &creator_id,
+            chapter,
+            schedule_id,
+        )
+        .await?
+        {
+            return Ok(count);
+        }
+    }
+
+    // ── V1.47 placeholder synthesis (fallback per spec §1.3) ───────────────
+    persist_placeholder_finding(
+        pool,
+        &work,
+        &work_id,
+        &creator_id,
+        chapter,
+        &work_ref_or_id,
+        schedule_id,
+    )
+    .await
+}
+
+/// Persist the V1.47 single placeholder finding (spec §8.2 safe defaults).
+///
+/// Used as the documented fallback whenever the parsed path does not yield a
+/// persisted row (missing report, parse failure, zero findings, all-rows
+/// conflict, or `workspace_dir=None`).
+async fn persist_placeholder_finding(
+    pool: &SqlitePool,
+    work: &WorkRecord,
+    work_id: &str,
+    creator_id: &str,
+    chapter: Option<i64>,
+    work_ref_or_id: &str,
+    schedule_id: &str,
+) -> Result<usize, AutoChainError> {
     // Synthesize the minimum viable review finding per spec §8.2.
     let chapter_ctx = chapter.map_or_else(|| "work-level".to_string(), |c| format!("chapter {c}"));
     let title = format!("Review pass completed ({chapter_ctx})");
-    let work_ref_or_id = work.work_ref.as_deref().unwrap_or(&work_id);
     let description = format!(
         "Automated review pass for Work '{}' ({}) — {chapter_ctx}.\n\
          The full review report is written under Works/{}/Logs/review/.\n\
@@ -206,7 +272,7 @@ pub async fn persist_review_findings_for_schedule(
     );
 
     let verdict = ReviewVerdictFinding {
-        work_id: work_id.clone(),
+        work_id: work_id.to_string(),
         chapter,
         // Safe defaults per spec §8.2 + §2.1; the synthesized finding is
         // intentionally non-disruptive (`info` severity, `none` executor).
@@ -214,7 +280,7 @@ pub async fn persist_review_findings_for_schedule(
         title,
         description,
         target_executor: "none".to_string(),
-        creator_id,
+        creator_id: creator_id.to_string(),
         kind: "craft".to_string(),
         // Optional — no rule suggestion in the synthesized path.
         rule_suggestion: None,
@@ -229,7 +295,7 @@ pub async fn persist_review_findings_for_schedule(
         Ok(finding_id) => {
             tracing::info!(
                 schedule_id,
-                work_id = %work_id,
+                work_id,
                 finding_id = %finding_id,
                 "review-findings: persisted finding for review pass"
             );
@@ -240,13 +306,211 @@ pub async fn persist_review_findings_for_schedule(
             // failure without blocking the terminal transition.
             tracing::warn!(
                 schedule_id,
-                work_id = %work_id,
+                work_id,
                 error = %e,
                 "review-findings: failed to persist finding"
             );
             Err(AutoChainError::from(e))
         }
     }
+}
+
+/// Try to read + parse `Works/<work_ref>/Logs/review/review-report.md` and
+/// persist one finding per parsed row (V1.48 P0 T2).
+///
+/// Returns:
+/// - `Ok(Some(count))` — parsed findings existed and `count` rows were
+///   persisted. The caller returns this count directly.
+/// - `Ok(None)` — either `workspace_dir` was not provided, OR the report
+///   was missing/unreadable/unparseable, OR it parsed zero findings, OR
+///   the parsed rows all hit the idempotent conflict and zero were inserted.
+///   In every `None` case the caller falls back to the V1.47 placeholder
+///   synthesis path (spec §1.3).
+///
+/// Each non-`None` failure branch emits a `tracing::warn!` with the
+/// schedule/work context so operators can see the degrade.
+async fn try_persist_parsed_findings(
+    pool: &SqlitePool,
+    workspace_dir: &std::path::Path,
+    work_ref: &str,
+    work_id: &str,
+    creator_id: &str,
+    chapter: Option<i64>,
+    schedule_id: &str,
+) -> Result<Option<usize>, AutoChainError> {
+    match load_and_parse_review_report(workspace_dir, work_ref) {
+        Ok(parsed) if !parsed.findings.is_empty() => {
+            let count =
+                persist_parsed_findings(pool, &parsed, work_id, creator_id, chapter, schedule_id)
+                    .await?;
+            if count > 0 {
+                tracing::info!(
+                    schedule_id,
+                    work_id,
+                    parsed_count = count,
+                    "review-findings: persisted parsed findings from review-report.md"
+                );
+                return Ok(Some(count));
+            }
+            // Parsed rows existed but none persisted (e.g. idempotent
+            // conflict). Fall through to placeholder synthesis so the
+            // spec §8.2 "≥1 finding per review pass" guarantee holds.
+            tracing::debug!(
+                schedule_id,
+                work_id,
+                "review-findings: parsed {} rows but 0 persisted; falling back to placeholder",
+                parsed.findings.len()
+            );
+            Ok(None)
+        }
+        Ok(_) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                "review-findings: review-report.md parsed but contained no issues; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+        Err(ReportLoadError::Missing) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                "review-findings: review-report.md not found; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+        Err(ReportLoadError::Read(ref path, ref e)) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                path = %path.display(),
+                error = %e,
+                "review-findings: failed to read review-report.md; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+        Err(ReportLoadError::Parse(ref reason)) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                parse_error = %reason,
+                "review-findings: review-report.md failed to parse; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// Failures that can occur while loading + parsing `review-report.md`.
+///
+/// Used by [`persist_review_findings_for_schedule`] to emit the right
+/// `tracing::warn!` shape per `.mstar/knowledge/specs/novel-findings-maturity.md`
+/// §1.3 (each branch is a documented fallback trigger).
+#[derive(Debug)]
+enum ReportLoadError {
+    /// File does not exist at the resolved path.
+    Missing,
+    /// File exists but could not be read.
+    Read(std::path::PathBuf, std::io::Error),
+    /// File was read but the parser rejected it.
+    Parse(String),
+}
+
+/// Resolve `<workspace_dir>/Works/<work_ref>/Logs/review/review-report.md`,
+/// read it, and parse it via [`crate::review_report::parse_review_report`].
+///
+/// Hermetic-friendly: takes an explicit `workspace_dir` so callers (and tests)
+/// control the FS root. The path layout is provided by `nexus-home-layout`
+/// (`work_logs_subdir`).
+fn load_and_parse_review_report(
+    workspace_dir: &std::path::Path,
+    work_ref: &str,
+) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
+    let review_dir = nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
+    let report_path = review_dir.join("review-report.md");
+    if !report_path.exists() {
+        return Err(ReportLoadError::Missing);
+    }
+    let content = match std::fs::read_to_string(&report_path) {
+        Ok(c) => c,
+        Err(e) => return Err(ReportLoadError::Read(report_path, e)),
+    };
+    crate::review_report::parse_review_report(&content)
+        .map_err(|e| ReportLoadError::Parse(e.to_string()))
+}
+
+/// Persist each parsed finding as its own row via the from-review DAO.
+///
+/// Each row inherits a **per-finding-indexed** `source_schedule_id` of the
+/// form `<schedule_id>#<idx>` so the partial unique index
+/// `findings_unique_review_per_chapter` keeps the insert idempotent per
+/// `(work_id, chapter, source_schedule_id)` while still allowing multiple
+/// distinct findings from one review report. A retry that re-parses the
+/// same report hits the same indices and is a no-op; the V1.47 placeholder
+/// path uses the bare `schedule_id` (no suffix), so the two paths never
+/// collide on the index.
+///
+/// Returns the count of rows actually inserted (best-effort: rows that hit
+/// the idempotent conflict are not counted).
+async fn persist_parsed_findings(
+    pool: &SqlitePool,
+    parsed: &crate::review_report::ParsedReviewReport,
+    work_id: &str,
+    creator_id: &str,
+    chapter: Option<i64>,
+    schedule_id: &str,
+) -> Result<usize, AutoChainError> {
+    let mut inserted = 0usize;
+    for (idx, finding) in parsed.findings.iter().enumerate() {
+        // Truncate body to a safe upper bound to avoid DB bloat. The from-review
+        // DAO already enforces rule_suggestion size; the body uses the same
+        // finding.description column.
+        const BODY_MAX_CHARS: usize = 2_000;
+        let body: String = if finding.body.len() > BODY_MAX_CHARS {
+            // Collect char units to avoid splitting a UTF-8 boundary.
+            finding.body.chars().take(BODY_MAX_CHARS).collect()
+        } else {
+            finding.body.clone()
+        };
+
+        let title_preview: String = body.chars().take(80).collect();
+        // Per-finding source id — distinct from the bare `schedule_id` used
+        // by the V1.47 placeholder path (so they cannot collide on the
+        // partial unique index), and stable across retries (same schedule +
+        // same report → same indices → same conflict resolution = no-op).
+        let source_schedule_id = format!("{schedule_id}#{idx}");
+        let verdict = ReviewVerdictFinding {
+            work_id: work_id.to_string(),
+            chapter,
+            severity: finding.severity.clone(),
+            title: format!("Review finding: {title_preview}"),
+            description: body,
+            target_executor: finding.target_executor.clone(),
+            creator_id: creator_id.to_string(),
+            kind: finding.kind.clone(),
+            rule_suggestion: finding.rule_suggestion.clone(),
+            source_schedule_id: Some(source_schedule_id),
+        };
+        match findings::create_finding_from_review(pool, &verdict).await {
+            Ok(_) => inserted += 1,
+            Err(e) => {
+                tracing::warn!(
+                    schedule_id,
+                    work_id,
+                    error = %e,
+                    "review-findings: failed to persist one parsed finding (continuing batch)"
+                );
+            }
+        }
+    }
+    Ok(inserted)
 }
 
 /// Determine the next chain action after a schedule completes.
@@ -804,7 +1068,17 @@ pub async fn enqueue_review_master_schedule(
     creator_id: &str,
     work_id: &str,
 ) -> Result<String, AutoChainError> {
-    let schedule_id = format!("RVM{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
+    // R-V147P0-05 (hotfix H-1): append a per-process monotonic counter suffix
+    // (mirrors `ACH_COUNTER` / R-V139P0-W-B) so two enqueues in the same
+    // millisecond produce distinct PKs. Without this, the
+    // `master_decision_timeout::repeated_sweeps_remain_stable` test flakes
+    // when both sweeps land in the same `%Y%m%d%H%M%S%3f` granule.
+    let counter = RVM_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let schedule_id = format!(
+        "RVM{}{:06x}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S%3f"),
+        counter & 0x00FF_FFFF
+    );
     let now_ts = chrono::Utc::now().timestamp();
     let label = format!("auto-review-master: {work_id}");
     let preset_version = preset_version_for_id("novel-review-master");
@@ -1175,6 +1449,67 @@ mod tests {
         assert!(
             matches!(err, AutoChainError::InvalidState(_)),
             "should be InvalidState: {err:?}"
+        );
+    }
+
+    // ── R-V147P0-05 (hotfix H-1): RVM schedule_id PK collision regression ────
+
+    /// Regression for R-V147P0-05: two `enqueue_review_master_schedule` calls
+    /// landing in the same `%Y%m%d%H%M%S%3f` millisecond granule MUST produce
+    /// distinct `schedule_id` PKs. Before the fix, the second INSERT collided
+    /// on the PK and surfaced as a flake in
+    /// `master_decision_timeout::repeated_sweeps_remain_stable`.
+    ///
+    /// The per-process `RVM_COUNTER` provides the unique suffix without adding
+    /// a new crate dependency (mirrors the `ACH_COUNTER` fix, R-V139P0-W-B).
+    #[tokio::test]
+    async fn rvm_schedule_ids_are_unique_within_same_millisecond() {
+        let db = tempfile::Builder::new()
+            .prefix("rvm_pk_collision_")
+            .suffix(".db")
+            .tempfile()
+            .unwrap();
+        let db_path = db.path().to_path_buf();
+        std::mem::forget(db);
+
+        let pool = nexus_local_db::open_pool(&db_path).await.unwrap();
+        nexus_local_db::run_migrations(&pool).await.unwrap();
+
+        let work = work_at("review", "active", 1, 3);
+        nexus_local_db::works::create_work(&pool, &work)
+            .await
+            .unwrap();
+
+        // Fire two enqueues back-to-back. Even if both land in the same ms
+        // granule, the counter suffix must keep the PKs distinct.
+        let sid_a = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
+            .await
+            .expect("first RVM enqueue must succeed");
+        let sid_b = enqueue_review_master_schedule(&pool, "ctr_test", "wrk_test")
+            .await
+            .expect("second RVM enqueue must succeed even in the same ms");
+
+        assert!(
+            sid_a != sid_b,
+            "RVM schedule ids must be distinct; got sid_a={sid_a} sid_b={sid_b}"
+        );
+        assert!(
+            sid_a.starts_with("RVM") && sid_b.starts_with("RVM"),
+            "both ids must keep the RVM prefix: sid_a={sid_a} sid_b={sid_b}"
+        );
+
+        // Both rows must be present in the table (no PK collision).
+        let n: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM creator_schedules \
+             WHERE preset_id = 'novel-review-master' AND work_id = ?",
+        )
+        .bind("wrk_test")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            n, 2,
+            "both RVM schedules must be persisted without PK collision; got count={n}"
         );
     }
 

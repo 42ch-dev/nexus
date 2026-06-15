@@ -404,13 +404,28 @@ impl ScheduleSupervisor {
             // preset_id is `novel-chapter-review`. Other presets are a no-op
             // and the guard avoids the extra schedule-row lookup that
             // persist_review_findings_for_schedule would otherwise perform.
+            // R-V147P0-06 (V1.48 P0 T3): preset id hoisted to `preset_ids`
+            // SSOT — single source shared with the allowlist and findings hook.
             if schedule_row
                 .as_ref()
-                .is_some_and(|r| r.preset_id == "novel-chapter-review")
+                .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID)
             {
                 use crate::auto_chain;
-                if let Err(e) =
-                    auto_chain::persist_review_findings_for_schedule(&self.pool, schedule_id).await
+                // V1.48 P0 T2: thread the supervisor's optional
+                // `workspace_dir` so the producer can read
+                // `Works/<work_ref>/Logs/review/review-report.md` and parse
+                // richer findings (`.mstar/knowledge/specs/novel-findings-maturity.md`
+                // §1). When the workspace is None (e.g. hermetic DB-only
+                // tests) or the report is missing, the producer falls back
+                // to the V1.47 placeholder synthesis with `tracing::warn!`.
+                let ws_ref = self.workspace_dir.as_ref();
+                let ws_path = ws_ref.as_deref();
+                if let Err(e) = auto_chain::persist_review_findings_for_schedule(
+                    &self.pool,
+                    schedule_id,
+                    ws_path,
+                )
+                .await
                 {
                     tracing::warn!(
                         schedule_id,
