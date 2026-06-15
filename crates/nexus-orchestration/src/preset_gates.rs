@@ -870,9 +870,9 @@ mod tests {
 
     // ── V1.39 P0.5 (T6): research preset gate integration ──────────────
 
-    /// Research preset gates require intake_status == "complete" and
-    /// work_ref to be present. Verify that a Work with intake complete
-    /// and a work_ref passes all gates.
+    /// Research preset gates require `intake_status` == "complete" and
+    /// `work_ref` to be present. Verify that a Work with intake complete
+    /// and a `work_ref` passes all gates.
     #[tokio::test]
     async fn research_gates_pass_with_intake_complete_and_work_ref() {
         let gates = vec![
@@ -904,7 +904,7 @@ mod tests {
         );
     }
 
-    /// Research preset gates fail when intake_status is not "complete".
+    /// Research preset gates fail when `intake_status` is not "complete".
     #[tokio::test]
     async fn research_gates_fail_when_intake_not_complete() {
         let gates = vec![Gate::WorkField {
@@ -933,7 +933,7 @@ mod tests {
         assert_eq!(err.failed_gates[0].kind, "work_field");
     }
 
-    /// Research preset gates fail when work_ref is missing.
+    /// Research preset gates fail when `work_ref` is missing.
     #[tokio::test]
     async fn research_gates_fail_when_work_ref_missing() {
         let gates = vec![Gate::WorkField {
@@ -960,7 +960,7 @@ mod tests {
 
     // ── V1.43 P1 remediation citation tests ──────────────────────────────
 
-    /// V1.43 (P1 §3 remediation — preset_gates_failed): work_field remediation
+    /// V1.43 (P1 §3 remediation — `preset_gates_failed`): `work_field` remediation
     /// strings cite quickstart §2/§3.
     #[tokio::test]
     async fn remediation_work_field_cites_quickstart() {
@@ -1031,7 +1031,7 @@ mod tests {
         );
     }
 
-    /// V1.46 P1 (spec hygiene): previous_preset remediation for
+    /// V1.46 P1 (spec hygiene): `previous_preset` remediation for
     /// novel-project-init cites the preset-entry spec.
     #[tokio::test]
     async fn remediation_previous_preset_init_cites_preset_entry_spec() {
@@ -1066,7 +1066,7 @@ mod tests {
         );
     }
 
-    /// V1.46 P1 (spec hygiene): previous_preset remediation for
+    /// V1.46 P1 (spec hygiene): `previous_preset` remediation for
     /// novel-writing cites the author-experience spec.
     #[tokio::test]
     async fn remediation_previous_preset_writing_cites_author_experience_spec() {
@@ -1156,7 +1156,7 @@ mod tests {
     /// R-V146P1-QC3-S4 regression guard: no user-facing remediation string
     /// produced by any gate helper may embed raw `.mstar/knowledge/specs/`
     /// paths. Exercises every `work_field_remediation` branch plus the
-    /// filesystem and previous_preset helpers.
+    /// filesystem and `previous_preset` helpers.
     #[tokio::test]
     async fn no_gate_remediation_embeds_raw_dotmstar_paths() {
         let lookup = MockPreviousLookup {

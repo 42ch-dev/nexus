@@ -494,7 +494,7 @@ Body text here.";
 
     /// §4.5.7 #2 — `current_chapter` advances ONLY on transition to `finalized`
     /// and takes the just-finalized chapter number. Non-finalize transitions
-    /// (not_started → outlined, outlined → draft) do NOT change
+    /// (`not_started` → outlined, outlined → draft) do NOT change
     /// `works.current_chapter`.
     #[tokio::test]
     async fn spec_4_5_7_current_chapter_advances_only_on_finalize() {

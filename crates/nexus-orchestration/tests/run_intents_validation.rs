@@ -83,8 +83,7 @@ states:
         .collect();
     assert!(
         run_intent_errors.is_empty(),
-        "creator with run_intents should not generate RunIntents diagnostics: {:?}",
-        run_intent_errors
+        "creator with run_intents should not generate RunIntents diagnostics: {run_intent_errors:?}",
     );
 }
 
@@ -117,12 +116,11 @@ states:
         .collect();
     assert!(
         diags.is_empty(),
-        "system preset with system_maintenance should have no RunIntents diagnostics: {:?}",
-        diags
+        "system preset with system_maintenance should have no RunIntents diagnostics: {diags:?}",
     );
 }
 
-/// R-V133P1-05: creator preset claiming system_maintenance is an Error.
+/// R-V133P1-05: creator preset claiming `system_maintenance` is an Error.
 #[test]
 fn creator_preset_with_system_maintenance_is_error() {
     let yaml = r"
@@ -159,7 +157,7 @@ states:
     );
 }
 
-/// R-V133P1-05: system preset claiming work_init (creator-only) is an Error.
+/// R-V133P1-05: system preset claiming `work_init` (creator-only) is an Error.
 #[test]
 fn system_preset_with_creator_intent_is_error() {
     let yaml = r"
@@ -189,9 +187,8 @@ states:
         .collect();
     // Expect both: Error for cross-claim + Warning for missing system_maintenance
     assert!(
-        diags.len() >= 1,
-        "expected at least 1 RunIntents diagnostic: {:?}",
-        diags
+        !diags.is_empty(),
+        "expected at least 1 RunIntents diagnostic: {diags:?}",
     );
     let errors: Vec<_> = diags
         .iter()

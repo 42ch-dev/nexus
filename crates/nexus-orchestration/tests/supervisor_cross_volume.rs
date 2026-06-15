@@ -64,7 +64,7 @@ fn test_work(work_id: &str, chapter: i32, total: i32, auto_chain: bool) -> WorkR
 /// Seed chapter rows across multiple volumes.
 ///
 /// Chapters in vol `1..=finalized_vol` ch `1..=finalized_ch` are "finalized";
-/// everything else is "not_started".
+/// everything else is `not_started`.
 async fn seed_multi_volume_chapters(
     pool: &sqlx::SqlitePool,
     work_id: &str,
@@ -323,7 +323,7 @@ async fn f001_volume_aware_evaluator_picks_vol2_ch1() {
     );
 }
 
-/// F-001 (hermetic): `evaluate_after_persist_volume_aware` returns WorkComplete
+/// F-001 (hermetic): `evaluate_after_persist_volume_aware` returns `WorkComplete`
 /// when all chapters across all volumes are finalized.
 #[tokio::test]
 async fn f001_volume_aware_evaluator_work_complete() {
@@ -414,7 +414,7 @@ async fn f004_single_volume_enqueue_has_no_volume_in_input() {
     );
 }
 
-/// AC1 (F-002): is_work_completed returns true for 2-volume Work with all
+/// AC1 (F-002): `is_work_completed` returns true for 2-volume Work with all
 /// rows finalized across both volumes.
 #[tokio::test]
 async fn f002_multi_volume_work_completed_all_volumes_finalized() {
@@ -437,7 +437,7 @@ async fn f002_multi_volume_work_completed_all_volumes_finalized() {
     );
 }
 
-/// AC1 (F-002 negative): is_work_completed returns false when vol 2 has
+/// AC1 (F-002 negative): `is_work_completed` returns false when vol 2 has
 /// unfinished chapters even though vol 1 is complete.
 #[tokio::test]
 async fn f002_multi_volume_work_not_completed_partial_vol2() {

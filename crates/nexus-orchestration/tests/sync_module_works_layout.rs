@@ -1,4 +1,4 @@
-//! Sync module contract tests for Works/<work_ref>/Stories/ layout (V1.36 P2).
+//! Sync module contract tests for `Works/<work_ref>/Stories/` layout (V1.36 P2).
 //!
 //! Verifies the sync module scans only the correct directories and
 //! excludes non-chapter artifacts per novel-writing-sync-contract.md.
@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Create a temp workspace with Works/<work_ref>/Stories/ structure.
+/// Create a temp workspace with `Works/<work_ref>/Stories/` structure.
 fn create_work_stories(workspace: &Path, work_ref: &str) -> PathBuf {
     let stories = workspace.join("Works").join(work_ref).join("Stories");
     fs::create_dir_all(&stories).expect("create Stories dir");
