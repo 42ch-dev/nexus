@@ -1,7 +1,120 @@
 {
   "version": 1,
-  "updated_at": "2026-06-15T05:30:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-15T14:00:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-15-v1.47-harness-docs-prepare",
+      "title": "P-1 — V1.47 compass, plans, spec overlays, tracker, status (docs-only)",
+      "file": ".mstar/plans/2026-06-15-v1.47-harness-docs-prepare.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@project-manager", "@writing-specialist"],
+      "progress": 100,
+      "tags": ["v1.47", "harness", "docs"],
+      "created_at": "2026-06-15",
+      "updated_at": "2026-06-15",
+      "done_at": "2026-06-15",
+      "notes": "PM signoff — Pre-implement GO for P0–P-last",
+      "metadata": {
+        "working_branch": "iteration/v1.47",
+        "merge_target": "iteration/v1.47",
+        "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md"
+      }
+    },
+    {
+      "id": "2026-06-15-v1.47-reflection-loop-findings",
+      "title": "P0 — Novel review preset → findings",
+      "file": ".mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.47", "feature", "quality-loop"],
+      "created_at": "2026-06-15",
+      "updated_at": "2026-06-15",
+      "done_at": null,
+      "notes": "",
+      "metadata": {
+        "working_branch": "feature/v1.47-reflection-loop-findings",
+        "merge_target": "iteration/v1.47"
+      }
+    },
+    {
+      "id": "2026-06-15-v1.47-gate-remediation-audit",
+      "title": "P1 — Gate remediation audit",
+      "file": ".mstar/plans/2026-06-15-v1.47-gate-remediation-audit.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.47", "feature"],
+      "created_at": "2026-06-15",
+      "updated_at": "2026-06-15",
+      "done_at": null,
+      "notes": "",
+      "metadata": {
+        "working_branch": "feature/v1.47-gate-remediation-audit",
+        "merge_target": "iteration/v1.47",
+        "depends_on": "2026-06-15-v1.47-reflection-loop-findings"
+      }
+    },
+    {
+      "id": "2026-06-15-v1.47-serial-completion-hardening",
+      "title": "P2 — Serial completion hardening",
+      "file": ".mstar/plans/2026-06-15-v1.47-serial-completion-hardening.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.47", "feature"],
+      "created_at": "2026-06-15",
+      "updated_at": "2026-06-15",
+      "done_at": null,
+      "notes": "",
+      "metadata": {
+        "working_branch": "feature/v1.47-serial-completion-hardening",
+        "merge_target": "iteration/v1.47",
+        "depends_on": "2026-06-15-v1.47-gate-remediation-audit"
+      }
+    },
+    {
+      "id": "2026-06-15-v1.47-quality-loop-spec-reconcile",
+      "title": "P3 — Quality loop spec reconcile (docs-only)",
+      "file": ".mstar/plans/2026-06-15-v1.47-quality-loop-spec-reconcile.md",
+      "status": "Todo",
+      "owner": "@writing-specialist",
+      "agents": ["@writing-specialist", "@project-manager"],
+      "progress": 0,
+      "tags": ["v1.47", "docs"],
+      "created_at": "2026-06-15",
+      "updated_at": "2026-06-15",
+      "done_at": null,
+      "notes": "",
+      "metadata": {
+        "working_branch": "feature/v1.47-quality-loop-spec-reconcile",
+        "merge_target": "iteration/v1.47",
+        "depends_on": "2026-06-15-v1.47-serial-completion-hardening"
+      }
+    },
+    {
+      "id": "2026-06-15-v1.47-hygiene-and-closeout",
+      "title": "P-last — Hygiene and closeout",
+      "file": ".mstar/plans/2026-06-15-v1.47-hygiene-and-closeout.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev", "@writing-specialist", "@project-manager"],
+      "progress": 0,
+      "tags": ["v1.47", "hygiene"],
+      "created_at": "2026-06-15",
+      "updated_at": "2026-06-15",
+      "done_at": null,
+      "notes": "",
+      "metadata": {
+        "working_branch": "feature/v1.47-hygiene-and-closeout",
+        "merge_target": "iteration/v1.47"
+      }
+    }
+  ],
   "v1_43_iteration_complete": true,
   "v1_44_iteration_complete": true,
   "v1_45_iteration_complete": true,
@@ -12,15 +125,15 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.46 (PR #59 opened; integration branch retires on merge to main)",
-    "last_integration_branch": "iteration/v1.45",
+    "integration_branch": "iteration/v1.47",
+    "last_integration_branch": "iteration/v1.46",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
     "latest_shipped_iteration": "v1.46",
-    "latest_shipped_at": "2026-06-15 (PR #59 opened; merge to main pending)",
-    "latest_active_iteration": "v1.47 (placeholder; not yet authored)",
-    "latest_active_compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md",
-    "integration_branch_retired": "iteration/v1.46 (PR #59 opened; integration branch retires on merge)",
+    "latest_shipped_at": "2026-06-15 (PR #59 merged to main at 72eba21b)",
+    "latest_active_iteration": "v1.47",
+    "latest_active_compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
+    "integration_branch_retired": "iteration/v1.46 (retired post PR #59 merge to main)",
     "platform_integration": "paused — local-only until further notice",
     "tech_debt_summary": {
       "updated_at": "2026-06-15T05:00:00+08:00",
@@ -33,13 +146,15 @@
         "nit": 0
       },
       "by_target": {
-        "V1.46": 26
+        "V1.46": 26,
+        "V1.47": 26
       },
-      "notes": "V1.46 ITERATION COMPLETE (2026-06-15). All 7 plans (P-1, P0, P1, P2, P3, P4, P-last) Done on iteration/v1.46. PR #59 opened. 26 open low-severity V1.46 residuals + 1 pre-existing V1.45 clippy PM-override (R-V145-PRE-CLIPPY-001) carried forward to V1.47 hygiene plan."
+      "notes": "V1.47 harness prepare 2026-06-15. Carry-forward: 26 open residuals (25 low + 1 high clippy R-V145-PRE-CLIPPY-001) from V1.46 ship; P-last bounded triage per compass §1.3."
     },
-    "wave_0_spec": ".mstar/knowledge/specs/novel-author-experience.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-quality-loop.md",
     "spec_refs": [
-      ".mstar/knowledge/specs/novel-author-experience.md",
+      ".mstar/knowledge/specs/novel-quality-loop.md",
+      ".mstar/knowledge/specs/novel-workflow-profile.md",
       ".mstar/knowledge/specs/creator-run-preset-entry.md",
       ".mstar/knowledge/specs/cli-spec.md",
       ".mstar/knowledge/specs/cli-command-ia.md",
@@ -59,8 +174,8 @@
       ".mstar/knowledge/specs/novel-multi-work-lifecycle.md",
       ".mstar/knowledge/specs/novel-work-pool.md"
     ],
-    "iteration_compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md",
-    "pre_implement_gate": "V1.46 harness prepare complete 2026-06-14 — Pre-implement GO; P0–P-last Todo on iteration/v1.46",
+    "iteration_compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
+    "pre_implement_gate": "V1.47 harness prepare complete 2026-06-15 — Pre-implement GO; P0–P-last Todo on iteration/v1.47",
     "v1_43_ship": {
       "merge_commit": "0004d85f",
       "pr": 56,
@@ -148,10 +263,18 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/59",
       "pr_state": "OPEN (awaiting maintainer merge)"
     },
-    "v1_47_iteration_placeholder": {
-      "status": "not_authored",
-      "compass": "TBD",
-      "expected_focus": "pre-existing clippy hygiene + V1.46 residual triage + new V1.47 scope"
+    "v1_47_harness_prepare": {
+      "status": "complete",
+      "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
+      "spec_overlays": [
+        "novel-quality-loop.md Draft (V1.47) §8",
+        "novel-workflow-profile.md §5.5.4 / §5.5.6 Draft overlay",
+        "novel-author-experience.md §3.4 V1.47 implement note"
+      ],
+      "plan_count_registered": 6,
+      "prepared_at": "2026-06-15",
+      "integration_branch": "iteration/v1.47",
+      "pre_implement_base": "main @ 72eba21b (V1.46 merged)"
     }
   },
   "residual_findings": {
@@ -1922,5 +2045,5 @@
     ]
   },
   "v1_46_iteration_complete": true,
-  "v1_47_pre_implement_gate": "not_yet (V1.47 compass not yet authored; awaiting PM direction)"
+  "v1_47_pre_implement_gate": "GO — V1.47 harness prepare complete 2026-06-15; P0–P-last Todo on iteration/v1.47"
 }

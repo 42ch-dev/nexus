@@ -85,9 +85,11 @@ On-disk chapter files: see [novel-workflow-profile.md](novel-workflow-profile.md
 
 ### 3.4 Quality loop — dual preset table (Grill #19)
 
+> **V1.47 implement**: Review preset produces findings per [novel-quality-loop.md §8](novel-quality-loop.md#8-reflection-loop-output-contract-v147-draft) (P0). Preset id may change when generic demo is replaced.
+
 | Intent | Preset id | When |
 | --- | --- | --- |
-| Generate / refresh findings | `reflection-loop` | After draft milestones; produces candidate findings |
+| Generate / refresh findings | `reflection-loop` (or successor id from P0) | After draft milestones; produces candidate findings |
 | Master decision on open findings | `novel-review-master` | When findings need accept/reject/defer |
 
 ```bash

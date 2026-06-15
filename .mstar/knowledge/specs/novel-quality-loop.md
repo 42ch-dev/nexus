@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Shipped (V1.44 — 2026-06-13; V1.39 baseline retained; V1.45 overlay 2026-06-14)  
+**Status**: Draft (V1.47) — overlay on Shipped (V1.44) baseline; promote at P-last  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-14 (V1.45 P3 — §3.4/§6 updated to preset-id commands per compass §2 migration appendix)  
+**Last updated**: 2026-06-15 (V1.47 P-1 harness — §8 reflection-loop output contract; §2.1 `rule_suggestion` metadata)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
@@ -14,7 +14,7 @@
 - [novel-manuscript-audit.md](novel-manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
 - [novel-author-experience.md](novel-author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
 
-**Iteration compass**: [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) · [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) (P1 overlay)
+**Iteration compass**: [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) · [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) · [v1.47-novel-quality-loop-closure-delivery-compass-v1.md](../../iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md) (active)
 
 ---
 
@@ -38,6 +38,7 @@ V1.36 shipped inline `llm_judge` 五问 on finalize. V1.39 implements a durable 
 | `status` | TEXT | `open`, `resolved`, `wont_fix` |
 | `target_executor` | TEXT | `write`, `brainstorm`, `none`, `master` |
 | `body` | TEXT | Human-readable finding |
+| `rule_suggestion` | TEXT NULL | **V1.47** — optional prose suggestion for Layer 2 rules; persisted on finding row only (no `AGENTS.md` write in P0) |
 | `created_at` / `updated_at` | INTEGER | Unix epoch |
 
 Indexes: `(work_id, status)`, `(work_id, chapter, status)`.
@@ -59,7 +60,7 @@ Auto-chain must not fork driver when routing spawns auxiliary schedules; at most
 
 | Preset ID | Role |
 | --- | --- |
-| `reflection-loop` | Default FL-E `review` stage (shipped) |
+| `reflection-loop` | FL-E `review` stage — **V1.47 P0** transforms to novel review producer (findings writer); preset id may be renamed |
 | `novel-brainstorm` | Ideation from open findings (V1.39 P2) |
 | `novel-review-master` | Master decision surface (V1.39 P2) |
 | `novel-manuscript-audit` | On-demand chapter audit — review and/or extract (V1.44 P0; see [novel-manuscript-audit.md](novel-manuscript-audit.md)) |
@@ -92,7 +93,7 @@ nexus42 creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-
 
 ## 4. Rules architecture (DF-65)
 
-See [novel-workflow-profile.md §5.5.4](novel-workflow-profile.md#554-three-layer-rules-architecture) — V1.39 implements all three layers.
+See [novel-workflow-profile.md §5.5.4](novel-workflow-profile.md#554-two-layer-rules-architecture-v147) — V1.47 normative: Layer 2 = `Works/<work_ref>/AGENTS.md` (runtime reader migration deferred).
 
 ---
 
@@ -116,6 +117,35 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 2. Review stage in auto-chain can create findings without canceling driver.
 3. Rules and Logs paths match novel-workflow-profile layout.
 4. No Redis, external cron, or platform dependency.
+
+---
+
+## 8. Reflection-loop output contract (V1.47 Draft)
+
+**Scope**: Normative behavior for the FL-E `review` preset after P0 implement. Applies to **both** auto-chain review stage and on-demand `creator run <preset_id>`.
+
+### 8.1 Inputs (minimum)
+
+| Input | Source | Required |
+| --- | --- | --- |
+| `work_id` | Schedule / CLI | Yes |
+| `chapter` | `work_chapters` selection for review pass | Yes when multi-chapter |
+| `body_path` / `outline_path` | Chapter artifacts | Best-effort |
+| Rules context | Layer 1 embedded + Layer 2 (shipped: `Rules/novel-rules.md`; normative target: `AGENTS.md`) | Best-effort |
+
+### 8.2 Finding creation
+
+1. On terminal success of review preset, call existing `create_finding_from_review` (or supervisor-equivalent) **≥1** time per review pass.
+2. Each finding MUST set: `work_id`, `chapter` (when known), `kind`, `severity`, `status=open`, `target_executor`, `body`.
+3. Optional `rule_suggestion` text MAY be stored on the finding row; accepting a suggestion does **not** mutate `Works/<work_ref>/AGENTS.md` in V1.47.
+
+### 8.3 Idempotency
+
+Re-running review on the same chapter SHOULD avoid duplicate open findings with identical `body` hash within a 24h window (implementer may use content hash or finding kind+chapter dedupe — lock in P0 plan).
+
+### 8.4 Auto-chain invariant
+
+Finding creation MUST NOT fork or cancel the active FL-E auto-chain driver schedule.
 
 ---
 

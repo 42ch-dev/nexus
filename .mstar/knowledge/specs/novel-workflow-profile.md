@@ -1,6 +1,6 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Shipped** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md); **V1.42 Shipped** — multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) via plan [2026-06-11-v1.42-multi-volume](../../plans/2026-06-11-v1.42-multi-volume.md).
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Shipped** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md); **V1.42 Shipped** — multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) via plan [2026-06-11-v1.42-multi-volume](../../plans/2026-06-11-v1.42-multi-volume.md). **V1.47 Draft overlay** — §5.5.4 two-layer rules (`AGENTS.md`); §5.5.6 normative reflection→findings.
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
 **Last updated**: 2026-06-12 (V1.43 P-last — V1.42 Shipped stamps)
@@ -702,24 +702,37 @@ The reference-system pattern escalates a finding if it remains `open` for 96 hou
 
 This keeps the OSS path local-first: local DB + daemon scheduled task + CLI status banner. It explicitly does not reintroduce Redis, external cron, platform queues, or platform workers.
 
-#### 5.5.4 Three-layer rules architecture
+#### 5.5.4 Two-layer rules architecture (V1.47 normative)
 
-Future quality-loop work uses three rules layers:
+**V1.47 overlay** supersedes the three-layer model (Layer 3 history removed). **Shipped runtime** (through V1.46) still reads `Works/<work_ref>/Rules/novel-rules.md` — path migration is a follow-up implement slice; this section is normative for new Work layout.
 
 | Layer | Location | Mutability | Purpose |
 | --- | --- | --- | --- |
 | Layer 1 — Shared writing craft rules | User override: `~/.nexus42/rules/writing-craft.md`; in-repo default: `crates/nexus-orchestration/embedded-rules/writing-craft.md` | Immutable per version; user override may pin/replace a version | Cross-Work craft guidance read by all `novel-writing` runs; includes prose quality, pacing, scene craft, and the 五问 gate rationale |
-| Layer 2 — Per-work novel rules | `Works/<work_ref>/Rules/novel-rules.md` | User-editable; reset/replaced by future `creator run rules reset <work_id>` | Per-Work style preferences: POV, tense, chapter length, allowed tone, banned motifs, target audience, stylistic constraints |
-| Layer 3 — Append-only rules history | `Works/<work_ref>/Rules/novel-rules-history.md` | Append-only; never deleted | Audit trail for every Layer 2 change with timestamp, reason, actor/source, and previous/new summary |
+| Layer 2 — Per-work rules (agent-facing) | `Works/<work_ref>/AGENTS.md` | User-editable; future reset/replace via dedicated CLI (deferred) | Per-Work style and craft constraints for agents and presets: POV, tense, chapter length, tone, banned motifs, audience — formatted as **AGENTS.md** at Work root (not `Rules/novel-rules.md`) |
+
+**Deprecated (no migration)**: `Works/<work_ref>/Rules/novel-rules.md`, `novel-rules-history.md`. Existing Works may retain old files; new scaffolds SHOULD use `AGENTS.md` once runtime migration ships.
 
 Rules responsibilities are distinct from adjacent knowledge surfaces:
 
 - **SOUL**: creator identity, voice, experience, and memory. SOUL is not a rule file and should not receive per-Work style churn.
 - **World KB**: characters, locations, society, magic/physics/technology rules, timeline facts, and source anchors (§3.5; entity-scope-model.md §5.1). World KB describes fictional reality, not prose craft instructions.
 - **Shared writing craft rules**: how to write prose across Works (scene quality, pacing, clarity, consistency, 五问).
-- **Per-work novel rules**: how this Work should be written (POV, tense, chapter size, style preferences).
+- **Per-work AGENTS.md**: how this Work should be written (POV, tense, chapter size, style preferences) for coding agents and orchestration presets.
 
-If no `writing-craft-rules.md` exists, `novel-writing` continues to embed the 五问 prompt inline (§5.1). P3 found no existing `writing-craft-rules.md`; creating the embedded/user rule files is future implementation.
+If no Layer 1 user override exists, `novel-writing` continues to use embedded `writing-craft.md` (§5.1).
+
+#### 5.5.4 (archived) Three-layer rules architecture
+
+<details>
+<summary>Pre-V1.47 three-layer model (superseded in normative text; retained for history)</summary>
+
+| Layer | Location | Mutability | Purpose |
+| --- | --- | --- | --- |
+| Layer 2 — Per-work novel rules | `Works/<work_ref>/Rules/novel-rules.md` | User-editable | Per-Work style preferences |
+| Layer 3 — Append-only rules history | `Works/<work_ref>/Rules/novel-rules-history.md` | Append-only | Audit trail |
+
+</details>
 
 #### 5.5.5 `Logs/` structure and write discipline
 
@@ -740,7 +753,27 @@ Write discipline:
 3. `Logs/publish/` remains reserved until platform publish (DF-59) ships.
 4. Per §3.2 and §7, `Works/<work_ref>/Logs/**` is **not** scanned by the chapter sync module. Chapter sync remains scoped to `Works/<work_ref>/Stories/*.md` only.
 
-#### 5.5.6 `reflection-loop` feeding findings and rules updates
+#### 5.5.6 `reflection-loop` feeding findings (V1.47 normative)
+
+**Status**: **V1.47 implement** (plan `2026-06-15-v1.47-reflection-loop-findings`). Supersedes “future implementation” wording below.
+
+The FL-E `review` stage preset (today: `reflection-loop`; may be renamed in P0) MUST:
+
+1. Run after `novel-writing` has produced chapter content (draft or finalized) for the selected chapter.
+2. Inspect chapter body, outline context, `llm_judge` output where applicable, World KB context for World-bound Works, and rules layers (Layer 1 + Layer 2 per §5.5.4).
+3. On terminal success, write **≥1** row to `findings` via the daemon `from-review` path with supported `kind` values (`craft`, `continuity`, `plot_hole`, `world_inconsistency`, …).
+4. Surface findings on `creator works status` (human + `--json` per V1.46).
+5. Optionally attach `rule_suggestion` text on the finding row **only** (V1.47 P0 does not write `AGENTS.md`).
+
+**Trigger paths** (both required):
+
+- Auto-chain FL-E `review` stage after `produce`.
+- On-demand `creator run <review_preset_id> <work_id>`.
+
+**Out of V1.47 P0**: accepting a rule suggestion and mutating `Works/<work_ref>/AGENTS.md` (deferred).
+
+<details>
+<summary>Pre-V1.47 roadmap text (historical)</summary>
 
 `reflection-loop` is already the FL-E `review` stage preset and remains optional in V1.36 (§5.3.3; creator-workflow.md §3.1 and §4). Future integration should work as follows:
 
@@ -752,6 +785,8 @@ Write discipline:
 6. If accepted as a rule suggestion, the daemon updates `Works/<work_ref>/Rules/novel-rules.md` and appends an audit entry to `novel-rules-history.md` with timestamp + reason.
 
 This integration depends on the `findings` table and rules files existing, so it is future implementation scope.
+
+</details>
 
 #### 5.5.7 V1.37 P3 scope decision (superseded for implement by V1.39)
 
