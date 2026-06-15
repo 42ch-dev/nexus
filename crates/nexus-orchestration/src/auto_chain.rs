@@ -111,8 +111,9 @@ pub async fn find_work_for_driver(
 /// 4. **V1.48 P0 T2**: when `workspace_dir` is `Some`, reads
 ///    `Works/<work_ref>/Logs/review/review-report.md` and parses it via
 ///    [`crate::review_report::parse_review_report`]. When ≥1 finding parses,
-///    each row is persisted via [`findings::create_finding_from_review`] with
-///    the parsed `kind` / `severity` / `body` / optional `rule_suggestion`
+///    each row is persisted via [`findings::create_finding_from_review_tx`]
+///    inside a single transaction with the parsed `kind` / `severity` /
+///    `body` / optional `rule_suggestion`
 ///    (per `.mstar/knowledge/specs/novel-findings-maturity.md` §1.2).
 /// 5. **Fallback** (V1.47 placeholder shape): when the report is missing,
 ///    unparsable, or yields zero findings — OR when `workspace_dir` is
@@ -510,6 +511,16 @@ fn load_and_parse_review_report(
 /// path uses the bare `schedule_id` (no suffix), so the two paths never
 /// collide on the index.
 ///
+/// V1.48 P0-fix1 (qc3 W-2): all parsed rows for one review report are
+/// persisted inside a **single `SQLite` transaction** (`BEGIN; …; COMMIT;`)
+/// via [`findings::create_finding_from_review_tx`]. This replaces the
+/// previous N-sequential-`INSERT` round-trips with one transaction boundary
+/// so a 20-issue report is now one DB round-trip envelope instead of 20.
+/// Idempotency semantics (`ON CONFLICT DO NOTHING` on the partial unique
+/// index) are unchanged. Per-row insert failures are still logged and do not
+/// abort the transaction (`SQLite` does not poison the tx on a statement-level
+/// error); whatever succeeded commits at the end.
+///
 /// Returns the count of rows actually inserted (best-effort: rows that hit
 /// the idempotent conflict are not counted).
 async fn persist_parsed_findings(
@@ -521,6 +532,26 @@ async fn persist_parsed_findings(
     schedule_id: &str,
 ) -> Result<usize, AutoChainError> {
     let mut inserted = 0usize;
+    // V1.48 P0-fix1 (qc3 W-2): one transaction wraps the whole batch so N
+    // parsed findings cost one DB round-trip envelope (BEGIN + N inserts via
+    // the `_tx` DAO variant + COMMIT) instead of N independent round-trips.
+    let mut tx = pool.begin().await.map_err(|e| {
+        let db_err = nexus_local_db::LocalDbError::from(e);
+        tracing::warn!(
+            schedule_id,
+            work_id,
+            error = %db_err,
+            "review-findings: failed to begin parsed-findings transaction; \
+             falling back to placeholder synthesis"
+        );
+        AutoChainError::from(db_err)
+    })?;
+    tracing::debug!(
+        schedule_id,
+        work_id,
+        finding_count = parsed.findings.len(),
+        "review-findings: persisting parsed findings in single transaction"
+    );
     for (idx, finding) in parsed.findings.iter().enumerate() {
         // Truncate body to a safe upper bound to avoid DB bloat. The from-review
         // DAO already enforces rule_suggestion size; the body uses the same
@@ -551,7 +582,8 @@ async fn persist_parsed_findings(
             rule_suggestion: finding.rule_suggestion.clone(),
             source_schedule_id: Some(source_schedule_id),
         };
-        match findings::create_finding_from_review(pool, &verdict).await {
+        // `_tx` variant executes against the shared transaction.
+        match findings::create_finding_from_review_tx(&mut tx, &verdict).await {
             Ok(_) => inserted += 1,
             Err(e) => {
                 tracing::warn!(
@@ -563,6 +595,9 @@ async fn persist_parsed_findings(
             }
         }
     }
+    tx.commit()
+        .await
+        .map_err(|e| AutoChainError::from(nexus_local_db::LocalDbError::from(e)))?;
     Ok(inserted)
 }
 

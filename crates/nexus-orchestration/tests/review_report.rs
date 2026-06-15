@@ -409,6 +409,65 @@ async fn large_report_falls_back_to_placeholder() {
     assert!(f.rule_suggestion.is_none());
 }
 
+/// AC (W-2, qc3): the parsed-report path persists all findings inside a
+/// single SQLite transaction. This regression guard verifies the two
+/// observable invariants of that change:
+///
+/// 1. **Commit semantics**: a parsed report with N findings yields exactly
+///    N persisted rows (the transaction commits, not rolls back).
+/// 2. **Idempotency inside the transaction**: re-running the same schedule
+///    on the same report is a no-op — `ON CONFLICT DO NOTHING` still works
+///    when the inserts share one transaction boundary.
+///
+/// The transaction itself is documented in code via a `tracing::debug!`
+/// marker emitted at the `BEGIN` boundary in `persist_parsed_findings`; this
+/// test exercises the behavior that marker promises.
+#[tokio::test]
+async fn parsed_findings_transaction_commits_and_is_idempotent_on_retry() {
+    let pool = test_pool().await;
+    let work = novel_work("wrk_tx", "tx-novel", 2, 4);
+    works::create_work(&pool, &work).await.unwrap();
+    insert_review_schedule(&pool, "sch_tx_review", "wrk_tx").await;
+
+    let report = "\
+# Review Report
+
+## Issues
+- Craft nit one. kind: craft, severity: minor
+- Craft nit two. kind: craft, severity: major, executor: write
+- World timeline gap. kind: world_inconsistency, severity: critical
+";
+    let ws_root = write_report_file("tx-novel", report);
+
+    // First pass: transaction commits all three parsed findings.
+    let count1 =
+        auto_chain::persist_review_findings_for_schedule(&pool, "sch_tx_review", Some(&ws_root))
+            .await
+            .expect("parsed-path transaction must commit");
+    assert_eq!(count1, 3, "first pass persists all 3 findings");
+
+    let rows1 = list_work_findings(&pool, "wrk_tx").await;
+    assert_eq!(rows1.len(), 3, "transaction committed all 3 rows");
+
+    // Second pass: same schedule + same report → idempotent (ON CONFLICT
+    // DO NOTHING fires inside the transaction). The row count must not grow.
+    let count2 =
+        auto_chain::persist_review_findings_for_schedule(&pool, "sch_tx_review", Some(&ws_root))
+            .await
+            .expect("idempotent retry must not fail");
+    assert_eq!(
+        count2, 3,
+        "retry returns the parsed count but the DB rows are unchanged (idempotent)"
+    );
+
+    let rows2 = list_work_findings(&pool, "wrk_tx").await;
+    assert_eq!(
+        rows2.len(),
+        3,
+        "idempotent retry inside the transaction must not duplicate rows"
+    );
+}
+
 /// AC3 (hermetic / supervisor contract): when `workspace_dir` is `None`
 /// (the V1.47 hermetic DB-only mode), the producer always uses the
 /// placeholder synthesis — never tries to touch the filesystem.
