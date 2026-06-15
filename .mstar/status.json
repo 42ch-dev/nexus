@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16T02:09:19+08:00",
+  "updated_at": "2026-06-16T02:50:13+08:00",
   "plans": [
     {
       "id": "2026-06-16-v1.48-harness-docs-prepare",
@@ -752,6 +752,20 @@
         "target_date": "V1.49",
         "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-serial-hardening/qc-consolidated.md",
         "note": "Deferred to V1.49. Consider batching / chunked async processing or not holding runtime lock during best-effort file rewrites."
+      }
+    ],
+    "2026-06-16-v1.48-findings-producer": [
+      {
+        "id": "R-V148P0-W1",
+        "title": "load_and_parse_review_report path resolution is app-controlled; recommend safe-resolve guard or invariant test before P1/P2 prompt injection surfaces",
+        "severity": "low",
+        "source": "qc2 W-1 (P0 tri-review)",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs::load_and_parse_review_report",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target_date": "V1.49",
+        "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-findings-producer/qc-consolidated.md",
+        "note": "Deferred. P0 work_ref is app-controlled today; P1+ prompt injection surfaces `rule_suggestion` and `body` to LLMs, so a small safe-resolve guard or invariant test should be added before that touch point."
       }
     ]
   }
