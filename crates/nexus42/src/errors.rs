@@ -261,9 +261,10 @@ impl CliError {
     pub fn daemon_not_reachable_quickstart() -> Self {
         Self::DaemonNotReachable {
             message: "The nexus42 daemon is not reachable.".to_string(),
+            // V1.47 P1: normalize user-facing copy — spec name, not repo path.
             // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
             suggestion: "Start the daemon with `nexus42 daemon start`; \
-                see .mstar/knowledge/specs/creator-run-preset-entry.md"
+                see the creator-run-preset-entry spec"
                 .to_string(),
         }
     }
@@ -602,8 +603,13 @@ mod tests {
             "should suggest starting daemon: {msg}"
         );
         assert!(
-            msg.contains("creator-run-preset-entry.md"),
+            msg.contains("creator-run-preset-entry"),
             "should cite the preset-entry spec: {msg}"
+        );
+        // R-V146P1-QC3-S4: no raw .mstar/ paths in user-facing copy.
+        assert!(
+            !msg.contains(".mstar/"),
+            "daemon-not-reachable remediation must not cite raw .mstar/ paths: {msg}"
         );
     }
 }
