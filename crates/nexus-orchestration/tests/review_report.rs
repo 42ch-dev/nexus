@@ -352,6 +352,63 @@ Adequate; no actionable issues this pass.
     assert_eq!(rows[0].severity, "info");
 }
 
+/// AC (W-1, qc3): a `review-report.md` larger than `MAX_REVIEW_REPORT_BYTES`
+/// (256 KiB) must NOT be buffered into memory on the producer hot path. The
+/// producer falls back to the V1.47 placeholder synthesis with a
+/// `tracing::warn!` carrying `size_bytes` / `cap_bytes` / `chapter`.
+///
+/// The fixture uses a valid `## Issues` body padded past the cap so that ONLY
+/// the size guard (not the parser) is what rejects the read — proving the cap
+/// fires before `read_to_string` is ever called.
+#[tokio::test]
+async fn large_report_falls_back_to_placeholder() {
+    let pool = test_pool().await;
+    let work = novel_work("wrk_large", "large-novel", 3, 5);
+    works::create_work(&pool, &work).await.unwrap();
+    insert_review_schedule(&pool, "sch_large_review", "wrk_large").await;
+
+    // 300 KiB of padding > 256 KiB cap. The literal mirrors the
+    // `MAX_REVIEW_REPORT_BYTES` constant in `auto_chain.rs`; if that constant
+    // changes, bump this fixture to match (the assert! below guards it).
+    const CAP_BYTES: usize = 256 * 1024;
+    let pad = "x".repeat(300 * 1024);
+    let report = format!(
+        "# Review Report\n\n## Issues\n\
+         - Filler to exceed the bounded-read cap. kind: craft, severity: minor\n\n\
+         {pad}\n"
+    );
+    assert!(
+        report.len() > CAP_BYTES,
+        "fixture must exceed the {}-byte cap; got {} bytes",
+        CAP_BYTES,
+        report.len()
+    );
+    let ws_root = write_report_file("large-novel", &report);
+
+    let count =
+        auto_chain::persist_review_findings_for_schedule(&pool, "sch_large_review", Some(&ws_root))
+            .await
+            .expect("oversized report must NOT fail the persist call");
+
+    assert!(
+        count >= 1,
+        "oversized-report fallback must persist ≥1 placeholder; got {count}"
+    );
+
+    let rows = list_work_findings(&pool, "wrk_large").await;
+    assert_eq!(rows.len(), 1, "exactly one placeholder finding");
+    let f = &rows[0];
+    // V1.47 placeholder shape (not parsed fields).
+    assert_eq!(f.kind, "craft");
+    assert_eq!(f.severity, "info");
+    assert_eq!(f.target_executor, "none");
+    assert!(
+        f.description.contains("V1.47 P0: synthesized finding"),
+        "oversized-report fallback must use the placeholder body"
+    );
+    assert!(f.rule_suggestion.is_none());
+}
+
 /// AC3 (hermetic / supervisor contract): when `workspace_dir` is `None`
 /// (the V1.47 hermetic DB-only mode), the producer always uses the
 /// placeholder synthesis — never tries to touch the filesystem.
