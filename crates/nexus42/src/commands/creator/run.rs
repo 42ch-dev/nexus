@@ -6,7 +6,7 @@
 //!
 //! `nexus42 creator run <preset_id> [<work_id>] [global flags] [preset args...]`
 //!
-//! FL-E stage-advance presets (`research`, `novel-writing`, `reflection-loop`,
+//! FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`,
 //! `kb-extract`) are dispatched to `stage_advance`; all other presets are
 //! scheduled directly via the daemon Local API.
 

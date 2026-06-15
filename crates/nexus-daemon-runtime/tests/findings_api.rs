@@ -74,6 +74,8 @@ async fn create_finding(
             title: title.to_string(),
             description: "Test finding description".into(),
             target_executor: "none".to_string(),
+            kind: "craft".to_string(),
+            rule_suggestion: None,
         }),
     )
     .await
@@ -174,6 +176,8 @@ async fn findings_update_and_close_transition() {
             status: None,
             title: None,
             target_executor: None,
+            kind: None,
+            rule_suggestion: None,
         }),
     )
     .await
@@ -193,6 +197,8 @@ async fn findings_update_and_close_transition() {
             severity: None,
             description: None,
             title: None,
+            kind: None,
+            rule_suggestion: None,
         }),
     )
     .await
@@ -213,6 +219,8 @@ async fn findings_update_and_close_transition() {
             description: None,
             title: None,
             target_executor: None,
+            kind: None,
+            rule_suggestion: None,
         }),
     )
     .await
@@ -306,6 +314,11 @@ async fn findings_from_review_endpoint_auto_create() {
             title: "LLM-judge: continuity break".to_string(),
             description: "Character age inconsistency between ch2 and ch3".to_string(),
             target_executor: "write".to_string(),
+            kind: "continuity".to_string(),
+            rule_suggestion: Some(
+                "Consider adding a Layer 2 rule that pins character ages at first appearance."
+                    .to_string(),
+            ),
         }),
     )
     .await
@@ -320,6 +333,13 @@ async fn findings_from_review_endpoint_auto_create() {
     assert_eq!(body.target_executor, "write");
     assert_eq!(body.routing_hint.as_deref(), Some("→ write"));
     assert!(body.finding_id.starts_with("fnd_"));
+    // V1.47 P0 §8.2: kind + rule_suggestion persisted on the finding row.
+    assert_eq!(body.kind, "continuity");
+    assert!(body.rule_suggestion.is_some());
+    assert!(body
+        .rule_suggestion
+        .as_ref()
+        .is_some_and(|s| s.contains("Layer 2 rule")));
 }
 
 #[tokio::test]
@@ -368,6 +388,8 @@ async fn findings_routing_hints_all_executors() {
                 title: format!("Finding for {executor}"),
                 description: String::new(),
                 target_executor: executor.to_string(),
+                kind: "craft".to_string(),
+                rule_suggestion: None,
             }),
         )
         .await

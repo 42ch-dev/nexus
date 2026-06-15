@@ -404,7 +404,7 @@ A future implementation plan for this roadmap must include at least these tests:
 | `novel-project-init` | Interactive grill-me; sets `work_ref`, `total_planned_chapters`, required `world_id` (bind to existing / create new), scaffolds `Works/<work_ref>/` dirs (§5.4), seeds `work_chapters` rows | Before first `novel-writing` if scaffold missing | §5.3.1 |
 | `creative-brief-intake` | Structured brief on Work | FL-E `intake` / `creator bootstrap` | (generic; out of novel overlay) |
 | `novel-writing` | Outline → draft → **finalize (gated by `llm_judge`)** → `finalized`; per-chapter transitions update both `work_chapters` row + chapter frontmatter | FL-E `produce` | §5.3.2 |
-| `reflection-loop` | Optional deeper quality pass; **not** in V1.36 default flow | FL-E `review` (optional V1.36) | §5.3.3 |
+| `novel-chapter-review` | FL-E `review` stage — novel/work/chapter-aware review that produces findings (V1.47); replaces the former generic `reflection-loop` demo | FL-E `review` | §5.3.3 |
 
 **Separation rule**: `novel-project-init` is **not** auto-chained inside `novel-writing`. User or `creator run` explicitly schedules it when starting a new novel Work. The engine enforces this via the `previous_preset: novel-project-init` gate on `novel-writing` (§5.3.2).
 
@@ -482,7 +482,7 @@ gates:
 
 **Rationale**: `novel-writing` runs in the FL-E `produce` stage. The gates enforce the **layer cake** from §3.1 (scaffold dirs), the **Work identity** (profile + work_ref), the **intake** requirement, and the **World binding** (if the preset's `run_intents` declares it world-required). The `previous_preset` gate ensures the scaffold was actually created via `novel-project-init` (not hand-edited or copied from another Work).
 
-#### 5.3.3 `reflection-loop` gates (optional quality pass)
+#### 5.3.3 `novel-chapter-review` gates (review quality pass)
 
 ```yaml
 gates:
@@ -502,7 +502,7 @@ gates:
     scope: work
 ```
 
-**Rationale**: `reflection-loop` is optional and runs after at least one chapter draft. It needs the chapter directory but does not require the chapter to be `finalized` (reflection may be triggered on `draft` too).
+**Rationale**: `novel-chapter-review` runs after at least one chapter draft. It needs the chapter directory but does not require the chapter to be `finalized` (review may be triggered on `draft` too).
 
 #### 5.3.4 World-binding toggle (preset-level opt-in)
 
@@ -753,11 +753,11 @@ Write discipline:
 3. `Logs/publish/` remains reserved until platform publish (DF-59) ships.
 4. Per §3.2 and §7, `Works/<work_ref>/Logs/**` is **not** scanned by the chapter sync module. Chapter sync remains scoped to `Works/<work_ref>/Stories/*.md` only.
 
-#### 5.5.6 `reflection-loop` feeding findings (V1.47 normative)
+#### 5.5.6 `novel-chapter-review` feeding findings (V1.47 normative)
 
 **Status**: **V1.47 implement** (plan `2026-06-15-v1.47-reflection-loop-findings`). Supersedes “future implementation” wording below.
 
-The FL-E `review` stage preset (today: `reflection-loop`; may be renamed in P0) MUST:
+The FL-E `review` stage preset (`novel-chapter-review`) MUST:
 
 1. Run after `novel-writing` has produced chapter content (draft or finalized) for the selected chapter.
 2. Inspect chapter body, outline context, `llm_judge` output where applicable, World KB context for World-bound Works, and rules layers (Layer 1 + Layer 2 per §5.5.4).

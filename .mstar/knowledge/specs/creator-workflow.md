@@ -61,7 +61,7 @@ without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P
 | `intake` | Creative Brief Intake | `creative-brief-intake` | `work_init` |
 | `research` | Reference / KB gathering | `research` | `knowledge_ingest`, `work_continue` |
 | `produce` | Primary drafting / generation | `novel-writing` (default) | `work_continue` |
-| `review` | Quality loop / revision | `reflection-loop` | `work_continue` |
+| `review` | Quality loop / revision | `novel-chapter-review` (V1.47: renamed from `reflection-loop`) | `work_continue` |
 | `persist` | Memory + KB promotion | `kb-extract`, `creator memory review` CLI | `knowledge_ingest`, `work_continue` |
 
 Stages are **linear** in product order. Skipping a stage requires explicit `--force` (logged) or PM-approved compass exception — not conditional graph edges.
@@ -102,7 +102,7 @@ creator run <preset_id> [<work_id>] # e.g. creator run research, creator run nov
 | `intake` | `creative-brief-intake` | Shipped V1.33 |
 | `research` | `research` | May append references to Work context |
 | `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log`; novel profile writes to `Works/<work_ref>/` per [novel-workflow-profile.md](novel-workflow-profile.md) |
-| `review` | `reflection-loop` | `llm_judge` gates per orchestration-engine |
+| `review` | `novel-chapter-review` | V1.47 P0: renamed from `reflection-loop` (compass §0.1 #6). Persists ≥1 finding per review pass via the supervisor terminal hook; see [novel-quality-loop.md §8](novel-quality-loop.md#8-reflection-loop-output-contract-v147-draft). |
 | `persist` | `kb-extract` (via queue) + CLI memory review | **V1.40 P3**: World-bound novel Works enqueue extract with `work.world_id`; worldless Works skip World promotion. See [novel-workflow-profile.md §3.5.1.5](novel-workflow-profile.md). |
 
 P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
@@ -119,7 +119,7 @@ creator bootstrap --idea "..."
   → intake schedule → brief complete
 creator run research <work_id>      # preset runner validates stage gates, PATCHes Work stage
 creator run novel-writing <work_id>
-creator run reflection-loop <work_id>
+creator run novel-chapter-review <work_id>
 creator run kb-extract <work_id>
 creator memory review <id>
 creator kb queue-extract --world-id <work.world_id>  # World-bound novel Works (V1.40 P3)

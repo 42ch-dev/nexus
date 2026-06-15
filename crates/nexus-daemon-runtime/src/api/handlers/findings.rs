@@ -38,6 +38,11 @@ pub struct FindingApiDto {
     pub title: String,
     pub description: String,
     pub target_executor: String,
+    /// V1.47 §2.1: finding category (`craft`, `continuity`, …).
+    pub kind: String,
+    /// V1.47 §8.2: optional prose rule suggestion (omitted when `None`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule_suggestion: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Routing hint string for CLI display (T4).
@@ -57,6 +62,8 @@ impl From<Finding> for FindingApiDto {
             title: f.title,
             description: f.description,
             target_executor: f.target_executor,
+            kind: f.kind,
+            rule_suggestion: f.rule_suggestion,
             created_at: f.created_at,
             updated_at: f.updated_at,
         }
@@ -73,10 +80,20 @@ pub struct CreateFindingRequest {
     pub description: String,
     #[serde(default = "default_target_executor")]
     pub target_executor: String,
+    /// V1.47 §2.1: finding category; defaults to `"craft"`.
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    /// V1.47 §8.2: optional prose rule suggestion.
+    pub rule_suggestion: Option<String>,
 }
 
 fn default_target_executor() -> String {
     "none".to_string()
+}
+
+/// V1.47: default `kind` value when the request omits the field.
+fn default_kind() -> String {
+    "craft".to_string()
 }
 
 /// Update finding request body (all fields optional).
@@ -87,6 +104,10 @@ pub struct UpdateFindingRequest {
     pub title: Option<String>,
     pub description: Option<String>,
     pub target_executor: Option<String>,
+    /// V1.47: optional new `kind`.
+    pub kind: Option<String>,
+    /// V1.47: optional new `rule_suggestion`.
+    pub rule_suggestion: Option<String>,
 }
 
 /// List findings query parameters.
@@ -169,6 +190,8 @@ pub async fn create_finding_handler(
         description: body.description,
         target_executor: body.target_executor,
         creator_id: creator_id.clone(),
+        kind: body.kind,
+        rule_suggestion: body.rule_suggestion,
         created_at: now,
         updated_at: now,
     };
@@ -234,6 +257,8 @@ pub async fn update_finding_handler(
         title: body.title,
         description: body.description,
         target_executor: body.target_executor,
+        kind: body.kind,
+        rule_suggestion: body.rule_suggestion,
     };
     let now = chrono::Utc::now().timestamp();
     let updated =
@@ -294,6 +319,10 @@ pub async fn create_from_review_handler(
         description: body.description,
         target_executor: body.target_executor,
         creator_id: creator_id.clone(),
+        kind: body.kind,
+        rule_suggestion: body.rule_suggestion,
+        // Manual API path — no originating schedule; no idempotency guard.
+        source_schedule_id: None,
     };
     let finding_id = findings::create_finding_from_review(state.pool(), &verdict)
         .await

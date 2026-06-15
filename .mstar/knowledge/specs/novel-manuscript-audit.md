@@ -32,7 +32,7 @@ V1.44 P0 implements **DF-69**: a dual-mode embedded preset (or preset pair) plus
 | Surface | Role | Enters FL-E driver? |
 | --- | --- | --- |
 | `novel-writing` finalize `llm_judge` | Inline quality gate on finalize transition | Yes (produce stage) |
-| `reflection-loop` | Default FL-E `review` stage | Yes |
+| `novel-chapter-review` | Default FL-E `review` stage | Yes |
 | `novel-review-master` | Master decisions on **existing** findings | Auxiliary schedule only |
 | `kb-extract` preset | Queue claim → job lifecycle | No (queue path) |
 | `creator kb queue-extract --chapter N` | CLI sugar → `kb_extract_jobs` row | No (queue path) |

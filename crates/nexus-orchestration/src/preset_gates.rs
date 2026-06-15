@@ -773,7 +773,7 @@ mod tests {
 
         let result = evaluate_gates(
             &gates,
-            "reflection-loop",
+            "novel-chapter-review",
             &work,
             &input,
             tempfile::tempdir().unwrap().path(),

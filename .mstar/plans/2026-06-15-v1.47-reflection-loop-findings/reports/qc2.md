@@ -2,9 +2,9 @@
 report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
-plan_id: 2026-06-15-v1.47-reflection-loop-findings
-verdict: Request Changes
-generated_at: 2026-06-15T20:15:00Z
+plan_id: "2026-06-15-v1.47-reflection-loop-findings"
+verdict: "Approve"
+generated_at: "2026-06-15"
 ---
 
 # Code Review Report
@@ -12,18 +12,94 @@ generated_at: 2026-06-15T20:15:00Z
 ## Reviewer Metadata
 - Reviewer: @qc-specialist-2
 - Runtime Agent ID: qc-specialist-2
-- Runtime Model: xai/grok-build-0.1
-- Review Perspective: security and correctness risk (input validation on preset terminal hook (work_id, chapter, kind/severity values), SQL/DAO parameter binding, idempotency / duplicate-finding risk, untrusted prompt-injection surface, race conditions, error propagation, supervisor hook lifecycle)
-- Report Timestamp: 2026-06-15T20:15:00Z
+- Runtime Model: grok-build-0.1 (xai/grok-build-0.1)
+- Review Perspective: Security and correctness risk — input validation on `create_finding_from_review` (`kind`, `rule_suggestion`), idempotency/duplicate-finding, untrusted prompt-injection surface, race conditions, error propagation.
+- Report Timestamp: 2026-06-15
 
 ## Scope
 - plan_id: 2026-06-15-v1.47-reflection-loop-findings
-- Review range / Diff basis: merge-base: 594b00b51c43681ec779f9ad6fef09333ffc2ed8 + tip: HEAD (i.e. `git diff 594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD` from the worktree)
+- Review range / Diff basis: merge-base: 594b00b51c43681ec779f9ad6fef09333ffc2ed8 + tip: HEAD (i.e. `git diff 594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD`)
 - Working branch (verified): feature/v1.47-reflection-loop-findings
 - Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.47-p0-reflection
-- Files reviewed: 12 (core security surface: supervisor.rs, auto_chain.rs, review_findings.rs, findings.rs, handlers/findings.rs, novel-chapter-review/preset.yaml, review-report.md, plus supporting test and schema changes)
-- Commit range: d0cf8a7a feat(v1.47): novel-chapter-review preset produces findings (+ kind/rule_suggestion)
-- Tools run: `cargo test -p nexus-orchestration --test review_findings`, `cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings`, `git diff --stat`, `git log`, manual source review of supervisor hook, persist_review_findings_for_schedule, DAO create_finding_from_review, from-review handler, preset gates, prompt template, and all new hermetic tests. Verification commands from the plan were executed in the review worktree.
+- Files reviewed: 47 (per `git diff --stat`)
+- Commit range: 594b00b51c43681ec779f9ad6fef09333ffc2ed8..7c4dae34c9f3912e833efa3a2d70abc521344ee7
+- Tools run:
+  - `git rev-parse --show-toplevel && git branch --show-current && git rev-parse HEAD`
+  - `git diff --stat 594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD`
+  - `git show 6fcfa322 -- crates/nexus-local-db/src/findings.rs crates/nexus-local-db/migrations/ crates/nexus-orchestration/src/auto_chain.rs crates/nexus-orchestration/tests/review_findings.rs`
+  - `git show 8d9e6e3f -- crates/nexus-local-db/src/findings.rs`
+  - `cargo +nightly fmt --all -- --check`
+  - `cargo clippy -p nexus-orchestration -p nexus-local-db -p nexus-daemon-runtime -p nexus42 -- -D warnings`
+  - `cargo test -p nexus-local-db --lib -- findings`
+  - `cargo test -p nexus-daemon-runtime --test findings_api`
+  - `cargo test -p nexus-orchestration --test review_findings`
+
+## Revalidation
+
+This is a **targeted re-review** (QC re-review: targeted) after the fix round. Only the two prior warnings raised by qc-specialist-2 in the initial wave are in scope. Pre-existing baseline issues (e.g. `master_decision_timeout::repeated_sweeps_remain_stable` flake, baseline clippy items) are explicitly out of scope and not re-flagged. No new findings were introduced by the fix-round commits in the security/correctness surface under review.
+
+### W-01: Idempotency / duplicate-finding risk
+- **Prior finding (initial wave)**: The review terminal hook path (`auto_chain::persist_review_findings_for_schedule` → `create_finding_from_review`) had no idempotency guard. Repeated terminal transitions for the same chapter + schedule could insert duplicate rows. `novel-quality-loop.md §8.3` had asked the plan to lock in a decision on this; it was not implemented in the initial delivery.
+- **Fix commit**: `6fcfa322` ("fix(v1.47-P0): idempotency for review→finding via source_schedule_id")
+- **Evidence from diff inspection**:
+  - New migration `202606150002_findings_source_schedule_unique.sql`:
+    - Adds `findings.source_schedule_id TEXT` (server-only; not in wire contract).
+    - Adds partial unique index `findings_unique_review_per_chapter ON findings (work_id, chapter, source_schedule_id) WHERE source_schedule_id IS NOT NULL`.
+  - `ReviewVerdictFinding` struct gains `source_schedule_id: Option<String>`.
+    - `Some(...)` → idempotent path (review terminal hook).
+    - `None` → standard CRUD path (manual API / `create_from_review_handler`).
+  - `create_finding_from_review`:
+    - When `source_schedule_id` is `Some`:
+      - Dynamic `INSERT ... ON CONFLICT (work_id, chapter, source_schedule_id) WHERE source_schedule_id IS NOT NULL DO NOTHING`.
+      - On `rows_affected() == 1` → return the minted id.
+      - On conflict (0 rows) → `SELECT finding_id` by the unique triple and return the existing id (or `ConstraintViolation` if the fetch unexpectedly fails).
+    - When `None` → falls through to the pre-existing `create_finding` path (behavior unchanged for manual callers).
+  - `auto_chain::persist_review_findings_for_schedule` now correctly threads the originating `schedule_id`:
+    ```rust
+    source_schedule_id: Some(schedule_id.to_string()),
+    ```
+  - New hermetic test `ac5_idempotent_review_repeat_no_duplicate_finding`:
+    - Creates a novel work + schedule + driver.
+    - Fires `on_schedule_terminal(Completed)` twice (resetting status between to allow the second transition).
+    - Asserts exactly 1 finding row after both calls.
+- **Re-run evidence** (executed in this review cwd):
+  - `cargo test -p nexus-orchestration --test review_findings` → all 5 tests passed, including `ac5_idempotent_review_repeat_no_duplicate_finding`.
+  - `cargo test -p nexus-daemon-runtime --test findings_api` → all 7 tests passed (the manual API path continues to use `source_schedule_id: None` and is unaffected).
+- **Disposition**: **resolved**. The partial unique index + ON CONFLICT DO NOTHING + fetch-on-conflict logic, combined with correct threading from the supervisor hook, closes the duplicate-finding vector for the review terminal path. Manual API path remains non-idempotent by design (as before).
+
+### W-02: Public DAO surface accepts free-text `kind` and verbatim `rule_suggestion`
+- **Prior finding (initial wave)**: `create_finding_from_review` (the public DAO surface used by both the supervisor hook and the findings API handler) accepted arbitrary free-text for `kind` and any (including whitespace-only or multi-megabyte) string for `rule_suggestion`. While the P0 synthesized path always passed `kind="craft"` and `rule_suggestion=None`, future callers / API payloads could bypass any intended vocabulary or size limits, with silent truncation (and a latent UTF-8 panic on multi-byte boundaries in the old cap logic).
+- **Fix commit**: `8d9e6e3f` ("fix(v1.47-P0): tighten findings DAO surface (closed kind set + rule_suggestion length cap)")
+- **Evidence from diff inspection** (all changes confined to `crates/nexus-local-db/src/findings.rs`):
+  - New closed `FindingKind` enum (5 variants):
+    ```rust
+    pub enum FindingKind { Craft, Continuity, Pacing, Consistency, Other }
+    pub const ALL_STRS: &[&str] = &["craft", "continuity", "pacing", "consistency", "other"];
+    pub fn validate(s: &str) -> Result<String, LocalDbError> { ... ConstraintViolation on unknown ... }
+    ```
+  - Wired into `create_finding_from_review` **before any DB write**:
+    - Empty `kind` still defensively defaults to `"craft"` (per spec §8.2).
+    - Non-empty `kind` now does `FindingKind::validate(&verdict.kind)?`; unknown values surface as `ConstraintViolation` immediately.
+  - `normalize_rule_suggestion` signature changed to `Result<Option<String>, LocalDbError>`:
+    - `None` → `Ok(None)` (no-op).
+    - `Some(s)` after `.trim()`:
+      - Empty-after-trim → `ConstraintViolation` ("rule_suggestion must be non-empty after trim"). Callers intending "no suggestion" **must** pass `None`.
+      - Byte length > `RULE_SUGGESTION_MAX_BYTES` (4096) → `ConstraintViolation` with observed length and cap (explicit reject, not silent truncate).
+      - Otherwise `Ok(Some(trimmed))` — **no internal whitespace collapsing** (only leading/trailing trim, as originally specified).
+  - Latent UTF-8 panic fixed: the old `collapsed[..RULE_SUGGESTION_MAX_LEN]` slice is gone; the new path never slices into the middle of the string for capping.
+  - Renamed constant `RULE_SUGGESTION_MAX_LEN` → `RULE_SUGGESTION_MAX_BYTES` (byte semantics, not char count).
+  - Five new unit tests in the `findings::tests` module (all green):
+    - `finding_kind_validate_accepts_known_values`
+    - `finding_kind_validate_rejects_unknown`
+    - `rule_suggestion_length_cap_accepts_within_limit`
+    - `rule_suggestion_length_cap_rejects_too_long`
+    - `rule_suggestion_trimmed_empty_rejected`
+  - Commit message includes explicit caller audit: the three real call sites (supervisor hook in auto_chain, `create_from_review_handler` in daemon-runtime, and the integration test in review_findings.rs) all pass either `"craft"` or `None`/short ASCII — well inside the new contract. No behavior change for the P0 synthesized path.
+- **Re-run evidence** (executed in this review cwd):
+  - `cargo +nightly fmt --all -- --check` → clean (exit 0).
+  - `cargo clippy -p nexus-orchestration -p nexus-local-db -p nexus-daemon-runtime -p nexus42 -- -D warnings` → clean (exit 0).
+  - `cargo test -p nexus-local-db --lib -- findings` → 6 tests passed (the original index test + the 5 new W-02 tests).
+- **Disposition**: **resolved**. The validator is wired into the single hot path (`create_finding_from_review`), oversized/empty-after-trim inputs are rejected with clear `ConstraintViolation` before any persistence, and the unit test matrix directly covers the acceptance and rejection cases. The manual API path (which uses the general `create_finding` entry point) remains open-vocabulary for `kind` per prior design; only the review-hook DAO surface is now closed.
 
 ## Findings
 
@@ -31,47 +107,29 @@ generated_at: 2026-06-15T20:15:00Z
 None.
 
 ### 🟡 Warning
-
-- **W-01 Idempotency / duplicate-finding risk on repeated terminal hook invocation**  
-  `persist_review_findings_for_schedule` (auto_chain.rs:120) performs an unconditional INSERT via `create_finding_from_review`. The supervisor calls it from `on_schedule_terminal(Completed)` (supervisor.rs:398) inside the Completed branch, before auto-chain continuation. There is no guard (schedule_id correlation check, "already recorded for this driver" query, or unique constraint on (work_id, chapter, review_pass_correlation)). If the terminal transition were ever emitted twice for the same schedule (supervisor restart recovery, test harness double-call, or future re-entrancy in the terminal path), duplicate finding rows for the same (Work, chapter, review pass) would be created. The new hermetic tests (review_findings.rs) exercise only single terminal calls; no test asserts "second Completed for the same schedule_id produces 0 additional findings".  
-  Current lifecycle makes re-invocation unlikely (schedules reach terminal once; the R1/R2 pause/resume TOCTOU guards are pre-existing and not changed here), but the hook is the canonical "review → finding" path for both auto-chain and on-demand `creator run`. This is a correctness risk against the "≥1 finding" guarantee and the quality-loop dedup expectations.  
-  → Recommended: add an explicit idempotency token (e.g. store the driver schedule_id on the finding or a review_pass_id) or a pre-INSERT existence check keyed on (work_id, chapter, preset_id, schedule_id). At minimum, add a test that calls `on_schedule_terminal(Completed)` twice and asserts exactly one finding row.
-
-- **W-02 Shared from-review DAO surface accepts untrusted kind/severity/rule_suggestion without additional sanitization**  
-  Both the supervisor synthesized path (auto_chain.rs:208, hard-coded safe defaults: kind="craft", severity="info", target_executor="none", rule_suggestion=None) and the public `POST /v1/local/works/{work_id}/findings/from-review` handler (handlers/findings.rs:314) construct a `ReviewVerdictFinding` and pass it to the same `findings::create_finding_from_review` (findings.rs:611). The DAO only calls `validate_finding_enums` for the three enum columns (severity/status/target_executor). `kind` is free-text (suggested vocabulary in SUGGESTED_FINDING_KINDS but no enforcement; column is TEXT), and `rule_suggestion` is stored verbatim as Optional TEXT.  
-  The P0 hook itself never supplies attacker-controlled values, but the shared DAO + from-review handler now expose this surface for any review verdict. If a future caller, compromised agent side-effect parser, or direct API client supplies malicious `kind` or `rule_suggestion` (e.g. content that later gets rendered into prompts, executed as policy, or displayed in a privileged UI), this becomes a stored prompt-injection / policy-injection vector. The review-report.md prompt already tells the agent to produce a side-effect file under Logs/review/ and mentions that rule_suggestion is "metadata only" in P0; however the finding row is the machine-readable contract. No escaping or provenance tagging is applied at insert time.  
-  → Recommended: either (a) treat from-review inputs as "orchestration-layer only" and document the trust boundary explicitly, or (b) add allow-list validation for kind and store rule_suggestion with a provenance marker (e.g. "llm-synthesized" vs "user-supplied") plus output escaping on all consumers. At minimum, add a test that the from-review handler rejects or normalizes obviously dangerous values for the enum fields (the current findings_api.rs test only asserts happy-path round-trip).
+None (both prior warnings W-01 and W-02 from the initial qc2 wave are resolved by the targeted fix-round commits 6fcfa322 and 8d9e6e3f; no new Warning-grade issues introduced by the fix round in the security/correctness focus area).
 
 ### 🟢 Suggestion
-
-- **S-01 Missing explicit test coverage for work-level (chapter=NULL) synthesis branch**  
-  In `persist_review_findings_for_schedule` (auto_chain.rs:188): `let chapter: Option<i64> = if work.current_chapter > 0 { Some(...) } else { None };`. The AC1 test seeds a Work with current_chapter=2; the AC2 on-demand test uses chapter=1. No hermetic test in review_findings.rs asserts the "work-level" (chapter=NULL) path that the code explicitly supports ("treat 0 as Work-level"). The DAO and handler tests cover NULL chapter indirectly, but the new supervisor hook path does not have a dedicated assertion for the first review before any finalize.  
-  → Add one test case exercising current_chapter=0 (or a Work that has never finalized a chapter) and verify the persisted finding has chapter=NULL and title contains "work-level".
-
-- **S-02 Preset ID string match is the sole selector in the hook; document user-preset shadowing behavior**  
-  The hook does `if preset_id != "novel-chapter-review" { return Ok(0); }` (auto_chain.rs:159). The preset.yaml itself carries the work_profile=novel + work_ref required gates (enforced by the orchestration preset loader before the schedule is ever created). A user-installed preset that registers the same id would also hit the finding persistence path. This is likely intentional (user review presets should also produce findings), but the assumption is not documented in the hook.  
-  → Add a one-line SAFETY / assumption comment in persist_review_findings_for_schedule stating that the preset_id match is the runtime selector and that preset-level gates are the first line of defense.
-
-- **S-03 Consider adding a correlation id (schedule_id) to the finding row for review provenance and easier dedup**  
-  Currently a finding created by the review hook has no machine-readable link back to the specific schedule that produced it (only work_id + chapter + synthesized title/description). Adding an optional `source_schedule_id` (or storing it inside a metadata JSON blob) would make "which review pass produced this finding" queryable, enable trivial idempotency checks ("already have a finding for this driver schedule"), and improve observability for the quality loop without changing the wire contract in P0.  
-  → Low-priority for this slice; record as a follow-up improvement if duplicate or "which review" questions arise in later iterations.
+- (Minor) Consider adding a thin integration test at the `findings_api` layer that posts an unknown `kind` through the `create_from_review` handler and asserts a 4xx / ConstraintViolation-shaped response. This would give end-to-end coverage of how the new DAO rejection surfaces over the wire. Out of scope for this targeted re-review (the core DAO contract is already unit-tested and the P0 supervisor path stays inside the closed set).
 
 ## Source Trace
-- Finding W-01 (idempotency): `git diff 594b00b5..HEAD -- crates/nexus-orchestration/src/auto_chain.rs` (persist_review_findings_for_schedule:223), `supervisor.rs:398` (call site inside Completed), `tests/review_findings.rs:166` (single terminal call only).
-- Finding W-02 (shared surface): `crates/nexus-local-db/src/findings.rs:611` (create_finding_from_review + validate_finding_enums only for 3 enums), `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:314` (verdict built from JSON body), `create_from_review_handler:325`.
-- AC1/AC2/AC3/AC4/AC5 coverage: `crates/nexus-orchestration/tests/review_findings.rs:126` (ac1_auto_chain...), `228` (ac2_on_demand...), `332` (ac3_rule_suggestion...), `298` (negative), and the supervisor terminal path.
-- No new wire schema or AGENTS.md writes: confirmed by diff (only local-db findings table evolution from prior V1.39, preset YAML, prompt, and Rust hook code).
+- W-01 revalidation: `git show 6fcfa322`, `cargo test -p nexus-orchestration --test review_findings` (ac5), direct inspection of `persist_review_findings_for_schedule` and the idempotent INSERT path in `create_finding_from_review`.
+- W-02 revalidation: `git show 8d9e6e3f`, `cargo test -p nexus-local-db --lib -- findings` (the five new tests), `cargo clippy ... -D warnings`, direct inspection of `FindingKind::validate`, `normalize_rule_suggestion` return type + early rejection, and the call site inside `create_finding_from_review`.
+- All commands executed from the assigned Review cwd on the verified Working branch at the verified HEAD.
 
 ## Summary
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 2 |
-| 🟢 Suggestion | 3 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 1 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-## Revalidation Notes (for targeted re-review)
-- After fixes for W-01 and W-02, re-run the full `review_findings` test suite + the from-review handler test in findings_api.rs, plus a manual double-terminal call test if added.
-- Confirm that `rule_suggestion` values supplied via the from-review path are still round-tripped but now carry explicit provenance or sanitization notes in the code/docs.
-- No changes to auto-chain driver invariant or preset gate semantics are expected.
+---
+
+## Revalidation Summary (for PM consolidation)
+- W-01 (idempotency/duplicate-finding): resolved by 6fcfa322 + ac5 test + gate runs.
+- W-02 (closed `kind` + `rule_suggestion` length/emptiness cap): resolved by 8d9e6e3f + 5 new unit tests + gate runs.
+- No new Critical or Warning findings introduced by the fix-round delta in the qc-specialist-2 focus area.
+- All mandated static checks and scoped tests passed cleanly.

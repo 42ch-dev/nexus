@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT creator_id as \"creator_id!\", preset_id as \"preset_id!\"\n             FROM creator_schedules WHERE schedule_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "creator_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "preset_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d8f7451313985660d140c8962c76122a994b2b1296b15293b73cc26cbe187e29"
+}

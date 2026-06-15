@@ -146,10 +146,10 @@ Loader **must** reject unknown intent strings. Embedded presets updated in V1.33
 | `novel-writing` | `work_init`, `work_continue` |
 | `research` | `knowledge_ingest`, `work_continue` |
 | `memory-augmented` | `work_continue` |
-| `reflection-loop` | `work_continue` |
+| `novel-chapter-review` | `work_continue` |
 | `kb-extract` | `knowledge_ingest` |
 | `soul-experience-refresh` | `work_maintenance` |
-| `reflection-loop` | `work_continue` |
+| `novel-chapter-review` | `work_continue` |
 
 Policy: only presets with `work_init` appear in the default bootstrap intake list.
 
@@ -231,7 +231,7 @@ V1.33 requires runtime alignment with [orchestration-engine.md](orchestration-en
 - `exit_when.kind: llm_judge` must invoke declared `judge_capability` (default `judge.llm`) with `template_file`.
 - Until **conditional routing** ships, NOGO results in `WaitForInput` on the **same** linear edge (user may `daemon schedule advance` or append context via `creator run continue`).
 
-Presets relying on quality loops: `novel-writing` (gathering exit), `reflection-loop` (draft/revise).
+Presets relying on quality loops: `novel-writing` (gathering exit), `novel-chapter-review` (review/revise).
 
 ---
 

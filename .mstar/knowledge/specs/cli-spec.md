@@ -360,7 +360,7 @@ nexus42 creator run <PRESET_ID> [<WORK_ID>] [global flags] [preset args...]
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator run <preset_id> [<work_id>]` | Generic preset dispatch. FL-E stage-advance presets (`research`, `novel-writing`, `reflection-loop`, `kb-extract`) are routed to `stage_advance`; all other presets are scheduled directly via daemon Local API. `<work_id>` optional — defaults to pool `active` Work. |
+| `nexus42 creator run <preset_id> [<work_id>]` | Generic preset dispatch. FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`) are routed to `stage_advance`; all other presets are scheduled directly via daemon Local API. `<work_id>` optional — defaults to pool `active` Work. |
 
 **Global flags:**
 
