@@ -401,7 +401,10 @@ async fn ac5_idempotent_review_repeat_no_duplicate_finding() {
         .await
         .unwrap();
     let n1 = count_findings(&pool, "wrk_ac5").await;
-    assert_eq!(n1, 1, "first terminal must create exactly 1 finding; got {n1}");
+    assert_eq!(
+        n1, 1,
+        "first terminal must create exactly 1 finding; got {n1}"
+    );
 
     // Simulate a second terminal transition for the SAME schedule (e.g.
     // supervisor retry or double-fire). The schedule row was already flipped

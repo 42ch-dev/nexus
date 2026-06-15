@@ -406,8 +406,7 @@ impl ScheduleSupervisor {
             // persist_review_findings_for_schedule would otherwise perform.
             if schedule_row
                 .as_ref()
-                .map(|r| r.preset_id == "novel-chapter-review")
-                .unwrap_or(false)
+                .is_some_and(|r| r.preset_id == "novel-chapter-review")
             {
                 use crate::auto_chain;
                 if let Err(e) =
