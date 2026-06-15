@@ -105,6 +105,11 @@ pub const SUGGESTED_FINDING_KINDS: &[&str] =
 /// `create_finding_from_review` enforces this set so the synthesized
 /// finding's category is always one of these well-known values. Unknown kinds
 /// are rejected with [`LocalDbError::ConstraintViolation`].
+///
+/// V1.48 P0 T4: expanded to include `plot_hole` and `world_inconsistency`
+/// per `.mstar/knowledge/specs/novel-quality-loop.md` §2.1 (the V1.47 P0
+/// quick-closure missed these spec-listed kinds; the producer's
+/// `review-report.md` parser emits them and the DB layer must accept).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingKind {
     /// Craft-level writing issue (prose, dialogue, imagery).
@@ -117,12 +122,25 @@ pub enum FindingKind {
     Consistency,
     /// Catch-all for review findings that don't fit the above.
     Other,
+    /// Plot-level issue (introduced-then-dropped thread, contradiction).
+    /// V1.48 P0: added per `novel-quality-loop.md` §2.1.
+    PlotHole,
+    /// World-building inconsistency (timeline, geography, lore).
+    /// V1.48 P0: added per `novel-quality-loop.md` §2.1.
+    WorldInconsistency,
 }
 
 impl FindingKind {
     /// All valid string representations, in canonical order.
-    pub const ALL_STRS: &'static [&'static str] =
-        &["craft", "continuity", "pacing", "consistency", "other"];
+    pub const ALL_STRS: &'static [&'static str] = &[
+        "craft",
+        "continuity",
+        "pacing",
+        "consistency",
+        "other",
+        "plot_hole",
+        "world_inconsistency",
+    ];
 
     /// Returns the canonical string for this variant.
     #[must_use]
@@ -133,6 +151,8 @@ impl FindingKind {
             Self::Pacing => "pacing",
             Self::Consistency => "consistency",
             Self::Other => "other",
+            Self::PlotHole => "plot_hole",
+            Self::WorldInconsistency => "world_inconsistency",
         }
     }
 
@@ -861,7 +881,7 @@ mod tests {
 
     // ── V1.47 P0 (qc2 W-2): closed `kind` set + `rule_suggestion` cap ───────
 
-    /// All 5 enum variants in [`FindingKind::ALL_STRS`] validate successfully
+    /// All enum variants in [`FindingKind::ALL_STRS`] validate successfully
     /// and return the input string unchanged.
     #[test]
     fn finding_kind_validate_accepts_known_values() {
@@ -870,12 +890,14 @@ mod tests {
                 .unwrap_or_else(|e| panic!("known kind '{known}' should validate: {e}"));
             assert_eq!(validated, known);
         }
-        // sanity: the enum has exactly 5 variants and the docstring count
-        // matches the const ALL_STRS slice length.
+        // sanity: the enum variant count matches the const ALL_STRS slice
+        // length. V1.48 P0 T4: expanded from 5 → 7 to include `plot_hole`
+        // and `world_inconsistency` per `novel-quality-loop.md` §2.1.
         assert_eq!(
             FindingKind::ALL_STRS.len(),
-            5,
-            "expected 5 closed-set kinds; update test if you intentionally add a variant"
+            7,
+            "expected 7 closed-set kinds after V1.48 P0 expansion; got {}",
+            FindingKind::ALL_STRS.len()
         );
     }
 
