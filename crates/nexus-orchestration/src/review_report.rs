@@ -24,18 +24,23 @@
 
 use std::collections::HashMap;
 
-/// Finding `kind` vocabulary (spec §2.1 / §8; matches
-/// `nexus_local_db::findings::FindingKind::ALL_STRS`).
+/// Finding `kind` vocabulary (spec §2.1 / §8).
 ///
-/// Source-of-truth is the DB layer's closed set; this array mirrors it for
-/// parser-side validation. A `spec §1.2` fallback applies when the report's
-/// kind token is not in this set.
+/// Source-of-truth is the DB layer's closed set
+/// (`nexus_local_db::findings::FindingKind::ALL_STRS`); this array mirrors it
+/// for parser-side validation. A spec §1.2 fallback applies when the report's
+/// kind token is not in this set. Kept in lockstep with the DB enum — both
+/// were expanded together in V1.48 P0 T4 to include `plot_hole` and
+/// `world_inconsistency` per `novel-quality-loop.md` §2.1.
 pub const KNOWN_FINDING_KINDS: &[&str] = &[
-    "continuity",
     "craft",
+    "continuity",
+    "pacing",
+    "consistency",
     "plot_hole",
     "world_inconsistency",
-    "pacing",
+    // `other` is a DB-side catch-all; reports should emit one of the above
+    // (the parser falls back to `craft` for unknown tokens per spec §1.2).
 ];
 
 /// Finding `severity` vocabulary (spec §2.1).

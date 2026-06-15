@@ -386,11 +386,14 @@ fn load_and_parse_review_report(
 
 /// Persist each parsed finding as its own row via the from-review DAO.
 ///
-/// Each row inherits the originating `schedule_id` so the partial unique
-/// index `findings_unique_review_per_chapter` keeps the insert idempotent on
-/// a per-schedule basis (multiple findings from one report are still allowed
-/// — the index is on `(work_id, chapter, source_schedule_id)` and the DAO
-/// returns the first conflict id rather than failing the batch).
+/// Each row inherits a **per-finding-indexed** `source_schedule_id` of the
+/// form `<schedule_id>#<idx>` so the partial unique index
+/// `findings_unique_review_per_chapter` keeps the insert idempotent per
+/// `(work_id, chapter, source_schedule_id)` while still allowing multiple
+/// distinct findings from one review report. A retry that re-parses the
+/// same report hits the same indices and is a no-op; the V1.47 placeholder
+/// path uses the bare `schedule_id` (no suffix), so the two paths never
+/// collide on the index.
 ///
 /// Returns the count of rows actually inserted (best-effort: rows that hit
 /// the idempotent conflict are not counted).
@@ -403,7 +406,7 @@ async fn persist_parsed_findings(
     schedule_id: &str,
 ) -> Result<usize, AutoChainError> {
     let mut inserted = 0usize;
-    for finding in &parsed.findings {
+    for (idx, finding) in parsed.findings.iter().enumerate() {
         // Truncate body to a safe upper bound to avoid DB bloat. The from-review
         // DAO already enforces rule_suggestion size; the body uses the same
         // finding.description column.
@@ -416,6 +419,11 @@ async fn persist_parsed_findings(
         };
 
         let title_preview: String = body.chars().take(80).collect();
+        // Per-finding source id — distinct from the bare `schedule_id` used
+        // by the V1.47 placeholder path (so they cannot collide on the
+        // partial unique index), and stable across retries (same schedule +
+        // same report → same indices → same conflict resolution = no-op).
+        let source_schedule_id = format!("{schedule_id}#{idx}");
         let verdict = ReviewVerdictFinding {
             work_id: work_id.to_string(),
             chapter,
@@ -426,7 +434,7 @@ async fn persist_parsed_findings(
             creator_id: creator_id.to_string(),
             kind: finding.kind.clone(),
             rule_suggestion: finding.rule_suggestion.clone(),
-            source_schedule_id: Some(schedule_id.to_string()),
+            source_schedule_id: Some(source_schedule_id),
         };
         match findings::create_finding_from_review(pool, &verdict).await {
             Ok(_) => inserted += 1,
