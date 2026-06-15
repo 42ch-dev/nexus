@@ -2407,7 +2407,7 @@ states:
         let bundle_root = tmp.path().join("missing-asset");
         std::fs::create_dir_all(&bundle_root).unwrap();
 
-        let yaml = r#"preset:
+        let yaml = r"preset:
   id: missing-asset
   version: 1
   kind: creator
@@ -2424,7 +2424,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         std::fs::write(bundle_root.join("preset.yaml"), yaml).unwrap();
 
         let caps = test_capability_registry();
@@ -2440,7 +2440,7 @@ states:
 
     /// C-001 regression: `load_preset()` must reject a preset that uses `..`
     /// traversal in `system_prompt_file` (role definition). This exercises
-    /// the `validate_path_safety()` A3 surface for prompt/system_prompt paths.
+    /// the `validate_path_safety()` A3 surface for `prompt/system_prompt` paths.
     #[test]
     fn a3_loader_rejects_dotdot_in_system_prompt_file() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2483,7 +2483,7 @@ states:
 
     // ── V1.42 P2 T4: GoNogo conditional next tests ──────────────────────
 
-    /// Helper YAML for a preset with llm_judge + GoNogo next.
+    /// Helper YAML for a preset with `llm_judge` + `GoNogo` next.
     fn gonogo_yaml() -> &'static str {
         r#"
 preset:
@@ -2569,7 +2569,7 @@ states:
 
     #[test]
     fn reject_gonogo_on_non_llm_judge_state() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: bad-gonogo
   version: 1
@@ -2591,7 +2591,7 @@ states:
     next: c
   - id: c
     terminal: true
-"#;
+";
         let caps = test_capability_registry();
         let err = load_preset_from_str(yaml, &caps).unwrap_err();
         let problems = err.problems();
@@ -2760,7 +2760,7 @@ states:
             );
 
         tracing::subscriber::with_default(subscriber, || {
-            let yaml = r#"
+            let yaml = r"
 preset:
   id: stray-keys-test
   version: 1
@@ -2776,7 +2776,7 @@ states:
 gates:
   - kind: file_exists
     path: Works/{{work_ref}}/README.md
-"#;
+";
             let caps = test_capability_registry();
             // Should NOT fail — unknown keys are warnings only.
             let loaded = load_preset_from_str(yaml, &caps).unwrap();
@@ -2787,10 +2787,13 @@ gates:
             super::warn_unknown_top_level_keys(&yaml_value);
         });
 
-        let messages = captured.lock().unwrap();
-        assert!(
-            messages.iter().any(|m| m.contains("gates")),
-            "expected tracing::warn! mentioning 'gates', got: {messages:?}"
-        );
+        {
+            let messages = captured.lock().unwrap();
+            assert!(
+                messages.iter().any(|m| m.contains("gates")),
+                "expected tracing::warn! mentioning 'gates', got: {messages:?}"
+            );
+            drop(messages);
+        }
     }
 }

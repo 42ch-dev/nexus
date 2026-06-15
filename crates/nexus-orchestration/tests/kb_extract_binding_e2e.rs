@@ -1,7 +1,7 @@
 //! Hermetic e2e test for V1.40 P3 kb-extract binding (T7).
 //!
 //! Validates: persist schedule → extract → P2 chapter block sees new item.
-//! Uses in-memory stores for KB and SQLite for job lifecycle.
+//! Uses in-memory stores for KB and `SQLite` for job lifecycle.
 
 use nexus_contracts::BlockType;
 use nexus_kb::extract_finalize::{finalize_extract, ExtractFinalizeInput};

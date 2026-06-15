@@ -448,8 +448,8 @@ mod tests {
                     manifest::EnterAction::Capability { args, .. } => {
                         args.as_ref()?.get("prompt_file")?.as_str()
                     }
-                    manifest::EnterAction::InnerGraph { .. } => None,
-                    manifest::EnterAction::HostTool { .. } => None,
+                    manifest::EnterAction::InnerGraph { .. }
+                    | manifest::EnterAction::HostTool { .. } => None,
                 })
             })
             .collect();
@@ -749,6 +749,8 @@ states:
 
     #[test]
     fn novel_chapter_review_has_correct_prompt_files() {
+        use nexus_contracts::local::orchestration::preset::EnterAction;
+
         let caps = CapabilityRegistry::with_builtins();
         let loaded = load_embedded_preset("novel-chapter-review", &caps).unwrap();
 
@@ -764,7 +766,6 @@ states:
 
         // The manifest references prompts/load-chapter.md and prompts/review-report.md
         // via `EnterAction::Capability { args: { prompt_file: ... } }`.
-        use nexus_contracts::local::orchestration::preset::EnterAction;
         let prompt_refs: Vec<String> = loaded
             .manifest
             .states
@@ -1109,8 +1110,7 @@ states:
             .collect();
         assert!(
             orphan_warnings.is_empty(),
-            "extraction_graph should NOT be orphan: {:?}",
-            orphan_warnings
+            "extraction_graph should NOT be orphan: {orphan_warnings:?}",
         );
     }
 
@@ -1219,16 +1219,13 @@ states:
         // kb.extract_work requires creator_id (omitted) → Error-severity
         // CapabilityArgDrift. Must NOT be downgraded (only creator.inject_prompt
         // gets the downgrade).
-        let drift_errors: Vec<_> = result
-            .errors()
-            .filter(|d| {
-                d.category == validation::DiagnosticCategory::CapabilityArgDrift
-                    && d.message.contains("capability 'kb.extract_work'")
-            })
-            .collect();
+        let has_drift_error = result.errors().any(|d| {
+            d.category == validation::DiagnosticCategory::CapabilityArgDrift
+                && d.message.contains("capability 'kb.extract_work'")
+        });
 
         assert!(
-            !drift_errors.is_empty(),
+            has_drift_error,
             "kb.extract_work CapabilityArgDrift should NOT be downgraded; expected at least one error, got: {:?}",
             result.diagnostics
         );

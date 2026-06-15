@@ -23,7 +23,7 @@ fn novel_review_master_loads_successfully() {
 }
 
 /// AC2: novel-brainstorm consumes open findings in prompt context.
-/// Verify that the gather state's enter action references open_findings in its template vars.
+/// Verify that the gather state's enter action references `open_findings` in its template vars.
 #[test]
 fn novel_brainstorm_gather_references_open_findings() {
     let caps = CapabilityRegistry::with_builtins();
@@ -38,13 +38,14 @@ fn novel_brainstorm_gather_references_open_findings() {
 
     // The enter action must inject a prompt that references open_findings
     let has_open_findings_var = gather.enter.iter().any(|action| {
-        if let manifest::EnterAction::Capability { args, .. } = action {
-            if let Some(args) = args {
-                let vars = args.get("vars");
-                if let Some(vars) = vars {
-                    let open_findings = vars.get("open_findings");
-                    return open_findings.is_some();
-                }
+        if let manifest::EnterAction::Capability {
+            args: Some(args), ..
+        } = action
+        {
+            let vars = args.get("vars");
+            if let Some(vars) = vars {
+                let open_findings = vars.get("open_findings");
+                return open_findings.is_some();
             }
         }
         false
@@ -56,8 +57,8 @@ fn novel_brainstorm_gather_references_open_findings() {
 }
 
 /// AC3: novel-review-master lists findings requiring approval; integrates with P1 API.
-/// Verify the present state surfaces open_findings and the state machine
-/// has a structured await_decision state for recording decisions.
+/// Verify the present state surfaces `open_findings` and the state machine
+/// has a structured `await_decision` state for recording decisions.
 #[test]
 fn novel_review_master_present_references_open_findings() {
     let caps = CapabilityRegistry::with_builtins();
@@ -72,13 +73,14 @@ fn novel_review_master_present_references_open_findings() {
 
     // The enter action must inject a prompt that references open_findings
     let has_open_findings_var = present.enter.iter().any(|action| {
-        if let manifest::EnterAction::Capability { args, .. } = action {
-            if let Some(args) = args {
-                let vars = args.get("vars");
-                if let Some(vars) = vars {
-                    let open_findings = vars.get("open_findings");
-                    return open_findings.is_some();
-                }
+        if let manifest::EnterAction::Capability {
+            args: Some(args), ..
+        } = action
+        {
+            let vars = args.get("vars");
+            if let Some(vars) = vars {
+                let open_findings = vars.get("open_findings");
+                return open_findings.is_some();
             }
         }
         false
@@ -141,7 +143,7 @@ fn novel_brainstorm_happy_path_state_flow() {
     assert!(done.next.is_none());
 }
 
-/// Happy path: review-master state machine flows present → await_decision → sync_world_kb → done.
+/// Happy path: review-master state machine flows present → `await_decision` → `sync_world_kb` → done.
 #[test]
 fn novel_review_master_happy_path_state_flow() {
     let caps = CapabilityRegistry::with_builtins();
@@ -191,7 +193,7 @@ fn novel_review_master_happy_path_state_flow() {
     assert!(done.next.is_none());
 }
 
-/// Verify brainstorm uses auto-chain compatible exit (llm_judge).
+/// Verify brainstorm uses auto-chain compatible exit (`llm_judge`).
 #[test]
 fn novel_brainstorm_auto_chain_compatible() {
     let caps = CapabilityRegistry::with_builtins();

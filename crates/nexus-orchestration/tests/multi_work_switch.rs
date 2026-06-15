@@ -125,6 +125,7 @@ async fn test_completion_two_step_ceremony_writes_lock_and_updates_pool() {
 // ─── TC2: Other work continues after completion ────────────────────────
 
 #[tokio::test]
+#[allow(clippy::similar_names)] // work_a_db / work_b_db are intentionally parallel test fixtures
 async fn test_other_work_continues_after_completion() {
     let pool = test_pool().await;
 

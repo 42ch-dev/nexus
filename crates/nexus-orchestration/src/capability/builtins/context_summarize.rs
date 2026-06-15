@@ -347,11 +347,14 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert!(result.get("summary").is_some());
-        let captured = provider.captured_creator_id.lock().unwrap();
-        assert_eq!(
-            *captured, "default",
-            "SEC-V131-01: raw creator_id leaked through"
-        );
+        {
+            let captured = provider.captured_creator_id.lock().unwrap();
+            assert_eq!(
+                *captured, "default",
+                "SEC-V131-01: raw creator_id leaked through"
+            );
+            drop(captured);
+        }
     }
 
     /// Proves context-injected `_creator_id` / `_session_id` are used.
@@ -366,8 +369,11 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert!(result.get("summary").is_some());
-        let captured = provider.captured_creator_id.lock().unwrap();
-        assert_eq!(*captured, "legit_creator");
+        {
+            let captured = provider.captured_creator_id.lock().unwrap();
+            assert_eq!(*captured, "legit_creator");
+            drop(captured);
+        }
     }
 
     /// Proves context-injected identity wins even when raw args are present.
@@ -384,11 +390,14 @@ mod tests {
         });
         let result = cap.run(input).await.unwrap();
         assert!(result.get("summary").is_some());
-        let captured = provider.captured_creator_id.lock().unwrap();
-        assert_eq!(
-            *captured, "legit_creator",
-            "SEC-V131-01: context ID must win over raw spoof"
-        );
+        {
+            let captured = provider.captured_creator_id.lock().unwrap();
+            assert_eq!(
+                *captured, "legit_creator",
+                "SEC-V131-01: context ID must win over raw spoof"
+            );
+            drop(captured);
+        }
     }
 
     // ── J3: Prompt builder unit tests ─────────────────────────────────
@@ -421,7 +430,7 @@ mod tests {
         let oversized = "x".repeat(DEFAULT_MAX_CONTENT_BYTES + 1000);
         let prompt = build_summary_prompt(&oversized, "", "");
         assert!(prompt.contains("[truncated at"));
-        assert!(prompt.contains(&format!("{} bytes", DEFAULT_MAX_CONTENT_BYTES)));
+        assert!(prompt.contains(&format!("{DEFAULT_MAX_CONTENT_BYTES} bytes")));
         assert!(prompt.contains(&format!("original was {} bytes", oversized.len())));
         // The truncated portion should be exactly DEFAULT_MAX_CONTENT_BYTES of 'x'.
         let truncated_content = &oversized[..DEFAULT_MAX_CONTENT_BYTES];

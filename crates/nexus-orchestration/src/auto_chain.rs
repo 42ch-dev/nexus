@@ -1180,8 +1180,8 @@ mod tests {
 
     // ── V1.39 P0.5 (T6): research-stage wiring integration tests ───────
 
-    /// AC1: research preset schedule has fl_e_stage = "research" and includes
-    /// creative_brief + inspiration_log in the seed (same surface produce reads).
+    /// AC1: research preset schedule has `fl_e_stage` = "research" and includes
+    /// `creative_brief` + `inspiration_log` in the seed (same surface produce reads).
     #[test]
     fn research_schedule_seed_includes_context_for_produce() {
         let work = work_at("research", "active", 0, 5);
@@ -1201,7 +1201,7 @@ mod tests {
         assert_eq!(seed["work_id"], "wrk_test");
     }
 
-    /// AC1: produce stage seed also carries creative_brief and inspiration_log,
+    /// AC1: produce stage seed also carries `creative_brief` and `inspiration_log`,
     /// confirming the shared context surface between research and produce.
     #[test]
     fn produce_schedule_seed_carries_research_enrichable_fields() {
@@ -1218,8 +1218,8 @@ mod tests {
         assert!(input.get("inspiration_log").is_some());
     }
 
-    /// Fix W-2: produce stage input includes research_artifacts_dir when
-    /// the work has a driver_schedule_id (the research schedule that just
+    /// Fix W-2: produce stage input includes `research_artifacts_dir` when
+    /// the work has a `driver_schedule_id` (the research schedule that just
     /// completed). This enables AC2 and AC3 (produce sees research output).
     #[test]
     fn produce_schedule_includes_research_artifacts_dir() {
@@ -1243,7 +1243,7 @@ mod tests {
         );
     }
 
-    /// Fix W-2 (negative): research stage does NOT include research_artifacts_dir.
+    /// Fix W-2 (negative): research stage does NOT include `research_artifacts_dir`.
     #[test]
     fn research_schedule_does_not_include_research_artifacts_dir() {
         let mut work = work_at("research", "active", 0, 5);
@@ -1259,7 +1259,7 @@ mod tests {
     }
 
     /// AC2: full chain intake→research→produce advances correctly
-    /// (verifies evaluate_next_step for the research-middle position).
+    /// (verifies `evaluate_next_step` for the research-middle position).
     #[test]
     fn full_chain_intake_research_produce_advances() {
         // intake complete → advance to research
@@ -1323,8 +1323,7 @@ mod tests {
                 .find_map(|line| {
                     let trimmed = line.trim();
                     trimmed.strip_prefix("version:").map(|v| {
-                        v.trim()
-                            .split_whitespace()
+                        v.split_whitespace()
                             .next()
                             .unwrap()
                             .trim()

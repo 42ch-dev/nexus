@@ -762,7 +762,7 @@ mod tests {
 
     // ── V1.38 P1: chapter context parameterization tests ─────────────────────
 
-    /// Helper: produce WorkFields for a given chapter number.
+    /// Helper: produce `WorkFields` for a given chapter number.
     fn chapter_work_fields(chapter: i32, work_ref: &str) -> WorkFields {
         let ch_label = chapter_label(chapter);
         WorkFields {
