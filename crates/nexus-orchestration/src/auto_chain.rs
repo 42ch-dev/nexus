@@ -216,79 +216,40 @@ pub async fn persist_review_findings_for_schedule(
     let work_ref_or_id = work.work_ref.as_deref().unwrap_or(&work_id).to_string();
 
     if let Some(ws_dir) = workspace_dir {
-        match load_and_parse_review_report(ws_dir, &work_ref_or_id) {
-            Ok(parsed) if !parsed.findings.is_empty() => {
-                let count = persist_parsed_findings(
-                    pool,
-                    &parsed,
-                    &work_id,
-                    &creator_id,
-                    chapter,
-                    schedule_id,
-                )
-                .await?;
-                if count > 0 {
-                    tracing::info!(
-                        schedule_id,
-                        work_id = %work_id,
-                        parsed_count = count,
-                        "review-findings: persisted parsed findings from review-report.md"
-                    );
-                    return Ok(count);
-                }
-                // Parsed rows existed but none persisted (e.g. idempotent
-                // conflict). Fall through to placeholder synthesis below so
-                // the spec §8.2 "≥1 finding per review pass" guarantee holds.
-                tracing::debug!(
-                    schedule_id,
-                    work_id = %work_id,
-                    "review-findings: parsed {} rows but 0 persisted; falling back to placeholder",
-                    parsed.findings.len()
-                );
-            }
-            Ok(_) => {
-                // Report parsed but yielded zero findings — degrade with warn.
-                tracing::warn!(
-                    schedule_id,
-                    work_id = %work_id,
-                    work_ref = %work_ref_or_id,
-                    "review-findings: review-report.md parsed but contained no issues; \
-                     falling back to V1.47 placeholder synthesis"
-                );
-            }
-            Err(ReportLoadError::Missing) => {
-                tracing::warn!(
-                    schedule_id,
-                    work_id = %work_id,
-                    work_ref = %work_ref_or_id,
-                    "review-findings: review-report.md not found; \
-                     falling back to V1.47 placeholder synthesis"
-                );
-            }
-            Err(ReportLoadError::Read(ref path, ref e)) => {
-                tracing::warn!(
-                    schedule_id,
-                    work_id = %work_id,
-                    path = %path.display(),
-                    error = %e,
-                    "review-findings: failed to read review-report.md; \
-                     falling back to V1.47 placeholder synthesis"
-                );
-            }
-            Err(ReportLoadError::Parse(ref reason)) => {
-                tracing::warn!(
-                    schedule_id,
-                    work_id = %work_id,
-                    work_ref = %work_ref_or_id,
-                    parse_error = %reason,
-                    "review-findings: review-report.md failed to parse; \
-                     falling back to V1.47 placeholder synthesis"
-                );
-            }
+        if let Some(count) = try_persist_parsed_findings(
+            pool,
+            ws_dir,
+            &work_ref_or_id,
+            &work_id,
+            &creator_id,
+            chapter,
+            schedule_id,
+        )
+        .await?
+        {
+            return Ok(count);
         }
     }
 
     // ── V1.47 placeholder synthesis (fallback per spec §1.3) ───────────────
+    persist_placeholder_finding(pool, &work, &work_id, &creator_id, chapter, &work_ref_or_id, schedule_id)
+        .await
+}
+
+/// Persist the V1.47 single placeholder finding (spec §8.2 safe defaults).
+///
+/// Used as the documented fallback whenever the parsed path does not yield a
+/// persisted row (missing report, parse failure, zero findings, all-rows
+/// conflict, or `workspace_dir=None`).
+async fn persist_placeholder_finding(
+    pool: &SqlitePool,
+    work: &WorkRecord,
+    work_id: &str,
+    creator_id: &str,
+    chapter: Option<i64>,
+    work_ref_or_id: &str,
+    schedule_id: &str,
+) -> Result<usize, AutoChainError> {
     // Synthesize the minimum viable review finding per spec §8.2.
     let chapter_ctx = chapter.map_or_else(|| "work-level".to_string(), |c| format!("chapter {c}"));
     let title = format!("Review pass completed ({chapter_ctx})");
@@ -303,7 +264,7 @@ pub async fn persist_review_findings_for_schedule(
     );
 
     let verdict = ReviewVerdictFinding {
-        work_id: work_id.clone(),
+        work_id: work_id.to_string(),
         chapter,
         // Safe defaults per spec §8.2 + §2.1; the synthesized finding is
         // intentionally non-disruptive (`info` severity, `none` executor).
@@ -311,7 +272,7 @@ pub async fn persist_review_findings_for_schedule(
         title,
         description,
         target_executor: "none".to_string(),
-        creator_id,
+        creator_id: creator_id.to_string(),
         kind: "craft".to_string(),
         // Optional — no rule suggestion in the synthesized path.
         rule_suggestion: None,
@@ -326,7 +287,7 @@ pub async fn persist_review_findings_for_schedule(
         Ok(finding_id) => {
             tracing::info!(
                 schedule_id,
-                work_id = %work_id,
+                work_id,
                 finding_id = %finding_id,
                 "review-findings: persisted finding for review pass"
             );
@@ -337,11 +298,104 @@ pub async fn persist_review_findings_for_schedule(
             // failure without blocking the terminal transition.
             tracing::warn!(
                 schedule_id,
-                work_id = %work_id,
+                work_id,
                 error = %e,
                 "review-findings: failed to persist finding"
             );
             Err(AutoChainError::from(e))
+        }
+    }
+}
+
+/// Try to read + parse `Works/<work_ref>/Logs/review/review-report.md` and
+/// persist one finding per parsed row (V1.48 P0 T2).
+///
+/// Returns:
+/// - `Ok(Some(count))` — parsed findings existed and `count` rows were
+///   persisted. The caller returns this count directly.
+/// - `Ok(None)` — either `workspace_dir` was not provided, OR the report
+///   was missing/unreadable/unparseable, OR it parsed zero findings, OR
+///   the parsed rows all hit the idempotent conflict and zero were inserted.
+///   In every `None` case the caller falls back to the V1.47 placeholder
+///   synthesis path (spec §1.3).
+///
+/// Each non-`None` failure branch emits a `tracing::warn!` with the
+/// schedule/work context so operators can see the degrade.
+async fn try_persist_parsed_findings(
+    pool: &SqlitePool,
+    workspace_dir: &std::path::Path,
+    work_ref: &str,
+    work_id: &str,
+    creator_id: &str,
+    chapter: Option<i64>,
+    schedule_id: &str,
+) -> Result<Option<usize>, AutoChainError> {
+    match load_and_parse_review_report(workspace_dir, work_ref) {
+        Ok(parsed) if !parsed.findings.is_empty() => {
+            let count =
+                persist_parsed_findings(pool, &parsed, work_id, creator_id, chapter, schedule_id)
+                    .await?;
+            if count > 0 {
+                tracing::info!(
+                    schedule_id,
+                    work_id,
+                    parsed_count = count,
+                    "review-findings: persisted parsed findings from review-report.md"
+                );
+                return Ok(Some(count));
+            }
+            // Parsed rows existed but none persisted (e.g. idempotent
+            // conflict). Fall through to placeholder synthesis so the
+            // spec §8.2 "≥1 finding per review pass" guarantee holds.
+            tracing::debug!(
+                schedule_id,
+                work_id,
+                "review-findings: parsed {} rows but 0 persisted; falling back to placeholder",
+                parsed.findings.len()
+            );
+            Ok(None)
+        }
+        Ok(_) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                "review-findings: review-report.md parsed but contained no issues; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+        Err(ReportLoadError::Missing) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                "review-findings: review-report.md not found; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+        Err(ReportLoadError::Read(ref path, ref e)) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                path = %path.display(),
+                error = %e,
+                "review-findings: failed to read review-report.md; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
+        Err(ReportLoadError::Parse(ref reason)) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                parse_error = %reason,
+                "review-findings: review-report.md failed to parse; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
         }
     }
 }
