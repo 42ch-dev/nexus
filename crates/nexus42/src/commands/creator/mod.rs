@@ -453,7 +453,7 @@ pub enum CreatorCommand {
     /// For atomic Work operations, use `creator works`.
     /// For preset dispatch, use `creator run <preset_id>`.
     ///
-    /// See .mstar/knowledge/specs/creator-run-preset-entry.md for the CLI workflow.
+    /// See the creator-run-preset-entry spec for the CLI workflow.
     Bootstrap(bootstrap::BootstrapArgs),
 
     /// Work management and pool — atomic single-purpose ops (DF-60 §6.2H).
@@ -461,7 +461,7 @@ pub enum CreatorCommand {
     /// List, inspect, and manage your Works and the selection pool.
     /// Each subcommand is strictly single-purpose (one business function).
     /// Shows progress, chapter status, open findings, and completion state.
-    /// See .mstar/knowledge/specs/novel-author-experience.md §3 for the author path.
+    /// See novel-author-experience §3 for the author path.
     Works {
         #[command(subcommand)]
         command: works::WorksCommand,

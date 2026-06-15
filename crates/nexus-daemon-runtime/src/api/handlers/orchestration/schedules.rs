@@ -177,12 +177,13 @@ pub async fn add_schedule(
         })?;
 
         if completed_count > 0 {
+            // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
             // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
             return Err((
                 StatusCode::CONFLICT,
-                "This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md. \
+                "This Work is complete; see the novel-author-experience spec. \
                  To start a new Work, use `nexus42 creator bootstrap --init-preset \
-                 novel-project-init` (see .mstar/knowledge/specs/creator-run-preset-entry.md)"
+                 novel-project-init` (see the creator-run-preset-entry spec)"
                     .to_string(),
             ));
         }
@@ -337,7 +338,7 @@ pub async fn add_schedule(
                                             remediation:
                                                 "Pass work_id via input.work_id or seed.work_id, \
                                          or use force_gates=true with a reason. \
-                                         See .mstar/knowledge/specs/creator-run-preset-entry.md"
+                                         See the creator-run-preset-entry spec"
                                                     .to_string(),
                                         },
                                     ],
@@ -518,7 +519,7 @@ pub async fn add_schedule(
                                             actual: "not found".to_string(),
                                             remediation:
                                                 "Ensure the work_id refers to an existing Work. \
-                                         See .mstar/knowledge/specs/creator-run-preset-entry.md"
+                                         See the creator-run-preset-entry spec"
                                                     .to_string(),
                                         },
                                     ],
@@ -1576,20 +1577,26 @@ mod tests {
         assert!(sql.contains("status = 'completed'"));
     }
 
-    /// V1.46 P1 (spec hygiene): the completion-guard error message cites
-    /// the spec paths, not the deleted quickstart.
+    /// V1.47 P1: the completion-guard message cites spec names (not repo
+    /// paths). V1.46 P1 (spec hygiene): cites the spec, not the deleted
+    /// quickstart.
     #[test]
     fn completion_guard_message_cites_spec_paths() {
-        let msg = "This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md. \
+        let msg = "This Work is complete; see the novel-author-experience spec. \
                    To start a new Work, use `nexus42 creator bootstrap --init-preset \
-                   novel-project-init` (see .mstar/knowledge/specs/creator-run-preset-entry.md)";
+                   novel-project-init` (see the creator-run-preset-entry spec)";
         assert!(
-            msg.contains("novel-author-experience.md"),
+            msg.contains("novel-author-experience"),
             "completion guard should cite the author-experience spec"
         );
         assert!(
-            msg.contains("creator-run-preset-entry.md"),
+            msg.contains("creator-run-preset-entry"),
             "completion guard should cite the preset-entry spec for new Work"
+        );
+        // R-V146P1-QC3-S4: no raw .mstar/ paths in user-facing copy.
+        assert!(
+            !msg.contains(".mstar/"),
+            "completion guard must not cite raw .mstar/ paths"
         );
     }
 }
