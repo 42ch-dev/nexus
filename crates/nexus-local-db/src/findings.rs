@@ -98,6 +98,68 @@ pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "ma
 pub const SUGGESTED_FINDING_KINDS: &[&str] =
     &["continuity", "craft", "plot_hole", "world_inconsistency"];
 
+/// V1.47 P0 fix (qc2 W-2): closed set of valid `kind` values for the
+/// review-hook path (`create_finding_from_review`).
+///
+/// The general CRUD path (`create_finding`) remains open-vocabulary; only
+/// `create_finding_from_review` enforces this set so the synthesized
+/// finding's category is always one of these well-known values. Unknown kinds
+/// are rejected with [`LocalDbError::ConstraintViolation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindingKind {
+    /// Craft-level writing issue (prose, dialogue, imagery).
+    Craft,
+    /// Continuity / consistency across chapters or scenes.
+    Continuity,
+    /// Pacing or structural rhythm issue.
+    Pacing,
+    /// Internal consistency within a chapter or passage.
+    Consistency,
+    /// Catch-all for review findings that don't fit the above.
+    Other,
+}
+
+impl FindingKind {
+    /// All valid string representations, in canonical order.
+    pub const ALL_STRS: &'static [&'static str] =
+        &["craft", "continuity", "pacing", "consistency", "other"];
+
+    /// Returns the canonical string for this variant.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Craft => "craft",
+            Self::Continuity => "continuity",
+            Self::Pacing => "pacing",
+            Self::Consistency => "consistency",
+            Self::Other => "other",
+        }
+    }
+
+    /// Validate a `kind` string against the closed set.
+    ///
+    /// Returns the validated string on success, or
+    /// [`LocalDbError::ConstraintViolation`] if the value is not in
+    /// [`ALL_STRS`](Self::ALL_STRS).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LocalDbError::ConstraintViolation`] for unknown kind values.
+    pub fn validate(s: &str) -> Result<String, LocalDbError> {
+        if Self::ALL_STRS.contains(&s) {
+            Ok(s.to_string())
+        } else {
+            Err(LocalDbError::ConstraintViolation {
+                table: "findings".to_string(),
+                constraint: format!(
+                    "invalid kind '{s}'; expected one of: {}",
+                    Self::ALL_STRS.join(", ")
+                ),
+            })
+        }
+    }
+}
+
 /// R-V139P1-W-2: Single source of truth for finding ID generation.
 ///
 /// All callers (handler direct-create, from-review hook) must use this
@@ -107,35 +169,56 @@ pub fn mint_finding_id() -> String {
     format!("fnd_{}", uuid::Uuid::new_v4().simple())
 }
 
-/// V1.47 P0 fix (qc2 W-2): normalize and cap `rule_suggestion` text.
+/// V1.47 P0 fix (qc2 W-2): validate and normalize `rule_suggestion` text.
 ///
-/// Trims leading/trailing whitespace, collapses internal runs of whitespace
-/// to single spaces, and caps the length at `RULE_SUGGESTION_MAX_LEN` (4 KiB).
-/// Returns `None` when the input is `None` or empty after trimming.
+/// - `None` → `Ok(None)` (no patch).
+/// - `Some(s)` → trim leading/trailing whitespace, then:
+///   - **reject** with [`LocalDbError::ConstraintViolation`] if the trimmed
+///     string is empty (caller passed `Some("")` / whitespace-only);
+///   - **reject** if the trimmed byte length exceeds
+///     [`RULE_SUGGESTION_MAX_BYTES`] (4 KiB);
+///   - otherwise return `Ok(Some(trimmed))`.
+///
+/// No internal-whitespace collapsing is performed: the value is persisted
+/// verbatim (after trim) so users can author multi-line or multi-sentence
+/// rule suggestions without surprise reformatting.
 ///
 /// This guard prevents accidentally persisting unbounded whitespace or
 /// oversized blobs on the finding row. The P0 synthesized finding always
 /// passes `None`, but the public DAO surface exists for future callers.
-pub fn normalize_rule_suggestion(s: Option<&str>) -> Option<String> {
-    let trimmed = s?.trim();
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::ConstraintViolation`] when the caller-provided
+/// value is empty after trimming or exceeds the byte cap.
+pub fn normalize_rule_suggestion(s: Option<&str>) -> Result<Option<String>, LocalDbError> {
+    let Some(s) = s else {
+        return Ok(None);
+    };
+    let trimmed = s.trim();
     if trimmed.is_empty() {
-        return None;
+        return Err(LocalDbError::ConstraintViolation {
+            table: "findings".to_string(),
+            constraint: "rule_suggestion must be non-empty after trim".to_string(),
+        });
     }
-    let collapsed: String = trimmed
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    if collapsed.len() > RULE_SUGGESTION_MAX_LEN {
-        Some(collapsed[..RULE_SUGGESTION_MAX_LEN].to_string())
-    } else {
-        Some(collapsed)
+    let byte_len = trimmed.len();
+    if byte_len > RULE_SUGGESTION_MAX_BYTES {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "findings".to_string(),
+            constraint: format!(
+                "rule_suggestion is {byte_len} bytes; exceeds {RULE_SUGGESTION_MAX_BYTES}-byte cap"
+            ),
+        });
     }
+    Ok(Some(trimmed.to_string()))
 }
 
-/// V1.47 P0 fix (qc2 W-2): maximum accepted length for `rule_suggestion`
-/// text (4 KiB). Longer inputs are truncated by
-/// [`normalize_rule_suggestion`].
-pub const RULE_SUGGESTION_MAX_LEN: usize = 4096;
+/// V1.47 P0 fix (qc2 W-2): maximum accepted byte length for `rule_suggestion` text (4 KiB).
+///
+/// Longer inputs are **rejected** (not truncated) by [`normalize_rule_suggestion`]
+/// to surface upstream bugs rather than silently dropping content.
+pub const RULE_SUGGESTION_MAX_BYTES: usize = 4096;
 
 /// Validate finding enum fields. Returns [`LocalDbError::ConstraintViolation`] on invalid values.
 ///
@@ -621,8 +704,15 @@ pub struct ReviewVerdictFinding {
     /// Owning creator.
     pub creator_id: String,
     /// V1.47 §2.1 / §8.2: finding category. Callers SHOULD pick from
-    /// [`SUGGESTED_FINDING_KINDS`] but any non-empty string is accepted.
-    /// Defaults to `"craft"` when empty.
+    /// [`SUGGESTED_FINDING_KINDS`] (or the closed set
+    /// [`FindingKind::ALL_STRS`]). Defaults to `"craft"` when empty.
+    ///
+    /// V1.47 P0 fix (qc2 W-2): the DAO ([`create_finding_from_review`])
+    /// validates non-empty `kind` against [`FindingKind::ALL_STRS`] and
+    /// rejects unknown values with `ConstraintViolation` before any DB
+    /// call. The wire shape of `ReviewVerdictFinding` is unchanged (it
+    /// remains `String`); the handler can normalize wire values into the
+    /// closed set if it needs to surface a different error shape.
     pub kind: String,
     /// V1.47 §8.2: optional prose suggestion for Layer 2 rules.
     /// Persisted on the finding row only; V1.47 P0 does not write `AGENTS.md`.
@@ -667,99 +757,98 @@ pub async fn create_finding_from_review(
 
     // V1.47 §8.2: `kind` defaults to `"craft"` when empty (defensive — callers
     // should set it explicitly, but the spec lists `craft` as a safe default).
+    // V1.47 P0 fix (qc2 W-2): once non-empty, `kind` is validated against the
+    // closed set [`FindingKind::ALL_STRS`]; unknown values are rejected with
+    // `ConstraintViolation` before any DB call.
     let kind = if verdict.kind.is_empty() {
         "craft".to_string()
     } else {
-        verdict.kind.clone()
+        FindingKind::validate(&verdict.kind)?
     };
     let now = chrono::Utc::now().timestamp();
 
-    let rule_suggestion = normalize_rule_suggestion(verdict.rule_suggestion.as_deref());
+    // V1.47 P0 fix (qc2 W-2): reject empty-after-trim and oversized
+    // `rule_suggestion` payloads before any DB call.
+    let rule_suggestion = normalize_rule_suggestion(verdict.rule_suggestion.as_deref())?;
 
-    match &verdict.source_schedule_id {
+    let finding_id = mint_finding_id();
+    if let Some(source_schedule_id) = &verdict.source_schedule_id {
         // Idempotent path: review terminal hook with a source schedule.
-        Some(source_schedule_id) => {
-            let finding_id = mint_finding_id();
-            // SAFETY: dynamic SQL — ON CONFLICT clause with a partial-index
-            // conflict target is not supported by sqlx compile-time macros.
-            let result = sqlx::query(
-                "INSERT INTO findings
-                   (finding_id, work_id, chapter, severity, status, title,
-                    description, target_executor, creator_id, kind,
-                    rule_suggestion, source_schedule_id, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT (work_id, chapter, source_schedule_id)
-                   WHERE source_schedule_id IS NOT NULL
-                   DO NOTHING",
-            )
-            .bind(&finding_id)
-            .bind(&verdict.work_id)
-            .bind(verdict.chapter)
-            .bind(&verdict.severity)
-            .bind(&verdict.title)
-            .bind(&verdict.description)
-            .bind(&verdict.target_executor)
-            .bind(&verdict.creator_id)
-            .bind(&kind)
-            .bind(&rule_suggestion)
-            .bind(source_schedule_id)
-            .bind(now)
-            .bind(now)
-            .execute(pool)
-            .await?;
+        // SAFETY: dynamic SQL — ON CONFLICT clause with a partial-index
+        // conflict target is not supported by sqlx compile-time macros.
+        let result = sqlx::query(
+            "INSERT INTO findings
+               (finding_id, work_id, chapter, severity, status, title,
+                description, target_executor, creator_id, kind,
+                rule_suggestion, source_schedule_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (work_id, chapter, source_schedule_id)
+               WHERE source_schedule_id IS NOT NULL
+               DO NOTHING",
+        )
+        .bind(&finding_id)
+        .bind(&verdict.work_id)
+        .bind(verdict.chapter)
+        .bind(&verdict.severity)
+        .bind(&verdict.title)
+        .bind(&verdict.description)
+        .bind(&verdict.target_executor)
+        .bind(&verdict.creator_id)
+        .bind(&kind)
+        .bind(&rule_suggestion)
+        .bind(source_schedule_id)
+        .bind(now)
+        .bind(now)
+        .execute(pool)
+        .await?;
 
-            if result.rows_affected() == 1 {
-                return Ok(finding_id);
-            }
-
-            // Conflict — the finding already exists. Fetch its id.
-            // SAFETY: dynamic SQL — fetch by the unique triple.
-            let existing: Option<String> =
-                sqlx::query_scalar(
-                    "SELECT finding_id FROM findings
-                     WHERE work_id = ? AND chapter IS ? AND source_schedule_id = ?",
-                )
-                .bind(&verdict.work_id)
-                .bind(verdict.chapter)
-                .bind(source_schedule_id)
-                .fetch_optional(pool)
-                .await?;
-
-            existing.ok_or_else(|| {
-                LocalDbError::ConstraintViolation {
-                    table: "findings".to_string(),
-                    constraint: "idempotent insert reported 0 rows but existing finding not found"
-                        .to_string(),
-                }
-            })
+        if result.rows_affected() == 1 {
+            return Ok(finding_id);
         }
 
+        // Conflict — the finding already exists. Fetch its id.
+        // SAFETY: dynamic SQL — fetch by the unique triple.
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT finding_id FROM findings
+                 WHERE work_id = ? AND chapter IS ? AND source_schedule_id = ?",
+        )
+        .bind(&verdict.work_id)
+        .bind(verdict.chapter)
+        .bind(source_schedule_id)
+        .fetch_optional(pool)
+        .await?;
+
+        existing.ok_or_else(|| LocalDbError::ConstraintViolation {
+            table: "findings".to_string(),
+            constraint: "idempotent insert reported 0 rows but existing finding not found"
+                .to_string(),
+        })
+    } else {
         // Standard path: manual CRUD / API (no idempotency guard).
-        None => {
-            let finding_id = mint_finding_id();
-            let f = Finding {
-                finding_id: finding_id.clone(),
-                work_id: verdict.work_id.clone(),
-                chapter: verdict.chapter,
-                severity: verdict.severity.clone(),
-                status: "open".to_string(),
-                title: verdict.title.clone(),
-                description: verdict.description.clone(),
-                target_executor: verdict.target_executor.clone(),
-                creator_id: verdict.creator_id.clone(),
-                kind,
-                rule_suggestion,
-                created_at: now,
-                updated_at: now,
-            };
-            create_finding(pool, &f).await?;
-            Ok(finding_id)
-        }
+        let f = Finding {
+            finding_id: finding_id.clone(),
+            work_id: verdict.work_id.clone(),
+            chapter: verdict.chapter,
+            severity: verdict.severity.clone(),
+            status: "open".to_string(),
+            title: verdict.title.clone(),
+            description: verdict.description.clone(),
+            target_executor: verdict.target_executor.clone(),
+            creator_id: verdict.creator_id.clone(),
+            kind,
+            rule_suggestion,
+            created_at: now,
+            updated_at: now,
+        };
+        create_finding(pool, &f).await?;
+        Ok(finding_id)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{normalize_rule_suggestion, FindingKind, RULE_SUGGESTION_MAX_BYTES};
+    use crate::error::LocalDbError;
     use sqlx::SqlitePool;
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
@@ -769,6 +858,104 @@ mod tests {
         crate::run_migrations(&pool).await.unwrap();
         (pool, dir)
     }
+
+    // ── V1.47 P0 (qc2 W-2): closed `kind` set + `rule_suggestion` cap ───────
+
+    /// All 5 enum variants in [`FindingKind::ALL_STRS`] validate successfully
+    /// and return the input string unchanged.
+    #[test]
+    fn finding_kind_validate_accepts_known_values() {
+        for &known in FindingKind::ALL_STRS {
+            let validated = FindingKind::validate(known)
+                .unwrap_or_else(|e| panic!("known kind '{known}' should validate: {e}"));
+            assert_eq!(validated, known);
+        }
+        // sanity: the enum has exactly 5 variants and the docstring count
+        // matches the const ALL_STRS slice length.
+        assert_eq!(
+            FindingKind::ALL_STRS.len(),
+            5,
+            "expected 5 closed-set kinds; update test if you intentionally add a variant"
+        );
+    }
+
+    /// Unknown `kind` strings are rejected with `ConstraintViolation`.
+    #[test]
+    fn finding_kind_validate_rejects_unknown() {
+        let err = FindingKind::validate("foo").expect_err("unknown kind should be rejected");
+        match err {
+            LocalDbError::ConstraintViolation { table, constraint } => {
+                assert_eq!(table, "findings");
+                assert!(
+                    constraint.contains('\''),
+                    "constraint should quote the bad value: {constraint}"
+                );
+                assert!(
+                    constraint.contains("foo"),
+                    "constraint should name the bad value: {constraint}"
+                );
+                assert!(
+                    constraint.contains("craft") && constraint.contains("continuity"),
+                    "constraint should list the accepted set: {constraint}"
+                );
+            }
+            other => panic!("expected ConstraintViolation, got {other:?}"),
+        }
+    }
+
+    /// `rule_suggestion` at exactly the byte cap (4 KiB) is accepted.
+    #[test]
+    fn rule_suggestion_length_cap_accepts_within_limit() {
+        let within = "a".repeat(RULE_SUGGESTION_MAX_BYTES);
+        assert_eq!(within.len(), RULE_SUGGESTION_MAX_BYTES);
+        let normalized = normalize_rule_suggestion(Some(&within))
+            .expect("input exactly at the cap should be accepted");
+        assert_eq!(normalized.as_deref(), Some(within.as_str()));
+    }
+
+    /// `rule_suggestion` one byte over the cap (4 KiB + 1) is rejected.
+    #[test]
+    fn rule_suggestion_length_cap_rejects_too_long() {
+        let too_long = "a".repeat(RULE_SUGGESTION_MAX_BYTES + 1);
+        assert_eq!(too_long.len(), RULE_SUGGESTION_MAX_BYTES + 1);
+        let err = normalize_rule_suggestion(Some(&too_long))
+            .expect_err("input over the cap should be rejected");
+        match err {
+            LocalDbError::ConstraintViolation { table, constraint } => {
+                assert_eq!(table, "findings");
+                assert!(
+                    constraint.contains(&format!("{}", too_long.len())),
+                    "constraint should report the observed byte length: {constraint}"
+                );
+                assert!(
+                    constraint.contains(&format!("{RULE_SUGGESTION_MAX_BYTES}")),
+                    "constraint should name the cap: {constraint}"
+                );
+            }
+            other => panic!("expected ConstraintViolation, got {other:?}"),
+        }
+    }
+
+    /// `rule_suggestion = Some("   ")` (whitespace-only) is rejected — callers
+    /// that intend "no suggestion" must pass `None` explicitly.
+    #[test]
+    fn rule_suggestion_trimmed_empty_rejected() {
+        let err = normalize_rule_suggestion(Some("   "))
+            .expect_err("whitespace-only input should be rejected");
+        assert!(
+            matches!(err, LocalDbError::ConstraintViolation { ref table, .. } if table == "findings"),
+            "expected ConstraintViolation on findings, got {err:?}"
+        );
+        // None stays None — no rejection, no normalization.
+        assert!(
+            normalize_rule_suggestion(None)
+                .expect("None should pass through")
+                .is_none(),
+            "None should round-trip as Ok(None)"
+        );
+    }
+
+    // ── C-1 fix: index presence (existing) ──────────────────────────────────
 
     /// C-1 fix: Verify the spec-required composite index on
     /// (work_id, chapter, status) exists after migration.
