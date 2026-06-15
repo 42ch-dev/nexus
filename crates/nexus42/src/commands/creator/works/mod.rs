@@ -372,7 +372,20 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
         .await?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&resp)?);
+        // V1.46 P0 (T1+T2): novel-only findings enrichment (Grill #6/#8; spec §4.1).
+        // Generic / non-novel works stay findings-free (novel-only gate).
+        let is_novel =
+            resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
+        let (findings_vec, stale) = if is_novel {
+            // qc3 F-001: run the two independent daemon subcalls (findings +
+            // stale) concurrently via tokio::join! to avoid stacking their
+            // worst-case latencies on the JSON hot path.
+            fetch_novel_findings_and_stale(client, &resolved_id).await
+        } else {
+            (None, None)
+        };
+        let output = enrich_status_json(resp, findings_vec.as_deref(), stale.as_ref());
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
@@ -390,12 +403,11 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 .unwrap_or(96 * 60 * 60);
             if stale_count > 0 {
                 let threshold_hours = threshold_secs / 3600;
-                // V1.43 (P1 §3 remediation — open findings blocking progress):
-                // cite quickstart §5.
+                // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
                 println!(
                     "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
                      address open findings or run a review pass; \
-                     see docs/novel-writing-quickstart.md §5"
+                     see .mstar/knowledge/specs/novel-author-experience.md §4"
                 );
                 println!();
             }
@@ -458,7 +470,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 println!();
                 // V1.43 P2: findings summary in completed view (spec §4 row 3).
                 print_findings_summary(&open_findings, &resolved_id);
-                println!("  This Work is complete; see docs/novel-writing-quickstart.md §6");
+                println!("  This Work is complete; see .mstar/knowledge/specs/novel-author-experience.md §3");
                 println!();
                 println!("  To start a new Work, run:");
                 // V1.45 P2: hint updated from `run start` to `creator bootstrap`.
@@ -515,7 +527,9 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 print_findings_summary(&open_findings, &resolved_id);
 
                 // Per-chapter table
-                print_chapter_table(ch_list);
+                // V1.46 P2 (Grill #9): pass work_id so on-disk path hints can
+                // render a `works reconcile-chapters` remediation command.
+                print_chapter_table(ch_list, &resolved_id);
             }
         } else {
             // Non-novel or generic work display
@@ -1058,6 +1072,13 @@ const FINDINGS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// Hard cap on the number of findings fetched from the daemon.
 const FINDINGS_FETCH_LIMIT: usize = 50;
 
+/// Stale-fetch subcall timeout — mirrors `FINDINGS_FETCH_TIMEOUT` so the
+/// JSON-path `/v1/local/findings/stale` fetch cannot block the status hot
+/// path longer than the findings fetch (qc3 F-002; resolves the timeout
+/// asymmetry flagged in qc1 S-3). Previously the stale fetch inherited the
+/// default 30s `DEFAULT_REQUEST_TIMEOUT`, six times the findings cap.
+const STALE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Result of fetching open findings from the daemon.
 ///
 /// Distinguishes "successfully fetched 0 findings" from "fetch failed",
@@ -1090,6 +1111,111 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
         .map_or(FindingsResult::Unavailable, |v| {
             FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
         })
+}
+
+/// Fetch the creator-global stale-findings summary for the JSON status path —
+/// best-effort, returns `None` on any failure (parity with the human stale banner).
+///
+/// Extracted so the JSON path can run this subcall **concurrently** with
+/// `fetch_open_findings` via `tokio::join!` (qc3 F-001), avoiding stacked
+/// worst-case latency on the status hot path.
+///
+/// qc3 F-002: uses a dedicated short-timeout client (`STALE_FETCH_TIMEOUT`,
+/// 5s) instead of the supplied client's default 30s, so a degraded stale
+/// endpoint cannot block the JSON status command longer than the findings
+/// fetch. Mirrors `fetch_open_findings`'s timeout policy.
+async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value> {
+    let stale_client = DaemonClient::with_timeouts(
+        client.base_url(),
+        crate::api::daemon_client::DEFAULT_CONNECT_TIMEOUT,
+        STALE_FETCH_TIMEOUT,
+    );
+    stale_client
+        .get::<serde_json::Value>("/v1/local/findings/stale")
+        .await
+        .ok()
+}
+
+/// Fetch both the work-scoped open findings and the creator-global stale
+/// summary for a novel work's JSON status, running the two independent daemon
+/// subcalls **concurrently** via `tokio::join!` (qc3 F-001).
+///
+/// Avoids stacking the two worst-case latencies on the status hot path
+/// (was ~5 s findings + ~30 s stale sequential; now bounded by the slower of
+/// the two). Both subcalls are best-effort: a failed findings fetch yields
+/// `None` (graceful degradation, `findings` omitted downstream); a failed
+/// stale fetch yields `None` (`findings_stale` omitted downstream).
+async fn fetch_novel_findings_and_stale(
+    client: &DaemonClient,
+    work_id: &str,
+) -> (Option<Vec<serde_json::Value>>, Option<serde_json::Value>) {
+    let (findings_res, stale_opt) = tokio::join!(
+        fetch_open_findings(client, work_id),
+        fetch_stale_findings(client)
+    );
+    let findings = match findings_res {
+        FindingsResult::Fetched(v) => Some(v),
+        FindingsResult::Unavailable => None,
+    };
+    (findings, stale_opt)
+}
+
+/// V1.46 P0: enrich the daemon GET work payload with novel-only findings.
+///
+/// For `work_profile=novel` only (Grill #6), inserts a root-level `findings`
+/// array matching the findings list-API element shape verbatim (spec §4.1),
+/// and an optional `findings_stale` object when the 96h master-review stale
+/// banner would show (human parity). Generic / non-novel works are returned
+/// unchanged (novel-only gate).
+///
+/// `findings`: `Some(slice)` when the findings fetch succeeded (possibly empty);
+///             `None` when the endpoint was unreachable — `findings` is then
+///             omitted for graceful degradation (mirrors the human "unavailable"
+///             path), since fabricating an empty array would mask a daemon fault.
+///             When `slice.len() == FINDINGS_FETCH_LIMIT`, a `findings_truncated`
+///             boolean is also inserted so JSON consumers can detect that more
+///             open findings may exist beyond the fetched page (qc3 F-003).
+///
+/// `stale`: the `/v1/local/findings/stale` payload; `findings_stale` is inserted
+///          only when its `stale_count` is greater than zero.
+fn enrich_status_json(
+    mut resp: serde_json::Value,
+    findings: Option<&[serde_json::Value]>,
+    stale: Option<&serde_json::Value>,
+) -> serde_json::Value {
+    let is_novel = resp.get("work_profile").and_then(serde_json::Value::as_str) == Some("novel");
+    if !is_novel {
+        return resp;
+    }
+    let Some(obj) = resp.as_object_mut() else {
+        return resp;
+    };
+    if let Some(arr) = findings {
+        let is_truncated = arr.len() == FINDINGS_FETCH_LIMIT;
+        obj.insert(
+            "findings".to_string(),
+            serde_json::Value::Array(arr.to_vec()),
+        );
+        // qc3 F-003: surface the 50-item fetch cap so JSON consumers can
+        // distinguish "exactly 50 open findings" from "50+ open findings".
+        // Omitted when not at the cap (consumers treat absence as not-truncated).
+        if is_truncated {
+            obj.insert(
+                "findings_truncated".to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+    }
+    if let Some(stale_obj) = stale {
+        let stale_count = stale_obj
+            .get("stale_count")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        if stale_count > 0 {
+            obj.insert("findings_stale".to_string(), stale_obj.clone());
+        }
+    }
+    resp
 }
 
 /// Parsed open-findings summary for display formatting.
@@ -1195,6 +1321,7 @@ impl FindingsSummary {
 /// Per cli-spec §7.1: clear, non-jargon formatting.
 ///
 /// - `FindingsResult::Fetched(vec)` with empty vec → "findings: none open"
+///   + suggests `creator run novel-review-master` (V1.46 P0, Grill #7)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     let findings = match result {
@@ -1208,7 +1335,10 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
     let summary = FindingsSummary::from_findings_json(findings, is_truncated);
     if summary.open_count == 0 {
+        // V1.46 P0 (Grill #7): empty findings → suggest a master-decision pass.
+        let safe_work_id = sanitize_for_terminal(work_id);
         println!("findings: none open");
+        println!("  Run: nexus42 creator run novel-review-master {safe_work_id}");
         return;
     }
 
@@ -1238,34 +1368,159 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         let display_title = truncate_with_ellipsis(&safe_title, 48);
         println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
     }
-
-    // Review action hint — cite quickstart §5 (sanitize work_id for defense in depth).
-    let safe_work_id = sanitize_for_terminal(work_id);
-    println!("  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}");
-    println!("  See docs/novel-writing-quickstart.md §5");
 }
 
+/// V1.46 P2 QC fix W-001: maximum number of chapters that receive
+/// per-row on-disk path hints in `print_chapter_table`. Bounds the
+/// synchronous `Path::exists()` syscall cost on large works (100+
+/// chapters). Chapters beyond this cap are summarized in a single
+/// line; the per-chapter `exists()` behavior itself (Grill #9) is
+/// preserved for the first `CHAPTER_PATH_HINT_CAP` rows.
+const CHAPTER_PATH_HINT_CAP: usize = 50;
+
 /// Print per-chapter status table for novel works.
-fn print_chapter_table(chapters: &[serde_json::Value]) {
+///
+/// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort on-disk check of each
+/// chapter's configured `body_path` / `outline_path`. When a configured
+/// path is missing on disk, a ⚠ marker plus a `works reconcile-chapters`
+/// remediation hint is printed below the row. The daemon reconcile pass
+/// remains authoritative; this is a CLI-only surfacing hint. All
+/// filesystem errors are swallowed (best-effort) and never fail the status
+/// command.
+///
+/// V1.46 P2 QC fix W-001: per-chapter `exists()` hints are capped at
+/// `CHAPTER_PATH_HINT_CAP` to prevent tail latency on large works; a
+/// summary line covers chapters beyond the cap.
+fn print_chapter_table(chapters: &[serde_json::Value], work_id: &str) {
+    // Resolve the operational workspace dir once (best-effort). When this
+    // cannot be resolved (no active creator, no home dir, etc.), on-disk
+    // hints are silently skipped — the table still renders normally.
+    let ws_dir = operational_workspace_dir_from_config();
+
     println!();
     println!(
         "{:<5} {:<30} {:<14} {:<14}",
         "CH", "TITLE", "STATUS", "UPDATED"
     );
-    for ch in chapters {
-        let num = ch
-            .get("chapter_number")
-            .and_then(serde_json::Value::as_i64)
-            .unwrap_or(0);
-        let ch_title = ch
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(untitled)");
-        let ch_status = ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-        let ch_updated = ch.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
-        let display_title = truncate_with_ellipsis(ch_title, 28);
-        println!("{num:<5} {display_title:<30} {ch_status:<14} {ch_updated:<14}");
+
+    // V1.46 P2 QC fix W-001: bound per-chapter `Path::exists()` hints at
+    // `CHAPTER_PATH_HINT_CAP` to prevent synchronous-filesystem-syscall
+    // tail latency on large works (100+ chapters on slower storage).
+    // Chapters beyond the cap are summarized in a single line below the
+    // table; the per-chapter `exists()` behavior (Grill #9) is preserved
+    // for the first `hint_cap` rows.
+    let total_chapters = chapters.len();
+    let hint_cap = total_chapters.min(CHAPTER_PATH_HINT_CAP);
+
+    // tracing span records chapter count + effective cap; the >100ms
+    // threshold log below surfaces slow loops without spamming fast SSDs.
+    let hint_loop_elapsed_ms = {
+        let span = tracing::info_span!("chapter_path_hints", total_chapters, capped = hint_cap,);
+        let _enter = span.enter();
+        let start = std::time::Instant::now();
+
+        for (idx, ch) in chapters.iter().enumerate() {
+            let num = ch
+                .get("chapter_number")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            let ch_title = ch
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(untitled)");
+            let ch_status = ch.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+            let ch_updated = ch.get("updated_at").and_then(|v| v.as_str()).unwrap_or("?");
+            let display_title = truncate_with_ellipsis(ch_title, 28);
+            println!("{num:<5} {display_title:<30} {ch_status:<14} {ch_updated:<14}");
+
+            // V1.46 P2 (Grill #9): on-disk path hint, best-effort; capped
+            // by CHAPTER_PATH_HINT_CAP (W-001). Chapters beyond `hint_cap`
+            // still render their row above, but skip the exists() check.
+            if idx < hint_cap {
+                if let Some(ref dir) = ws_dir {
+                    if let Some(reason) = chapter_path_missing_hint(ch, dir) {
+                        let safe_work_id = sanitize_for_terminal(work_id);
+                        println!(
+                            "  ⚠ {reason} — run: nexus42 creator works reconcile-chapters {safe_work_id}"
+                        );
+                    }
+                }
+            }
+        }
+
+        start.elapsed().as_millis()
+    };
+
+    if hint_loop_elapsed_ms > 100 {
+        tracing::info!(
+            elapsed_ms = hint_loop_elapsed_ms,
+            chapters_checked = hint_cap,
+            "chapter path hint loop took >100ms",
+        );
     }
+
+    // V1.46 P2 QC fix W-001: summary line for chapters beyond the cap.
+    // Emitted only when the workspace was resolved (otherwise the entire
+    // hint feature was silently skipped and a summary would mislead the
+    // user into thinking paths were checked).
+    if ws_dir.is_some() {
+        if let Some(summary) =
+            chapter_path_hint_skipped_summary(total_chapters.saturating_sub(hint_cap))
+        {
+            println!("  {summary}");
+        }
+    }
+}
+
+/// V1.46 P2 (Grill #9): resolve the operational workspace directory from
+/// the active CLI config. Returns `None` on any failure (best-effort) —
+/// callers must treat `None` as "skip on-disk hints".
+fn operational_workspace_dir_from_config() -> Option<std::path::PathBuf> {
+    let cfg = crate::config::CliConfig::load().ok()?;
+    let creator_id = cfg.active_creator_id.as_ref()?;
+    let ws_slug = cfg.active_workspace_slug_by_creator.get(creator_id)?;
+    let home = dirs::home_dir()?;
+    Some(nexus_home_layout::operational_workspace_dir(
+        &home, creator_id, ws_slug,
+    ))
+}
+
+/// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort check of a chapter's
+/// configured `body_path` / `outline_path` against the filesystem.
+///
+/// Returns `Some(reason)` when at least one configured path is missing on
+/// disk; `None` when both paths exist, when neither is configured, or when
+/// the workspace cannot be resolved. `Path::exists()` semantics swallow
+/// permission/IO errors as `false`, which is the desired best-effort
+/// behavior (a missing file and an unreadable file both warrant reconcile).
+///
+/// Pure over `(chapter JSON, ws_dir)` — hermetically testable with a
+/// tempdir for `ws_dir`.
+fn chapter_path_missing_hint(ch: &serde_json::Value, ws_dir: &std::path::Path) -> Option<String> {
+    let body = ch.get("body_path").and_then(serde_json::Value::as_str);
+    let outline = ch.get("outline_path").and_then(serde_json::Value::as_str);
+    let body_missing = body.is_some_and(|p| !ws_dir.join(p).exists());
+    let outline_missing = outline.is_some_and(|p| !ws_dir.join(p).exists());
+    if !body_missing && !outline_missing {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if body_missing {
+        parts.push("body_path");
+    }
+    if outline_missing {
+        parts.push("outline_path");
+    }
+    Some(format!("{} missing on disk", parts.join(", ")))
+}
+
+/// V1.46 P2 QC fix W-001: pure helper that formats the `"+ N more
+/// (paths not checked)"` summary line for chapters beyond the hint cap.
+/// Returns `None` when `skipped == 0` so the caller can skip rendering.
+///
+/// Pure over `skipped` — unit-tested independently of `print_chapter_table`.
+fn chapter_path_hint_skipped_summary(skipped: usize) -> Option<String> {
+    (skipped > 0).then(|| format!("+ {skipped} more (paths not checked)"))
 }
 
 /// V1.42 P-last (R-V141P0-06): best-effort on-disk completion-lock file check.
@@ -1422,7 +1677,12 @@ mod tests {
         let mut lines = Vec::new();
 
         if summary.open_count == 0 {
+            // V1.46 P0 (Grill #7): empty → suggest review-master.
+            let safe_work_id = sanitize_for_terminal(work_id);
             lines.push("findings: none open".to_string());
+            lines.push(format!(
+                "  Run: nexus42 creator run novel-review-master {safe_work_id}"
+            ));
         } else {
             let count_display = if summary.is_truncated {
                 format!("{}+", summary.open_count)
@@ -1451,11 +1711,6 @@ mod tests {
                     i + 1
                 ));
             }
-            let safe_work_id = sanitize_for_terminal(work_id);
-            lines.push(format!(
-                "  Address findings or run: nexus42 creator run reflection-loop {safe_work_id}"
-            ));
-            lines.push("  See docs/novel-writing-quickstart.md §5".to_string());
         }
 
         lines.join("\n")
@@ -1465,6 +1720,9 @@ mod tests {
     fn display_no_open_findings() {
         let output = capture_findings_output(&[], "wrk_test");
         assert!(output.contains("findings: none open"));
+        // V1.46 P0 (Grill #7): empty → suggest review-master.
+        assert!(output.contains("novel-review-master"));
+        assert!(output.contains("wrk_test"));
         assert!(!output.contains("highest"));
     }
 
@@ -1481,8 +1739,15 @@ mod tests {
         assert!(output.contains("highest: blocker"));
         assert!(output.contains("#1 [blocker] \"Continuity error\" → write"));
         assert!(output.contains("#2 [minor] \"Style issue\" → none"));
-        assert!(output.contains("wrk_abc123"));
-        assert!(output.contains("quickstart"));
+        // V1.46 P0 (Grill #7): per-finding hint only; no blanket footer.
+        assert!(
+            !output.contains("reflection-loop"),
+            "blanket reflection-loop footer removed"
+        );
+        assert!(
+            !output.contains("quickstart"),
+            "quickstart reference removed from findings summary"
+        );
     }
 
     #[test]
@@ -1503,6 +1768,7 @@ mod tests {
         // When no findings exist, the summary line should say "none open".
         let output = capture_findings_output(&[], "wrk_completed");
         assert!(output.contains("findings: none open"));
+        assert!(output.contains("novel-review-master"));
     }
 
     // ── Truncation tests ─────────────────────────────────────────────────
@@ -1533,6 +1799,342 @@ mod tests {
         assert!(
             !output.contains(&format!("findings: {} open", FINDINGS_FETCH_LIMIT)),
             "should not show exact count without '+' when truncated"
+        );
+    }
+
+    // ── V1.46 P0 enrich_status_json tests (novel-only gate + JSON contract) ──
+
+    fn novel_work_resp() -> serde_json::Value {
+        serde_json::json!({
+            "work_id": "wrk_novel_1",
+            "title": "Test Novel",
+            "work_profile": "novel",
+            "status": "writing",
+            "current_chapter": 3,
+        })
+    }
+
+    fn generic_work_resp() -> serde_json::Value {
+        serde_json::json!({
+            "work_id": "wrk_generic_1",
+            "title": "Generic Work",
+            "work_profile": "generic",
+            "status": "active",
+        })
+    }
+
+    #[test]
+    fn enrich_novel_with_findings_inserts_array() {
+        let findings = vec![
+            finding_json("major", "Plot hole", "→ write"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present for novel work");
+        assert_eq!(arr.len(), 2);
+        // Same element shape as list API (verbatim).
+        assert_eq!(
+            arr[0].get("severity").and_then(|v| v.as_str()),
+            Some("major")
+        );
+        assert_eq!(
+            arr[0].get("routing_hint").and_then(|v| v.as_str()),
+            Some("→ write")
+        );
+        // Daemon work fields preserved.
+        assert_eq!(
+            out.get("title").and_then(|v| v.as_str()),
+            Some("Test Novel")
+        );
+        assert_eq!(out.get("current_chapter").and_then(|v| v.as_i64()), Some(3));
+    }
+
+    #[test]
+    fn enrich_novel_empty_findings_inserts_empty_array() {
+        let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present (empty) for novel work");
+        assert!(arr.is_empty());
+    }
+
+    #[test]
+    fn enrich_novel_unavailable_findings_omits_key() {
+        // When the findings endpoint is unreachable (None), omit findings[]
+        // rather than fabricating an empty array (graceful degradation).
+        let out = enrich_status_json(novel_work_resp(), None, None);
+        assert!(
+            out.get("findings").is_none(),
+            "findings key omitted when unavailable"
+        );
+        // qc3 F-003: truncation marker must also be absent when findings
+        // were not fetched at all.
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings unavailable"
+        );
+    }
+
+    // ── qc3 F-003: findings_truncated marker tests ───────────────────────
+
+    #[test]
+    fn enrich_findings_truncated_marker_set_when_at_limit() {
+        // When the daemon returns exactly FINDINGS_FETCH_LIMIT (50) rows,
+        // there may be more open findings beyond the fetched page. Surface
+        // a `findings_truncated: true` flag so JSON consumers can detect
+        // the cap (qc3 F-003).
+        let findings: Vec<serde_json::Value> = (0..FINDINGS_FETCH_LIMIT)
+            .map(|i| finding_json("info", &format!("Finding {i}"), "→ none"))
+            .collect();
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        assert_eq!(
+            out.get("findings_truncated")
+                .and_then(serde_json::Value::as_bool),
+            Some(true),
+            "findings_truncated must be true when findings.len() == FINDINGS_FETCH_LIMIT"
+        );
+    }
+
+    #[test]
+    fn enrich_findings_truncated_omitted_when_below_limit() {
+        // Below the cap, the marker is omitted (not false) so consumers can
+        // distinguish "truncation known to be false" from "not applicable".
+        let findings = vec![
+            finding_json("major", "Plot hole", "→ write"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings.len() < FINDINGS_FETCH_LIMIT"
+        );
+    }
+
+    #[test]
+    fn enrich_findings_truncated_omitted_when_empty() {
+        // Empty findings (fetched successfully, none open) — not truncated.
+        let out = enrich_status_json(novel_work_resp(), Some(&[]), None);
+        assert!(
+            out.get("findings_truncated").is_none(),
+            "findings_truncated omitted when findings is empty"
+        );
+    }
+
+    #[test]
+    fn enrich_generic_work_omits_findings_gate() {
+        // Novel-only gate (Grill #6): generic works never get findings.
+        let findings = vec![finding_json("major", "Plot hole", "→ write")];
+        let out = enrich_status_json(generic_work_resp(), Some(findings.as_slice()), None);
+        assert!(
+            out.get("findings").is_none(),
+            "generic work must not include findings"
+        );
+        assert!(out.get("findings_stale").is_none());
+    }
+
+    #[test]
+    fn enrich_missing_work_profile_omits_findings() {
+        // A work with no work_profile field is treated as non-novel.
+        let resp = serde_json::json!({ "work_id": "wrk_x", "title": "Mystery" });
+        let findings = vec![finding_json("info", "x", "→ none")];
+        let out = enrich_status_json(resp, Some(findings.as_slice()), None);
+        assert!(out.get("findings").is_none());
+    }
+
+    #[test]
+    fn enrich_novel_stale_inserts_findings_stale() {
+        let stale = serde_json::json!({ "stale_count": 3, "threshold_seconds": 345600 });
+        let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
+        let stale_out = out
+            .get("findings_stale")
+            .expect("findings_stale present when stale_count > 0");
+        assert_eq!(
+            stale_out.get("stale_count").and_then(|v| v.as_u64()),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn enrich_novel_zero_stale_omits_findings_stale() {
+        let stale = serde_json::json!({ "stale_count": 0, "threshold_seconds": 345600 });
+        let out = enrich_status_json(novel_work_resp(), None, Some(&stale));
+        assert!(
+            out.get("findings_stale").is_none(),
+            "findings_stale omitted when stale_count is 0"
+        );
+    }
+
+    #[test]
+    fn enrich_preserves_daemon_work_fields() {
+        // Daemon GET work payload fields must be unchanged (spec §4.1).
+        let resp = serde_json::json!({
+            "work_id": "wrk_full",
+            "title": "Full",
+            "work_profile": "novel",
+            "status": "writing",
+            "chapters": [{"chapter_number": 1, "status": "finalized"}],
+        });
+        let out = enrich_status_json(resp, Some(&[]), None);
+        assert_eq!(
+            out.get("work_id").and_then(|v| v.as_str()),
+            Some("wrk_full")
+        );
+        assert_eq!(
+            out.get("work_profile").and_then(|v| v.as_str()),
+            Some("novel")
+        );
+        assert!(out.get("chapters").and_then(|v| v.as_array()).is_some());
+    }
+
+    // ── V1.46 P0 qc-fix: concurrent findings+stale fetch (qc3 F-001) ──────
+
+    #[tokio::test]
+    async fn fetch_novel_findings_and_stale_runs_concurrently() {
+        // qc3 F-001: the two daemon subcalls must run concurrently, not
+        // sequentially. Both endpoints delay 400ms; if run sequentially the
+        // total is ~800ms, if concurrent (tokio::join!) it is ~400ms. Assert
+        // the elapsed wall-clock is well below the sequential sum.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let per_endpoint_delay = std::time::Duration::from_millis(400);
+
+        // Findings endpoint (path includes query string in the request, but the
+        // wiremock `path` matcher matches the path component only).
+        Mock::given(method("GET"))
+            .and(path("/v1/local/works/wrk_concurrent/findings"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!([]))
+                    .set_delay(per_endpoint_delay),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // Stale endpoint.
+        Mock::given(method("GET"))
+            .and(path("/v1/local/findings/stale"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "stale_count": 0 }))
+                    .set_delay(per_endpoint_delay),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+
+        let start = std::time::Instant::now();
+        let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_concurrent").await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            findings.is_some(),
+            "findings fetched successfully (concurrent path)"
+        );
+        assert!(
+            stale.is_some(),
+            "stale fetched successfully (concurrent path)"
+        );
+        // Concurrent: elapsed ≈ max(400ms, 400ms) = 400ms. Sequential would be
+        // ~800ms. Threshold 700ms gives slack for scheduling/CI while still
+        // proving the two fetches overlapped.
+        assert!(
+            elapsed < std::time::Duration::from_millis(700),
+            "fetches ran concurrently (elapsed {elapsed:?} < 700ms; \
+             sequential would be ~800ms)",
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_novel_findings_and_stale_degrades_when_findings_fail() {
+        // qc3 F-001/F-003: when the findings endpoint is unreachable the
+        // helper returns None for findings (graceful degradation) while the
+        // stale subcall still runs concurrently and may succeed.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // No findings mock mounted → wiremock returns 404 → get() errors →
+        // FindingsResult::Unavailable → None.
+        Mock::given(method("GET"))
+            .and(path("/v1/local/findings/stale"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "stale_count": 2 })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let (findings, stale) = fetch_novel_findings_and_stale(&client, "wrk_none").await;
+
+        assert!(findings.is_none(), "findings None when endpoint 404s");
+        assert!(
+            stale.is_some(),
+            "stale still fetched even when findings fail (concurrent, independent)"
+        );
+        assert_eq!(
+            stale
+                .unwrap()
+                .get("stale_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(2)
+        );
+    }
+
+    // ── V1.46 P0 qc-fix: stale fetch short timeout (qc3 F-002) ────────────
+
+    #[test]
+    fn stale_fetch_timeout_matches_findings_fetch_timeout() {
+        // qc3 F-002 (resolves qc1 S-3 timeout asymmetry): the JSON-path
+        // stale fetch must use a short timeout consistent with the findings
+        // fetch, NOT the default 30 s. Lock the policy here so the asymmetry
+        // cannot silently return. (The actual ~5 s bound is documented in
+        // spec §4.1; a wall-clock timeout test would needlessly add ~5 s to
+        // every test run, so the constant-parity guard is the chosen
+        // regression surface.)
+        assert_eq!(
+            STALE_FETCH_TIMEOUT, FINDINGS_FETCH_TIMEOUT,
+            "stale fetch timeout must match findings fetch timeout (no asymmetry)"
+        );
+        assert!(
+            STALE_FETCH_TIMEOUT < crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT,
+            "stale fetch timeout ({:?}) must be shorter than the default request timeout ({:?})",
+            STALE_FETCH_TIMEOUT,
+            crate::api::daemon_client::DEFAULT_REQUEST_TIMEOUT
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_stale_findings_returns_none_on_endpoint_error() {
+        // qc3 F-002 wiring: the dedicated short-timeout client must still
+        // follow the best-effort contract (None on any failure). A 500 from
+        // the stale endpoint yields None rather than propagating.
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/local/findings/stale"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_json(serde_json::json!({ "error": "internal" })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let stale = fetch_stale_findings(&client).await;
+        assert!(
+            stale.is_none(),
+            "stale fetch returns None on endpoint error (best-effort, short-timeout client)"
         );
     }
 
@@ -1819,5 +2421,228 @@ mod tests {
         );
         // Suppress unused variable warning
         let _ = result;
+    }
+
+    // ── V1.46 P2 (Grill #9): on-disk chapter path hint tests ──────────────
+
+    fn chapter_with_paths(body: Option<&str>, outline: Option<&str>) -> serde_json::Value {
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "chapter_number".to_string(),
+            serde_json::Value::Number(1.into()),
+        );
+        obj.insert(
+            "title".to_string(),
+            serde_json::Value::String("Intro".into()),
+        );
+        obj.insert(
+            "status".to_string(),
+            serde_json::Value::String("writing".into()),
+        );
+        if let Some(b) = body {
+            obj.insert("body_path".to_string(), serde_json::Value::String(b.into()));
+        }
+        if let Some(o) = outline {
+            obj.insert(
+                "outline_path".to_string(),
+                serde_json::Value::String(o.into()),
+            );
+        }
+        serde_json::Value::Object(obj)
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_body_missing_on_disk() {
+        // body_path configured but file does not exist → hint should fire
+        // and mention body_path.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(Some("Works/my-novel/Stories/ch01-intro.md"), None);
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        let hint = hint.expect("hint present when body_path missing on disk");
+        assert!(
+            hint.contains("body_path"),
+            "hint should mention body_path: {hint}"
+        );
+        assert!(hint.contains("missing on disk"));
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_outline_missing_on_disk() {
+        // outline_path configured but file does not exist → hint fires.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(
+            None,
+            Some("Works/my-novel/Outlines/chapters/ch01-outline.md"),
+        );
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        let hint = hint.expect("hint present when outline_path missing on disk");
+        assert!(
+            hint.contains("outline_path"),
+            "hint should mention outline_path: {hint}"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_both_present_no_hint() {
+        // Both paths configured AND present on disk → no hint (None).
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Create the files so exists() returns true.
+        let body_rel = "Works/my-novel/Stories/ch01.md";
+        let outline_rel = "Works/my-novel/Outlines/chapters/ch01-outline.md";
+        std::fs::create_dir_all(dir.path().join("Works/my-novel/Stories"))
+            .expect("mkdir body parent");
+        std::fs::create_dir_all(dir.path().join("Works/my-novel/Outlines/chapters"))
+            .expect("mkdir outline parent");
+        std::fs::write(dir.path().join(body_rel), "body").expect("write body");
+        std::fs::write(dir.path().join(outline_rel), "outline").expect("write outline");
+
+        let ch = chapter_with_paths(Some(body_rel), Some(outline_rel));
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        assert!(
+            hint.is_none(),
+            "no hint when both configured paths exist on disk (got {hint:?})"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_no_paths_configured_no_hint() {
+        // Neither body_path nor outline_path in the JSON → None (nothing to
+        // check; daemon has not assigned file paths yet).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(None, None);
+        let hint = chapter_path_missing_hint(&ch, dir.path());
+        assert!(
+            hint.is_none(),
+            "no hint when neither path is configured (got {hint:?})"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_both_missing_mentions_both() {
+        // Both configured, neither exists → hint mentions both fields.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ch = chapter_with_paths(
+            Some("Works/x/Stories/ch01.md"),
+            Some("Works/x/Outlines/chapters/ch01-outline.md"),
+        );
+        let hint =
+            chapter_path_missing_hint(&ch, dir.path()).expect("hint present when both missing");
+        assert!(
+            hint.contains("body_path"),
+            "hint should mention body_path: {hint}"
+        );
+        assert!(
+            hint.contains("outline_path"),
+            "hint should mention outline_path: {hint}"
+        );
+    }
+
+    #[test]
+    fn chapter_path_missing_hint_exists_failure_is_silent() {
+        // Best-effort contract: `Path::exists()` returns false (rather than
+        // panicking) for unreadable / permission-denied paths. The hint
+        // surfaces "missing on disk" for such cases too — reconcile is the
+        // correct remediation regardless. This test pins the "swallow"
+        // behavior: a path pointing into a tempdir that was just removed
+        // still yields Some (treated as missing), never panics.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dir_path = dir.path().to_path_buf();
+        let ch = chapter_with_paths(Some("nonexistent/ch01.md"), None);
+        // Drop the tempdir handle but keep the path; the files never existed.
+        drop(dir);
+        let hint = chapter_path_missing_hint(&ch, &dir_path);
+        // After drop the tempdir may still exist on disk (cleanup is
+        // best-effort), but the inner file definitely does not → Some.
+        assert!(
+            hint.is_some(),
+            "missing file surfaces as Some (best-effort, never panics)"
+        );
+    }
+
+    // ── V1.46 P2 QC fix W-001: chapter hint cap + summary tests ──────────
+
+    #[test]
+    fn chapter_path_hint_skipped_summary_format() {
+        // Format contract for the "+ N more (paths not checked)" line.
+        assert_eq!(
+            chapter_path_hint_skipped_summary(1).as_deref(),
+            Some("+ 1 more (paths not checked)"),
+        );
+        assert_eq!(
+            chapter_path_hint_skipped_summary(10).as_deref(),
+            Some("+ 10 more (paths not checked)"),
+        );
+        // Zero skipped → no summary line (caller must not render one).
+        assert!(
+            chapter_path_hint_skipped_summary(0).is_none(),
+            "no summary when skipped == 0"
+        );
+    }
+
+    #[test]
+    fn chapter_path_hint_cap_only_first_50_chapters_get_hints() {
+        // 60-chapter work, all with missing body_path. Without the cap,
+        // every chapter would emit a ⚠ hint (and incur a synchronous
+        // `exists()` syscall). The cap bounds the inspected set at
+        // `CHAPTER_PATH_HINT_CAP` and summarizes the remainder.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let chapters: Vec<serde_json::Value> = (1..=60)
+            .map(|i| chapter_with_paths(Some(&format!("Works/x/Stories/ch{i:02}.md")), None))
+            .collect();
+        assert_eq!(chapters.len(), 60);
+
+        // Mirror print_chapter_table's cap math.
+        let hint_cap = chapters.len().min(CHAPTER_PATH_HINT_CAP);
+        assert_eq!(
+            hint_cap, CHAPTER_PATH_HINT_CAP,
+            "60-chapter work hits the cap"
+        );
+
+        // Only the first `hint_cap` chapters are inspected for path hints.
+        let capped_hint_count = chapters[..hint_cap]
+            .iter()
+            .filter_map(|ch| chapter_path_missing_hint(ch, dir.path()))
+            .count();
+        assert_eq!(
+            capped_hint_count, 50,
+            "all 50 capped chapters have missing body_path → 50 hints"
+        );
+
+        // Prove the cap is actually bounding something real: the skipped
+        // chapters WOULD have generated hints if the cap weren't in place.
+        let would_have_hinted = chapters[hint_cap..]
+            .iter()
+            .filter_map(|ch| chapter_path_missing_hint(ch, dir.path()))
+            .count();
+        assert_eq!(
+            would_have_hinted, 10,
+            "skipped chapters would have hinted without the cap"
+        );
+
+        // Summary line covers exactly the skipped count.
+        let skipped = chapters.len().saturating_sub(hint_cap);
+        assert_eq!(skipped, 10);
+        let summary =
+            chapter_path_hint_skipped_summary(skipped).expect("summary present when skipped > 0");
+        assert_eq!(summary, "+ 10 more (paths not checked)");
+    }
+
+    #[test]
+    fn chapter_path_hint_cap_not_triggered_under_50() {
+        // A 10-chapter work is well under the cap: no chapter is skipped,
+        // no summary line is rendered, and the existing per-chapter
+        // behavior is fully preserved.
+        let chapters: Vec<serde_json::Value> = (1..=10)
+            .map(|i| chapter_with_paths(Some(&format!("Works/x/Stories/ch{i:02}.md")), None))
+            .collect();
+        let hint_cap = chapters.len().min(CHAPTER_PATH_HINT_CAP);
+        assert_eq!(hint_cap, 10, "10-chapter work does not hit the cap");
+
+        let skipped = chapters.len().saturating_sub(hint_cap);
+        assert_eq!(skipped, 0);
+        assert!(
+            chapter_path_hint_skipped_summary(skipped).is_none(),
+            "no summary when skipped == 0"
+        );
     }
 }
