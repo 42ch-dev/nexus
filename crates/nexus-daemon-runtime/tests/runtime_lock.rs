@@ -7,11 +7,14 @@
 
 #![allow(clippy::unwrap_used)]
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use axum::extract::{Path, State};
 use axum::Json;
 use nexus_daemon_runtime::api::handlers::works::{
-    append_inspiration, create_work, patch_work, AppendInspirationRequest, CreateWorkRequest,
-    PatchWorkRequest,
+    append_inspiration, create_work, patch_work, reconcile_chapters, AppendInspirationRequest,
+    CreateWorkRequest, PatchWorkRequest,
 };
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
@@ -274,4 +277,80 @@ async fn test_inspiration_acquires_and_releases_lock() {
         .unwrap()
         .unwrap();
     assert!(work.runtime_lock_holder.is_none());
+}
+
+/// V1.48 P4-fix1 (W-2 qc3): `reconcile_chapters` MUST release the runtime lock
+/// when `reconcile_from_filesystem` returns an error after acquisition.
+/// Previously the `?` on the reconcile call could return early and leave the
+/// Work locked until daemon restart.
+#[tokio::test]
+async fn test_reconcile_chapters_releases_lock_on_error() {
+    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let workspace_tmp = tempfile::TempDir::new().unwrap();
+    let workspace_path = workspace_tmp.path().to_string_lossy().to_string();
+    let state = WorkspaceState::new_for_testing(
+        nexus_home.clone(),
+        db_path.clone(),
+        Some(workspace_path.clone()),
+    )
+    .await;
+    test_utils::seed_test_creator_and_world(state.pool()).await;
+
+    let work_id = create_test_work(&state).await;
+    let work_ref = "reconcile-lock-test";
+
+    // Set story_ref so the handler reaches the filesystem layer.
+    let mut patch = minimal_patch("Lock Release Test");
+    patch.story_ref = Some(Some(work_ref.to_string()));
+    let _ = patch_work(State(state.clone()), Path(work_id.clone()), Json(patch))
+        .await
+        .unwrap();
+
+    // Create the Stories/ directory with one chapter file whose frontmatter
+    // conflicts with the (non-existent) DB row so reconcile would mutate state.
+    let stories_dir = workspace_tmp
+        .path()
+        .join("Works")
+        .join(work_ref)
+        .join("Stories");
+    std::fs::create_dir_all(&stories_dir).unwrap();
+    std::fs::write(
+        stories_dir.join("ch01-intro.md"),
+        "---\nchapter: 1\nstatus: finalized\n---\nBody",
+    )
+    .unwrap();
+
+    // Make the Stories directory unreadable so `read_dir` fails after the
+    // runtime lock has been acquired. This is a Unix-only hermetic trigger;
+    // on other platforms we simply verify the happy path still releases.
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(&stories_dir, std::fs::Permissions::from_mode(0o000))
+            .expect("set Stories dir unreadable");
+    }
+
+    let result = reconcile_chapters(State(state.clone()), Path(work_id.clone())).await;
+
+    #[cfg(unix)]
+    {
+        // Restore permissions so the temp directory can be cleaned up.
+        std::fs::set_permissions(&stories_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("restore Stories dir permissions");
+
+        assert!(
+            result.is_err(),
+            "reconcile should fail when Stories/ is unreadable"
+        );
+    }
+
+    // The lock must be released regardless of whether the reconcile call
+    // succeeded or failed.
+    let work = works::get_work(state.pool(), "test_creator", &work_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        work.runtime_lock_holder.is_none(),
+        "reconcile_chapters must release runtime lock on error path"
+    );
 }
