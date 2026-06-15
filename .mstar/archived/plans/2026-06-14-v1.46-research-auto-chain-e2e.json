@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-06-15T04:00:00+08:00",
+  "archived_by": "P-last (hygiene-and-closeout)",
+  "plan": {
+    "id": "2026-06-14-v1.46-research-auto-chain-e2e",
+    "title": "P3 — Hermetic supervisor research E2E",
+    "file": ".mstar/plans/2026-06-14-v1.46-research-auto-chain-e2e.md",
+    "status": "Done",
+    "working_branch": "feature/v1.46-research-auto-chain-e2e",
+    "merge_target": "iteration/v1.46",
+    "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md",
+    "depends_on": "2026-06-14-v1.46-spec-cli-hygiene",
+    "supersedes": null,
+    "parallel_with": "2026-06-14-v1.46-pool-observability",
+    "qc_reports": ".mstar/plans/reports/2026-06-14-v1.46-research-auto-chain-e2e/qc1.md, qc2.md, qc3.md, qc-consolidated.md",
+    "fix_round_qc_revalidation": true
+  }
+}

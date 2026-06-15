@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.45 Shipped** (2026-06-14, P-last closeout) · **V1.44 Shipped** (2026-06-13, PR #57) · **V1.43 Shipped** (2026-06-12) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.46 Shipped** (2026-06-15, P-last closeout) · **V1.45 Shipped** (2026-06-14, P-last closeout) · **V1.44 Shipped** (2026-06-13, PR #57) · **V1.43 Shipped** (2026-06-12) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: Active (V1.45 Shipped 2026-06-14)
+**Status**: V1.46 Shipped (2026-06-15 P-last closeout); awaiting V1.47 compass authoring
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-14 (V1.45 P-last closeout: BL-12/DF-52/BL-13 archived; iteration Shipped; full V1.45 delivery snapshot in archive)
+**Last updated**: 2026-06-15 (V1.46 P-last closeout: 5 lifecycle residuals closed; 22 low-severity V1.46 residuals + 1 pre-existing V1.45 clippy PM-override carried forward to V1.47)
 
 ---
 
@@ -282,13 +282,13 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 ## 5) Related index
 
-**Latest shipped iteration**
-
-- **V1.45** (Shipped 2026-06-14): [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md) — CLI IA: `creator run <preset_id>` + `creator bootstrap` + atomic `creator works`; PR [#58](https://github.com/42ch-dev/nexus/pull/58) merged `9514bfdc`. 6 plans Done; 3 trackers closed (BL-12, BL-13, DF-52); `creator-run-preset-entry.md` Draft → **Shipped Master V1.45**; 6 V1.45 Draft overlays replaced with `Superseded by:` stubs; 10 low-severity open residuals carry-forward to V1.46+.
-
 **Latest active iteration**
 
-- _None — V1.45 just shipped; awaiting V1.46 compass._
+- **V1.46** (harness prepare complete 2026-06-14): [v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md](../iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md) — Novel author maturity + spec hygiene; integration branch `iteration/v1.46`; wave-0 `novel-author-experience.md` Draft overlay; 7 plans (P-1 Done, P0–P-last Todo); supersedes V1.45 P4 author-desk optional plan.
+
+**Latest shipped iteration**
+
+- **V1.45** (Shipped 2026-06-14): [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md) — CLI IA: `creator run <preset_id>` + `creator bootstrap` + atomic `creator works`; PR [#58](https://github.com/42ch-dev/nexus/pull/58) merged `9514bfdc`. 6 plans Done; P4 superseded by V1.46 P0; 3 trackers closed (BL-12, BL-13, DF-52); `creator-run-preset-entry.md` Draft → **Shipped Master V1.45**.
 
 **Recent shipped compasses** (detail in archive §2)
 

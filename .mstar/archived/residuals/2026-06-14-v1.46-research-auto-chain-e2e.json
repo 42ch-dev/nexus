@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-06-14-v1.46-research-auto-chain-e2e",
+  "archived_at": "2026-06-15T04:00:00+08:00",
+  "archived_by": "P-last (hygiene-and-closeout)",
+  "residual_findings": [
+    {
+      "id": "R-V139P5-S1",
+      "title": "supervisor+boot E2E",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "V1.46 P-last closeout (2026-06-15); 2026-06-14-v1.46-research-auto-chain-e2e",
+      "scope": "see 2026-06-14-v1.46-research-auto-chain-e2e qc-consolidated + QA report",
+      "decision": "closed",
+      "owner": "V1.46 P-last",
+      "closed_at": "2026-06-15T04:00:00+08:00",
+      "closure_note": "Closed in V1.46 P3 (a486e4c3 + 87f00619); 5 hermetic tests prove boot->running->terminal-done + boot-resume; QA PASS (86e54ccb)."
+    }
+  ]
+}

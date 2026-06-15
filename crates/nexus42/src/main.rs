@@ -8,6 +8,11 @@ use nexus42::cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() {
+    // V1.46 P2 (Grill #20, #21): intercept `creator run <preset_id> --help`
+    // before clap parses so manifest-declared `cli_args` surface in --help.
+    // Falls through silently for any non-matching invocation.
+    nexus42::commands::creator::run::maybe_print_preset_run_help_and_exit();
+
     let cli = Cli::parse();
 
     // Initialize tracing

@@ -52,7 +52,7 @@ Minimum chain to first Work (≤7 steps — see cli-spec §7.1):
 4. `creator workspace init`
 5. `daemon start`
 6. `acp agent use <agent>`
-7. `creator run start --idea "..."`
+7. `creator bootstrap --idea "..."`
 
 No `platform auth login` or `sync pull` required.
 

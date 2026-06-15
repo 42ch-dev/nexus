@@ -1,0 +1,31 @@
+{
+  "plan_id": "2026-06-14-v1.46-novel-runtime-ux-edges",
+  "archived_at": "2026-06-15T04:00:00+08:00",
+  "archived_by": "P-last (hygiene-and-closeout)",
+  "residual_findings": [
+    {
+      "id": "R-V139P5-N1",
+      "title": "chapter body_path hint",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "V1.46 P-last closeout (2026-06-15); 2026-06-14-v1.46-novel-runtime-ux-edges",
+      "scope": "see 2026-06-14-v1.46-novel-runtime-ux-edges qc-consolidated + QA report",
+      "decision": "closed",
+      "owner": "V1.46 P-last",
+      "closed_at": "2026-06-15T04:00:00+08:00",
+      "closure_note": "Closed in V1.46 P2 (9ce99c63 + c4f5d265); on-disk chapter path hints + reconcile remediation in works/mod.rs; W-001 fix added perf cap (50) + tracing; QA PASS (480ee445)."
+    },
+    {
+      "id": "R-V145B1-002",
+      "title": "cli_args in --help",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "V1.46 P-last closeout (2026-06-15); 2026-06-14-v1.46-novel-runtime-ux-edges",
+      "scope": "see 2026-06-14-v1.46-novel-runtime-ux-edges qc-consolidated + QA report",
+      "decision": "closed",
+      "owner": "V1.46 P-last",
+      "closed_at": "2026-06-15T04:00:00+08:00",
+      "closure_note": "Closed in V1.46 P2 (6b645ba0 + c4f5d265); manifest-driven clap cli_args help injection for 3 first-slice presets (novel-manuscript-audit-review, novel-manuscript-audit-extract, novel-review-master); QA PASS (480ee445)."
+    }
+  ]
+}

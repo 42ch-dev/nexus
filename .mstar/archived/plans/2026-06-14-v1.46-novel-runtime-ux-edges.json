@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "archived_at": "2026-06-15T04:00:00+08:00",
+  "archived_by": "P-last (hygiene-and-closeout)",
+  "plan": {
+    "id": "2026-06-14-v1.46-novel-runtime-ux-edges",
+    "title": "P2 — On-disk chapter hints + dynamic clap cli_args help",
+    "file": ".mstar/plans/2026-06-14-v1.46-novel-runtime-ux-edges.md",
+    "status": "Done",
+    "working_branch": "feature/v1.46-novel-runtime-ux-edges",
+    "merge_target": "iteration/v1.46",
+    "compass": ".mstar/iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md",
+    "depends_on": "2026-06-14-v1.46-spec-cli-hygiene",
+    "supersedes": null,
+    "parallel_with": null,
+    "qc_reports": ".mstar/plans/reports/2026-06-14-v1.46-novel-runtime-ux-edges/qc1.md, qc2.md, qc3.md, qc-consolidated.md",
+    "fix_round_qc_revalidation": true
+  }
+}

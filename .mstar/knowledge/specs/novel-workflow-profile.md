@@ -402,7 +402,7 @@ A future implementation plan for this roadmap must include at least these tests:
 | Preset | Role | When | Gates (see §5.3) |
 | --- | --- | --- | --- |
 | `novel-project-init` | Interactive grill-me; sets `work_ref`, `total_planned_chapters`, required `world_id` (bind to existing / create new), scaffolds `Works/<work_ref>/` dirs (§5.4), seeds `work_chapters` rows | Before first `novel-writing` if scaffold missing | §5.3.1 |
-| `creative-brief-intake` | Structured brief on Work | FL-E `intake` / `creator run start` | (generic; out of novel overlay) |
+| `creative-brief-intake` | Structured brief on Work | FL-E `intake` / `creator bootstrap` | (generic; out of novel overlay) |
 | `novel-writing` | Outline → draft → **finalize (gated by `llm_judge`)** → `finalized`; per-chapter transitions update both `work_chapters` row + chapter frontmatter | FL-E `produce` | §5.3.2 |
 | `reflection-loop` | Optional deeper quality pass; **not** in V1.36 default flow | FL-E `review` (optional V1.36) | §5.3.3 |
 
@@ -414,7 +414,7 @@ A future implementation plan for this roadmap must include at least these tests:
 
 - **GO** → both `work_chapters.status` AND chapter frontmatter `status` flip to `finalized`; `work_chapters.actual_word_count` is updated from frontmatter `word_count`; `current_chapter` advances.
 - **NOGO** → `WaitForInput`; user may `creator run continue <work_id> --note "..."` with additional context, then re-run. `work_chapters.status` and frontmatter `status` both stay `draft`.
-- **GO override on NOGO** → user explicit `creator run stage advance --force` with audit-logged reason; both rows flip to `finalized` regardless.
+- **GO override on NOGO** → user explicit `creator run novel-writing <work_id> --force-gates --reason "<text>"` with audit-logged reason; both rows flip to `finalized` regardless.
 
 The 五问 template file lives at `embedded-presets/novel-writing/prompts/finalize-exit.md` (P3 deliverable). It references [writing-craft-rules.md §2 五问质量检验](writing-craft-rules.md) when present; otherwise the template embeds the five questions inline.
 
@@ -523,7 +523,7 @@ Recommendation: keep the toggle in manifests for compatibility with older preset
 
 #### 5.3.5 Gate failure user experience
 
-When a `novel-writing` gate fails (e.g. user runs `creator run start --idea "..."` without first running `novel-project-init`), the CLI surfaces:
+When a `novel-writing` gate fails (e.g. user runs `creator bootstrap --idea "..."` without first running `novel-project-init`), the CLI surfaces:
 
 ```text
 error: preset_gates_failed
@@ -531,9 +531,9 @@ error: preset_gates_failed
   work_id: wrk_abc123
   failed_gates:
     - filesystem: Works/cozy-mystery/ must exist (actual: missing)
-        ↳ Run `creator run start --init-preset novel-project-init` to scaffold the Work.
+        ↳ Run `creator bootstrap --init-preset novel-project-init` to scaffold the Work.
     - work_field: intake_status must equal "complete" (actual: pending)
-        ↳ Complete intake via `creator run stage advance --stage intake`.
+        ↳ Complete intake via `creator bootstrap --preset creative-brief-intake`.
   override: pass --force-gates with --reason "<text>" to bypass (audit-logged)
 ```
 
@@ -585,7 +585,7 @@ For `chapter IN 1..total_planned_chapters`, insert one `work_chapters` row per c
 
 | Column | Value |
 | --- | --- |
-| `work_id` | from grill-me / `creator run start` |
+| `work_id` | from grill-me / `creator bootstrap` |
 | `chapter` | `i` (1..N) |
 | `volume` | `NULL` (V1.36 single-volume) |
 | `slug` | user-provided per chapter from grill-me (or auto-derived from `chNN` for V1.36 MVP) |
@@ -676,7 +676,7 @@ The reference-system executor concepts map to Nexus presets and surfaces as foll
 | Reference executor concept | Nexus preset / stage | CLI status surface | V1.37 P3 disposition |
 | --- | --- | --- | --- |
 | `write` | Existing `novel-writing` (`produce` stage) | `creator run status <work_id>` chapter progress and active schedule summary | Existing path remains; findings may later enrich prompt context, but no behavior change in P3 |
-| `brainstorm` | `novel-brainstorm` preset (Shipped V1.39) | `creator run brainstorm <work_id>` or `creator run stage advance --stage research --preset novel-brainstorm`; status shows open findings driving brainstorm prompts | Shipped V1.39 |
+| `brainstorm` | `novel-brainstorm` preset (Shipped V1.39) | `creator run novel-brainstorm <work_id>`; status shows open findings driving brainstorm prompts | Shipped V1.39 |
 | `none` | No preset; user or reviewer acknowledges, resolves, or marks `wont_fix` | `creator run status <work_id>` lists the finding with `next_action: none` / manual decision | Shipped V1.39 |
 | `master` | `novel-review-master` preset (Shipped V1.39); CLI `creator run review-master <work_id>` (Shipped V1.44) | `creator run review-master <work_id>`; status shows master-decision banner and open findings requiring approval | Shipped V1.39 (preset) / V1.44 (CLI) |
 
@@ -811,7 +811,7 @@ The V1.36 single-chapter case (`total_planned_chapters == 1`) is a strict subset
 1. §6.1–§6.2 completion criteria unchanged.
 2. Extend `auto_chain::mark_work_completed`: write `Works/<work_ref>/.completion-lock.json`; stop auto-chain on **that** Work only (lifecycle spec §3).
 3. Clear pool `active` when bound pool row completes; no automatic next Work.
-4. Next Work via `creator works use`, `creator works pool promote`, or `creator run start --from-work` — not implicit scaffold.
+4. Next Work via `creator works use`, `creator works pool promote`, or `creator bootstrap --from-work` — not implicit scaffold.
 5. **Reopen** same Work: `completion-lock release` then `creator run resume --reopen --reason` (grill-me B); distinct from `--from-work` new Work.
 6. Pool integration: [novel-work-pool.md](novel-work-pool.md). **OUT:** `creator work switch`.
 
@@ -836,9 +836,9 @@ Sync **must not** upload full正文 by default (cli-spec §5.3 unchanged).
 
 | Command | Novel profile behavior |
 | --- | --- |
-| `creator run start --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path; V1.40 creation/init must obtain a `world_id` via create-new or bind-existing before scaffold completes |
-| `creator run start --idea "..." --world-id <world_id>` | Bind the new Work to an existing World (per §3.5); World KB is injected as context in `novel-writing` prompts |
-| `creator run start --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + mandatory World binding question + `work_chapters` seed rows) before intake |
+| `creator bootstrap --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path; V1.40 creation/init must obtain a `world_id` via create-new or bind-existing before scaffold completes |
+| `creator bootstrap --idea "..." --world-id <world_id>` | Bind the new Work to an existing World (per §3.5); World KB is injected as context in `novel-writing` prompts |
+| `creator bootstrap --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + mandatory World binding question + `work_chapters` seed rows) before intake |
 | `creator works status [<work_id>]` | **V1.41** — migrated from `creator run status`; reads `work_chapters`; shows `work_ref`, chapter list, completion; **V1.39** fields + completion/runtime lock per [cli-spec.md](cli-spec.md) §6.2H |
 | `creator works list` | **V1.41** — migrated from `creator run list` |
 | `creator run resume <work_id>` | **V1.39** — resume checkpointed auto-chain after daemon restart |

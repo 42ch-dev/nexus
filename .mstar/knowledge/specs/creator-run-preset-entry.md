@@ -60,7 +60,7 @@ nexus42 creator run <preset_id> [<work_id>] [--json] [--force-gates --reason "<t
 | `--json` | No | Machine-readable schedule response |
 | `--force-gates --reason` | No | Audited gate bypass ([orchestration-engine.md](orchestration-engine.md) §7.9). `--reason` required when `--force-gates` set |
 
-**Not supported on `creator run`:** `--work-id` flag (use positional); `stage advance --force` (deleted).
+**Not supported on `creator run`:** `--work-id` flag (use positional); `stage advance --force` (Removed in V1.45; see changelog).
 
 ### 3.2 Preset discovery
 
@@ -107,7 +107,7 @@ The generic runner maps parsed flags to `AddScheduleRequest.input`. P0 ships `cl
 1. Resolve `<preset_id>` (fail if unknown).
 2. Resolve `<work_id>`: positional arg or pool `active`; if none, fail with remediation → `creator bootstrap` or `creator works use`.
 3. Build schedule request (preset input from `cli_args`, Work-derived context from daemon).
-4. For FL-E default presets (`research`, `novel-writing`, `reflection-loop`, `kb-extract`), apply **stage advance** semantics before enqueue: validate stage gates, PATCH Work stage fields, then create schedule (replaces deleted `creator run stage advance`).
+4. For FL-E default presets (`research`, `novel-writing`, `reflection-loop`, `kb-extract`), apply **stage advance** semantics before enqueue: validate stage gates, PATCH Work stage fields, then create schedule (Removed in V1.45; the explicit `creator run stage advance` CLI was replaced by this generic runner — see changelog).
 5. `POST /v1/local/orchestration/schedules` — orchestration validates `run_intents` and `gates`.
 6. Print schedule id (human or JSON).
 

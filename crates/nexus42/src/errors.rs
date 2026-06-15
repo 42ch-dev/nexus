@@ -261,9 +261,9 @@ impl CliError {
     pub fn daemon_not_reachable_quickstart() -> Self {
         Self::DaemonNotReachable {
             message: "The nexus42 daemon is not reachable.".to_string(),
-            // V1.43 remediation: daemon down → quickstart §1 step 5
+            // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
             suggestion: "Start the daemon with `nexus42 daemon start`; \
-                see docs/novel-writing-quickstart.md §1"
+                see .mstar/knowledge/specs/creator-run-preset-entry.md"
                 .to_string(),
         }
     }
@@ -602,8 +602,8 @@ mod tests {
             "should suggest starting daemon: {msg}"
         );
         assert!(
-            msg.contains("novel-writing-quickstart.md §1"),
-            "should cite quickstart §1: {msg}"
+            msg.contains("creator-run-preset-entry.md"),
+            "should cite the preset-entry spec: {msg}"
         );
     }
 }
