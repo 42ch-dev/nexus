@@ -413,8 +413,21 @@ impl ScheduleSupervisor {
                 })
             {
                 use crate::auto_chain;
-                if let Err(e) =
-                    auto_chain::persist_review_findings_for_schedule(&self.pool, schedule_id).await
+                // V1.48 P0 T2: thread the supervisor's optional
+                // `workspace_dir` so the producer can read
+                // `Works/<work_ref>/Logs/review/review-report.md` and parse
+                // richer findings (`.mstar/knowledge/specs/novel-findings-maturity.md`
+                // §1). When the workspace is None (e.g. hermetic DB-only
+                // tests) or the report is missing, the producer falls back
+                // to the V1.47 placeholder synthesis with `tracing::warn!`.
+                let ws_ref = self.workspace_dir.as_ref();
+                let ws_path = ws_ref.as_deref();
+                if let Err(e) = auto_chain::persist_review_findings_for_schedule(
+                    &self.pool,
+                    schedule_id,
+                    ws_path,
+                )
+                .await
                 {
                     tracing::warn!(
                         schedule_id,

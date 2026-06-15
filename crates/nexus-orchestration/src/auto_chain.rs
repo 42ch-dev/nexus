@@ -106,17 +106,22 @@ pub async fn find_work_for_driver(
 /// 1. Loads the schedule row to read `preset_id`, `work_id`, `creator_id`.
 /// 2. Returns `Ok(0)` early when the preset is not `novel-chapter-review`
 ///    (no-op for non-review schedules).
-/// 3. Loads the Work record for `chapter` context (`work.current_chapter`).
-/// 4. Synthesizes ≥1 `ReviewVerdictFinding` and persists it via
-///    [`findings::create_finding_from_review`]. The synthesized finding uses
+/// 3. Loads the Work record for `chapter` context (`work.current_chapter`)
+///    and `work_ref` (for the report path).
+/// 4. **V1.48 P0 T2**: when `workspace_dir` is `Some`, reads
+///    `Works/<work_ref>/Logs/review/review-report.md` and parses it via
+///    [`crate::review_report::parse_review_report`]. When ≥1 finding parses,
+///    each row is persisted via [`findings::create_finding_from_review`] with
+///    the parsed `kind` / `severity` / `body` / optional `rule_suggestion`
+///    (per `.mstar/knowledge/specs/novel-findings-maturity.md` §1.2).
+/// 5. **Fallback** (V1.47 placeholder shape): when the report is missing,
+///    unparsable, or yields zero findings — OR when `workspace_dir` is
+///    `None` (e.g. hermetic DB-only tests) — synthesizes ≥1 finding with
 ///    safe defaults (`kind=craft`, `severity=info`, `target_executor=none`)
-///    because the LLM judge output is not directly observable at the
-///    supervisor layer in P0 (the agent writes a richer report under
-///    `Works/<work_ref>/Logs/review/` as a side-effect; a follow-up slice
-///    can parse that artifact for richer findings).
+///    and emits `tracing::warn!` so operators can see the degrade (spec §1.3).
 ///
 /// Spec §8.4 invariant: finding creation MUST NOT fork or cancel the active
-/// FL-E driver schedule. This function performs only a DB INSERT and does
+/// FL-E driver schedule. This function performs only DB INSERT(s) and does
 /// not touch `driver_schedule_id`.
 ///
 /// # Errors
@@ -127,6 +132,7 @@ pub async fn find_work_for_driver(
 pub async fn persist_review_findings_for_schedule(
     pool: &SqlitePool,
     schedule_id: &str,
+    workspace_dir: Option<&std::path::Path>,
 ) -> Result<usize, AutoChainError> {
     // R-V147P0-06 (V1.48 P0 T3): hoisted to `preset_ids` SSOT; referenced
     // from the supervisor terminal guard and the STAGE_PRESET_ALLOWLIST too.
@@ -200,10 +206,92 @@ pub async fn persist_review_findings_for_schedule(
         None
     };
 
+    // V1.48 P0 T2: parse `Works/<work_ref>/Logs/review/review-report.md`
+    // when a workspace_dir is available. Spec
+    // (`.mstar/knowledge/specs/novel-findings-maturity.md` §1.2) — parsed
+    // findings persist with their `kind` / `severity` / `body` / optional
+    // `rule_suggestion`. Any failure (missing file, read error, parse error,
+    // zero parsed findings) falls through to the V1.47 placeholder synthesis
+    // below with a `tracing::warn!` per spec §1.3.
+    let work_ref_or_id = work.work_ref.as_deref().unwrap_or(&work_id).to_string();
+
+    if let Some(ws_dir) = workspace_dir {
+        match load_and_parse_review_report(ws_dir, &work_ref_or_id) {
+            Ok(parsed) if !parsed.findings.is_empty() => {
+                let count = persist_parsed_findings(
+                    pool,
+                    &parsed,
+                    &work_id,
+                    &creator_id,
+                    chapter,
+                    schedule_id,
+                )
+                .await?;
+                if count > 0 {
+                    tracing::info!(
+                        schedule_id,
+                        work_id = %work_id,
+                        parsed_count = count,
+                        "review-findings: persisted parsed findings from review-report.md"
+                    );
+                    return Ok(count);
+                }
+                // Parsed rows existed but none persisted (e.g. idempotent
+                // conflict). Fall through to placeholder synthesis below so
+                // the spec §8.2 "≥1 finding per review pass" guarantee holds.
+                tracing::debug!(
+                    schedule_id,
+                    work_id = %work_id,
+                    "review-findings: parsed {} rows but 0 persisted; falling back to placeholder",
+                    parsed.findings.len()
+                );
+            }
+            Ok(_) => {
+                // Report parsed but yielded zero findings — degrade with warn.
+                tracing::warn!(
+                    schedule_id,
+                    work_id = %work_id,
+                    work_ref = %work_ref_or_id,
+                    "review-findings: review-report.md parsed but contained no issues; \
+                     falling back to V1.47 placeholder synthesis"
+                );
+            }
+            Err(ReportLoadError::Missing) => {
+                tracing::warn!(
+                    schedule_id,
+                    work_id = %work_id,
+                    work_ref = %work_ref_or_id,
+                    "review-findings: review-report.md not found; \
+                     falling back to V1.47 placeholder synthesis"
+                );
+            }
+            Err(ReportLoadError::Read(ref path, ref e)) => {
+                tracing::warn!(
+                    schedule_id,
+                    work_id = %work_id,
+                    path = %path.display(),
+                    error = %e,
+                    "review-findings: failed to read review-report.md; \
+                     falling back to V1.47 placeholder synthesis"
+                );
+            }
+            Err(ReportLoadError::Parse(ref reason)) => {
+                tracing::warn!(
+                    schedule_id,
+                    work_id = %work_id,
+                    work_ref = %work_ref_or_id,
+                    parse_error = %reason,
+                    "review-findings: review-report.md failed to parse; \
+                     falling back to V1.47 placeholder synthesis"
+                );
+            }
+        }
+    }
+
+    // ── V1.47 placeholder synthesis (fallback per spec §1.3) ───────────────
     // Synthesize the minimum viable review finding per spec §8.2.
     let chapter_ctx = chapter.map_or_else(|| "work-level".to_string(), |c| format!("chapter {c}"));
     let title = format!("Review pass completed ({chapter_ctx})");
-    let work_ref_or_id = work.work_ref.as_deref().unwrap_or(&work_id);
     let description = format!(
         "Automated review pass for Work '{}' ({}) — {chapter_ctx}.\n\
          The full review report is written under Works/{}/Logs/review/.\n\
@@ -256,6 +344,103 @@ pub async fn persist_review_findings_for_schedule(
             Err(AutoChainError::from(e))
         }
     }
+}
+
+/// Failures that can occur while loading + parsing `review-report.md`.
+///
+/// Used by [`persist_review_findings_for_schedule`] to emit the right
+/// `tracing::warn!` shape per `.mstar/knowledge/specs/novel-findings-maturity.md`
+/// §1.3 (each branch is a documented fallback trigger).
+#[derive(Debug)]
+enum ReportLoadError {
+    /// File does not exist at the resolved path.
+    Missing,
+    /// File exists but could not be read.
+    Read(std::path::PathBuf, std::io::Error),
+    /// File was read but the parser rejected it.
+    Parse(String),
+}
+
+/// Resolve `<workspace_dir>/Works/<work_ref>/Logs/review/review-report.md`,
+/// read it, and parse it via [`crate::review_report::parse_review_report`].
+///
+/// Hermetic-friendly: takes an explicit `workspace_dir` so callers (and tests)
+/// control the FS root. The path layout is provided by `nexus-home-layout`
+/// (`work_logs_subdir`).
+fn load_and_parse_review_report(
+    workspace_dir: &std::path::Path,
+    work_ref: &str,
+) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
+    let review_dir =
+        nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
+    let report_path = review_dir.join("review-report.md");
+    if !report_path.exists() {
+        return Err(ReportLoadError::Missing);
+    }
+    let content = match std::fs::read_to_string(&report_path) {
+        Ok(c) => c,
+        Err(e) => return Err(ReportLoadError::Read(report_path, e)),
+    };
+    crate::review_report::parse_review_report(&content).map_err(|e| ReportLoadError::Parse(e.to_string()))
+}
+
+/// Persist each parsed finding as its own row via the from-review DAO.
+///
+/// Each row inherits the originating `schedule_id` so the partial unique
+/// index `findings_unique_review_per_chapter` keeps the insert idempotent on
+/// a per-schedule basis (multiple findings from one report are still allowed
+/// — the index is on `(work_id, chapter, source_schedule_id)` and the DAO
+/// returns the first conflict id rather than failing the batch).
+///
+/// Returns the count of rows actually inserted (best-effort: rows that hit
+/// the idempotent conflict are not counted).
+async fn persist_parsed_findings(
+    pool: &SqlitePool,
+    parsed: &crate::review_report::ParsedReviewReport,
+    work_id: &str,
+    creator_id: &str,
+    chapter: Option<i64>,
+    schedule_id: &str,
+) -> Result<usize, AutoChainError> {
+    let mut inserted = 0usize;
+    for finding in &parsed.findings {
+        // Truncate body to a safe upper bound to avoid DB bloat. The from-review
+        // DAO already enforces rule_suggestion size; the body uses the same
+        // finding.description column.
+        const BODY_MAX_CHARS: usize = 2_000;
+        let body: String = if finding.body.len() > BODY_MAX_CHARS {
+            // Collect char units to avoid splitting a UTF-8 boundary.
+            finding.body.chars().take(BODY_MAX_CHARS).collect()
+        } else {
+            finding.body.clone()
+        };
+
+        let title_preview: String = body.chars().take(80).collect();
+        let verdict = ReviewVerdictFinding {
+            work_id: work_id.to_string(),
+            chapter,
+            severity: finding.severity.clone(),
+            title: format!("Review finding: {title_preview}"),
+            description: body,
+            target_executor: finding.target_executor.clone(),
+            creator_id: creator_id.to_string(),
+            kind: finding.kind.clone(),
+            rule_suggestion: finding.rule_suggestion.clone(),
+            source_schedule_id: Some(schedule_id.to_string()),
+        };
+        match findings::create_finding_from_review(pool, &verdict).await {
+            Ok(_) => inserted += 1,
+            Err(e) => {
+                tracing::warn!(
+                    schedule_id,
+                    work_id,
+                    error = %e,
+                    "review-findings: failed to persist one parsed finding (continuing batch)"
+                );
+            }
+        }
+    }
+    Ok(inserted)
 }
 
 /// Determine the next chain action after a schedule completes.
