@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-16-v1.48-findings-producer"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-16"
+revalidation_count: 1
 ---
 
 # Code Review Report
@@ -98,3 +99,64 @@ None.
 **Verdict**: Request Changes
 
 The implementation correctly delivers the P0 functional contract (parsed findings round-trip, fallback works, preset-id SSOT is centralized, and hermetic tests pass). However, the unresolved warnings above are concrete performance/reliability gaps that should be fixed before the integration branch is approved: unbounded file I/O on the supervisor hot path, N sequential DB round-trips per review, and fallback tracing spans missing the chapter field required by the spec.
+
+## Revalidation
+
+**Re-review timestamp**: 2026-06-16T14:22:00Z  
+**Re-review scope**: P0-fix1 commits `c6787df3..82b6f135` (merge `29d76136`) on `iteration/v1.48`; only the W-1, W-2, W-3 fixes raised in the initial qc3 review. Original P0 work (approved by qc1/qc2) and P4-fix1 work are out of scope.  
+**Re-review verdict**: Approve
+
+### W-1: Parser hot path reads unbounded report file into memory
+
+- **Status**: Fixed
+- **Commit**: `c6787df3`
+- **Change made**: Added `MAX_REVIEW_REPORT_BYTES = 256 * 1024` (256 KiB) cap in `crates/nexus-orchestration/src/auto_chain.rs`; added `ReportLoadError::TooLarge { size_bytes, cap_bytes }`; rewrote `load_and_parse_review_report` to use `std::fs::metadata()` for both missing-detection and the size check so the cap fires **before** `std::fs::read_to_string`; added a new fallback `tracing::warn!` arm that includes `chapter = ?chapter`, `work_id`, `work_ref`, `schedule_id`, `size_bytes`, `cap_bytes`.
+- **Test**: `large_report_falls_back_to_placeholder` in `crates/nexus-orchestration/tests/review_report.rs`.
+- **Evidence**: `cargo test -p nexus-orchestration --test review_report large_report` — passed (2/2 runs, no flakes).
+- **Verdict**: Fixed. The cap is sane, the size check precedes the buffered read, and the degrade span carries all required fields. This change also incidentally closes original S-2 (drops the redundant `exists()` pre-check).
+
+### W-2: Parsed findings are persisted in N sequential INSERT round-trips
+
+- **Status**: Fixed
+- **Commit**: `374edb2a`
+- **Change made**: Added `create_finding_from_review_tx(tx: &mut Transaction<'_, Sqlite>, ...)` to `crates/nexus-local-db/src/findings.rs` following the crate's `_tx`-suffix convention; refactored `create_finding_from_review` to open a single-statement transaction, call `_tx`, and commit; updated `persist_parsed_findings` in `auto_chain.rs` to open one transaction, call `create_finding_from_review_tx` per parsed finding, and commit once; added a `tracing::debug!` marker at the transaction boundary.
+- **Test**: `parsed_findings_transaction_commits_and_is_idempotent_on_retry` in `crates/nexus-orchestration/tests/review_report.rs`.
+- **Evidence**:
+  - `cargo test -p nexus-orchestration --test review_report parsed_findings` — passed (2/2 runs, no flakes).
+  - `cargo test -p nexus-local-db --lib create_finding_from_review_tx` — **0 tests matched**; no unit test by that exact name exists in `nexus-local-db`. The `_tx` function is exercised by the orchestration integration test above, so coverage is present.
+- **Verdict**: Fixed. N rows now share one `BEGIN`/`COMMIT` envelope; idempotency (`ON CONFLICT DO NOTHING`) is preserved.
+
+### W-3: Fallback `tracing::warn!` spans omit required `chapter` field
+
+- **Status**: Fixed
+- **Commit**: `bd4539ad`
+- **Change made**: Added `chapter = ?chapter` to all four pre-existing fallback `tracing::warn!` arms in `try_persist_parsed_findings` (empty-parsed, Missing, Read, Parse); the W-1 TooLarge arm already included `chapter`.
+- **Test**: `fallback_warn_includes_chapter_field` in `crates/nexus-orchestration/tests/review_report.rs`.
+- **Evidence**: `cargo test -p nexus-orchestration --test review_report fallback_warn` — passed (2/2 runs, no flakes).
+- **Verdict**: Fixed. Every fallback warn span now carries the `chapter` field per `novel-findings-maturity.md` §1.3.
+
+### Validation Runbook (re-review)
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Clippy (CI gate) | `cargo clippy --all -- -D warnings` | passed |
+| Nightly fmt | `cargo +nightly fmt --all --check` | passed |
+| All `review_report` tests | `cargo test -p nexus-orchestration -- review_report` | 22 passed (12 unit + 10 integration), 2 runs, no flakes |
+| `review_report` integration | `cargo test -p nexus-orchestration --test review_report` | 10 passed, 2 runs, no flakes |
+| V1.47 baseline regression | `cargo test -p nexus-orchestration --test review_findings` | 5 passed, 2 runs, no flakes |
+| Daemon findings API | `cargo test -p nexus-daemon-runtime --test findings_api` | 7 passed, 2 runs, no flakes |
+| Daemon master decision timeout | `cargo test -p nexus-daemon-runtime --test master_decision_timeout` | 7 passed, 2 runs, no flakes |
+
+**Note on daemon-runtime filter**: `cargo test -p nexus-daemon-runtime -- findings` matches no test names in this workspace; the equivalent coverage is obtained by running `--test findings_api` and `--test master_decision_timeout` explicitly.
+
+### Updated Summary
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 1 |
+
+**Final Verdict**: Approve
+
+All three qc3-blocking Warnings are resolved. The P0-fix1 commits are safe to land on `iteration/v1.48`. The remaining open item is original Suggestion S-1 (RVM counter wrap-around), which is non-blocking and was already acknowledged as implausible-in-practice in the initial review.
