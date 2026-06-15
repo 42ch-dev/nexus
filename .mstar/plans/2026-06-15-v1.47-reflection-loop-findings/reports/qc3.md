@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-15-v1.47-reflection-loop-findings"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-15"
 ---
 
@@ -21,11 +21,14 @@ generated_at: "2026-06-15"
 - Review range / Diff basis: `merge-base: 594b00b51c43681ec779f9ad6fef09333ffc2ed8 + tip: HEAD` (i.e. `git diff 594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD`)
 - Working branch (verified): `feature/v1.47-reflection-loop-findings`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.47-p0-reflection`
-- Files reviewed: 34 changed files, focused on `crates/nexus-orchestration/src/auto_chain.rs`, `crates/nexus-orchestration/src/schedule/supervisor.rs`, `crates/nexus-local-db/src/findings.rs`, `crates/nexus-orchestration/tests/review_findings.rs`, `crates/nexus-orchestration/embedded-presets/novel-chapter-review/preset.yaml`
+- Files reviewed: 47 changed files, focused on `crates/nexus-orchestration/src/schedule/supervisor.rs`, `crates/nexus-orchestration/src/auto_chain.rs`, `crates/nexus-local-db/src/findings.rs`, `crates/nexus-local-db/migrations/202606150002_findings_source_schedule_unique.sql`, `crates/nexus-orchestration/tests/review_findings.rs`, `.mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md`
 - Commit range: `594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD`
 - Tools run:
   - `git rev-parse --show-toplevel && git branch --show-current`
   - `git diff --stat 594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD`
+  - `git show 2c125252 -- crates/nexus-orchestration/src/schedule/supervisor.rs`
+  - `git show 6fcfa322 -- crates/nexus-orchestration/src/auto_chain.rs crates/nexus-local-db/src/findings.rs crates/nexus-orchestration/tests/review_findings.rs crates/nexus-local-db/migrations/202606150002_findings_source_schedule_unique.sql crates/nexus-daemon-runtime/src/api/handlers/findings.rs`
+  - `git show 7c4dae34 -- .mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md`
   - `cargo test -p nexus-orchestration --test review_findings`
   - `cargo test -p nexus-daemon-runtime --test findings_api`
   - `cargo clippy -p nexus-orchestration -p nexus-local-db -p nexus-daemon-runtime -p nexus42 -- -D warnings`
@@ -37,62 +40,61 @@ generated_at: "2026-06-15"
 - None.
 
 ### 🟡 Warning
-
-#### W-1: Unconditional schedule-row lookup in the supervisor terminal hot path adds overhead for every terminal schedule
-The supervisor calls `auto_chain::persist_review_findings_for_schedule` unconditionally inside `on_schedule_terminal(Completed)` (lines 396-405 of `crates/nexus-orchestration/src/schedule/supervisor.rs`). The function then executes a `SELECT preset_id, work_id, creator_id FROM creator_schedules WHERE schedule_id = ?` query to decide whether the schedule is a review schedule. For the common case where the completed schedule is `novel-writing` (produce), `kb-extract` (persist), `research`, etc., this is a wasted indexed read on the critical terminal-transition path. The overhead is small per call but multiplies across every auto-chain stage terminal for every Work.
-
-- **Evidence**: `crates/nexus-orchestration/src/schedule/supervisor.rs:396-405`; `crates/nexus-orchestration/src/auto_chain.rs:120-162`.
-- **Proposed fix**: Make the hook conditional on the schedule's `preset_id`. The supervisor already fetches `creator_id` from the schedule row; it could also fetch `preset_id` and only call the review-finding hook when `preset_id == "novel-chapter-review"`. Alternatively, pass the already-known preset ID into the hook and return immediately without a DB round-trip.
-- **Severity (JSON)**: `medium`
-
-#### W-2: Review → finding path is not idempotent and has no retention cap, risking unbounded duplicate findings
-`findings::create_finding_from_review` (and the supervisor hook that calls it) mints a fresh `finding_id` (`fnd_{uuid}`) and inserts a row on every invocation. There is no unique constraint or deduplication key on `(work_id, chapter, review_schedule_id)` or any equivalent pass identifier. Re-running `creator run novel-chapter-review <work_id>` on the same chapter, or re-processing a terminal event, creates additional finding rows for the same conceptual review pass. The codebase also has no retention/cleanup policy for findings, so this growth is unbounded over the lifetime of a Work.
-
-- **Evidence**: `crates/nexus-local-db/src/findings.rs:611-641`; `crates/nexus-orchestration/src/auto_chain.rs:223-244`; migration `202606150001_findings_kind_rule_suggestion.sql` adds no unique index.
-- **Proposed fix**: Add a unique key on `(work_id, chapter, source_schedule_id)` (or store the originating `schedule_id` on the finding row and enforce uniqueness), or document the intentional "one row per review run" semantics and add a retention/cleanup policy. At minimum, the hook should record the originating `schedule_id` so duplicates are observable and future slices can deduplicate.
-- **Severity (JSON)**: `high`
+- None. (Prior W-1 and W-2 are resolved; see Revalidation.)
 
 ### 🟢 Suggestion
+- None. (Prior S-1 is resolved; S-2 remains deferred and acceptable; see Revalidation.)
 
-#### S-1: Plan verification command in §6 matches zero tests
-The plan's Verification block lists:
+## Revalidation
 
-```bash
-cargo test -p nexus-orchestration -p nexus42 -- reflection 2>&1 | tail -30
-```
+### W-1: Unconditional schedule-row lookup overhead — resolved
+- **Fix commit**: `2c125252`
+- **What changed**: `ScheduleSupervisor::on_schedule_terminal` now fetches `creator_id` **and** `preset_id` in a single query (`SELECT creator_id as "creator_id!", preset_id as "preset_id!" FROM creator_schedules WHERE schedule_id = ?`) and guards the `auto_chain::persist_review_findings_for_schedule` hook with `preset_id == "novel-chapter-review"`.
+- **Evidence**: `git show 2c125252 -- crates/nexus-orchestration/src/schedule/supervisor.rs` lines 335-425. For non-review terminal schedules, the review-finding hook is skipped entirely and no extra schedule-row lookup occurs inside `persist_review_findings_for_schedule`.
+- **Disposition**: Resolved. The supervisor no longer pays the review-hook lookup cost for `novel-writing`, `kb-extract`, `research`, or other non-review presets.
 
-No test name in the codebase contains `reflection` after the preset rename, so this command filters out all tests and exits with `0 passed; 0 failed`. Future QC/QA runs could falsely believe the reflection/review tests passed when they were not executed at all.
+### W-2: Review → finding not idempotent + no retention — resolved (idempotency), retention deferred
+- **Fix commit**: `6fcfa322`
+- **What changed**:
+  - Migration `202606150002_findings_source_schedule_unique.sql` adds `source_schedule_id TEXT` and a partial unique index `findings_unique_review_per_chapter ON findings (work_id, chapter, source_schedule_id) WHERE source_schedule_id IS NOT NULL`.
+  - `ReviewVerdictFinding` gained `source_schedule_id: Option<String>`.
+  - `findings::create_finding_from_review` uses an idempotent `INSERT ... ON CONFLICT (work_id, chapter, source_schedule_id) WHERE source_schedule_id IS NOT NULL DO NOTHING` when `source_schedule_id` is `Some`; on conflict it fetches and returns the existing `finding_id`.
+  - `auto_chain::persist_review_findings_for_schedule` passes `source_schedule_id: Some(schedule_id.to_string())`.
+  - `daemon-runtime` manual API path passes `source_schedule_id: None` (no idempotency guard for manual CRUD).
+- **Evidence**:
+  - Migration file and `findings.rs` dynamic INSERT/fetch logic in `git show 6fcfa322`.
+  - Test `ac5_idempotent_review_repeat_no_duplicate_finding` in `crates/nexus-orchestration/tests/review_findings.rs` passed (`cargo test -p nexus-orchestration --test review_findings`).
+  - `cargo test -p nexus-daemon-runtime --test findings_api` passed, confirming the manual API path still works with `source_schedule_id: None`.
+- **Cross-DB note**: The partial unique index syntax is valid for SQLite and PostgreSQL. The runtime fetch-by-triple query uses `chapter IS ?`, which is correct for SQLite's nullable `chapter` column. The crate is currently SQLite-only (`SqlitePool`), so this is acceptable for the target DB.
+- **Retention**: The unbounded-growth aspect of W-2 is intentionally deferred to V1.48+ and is now tracked in the plan §7 Follow-ups as "Findings retention / cleanup policy (unbounded growth risk; qc3 W-2 residue)".
+- **Disposition**: Resolved for the idempotency/duplicate-finding risk. Retention policy is an accepted follow-up.
 
-- **Evidence**: Plan file §6; `cargo test -p nexus-orchestration -p nexus42 -- reflection` output (0 tests run).
-- **Proposed fix**: Update the verification command to `cargo test -p nexus-orchestration --test review_findings` or `cargo test -p nexus-orchestration -- review`.
-- **Severity (JSON)**: `low`
+### S-1: Plan §6 verification command broken — resolved
+- **Fix commit**: `7c4dae34`
+- **What changed**: The broken command `cargo test -p nexus-orchestration -p nexus42 -- reflection` was replaced with `cargo test -p nexus-orchestration --test review_findings`, with an inline note explaining the preset rename.
+- **Evidence**: `git show 7c4dae34 -- .mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md`. The updated command was executed and ran 5 tests (0 filtered out).
+- **Disposition**: Resolved.
 
-#### S-2: Hook read/write operations are not transactional
-`persist_review_findings_for_schedule` reads the schedule row, reads the Work row, and then inserts a finding row using separate pool acquisitions. The current implementation only performs a single `INSERT`, so the practical risk is low, but any future extension that updates multiple tables (e.g. parsing the review report and inserting many findings, or updating Work counters) should be wrapped in a single transaction to keep the terminal hook atomic and failure-safe.
-
-- **Evidence**: `crates/nexus-orchestration/src/auto_chain.rs:120-245`.
-- **Proposed fix**: Wrap the Work-read + finding-insert in a `sqlx::Transaction` passed down to `create_finding_from_review` when the hook grows beyond a single row write.
-- **Severity (JSON)**: `low`
+### S-2: Hook read/write not transactional — deferred (acceptable today)
+- **Status**: No code change for this item.
+- **Rationale**: The hook still performs a single `INSERT` (idempotent) per terminal event and does not update multiple tables. The plan §7 Follow-ups captures the deferred richer-synthesis work, and the single-write nature keeps the practical failure mode low. Per assignment, this is acceptable for V1.47 P0.
+- **Disposition**: Deferred / acceptable.
 
 ## Source Trace
 
-- **F-001** (W-1): `git diff 594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD -- crates/nexus-orchestration/src/schedule/supervisor.rs crates/nexus-orchestration/src/auto_chain.rs` → manual reasoning + runtime command `cargo test -p nexus-orchestration --test review_findings`.
-- **F-002** (W-2): `git diff ... crates/nexus-local-db/src/findings.rs crates/nexus-local-db/migrations/202606150001_findings_kind_rule_suggestion.sql` → manual reasoning.
-- **F-003** (S-1): Plan file `.mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md` §6 + test run output.
-- **F-004** (S-2): `git diff ... crates/nexus-orchestration/src/auto_chain.rs` → manual reasoning.
+- **R-001** (W-1): `git show 2c125252 -- crates/nexus-orchestration/src/schedule/supervisor.rs` → manual reasoning + test `cargo test -p nexus-orchestration --test review_findings`.
+- **R-002** (W-2): `git show 6fcfa322 -- crates/nexus-local-db/src/findings.rs crates/nexus-local-db/migrations/202606150002_findings_source_schedule_unique.sql crates/nexus-orchestration/tests/review_findings.rs` → manual reasoning + passing `ac5_idempotent_review_repeat_no_duplicate_finding`.
+- **R-003** (S-1): `git show 7c4dae34 -- .mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md` + test run output.
+- **R-004** (S-2): `git diff 594b00b51c43681ec779f9ad6fef09333ffc2ed8..HEAD -- crates/nexus-orchestration/src/auto_chain.rs` → manual reasoning; no fix required for P0.
 
 ## Summary
 
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 2 |
-| 🟢 Suggestion | 2 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-Both warnings are substantive and should be addressed or explicitly risk-accepted before merge:
-- W-1 is a perf/reliability regression on the terminal hot path.
-- W-2 is a data-growth / idempotency risk that directly affects the new feature's correctness over time.
-
-The acceptance criteria are functionally met (tests pass, findings are created, driver invariant is preserved), so the changes are close to merge-ready once the hot-path overhead and duplicate-growth concerns are resolved or tracked as open residuals.
+The fix round addresses the performance hot-path concern (W-1) and the idempotency/correctness risk (W-2) with a targeted partial unique index and conditional hook. The plan verification command (S-1) is now accurate and executable. The transactional hook suggestion (S-2) remains acceptable for the single-INSERT P0 scope. All scoped tests, nightly formatting, and clippy pass without introduced regressions.
