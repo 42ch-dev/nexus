@@ -104,7 +104,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
 | [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Draft (V1.47)** overlay on Shipped (V1.44) — §8 reflection-loop output + `rule_suggestion` metadata |
 | [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
-| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Draft (V1.46)** — wave-0 overlay; §3 embedded author path; BL-10 quickstart retired P1 |
+| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.46)** — §3 embedded author path; BL-10 quickstart retired P1; V1.47 P3 spec reconcile |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

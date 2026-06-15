@@ -60,7 +60,7 @@ Auto-chain must not fork driver when routing spawns auxiliary schedules; at most
 
 | Preset ID | Role |
 | --- | --- |
-| `novel-chapter-review` | FL-E `review` stage — novel/work/chapter-aware review producer (findings writer); **V1.47 P0** shipped. Named `novel-chapter-review` (replaces the former generic `reflection-loop` demo) |
+| `novel-chapter-review` | FL-E `review` stage — novel/work/chapter-aware review producer (findings writer); **V1.47 P0** shipped. Named `novel-chapter-review` (replaces the former generic `reflection-loop` demo). See §8 for output contract + [novel-workflow-profile.md §5.5.6](novel-workflow-profile.md#556-novel-chapter-review-feeding-findings-v147-normative) for preset gates. |
 | `novel-brainstorm` | Ideation from open findings (V1.39 P2) |
 | `novel-review-master` | Master decision surface (V1.39 P2) |
 | `novel-manuscript-audit` | On-demand chapter audit — review and/or extract (V1.44 P0; see [novel-manuscript-audit.md](novel-manuscript-audit.md)) |
@@ -131,7 +131,7 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 | `work_id` | Schedule / CLI | Yes |
 | `chapter` | `work_chapters` selection for review pass | Yes when multi-chapter |
 | `body_path` / `outline_path` | Chapter artifacts | Best-effort |
-| Rules context | Layer 1 embedded + Layer 2 (shipped: `Rules/novel-rules.md`; normative target: `AGENTS.md`) | Best-effort |
+| Rules context | Layer 1 embedded + Layer 2 (`Works/<work_ref>/AGENTS.md`; shipped runtime reads `Rules/novel-rules.md` until follow-up migration) | Best-effort |
 
 ### 8.2 Finding creation
 
