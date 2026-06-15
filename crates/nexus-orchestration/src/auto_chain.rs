@@ -405,6 +405,26 @@ async fn try_persist_parsed_findings(
             );
             Ok(None)
         }
+        // V1.48 P0-fix1 (qc3 W-1): bounded-read cap exceeded. `chapter` is
+        // included in the span per spec §1.3 (operator-debugging field,
+        // forward-compatible with the W-3 fix that adds it to the other
+        // pre-existing fallback arms).
+        Err(ReportLoadError::TooLarge {
+            size_bytes,
+            cap_bytes,
+        }) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                chapter = ?chapter,
+                size_bytes,
+                cap_bytes,
+                "review-findings: review-report.md exceeds bounded-read cap; \
+                 falling back to V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
     }
 }
 
@@ -421,7 +441,23 @@ enum ReportLoadError {
     Read(std::path::PathBuf, std::io::Error),
     /// File was read but the parser rejected it.
     Parse(String),
+    /// V1.48 P0-fix1 (qc3 W-1): file size exceeds the bounded-read cap.
+    /// Falling back to placeholder synthesis is the documented safe degrade.
+    TooLarge { size_bytes: u64, cap_bytes: u64 },
 }
+
+/// Upper bound on how many bytes of `review-report.md` the supervisor will
+/// buffer into memory on the `on_schedule_terminal` hot path.
+///
+/// V1.48 P0-fix1 (qc3 W-1): a malformed or runaway LLM report must not
+/// consume unbounded memory on the producer path. The cap is sized for
+/// ~50 findings × ~2 KiB of prose (≈ 100 KiB typical) with a 2.5× headroom.
+/// The downstream [`persist_parsed_findings`] truncates each finding body to
+/// 2 000 chars anyway, so the persisted footprint stays bounded even when
+/// this cap is reached. If a legitimate report ever exceeds this, operators
+/// see a `tracing::warn!` with `size_bytes` / `cap_bytes` and the producer
+/// degrades to the V1.47 placeholder.
+const MAX_REVIEW_REPORT_BYTES: u64 = 256 * 1024;
 
 /// Resolve `<workspace_dir>/Works/<work_ref>/Logs/review/review-report.md`,
 /// read it, and parse it via [`crate::review_report::parse_review_report`].
@@ -429,14 +465,31 @@ enum ReportLoadError {
 /// Hermetic-friendly: takes an explicit `workspace_dir` so callers (and tests)
 /// control the FS root. The path layout is provided by `nexus-home-layout`
 /// (`work_logs_subdir`).
+///
+/// V1.48 P0-fix1 (qc3 W-1): the read is bounded by [`MAX_REVIEW_REPORT_BYTES`].
+/// `metadata()` is used for both missing-detection and the size check, so the
+/// happy path is two syscalls (stat + read). This also incidentally closes
+/// qc3 S-2 (drops the redundant `exists()` pre-check that previously made the
+/// path 3 syscalls).
 fn load_and_parse_review_report(
     workspace_dir: &std::path::Path,
     work_ref: &str,
 ) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
     let review_dir = nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
     let report_path = review_dir.join("review-report.md");
-    if !report_path.exists() {
-        return Err(ReportLoadError::Missing);
+    let metadata = match std::fs::metadata(&report_path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ReportLoadError::Missing);
+        }
+        Err(e) => return Err(ReportLoadError::Read(report_path, e)),
+    };
+    let size_bytes = metadata.len();
+    if size_bytes > MAX_REVIEW_REPORT_BYTES {
+        return Err(ReportLoadError::TooLarge {
+            size_bytes,
+            cap_bytes: MAX_REVIEW_REPORT_BYTES,
+        });
     }
     let content = match std::fs::read_to_string(&report_path) {
         Ok(c) => c,
