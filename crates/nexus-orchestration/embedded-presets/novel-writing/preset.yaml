@@ -14,7 +14,7 @@
 
 preset:
   id: novel-writing
-  version: 7  # V1.40 P2: world_kb_block template var for World context prompt injection
+  version: 8  # V1.48 P1: open_findings_block template var for chapter-scoped findings injection
   kind: creator
   description: "Per-chapter outline → draft → finalize pipeline; gated by llm_judge 五問 quality check"
   requires_capabilities:
@@ -89,6 +89,7 @@ states:
             outline_path: "{{preset.input.outline_path}}"
             slug: "{{preset.input.slug}}"
             world_kb_block: "{{preset.input.world_kb_block}}"
+            open_findings_block: "{{preset.input.open_findings_block}}"
     exit_when:
       kind: manual
     next: draft_chapter
@@ -111,6 +112,7 @@ states:
             body_path: "{{preset.input.body_path}}"
             slug: "{{preset.input.slug}}"
             world_kb_block: "{{preset.input.world_kb_block}}"
+            open_findings_block: "{{preset.input.open_findings_block}}"
       # Transition chapter status from outlined to draft
       - kind: capability
         name: novel.chapter_transition

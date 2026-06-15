@@ -29,6 +29,35 @@ pub const MAX_BODY_CHARS: usize = 400;
 /// once the rendered block would exceed this size.
 pub const MAX_TOTAL_BLOCK_CHARS: usize = 3200;
 
+/// Overlay §2.1 — map severity to a numeric rank for ordering
+/// (blocker > major > minor > info). Unknown severities sort lowest.
+///
+/// Exposed so callers that fetch findings outside the chapter-scoped DAO
+/// (e.g. the CLI, which lists via the daemon Local API) can re-sort
+/// client-side without duplicating the rank ladder.
+#[must_use]
+pub fn severity_rank(severity: &str) -> i32 {
+    match severity {
+        "blocker" => 4,
+        "major" => 3,
+        "minor" => 2,
+        _ => 1, // "info" and any unknown severity
+    }
+}
+
+/// Overlay §2.1 — sort a `&mut [Finding]` in place by severity DESC,
+/// then `created_at` ASC. This is the same ordering the chapter-scoped
+/// DAO query ([`nexus_local_db::findings::list_open_findings_for_chapter`])
+/// applies server-side; exposed as a helper for callers that fetch via
+/// paths which do not (yet) use that DAO (e.g. CLI Local API round-trip).
+pub fn sort_open_findings(findings: &mut [Finding]) {
+    findings.sort_by(|a, b| {
+        severity_rank(&b.severity)
+            .cmp(&severity_rank(&a.severity))
+            .then_with(|| a.created_at.cmp(&b.created_at))
+    });
+}
+
 /// V1.48 P1 (overlay §2.2) — render the `{{ open_findings_block }}`
 /// template variable for `novel-writing` outline/draft prompts.
 ///

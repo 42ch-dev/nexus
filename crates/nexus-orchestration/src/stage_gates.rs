@@ -91,6 +91,13 @@ pub struct WorkFields {
     /// When set, `build_preset_input` includes a `volume` template var so that
     /// the `novel-writing` preset preserves cross-volume context.
     pub volume: Option<i32>,
+    /// V1.48 P1 (overlay §2 Consumer): pre-rendered open-findings block
+    /// for chapter-scoped prompt injection. Populated by the caller (CLI
+    /// `stage advance` or auto-chain enqueue) via
+    /// [`crate::findings_block::build_open_findings_block`]. When `None`
+    /// or empty, the template guard `{{#if open_findings_block}}` omits
+    /// the section (AC2: no empty sentinel noise).
+    pub open_findings_block: Option<String>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -219,6 +226,21 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         map.as_object_mut()
             .map(|o| o.insert("volume".to_string(), serde_json::Value::Number(vol.into())));
     }
+
+    // V1.48 P1 (overlay §2 Consumer): inject the pre-rendered open-findings
+    // block. The caller (CLI/auto-chain) builds it via
+    // `findings_block::build_open_findings_block` from the chapter-scoped DAO
+    // query. When `None` (worldless Works, no open findings, or auto-chain
+    // path without pool access yet), default to empty string so strict-mode
+    // template rendering does not fail on `{{preset.input.open_findings_block}}`.
+    // The preset's `{{#if open_findings_block}}` guard omits the section.
+    let findings_block = fields.open_findings_block.clone().unwrap_or_default();
+    map.as_object_mut().map(|o| {
+        o.insert(
+            "open_findings_block".to_string(),
+            serde_json::Value::String(findings_block),
+        )
+    });
 
     map
 }
@@ -607,6 +629,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         }
@@ -783,6 +806,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         }
@@ -849,6 +873,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         };
@@ -1014,6 +1039,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: Some(ws.to_string_lossy().to_string()),
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         };
@@ -1043,6 +1069,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         };
