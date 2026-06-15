@@ -408,9 +408,7 @@ impl ScheduleSupervisor {
             // SSOT — single source shared with the allowlist and findings hook.
             if schedule_row
                 .as_ref()
-                .is_some_and(|r| {
-                    r.preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID
-                })
+                .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID)
             {
                 use crate::auto_chain;
                 // V1.48 P0 T2: thread the supervisor's optional
