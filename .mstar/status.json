@@ -1,10 +1,168 @@
 {
   "version": 1,
   "updated_at": "2026-06-16",
-  "plans": [],
+  "plans": [
+    {
+      "id": "2026-06-16-v1.48-harness-docs-prepare",
+      "title": "P-1 — V1.48 compass, plans, spec overlay, tracker, status (docs-only)",
+      "file": ".mstar/plans/2026-06-16-v1.48-harness-docs-prepare.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@project-manager", "@writing-specialist"],
+      "progress": 100,
+      "tags": ["v1.48", "harness", "docs"],
+      "created_at": "2026-06-16",
+      "updated_at": "2026-06-16",
+      "done_at": "2026-06-16",
+      "notes": "PM signoff 2026-06-16 — Pre-implement GO for P0–P-last",
+      "metadata": {
+        "working_branch": "iteration/v1.48",
+        "merge_target": "iteration/v1.48",
+        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md"
+      }
+    },
+    {
+      "id": "2026-06-16-v1.48-findings-producer",
+      "title": "P0 — Review-report parsing + producer hardening",
+      "file": ".mstar/plans/2026-06-16-v1.48-findings-producer.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.48", "findings", "p0"],
+      "created_at": "2026-06-16",
+      "updated_at": "2026-06-16",
+      "metadata": {
+        "working_branch": "feature/v1.48-findings-producer",
+        "merge_target": "iteration/v1.48",
+        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+        "track": "A",
+        "parallel_with": "2026-06-16-v1.48-serial-hardening",
+        "target_residuals": ["R-V147P0-01", "R-V147P0-05", "R-V147P0-06"]
+      }
+    },
+    {
+      "id": "2026-06-16-v1.48-findings-consumer",
+      "title": "P1 — Open findings → novel-writing prompt injection",
+      "file": ".mstar/plans/2026-06-16-v1.48-findings-consumer.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.48", "findings", "p1"],
+      "created_at": "2026-06-16",
+      "updated_at": "2026-06-16",
+      "metadata": {
+        "working_branch": "feature/v1.48-findings-consumer",
+        "merge_target": "iteration/v1.48",
+        "depends_on": "2026-06-16-v1.48-findings-producer",
+        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+        "track": "A"
+      }
+    },
+    {
+      "id": "2026-06-16-v1.48-rules-runtime",
+      "title": "P2 — AGENTS.md Layer 2 runtime + accept rule_suggestion + rules reset CLI",
+      "file": ".mstar/plans/2026-06-16-v1.48-rules-runtime.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.48", "rules", "p2"],
+      "created_at": "2026-06-16",
+      "updated_at": "2026-06-16",
+      "metadata": {
+        "working_branch": "feature/v1.48-rules-runtime",
+        "merge_target": "iteration/v1.48",
+        "depends_on": "2026-06-16-v1.48-findings-consumer",
+        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+        "track": "A",
+        "target_residuals": ["R-V147P0-04"]
+      }
+    },
+    {
+      "id": "2026-06-16-v1.48-findings-data-hygiene",
+      "title": "P3 — Retention/cleanup + rule_suggestion NULL clear",
+      "file": ".mstar/plans/2026-06-16-v1.48-findings-data-hygiene.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.48", "findings", "p3"],
+      "created_at": "2026-06-16",
+      "updated_at": "2026-06-16",
+      "metadata": {
+        "working_branch": "feature/v1.48-findings-data-hygiene",
+        "merge_target": "iteration/v1.48",
+        "depends_on": "2026-06-16-v1.48-rules-runtime",
+        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+        "track": "A",
+        "target_residuals": ["R-V147P0-02", "R-V147P0-03"]
+      }
+    },
+    {
+      "id": "2026-06-16-v1.48-serial-hardening",
+      "title": "P4 — §4.5.7 #4 resume + #5 reconcile",
+      "file": ".mstar/plans/2026-06-16-v1.48-serial-hardening.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "progress": 0,
+      "tags": ["v1.48", "serial", "p4"],
+      "created_at": "2026-06-16",
+      "updated_at": "2026-06-16",
+      "metadata": {
+        "working_branch": "feature/v1.48-serial-hardening",
+        "merge_target": "iteration/v1.48",
+        "depends_on": "2026-06-16-v1.48-harness-docs-prepare",
+        "parallel_with": "2026-06-16-v1.48-findings-producer",
+        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+        "track": "B",
+        "target_residuals": ["R-V147P1-01"]
+      }
+    },
+    {
+      "id": "2026-06-16-v1.48-hygiene-and-closeout",
+      "title": "P-last — WL-A residual closure, overlay promotion, Profile B compaction",
+      "file": ".mstar/plans/2026-06-16-v1.48-hygiene-and-closeout.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev", "@writing-specialist", "@project-manager"],
+      "progress": 0,
+      "tags": ["v1.48", "hygiene", "p-last"],
+      "created_at": "2026-06-16",
+      "updated_at": "2026-06-16",
+      "metadata": {
+        "working_branch": "feature/v1.48-hygiene-and-closeout",
+        "merge_target": "iteration/v1.48",
+        "depends_on": "P0-P4 merged",
+        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+        "wl_a_whitelist": [
+          "R-V145B3-001",
+          "R-V146P1-QC1-S3",
+          "R-V146P1-QC1-S1",
+          "R-V146P1-QC1-S2",
+          "R-V146P1-QC3-S3",
+          "R-V146P2-QC2-W",
+          "R-V146P1-QC3-S2",
+          "R-V146P0-QC3-S2",
+          "R-V146P1-QC2-S1",
+          "R-V146P1-QC2-S2"
+        ]
+      }
+    }
+  ],
   "v1_43_iteration_complete": true,
   "v1_44_iteration_complete": true,
   "v1_45_iteration_complete": true,
+  "v1_46_iteration_complete": true,
+  "v1_47_iteration_complete": true,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -12,18 +170,24 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "main",
+    "integration_branch": "iteration/v1.48",
     "last_integration_branch": "iteration/v1.47",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
     "integration_branch_retired": "iteration/v1.47 (PR #60 @ 8f4f9f2b)",
     "latest_shipped_iteration": "v1.47",
     "latest_shipped_at": "2026-06-15 (PR #60 @ 8f4f9f2b)",
-    "latest_active_iteration": "v1.48 (awaiting prepare)",
-    "latest_active_compass": null,
+    "latest_active_iteration": "v1.48",
+    "latest_active_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "V1.47 Shipped — awaiting V1.48 prepare",
+    "pre_implement_gate": "GO — V1.48 P-1 Done 2026-06-16",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+    "pre_iteration_hotfix": {
+      "id": "R-V147P0-05",
+      "recommended_branch": "fix/master-decision-timeout-pk-collision",
+      "policy": "H-1 — merge to main before or at iteration/v1.48 cut"
+    },
     "latest_ship": {
       "iteration": "v1.47",
       "pr": 60,
@@ -42,8 +206,7 @@
         "nit": 0
       },
       "by_target": {
-        "V1.47": 1,
-        "V1.48": 30
+        "V1.48": 31
       },
       "by_plan": {
         "2026-06-13-v1.45-hygiene-and-closeout": 1,
@@ -55,7 +218,7 @@
         "2026-06-15-v1.47-gate-remediation-audit": 1,
         "2026-06-15-v1.47-reflection-loop-findings": 6
       },
-      "notes": "31 open V1.48/V1.47 carry-forward; legacy residuals in archived/residuals/."
+      "notes": "31 open carry-forward; 7× R-V147P* targeted for closure in V1.48 P0–P4; WL-A 10 lows in P-last; remainder defer V1.49 at P-last."
     }
   },
   "residual_findings": {
@@ -68,7 +231,8 @@
         "title": "cli-spec.md §6.2D/E body still references shipped V1.33-V1.44 subcommand table; needs to be rewritten to match the new Shipped Master (creator-run-preset-entry.md). Tracked for follow-up spec-hygiene pass.",
         "decision": "defer",
         "owner": "@fullstack-dev or @writing-specialist",
-        "target": "V1.48"
+        "target": "V1.48",
+        "p_last_whitelist": true
       }
     ],
     "2026-06-14-v1.46-author-desk-status-ux": [
@@ -80,9 +244,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs (production lines 1264-1313; test helper lines 1485-1529)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Pre-existing pattern worsened by V1.46 P0; future refactor should extract pure fn format_findings_summary(result, work_id) -> String shared between production and tests."
+        "note": "Out of WL-A; defer V1.49 at P-last unless swept early."
       },
       {
         "id": "R-V146P0-QC2-S1",
@@ -92,9 +256,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs:1638-1752 (enrich_* tests) + helper at 1411",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Production path is direct to_vec() passthrough so no behavioral risk; this is test-coverage hygiene to harden the 'verbatim fidelity' claim. Fold into R-V146P0-QC1-S2 refactor when addressed."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P0-QC3-S2",
@@ -106,7 +270,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Best-effort degradation is intentional; add tracing::debug! / tracing::warn! with endpoint + work_id + elapsed_ms so operators can diagnose daemon degradation without changing user-facing contract."
+        "note": "WL-A — add tracing::debug/warn.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P0-QC3-S3",
@@ -116,9 +281,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs:379-389",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Low-confidence perf micro-opt under daemon overload. Skip stale call when findings unavailable to further reduce hot-path overhead."
+        "note": "Out of WL-A."
       }
     ],
     "2026-06-14-v1.46-novel-runtime-ux-edges": [
@@ -132,7 +297,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Defense-in-depth consistency with T1 (which uses sanitize_for_terminal for chapter-hint copy). Local user-controlled preset YAML only; no remote/untrusted input path. Apply same sanitization as T1."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P2-QC1-S1",
@@ -142,9 +308,9 @@
         "scope": "crates/nexus42/src/commands/creator/run.rs:231-235",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Mitigated by extracted pure helpers + e2e tests. Low priority; pre-existing pattern in CLI binaries."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P2-QC1-S2",
@@ -154,9 +320,9 @@
         "scope": "crates/nexus42/src/commands/creator/works/mod.rs (pre-existing duplication)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Pre-existing pattern; P2 added a new pure helper but didn't sweep existing callers. Out of P2 scope."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P2-QC3-S1",
@@ -166,9 +332,9 @@
         "scope": "crates/nexus42/src/commands/creator/run.rs:231-235 (maybe_print_preset_run_help_and_exit)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Line-buffered terminals typically flush on newline; low practical risk. Add explicit `use std::io::Write; let _ = std::io::stdout().flush();` before exit."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P2-QC3-S2",
@@ -178,9 +344,9 @@
         "scope": "crates/nexus42/src/commands/creator/run.rs:214",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Negligible today; future scalability. Consider `once_cell::sync::Lazy` static registry when registry becomes expensive."
+        "note": "Out of WL-A."
       }
     ],
     "2026-06-14-v1.46-pool-observability": [
@@ -192,9 +358,9 @@
         "scope": "crates/nexus-local-db/src/novel_pool_entries.rs (test_promote_to_active_emits_trace)",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Acceptable per plan §4.1 'test or manual note'. Parametrize for the other 8 paths as future hygiene."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P4-QC1-S2",
@@ -204,9 +370,9 @@
         "scope": "crates/nexus-local-db/src/novel_pool_entries.rs:550-554",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Idiomatic registry().with(layer) preferred over the UFCS form."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P4-QC3-S1",
@@ -216,9 +382,9 @@
         "scope": "crates/nexus-local-db/src/novel_pool_entries.rs + inspiration_items.rs",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Add capture tests for the other 8 mutation paths (4 pool + 4 inspiration) as future hygiene."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P4-QC3-S2",
@@ -228,9 +394,9 @@
         "scope": "crates/nexus-local-db/src/novel_pool_entries.rs + inspiration_items.rs (module-level docs)",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Audit docs are present per T1; add a one-line note explaining the INFO level choice (vs DEBUG) for operator visibility."
+        "note": "Out of WL-A."
       }
     ],
     "2026-06-14-v1.46-research-auto-chain-e2e": [
@@ -242,9 +408,9 @@
         "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:184 (assertion) + :123 (seed SQL)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Coupling enforced only by author discipline. Consider exporting the version constant from the preset loader."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P3-QC3-S1",
@@ -254,9 +420,9 @@
         "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:108-135",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Hardcoded column order. Wrap in DAO-style helper or reuse auto_chain::insert_driver_schedule with preset_id parameter. At minimum, add migration-file reference comment."
+        "note": "Out of WL-A."
       },
       {
         "id": "R-V146P3-QC3-S2",
@@ -266,9 +432,9 @@
         "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:138-145",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.48",
+        "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Return Option<String> and let caller expect() with descriptive message, or use fetch_optional + unwrap_or_else."
+        "note": "Out of WL-A."
       }
     ],
     "2026-06-14-v1.46-spec-cli-hygiene": [
@@ -282,7 +448,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
-        "note": "Same AC-filter-gaming pattern as qc1 W-1, but borderline parse (clarifying clause prevents firm misread) and lives in Shipped Master. Per knowledge/specs/AGENTS.md, Master normative changes need plan/ADR. Defer to V1.46+ via plan."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P1-QC1-S2",
@@ -294,7 +461,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
-        "note": "Pure rename refactor. Suggestion-string replacement in T4 left the function name unchanged; mechanical rename of pub fn ripples to call sites and tests."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P1-QC1-S3",
@@ -306,7 +474,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
-        "note": "Column header promises V1.33 model but cell shows V1.41+ command form. T3 sweep updated cell without restoring historical value. Restore `creator run continue --note` in V1.33 column or relabel header."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P1-QC2-S1",
@@ -318,7 +487,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
-        "note": "Brittle to copy changes; consider semantic assertion (severity/keyword/structure instead of full-string match). Folds with R-V146P1-QC2-S2."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P1-QC2-S2",
@@ -330,7 +500,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
-        "note": "Same brittleness as R-V146P1-QC2-S1. Group refactor opportunity: replace string-snapshot asserts with semantic invariants."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P1-QC3-S2",
@@ -342,7 +513,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
-        "note": "Add executable command validation (e.g. spawn dry-run or CLI surface check) to remediation tests, not just spec filename presence."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       },
       {
         "id": "R-V146P1-QC3-S3",
@@ -354,7 +526,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
-        "note": "Mechanical rename of test identifiers that still include 'quickstart' in name."
+        "note": "WL-A.",
+        "p_last_whitelist": true
       }
     ],
     "2026-06-15-v1.47-gate-remediation-audit": [
@@ -366,8 +539,9 @@
         "scope": "nexus42 CLI / daemon schedule add surface",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.48+",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-gate-remediation-audit][R-V147P1-01]"
+        "target": "V1.48",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-gate-remediation-audit][R-V147P1-01]",
+        "note": "P4 attach if capacity."
       }
     ],
     "2026-06-15-v1.47-reflection-loop-findings": [
@@ -379,8 +553,9 @@
         "scope": "crates/nexus-orchestration/src/auto_chain.rs::persist_review_findings_for_schedule",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.48+",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-01]"
+        "target": "V1.48",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-01]",
+        "note": "P0 close."
       },
       {
         "id": "R-V147P0-02",
@@ -390,8 +565,9 @@
         "scope": "crates/nexus-local-db/src/findings.rs + migrations/",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.48+",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-02]"
+        "target": "V1.48",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-02]",
+        "note": "P3 close."
       },
       {
         "id": "R-V147P0-03",
@@ -401,8 +577,9 @@
         "scope": "crates/nexus-local-db/src/findings.rs::update_finding",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.48+",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-03]"
+        "target": "V1.48",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-03]",
+        "note": "P3 close."
       },
       {
         "id": "R-V147P0-04",
@@ -412,8 +589,9 @@
         "scope": "spec layer only in V1.47; runtime deferred",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.48+",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-04]"
+        "target": "V1.48",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-04]",
+        "note": "P2 close."
       },
       {
         "id": "R-V147P0-05",
@@ -423,8 +601,9 @@
         "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (or relevant enqueue site)",
         "decision": "defer (separate hotfix)",
         "owner": "@fullstack-dev",
-        "target": "post-V1.47 hotfix",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-05]"
+        "target": "V1.48",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-05]",
+        "note": "H-1 pre-iteration hotfix."
       },
       {
         "id": "R-V147P0-06",
@@ -434,11 +613,10 @@
         "scope": "crates/nexus-orchestration/src/auto_chain.rs, crates/nexus-orchestration/src/preset/validation.rs, crates/nexus-orchestration/src/schedule/supervisor.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.48+",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-06]"
+        "target": "V1.48",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-06]",
+        "note": "P0 close."
       }
     ]
-  },
-  "v1_46_iteration_complete": true,
-  "v1_47_iteration_complete": true
+  }
 }
