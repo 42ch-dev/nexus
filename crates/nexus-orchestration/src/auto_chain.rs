@@ -218,6 +218,11 @@ pub async fn persist_review_findings_for_schedule(
         kind: "craft".to_string(),
         // Optional — no rule suggestion in the synthesized path.
         rule_suggestion: None,
+        // V1.47 P0 fix (qc1 W-2): pass the originating schedule_id so the
+        // INSERT is idempotent — a second terminal transition for the same
+        // review schedule is a no-op (partial unique index
+        // `findings_unique_review_per_chapter`).
+        source_schedule_id: Some(schedule_id.to_string()),
     };
 
     match findings::create_finding_from_review(pool, &verdict).await {
