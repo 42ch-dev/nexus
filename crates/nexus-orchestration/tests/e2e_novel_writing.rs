@@ -1,11 +1,11 @@
 //! End-to-end novel-writing preset test.
 //!
-//! Covers the V1.36 chapter-scoped pipeline (outline_chapter → draft_chapter →
-//! finalize → done), manual advance, restart durability, and the llm_judge
+//! Covers the V1.36 chapter-scoped pipeline (`outline_chapter` → `draft_chapter` →
+//! finalize → done), manual advance, restart durability, and the `llm_judge`
 //! 五問 quality gate.
 //!
 //! P3 refactored: legacy 4-state flow (gathering → brainstorming → outlining → drafting)
-//! replaced by chapter-scoped 3-state flow (outline_chapter → draft_chapter → finalize).
+//! replaced by chapter-scoped 3-state flow (`outline_chapter` → `draft_chapter` → finalize).
 
 use std::sync::Arc;
 
@@ -159,7 +159,7 @@ async fn e2e_chapter_scoped_pipeline_executes() {
         "should have executed at least one step"
     );
 
-    let ctx = engine
+    let _ctx = engine
         .get_context(&session_id)
         .await
         .expect("get_context should succeed");
