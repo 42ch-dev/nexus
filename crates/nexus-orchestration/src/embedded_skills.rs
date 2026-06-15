@@ -158,8 +158,7 @@ mod tests {
     fn embedded_skill_dir_is_not_empty() {
         let dir = embedded_skill_dir();
         assert!(
-            !dir.files().collect::<Vec<_>>().is_empty()
-                || !dir.dirs().collect::<Vec<_>>().is_empty(),
+            dir.files().next().is_some() || dir.dirs().next().is_some(),
             "embedded skills directory must contain at least one file or subdirectory"
         );
     }

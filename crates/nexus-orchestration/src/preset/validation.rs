@@ -1163,7 +1163,7 @@ states:
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::TerminalConsistency
                     && d.severity == DiagnosticSeverity::Warning
-                    && d.message.contains("c")
+                    && d.message.contains('c')
             }),
             "expected warning for extra terminal 'c': {:?}",
             result.diagnostics
@@ -1327,7 +1327,7 @@ states:
 
     #[test]
     fn missing_template_file_in_bundle_is_error() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: missing-file
   version: 1
@@ -1346,7 +1346,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let bundle_root = tmp.path().join("missing-file");
@@ -1365,7 +1365,7 @@ states:
 
     #[test]
     fn existing_template_file_passes() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: has-file
   version: 1
@@ -1384,7 +1384,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let bundle_root = tmp.path().join("has-file");

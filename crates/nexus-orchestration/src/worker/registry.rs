@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn worker_manager_spawner_creates_fresh() {
         let spawner = WorkerManagerSpawner::fresh();
-        assert!(Arc::strong_count(&spawner.manager) == 1);
+        assert_eq!(Arc::strong_count(&spawner.manager), 1);
     }
 
     #[tokio::test]
