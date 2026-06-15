@@ -183,7 +183,13 @@
     "2026-06-14-v1.46-novel-runtime-ux-edges",
     "2026-06-14-v1.46-research-auto-chain-e2e",
     "2026-06-14-v1.46-pool-observability",
-    "2026-06-14-v1.46-hygiene-and-closeout"
+    "2026-06-14-v1.46-hygiene-and-closeout",
+    "2026-06-15-v1.47-harness-docs-prepare",
+    "2026-06-15-v1.47-reflection-loop-findings",
+    "2026-06-15-v1.47-gate-remediation-audit",
+    "2026-06-15-v1.47-serial-completion-hardening",
+    "2026-06-15-v1.47-quality-loop-spec-reconcile",
+    "2026-06-15-v1.47-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -219,5 +225,9 @@
         "cli-spec.md"
       ]
     }
+  },
+  "metadata": {
+    "last_updated": "2026-06-15 (V1.47 P-last closeout)",
+    "v1_47_iteration_complete": "yes — ready for PR to main"
   }
 }

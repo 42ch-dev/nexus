@@ -2,12 +2,12 @@
 
 **Quick status**: **V1.47 Active** (2026-06-15, harness prepare) · **V1.46 Shipped** (2026-06-15, PR #59 merged) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.47 Active (harness prepare 2026-06-15); V1.46 Shipped; awaiting V1.47 implement wave
+**Status**: V1.47 Shipped (2026-06-15, P-last closeout); V1.48 Active (awaiting prepare)
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
 **Created**: 2026-04-21  
-**Last updated**: 2026-06-15 (V1.47 harness prepare: compass + plans + spec overlays; active iteration V1.47)
+**Last updated**: 2026-06-15 (V1.47 closeout: 5 whitelist residuals closed; 33 V1.45/V1.46 lows deferred to V1.48; PR pending per .mstar/AGENTS.md merge discipline)
 
 ---
 

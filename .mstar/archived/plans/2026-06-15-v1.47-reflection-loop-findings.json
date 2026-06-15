@@ -1,0 +1,39 @@
+{
+  "id": "2026-06-15-v1.47-reflection-loop-findings",
+  "title": "P0 — Novel review preset → findings",
+  "file": ".mstar/plans/2026-06-15-v1.47-reflection-loop-findings.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.47",
+    "feature",
+    "quality-loop"
+  ],
+  "created_at": "2026-06-15",
+  "updated_at": "2026-06-15",
+  "done_at": "2026-06-15",
+  "notes": "",
+  "metadata": {
+    "working_branch": "feature/v1.47-reflection-loop-findings",
+    "merge_target": "iteration/v1.47",
+    "implementation_commits": [
+      "d0cf8a7a4f2c063880062172121d7aa01957b8e1"
+    ],
+    "implementation_completed_at": "2026-06-15",
+    "review_range": "merge-base: origin/main",
+    "review_tip": "HEAD (d0cf8a7a)",
+    "qc_status": "Approve (3/3, after targeted re-review)",
+    "qa_status": "Pass",
+    "qc_review_commits": [
+      "453b825b",
+      "350ff6e8",
+      "222653ee"
+    ],
+    "qa_commit": "c26fd7a4",
+    "merge_commit": "82bc904c"
+  }
+}

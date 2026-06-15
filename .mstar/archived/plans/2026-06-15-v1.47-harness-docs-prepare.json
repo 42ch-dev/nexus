@@ -1,0 +1,26 @@
+{
+  "id": "2026-06-15-v1.47-harness-docs-prepare",
+  "title": "P-1 — V1.47 compass, plans, spec overlays, tracker, status (docs-only)",
+  "file": ".mstar/plans/2026-06-15-v1.47-harness-docs-prepare.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@project-manager",
+    "@writing-specialist"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.47",
+    "harness",
+    "docs"
+  ],
+  "created_at": "2026-06-15",
+  "updated_at": "2026-06-15",
+  "done_at": "2026-06-15",
+  "notes": "PM signoff — Pre-implement GO for P0–P-last",
+  "metadata": {
+    "working_branch": "iteration/v1.47",
+    "merge_target": "iteration/v1.47",
+    "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md"
+  }
+}
