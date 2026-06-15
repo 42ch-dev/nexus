@@ -10,7 +10,7 @@ use std::path::Path;
 /// Each entry is a Markdown line with:
 /// - ISO 8601 timestamp
 /// - Reason for the change
-/// - Actor/source (e.g. "reflection-loop", "user")
+/// - Actor/source (e.g. "novel-chapter-review", "user")
 ///
 /// The file is created if it doesn't exist. Writes are atomic
 /// (write to temp file, then rename) per V1.33 R-V133P4-05.
@@ -89,7 +89,7 @@ mod tests {
             ws,
             "my-novel",
             "Updated chapter length target",
-            "reflection-loop",
+            "novel-chapter-review",
         )
         .expect("second append");
 
@@ -107,6 +107,6 @@ mod tests {
         assert!(content.contains("Changed POV to first person"));
         assert!(content.contains("Updated chapter length target"));
         assert!(content.contains("user"));
-        assert!(content.contains("reflection-loop"));
+        assert!(content.contains("novel-chapter-review"));
     }
 }

@@ -473,7 +473,7 @@ pub enum CreatorCommand {
     /// Any resolvable preset id (embedded, user, or system) can be dispatched.
     /// No CLI preset whitelist — adding a preset changes YAML, not Rust.
     /// FL-E stage-advance presets (`research`, `novel-writing`,
-    /// `reflection-loop`, `kb-extract`) preserve stage-advance semantics.
+    /// `novel-chapter-review`, `kb-extract`) preserve stage-advance semantics.
     Run {
         #[command(flatten)]
         command: run::RunCommand,

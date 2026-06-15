@@ -198,7 +198,7 @@ fn fl_e_chain_e2e_resolve_presets_and_inputs() {
         ("intake", "creative-brief-intake"),
         ("research", "research"),
         ("produce", "novel-writing"),
-        ("review", "reflection-loop"),
+        ("review", "novel-chapter-review"),
         ("persist", "kb-extract"),
     ];
 

@@ -306,9 +306,13 @@ async fn schedule_list_isolation_by_creator() {
 async fn schedule_create_without_seed_no_core_context() {
     let ctx = test_ctx().await;
 
+    // V1.47: switched from `reflection-loop` (now `novel-chapter-review`,
+    // which declares novel-only gates and would 422 without a work_id) to
+    // `memory-augmented` — a non-gated preset — so this test keeps its
+    // original intent (seed propagation, not gate evaluation).
     let req = AddScheduleRequest {
         creator_id: "ctr_noseed".to_string(),
-        preset_id: "reflection-loop".to_string(),
+        preset_id: "memory-augmented".to_string(),
         seed: None,
         label: None,
         depends_on: None,
@@ -342,7 +346,7 @@ async fn schedule_create_without_seed_no_core_context() {
     let list_body: Value = list_resp.json();
     let schedules = list_body["schedules"].as_array().unwrap();
     assert_eq!(schedules.len(), 1);
-    assert_eq!(schedules[0]["preset_id"], "reflection-loop");
+    assert_eq!(schedules[0]["preset_id"], "memory-augmented");
 }
 
 // ── Test 5: Empty creator_id breaks cross-creator isolation (R-FL-E-P2-05) ────

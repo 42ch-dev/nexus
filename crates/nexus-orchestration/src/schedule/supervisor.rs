@@ -384,6 +384,25 @@ impl ScheduleSupervisor {
         // V1.39 §5.4 (Fix 1): Evaluate auto-chain continuation for completed schedules.
         // Only on success — failed/cancelled schedules do not trigger auto-chain.
         if terminal_status == ScheduleStatus::Completed {
+            // V1.47 P0 (novel-quality-loop §5.5.6 / §8): persist ≥1 finding
+            // when a `novel-chapter-review` schedule completes. This is the
+            // **single code path** covering both the auto-chain driver and
+            // on-demand `creator run novel-chapter-review <work_id>` runs.
+            // It runs BEFORE `process_auto_chain_after_terminal` so findings
+            // exist before advancing to the persist stage. Best-effort:
+            // errors are logged and do NOT block the terminal transition
+            // (spec §8.4 invariant — finding creation must not fork/cancel
+            // the active driver).
+            use crate::auto_chain;
+            if let Err(e) =
+                auto_chain::persist_review_findings_for_schedule(&self.pool, schedule_id).await
+            {
+                tracing::warn!(
+                    schedule_id,
+                    error = %e,
+                    "review-findings: persist hook failed (non-fatal)"
+                );
+            }
             if let Some(ref creator_id) = row {
                 self.process_auto_chain_after_terminal(schedule_id, creator_id)
                     .await;
