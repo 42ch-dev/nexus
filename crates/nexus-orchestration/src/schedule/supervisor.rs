@@ -404,9 +404,13 @@ impl ScheduleSupervisor {
             // preset_id is `novel-chapter-review`. Other presets are a no-op
             // and the guard avoids the extra schedule-row lookup that
             // persist_review_findings_for_schedule would otherwise perform.
+            // R-V147P0-06 (V1.48 P0 T3): preset id hoisted to `preset_ids`
+            // SSOT — single source shared with the allowlist and findings hook.
             if schedule_row
                 .as_ref()
-                .is_some_and(|r| r.preset_id == "novel-chapter-review")
+                .is_some_and(|r| {
+                    r.preset_id == crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID
+                })
             {
                 use crate::auto_chain;
                 if let Err(e) =
