@@ -2013,7 +2013,7 @@ mod tests {
         assert!(judge_result, "judge_result should be true for GO");
     }
 
-    /// T5: novel-writing gathering exit with NOGO → WaitForInput.
+    /// T5: novel-writing gathering exit with NOGO → `WaitForInput`.
     #[tokio::test]
     async fn state_composite_llm_judge_nogo_waits() {
         use crate::capability::CapabilityRuntimeDeps;
@@ -2058,7 +2058,7 @@ mod tests {
         assert!(!judge_result, "judge_result should be false for NOGO");
     }
 
-    /// T5: llm_judge without worker IPC → WaitForInput (safe fallback).
+    /// T5: `llm_judge` without worker IPC → `WaitForInput` (safe fallback).
     #[tokio::test]
     async fn state_composite_llm_judge_no_worker_waits() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
@@ -2090,7 +2090,7 @@ mod tests {
         );
     }
 
-    /// T5: llm_judge with empty template_file → WaitForInput.
+    /// T5: `llm_judge` with empty `template_file` → `WaitForInput`.
     #[tokio::test]
     async fn state_composite_llm_judge_empty_template_waits() {
         let registry = Arc::new(CapabilityRegistry::with_builtins());
@@ -2739,11 +2739,11 @@ mod tests {
         );
     }
 
-    /// C-V133P2-01 integration: StateCompositeTask renders capability args
+    /// C-V133P2-01 integration: `StateCompositeTask` renders capability args
     /// through the template engine before passing to the capability.
     ///
     /// This test loads the actual engine context with preset.input and
-    /// state.* values, runs a StateCompositeTask with a capability action
+    /// `state.*` values, runs a `StateCompositeTask` with a capability action
     /// that uses template placeholders, and verifies the rendered values
     /// reach the capability input.
     #[tokio::test]

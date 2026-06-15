@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Draft (V1.47) — overlay on Shipped (V1.44) baseline; promote at P-last  
+**Status**: Shipped (V1.47)  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-15 (V1.47 P-1 harness — §8 reflection-loop output contract; §2.1 `rule_suggestion` metadata)  
+**Last updated**: 2026-06-15 (V1.47 P-last — spec promotion Draft → Shipped)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
@@ -120,7 +120,9 @@ See [novel-workflow-profile.md §5.5.5](novel-workflow-profile.md#555-logs-struc
 
 ---
 
-## 8. Reflection-loop output contract (V1.47 Draft)
+## 8. Reflection-loop output contract (V1.47 Shipped)
+
+Heading preserved for back-compat with existing inbound cross-refs; the canonical preset id is `novel-chapter-review` (renamed in V1.47 P0).
 
 **Scope**: Normative behavior for the FL-E `review` preset after P0 implement. Applies to **both** auto-chain review stage and on-demand `creator run <preset_id>`.
 
@@ -149,7 +151,7 @@ Finding creation MUST NOT fork or cancel the active FL-E auto-chain driver sched
 
 ---
 
-*Draft overlay for V1.39. Merge into novel-workflow-profile §5.5 at iteration P5 hygiene if section stabilizes.*
+*Shipped V1.47. Normative text reconciled to [novel-workflow-profile.md §5.5](novel-workflow-profile.md).*
 
 ---
 

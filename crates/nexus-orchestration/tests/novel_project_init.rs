@@ -931,8 +931,7 @@ async fn t6_ac1_single_volume_regression_volume_defaults_to_1() {
     assert_eq!(
         next,
         Some((1, 1)),
-        "next chapter should be (volume=1, chapter=1), got {:?}",
-        next
+        "next chapter should be (volume=1, chapter=1), got {next:?}",
     );
 
     let _ = out;
@@ -982,8 +981,7 @@ async fn t6_ac2_two_volume_happy_path() {
     assert_eq!(
         next,
         Some((1, 1)),
-        "initial next should be vol 1, ch 1, got {:?}",
-        next
+        "initial next should be vol 1, ch 1, got {next:?}",
     );
 
     // Finalize volume 1 chapters 1-6
@@ -1010,8 +1008,7 @@ async fn t6_ac2_two_volume_happy_path() {
     assert_eq!(
         next_after_vol1,
         Some((2, 1)),
-        "after vol 1 finalized, next should be vol 2, ch 1, got {:?}",
-        next_after_vol1
+        "after vol 1 finalized, next should be vol 2, ch 1, got {next_after_vol1:?}",
     );
 
     // Verify volume-outline.md exists with multi-volume structure
@@ -1064,10 +1061,10 @@ async fn t6_ac3_status_api_volume_aware_rows() {
     }
 
     // Verify correct volume distribution: vol 1 = ch 1-3, vol 2 = ch 1-3
-    let vol1: Vec<_> = chapters.iter().filter(|c| c.volume == Some(1)).collect();
-    let vol2: Vec<_> = chapters.iter().filter(|c| c.volume == Some(2)).collect();
-    assert_eq!(vol1.len(), 3, "volume 1 should have 3 chapters");
-    assert_eq!(vol2.len(), 3, "volume 2 should have 3 chapters");
+    let vol1_count = chapters.iter().filter(|c| c.volume == Some(1)).count();
+    let vol2_count = chapters.iter().filter(|c| c.volume == Some(2)).count();
+    assert_eq!(vol1_count, 3, "volume 1 should have 3 chapters");
+    assert_eq!(vol2_count, 3, "volume 2 should have 3 chapters");
 
     // Verify ordering: volume ascending, then chapter ascending
     for (i, ch) in chapters.iter().enumerate() {

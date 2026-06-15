@@ -281,7 +281,7 @@ mod tests {
         // Now call ensure_skill_link with the correct target
         let result = ensure_skill_link(
             &workspace,
-            &home_skills.join("correct-skill").parent().unwrap(),
+            home_skills.join("correct-skill").parent().unwrap(),
             "target-skill",
         )
         .expect("should succeed");

@@ -1,9 +1,9 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Shipped** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md); **V1.42 Shipped** — multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) via plan [2026-06-11-v1.42-multi-volume](../../plans/2026-06-11-v1.42-multi-volume.md). **V1.47 Draft overlay** — §5.5.4 two-layer rules (`AGENTS.md`); §5.5.6 normative reflection→findings.
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Shipped** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md); **V1.42 Shipped** — multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) via plan [2026-06-11-v1.42-multi-volume](../../plans/2026-06-11-v1.42-multi-volume.md). **V1.47 Shipped** — §5.5.4 two-layer rules (`AGENTS.md`); §5.5.6 normative reflection→findings.
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
-**Last updated**: 2026-06-12 (V1.43 P-last — V1.42 Shipped stamps)
+**Last updated**: 2026-06-15 (V1.47 P-last — spec promotion Draft → Shipped)
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
@@ -704,7 +704,7 @@ This keeps the OSS path local-first: local DB + daemon scheduled task + CLI stat
 
 #### 5.5.4 Two-layer rules architecture (V1.47 normative)
 
-**V1.47 overlay** supersedes the three-layer model (Layer 3 history removed). **Shipped runtime** (through V1.46) still reads `Works/<work_ref>/Rules/novel-rules.md` — path migration is a follow-up implement slice; this section is normative for new Work layout.
+**V1.47 Shipped (normative)** supersedes the three-layer model (Layer 3 history removed). **Shipped runtime** (through V1.46) still reads `Works/<work_ref>/Rules/novel-rules.md` — path migration is a follow-up implement slice; this section is normative for new Work layout.
 
 | Layer | Location | Mutability | Purpose |
 | --- | --- | --- | --- |
@@ -988,6 +988,10 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
   - Three-layer rules architecture and SOUL / World KB boundaries documented (§5.5.4).
   - `Logs/brainstorm|write|review|publish` roadmap structure documented while reaffirming `Logs/**` sync exclusion (§5.5.5).
   - `reflection-loop` → findings / rule-suggestion integration documented as future implementation (§5.5.6 — **superseded V1.47 P0**; §5.5.6 is now normative).
+- **V1.47 P-last promotion** (recorded 2026-06-15):
+  - §5.5.4 two-layer rules (`AGENTS.md`) promoted Draft → Shipped.
+  - §5.5.6 `novel-chapter-review` findings integration promoted Draft → Shipped.
+  - Status banner updated to `V1.47 Shipped`.
 
 ---
 
