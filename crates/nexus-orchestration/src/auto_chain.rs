@@ -329,7 +329,9 @@ async fn persist_placeholder_finding(
 ///   synthesis path (spec §1.3).
 ///
 /// Each non-`None` failure branch emits a `tracing::warn!` with the
-/// schedule/work context so operators can see the degrade.
+/// schedule/work context so operators can see the degrade. V1.48 P0-fix1
+/// (qc3 W-3): every fallback `warn!` includes `chapter` per spec §1.3
+/// (operator-debugging field for chapter-scoped review passes).
 async fn try_persist_parsed_findings(
     pool: &SqlitePool,
     workspace_dir: &std::path::Path,
@@ -369,6 +371,7 @@ async fn try_persist_parsed_findings(
                 schedule_id,
                 work_id,
                 work_ref,
+                chapter = ?chapter,
                 "review-findings: review-report.md parsed but contained no issues; \
                  falling back to V1.47 placeholder synthesis"
             );
@@ -379,6 +382,7 @@ async fn try_persist_parsed_findings(
                 schedule_id,
                 work_id,
                 work_ref,
+                chapter = ?chapter,
                 "review-findings: review-report.md not found; \
                  falling back to V1.47 placeholder synthesis"
             );
@@ -388,6 +392,7 @@ async fn try_persist_parsed_findings(
             tracing::warn!(
                 schedule_id,
                 work_id,
+                chapter = ?chapter,
                 path = %path.display(),
                 error = %e,
                 "review-findings: failed to read review-report.md; \
@@ -400,16 +405,15 @@ async fn try_persist_parsed_findings(
                 schedule_id,
                 work_id,
                 work_ref,
+                chapter = ?chapter,
                 parse_error = %reason,
                 "review-findings: review-report.md failed to parse; \
                  falling back to V1.47 placeholder synthesis"
             );
             Ok(None)
         }
-        // V1.48 P0-fix1 (qc3 W-1): bounded-read cap exceeded. `chapter` is
-        // included in the span per spec §1.3 (operator-debugging field,
-        // forward-compatible with the W-3 fix that adds it to the other
-        // pre-existing fallback arms).
+        // V1.48 P0-fix1 (qc3 W-1): bounded-read cap exceeded. `chapter`
+        // included per spec §1.3 (qc3 W-3 adds it to every fallback arm).
         Err(ReportLoadError::TooLarge {
             size_bytes,
             cap_bytes,
