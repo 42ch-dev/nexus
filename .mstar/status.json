@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16",
+  "updated_at": "2026-06-16T02:09:19+08:00",
   "plans": [
     {
       "id": "2026-06-16-v1.48-harness-docs-prepare",
@@ -8,9 +8,16 @@
       "file": ".mstar/plans/2026-06-16-v1.48-harness-docs-prepare.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@project-manager", "@writing-specialist"],
+      "agents": [
+        "@project-manager",
+        "@writing-specialist"
+      ],
       "progress": 100,
-      "tags": ["v1.48", "harness", "docs"],
+      "tags": [
+        "v1.48",
+        "harness",
+        "docs"
+      ],
       "created_at": "2026-06-16",
       "updated_at": "2026-06-16",
       "done_at": "2026-06-16",
@@ -26,22 +33,54 @@
       "id": "2026-06-16-v1.48-findings-producer",
       "title": "P0 — Review-report parsing + producer hardening",
       "file": ".mstar/plans/2026-06-16-v1.48-findings-producer.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 0,
-      "tags": ["v1.48", "findings", "p0"],
+      "tags": [
+        "v1.48",
+        "findings",
+        "p0"
+      ],
       "created_at": "2026-06-16",
-      "updated_at": "2026-06-16",
+      "updated_at": "2026-06-16T02:09:19+08:00",
       "metadata": {
-        "working_branch": "feature/v1.48-findings-producer",
-        "merge_target": "iteration/v1.48",
-        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
-        "track": "A",
-        "parallel_with": "2026-06-16-v1.48-serial-hardening",
-        "target_residuals": ["R-V147P0-01", "R-V147P0-05", "R-V147P0-06"]
-      }
+        "commits": [
+          "cb893a91",
+          "cdae5c5f",
+          "3adfb6ae",
+          "b1e23b86",
+          "7668e0a9",
+          "801959f1",
+          "995903b1",
+          "e1b9da55"
+        ],
+        "merge_commit": "e2e51823",
+        "qc_status": "pending"
+      },
+      "working_branch": "feature/v1.48-findings-producer",
+      "merge_target": "iteration/v1.48",
+      "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+      "iteration_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+      "notes": [
+        {
+          "at": "2026-06-16",
+          "event": "implement_dispatched",
+          "evidence": "feature/v1.48-findings-producer @ e1b9da55"
+        },
+        {
+          "at": "2026-06-16",
+          "event": "merged_to_integration",
+          "evidence": "iteration/v1.48 @ e2e51823 (merge commit)"
+        },
+        {
+          "at": "2026-06-16",
+          "event": "in_review",
+          "evidence": "QC tri-review dispatched"
+        }
+      ]
     },
     {
       "id": "2026-06-16-v1.48-findings-consumer",
@@ -49,9 +88,15 @@
       "file": ".mstar/plans/2026-06-16-v1.48-findings-consumer.md",
       "status": "Todo",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 0,
-      "tags": ["v1.48", "findings", "p1"],
+      "tags": [
+        "v1.48",
+        "findings",
+        "p1"
+      ],
       "created_at": "2026-06-16",
       "updated_at": "2026-06-16",
       "metadata": {
@@ -69,9 +114,15 @@
       "file": ".mstar/plans/2026-06-16-v1.48-rules-runtime.md",
       "status": "Todo",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 0,
-      "tags": ["v1.48", "rules", "p2"],
+      "tags": [
+        "v1.48",
+        "rules",
+        "p2"
+      ],
       "created_at": "2026-06-16",
       "updated_at": "2026-06-16",
       "metadata": {
@@ -81,7 +132,9 @@
         "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
         "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
         "track": "A",
-        "target_residuals": ["R-V147P0-04"]
+        "target_residuals": [
+          "R-V147P0-04"
+        ]
       }
     },
     {
@@ -90,9 +143,15 @@
       "file": ".mstar/plans/2026-06-16-v1.48-findings-data-hygiene.md",
       "status": "Todo",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 0,
-      "tags": ["v1.48", "findings", "p3"],
+      "tags": [
+        "v1.48",
+        "findings",
+        "p3"
+      ],
       "created_at": "2026-06-16",
       "updated_at": "2026-06-16",
       "metadata": {
@@ -102,30 +161,61 @@
         "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
         "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
         "track": "A",
-        "target_residuals": ["R-V147P0-02", "R-V147P0-03"]
+        "target_residuals": [
+          "R-V147P0-02",
+          "R-V147P0-03"
+        ]
       }
     },
     {
       "id": "2026-06-16-v1.48-serial-hardening",
       "title": "P4 — §4.5.7 #4 resume + #5 reconcile",
       "file": ".mstar/plans/2026-06-16-v1.48-serial-hardening.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "progress": 0,
-      "tags": ["v1.48", "serial", "p4"],
+      "tags": [
+        "v1.48",
+        "serial",
+        "p4"
+      ],
       "created_at": "2026-06-16",
-      "updated_at": "2026-06-16",
+      "updated_at": "2026-06-16T02:09:19+08:00",
       "metadata": {
-        "working_branch": "feature/v1.48-serial-hardening",
-        "merge_target": "iteration/v1.48",
-        "depends_on": "2026-06-16-v1.48-harness-docs-prepare",
-        "parallel_with": "2026-06-16-v1.48-findings-producer",
-        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
-        "track": "B",
-        "target_residuals": ["R-V147P1-01"]
-      }
+        "commits": [
+          "2b75aa81",
+          "7093ba2d",
+          "a61fc6a9",
+          "93f1c8e1",
+          "f3893a19"
+        ],
+        "merge_commit": "bfc1f332",
+        "qc_status": "pending"
+      },
+      "working_branch": "feature/v1.48-serial-hardening",
+      "merge_target": "iteration/v1.48",
+      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "iteration_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+      "notes": [
+        {
+          "at": "2026-06-16",
+          "event": "implement_dispatched",
+          "evidence": "feature/v1.48-serial-hardening @ f3893a19"
+        },
+        {
+          "at": "2026-06-16",
+          "event": "merged_to_integration",
+          "evidence": "iteration/v1.48 @ bfc1f332 (merge commit)"
+        },
+        {
+          "at": "2026-06-16",
+          "event": "in_review",
+          "evidence": "QC tri-review dispatched"
+        }
+      ]
     },
     {
       "id": "2026-06-16-v1.48-hygiene-and-closeout",
@@ -133,9 +223,17 @@
       "file": ".mstar/plans/2026-06-16-v1.48-hygiene-and-closeout.md",
       "status": "Todo",
       "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@writing-specialist", "@project-manager"],
+      "agents": [
+        "@fullstack-dev",
+        "@writing-specialist",
+        "@project-manager"
+      ],
       "progress": 0,
-      "tags": ["v1.48", "hygiene", "p-last"],
+      "tags": [
+        "v1.48",
+        "hygiene",
+        "p-last"
+      ],
       "created_at": "2026-06-16",
       "updated_at": "2026-06-16",
       "metadata": {
@@ -555,7 +653,11 @@
         "owner": "@fullstack-dev",
         "target": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-01]",
-        "note": "P0 close."
+        "note": "P0 close.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P0 T1+T2: review-report.md parser wired into from-review synthesis path; findings now populate parsed kind/severity/body/rule_suggestion from Works/<work_ref>/Logs/review/review-report.md. Tests in crates/nexus-orchestration/tests/review_report.rs cover parsed + fallback paths.",
+        "closure_evidence": "iteration/v1.48 @ e2e51823 (commits 3adfb6ae, b1e23b86)"
       },
       {
         "id": "R-V147P0-02",
@@ -603,7 +705,11 @@
         "owner": "@fullstack-dev",
         "target": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-05]",
-        "note": "H-1 pre-iteration hotfix."
+        "note": "H-1 pre-iteration hotfix.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P0 T0: H-1 hotfix performed in-plan. RVM schedule_id PK collision root-caused: enqueue_review_master_schedule minted RVM<ts_ms> which collided when two opt-in Works enqueued in same millisecond. Fix: per-process RVM_COUNTER AtomicU32 appended as 6-hex suffix (mirrors ACH_COUNTER / R-V139P0-W-B). Regression test rvm_schedule_ids_are_unique_within_same_millisecond added.",
+        "closure_evidence": "iteration/v1.48 @ e2e51823 (commit cb893a91)"
       },
       {
         "id": "R-V147P0-06",
@@ -615,7 +721,11 @@
         "owner": "@fullstack-dev",
         "target": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-06]",
-        "note": "P0 close."
+        "note": "P0 close.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P0 T3: REVIEW_PRESET_ID hoisted to crates/nexus-orchestration/src/preset_ids.rs::NOVEL_CHAPTER_REVIEW_PRESET_ID. All three duplication sites (auto_chain.rs, preset/validation.rs, schedule/supervisor.rs) now reference the SSOT.",
+        "closure_evidence": "iteration/v1.48 @ e2e51823 (commit cdae5c5f)"
       }
     ]
   }
