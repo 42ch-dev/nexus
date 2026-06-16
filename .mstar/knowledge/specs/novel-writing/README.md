@@ -20,12 +20,12 @@ work-pool.md            → selection + inspiration pools (V1.41)
 manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 ```
 
-**Draft overlays (V1.49 active)** — fold at P-last:
+**Draft overlays (V1.49 P-last — folded)**:
 
-| Overlay | Merge target |
-| --- | --- |
-| [findings-lifecycle.md](findings-lifecycle.md) | `quality-loop.md` §2 |
-| [narrative-indexes.md](narrative-indexes.md) | `workflow-profile.md` §4.6 |
+| Overlay | Merge target | Status |
+| --- | --- | --- |
+| [findings-lifecycle.md](findings-lifecycle.md) | `quality-loop.md` §2 | **Superseded** (V1.49 P-last) |
+| [narrative-indexes.md](narrative-indexes.md) | `workflow-profile.md` §4.6 | **Superseded** (V1.49 P-last) |
 
 ---
 
@@ -33,15 +33,15 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [workflow-profile.md](workflow-profile.md) | Feature line | Shipped V1.36 → V1.48 |
-| [quality-loop.md](quality-loop.md) | Feature line | Shipped V1.47 → V1.48 |
-| [author-experience.md](author-experience.md) | Feature line | Shipped V1.46; Draft §8 V1.49 |
+| [workflow-profile.md](workflow-profile.md) | Feature line | Shipped V1.36 → V1.49 |
+| [quality-loop.md](quality-loop.md) | Feature line | Shipped V1.47 → V1.49 |
+| [author-experience.md](author-experience.md) | Feature line | Shipped V1.49 P2 |
 | [manuscript-audit.md](manuscript-audit.md) | Feature line | Shipped V1.44 |
 | [multi-work-lifecycle.md](multi-work-lifecycle.md) | Feature line | Shipped V1.41 → V1.42 |
 | [work-pool.md](work-pool.md) | Feature line | Shipped V1.41 |
 | [sync-contract.md](sync-contract.md) | Companion | Normative (module contract) |
-| [findings-lifecycle.md](findings-lifecycle.md) | Draft overlay | Draft V1.49 |
-| [narrative-indexes.md](narrative-indexes.md) | Draft overlay | Draft V1.49 |
+| [findings-lifecycle.md](findings-lifecycle.md) | Draft overlay (archived) | Superseded (V1.49 P-last) |
+| [narrative-indexes.md](narrative-indexes.md) | Draft overlay (archived) | Superseded (V1.49 P-last) |
 
 **Archived**: [novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) — superseded; folded into `quality-loop.md` §9.
 
@@ -52,8 +52,8 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 | Topic | Primary SSOT |
 | --- | --- |
 | `Works/<work_ref>/` layout + chapter frontmatter | `workflow-profile.md` |
-| Findings lifecycle + review chain | `quality-loop.md` (+ `findings-lifecycle.md` overlay during V1.49) |
-| F### / E### index files | `narrative-indexes.md` overlay → `workflow-profile.md` §4.6 at P-last |
+| Findings lifecycle + review chain | `quality-loop.md` §2 (6-state F6) |
+| F### / E### index files | `workflow-profile.md` §4.6 (5-col schema) |
 | Author happy path + remediation copy | `author-experience.md` |
 | On-demand chapter audit | `manuscript-audit.md` |
 | Multi-work completion + locks | `multi-work-lifecycle.md` |
