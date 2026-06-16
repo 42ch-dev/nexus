@@ -698,9 +698,16 @@ mod tests {
 
         {
             let _guard = tracing::subscriber::set_default(subscriber);
-            create_inspiration_row(&pool, "npi_1", "ctr_test", "Pool/Ideas/x.md", "Title 1", &now)
-                .await
-                .unwrap();
+            create_inspiration_row(
+                &pool,
+                "npi_1",
+                "ctr_test",
+                "Pool/Ideas/x.md",
+                "Title 1",
+                &now,
+            )
+            .await
+            .unwrap();
         }
 
         crate::test_tracing::assert_info_emitted(
@@ -723,9 +730,16 @@ mod tests {
 
         {
             let _guard = tracing::subscriber::set_default(subscriber);
-            create_inspiration_with_scaffold(&pool, "npi_2", "ctr_test", "Cyber Heist", dir.path(), &now)
-                .await
-                .unwrap();
+            create_inspiration_with_scaffold(
+                &pool,
+                "npi_2",
+                "ctr_test",
+                "Cyber Heist",
+                dir.path(),
+                &now,
+            )
+            .await
+            .unwrap();
         }
 
         // The scaffold path emits its own `inspiration_create_with_scaffold`
@@ -748,9 +762,16 @@ mod tests {
 
         let (pool, _dir) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
-        create_inspiration_row(&pool, "npi_3", "ctr_test", "Pool/Ideas/y.md", "Title 3", &now)
-            .await
-            .unwrap();
+        create_inspiration_row(
+            &pool,
+            "npi_3",
+            "ctr_test",
+            "Pool/Ideas/y.md",
+            "Title 3",
+            &now,
+        )
+        .await
+        .unwrap();
         // FK: inspiration_items.promoted_work_id → works.work_id.
         seed_work(&pool, "wrk_promoted", "ctr_test").await;
 
@@ -779,9 +800,16 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
         // Seed the inspiration row the atomic path updates in step 3.
-        create_inspiration_row(&pool, "npi_4", "ctr_test", "Pool/Ideas/z.md", "Title 4", &now)
-            .await
-            .unwrap();
+        create_inspiration_row(
+            &pool,
+            "npi_4",
+            "ctr_test",
+            "Pool/Ideas/z.md",
+            "Title 4",
+            &now,
+        )
+        .await
+        .unwrap();
         let work = sample_work_record("wrk_atomic", "ctr_test");
 
         {
@@ -789,8 +817,9 @@ mod tests {
             // The trace is emitted at function entry. The subsequent works
             // INSERT may succeed or fail depending on schema FKs; either way
             // the structured trace has already been recorded.
-            let _ = inspiration_promote_atomic(&pool, &work, "ctr_test", "wrk_atomic", "npi_4", &now)
-                .await;
+            let _ =
+                inspiration_promote_atomic(&pool, &work, "ctr_test", "wrk_atomic", "npi_4", &now)
+                    .await;
         }
 
         crate::test_tracing::assert_info_emitted(
@@ -811,9 +840,16 @@ mod tests {
 
         let (pool, _dir) = fresh_pool().await;
         let now = chrono::Utc::now().to_rfc3339();
-        create_inspiration_row(&pool, "npi_5", "ctr_test", "Pool/Ideas/a.md", "Title 5", &now)
-            .await
-            .unwrap();
+        create_inspiration_row(
+            &pool,
+            "npi_5",
+            "ctr_test",
+            "Pool/Ideas/a.md",
+            "Title 5",
+            &now,
+        )
+        .await
+        .unwrap();
 
         {
             let _guard = tracing::subscriber::set_default(subscriber);

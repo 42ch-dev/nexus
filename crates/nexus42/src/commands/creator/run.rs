@@ -242,14 +242,14 @@ fn render_rich_preset_help(
     nexus_home: &std::path::Path,
     caps: &nexus_orchestration::capability::CapabilityRegistry,
 ) -> Option<String> {
-    let loaded =
-        match nexus_orchestration::preset::lookup_preset_by_id(preset_id, nexus_home, caps) {
-            Some(loaded) => loaded,
-            None => match nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, caps) {
-                Ok(loaded) => loaded,
-                Err(_) => return None,
-            },
-        };
+    let loaded = match nexus_orchestration::preset::lookup_preset_by_id(preset_id, nexus_home, caps)
+    {
+        Some(loaded) => loaded,
+        None => match nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, caps) {
+            Ok(loaded) => loaded,
+            Err(_) => return None,
+        },
+    };
     let cli_args = &loaded.manifest.preset.cli_args;
     if cli_args.is_empty() {
         // No preset-specific flags → let clap render the generic RunCommand help.
@@ -1629,8 +1629,7 @@ mod tests {
             "rich help must end with newline (flush-safe): {with_args:?}"
         );
 
-        let without_args =
-            format_preset_run_help("novel-brainstorm", "Brainstorm a novel.", &[]);
+        let without_args = format_preset_run_help("novel-brainstorm", "Brainstorm a novel.", &[]);
         assert!(
             without_args.ends_with('\n'),
             "generic help must end with newline (flush-safe): {without_args:?}"
@@ -1653,8 +1652,7 @@ mod tests {
         let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
         let empty_home = std::env::temp_dir().join("nexus42_wl_a_qc3_s2_empty_home");
         let rendered = render_rich_preset_help("novel-manuscript-audit-review", &empty_home, &caps);
-        let help =
-            rendered.expect("novel-manuscript-audit-review declares cli_args → rich help");
+        let help = rendered.expect("novel-manuscript-audit-review declares cli_args → rich help");
         assert!(
             help.contains("nexus42 creator run novel-manuscript-audit-review"),
             "rich help must echo the preset id: {help}"

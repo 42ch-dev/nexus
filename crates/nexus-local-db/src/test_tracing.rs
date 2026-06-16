@@ -24,7 +24,11 @@ impl<S> tracing_subscriber::Layer<S> for CaptureLayer
 where
     S: tracing::Subscriber,
 {
-    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
         if event.metadata().level() == &tracing::Level::INFO {
             let mut visitor = CaptureVisitor(String::new());
             event.record(&mut visitor);
@@ -77,8 +81,7 @@ pub(crate) fn subscriber_with(
 pub(crate) fn assert_info_emitted(messages: &Arc<Mutex<Vec<String>>>, needles: &[&str]) {
     let msgs = messages.lock().unwrap();
     assert!(
-        msgs.iter()
-            .any(|m| needles.iter().all(|n| m.contains(n))),
+        msgs.iter().any(|m| needles.iter().all(|n| m.contains(n))),
         "expected an INFO trace containing all of {needles:?}; captured: {msgs:?}"
     );
 }
