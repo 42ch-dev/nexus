@@ -47,7 +47,7 @@
       "id": "2026-06-17-v1.49-narrative-indexes",
       "title": "P1 — F###/E### narrative index runtime MVP",
       "file": ".mstar/plans/2026-06-17-v1.49-narrative-indexes.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.49-narrative-indexes",
@@ -56,15 +56,19 @@
       "primary_spec": ".mstar/knowledge/specs/novel-writing/narrative-indexes.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
-      "updated_at": "2026-06-17T20:15:00+08:00",
+      "updated_at": "2026-06-17T22:00:00+08:00",
       "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md",
       "completion_commits": [
         "9e73a047",
         "2ef52406",
         "01425b8c",
-        "1f037243"
+        "1f037243",
+        "3f2efc03",
+        "480a7663"
       ],
-      "head_sha": "1f037243"
+      "head_sha": "3f2efc03",
+      "done_at": "2026-06-17T22:00:00+08:00",
+      "archived_to": ".mstar/archived/plans/2026-06-17-v1.49-narrative-indexes.json"
     },
     {
       "id": "2026-06-17-v1.49-author-desk-ux",
