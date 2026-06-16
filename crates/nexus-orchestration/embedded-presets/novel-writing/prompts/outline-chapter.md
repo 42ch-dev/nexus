@@ -10,6 +10,7 @@ vars:
   slug: { type: string, default: "ch01" }
   world_kb_block: { type: string, default: "" }
   open_findings_block: { type: string, default: "" }
+  foreshadowing_summary: { type: string, default: "" }
 max_tokens: 3000
 ---
 
@@ -56,6 +57,12 @@ The outline **must** contain every section below. Missing sections are a validat
 7. **Foreshadowing Touched (F###)** — see below (REQUIRED even if empty)
 
 ## Foreshadowing Section (REQUIRED)
+
+{{#if foreshadowing_summary}}
+The current foreshadowing index (`Works/{{work_ref}}/Outlines/foreshadowing.md`) lists these active items — reuse their `F###` ids when you touch them, and stay consistent with their planted/paid-off status:
+
+{{foreshadowing_summary}}
+{{/if}}
 
 The outline **must** include a `## Foreshadowing Touched (F###)` section. For each
 foreshadowing item touched (buried or paid-off) in this chapter:
