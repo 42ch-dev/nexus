@@ -526,7 +526,11 @@ mod tests {
 
         crate::test_tracing::assert_info_emitted(
             &captured,
-            &["operation=pool_promote_to_active", "creator_id=ctr_test", "work_id=wrk_001"],
+            &[
+                "operation=pool_promote_to_active",
+                "creator_id=ctr_test",
+                "work_id=wrk_001",
+            ],
         );
     }
 

@@ -2149,7 +2149,10 @@ mod tests {
         let via_helper = capture_findings_output(&findings, "wrk_parity");
         let result = FindingsResult::Fetched(findings.clone());
         let via_shared = format_findings_summary_lines(&result, "wrk_parity").join("\n");
-        assert_eq!(via_helper, via_shared, "helper must delegate to shared formatter");
+        assert_eq!(
+            via_helper, via_shared,
+            "helper must delegate to shared formatter"
+        );
         // Sanity: the populated summary surfaces the count + a top finding.
         assert!(via_shared.contains("findings: 3 open"));
         assert!(via_shared.contains("1 blocker"));
@@ -2344,12 +2347,18 @@ mod tests {
             arr[0].get("description").and_then(|v| v.as_str()),
             Some("Character name changes between paragraphs 3 and 9.")
         );
-        assert_eq!(arr[0].get("kind").and_then(|v| v.as_str()), Some("continuity"));
+        assert_eq!(
+            arr[0].get("kind").and_then(|v| v.as_str()),
+            Some("continuity")
+        );
         assert_eq!(
             arr[0].get("rule_suggestion").and_then(|v| v.as_str()),
             Some("Track character names per chapter.")
         );
-        assert_eq!(arr[0].get("created_at").and_then(|v| v.as_i64()), Some(1_718_000_000));
+        assert_eq!(
+            arr[0].get("created_at").and_then(|v| v.as_i64()),
+            Some(1_718_000_000)
+        );
     }
 
     #[test]
@@ -2653,8 +2662,14 @@ mod tests {
         // R-V146P0-QC3-S3: a positive stale count renders the banner with the
         // computed whole-hour threshold and the spec citation.
         let banner = format_stale_banner(7, 96 * 60 * 60).expect("banner for stale_count>0");
-        assert!(banner.contains("7 finding(s) stale"), "count rendered: {banner}");
-        assert!(banner.contains(">96h"), "threshold hours rendered: {banner}");
+        assert!(
+            banner.contains("7 finding(s) stale"),
+            "count rendered: {banner}"
+        );
+        assert!(
+            banner.contains(">96h"),
+            "threshold hours rendered: {banner}"
+        );
         assert!(
             banner.contains("novel-author-experience §4"),
             "spec citation preserved: {banner}"
@@ -2665,9 +2680,7 @@ mod tests {
     fn format_stale_banner_computes_hours_from_seconds() {
         // R-V146P0-QC3-S3: threshold_seconds is converted to whole hours
         // (integer division). 345600s = 96h; 7200s = 2h.
-        assert!(format_stale_banner(1, 345_600)
-            .unwrap()
-            .contains(">96h"));
+        assert!(format_stale_banner(1, 345_600).unwrap().contains(">96h"));
         assert!(format_stale_banner(1, 7_200).unwrap().contains(">2h"));
     }
 
