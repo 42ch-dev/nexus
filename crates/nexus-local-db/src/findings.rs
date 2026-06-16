@@ -97,8 +97,80 @@ pub struct FindingListFilters {
 /// Valid severity values (R-V139P1-W-1).
 pub const VALID_SEVERITIES: &[&str] = &["info", "minor", "major", "blocker"];
 
-/// Valid status values (R-V139P1-W-1).
-pub const VALID_STATUSES: &[&str] = &["open", "resolved", "wont_fix"];
+/// Valid status values.
+///
+/// V1.39 (R-V139P1-W-1): original three-state minimum (`open`, `resolved`,
+/// `wont_fix`).
+///
+/// V1.49 (F6 — `findings-lifecycle.md` §2): extended to six states by adding
+/// `triaged`, `in_review`, `duplicate`. Existing rows keep their original
+/// status values; the runtime set is the sole enforcement (SQLite `ALTER
+/// TABLE` cannot add `CHECK` constraints to existing tables — see
+/// [`validate_finding_enums`] and migration `202606170001_extend_findings_status.sql`).
+pub const VALID_STATUSES: &[&str] = &[
+    "open",
+    "resolved",
+    "wont_fix",
+    "triaged",
+    "in_review",
+    "duplicate",
+];
+
+/// V1.49 F6 — status strings considered **actionable** for the prompt
+/// consumer ([`list_open_findings_for_chapter`] / `open_findings_block`).
+///
+/// Implements `findings-lifecycle.md` §2.2: findings with status in
+/// `{ open, triaged }` are included in produce prompts; `in_review` is
+/// **excluded** by default (the master-review preset owns that surface),
+/// as are the terminal statuses (`resolved`, `wont_fix`, `duplicate`).
+pub const ACTIONABLE_FINDING_STATUSES: &[&str] = &["open", "triaged"];
+
+/// V1.49 F6 — returns `true` when `status` is a member of [`VALID_STATUSES`].
+///
+/// Originally specified as `const fn` in the plan; the stable Rust toolchain
+/// (1.93) does not yet allow `matches!` on `&str` in `const` contexts
+/// (issue `rust-lang/rust#143874`). The runtime signature is identical —
+/// no current caller requires const evaluation. Promote to `const fn` once
+/// `PartialEq` for `str` stabilises in const.
+#[must_use]
+pub fn is_valid_status(status: &str) -> bool {
+    VALID_STATUSES.contains(&status)
+}
+
+/// V1.49 F6 — Returns `true` when transitioning `from` → `to` is permitted
+/// by the lifecycle diagram in `findings-lifecycle.md` §2.1.
+///
+/// ```text
+/// open → triaged | in_review | resolved | wont_fix | duplicate
+/// triaged → in_review | resolved | wont_fix | duplicate
+/// in_review → resolved | wont_fix | duplicate
+/// resolved → (terminal)
+/// wont_fix → (terminal)
+/// duplicate → (terminal)
+/// ```
+///
+/// `from == to` is **not** a transition and is rejected: callers that want
+/// to refresh `updated_at` without changing status must omit `status` from
+/// the patch. Both endpoints must already be valid members of
+/// [`VALID_STATUSES`]; unknown endpoints return `false`.
+#[must_use]
+pub fn is_valid_transition(from: &str, to: &str) -> bool {
+    if from == to || !is_valid_status(from) || !is_valid_status(to) {
+        return false;
+    }
+    match from {
+        "open" => matches!(
+            to,
+            "triaged" | "in_review" | "resolved" | "wont_fix" | "duplicate"
+        ),
+        "triaged" => matches!(to, "in_review" | "resolved" | "wont_fix" | "duplicate"),
+        "in_review" => matches!(to, "resolved" | "wont_fix" | "duplicate"),
+        // Terminal states: no outbound transitions.
+        "resolved" | "wont_fix" | "duplicate" => false,
+        // Unreachable: is_valid_status already filtered unknowns.
+        _ => false,
+    }
+}
 
 /// Valid `target_executor` values (R-V139P1-W-1).
 pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
@@ -282,6 +354,12 @@ pub const RULE_SUGGESTION_MAX_BYTES: usize = 4096;
 /// values. Any non-`Rust` caller (future API, direct SQL) must be validated
 /// before reaching the DB.
 ///
+/// V1.49 F6: the status set expanded to six states (see [`VALID_STATUSES`]).
+/// Transition legality (open → triaged, etc.) is **not** checked here — it is
+/// enforced by [`update_finding`] which fetches the row's current status
+/// before applying the patch. Create paths always seed `status = "open"`, so
+/// there is no transition to validate at create time.
+///
 /// # Errors
 ///
 /// Returns [`LocalDbError::ConstraintViolation`] if any enum field has an invalid value.
@@ -419,13 +497,18 @@ pub async fn list_findings(
         .collect())
 }
 
-/// V1.48 P1 — chapter-scoped open findings query for `novel-writing` prompt
-/// injection (`archived/knowledge/novel-findings-maturity.md` §2 Consumer).
+/// V1.48 P1 — chapter-scoped **actionable** findings query for
+/// `novel-writing` prompt injection (`findings-lifecycle.md` §2 Consumer).
 ///
-/// Returns all **open** findings for a Work that should influence the
+/// V1.49 F6: the actionable set expanded from `status = 'open'` to
+/// `status IN ('open', 'triaged')` per overlay §2.2. `triaged` findings
+/// (reviewed but not yet addressed) must reach the produce prompt;
+/// `in_review` and the terminal statuses are excluded by default.
+///
+/// Returns all actionable findings for a Work that should influence the
 /// `novel-writing` outline/draft prompt for chapter `N`:
 ///
-/// - rows where `work_id` matches AND `status = 'open'`
+/// - rows where `work_id` matches AND `status IN ('open', 'triaged')`
 ///   AND (`chapter = N` OR `chapter IS NULL`)
 ///
 /// Work-level findings (`chapter IS NULL`) are included so a Work-wide
@@ -440,6 +523,10 @@ pub async fn list_findings(
 ///
 /// The function is creator-scoped for the same isolation reasons as
 /// [`list_findings`] and [`list_stale_open_findings`].
+///
+/// **Actionable set source**: [`ACTIONABLE_FINDING_STATUSES`] is the
+/// canonical constant; callers that need to mirror the filter (e.g. an
+/// HTTP query builder) should read that constant rather than re-hardcoding.
 ///
 /// # Errors
 ///
@@ -461,7 +548,7 @@ pub async fn list_open_findings_for_chapter(
          FROM findings
          WHERE creator_id = ?
            AND work_id = ?
-           AND status = 'open'
+           AND status IN ('open', 'triaged')
            AND (chapter = ? OR chapter IS NULL)
          ORDER BY
            CASE severity
@@ -552,9 +639,19 @@ pub async fn get_finding(
 /// `COALESCE` UPDATE (which treated SQL NULL as "keep existing") to a dynamic
 /// SET-clause builder (mirrors [`works::patch_work`]).
 ///
+/// **V1.49 F6** (`findings-lifecycle.md` §2.1): when `patch.status` is
+/// `Some(new_status)`, the DAO fetches the row's current status and rejects
+/// the transition via [`is_valid_transition`]. Invalid transitions return
+/// [`LocalDbError::ConstraintViolation`] (which the daemon API maps to HTTP
+/// 422 — see `nexus-daemon-runtime::api::handlers::findings::update_finding_handler`).
+/// This read-before-write is best-effort single-statement: under concurrent
+/// writes a TOCTOU race is possible, but SQLite serialises writes and the
+/// WHERE clause scopes the UPDATE to `(creator_id, finding_id)`.
+///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails or the finding is not found.
+/// Returns `LocalDbError` if the database query fails, the finding is not
+/// found, or `patch.status` proposes an illegal lifecycle transition.
 pub async fn update_finding(
     pool: &SqlitePool,
     creator_id: &str,
@@ -594,6 +691,42 @@ pub async fn update_finding(
                     VALID_TARGET_EXECUTORS.join(", ")
                 ),
             });
+        }
+    }
+
+    // V1.49 F6: enforce the lifecycle transition table. When the caller
+    // patches `status`, fetch the row's current status and reject illegal
+    // transitions (e.g. resolved → open, terminal → anything) before any
+    // write. The DAO already validates that the target string is a known
+    // status (above), so `is_valid_transition` only needs to evaluate the
+    // state-machine edges.
+    if let Some(ref new_status) = patch.status {
+        // SAFETY: runtime query_scalar — only the `status` column is read,
+        // and the WHERE clause is creator-scoped. Equivalent to
+        // `get_finding` but cheaper (single column, no FromRow mapping).
+        let current_status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM findings WHERE creator_id = ? AND finding_id = ?",
+        )
+        .bind(creator_id)
+        .bind(finding_id)
+        .fetch_optional(pool)
+        .await?;
+
+        match current_status {
+            None => {
+                // Row not found — fall through to the UPDATE, which will
+                // report `rows_affected = 0` and the caller surfaces NotFound.
+            }
+            Some(from) if !is_valid_transition(&from, new_status) => {
+                return Err(LocalDbError::ConstraintViolation {
+                    table: "findings".to_string(),
+                    constraint: format!(
+                        "invalid status transition '{from}' → '{new_status}'; \
+                         see findings-lifecycle.md §2.1 for the lifecycle diagram"
+                    ),
+                });
+            }
+            Some(_) => { /* valid transition — proceed to UPDATE */ }
         }
     }
 
