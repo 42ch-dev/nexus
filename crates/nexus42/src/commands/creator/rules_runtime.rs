@@ -20,6 +20,8 @@
 //! - [novel-findings-maturity.md §3 / §4](../../../../../.mstar/knowledge/specs/novel-findings-maturity.md)
 //! - [novel-workflow-profile.md §5.5.4](../../../../../.mstar/knowledge/specs/novel-workflow-profile.md)
 
+use std::io::IsTerminal;
+
 use serde::Deserialize;
 
 use crate::api::DaemonClient;
@@ -66,7 +68,12 @@ pub async fn handle_findings(client: &DaemonClient, command: FindingsCommand) ->
 /// `work_ref`, or filesystem write error.
 pub async fn handle_rules(client: &DaemonClient, command: RulesCommand) -> Result<()> {
     match command {
-        RulesCommand::Reset { work_id, json } => handle_rules_reset(client, work_id, json).await,
+        RulesCommand::Reset {
+            work_id,
+            dry_run,
+            yes,
+            json,
+        } => handle_rules_reset(client, work_id, dry_run, yes, json).await,
     }
 }
 
@@ -200,9 +207,30 @@ fn operational_workspace_dir_or_error() -> Result<std::path::PathBuf> {
 ///
 /// Restores `Works/<work_ref>/AGENTS.md` to the default scaffold. Does NOT
 /// delete the Work or any chapter artifacts.
+///
+/// # Flags (V1.48 P2-fix1)
+///
+/// - `--dry-run`: print a unified diff of the pending change and exit WITHOUT
+///   writing. No confirmation prompt is shown. Takes precedence over `--yes`.
+/// - `--yes` (or `-y`): skip the confirmation prompt and write immediately
+///   (matches the `apt-get -y` / `pacman --noconfirm` convention).
+/// - Default (neither flag): print the diff, then prompt for confirmation
+///   before overwriting. Non-interactive stdin without `--yes` is an error.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] on daemon API failure, missing
+/// `work_ref`, non-interactive confirmation, or filesystem write error.
+// Linear 6-phase CLI dispatch (resolve → snapshot → dry-run → no-op →
+// confirm → write) reported in JSON + human form. Splitting it would create a
+// `too_many_arguments` helper or a single-use context struct; neither reduces
+// real complexity. Phase boundaries are marked by section comments below.
+#[allow(clippy::too_many_lines)]
 async fn handle_rules_reset(
     client: &DaemonClient,
     work_id: Option<String>,
+    dry_run: bool,
+    yes: bool,
     json: bool,
 ) -> Result<()> {
     let resolved_work_id = resolve_active_work_id(client, work_id).await?;
@@ -218,24 +246,136 @@ async fn handle_rules_reset(
 
     let ws_dir = operational_workspace_dir_or_error()?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
+    let agents_md_rel = std::path::Path::new("Works")
+        .join(work_ref)
+        .join("AGENTS.md");
 
+    // Snapshot current content. `None` ⇒ the file is absent, so reset would
+    // create it. A read failure for an existing-but-corrupt file is also
+    // treated as "absent" so the atomic reset can still recover it.
+    let current: Option<String> = std::fs::read_to_string(&agents_md_path).ok();
+    let scaffold = nexus_orchestration::rules_layers::render_default_agents_md(work_ref);
+    let would_change = current.as_deref().is_none_or(|c| c != scaffold);
+    let diff = if would_change {
+        current
+            .as_deref()
+            .map(|c| nexus_orchestration::rules_layers::diff_agents_md_vs_scaffold(c, work_ref))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // ── `--dry-run`: preview only, never write, never prompt. ──────────
+    if dry_run {
+        if json {
+            let diff_value = if diff.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::Value::String(diff)
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "work_id": resolved_work_id,
+                    "work_ref": work_ref,
+                    "agents_md_path": agents_md_path.to_string_lossy(),
+                    "dry_run": true,
+                    "would_change": would_change,
+                    "diff": diff_value,
+                }))
+                .unwrap_or_default()
+            );
+        } else if current.is_none() {
+            println!(
+                "• {rel} does not exist; reset would create it with the default scaffold.",
+                rel = agents_md_rel.display()
+            );
+            println!("--- preview: default scaffold ---");
+            print!("{scaffold}");
+            if !scaffold.ends_with('\n') {
+                println!();
+            }
+        } else if !would_change {
+            println!(
+                "• {rel} already matches the default scaffold (no changes).",
+                rel = agents_md_rel.display()
+            );
+        } else {
+            println!(
+                "Dry run — no files modified. Proposed reset of {rel}:",
+                rel = agents_md_rel.display()
+            );
+            print!("{diff}");
+        }
+        return Ok(());
+    }
+
+    // ── Nothing to do: file already matches the scaffold. ──────────────
+    if !would_change {
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "work_id": resolved_work_id,
+                    "work_ref": work_ref,
+                    "agents_md_path": agents_md_path.to_string_lossy(),
+                    "reset": false,
+                    "reason": "already matches default scaffold",
+                }))
+                .unwrap_or_default()
+            );
+        } else {
+            println!(
+                "• {rel} already matches the default scaffold (no changes).",
+                rel = agents_md_rel.display()
+            );
+        }
+        return Ok(());
+    }
+
+    // ── Pending changes. Confirm unless `--yes`. ───────────────────────
+    if !yes {
+        if json {
+            // Machine-readable mode cannot host an interactive prompt; report
+            // that confirmation is required and exit without writing.
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "work_id": resolved_work_id,
+                    "work_ref": work_ref,
+                    "agents_md_path": agents_md_path.to_string_lossy(),
+                    "reset": false,
+                    "confirmation_required": true,
+                    "hint": "pass --yes to proceed non-interactively",
+                }))
+                .unwrap_or_default()
+            );
+            return Ok(());
+        }
+        if !confirm_reset_interactive(&agents_md_rel, &diff)? {
+            println!(
+                "• Reset declined; {rel} left unchanged.",
+                rel = agents_md_rel.display()
+            );
+            return Ok(());
+        }
+    }
+
+    // ── Perform the reset. ─────────────────────────────────────────────
     nexus_orchestration::rules_layers::reset_agents_md(&agents_md_path, work_ref).map_err(|e| {
         CliError::Other(format!("Failed to reset {}: {e}", agents_md_path.display()))
     })?;
 
-    let agents_md_rel = std::path::Path::new("Works")
-        .join(work_ref)
-        .join("AGENTS.md");
     if json {
-        let body = serde_json::json!({
-            "work_id": resolved_work_id,
-            "work_ref": work_ref,
-            "agents_md_path": agents_md_path.to_string_lossy(),
-            "reset": true,
-        });
         println!(
             "{}",
-            serde_json::to_string_pretty(&body).unwrap_or_default()
+            serde_json::to_string_pretty(&serde_json::json!({
+                "work_id": resolved_work_id,
+                "work_ref": work_ref,
+                "agents_md_path": agents_md_path.to_string_lossy(),
+                "reset": true,
+            }))
+            .unwrap_or_default()
         );
     } else {
         println!(
@@ -244,6 +384,38 @@ async fn handle_rules_reset(
         );
     }
     Ok(())
+}
+
+/// Human-mode confirmation: print the diff and prompt before the reset.
+///
+/// Returns `Ok(true)` when the user confirms, `Ok(false)` when they decline.
+/// Errors when stdin is not a terminal (callers should pass `--yes` for
+/// non-interactive use).
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] when stdin is non-interactive or the
+/// prompt itself fails.
+fn confirm_reset_interactive(agents_md_rel: &std::path::Path, diff: &str) -> Result<bool> {
+    print!("{diff}");
+    println!("Lines marked '-' above will be DISCARDED by the reset.\n");
+    if !std::io::stdin().is_terminal() {
+        return Err(CliError::Config(format!(
+            "Resetting {rel} requires confirmation but stdin is not a terminal. \
+             Pass --yes to proceed, or --dry-run to preview.",
+            rel = agents_md_rel.display()
+        )));
+    }
+    let confirmed = dialoguer::Confirm::new()
+        .with_prompt(format!(
+            "Reset {rel} to the default scaffold? This discards local edits.",
+            rel = agents_md_rel.display()
+        ))
+        .default(false)
+        .show_default(true)
+        .interact_opt()
+        .map_err(|e| CliError::Other(format!("confirmation prompt failed: {e}")))?;
+    Ok(confirmed == Some(true))
 }
 
 /// PATCH a finding's status to `resolved` via the daemon API.
