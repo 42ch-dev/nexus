@@ -2,13 +2,6 @@
   "version": 1,
   "updated_at": "2026-06-18T02:00:00+08:00",
   "plans": [],
-  "v1_43_iteration_complete": true,
-  "v1_44_iteration_complete": true,
-  "v1_45_iteration_complete": true,
-  "v1_46_iteration_complete": true,
-  "v1_47_iteration_complete": true,
-  "v1_48_iteration_complete": true,
-  "v1_49_p0_status": null,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
