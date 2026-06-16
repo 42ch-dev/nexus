@@ -201,6 +201,43 @@ mod tests {
         );
     }
 
+    /// Plan T4 alias — combined token-cap coverage: count cap (20 → ≤8
+    /// bullets) AND body truncation (oversize bodies get an ellipsis).
+    /// With oversize bodies the total-block cap may also bind (further
+    /// reducing the bullet count below MAX_FINDINGS); the assertion
+    /// accepts either cap binding as long as both invariants hold.
+    #[test]
+    fn findings_block_builder_respects_token_cap() {
+        let long_body = "z".repeat(MAX_BODY_CHARS * 3);
+        let findings: Vec<Finding> = (0..20)
+            .map(|i| make_finding("minor", "craft", &format!("f{i}"), &long_body))
+            .collect();
+        let block = build_open_findings_block(&findings, "01");
+
+        // Count cap (≤ MAX_FINDINGS) — total-char cap may further reduce.
+        let bullet_count = block.lines().filter(|l| l.starts_with("- [")).count();
+        assert!(
+            bullet_count <= MAX_FINDINGS,
+            "expected at most {MAX_FINDINGS} bullets when 20 findings seeded; got {bullet_count}"
+        );
+
+        // Body truncation — every emitted bullet should carry an ellipsis.
+        let bullets: Vec<&str> = block.lines().filter(|l| l.starts_with("- [")).collect();
+        for b in &bullets {
+            assert!(
+                b.contains('…'),
+                "oversize body should be truncated with ellipsis; got: {b}"
+            );
+        }
+
+        // Total-char cap invariant.
+        assert!(
+            block.len() <= MAX_TOTAL_BLOCK_CHARS,
+            "block must not exceed MAX_TOTAL_BLOCK_CHARS ({MAX_TOTAL_BLOCK_CHARS}); got {}",
+            block.len()
+        );
+    }
+
     /// Overlay §2.2 body cap: a body over `MAX_BODY_CHARS` is truncated
     /// with ellipsis.
     #[test]

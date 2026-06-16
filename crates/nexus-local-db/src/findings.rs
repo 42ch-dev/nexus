@@ -996,7 +996,10 @@ pub async fn create_finding_from_review_tx(
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_rule_suggestion, FindingKind, RULE_SUGGESTION_MAX_BYTES};
+    use super::{
+        normalize_rule_suggestion, list_open_findings_for_chapter, Finding, FindingKind,
+        RULE_SUGGESTION_MAX_BYTES,
+    };
     use crate::error::LocalDbError;
     use sqlx::SqlitePool;
 
@@ -1135,5 +1138,164 @@ mod tests {
             sql.contains("work_id") && sql.contains("chapter") && sql.contains("status"),
             "index should cover (work_id, chapter, status): {sql}"
         );
+    }
+
+    // ── V1.48 P1 (T4): chapter-scoped open-findings query ────────────────────
+
+    /// Build a minimal `Finding` row for insertion in tests.
+    fn row(
+        id: &str,
+        work_id: &str,
+        chapter: Option<i64>,
+        severity: &str,
+        title: &str,
+        created_at: i64,
+        status: &str,
+    ) -> Finding {
+        Finding {
+            finding_id: id.to_string(),
+            work_id: work_id.to_string(),
+            chapter,
+            severity: severity.to_string(),
+            status: status.to_string(),
+            title: title.to_string(),
+            description: "desc".to_string(),
+            target_executor: "write".to_string(),
+            creator_id: "ctr_test".to_string(),
+            kind: "craft".to_string(),
+            rule_suggestion: None,
+            created_at,
+            updated_at: created_at,
+        }
+    }
+
+    /// V1.48 P1 T4 — `list_open_findings_for_chapter` filters by chapter AND
+    /// work-level (chapter IS NULL) and orders per overlay §2.1
+    /// (severity DESC, then created_at ASC). Closed/resolved rows and
+    /// other-chapter rows are excluded.
+    #[tokio::test]
+    async fn list_open_findings_for_chapter_filters_by_chapter_and_work_level() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_a";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+        seed_minimal_work(&pool, "wrk_other", CREATOR).await;
+
+        // Seed:
+        //  - chapter=1 open (minor)
+        //  - chapter=2 open (blocker)         ← must NOT appear for chapter=1
+        //  - chapter=NULL open (major)        ← Work-level, must appear
+        //  - chapter=1 resolved (major)       ← must NOT appear
+        //  - chapter=1 wont_fix (blocker)     ← must NOT appear
+        //  - different work_id, chapter=1     ← must NOT appear
+        super::create_finding(&pool, &row("f1", WORK, Some(1), "minor", "ch1-minor", 100, "open"))
+            .await
+            .unwrap();
+        super::create_finding(
+            &pool,
+            &row("f2", WORK, Some(2), "blocker", "ch2-blocker", 100, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("f3", WORK, None, "major", "work-level-major", 50, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("f4", WORK, Some(1), "major", "ch1-resolved", 200, "resolved"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("f5", WORK, Some(1), "blocker", "ch1-wontfix", 300, "wont_fix"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("f6", "wrk_other", Some(1), "blocker", "other-work", 100, "open"),
+        )
+        .await
+        .unwrap();
+
+        let got = list_open_findings_for_chapter(&pool, CREATOR, WORK, 1)
+            .await
+            .unwrap();
+
+        // Expect: f3 (work-level major), f1 (ch1 minor) in severity-desc order.
+        let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
+        assert_eq!(ids, vec!["f3", "f1"],
+            "expected [work-level-major (severity major), ch1-minor (severity minor)] in that order; got {ids:?}");
+
+        // Verify chapter predicate explicitly.
+        for f in &got {
+            assert!(
+                f.chapter == Some(1) || f.chapter.is_none(),
+                "found finding for chapter {:?} should not appear for chapter 1",
+                f.chapter
+            );
+        }
+    }
+
+    /// V1.48 P1 T4 — ordering check: when multiple findings share a severity,
+    /// the tiebreaker is `created_at` ASC (oldest first within the bucket).
+    #[tokio::test]
+    async fn list_open_findings_for_chapter_orders_by_created_at_asc_within_severity() {
+        let (pool, _dir) = fresh_pool().await;
+        const WORK: &str = "wrk_b";
+        seed_minimal_work(&pool, WORK, "ctr_test").await;
+
+        // Three minors on chapter 1, inserted with decreasing created_at.
+        super::create_finding(&pool, &row("g1", WORK, Some(1), "minor", "newest", 5000, "open"))
+            .await
+            .unwrap();
+        super::create_finding(&pool, &row("g2", WORK, Some(1), "minor", "middle", 3000, "open"))
+            .await
+            .unwrap();
+        super::create_finding(&pool, &row("g3", WORK, Some(1), "minor", "oldest", 1000, "open"))
+            .await
+            .unwrap();
+
+        let got = list_open_findings_for_chapter(&pool, "ctr_test", WORK, 1)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
+        assert_eq!(ids, vec!["g3", "g2", "g1"],
+            "expected oldest-first within minor bucket; got {ids:?}");
+    }
+
+    /// V1.48 P1 T4 — empty result when no open findings match.
+    #[tokio::test]
+    async fn list_open_findings_for_chapter_returns_empty_when_no_matches() {
+        let (pool, _dir) = fresh_pool().await;
+        // No seed — table is empty.
+        let got = list_open_findings_for_chapter(&pool, "ctr_test", "wrk_c", 1)
+            .await
+            .unwrap();
+        assert!(got.is_empty(), "expected empty result on unseeded table");
+    }
+
+    /// Insert a minimal works row to satisfy the `findings.work_id` FK.
+    async fn seed_minimal_work(pool: &SqlitePool, work_id: &str, creator_id: &str) {
+        // SAFETY: test-only — minimal works row for FK satisfaction.
+        sqlx::query(
+            r"INSERT INTO works
+                 (work_id, creator_id, workspace_slug, status, title,
+                  long_term_goal, initial_idea, intake_status, inspiration_log,
+                  primary_preset_id, schedule_ids, created_at, updated_at,
+                  current_stage, stage_status)
+               VALUES (?, ?, 'ws', 'active', 't', 'g', 'i', 'complete', '[]',
+                       'novel-writing', '[]', '2026-06-16T10:00:00Z',
+                       '2026-06-16T10:00:00Z', 'produce', 'active')",
+        )
+        .bind(work_id)
+        .bind(creator_id)
+        .execute(pool)
+        .await
+        .unwrap();
     }
 }
