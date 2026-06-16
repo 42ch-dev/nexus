@@ -706,6 +706,34 @@
         "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/fix-w1-completion.md §Risks",
         "note": "Local clippy rust-1.93.0 is stricter than the clippy version CI/qc3 used (qc3 reported --all clean against the same code). Verified pre-existing on iteration/v1.49 @ bc8efc8d (clean base before W-1 fix) with identical 131-error count. Not a V1.49 regression. W-1 fix is clippy-neutral on the directly modified crates. Suggested fix at V1.50: pin rust-toolchain.toml to CI's resolved version, or run `cargo clippy --fix --allow-dirty --allow-staged` and address residual manually per AGENTS.md fix-cadence."
       }
+    ],
+    "2026-06-17-v1.49-narrative-indexes": [
+      {
+        "id": "R-V149P1-01",
+        "title": "Draft overlay narrative-indexes.md §3 lists a 4-column F### table (id|description|status|chapters) while claiming alignment with the 5-column scaffolded template (ID|Description|Planted|Paid off|Status); overlay table to be reconciled at the P5 fold into workflow-profile.md §4.6.",
+        "severity": "low",
+        "source": "P1 implementer (spec/code reconciliation)",
+        "scope": ".mstar/knowledge/specs/novel-writing/narrative-indexes.md §3; runtime uses the scaffolded template 5-column shape (crates/nexus-orchestration/src/narrative_index.rs)",
+        "decision": "defer",
+        "owner": "@writing-specialist or @architect",
+        "target": "V1.49 P5",
+        "target_date": "V1.49 P5",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision",
+        "note": "No runtime behavior gap — the runtime implements the template's 5-column shape (ground truth for round-trip), and the overlay §3 4-column summary maps onto it (Planted+Paid off realize `chapters`; Status honours planned|buried|paid_off). Documentation-only reconciliation when the overlay folds into workflow-profile.md §4.6 at P-last. Also tracks the deferred promotion-concurrency advisory-lock decision (single-writer daemon model + atomic temp+rename is the V1.49 choice; a hard advisory lock is a V1.50 follow-up if multi-writer arrives)."
+      },
+      {
+        "id": "R-V149P1-02",
+        "title": "Intermittent flaky test `fallback_warn_includes_chapter_field` (review_report) fails under full parallel `cargo test -p nexus-orchestration`; passes in isolation. Pre-existing on iteration/v1.49 base.",
+        "severity": "low",
+        "source": "P1 implementer (pre-existing flake, verified against base per .mstar/AGENTS.md protocol)",
+        "scope": "crates/nexus-orchestration/tests/review_report.rs::fallback_warn_includes_chapter_field (self-contained tracing_subscriber capture layer)",
+        "decision": "defer",
+        "owner": "@qa-engineer or @fullstack-dev",
+        "target": "V1.50",
+        "target_date": "V1.50",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Residual additions",
+        "note": "Verified pre-existing per the repo's 'Pre-existing claim verification protocol': reproduces on iteration/v1.49 @ 3630a4e5 (base) with `cargo test -p nexus-orchestration` (full parallel suite — 9 passed, 1 failed in review_report); passes with `cargo test -p nexus-orchestration --test review_report` (in isolation, parallel and serial). Cause: global tracing registry contention when many test binaries install/inspect the subscriber concurrently. Not caused by V1.49 P1 — review_report.rs and its capture layer are untouched. Suggested fix: scoped subscriber guard or serializing that single test."
+      }
     ]
   }
 }
