@@ -519,21 +519,23 @@ impl Capability for NovelProjectScaffold {
             }
         }
 
-        // ── T2j: Rules/ (V1.39 P3, DF-65) ─────────────────────────────
-        let rules = root.join("Rules");
-        if create_dir_all_idem(&rules)? {
-            txn.dirs_created.push(rules);
-        }
-
-        // Layer 2: per-work novel-rules.md stub
-        if let Some(tmpl) = load_template("novel-rules.md") {
-            let rendered = render_template(&tmpl, &[("work_ref", &inp.work_ref)])?;
-            write_file_idem(
-                &root.join("Rules/novel-rules.md"),
-                &rendered,
-                &mut txn.files_created,
-            )?;
-        }
+        // ── T2j: Layer 2 AGENTS.md (V1.48 P2, overlay §3.1 #4) ─────────
+        // V1.47 normative (novel-workflow-profile.md §5.5.4) declares
+        // `Works/<work_ref>/AGENTS.md` as Layer 2. V1.48 P2 migrates the
+        // scaffold away from the legacy `Rules/novel-rules.md`. The
+        // `Rules/` directory is no longer created for new Works; existing
+        // Works keep their legacy file and the read path falls back to it
+        // (see stage_gates::read_rules_layers).
+        //
+        // The scaffold content comes from the shared
+        // `rules_layers::render_default_agents_md` so that `novel-project-init`
+        // and the `rules reset` CLI (T4) stay in sync.
+        let agents_md_rendered = crate::rules_layers::render_default_agents_md(&inp.work_ref);
+        write_file_idem(
+            &root.join("AGENTS.md"),
+            &agents_md_rendered,
+            &mut txn.files_created,
+        )?;
 
         // ── T3: seed work_chapters rows + T4: PATCH works ─────────────
         // V1.37 (R-V136P1-02): T3 + T4 now run inside a single DB
@@ -907,9 +909,16 @@ mod tests {
         assert!(scaffold_path.join("Logs/write").is_dir());
         assert!(scaffold_path.join("Logs/review").is_dir());
         assert!(scaffold_path.join("Logs/publish").is_dir());
-        // V1.39 P3: Rules directory + Layer 2 stub
-        assert!(scaffold_path.join("Rules").is_dir());
-        assert!(scaffold_path.join("Rules/novel-rules.md").is_file());
+        // V1.48 P2: Layer 2 is now AGENTS.md at Work root (not Rules/novel-rules.md).
+        assert!(
+            scaffold_path.join("AGENTS.md").is_file(),
+            "AGENTS.md must be scaffolded at Work root"
+        );
+        // Legacy Rules/ dir is intentionally NOT created for new scaffolds.
+        assert!(
+            !scaffold_path.join("Rules").exists(),
+            "Rules/ dir must not be created for new V1.48 scaffolds"
+        );
 
         // Verify files
         assert!(scaffold_path.join("README.md").is_file());
