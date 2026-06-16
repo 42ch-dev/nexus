@@ -733,14 +733,40 @@
         "id": "R-V149P1-02",
         "title": "Intermittent flaky test `fallback_warn_includes_chapter_field` (review_report) fails under full parallel `cargo test -p nexus-orchestration`; passes in isolation. Pre-existing on iteration/v1.49 base.",
         "severity": "low",
-        "source": "P1 implementer (pre-existing flake, verified against base per .mstar/AGENTS.md protocol)",
+        "source": "P1 implementer (pre-existing flake, verified against base per .mstar/AGENTS.md protocol); QC3 also verified on origin/main @ be27111b",
         "scope": "crates/nexus-orchestration/tests/review_report.rs::fallback_warn_includes_chapter_field (self-contained tracing_subscriber capture layer)",
         "decision": "defer",
         "owner": "@qa-engineer or @fullstack-dev",
         "target": "V1.50",
         "target_date": "V1.50",
-        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Residual additions",
-        "note": "Verified pre-existing per the repo's 'Pre-existing claim verification protocol': reproduces on iteration/v1.49 @ 3630a4e5 (base) with `cargo test -p nexus-orchestration` (full parallel suite — 9 passed, 1 failed in review_report); passes with `cargo test -p nexus-orchestration --test review_report` (in isolation, parallel and serial). Cause: global tracing registry contention when many test binaries install/inspect the subscriber concurrently. Not caused by V1.49 P1 — review_report.rs and its capture layer are untouched. Suggested fix: scoped subscriber guard or serializing that single test."
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Residual additions + qc3.md",
+        "note": "Verified pre-existing per the repo's 'Pre-existing claim verification protocol': reproduces on iteration/v1.49 @ 3630a4e5 (base) with `cargo test -p nexus-orchestration` (full parallel suite — 9 passed, 1 failed in review_report); passes with `cargo test -p nexus-orchestration --test review_report` (in isolation, parallel and serial). QC3 also verified on origin/main @ be27111b with 2/10 failure rate. Cause: global tracing registry contention when many test binaries install/inspect the subscriber concurrently. Not caused by V1.49 P1 — review_report.rs and its capture layer are untouched. Suggested fix: scoped subscriber guard or serializing that single test."
+      },
+      {
+        "id": "R-V149P1-03",
+        "title": "ForeshadowingRow.status is String; overlay defines closed vocabulary (planned|buried|paid_off) but runtime does not validate",
+        "severity": "medium",
+        "source": "qc1 W-1 (architecture/maintainability)",
+        "scope": "crates/nexus-orchestration/src/narrative_index.rs (ForeshadowingRow struct + parse/serialize)",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.49 P1 fix wave",
+        "target_date": "V1.49 P1 fix wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/qc-consolidated.md §W-1",
+        "note": "ForeshadowingRow.status: String → typed enum ForeshadowingStatus { Planned, Buried, PaidOff } with FromStr + Display. parse_foreshadowing_index validates string on parse (reject unknown with structured error). serialize_foreshadowing_index uses Display for canonical output. Tests: parse_foreshadowing_index_rejects_unknown_status, serialize_then_parse_roundtrip_preserves_known_statuses. No runtime currently branches on status; the risk is for future code (filtering, transitions)."
+      },
+      {
+        "id": "R-V149P1-04",
+        "title": "extract_inline_f_declarations / promote_outline_to_index over-allocates: bullets without explicit F### token receive new F### ids (silent index corruption)",
+        "severity": "medium",
+        "source": "qc1 W-2 (architecture/maintainability)",
+        "scope": "crates/nexus-orchestration/src/narrative_index.rs::extract_inline_f_declarations + promote_outline_to_index",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.49 P1 fix wave",
+        "target_date": "V1.49 P1 fix wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/qc-consolidated.md §W-2",
+        "note": "Promotion allocates F### for ANY bullet without F### prefix — notes/TODOs/prose silently corrupt the index with spurious ids. Fix: require explicit F### token in the bullet (lines without F### ignored or logged at debug). Update extract_inline_f_declarations to require the token. Update promote_outline_to_index to skip non-declaration bullets. Tests: extract_inline_f_declarations_ignores_bullets_without_f_token, promote_outline_to_index_does_not_allocate_for_prose_bullets. Risk: index not user-facing beyond prompt injection; spurious ids are recoverable by manual edit."
       }
     ]
   }
