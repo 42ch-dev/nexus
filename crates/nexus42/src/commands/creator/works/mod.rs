@@ -535,10 +535,15 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
-        if let Ok(stale) = client
-            .get::<serde_json::Value>("/v1/local/findings/stale")
-            .await
-        {
+        //
+        // R-V146P0-QC3-S3: route through `fetch_stale_findings` (the shared
+        // short-timeout helper, STALE_FETCH_TIMEOUT = 5s) instead of the raw
+        // `client.get(...)` which inherited the default 30s request timeout.
+        // This restores parity with the JSON status path (qc3 F-002) and
+        // bounds the stale-fetch latency on the human status hot path — the
+        // original qc3 S-003 concern that a degraded stale endpoint could
+        // stall the status command for the full default timeout.
+        if let Some(stale) = fetch_stale_findings(client).await {
             let stale_count = stale
                 .get("stale_count")
                 .and_then(serde_json::Value::as_u64)
@@ -547,15 +552,8 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 .get("threshold_seconds")
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(96 * 60 * 60);
-            if stale_count > 0 {
-                let threshold_hours = threshold_secs / 3600;
-                // V1.47 P1: normalize user-facing copy — spec name, not repo path.
-                // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
-                println!(
-                    "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
-                     address open findings or run a review pass; \
-                     see novel-author-experience §4"
-                );
+            if let Some(banner) = format_stale_banner(stale_count, threshold_secs) {
+                println!("{banner}");
                 println!();
             }
         }
@@ -1484,6 +1482,30 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
             e
         })
         .ok()
+}
+
+/// Format the human-path stale-findings banner line (R-V146P0-QC3-S3).
+///
+/// Pure over `(stale_count, threshold_seconds)`. Returns `Some(banner)` only
+/// when `stale_count > 0` (no banner noise when nothing is stale); `None`
+/// otherwise so the caller skips printing. Extracted from the inline banner
+/// block so the rendering + zero-suppression is hermetically unit-testable,
+/// and so both the threshold math and the spec citation live in one place.
+///
+/// `threshold_seconds` defaults to 96h (96 * 60 * 60) at the call site when
+/// the daemon omits it.
+fn format_stale_banner(stale_count: u64, threshold_seconds: i64) -> Option<String> {
+    if stale_count == 0 {
+        return None;
+    }
+    let threshold_hours = threshold_seconds / 3600;
+    // V1.47 P1: normalize user-facing copy — spec name, not repo path.
+    // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
+    Some(format!(
+        "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
+         address open findings or run a review pass; \
+         see novel-author-experience §4"
+    ))
 }
 
 /// Fetch both the work-scoped open findings and the creator-global stale
@@ -2614,6 +2636,39 @@ mod tests {
             stale.is_none(),
             "stale fetch returns None on endpoint error (best-effort, short-timeout client)"
         );
+    }
+
+    // ── R-V146P0-QC3-S3: human-path stale banner rendering ──────────────
+
+    #[test]
+    fn format_stale_banner_none_when_zero() {
+        // R-V146P0-QC3-S3: zero stale findings must NOT emit a banner
+        // (no empty sentinel noise). The human status path now routes through
+        // `format_stale_banner`, so the zero-suppression is unit-testable.
+        assert_eq!(format_stale_banner(0, 96 * 60 * 60), None);
+    }
+
+    #[test]
+    fn format_stale_banner_some_when_stale_count_positive() {
+        // R-V146P0-QC3-S3: a positive stale count renders the banner with the
+        // computed whole-hour threshold and the spec citation.
+        let banner = format_stale_banner(7, 96 * 60 * 60).expect("banner for stale_count>0");
+        assert!(banner.contains("7 finding(s) stale"), "count rendered: {banner}");
+        assert!(banner.contains(">96h"), "threshold hours rendered: {banner}");
+        assert!(
+            banner.contains("novel-author-experience §4"),
+            "spec citation preserved: {banner}"
+        );
+    }
+
+    #[test]
+    fn format_stale_banner_computes_hours_from_seconds() {
+        // R-V146P0-QC3-S3: threshold_seconds is converted to whole hours
+        // (integer division). 345600s = 96h; 7200s = 2h.
+        assert!(format_stale_banner(1, 345_600)
+            .unwrap()
+            .contains(">96h"));
+        assert!(format_stale_banner(1, 7_200).unwrap().contains(">2h"));
     }
 
     // ── sanitize_for_terminal tests ──────────────────────────────────────
