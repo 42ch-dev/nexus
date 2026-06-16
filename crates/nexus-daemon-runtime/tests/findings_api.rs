@@ -13,11 +13,12 @@
 
 #![allow(clippy::unwrap_used)]
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use nexus_daemon_runtime::api::handlers::findings::{
     create_finding_handler, create_from_review_handler, delete_finding_handler,
-    get_finding_handler, list_findings_handler, update_finding_handler, CreateFindingRequest,
-    FindingApiDto, ListFindingsQuery, UpdateFindingRequest,
+    get_finding_handler, list_findings_handler, prune_findings_handler, update_finding_handler,
+    CreateFindingRequest, FindingApiDto, ListFindingsQuery, PruneFindingsQuery,
+    UpdateFindingRequest,
 };
 use nexus_daemon_runtime::api::handlers::works::CreateWorkRequest;
 use nexus_daemon_runtime::test_utils;
@@ -755,5 +756,74 @@ async fn findings_lifecycle_rejects_sql_injection_style_status() {
     assert_eq!(
         still_there.status, "open",
         "seeded row must be unchanged after the rejected PATCH"
+    );
+}
+
+// ─── V1.49 P3: retention prune endpoint (§9.4) ──────────────────────────────
+
+/// `POST /v1/local/findings/prune` previews (`dry_run=true`) and performs
+/// (`dry_run=false`) the retention prune of old `resolved` findings.
+///
+/// Seeds two findings: one marked `resolved` + old (past the 90-day window)
+/// and one left `open` + recent. The dry-run reports 1 and deletes nothing;
+/// the real prune deletes 1 and leaves the open finding intact.
+#[tokio::test]
+async fn findings_prune_endpoint_dry_run_and_delete() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let f1 = create_finding(&state, &work_id, "major", "old resolved").await;
+    let f2 = create_finding(&state, &work_id, "minor", "recent open").await;
+
+    // Seed: mark f1 resolved + old (past 90d). f2 stays open + recent.
+    let now = chrono::Utc::now().timestamp();
+    let old_ts = now - 91 * 24 * 3_600;
+    sqlx::query("UPDATE findings SET status = 'resolved', updated_at = ? WHERE finding_id = ?")
+        .bind(old_ts)
+        .bind(&f1.finding_id)
+        .execute(state.pool())
+        .await
+        .unwrap();
+
+    // Dry-run: reports 1 eligible, deletes nothing.
+    let axum::Json(dry) = prune_findings_handler(
+        State(state.clone()),
+        Query(PruneFindingsQuery {
+            older_than_days: None,
+            dry_run: Some(true),
+        }),
+    )
+    .await
+    .expect("dry-run prune must succeed");
+    assert!(dry.dry_run, "dry_run flag must round-trip");
+    assert_eq!(dry.count, 1, "exactly one old resolved row is eligible");
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+        .bind(&work_id)
+        .fetch_one(state.pool())
+        .await
+        .unwrap();
+    assert_eq!(total, 2, "dry-run must not delete any rows");
+
+    // Real prune: deletes 1.
+    let axum::Json(real) = prune_findings_handler(
+        State(state.clone()),
+        Query(PruneFindingsQuery {
+            older_than_days: None,
+            dry_run: None,
+        }),
+    )
+    .await
+    .expect("prune must succeed");
+    assert!(!real.dry_run);
+    assert_eq!(real.count, 1, "exactly one row deleted");
+    let remaining: Vec<String> =
+        sqlx::query_scalar("SELECT finding_id FROM findings WHERE work_id = ? ORDER BY finding_id")
+            .bind(&work_id)
+            .fetch_all(state.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        remaining,
+        vec![f2.finding_id],
+        "only the old resolved row is pruned; the open finding survives"
     );
 }

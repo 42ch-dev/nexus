@@ -57,6 +57,11 @@ pub async fn handle_findings(client: &DaemonClient, command: FindingsCommand) ->
         FindingsCommand::Accept { finding_id, json } => {
             handle_findings_accept(client, &finding_id, json).await
         }
+        FindingsCommand::Prune {
+            older_than_days,
+            dry_run,
+            json,
+        } => handle_findings_prune(client, older_than_days, dry_run, json).await,
     }
 }
 
@@ -185,6 +190,63 @@ async fn handle_findings_accept(client: &DaemonClient, finding_id: &str, json: b
         } else if already_resolved {
             println!("• Finding {finding_id} was already resolved");
         }
+    }
+    Ok(())
+}
+
+/// `creator works findings prune [--older-than <days>] [--dry-run]`
+/// (`novel-writing/quality-loop.md` §9.4).
+///
+/// Calls `POST /v1/local/findings/prune` and reports the deleted (or, in
+/// dry-run, would-be-deleted) count. `resolved` findings older than the
+/// retention window are eligible; `open` and `wont_fix` are never touched.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] on daemon API failure.
+async fn handle_findings_prune(
+    client: &DaemonClient,
+    older_than_days: i64,
+    dry_run: bool,
+    json: bool,
+) -> Result<()> {
+    let path =
+        format!("/v1/local/findings/prune?older_than_days={older_than_days}&dry_run={dry_run}");
+    let resp: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&resp).unwrap_or_default()
+        );
+        return Ok(());
+    }
+
+    let count = resp
+        .get("count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let resp_dry_run = resp
+        .get("dry_run")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(dry_run);
+    let days = resp
+        .get("older_than_days")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(older_than_days);
+    if resp_dry_run {
+        if count == 0 {
+            println!("• No resolved findings older than {days} days to prune (dry-run).");
+        } else {
+            println!(
+                "Dry run — {count} resolved finding(s) older than {days} day(s) \
+                 would be pruned. Re-run without --dry-run to delete."
+            );
+        }
+    } else if count == 0 {
+        println!("• No resolved findings older than {days} days to prune; nothing deleted.");
+    } else {
+        println!("✓ Pruned {count} resolved finding(s) older than {days} day(s).");
     }
     Ok(())
 }

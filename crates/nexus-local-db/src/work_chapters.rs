@@ -361,6 +361,89 @@ pub struct ReconcileReport {
     pub preserved: u32,
 }
 
+/// A single write decision produced by [`compute_reconcile_diff`] (V1.49 P3,
+/// R-V148P4-W3).
+///
+/// Each variant maps 1:1 to a mutation performed by [`apply_reconcile_diff`].
+/// Splitting reconcile into a read-only "compute" phase and a write-only
+/// "apply" phase lets the daemon hold the runtime lock **only** for the fast
+/// write phase, while the slow filesystem walk + per-chapter DB reads run
+/// unlocked. The [`ReconcileReport`] counters are derivable from a
+/// [`ReconcileDiff`] without re-reading state (see [`ReconcileDiff::to_report`]),
+/// so the dry-run preview and the mutating path produce identical counters.
+#[derive(Debug, Clone)]
+pub enum ReconcileOp {
+    /// Insert a new chapter row, optionally applying a non-default status
+    /// and/or word count mirrored from the file frontmatter.
+    CreateChapter {
+        /// Chapter number parsed from the filename.
+        chapter: i32,
+        /// Volume parsed from frontmatter (default 1).
+        volume: i32,
+        /// `Works/<work_ref>/Stories/<filename>` body path.
+        body_path: String,
+        /// Frontmatter `status` if present and not the `not_started` default.
+        status: Option<String>,
+        /// Frontmatter `word_count` if present (already converted to `u32`).
+        word_count: Option<u32>,
+    },
+    /// Resync the chapter file's frontmatter `status` to the DB source of
+    /// truth (DB-as-SSOT; the file was ahead/conflicting).
+    ResyncFileStatus {
+        /// Absolute path to the chapter `.md` file.
+        path: std::path::PathBuf,
+        /// DB status to write into the file frontmatter.
+        db_status: String,
+    },
+    /// Mirror the file's `word_count` into the DB row (status unchanged).
+    UpdateWordCount {
+        chapter: i32,
+        volume: i32,
+        /// Current DB status (preserved on the word-count-only update).
+        db_status: String,
+        word_count: u32,
+    },
+}
+
+/// The read-only result of [`compute_reconcile_diff`]: an ordered list of
+/// [`ReconcileOp`]s plus the count of existing rows that need no write.
+///
+/// Carrying the decisions (not the raw file/DB state) keeps [`apply_reconcile_diff`]
+/// cheap and free of re-reads, which is what makes the lock window short.
+#[derive(Debug, Clone, Default)]
+pub struct ReconcileDiff {
+    /// Ordered write decisions; applying them in order reproduces the legacy
+    /// single-pass behavior.
+    pub ops: Vec<ReconcileOp>,
+    /// Existing rows whose status and `word_count` already agree (no write).
+    pub preserved: u32,
+}
+
+impl ReconcileDiff {
+    /// Derive the [`ReconcileReport`] counters from this diff without touching
+    /// the DB or filesystem. Used by both the dry-run preview path and the
+    /// post-apply summary so the two paths can never disagree.
+    #[must_use]
+    pub fn to_report(&self) -> ReconcileReport {
+        let mut created = 0u32;
+        let mut resynced = 0u32;
+        let mut updated = 0u32;
+        for op in &self.ops {
+            match op {
+                ReconcileOp::CreateChapter { .. } => created += 1,
+                ReconcileOp::ResyncFileStatus { .. } => resynced += 1,
+                ReconcileOp::UpdateWordCount { .. } => updated += 1,
+            }
+        }
+        ReconcileReport {
+            created,
+            updated,
+            resynced,
+            preserved: self.preserved,
+        }
+    }
+}
+
 /// Verify that `stories_dir` does not escape the expected
 /// `Works/<work_ref>/` subtree via path traversal. Returns `Ok(())` if the
 /// path is safe, `Err(LocalDbError::PathEscape)` otherwise.
@@ -514,13 +597,12 @@ fn sync_frontmatter_status(path: &std::path::Path, status: &str) -> Result<(), L
 /// / `preserved`) reflect what the mutating path would do. Callers that only
 /// want a preview should pass `dry_run = true`; the daemon reconcile handler
 /// additionally skips the runtime-lock acquire on this path (overlay §8.2).
-//
-// Allow `clippy::too_many_lines` (pedantic): this is a single-purpose
-// reconcile routine that walks the filesystem and updates DB rows in one
-// pass; splitting into helper functions would hide the linear control flow
-// without reducing real complexity. Volume-aware per V1.43 P-last
-// (R-V142P1-F-003). Dry-run gating per V1.49 P2 (R-V148P4-W2).
-#[allow(clippy::too_many_lines)]
+///
+/// # Implementation (V1.49 P3, R-V148P4-W3)
+///
+/// This is now a thin wrapper over [`compute_reconcile_diff`] (read-only) and
+/// [`apply_reconcile_diff`] (write-only). The daemon handler calls those two
+/// directly so the runtime lock is held **only** for the fast write phase.
 pub async fn reconcile_from_filesystem(
     pool: &SqlitePool,
     work_id: &str,
@@ -529,6 +611,40 @@ pub async fn reconcile_from_filesystem(
     now: &str,
     dry_run: bool,
 ) -> Result<ReconcileReport, LocalDbError> {
+    let diff = compute_reconcile_diff(pool, work_id, work_ref, workspace_root).await?;
+    if dry_run {
+        return Ok(diff.to_report());
+    }
+    apply_reconcile_diff(pool, work_id, now, &diff).await
+}
+
+/// Read-only phase of reconcile (V1.49 P3, R-V148P4-W3).
+///
+/// Walks `Works/<work_ref>/Stories/`, reads each `.md` file's frontmatter and
+/// the matching `work_chapters` row, and produces a [`ReconcileDiff`] — the
+/// ordered list of [`ReconcileOp`]s that [`apply_reconcile_diff`] will execute.
+/// Performs **no** writes (no `INSERT`/`UPDATE`, no file frontmatter rewrite),
+/// so it is safe to run **without** the runtime lock. The slow part of
+/// reconcile (filesystem walk + per-chapter DB reads) lives here precisely so
+/// it can run unlocked.
+///
+/// The trade-off is documented in the plan: under concurrent reconcile +
+/// mutate from the same client, the diff may be stale by the time
+/// [`apply_reconcile_diff`] re-acquires the lock. This is accepted for the
+/// local-first single-writer daemon model (one active creator, schedule
+/// operations serialized through the daemon).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the filesystem walk or a DB read fails.
+/// Returns `LocalDbError::PathEscape` if `work_ref` would cause the resolved
+/// path to escape the `Works/<work_ref>/` subtree.
+pub async fn compute_reconcile_diff(
+    pool: &SqlitePool,
+    work_id: &str,
+    work_ref: &str,
+    workspace_root: &std::path::Path,
+) -> Result<ReconcileDiff, LocalDbError> {
     let stories_dir = workspace_root.join("Works").join(work_ref).join("Stories");
 
     // Defense in depth: canonicalize and verify the resolved path stays
@@ -536,19 +652,10 @@ pub async fn reconcile_from_filesystem(
     // traversal even if a caller forgets to validate `work_ref`.
     verify_stories_dir_in_workspace(&stories_dir, workspace_root, work_ref)?;
 
+    let mut diff = ReconcileDiff::default();
     if !stories_dir.is_dir() {
-        return Ok(ReconcileReport {
-            created: 0,
-            updated: 0,
-            resynced: 0,
-            preserved: 0,
-        });
+        return Ok(diff);
     }
-
-    let mut created: u32 = 0;
-    let mut updated: u32 = 0;
-    let mut resynced: u32 = 0;
-    let mut preserved: u32 = 0;
 
     let entries = std::fs::read_dir(&stories_dir).map_err(|e| LocalDbError::IoWithPath {
         path: stories_dir.to_string_lossy().to_string(),
@@ -583,6 +690,7 @@ pub async fn reconcile_from_filesystem(
         let fm = parse_frontmatter(&content);
         let fm_status = fm.get("status").cloned();
         let fm_word_count: Option<i32> = fm.get("word_count").and_then(|v| v.parse().ok());
+        let fm_word_count_u32: Option<u32> = fm_word_count.map(|v| u32::try_from(v).unwrap_or(0));
         // R-V142P1-F-003: parse volume from frontmatter; default to 1 for
         // single-volume works or files without the field.
         // R-V143P0-fix: reject negative/zero volume — default to 1 with a warn.
@@ -603,57 +711,30 @@ pub async fn reconcile_from_filesystem(
 
         match existing {
             None => {
-                // New chapter — insert with defaults, then apply frontmatter
-                // status if available (insert_chapter defaults to 'not_started').
-                if !dry_run {
-                    let body_path = format!("Works/{work_ref}/Stories/{fname}");
-                    insert_chapter(
-                        pool,
-                        &InsertChapterParams {
-                            work_id,
-                            chapter: ch_num,
-                            volume: Some(fm_volume),
-                            slug: None,
-                            planned_word_count: 4000,
-                            outline_path: None,
-                            body_path: Some(&body_path),
-                            now,
-                        },
-                    )
-                    .await?;
-                    // Apply frontmatter status + word_count if present.
-                    if fm_status.as_deref() != Some("not_started") || fm_word_count.is_some() {
-                        update_status(
-                            pool,
-                            work_id,
-                            ch_num,
-                            fm_volume,
-                            fm_status.as_deref().unwrap_or("not_started"),
-                            fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
-                            now,
-                        )
-                        .await?;
-                    }
-                }
-                created += 1;
+                // New chapter — record a CreateChapter op.
+                let body_path = format!("Works/{work_ref}/Stories/{fname}");
+                diff.ops.push(ReconcileOp::CreateChapter {
+                    chapter: ch_num,
+                    volume: fm_volume,
+                    body_path,
+                    status: fm_status,
+                    word_count: fm_word_count_u32,
+                });
             }
             Some(row) => {
                 let db_status = row.status.clone();
 
                 // §4.5.3: `work_chapters` is the queryable SSOT for status. If
-                // the file frontmatter disagrees, do NOT overwrite the DB row;
-                // instead re-sync the file so prompt-visible state catches up
-                // without inventing an extra chapter transition.
+                // the file frontmatter disagrees, the file is re-synced so
+                // prompt-visible state catches up without inventing an extra
+                // chapter transition.
                 let status_conflicts = fm_status.as_ref().is_some_and(|s| s != &db_status);
-                let file_resynced = if status_conflicts {
-                    if !dry_run {
-                        sync_frontmatter_status(&path, &db_status)?;
-                    }
-                    resynced += 1;
-                    true
-                } else {
-                    false
-                };
+                if status_conflicts {
+                    diff.ops.push(ReconcileOp::ResyncFileStatus {
+                        path: path.clone(),
+                        db_status: db_status.clone(),
+                    });
+                }
 
                 // Mirror word_count from file to DB when present and different.
                 // This is not a status transition; it only updates the cached
@@ -661,32 +742,105 @@ pub async fn reconcile_from_filesystem(
                 let needs_word_count_update =
                     fm_word_count.is_some_and(|wc| row.actual_word_count != Some(wc));
                 if needs_word_count_update {
-                    if !dry_run {
-                        update_status(
-                            pool,
-                            work_id,
-                            ch_num,
-                            fm_volume,
-                            &db_status,
-                            fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
-                            now,
-                        )
-                        .await?;
-                    }
-                    updated += 1;
-                } else if !file_resynced {
-                    preserved += 1;
+                    let wc = fm_word_count_u32.unwrap_or(0);
+                    diff.ops.push(ReconcileOp::UpdateWordCount {
+                        chapter: ch_num,
+                        volume: fm_volume,
+                        db_status,
+                        word_count: wc,
+                    });
+                }
+
+                if !status_conflicts && !needs_word_count_update {
+                    diff.preserved += 1;
                 }
             }
         }
     }
 
-    Ok(ReconcileReport {
-        created,
-        updated,
-        resynced,
-        preserved,
-    })
+    Ok(diff)
+}
+
+/// Write phase of reconcile (V1.49 P3, R-V148P4-W3).
+///
+/// Executes each [`ReconcileOp`] in `diff` in order, reproducing the legacy
+/// single-pass behavior. This is the only phase that mutates the DB or the
+/// chapter files, so the daemon holds the runtime lock **only** across this
+/// call. Returns a [`ReconcileReport`] derived from the diff (identical to
+/// what [`ReconcileDiff::to_report`] produces), so the report never depends on
+/// a post-write re-read.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any database or I/O write fails.
+pub async fn apply_reconcile_diff(
+    pool: &SqlitePool,
+    work_id: &str,
+    now: &str,
+    diff: &ReconcileDiff,
+) -> Result<ReconcileReport, LocalDbError> {
+    for op in &diff.ops {
+        match op {
+            ReconcileOp::CreateChapter {
+                chapter,
+                volume,
+                body_path,
+                status,
+                word_count,
+            } => {
+                // insert_chapter defaults to 'not_started'.
+                insert_chapter(
+                    pool,
+                    &InsertChapterParams {
+                        work_id,
+                        chapter: *chapter,
+                        volume: Some(*volume),
+                        slug: None,
+                        planned_word_count: 4000,
+                        outline_path: None,
+                        body_path: Some(body_path),
+                        now,
+                    },
+                )
+                .await?;
+                // Apply frontmatter status + word_count if present.
+                if status.as_deref() != Some("not_started") || word_count.is_some() {
+                    update_status(
+                        pool,
+                        work_id,
+                        *chapter,
+                        *volume,
+                        status.as_deref().unwrap_or("not_started"),
+                        *word_count,
+                        now,
+                    )
+                    .await?;
+                }
+            }
+            ReconcileOp::ResyncFileStatus { path, db_status } => {
+                sync_frontmatter_status(path, db_status)?;
+            }
+            ReconcileOp::UpdateWordCount {
+                chapter,
+                volume,
+                db_status,
+                word_count,
+            } => {
+                update_status(
+                    pool,
+                    work_id,
+                    *chapter,
+                    *volume,
+                    db_status,
+                    Some(*word_count),
+                    now,
+                )
+                .await?;
+            }
+        }
+    }
+
+    Ok(diff.to_report())
 }
 
 /// Select the next chapter to work on per novel-workflow-profile §4.5.2.
@@ -1395,6 +1549,60 @@ mod tests {
         assert_eq!(chapters[0].chapter, 1);
         assert_eq!(chapters[1].chapter, 2);
         assert_eq!(chapters[2].chapter, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.49 P3 (R-V148P4-W3): compute phase is read-only; apply is the only
+    // phase that mutates. This is the DAO-layer evidence that the runtime-lock
+    // window can safely exclude the slow filesystem walk.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_compute_is_read_only_then_apply_writes() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_recon_split").await;
+
+        let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
+        std::fs::create_dir_all(&stories_dir).unwrap();
+        let ch1 = stories_dir.join("ch01-intro.md");
+        std::fs::write(
+            &ch1,
+            "---\ntitle: Intro\nchapter: 1\nstatus: draft\nword_count: 1500\n---\nBody",
+        )
+        .unwrap();
+
+        // 1. Compute (read-only): produces a CreateChapter op but writes nothing.
+        let diff = compute_reconcile_diff(&pool, "wrk_recon_split", "my-novel", dir.path())
+            .await
+            .unwrap();
+        assert_eq!(
+            diff.to_report().created,
+            1,
+            "diff should describe one create"
+        );
+        assert_eq!(diff.ops.len(), 1);
+        assert!(
+            list_chapters(&pool, "wrk_recon_split")
+                .await
+                .unwrap()
+                .is_empty(),
+            "compute_reconcile_diff must not insert chapter rows"
+        );
+        let after_compute = std::fs::read_to_string(&ch1).unwrap();
+        assert!(
+            after_compute.contains("status: draft"),
+            "compute_reconcile_diff must not rewrite chapter files: {after_compute}"
+        );
+
+        // 2. Apply (write): the diff now materializes the row.
+        let report = apply_reconcile_diff(&pool, "wrk_recon_split", "2026-06-17T00:00:00Z", &diff)
+            .await
+            .unwrap();
+        assert_eq!(report.created, 1);
+        let rows = list_chapters(&pool, "wrk_recon_split").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].chapter, 1);
+        assert_eq!(rows[0].status, "draft");
+        assert_eq!(rows[0].actual_word_count, Some(1500));
     }
 
     // -----------------------------------------------------------------------

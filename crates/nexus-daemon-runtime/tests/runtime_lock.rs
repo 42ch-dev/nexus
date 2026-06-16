@@ -279,10 +279,19 @@ async fn test_inspiration_acquires_and_releases_lock() {
     assert!(work.runtime_lock_holder.is_none());
 }
 
-/// V1.48 P4-fix1 (W-2 qc3): `reconcile_chapters` MUST release the runtime lock
-/// when `reconcile_from_filesystem` returns an error after acquisition.
-/// Previously the `?` on the reconcile call could return early and leave the
-/// Work locked until daemon restart.
+/// V1.48 P4-fix1 (W-2 qc3) + V1.49 P3 (R-V148P4-W3): `reconcile_chapters`
+/// MUST release the runtime lock when the **apply phase** (write phase, which
+/// is the only phase that holds the lock under the V1.49 P3 split) returns an
+/// error after acquisition.
+///
+/// V1.49 P3 split reconcile into `compute_reconcile_diff` (unlocked read) +
+/// `apply_reconcile_diff` (locked write). To exercise the apply-phase error
+/// path we make `compute` succeed (Stories/ is readable) while making the
+/// **write** fail: seed a DB chapter row whose status conflicts with the file
+/// frontmatter (so compute emits a `ResyncFileStatus` op), then mark Stories/
+/// read-only (`0o555`) so apply's atomic frontmatter rewrite cannot create its
+/// temp file. Apply fails after the lock was acquired → the handler must
+/// release the lock on the way out.
 #[tokio::test]
 async fn test_reconcile_chapters_releases_lock_on_error() {
     let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
@@ -306,8 +315,28 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
         .await
         .unwrap();
 
+    // Seed a DB chapter row (status defaults to `not_started`) so the file
+    // frontmatter below produces a status CONFLICT → `ResyncFileStatus` op.
+    nexus_local_db::insert_chapter(
+        state.pool(),
+        &nexus_local_db::InsertChapterParams {
+            work_id: &work_id,
+            chapter: 1,
+            volume: Some(1),
+            slug: None,
+            planned_word_count: 4000,
+            outline_path: None,
+            body_path: Some("Works/reconcile-lock-test/Stories/ch01-intro.md"),
+            now: "2026-06-17T00:00:00Z",
+        },
+    )
+    .await
+    .unwrap();
+
     // Create the Stories/ directory with one chapter file whose frontmatter
-    // conflicts with the (non-existent) DB row so reconcile would mutate state.
+    // status (`finalized`) CONFLICTS with the DB row (`not_started`). This
+    // makes compute emit a `ResyncFileStatus` op, which apply will attempt to
+    // execute.
     let stories_dir = workspace_tmp
         .path()
         .join("Works")
@@ -320,13 +349,14 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
     )
     .unwrap();
 
-    // Make the Stories directory unreadable so `read_dir` fails after the
-    // runtime lock has been acquired. This is a Unix-only hermetic trigger;
-    // on other platforms we simply verify the happy path still releases.
+    // Make Stories/ read-only (`0o555`) so compute (read_dir + file read)
+    // succeeds but apply's atomic frontmatter rewrite cannot create its temp
+    // file. This is a Unix-only hermetic trigger; on other platforms we simply
+    // verify the happy path still releases the lock.
     #[cfg(unix)]
     {
-        std::fs::set_permissions(&stories_dir, std::fs::Permissions::from_mode(0o000))
-            .expect("set Stories dir unreadable");
+        std::fs::set_permissions(&stories_dir, std::fs::Permissions::from_mode(0o555))
+            .expect("set Stories dir read-only");
     }
 
     let result = reconcile_chapters(
@@ -344,7 +374,8 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
 
         assert!(
             result.is_err(),
-            "reconcile should fail when Stories/ is unreadable"
+            "reconcile apply should fail when Stories/ is read-only and a \
+             frontmatter rewrite is pending"
         );
     }
 
@@ -356,7 +387,86 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
         .unwrap();
     assert!(
         work.runtime_lock_holder.is_none(),
-        "reconcile_chapters must release runtime lock on error path"
+        "reconcile_chapters must release runtime lock on apply error path"
+    );
+}
+
+/// V1.49 P3 (R-V148P4-W3): the **read phase** (`compute_reconcile_diff`)
+/// runs WITHOUT acquiring the runtime lock, so a read-phase failure (e.g. an
+/// unreadable Stories/ dir) must never acquire the lock in the first place.
+///
+/// This is the structural evidence that the lock window now excludes the slow
+/// filesystem walk: a failure that used to occur *after* lock acquire (under
+/// the V1.48 single-pass reconcile) now occurs *before* lock acquire, so
+/// `runtime_lock_holder` stays `None`.
+#[tokio::test]
+async fn test_reconcile_chapters_read_phase_runs_unlocked() {
+    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let workspace_tmp = tempfile::TempDir::new().unwrap();
+    let workspace_path = workspace_tmp.path().to_string_lossy().to_string();
+    let state = WorkspaceState::new_for_testing(
+        nexus_home.clone(),
+        db_path.clone(),
+        Some(workspace_path.clone()),
+    )
+    .await;
+    test_utils::seed_test_creator_and_world(state.pool()).await;
+
+    let work_id = create_test_work(&state).await;
+    let work_ref = "reconcile-read-unlocked";
+
+    let mut patch = minimal_patch("Read Phase Unlocked");
+    patch.story_ref = Some(Some(work_ref.to_string()));
+    let _ = patch_work(State(state.clone()), Path(work_id.clone()), Json(patch))
+        .await
+        .unwrap();
+
+    // Stories/ exists with one chapter (no DB row) — would be a CreateChapter.
+    let stories_dir = workspace_tmp
+        .path()
+        .join("Works")
+        .join(work_ref)
+        .join("Stories");
+    std::fs::create_dir_all(&stories_dir).unwrap();
+    std::fs::write(
+        stories_dir.join("ch01-intro.md"),
+        "---\nchapter: 1\nstatus: finalized\n---\nBody",
+    )
+    .unwrap();
+
+    // Make Stories/ UNREADABLE (`0o000`) so `read_dir` in the read phase
+    // fails. Unix-only hermetic trigger.
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(&stories_dir, std::fs::Permissions::from_mode(0o000))
+            .expect("set Stories dir unreadable");
+    }
+
+    let result = reconcile_chapters(
+        State(state.clone()),
+        Path(work_id.clone()),
+        Query(ReconcileDryRunQuery { dry_run: None }),
+    )
+    .await;
+
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(&stories_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("restore Stories dir permissions");
+        assert!(
+            result.is_err(),
+            "read phase should fail when Stories/ is unreadable"
+        );
+    }
+
+    let work = works::get_work(state.pool(), "test_creator", &work_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        work.runtime_lock_holder.is_none(),
+        "read-phase failure must NOT acquire the runtime lock (lock window \
+         excludes the filesystem walk — R-V148P4-W3)"
     );
 }
 

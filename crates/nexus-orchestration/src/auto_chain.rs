@@ -332,6 +332,13 @@ async fn persist_placeholder_finding(
 /// schedule/work context so operators can see the degrade. V1.48 P0-fix1
 /// (qc3 W-3): every fallback `warn!` includes `chapter` per spec §1.3
 /// (operator-debugging field for chapter-scoped review passes).
+//
+// `too_many_lines`: this is a single match dispatching one documented fallback
+// `warn!` arm per `ReportLoadError` variant (spec §1.3 mandates each branch).
+// Splitting the arms into helpers would hide the linear fallback contract
+// without reducing real complexity. Mirrors the `work_chapters` reconcile and
+// `rules_runtime::handle_rules_reset` precedent.
+#[allow(clippy::too_many_lines)]
 async fn try_persist_parsed_findings(
     pool: &SqlitePool,
     workspace_dir: &std::path::Path,
@@ -430,6 +437,23 @@ async fn try_persist_parsed_findings(
             );
             Ok(None)
         }
+        // V1.49 P3 (R-V148P0-W1): resolved path escaped Works/<work_ref>/.
+        // qc3 W-3: `chapter` included on every fallback arm.
+        Err(ReportLoadError::PathEscape {
+            work_ref: ref escaped,
+        }) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                escaped_work_ref = %escaped,
+                chapter = ?chapter,
+                "review-findings: review-report.md path escapes Works/<work_ref>/ \
+                 (traversal or symlink); rejecting before read; falling back to \
+                 V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
     }
 }
 
@@ -449,6 +473,10 @@ enum ReportLoadError {
     /// V1.48 P0-fix1 (qc3 W-1): file size exceeds the bounded-read cap.
     /// Falling back to placeholder synthesis is the documented safe degrade.
     TooLarge { size_bytes: u64, cap_bytes: u64 },
+    /// V1.49 P3 (R-V148P0-W1): the resolved report path escapes the
+    /// `Works/<work_ref>/` subtree (path traversal in `work_ref` or symlink
+    /// escape). Rejecting before the read is the documented safe degrade.
+    PathEscape { work_ref: String },
 }
 
 /// Upper bound on how many bytes of `review-report.md` the supervisor will
@@ -480,6 +508,22 @@ fn load_and_parse_review_report(
     workspace_dir: &std::path::Path,
     work_ref: &str,
 ) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
+    // V1.49 P3 (R-V148P0-W1): defense-in-depth path guard. Reject traversal
+    // segments in `work_ref` BEFORE constructing the path, then verify (after
+    // confirming the file exists) that the resolved report stays under the
+    // canonicalized `Works/<work_ref>/` subtree. This blocks path traversal
+    // and symlink escape before P1/P2 prompt-injection surfaces grow.
+    if work_ref.is_empty()
+        || work_ref.contains("..")
+        || work_ref.contains('/')
+        || work_ref.contains('\\')
+        || work_ref.contains('\0')
+    {
+        return Err(ReportLoadError::PathEscape {
+            work_ref: work_ref.to_string(),
+        });
+    }
+
     let review_dir = nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
     let report_path = review_dir.join("review-report.md");
     let metadata = match std::fs::metadata(&report_path) {
@@ -489,6 +533,25 @@ fn load_and_parse_review_report(
         }
         Err(e) => return Err(ReportLoadError::Read(report_path, e)),
     };
+
+    // Canonical guard: the resolved report must live under the canonicalized
+    // `Works/<work_ref>/` subtree. Catches symlink escape (e.g. `Works/<work_ref>`
+    // itself being a symlink pointing outside the workspace). `canonicalize`
+    // succeeds here because `metadata` already confirmed the file exists.
+    let canonical_work_root = workspace_dir
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_dir.to_path_buf())
+        .join("Works")
+        .join(work_ref);
+    if !report_path
+        .canonicalize()
+        .is_ok_and(|canonical_report| canonical_report.starts_with(&canonical_work_root))
+    {
+        return Err(ReportLoadError::PathEscape {
+            work_ref: work_ref.to_string(),
+        });
+    }
+
     let size_bytes = metadata.len();
     if size_bytes > MAX_REVIEW_REPORT_BYTES {
         return Err(ReportLoadError::TooLarge {
@@ -2028,5 +2091,38 @@ mod tests {
                  Update the match arm in preset_version_for_id() to match."
             );
         }
+    }
+
+    // V1.49 P3 (R-V148P0-W1) ────────────────────────────────────────────────
+
+    /// `load_and_parse_review_report` must reject a `work_ref` that would
+    /// escape `Works/<work_ref>/` (path traversal / separators) BEFORE any
+    /// filesystem access, returning `ReportLoadError::PathEscape`.
+    #[test]
+    fn load_and_parse_review_report_rejects_path_outside_work_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        // Traversal segments in work_ref — the canonical "Works/<work_ref>/../../../etc/passwd"
+        // shape from the plan, expressed via the work_ref parameter.
+        let traversal = load_and_parse_review_report(tmp.path(), "../../../etc/passwd");
+        assert!(
+            matches!(traversal, Err(ReportLoadError::PathEscape { .. })),
+            "traversal work_ref must be rejected before FS access, got {traversal:?}"
+        );
+
+        // A path separator in work_ref must also be rejected.
+        let with_sep = load_and_parse_review_report(tmp.path(), "foo/bar");
+        assert!(
+            matches!(with_sep, Err(ReportLoadError::PathEscape { .. })),
+            "work_ref containing '/' must be rejected, got {with_sep:?}"
+        );
+
+        // A clean work_ref whose report is simply absent returns Missing, NOT
+        // PathEscape — proving the guard does not over-reject legitimate refs.
+        let missing = load_and_parse_review_report(tmp.path(), "clean-novel");
+        assert!(
+            matches!(missing, Err(ReportLoadError::Missing)),
+            "clean work_ref with no report must be Missing, not PathEscape; got {missing:?}"
+        );
     }
 }
