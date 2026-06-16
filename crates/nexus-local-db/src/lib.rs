@@ -134,10 +134,11 @@ pub use inspiration_items::{
 
 // Re-export work_chapters types
 pub use work_chapters::{
-    count_chapters, get_chapter, insert_chapter, is_work_completed, next_chapter,
-    next_chapter_volume_aware, reconcile_from_filesystem, seed_chapters,
-    seed_chapters_multi_volume, seed_chapters_multi_volume_tx, update_paths, update_status,
-    InsertChapterParams, ReconcileReport, WorkChapterRecord,
+    apply_reconcile_diff, compute_reconcile_diff, count_chapters, get_chapter, insert_chapter,
+    is_work_completed, next_chapter, next_chapter_volume_aware, reconcile_from_filesystem,
+    seed_chapters, seed_chapters_multi_volume, seed_chapters_multi_volume_tx, update_paths,
+    update_status, InsertChapterParams, ReconcileDiff, ReconcileOp, ReconcileReport,
+    WorkChapterRecord,
 };
 
 // Re-export force_gates_audit types
