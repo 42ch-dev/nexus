@@ -8,7 +8,10 @@
       "file": ".mstar/plans/2026-06-17-v1.49-harness-docs-prepare.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@project-manager", "@writing-specialist"],
+      "agents": [
+        "@project-manager",
+        "@writing-specialist"
+      ],
       "working_branch": "iteration/v1.49",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
@@ -22,7 +25,9 @@
       "file": ".mstar/plans/2026-06-17-v1.49-findings-lifecycle.md",
       "status": "Done",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "working_branch": "feature/v1.49-findings-lifecycle",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
@@ -49,7 +54,9 @@
       "file": ".mstar/plans/2026-06-17-v1.49-narrative-indexes.md",
       "status": "Done",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "working_branch": "feature/v1.49-narrative-indexes",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
@@ -76,7 +83,9 @@
       "file": ".mstar/plans/2026-06-17-v1.49-author-desk-ux.md",
       "status": "InReview",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "working_branch": "feature/v1.49-author-desk-ux",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
@@ -99,7 +108,9 @@
       "file": ".mstar/plans/2026-06-17-v1.49-serial-reliability.md",
       "status": "Todo",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev"],
+      "agents": [
+        "@fullstack-dev"
+      ],
       "working_branch": "feature/v1.49-serial-reliability",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
@@ -113,7 +124,11 @@
       "file": ".mstar/plans/2026-06-17-v1.49-hygiene-and-closeout.md",
       "status": "Todo",
       "owner": "@project-manager",
-      "agents": ["@project-manager", "@fullstack-dev", "@writing-specialist"],
+      "agents": [
+        "@project-manager",
+        "@fullstack-dev",
+        "@writing-specialist"
+      ],
       "working_branch": "feature/v1.49-hygiene-and-closeout",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
@@ -543,21 +558,7 @@
         "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d17c3182)"
       }
     ],
-    "2026-06-15-v1.47-gate-remediation-audit": [
-      {
-        "id": "R-V147P1-01",
-        "title": "Future UX gap — intake re-trigger on existing Work (creator bootstrap creates a new Work; no daemon schedule add --work-id path)",
-        "severity": "low",
-        "source": "P1 dev follow-up",
-        "scope": "nexus42 CLI / daemon schedule add surface",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-gate-remediation-audit][R-V147P1-01]",
-        "note": "P4 attach if capacity. [P-last T3: bulk-deferred to V1.49.]",
-        "target_date": "V1.49"
-      }
-    ],
+    "2026-06-15-v1.47-gate-remediation-audit": [],
     "2026-06-15-v1.47-reflection-loop-findings": [
       {
         "id": "R-V147P0-01",
@@ -658,19 +659,6 @@
     ],
     "2026-06-16-v1.48-serial-hardening": [
       {
-        "id": "R-V148P4-W2",
-        "title": "creator works reconcile-chapters has no confirmation or dry-run surface before mass filesystem frontmatter mutation",
-        "severity": "low",
-        "source": "qc2 W-2 (P4 tri-review)",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs::handle_reconcile_chapters + daemon POST handler",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-serial-hardening/qc-consolidated.md",
-        "note": "Deferred to V1.49 UX plan. P4-fix1 scope covers atomic write + resynced counter + lock release only. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
         "id": "R-V148P4-W3",
         "title": "reconcile-chapters holds Work runtime lock for full filesystem walk + DB + file I/O duration",
         "severity": "medium",
@@ -699,21 +687,7 @@
         "target": "V1.49"
       }
     ],
-    "2026-06-17-v1.49-author-desk-ux": [
-      {
-        "id": "R-V149P2-01",
-        "title": "clap `--yes` help text for `creator works reconcile-chapters` over-promises an inline preview that `confirm_reconcile_interactive` does not print in the default flow",
-        "severity": "low",
-        "source": "qc1 W-1 (architecture/maintainability)",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs::handle_reconcile_chapters (clap arg help)",
-        "decision": "fix-in-wave",
-        "owner": "@fullstack-dev",
-        "target": "V1.49 P2 fix wave",
-        "target_date": "V1.49 P2 fix wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-author-desk-ux/qc-consolidated.md §W-1",
-        "note": "Doc/behavior mismatch isolated to user-visible --help. Fix: update --yes help text to 'Skip the confirmation prompt for the mutating path' (no preview promise). 1-line change in clap arg; no behavior change. Handler docstring + overlay §8.2 are already accurate."
-      }
-    ],
+    "2026-06-17-v1.49-author-desk-ux": [],
     "2026-06-17-v1.49-findings-lifecycle": [
       {
         "id": "R-V149P0-01",

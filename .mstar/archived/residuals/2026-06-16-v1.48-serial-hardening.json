@@ -1,0 +1,32 @@
+{
+  "plan_id": "2026-06-16-v1.48-serial-hardening",
+  "archived_at": "2026-06-17T23:30:00+08:00",
+  "archived_by": "PM (V1.49 P2 closed R-V148P4-W2: reconcile preview)",
+  "residual_findings": [
+    {
+      "id": "R-V148P4-W2",
+      "title": "creator works reconcile-chapters has no confirmation or dry-run surface before mass filesystem frontmatter mutation",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc2 W-2 (P4 tri-review); closed in V1.49 P2",
+      "scope": "crates/nexus42/src/commands/creator/works/mod.rs::handle_reconcile_chapters + daemon POST handler",
+      "decision": "closed",
+      "owner": "V1.49 P2 (fullstack-dev)",
+      "closed_at": "2026-06-17T23:30:00+08:00",
+      "closure_note": "V1.49 P2 (commit 4ab9e0be + 0948cb87, merged at 1fa8002): reconcile_from_filesystem gained dry_run: bool parameter; daemon handler threads ?dry_run=true and skips runtime lock on dry-run path; CLI mirrors works rules reset --yes pattern with --dry-run / --yes flags. New hermetic test test_reconcile_chapters_dry_run_makes_zero_mutations asserts byte-identical chapter file + zero DB rows before/after + no lock holder + sanity check that mutating path still writes. Overlay §8.2 updated as Shipped (commit 9aea7091). Follow-up W-1 fix (commit bdd646dc, merged at 0b98e194): clap --yes help text updated to skip confirmation prompt (no preview promise). QA verification: works 67+ → 84 lib tests pass; reconcile_chapters 2 tests pass; runtime_lock 8 tests pass; intake 1 test passes.",
+      "closure_evidence": "iteration/v1.49 @ 1fa8002 (P2 merge) + 0b98e194 (W-1 fix merge) + bdd646dc (W-1 fix); qc1/qc2/qc3 all Approve; qa.md post-fix wave",
+      "fix_commits": [
+        "4ab9e0be",
+        "0948cb87",
+        "9aea7091",
+        "7fe873f7",
+        "1fa8002",
+        "bdd646dc",
+        "0b98e194"
+      ],
+      "re_review_commits": [
+        "e7848336"
+      ]
+    }
+  ]
+}
