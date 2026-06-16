@@ -1573,6 +1573,43 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // R-V146P2-QC3-S1: help text must be flush-safe (complete on exit)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_preset_run_help_ends_with_newline_so_flush_is_complete() {
+        // R-V146P2-QC3-S1: the binary prints the help with `print!` (buffered)
+        // and then flushes stdout before `std::process::exit(0)`. The rendered
+        // text must be a complete, newline-terminated block so the flushed
+        // buffer is not a truncated tail. Every code path through
+        // `format_preset_run_help` ends with a `writeln!`, so assert that
+        // invariant here — if a future edit drops the trailing newline, the
+        // flush-before-exit path would emit a half-line to piped consumers.
+        let with_args = format_preset_run_help(
+            "novel-manuscript-audit-review",
+            "On-demand review.",
+            &[PresetCliArg {
+                name: "chapter".to_string(),
+                r#type: PresetCliArgType::Integer,
+                required: true,
+                default: None,
+                description: "Chapter number".to_string(),
+            }],
+        );
+        assert!(
+            with_args.ends_with('\n'),
+            "rich help must end with newline (flush-safe): {with_args:?}"
+        );
+
+        let without_args =
+            format_preset_run_help("novel-brainstorm", "Brainstorm a novel.", &[]);
+        assert!(
+            without_args.ends_with('\n'),
+            "generic help must end with newline (flush-safe): {without_args:?}"
+        );
+    }
+
     #[test]
     fn format_help_sanitizes_manifest_description() {
         // R-V146P2-QC2-W: manifest-supplied description must be sanitized
