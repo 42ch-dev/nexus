@@ -65,9 +65,16 @@ pub struct FindingPatch {
     pub target_executor: Option<String>,
     /// V1.47: new `kind` (optional).
     pub kind: Option<String>,
-    /// V1.47: new `rule_suggestion` (optional; pass `Some(None)` via separate
-    /// sentinel is not supported — `None` means "do not patch").
-    pub rule_suggestion: Option<String>,
+    /// V1.48 P3 T3 — tri-state `rule_suggestion` patch.
+    ///
+    /// - `None` → omit (do not touch the column).
+    /// - `Some(Some(value))` → set `rule_suggestion` to `value`.
+    /// - `Some(None)` → **clear** `rule_suggestion` to SQL NULL.
+    ///
+    /// This resolves R-V147P0-03: the previous `COALESCE(?, rule_suggestion)`
+    /// semantics made it impossible to clear the column because SQL `NULL`
+    /// was treated as "use the existing value" rather than "set to NULL".
+    pub rule_suggestion: Option<Option<String>>,
 }
 
 /// Filters for listing findings.
@@ -95,6 +102,25 @@ pub const VALID_STATUSES: &[&str] = &["open", "resolved", "wont_fix"];
 
 /// Valid `target_executor` values (R-V139P1-W-1).
 pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
+
+/// V1.48 P3 T0 — default retention window for resolved findings (days).
+///
+/// Findings with `status = 'resolved'` whose `updated_at` is older than this
+/// many days are eligible for pruning by [`prune_resolved_findings_older_than`].
+/// `open` and `wont_fix` rows are never purged.
+///
+/// **Design decision (T0)**: the retention trigger is a **CLI command**
+/// (`creator works findings prune`), not a daemon periodic task. Rationale:
+/// simpler, manual control, no background scheduler complexity. The DAO
+/// function is the single hook both a future CLI subcommand and a potential
+/// daemon task would call.
+///
+/// **Spec note**: `novel-findings-maturity.md` §5.1 lists both `resolved` and
+/// `wont_fix` as purge-eligible. The V1.48 P3 Assignment (T2) explicitly
+/// restricts pruning to `resolved` only and skips `wont_fix`. This deviation
+/// is intentional for this delivery slice; PM reconciles with the overlay at
+/// P-last merge.
+pub const RETENTION_DEFAULT_DAYS: i64 = 90;
 
 /// V1.47 §2.1 / §8.2: suggested minimum `kind` vocabulary for findings.
 ///
@@ -517,8 +543,14 @@ pub async fn get_finding(
 
 /// Update (patch) a finding, scoped to a creator.
 ///
-/// Only non-None fields in `patch` are applied. `updated_at` is always
-/// set to the current Unix epoch.
+/// Only non-`None` fields in `patch` are applied. `updated_at` is always
+/// set to `now_epoch`.
+///
+/// **V1.48 P3 T3** (R-V147P0-03): `rule_suggestion` uses a tri-state
+/// [`Option<Option<String>>`] — `Some(None)` clears the column to SQL NULL,
+/// `None` omits it entirely. This required switching from a compile-time
+/// `COALESCE` UPDATE (which treated SQL NULL as "keep existing") to a dynamic
+/// SET-clause builder (mirrors [`works::patch_work`]).
 ///
 /// # Errors
 ///
@@ -564,30 +596,70 @@ pub async fn update_finding(
             });
         }
     }
-    let result = sqlx::query!(
-        "UPDATE findings
-         SET severity        = COALESCE(?, severity),
-             status          = COALESCE(?, status),
-             title           = COALESCE(?, title),
-             description     = COALESCE(?, description),
-             target_executor = COALESCE(?, target_executor),
-             kind            = COALESCE(?, kind),
-             rule_suggestion = COALESCE(?, rule_suggestion),
-             updated_at      = ?
-         WHERE creator_id = ? AND finding_id = ?",
-        patch.severity,
-        patch.status,
-        patch.title,
-        patch.description,
-        patch.target_executor,
-        patch.kind,
-        patch.rule_suggestion,
-        now_epoch,
-        creator_id,
-        finding_id
-    )
-    .execute(pool)
-    .await?;
+
+    // Build the SET clause dynamically so `rule_suggestion = ?` is only
+    // included when the caller explicitly wants to touch the column.
+    // This lets `Some(None)` bind SQL NULL (clear) rather than COALESCE
+    // back to the existing value.
+    let mut set_clauses = Vec::new();
+    if patch.severity.is_some() {
+        set_clauses.push("severity = ?");
+    }
+    if patch.status.is_some() {
+        set_clauses.push("status = ?");
+    }
+    if patch.title.is_some() {
+        set_clauses.push("title = ?");
+    }
+    if patch.description.is_some() {
+        set_clauses.push("description = ?");
+    }
+    if patch.target_executor.is_some() {
+        set_clauses.push("target_executor = ?");
+    }
+    if patch.kind.is_some() {
+        set_clauses.push("kind = ?");
+    }
+    if patch.rule_suggestion.is_some() {
+        set_clauses.push("rule_suggestion = ?");
+    }
+    set_clauses.push("updated_at = ?");
+
+    // SAFETY: dynamic SQL — conditional SET clauses for tri-state
+    // rule_suggestion. Mirrors the patch_work pattern in works.rs; bind order
+    // matches set_clauses order exactly.
+    let sql = format!(
+        "UPDATE findings SET {} WHERE creator_id = ? AND finding_id = ?",
+        set_clauses.join(", ")
+    );
+    let mut q = sqlx::query(&sql);
+    if let Some(ref v) = patch.severity {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.status {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.title {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.description {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.target_executor {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.kind {
+        q = q.bind(v);
+    }
+    // rule_suggestion is Option<Option<String>> — the if-guard unwraps the
+    // outer Option; the inner &Option<String> binds directly (None → NULL).
+    if let Some(ref v) = patch.rule_suggestion {
+        q = q.bind(v);
+    }
+    q = q.bind(now_epoch);
+    q = q.bind(creator_id);
+    q = q.bind(finding_id);
+    let result = q.execute(pool).await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -609,6 +681,51 @@ pub async fn delete_finding(
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// V1.48 P3 T2 — purge resolved findings older than the retention window.
+///
+/// Deletes every finding row with `status = 'resolved'` AND
+/// `updated_at < (now_epoch - retention_seconds)`. Returns the number of
+/// rows deleted.
+///
+/// **Retention clock**: `updated_at` (epoch seconds) is used as the proxy
+/// for "when the finding was resolved" — [`update_finding`] stamps it on
+/// every transition including status → `'resolved'`. No separate
+/// `resolved_at` column exists; this is the simplest durable choice that
+/// avoids a schema migration for a new column.
+///
+/// **Scope**: only `'resolved'` rows are purged. `'open'` and `'wont_fix'`
+/// rows are never touched (per V1.48 P3 Assignment T2). See
+/// [`RETENTION_DEFAULT_DAYS`] for the spec-deviation note.
+///
+/// **Hermetic testing**: `now_epoch` is a parameter (not wall-clock) so the
+/// daemon task / CLI command / tests can exercise the cutoff deterministically
+/// — same pattern as [`list_stale_open_findings`].
+///
+/// **Transaction**: the DELETE runs inside a single `SQLite` transaction so
+/// the prune is atomic and future archival side-effects can be added in the
+/// same tx without changing the public signature.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the transaction cannot be started, the DELETE
+/// fails, or the commit fails.
+pub async fn prune_resolved_findings_older_than(
+    pool: &SqlitePool,
+    now_epoch: i64,
+    retention_seconds: i64,
+) -> Result<u32, LocalDbError> {
+    let cutoff = now_epoch.saturating_sub(retention_seconds);
+    let mut tx = pool.begin().await?;
+    let result = sqlx::query!(
+        "DELETE FROM findings WHERE status = 'resolved' AND updated_at < ?",
+        cutoff
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(u32::try_from(result.rows_affected()).unwrap_or(u32::MAX))
 }
 
 /// Severity count row — used by `count_open_findings_by_severity`.
@@ -997,7 +1114,8 @@ pub async fn create_finding_from_review_tx(
 #[cfg(test)]
 mod tests {
     use super::{
-        list_open_findings_for_chapter, normalize_rule_suggestion, Finding, FindingKind,
+        list_open_findings_for_chapter, normalize_rule_suggestion,
+        prune_resolved_findings_older_than, update_finding, Finding, FindingKind, FindingPatch,
         RULE_SUGGESTION_MAX_BYTES,
     };
     use crate::error::LocalDbError;
@@ -1316,6 +1434,340 @@ mod tests {
             .await
             .unwrap();
         assert!(got.is_empty(), "expected empty result on unseeded table");
+    }
+
+    // ── V1.48 P3 T2: resolved-finding retention pruning ─────────────────────
+
+    /// V1.48 P3 T2 — old `resolved` rows past the retention window are purged;
+    /// `open` and `wont_fix` rows are never touched.
+    ///
+    /// Seeds:
+    ///  - `old_resolved`   — resolved, updated_at well past the cutoff   ← purged
+    ///  - `old_open`       — open,     created_at same vintage           ← kept (open)
+    ///  - `old_wont_fix`   — wont_fix, updated_at same vintage           ← kept (wont_fix)
+    ///  - `recent_resolved`— resolved, updated_at inside the window      ← kept (recent)
+    #[tokio::test]
+    async fn findings_retention_removes_old_resolved_rows() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_prune";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 10_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600; // 90 days
+        let old_ts = now - retention_seconds - 1; // 1s past the cutoff
+
+        super::create_finding(
+            &pool,
+            &row(
+                "pr1",
+                WORK,
+                Some(1),
+                "major",
+                "old_resolved",
+                old_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("pr2", WORK, Some(1), "major", "old_open", old_ts, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "pr3",
+                WORK,
+                Some(1),
+                "major",
+                "old_wont_fix",
+                old_ts,
+                "wont_fix",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "pr4",
+                WORK,
+                Some(1),
+                "major",
+                "recent_resolved",
+                now,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1, "exactly one old resolved row should be pruned");
+
+        // Verify: pr1 gone; pr2, pr3, pr4 still present.
+        let remaining: Vec<String> = sqlx::query_scalar(
+            "SELECT finding_id FROM findings WHERE work_id = ? ORDER BY finding_id",
+        )
+        .bind(WORK)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            remaining,
+            vec!["pr2".to_string(), "pr3".to_string(), "pr4".to_string()],
+            "open, wont_fix, and recent resolved rows must survive the prune"
+        );
+    }
+
+    /// V1.48 P3 T2 — `open` rows are never purged even when their
+    /// `updated_at` is far past the retention window.
+    #[tokio::test]
+    async fn findings_retention_skips_open_rows() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_prune_open";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 20_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600;
+        let old_ts = now - retention_seconds - 100_000;
+
+        // Only open rows — all old.
+        super::create_finding(
+            &pool,
+            &row(
+                "sk1",
+                WORK,
+                Some(1),
+                "blocker",
+                "old_open_1",
+                old_ts,
+                "open",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("sk2", WORK, Some(1), "minor", "old_open_2", old_ts, "open"),
+        )
+        .await
+        .unwrap();
+
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 0, "no rows should be pruned when all are open");
+
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+            .bind(WORK)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 2, "both open rows must survive");
+    }
+
+    /// V1.48 P3 T2 — `resolved` rows whose `updated_at` falls inside the
+    /// retention window are kept.
+    #[tokio::test]
+    async fn findings_retention_skips_recent_resolved_rows() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_prune_recent";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 30_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600;
+
+        // A resolved row exactly at the cutoff boundary (not older).
+        let boundary_ts = now - retention_seconds;
+        // A resolved row 1 second inside the window.
+        let inside_ts = now - retention_seconds + 1;
+
+        super::create_finding(
+            &pool,
+            &row(
+                "rc1",
+                WORK,
+                Some(1),
+                "major",
+                "boundary_resolved",
+                boundary_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "rc2",
+                WORK,
+                Some(1),
+                "major",
+                "inside_resolved",
+                inside_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        // boundary_ts == cutoff → NOT < cutoff → kept.
+        // inside_ts  > cutoff   → kept.
+        assert_eq!(deleted, 0, "boundary and inside-window rows must survive");
+
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+            .bind(WORK)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 2, "both recent resolved rows must survive");
+    }
+
+    // ── V1.48 P3 T3: FindingPatch tri-state rule_suggestion (R-V147P0-03) ───
+
+    /// Helper: build a FindingPatch with only `rule_suggestion` set.
+    fn patch_rule_suggestion(v: Option<Option<String>>) -> FindingPatch {
+        FindingPatch {
+            rule_suggestion: v,
+            ..Default::default()
+        }
+    }
+
+    /// V1.48 P3 T3 — `Some(None)` clears `rule_suggestion` to SQL NULL.
+    ///
+    /// Seeds a finding with `rule_suggestion = Some("...")`, patches with
+    /// `Some(None)`, then verifies the column is NULL after the update.
+    #[tokio::test]
+    async fn update_finding_can_clear_rule_suggestion_to_null() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_clr";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed with a non-empty rule_suggestion.
+        let mut f = row("cl1", WORK, Some(1), "major", "clear-test", 1000, "open");
+        f.rule_suggestion = Some("original suggestion".to_string());
+        super::create_finding(&pool, &f).await.unwrap();
+
+        // Verify seed.
+        let before = super::get_finding(&pool, CREATOR, "cl1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            before.rule_suggestion.as_deref(),
+            Some("original suggestion")
+        );
+
+        // Patch: Some(None) → clear to NULL.
+        let updated = update_finding(
+            &pool,
+            CREATOR,
+            "cl1",
+            &patch_rule_suggestion(Some(None)),
+            2000,
+        )
+        .await
+        .unwrap();
+        assert!(updated, "row should be updated");
+
+        let after = super::get_finding(&pool, CREATOR, "cl1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            after.rule_suggestion.is_none(),
+            "rule_suggestion should be NULL after Some(None) clear; got {:?}",
+            after.rule_suggestion
+        );
+    }
+
+    /// V1.48 P3 T3 — `Some(Some(value))` sets `rule_suggestion` to the value.
+    #[tokio::test]
+    async fn update_finding_can_set_rule_suggestion() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_set";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed with no rule_suggestion (NULL).
+        super::create_finding(
+            &pool,
+            &row("st1", WORK, Some(1), "major", "set-test", 1000, "open"),
+        )
+        .await
+        .unwrap();
+
+        // Patch: Some(Some("new value")) → set.
+        let updated = update_finding(
+            &pool,
+            CREATOR,
+            "st1",
+            &patch_rule_suggestion(Some(Some("new suggestion".to_string()))),
+            2000,
+        )
+        .await
+        .unwrap();
+        assert!(updated, "row should be updated");
+
+        let after = super::get_finding(&pool, CREATOR, "st1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.rule_suggestion.as_deref(),
+            Some("new suggestion"),
+            "rule_suggestion should be set to the new value"
+        );
+    }
+
+    /// V1.48 P3 T3 — `None` (outer) leaves `rule_suggestion` unchanged.
+    #[tokio::test]
+    async fn update_finding_can_omit_rule_suggestion_to_keep_unchanged() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_omit";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed with a non-empty rule_suggestion.
+        let mut f = row("om1", WORK, Some(1), "major", "omit-test", 1000, "open");
+        f.rule_suggestion = Some("keep me".to_string());
+        super::create_finding(&pool, &f).await.unwrap();
+
+        // Patch a DIFFERENT field (severity) while omitting rule_suggestion
+        // (None outer). The rule_suggestion must survive unchanged.
+        let mut patch = FindingPatch {
+            severity: Some("minor".to_string()),
+            ..Default::default()
+        };
+        patch.rule_suggestion = None; // omit
+        let updated = update_finding(&pool, CREATOR, "om1", &patch, 2000)
+            .await
+            .unwrap();
+        assert!(updated, "row should be updated");
+
+        let after = super::get_finding(&pool, CREATOR, "om1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.severity, "minor", "severity should be updated");
+        assert_eq!(
+            after.rule_suggestion.as_deref(),
+            Some("keep me"),
+            "rule_suggestion must be unchanged when omitted from the patch"
+        );
     }
 
     /// Insert a minimal works row to satisfy the `findings.work_id` FK.
