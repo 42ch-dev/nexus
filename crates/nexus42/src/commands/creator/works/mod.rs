@@ -1674,10 +1674,28 @@ impl FindingsSummary {
 ///   + suggests `creator run novel-review-master` (V1.46 P0, Grill #7)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult, work_id: &str) {
+    // R-V146P0-QC1-S2: formatting lives in the pure `format_findings_summary_lines`
+    // helper so the test helper `capture_findings_output` cannot drift from
+    // production. This wrapper only prints each rendered line.
+    for line in format_findings_summary_lines(result, work_id) {
+        println!("{line}");
+    }
+}
+
+/// Render the open-findings summary as a vector of display lines (pure).
+///
+/// Extracted from `print_findings_summary` (R-V146P0-QC1-S2) as the single
+/// formatting path shared by the production printer and the test helper
+/// `capture_findings_output` (previously the helper mirrored the production
+/// logic, risking silent drift).
+///
+/// - `FindingsResult::Unavailable` → one-line `["findings: unavailable (daemon error)"]`
+/// - `FindingsResult::Fetched([])` → two lines: "none open" + review-master hint
+/// - `FindingsResult::Fetched([...])` → summary line + top findings (sanitized)
+fn format_findings_summary_lines(result: &FindingsResult, work_id: &str) -> Vec<String> {
     let findings = match result {
         FindingsResult::Unavailable => {
-            println!("findings: unavailable (daemon error)");
-            return;
+            return vec!["findings: unavailable (daemon error)".to_string()];
         }
         FindingsResult::Fetched(vec) => vec,
     };
@@ -1687,9 +1705,10 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     if summary.open_count == 0 {
         // V1.46 P0 (Grill #7): empty findings → suggest a master-decision pass.
         let safe_work_id = sanitize_for_terminal(work_id);
-        println!("findings: none open");
-        println!("  Run: nexus42 creator run novel-review-master {safe_work_id}");
-        return;
+        return vec![
+            "findings: none open".to_string(),
+            format!("  Run: nexus42 creator run novel-review-master {safe_work_id}"),
+        ];
     }
 
     // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
@@ -1709,15 +1728,22 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         .highest_severity
         .as_ref()
         .map_or(String::new(), |h| format!(" — highest: {h}"));
-    println!("findings: {count_display} open ({sev_summary}){highest_tag}");
+
+    let mut lines = vec![format!(
+        "findings: {count_display} open ({sev_summary}){highest_tag}"
+    )];
 
     // Top findings with routing hints (sanitized).
     for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
         let safe_title = sanitize_for_terminal(title);
         let safe_hint = sanitize_for_terminal(hint);
         let display_title = truncate_with_ellipsis(&safe_title, 48);
-        println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
+        lines.push(format!(
+            "  #{} [{sev}] \"{display_title}\" {safe_hint}",
+            i + 1
+        ));
     }
+    lines
 }
 
 /// V1.46 P2 QC fix W-001: maximum number of chapters that receive
@@ -2031,49 +2057,12 @@ mod tests {
     // ── print_findings_summary display tests ─────────────────────────────
 
     fn capture_findings_output(findings: &[serde_json::Value], work_id: &str) -> String {
-        // Test the summary struct formatting (mirrors print_findings_summary logic).
-        let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
-        let summary = FindingsSummary::from_findings_json(findings, is_truncated);
-        let mut lines = Vec::new();
-
-        if summary.open_count == 0 {
-            // V1.46 P0 (Grill #7): empty → suggest review-master.
-            let safe_work_id = sanitize_for_terminal(work_id);
-            lines.push("findings: none open".to_string());
-            lines.push(format!(
-                "  Run: nexus42 creator run novel-review-master {safe_work_id}"
-            ));
-        } else {
-            let count_display = if summary.is_truncated {
-                format!("{}+", summary.open_count)
-            } else {
-                format!("{}", summary.open_count)
-            };
-            let sev_parts: Vec<String> = summary
-                .severity_counts
-                .iter()
-                .map(|(sev, count)| format!("{count} {sev}"))
-                .collect();
-            let sev_summary = sev_parts.join(", ");
-            let highest_tag = summary
-                .highest_severity
-                .as_ref()
-                .map_or(String::new(), |h| format!(" — highest: {h}"));
-            lines.push(format!(
-                "findings: {count_display} open ({sev_summary}){highest_tag}"
-            ));
-            for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
-                let safe_title = sanitize_for_terminal(title);
-                let safe_hint = sanitize_for_terminal(hint);
-                let display_title = truncate_with_ellipsis(&safe_title, 48);
-                lines.push(format!(
-                    "  #{} [{sev}] \"{display_title}\" {safe_hint}",
-                    i + 1
-                ));
-            }
-        }
-
-        lines.join("\n")
+        // R-V146P0-QC1-S2: delegate to the shared production formatter so the
+        // test helper cannot drift from `print_findings_summary`. The slice is
+        // wrapped into `FindingsResult::Fetched`; the `Unavailable` branch is
+        // covered directly by `format_findings_summary_lines` unit tests.
+        let result = FindingsResult::Fetched(findings.to_vec());
+        format_findings_summary_lines(&result, work_id).join("\n")
     }
 
     #[test]
@@ -2084,6 +2073,42 @@ mod tests {
         assert!(output.contains("novel-review-master"));
         assert!(output.contains("wrk_test"));
         assert!(!output.contains("highest"));
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V146P0-QC1-S2: shared formatter covers the Unavailable branch + parity
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_findings_summary_lines_unavailable_branch() {
+        // R-V146P0-QC1-S2: the shared `format_findings_summary_lines` owns the
+        // Unavailable branch (previously only reachable via the production
+        // `print_findings_summary`, never via the test helper). Pins the
+        // one-line degradation output.
+        let lines = format_findings_summary_lines(&FindingsResult::Unavailable, "wrk_x");
+        assert_eq!(lines.len(), 1, "Unavailable renders exactly one line");
+        assert_eq!(lines[0], "findings: unavailable (daemon error)");
+    }
+
+    #[test]
+    fn format_findings_summary_lines_parity_with_capture_helper() {
+        // R-V146P0-QC1-S2: the test helper `capture_findings_output` now
+        // delegates to the shared formatter, so its output must equal
+        // `format_findings_summary_lines(...).join("\n")` byte-for-byte.
+        // A representative populated case proves no formatting drifted.
+        let findings = vec![
+            finding_json("blocker", "Continuity error", "→ write"),
+            finding_json("major", "Plot hole", "→ brainstorm"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let via_helper = capture_findings_output(&findings, "wrk_parity");
+        let result = FindingsResult::Fetched(findings.clone());
+        let via_shared = format_findings_summary_lines(&result, "wrk_parity").join("\n");
+        assert_eq!(via_helper, via_shared, "helper must delegate to shared formatter");
+        // Sanity: the populated summary surfaces the count + a top finding.
+        assert!(via_shared.contains("findings: 3 open"));
+        assert!(via_shared.contains("1 blocker"));
+        assert!(via_shared.contains("Continuity error"));
     }
 
     #[test]
