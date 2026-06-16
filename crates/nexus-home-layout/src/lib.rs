@@ -291,10 +291,7 @@ pub fn user_writing_craft_rules_path(home: &Path) -> PathBuf {
 /// [`work_novel_rules_path`] is retained for read-only fallback only.
 #[must_use]
 pub fn work_agents_md_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
-    workspace_dir
-        .join("Works")
-        .join(work_ref)
-        .join("AGENTS.md")
+    workspace_dir.join("Works").join(work_ref).join("AGENTS.md")
 }
 
 /// Workspace-relative: `Works/<work_ref>/Rules/novel-rules.md` (legacy Layer 2).

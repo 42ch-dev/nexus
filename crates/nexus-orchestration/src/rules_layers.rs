@@ -234,7 +234,9 @@ mod tests {
         let content = std::fs::read_to_string(&path).expect("read");
         // The marker appears exactly once.
         assert_eq!(
-            content.matches(&format!("<!-- finding_id: {fid} -->")).count(),
+            content
+                .matches(&format!("<!-- finding_id: {fid} -->"))
+                .count(),
             1,
             "idempotency: finding marker should appear exactly once"
         );
@@ -302,8 +304,14 @@ mod tests {
         assert!(content.contains("# AGENTS.md — neon-river"));
         assert!(content.contains("## Style Preferences"));
         assert!(content.contains("## Accepted rule suggestions"));
-        assert!(!content.contains("fnd_old"), "reset must clear prior entries");
-        assert!(!content.contains("POV: first"), "reset must clear user edits");
+        assert!(
+            !content.contains("fnd_old"),
+            "reset must clear prior entries"
+        );
+        assert!(
+            !content.contains("POV: first"),
+            "reset must clear user edits"
+        );
     }
 
     #[test]

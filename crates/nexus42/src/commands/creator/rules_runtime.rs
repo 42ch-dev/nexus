@@ -66,9 +66,7 @@ pub async fn handle_findings(client: &DaemonClient, command: FindingsCommand) ->
 /// `work_ref`, or filesystem write error.
 pub async fn handle_rules(client: &DaemonClient, command: RulesCommand) -> Result<()> {
     match command {
-        RulesCommand::Reset { work_id, json } => {
-            handle_rules_reset(client, work_id, json).await
-        }
+        RulesCommand::Reset { work_id, json } => handle_rules_reset(client, work_id, json).await,
     }
 }
 
@@ -81,11 +79,7 @@ pub async fn handle_rules(client: &DaemonClient, command: RulesCommand) -> Resul
 /// 4. Append the rule suggestion to `Works/<work_ref>/AGENTS.md`
 ///    (idempotent on `finding_id`).
 /// 5. PATCH the finding `status=resolved`.
-async fn handle_findings_accept(
-    client: &DaemonClient,
-    finding_id: &str,
-    json: bool,
-) -> Result<()> {
+async fn handle_findings_accept(client: &DaemonClient, finding_id: &str, json: bool) -> Result<()> {
     // 1. Fetch the finding (creator-scoped endpoint, V1.48 P2).
     let path = format!("/v1/local/findings/{finding_id}");
     let finding: FindingResponse = client.get(&path).await?;
@@ -145,7 +139,10 @@ async fn handle_findings_accept(
     };
 
     if json {
-        let appended = matches!(outcome, nexus_orchestration::rules_layers::AppendOutcome::Appended);
+        let appended = matches!(
+            outcome,
+            nexus_orchestration::rules_layers::AppendOutcome::Appended
+        );
         let body = serde_json::json!({
             "finding_id": finding_id,
             "work_id": finding.work_id,
@@ -154,10 +151,14 @@ async fn handle_findings_accept(
             "appended": appended,
             "resolved_now": resolved_now,
         });
-        println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
     } else {
-        let agents_md_rel =
-            std::path::Path::new("Works").join(work_ref).join("AGENTS.md");
+        let agents_md_rel = std::path::Path::new("Works")
+            .join(work_ref)
+            .join("AGENTS.md");
         match outcome {
             nexus_orchestration::rules_layers::AppendOutcome::Appended => {
                 println!(
@@ -218,14 +219,9 @@ async fn handle_rules_reset(
     let ws_dir = operational_workspace_dir_or_error()?;
     let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
 
-    nexus_orchestration::rules_layers::reset_agents_md(&agents_md_path, work_ref).map_err(
-        |e| {
-            CliError::Other(format!(
-                "Failed to reset {}: {e}",
-                agents_md_path.display()
-            ))
-        },
-    )?;
+    nexus_orchestration::rules_layers::reset_agents_md(&agents_md_path, work_ref).map_err(|e| {
+        CliError::Other(format!("Failed to reset {}: {e}", agents_md_path.display()))
+    })?;
 
     let agents_md_rel = std::path::Path::new("Works")
         .join(work_ref)
@@ -237,7 +233,10 @@ async fn handle_rules_reset(
             "agents_md_path": agents_md_path.to_string_lossy(),
             "reset": true,
         });
-        println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
     } else {
         println!(
             "✓ Reset {rel} to default scaffold",
