@@ -1562,7 +1562,6 @@ pub(crate) fn operational_workspace_dir_from_config_public() -> Option<std::path
     operational_workspace_dir_from_config()
 }
 
-
 /// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort check of a chapter's
 /// configured `body_path` / `outline_path` against the filesystem.
 ///
@@ -2761,13 +2760,8 @@ mod tests {
 
     #[test]
     fn works_findings_accept_parses_with_finding_id() {
-        let cli = WorksCli::try_parse_from([
-            "nexus42",
-            "findings",
-            "accept",
-            "fnd_01HMV8KX",
-        ])
-        .expect("works findings accept <finding_id> should parse");
+        let cli = WorksCli::try_parse_from(["nexus42", "findings", "accept", "fnd_01HMV8KX"])
+            .expect("works findings accept <finding_id> should parse");
         match cli.command {
             WorksCommand::Findings {
                 command:
@@ -2784,21 +2778,12 @@ mod tests {
 
     #[test]
     fn works_findings_accept_supports_json_flag() {
-        let cli = WorksCli::try_parse_from([
-            "nexus42",
-            "findings",
-            "accept",
-            "fnd_01HMV8KX",
-            "--json",
-        ])
-        .expect("works findings accept <finding_id> --json should parse");
+        let cli =
+            WorksCli::try_parse_from(["nexus42", "findings", "accept", "fnd_01HMV8KX", "--json"])
+                .expect("works findings accept <finding_id> --json should parse");
         match cli.command {
             WorksCommand::Findings {
-                command:
-                    FindingsCommand::Accept {
-                        finding_id,
-                        json,
-                    },
+                command: FindingsCommand::Accept { finding_id, json },
             } => {
                 assert_eq!(finding_id, "fnd_01HMV8KX");
                 assert!(json, "--json should set json=true");
@@ -2825,21 +2810,11 @@ mod tests {
 
     #[test]
     fn works_rules_reset_parses_with_work_id_and_json() {
-        let cli = WorksCli::try_parse_from([
-            "nexus42",
-            "rules",
-            "reset",
-            "wrk_abc",
-            "--json",
-        ])
-        .expect("works rules reset <work_id> --json should parse");
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset", "wrk_abc", "--json"])
+            .expect("works rules reset <work_id> --json should parse");
         match cli.command {
             WorksCommand::Rules {
-                command:
-                    RulesCommand::Reset {
-                        work_id,
-                        json,
-                    },
+                command: RulesCommand::Reset { work_id, json },
             } => {
                 assert_eq!(work_id.as_deref(), Some("wrk_abc"));
                 assert!(json, "--json should set json=true");

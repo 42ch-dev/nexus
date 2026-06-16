@@ -530,8 +530,7 @@ impl Capability for NovelProjectScaffold {
         // The scaffold content comes from the shared
         // `rules_layers::render_default_agents_md` so that `novel-project-init`
         // and the `rules reset` CLI (T4) stay in sync.
-        let agents_md_rendered =
-            crate::rules_layers::render_default_agents_md(&inp.work_ref);
+        let agents_md_rendered = crate::rules_layers::render_default_agents_md(&inp.work_ref);
         write_file_idem(
             &root.join("AGENTS.md"),
             &agents_md_rendered,
