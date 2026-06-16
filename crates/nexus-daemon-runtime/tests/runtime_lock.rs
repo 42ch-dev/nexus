@@ -10,11 +10,11 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_daemon_runtime::api::handlers::works::{
     append_inspiration, create_work, patch_work, reconcile_chapters, AppendInspirationRequest,
-    CreateWorkRequest, PatchWorkRequest,
+    CreateWorkRequest, PatchWorkRequest, ReconcileDryRunQuery,
 };
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
@@ -329,7 +329,12 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
             .expect("set Stories dir unreadable");
     }
 
-    let result = reconcile_chapters(State(state.clone()), Path(work_id.clone())).await;
+    let result = reconcile_chapters(
+        State(state.clone()),
+        Path(work_id.clone()),
+        Query(ReconcileDryRunQuery { dry_run: None }),
+    )
+    .await;
 
     #[cfg(unix)]
     {
@@ -352,5 +357,153 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
     assert!(
         work.runtime_lock_holder.is_none(),
         "reconcile_chapters must release runtime lock on error path"
+    );
+}
+
+/// V1.49 P2 (R-V148P4-W2): `reconcile_chapters` with `dry_run=true` computes
+/// the `ReconcileReport` while making ZERO filesystem and DB mutations, and
+/// acquires NO runtime lock (overlay author-experience §8.2).
+///
+/// Setup mirrors `test_reconcile_chapters_releases_lock_on_error`: a chapter
+/// file whose frontmatter would force a `created` row in the mutating path.
+/// The dry-run path must report the same `created: 1` without writing the row
+/// or touching the file.
+#[tokio::test]
+async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
+    use nexus_daemon_runtime::api::handlers::works::ReconcileDryRunQuery;
+    use nexus_local_db::work_chapters;
+
+    let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let workspace_tmp = tempfile::TempDir::new().unwrap();
+    let workspace_path = workspace_tmp.path().to_string_lossy().to_string();
+    let state = WorkspaceState::new_for_testing(
+        nexus_home.clone(),
+        db_path.clone(),
+        Some(workspace_path.clone()),
+    )
+    .await;
+    test_utils::seed_test_creator_and_world(state.pool()).await;
+
+    let work_id = create_test_work(&state).await;
+    let work_ref = "reconcile-dryrun-test";
+
+    // Set story_ref so the handler reaches the filesystem layer.
+    let mut patch = minimal_patch("Dry Run Test");
+    patch.story_ref = Some(Some(work_ref.to_string()));
+    let _ = patch_work(State(state.clone()), Path(work_id.clone()), Json(patch))
+        .await
+        .unwrap();
+
+    // One chapter file whose frontmatter would create a new DB row in the
+    // mutating path (no existing row for chapter 1).
+    let stories_dir = workspace_tmp
+        .path()
+        .join("Works")
+        .join(work_ref)
+        .join("Stories");
+    std::fs::create_dir_all(&stories_dir).unwrap();
+    let chapter_path = stories_dir.join("ch01-intro.md");
+    let original_body = "---\nchapter: 1\nstatus: finalized\nword_count: 1234\n---\nBody";
+    std::fs::write(&chapter_path, original_body).unwrap();
+
+    // Snapshot pre-state: filesystem file contents + DB chapter row count.
+    let pre_file_contents = std::fs::read_to_string(&chapter_path).unwrap();
+    let pre_db_rows = work_chapters::list_chapters(state.pool(), &work_id)
+        .await
+        .expect("list_chapters pre-dry-run")
+        .len();
+    assert_eq!(
+        pre_db_rows, 0,
+        "no chapter rows should exist before dry-run"
+    );
+    let pre_lock_holder = works::get_work(state.pool(), "test_creator", &work_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .runtime_lock_holder;
+
+    // Dry-run reconcile: compute the report without writing.
+    let result = reconcile_chapters(
+        State(state.clone()),
+        Path(work_id.clone()),
+        Query(ReconcileDryRunQuery {
+            dry_run: Some(true),
+        }),
+    )
+    .await;
+
+    let (_status, json_report) = result.expect("dry-run reconcile should succeed");
+    let report = json_report.0;
+
+    // The report must reflect what the mutating path would do: one new chapter.
+    assert_eq!(
+        report.created, 1,
+        "dry-run report should show created=1 for the new chapter file"
+    );
+    assert_eq!(report.updated, 0);
+    assert_eq!(report.resynced, 0);
+    assert_eq!(report.preserved, 0);
+
+    // ZERO filesystem mutations: the chapter file must be byte-identical.
+    let post_file_contents = std::fs::read_to_string(&chapter_path).unwrap();
+    assert_eq!(
+        pre_file_contents, post_file_contents,
+        "dry-run must not modify the chapter file"
+    );
+
+    // ZERO DB mutations: still no chapter rows.
+    let post_db_rows = work_chapters::list_chapters(state.pool(), &work_id)
+        .await
+        .expect("list_chapters post-dry-run")
+        .len();
+    assert_eq!(
+        post_db_rows, 0,
+        "dry-run must not insert any chapter rows into the DB"
+    );
+
+    // NO runtime lock acquired on the dry-run path.
+    let post_lock_holder = works::get_work(state.pool(), "test_creator", &work_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .runtime_lock_holder;
+    assert_eq!(
+        pre_lock_holder, post_lock_holder,
+        "dry-run must not acquire the runtime lock"
+    );
+    assert!(
+        post_lock_holder.is_none(),
+        "runtime_lock_holder must remain unset after dry-run"
+    );
+
+    // Sanity: a subsequent MUTATING reconcile (dry_run=false) does write the
+    // row, proving the dry-run report was accurate and the path is genuinely
+    // non-mutating (not silently no-oping due to a setup bug).
+    let (_status, mutate_report) = reconcile_chapters(
+        State(state.clone()),
+        Path(work_id.clone()),
+        Query(ReconcileDryRunQuery { dry_run: None }),
+    )
+    .await
+    .expect("mutating reconcile should succeed");
+    assert_eq!(mutate_report.0.created, 1, "mutating path creates the row");
+    let post_mutate_rows = work_chapters::list_chapters(state.pool(), &work_id)
+        .await
+        .unwrap()
+        .len();
+    assert_eq!(
+        post_mutate_rows, 1,
+        "mutating reconcile must insert exactly one chapter row"
+    );
+
+    // Lock must be released after the mutating path too.
+    let post_mutate_lock = works::get_work(state.pool(), "test_creator", &work_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .runtime_lock_holder;
+    assert!(
+        post_mutate_lock.is_none(),
+        "mutating reconcile must release the runtime lock"
     );
 }

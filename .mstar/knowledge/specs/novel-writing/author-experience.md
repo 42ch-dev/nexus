@@ -207,33 +207,35 @@ At V1.46 P-last:
 
 **Problem**: `creator bootstrap` creates a new Work and schedules `creative-brief-intake`. Existing Works have no equivalent.
 
-**Normative CLI** (V1.49 target):
+**Shipped CLI** (V1.49 P2):
 
 ```bash
 nexus42 creator works intake [<work_id>] [--json]
 ```
 
-| Behavior | Requirement |
-| --- | --- |
-| Default work | Resolves active/default Work when `work_id` omitted |
-| Schedule | Enqueues `creative-brief-intake` for the resolved Work without creating a new Work row |
-| Driver interaction | Must not cancel active FL-E auto-chain driver |
-| Remediation | On failure, cite this §8.1 + `creator bootstrap` for new-Work path |
+| Behavior | Requirement | Implementation (V1.49 P2) |
+| --- | --- | --- |
+| Default work | Resolves active/default Work when `work_id` omitted | `resolve_active_work_id` (`work_utils.rs`); errors when `None` and no active Work |
+| Schedule | Enqueues `creative-brief-intake` for the resolved Work without creating a new Work row | POST `/v1/local/orchestration/schedules` with `preset_id="creative-brief-intake"` and `input.work_id=<resolved>`; the preset declares no gates, so the existing schedule-add handler accepts it on any existing Work |
+| Driver interaction | Must not cancel active FL-E auto-chain driver | Schedule is enqueued independently; no PATCH to `driver_schedule_id` |
+| Remediation | On failure, cite this §8.1 + `creator bootstrap` for new-Work path | Missing/failed Work GET surfaces an error citing §8.1 + `creator bootstrap` |
 
 ### 8.2 Reconcile preview (R-V148P4-W2)
 
 **Problem**: `creator works reconcile-chapters` mutates filesystem frontmatter and `work_chapters` without preview.
 
-**Normative CLI** (mirror `works rules reset` safety flags):
+**Shipped CLI** (mirror `works rules reset` safety flags; V1.49 P2):
 
 ```bash
-nexus42 creator works reconcile-chapters [<work_id>] [--dry-run] [--yes] [--json]
+nexus42 creator works reconcile-chapters [<work_id>] [--dry-run] [--yes|-y] [--json]
 ```
 
-| Flag | Requirement |
-| --- | --- |
-| `--dry-run` | Compute `ReconcileReport` only; **no** filesystem or DB writes; **no** runtime lock acquire |
-| `--yes` | Skip interactive confirmation when not dry-run |
-| default | Prompt before mutating when stderr is a TTY (same policy family as rules reset) |
+| Flag | Requirement | Implementation (V1.49 P2) |
+| --- | --- | --- |
+| `--dry-run` | Compute `ReconcileReport` only; **no** filesystem or DB writes; **no** runtime lock acquire | Threads `?dry_run=true` query param; daemon skips `RuntimeLockGuard::acquire` and calls `reconcile_from_filesystem(..., dry_run=true)` which gates all writes behind `if !dry_run` while keeping counter increments accurate |
+| `--yes` (or `-y`) | Skip interactive confirmation when not dry-run | CLI skips `confirm_reconcile_interactive`; daemon mutating path unchanged |
+| default | Prompt before mutating when stdin is a TTY (same policy family as rules reset) | `confirm_reconcile_interactive` errors when stdin is non-TTY (scripted use must pass `--yes`); `--dry-run` takes precedence over `--yes` |
+
+The daemon handler signature is now `POST /v1/local/works/{work_id}/reconcile-chapters?dry_run=true|false` (query param optional, defaults to the mutating path).
 
 **Remediation copy** in `creator works status` must cite `reconcile-chapters --dry-run` when filesystem/DB drift detected.
