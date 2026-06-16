@@ -1,9 +1,9 @@
 # Novel Author Experience — Normative Supplement v1
 
-**Status**: **Shipped (V1.46)** — overlay merged into Master; baseline **Shipped (V1.43)** + V1.45 CLI IA amendments  
+**Status**: **Shipped (V1.49 P2 — author desk UX integrated)** — baseline Shipped (V1.43) + V1.45 CLI IA amendments + V1.46 Shipped; §8 intake re-trigger + reconcile preview merged from V1.49 P2 overlay  
 **Document class**: Feature line (author experience supplement)  
 **Created**: 2026-06-12  
-**Last updated**: 2026-06-15 (V1.46 P-last — promoted from Draft (V1.46) to Shipped; P0 author desk delta + P1 spec sweep + P2 chapter hints shipped)  
+**Last updated**: 2026-06-17 (V1.49 P-last — §8 overlay merged; cross-refs added)  
 **Scope**: End-user **ongoing serial** happy path — normative CLI surfaces, remediation chains, and author visibility (spec-only SSOT; **no** `docs/novel-writing-quickstart.md` after P1)  
 **Coordinates with**:
 
@@ -198,10 +198,11 @@ At V1.46 P-last:
 
 ---
 
-## 8. Author desk deltas (Draft V1.49)
+## 8. Author desk deltas (Shipped V1.49 P2)
 
-> **Status**: Draft overlay — merge into Shipped body at V1.49 P-last.  
+> **Status**: Shipped (V1.49 P2) — P2 overlay merged into Master.  
 > **Plan**: [2026-06-17-v1.49-author-desk-ux.md](../../plans/2026-06-17-v1.49-author-desk-ux.md)
+> **Cross-refs**: findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (6-state V1.49 P0); narrative indexes → [workflow-profile.md §4.6](workflow-profile.md#46-narrative-indexes--f-e-runtime-v149-p1) (V1.49 P1)
 
 ### 8.1 Intake re-trigger on existing Work (R-V147P1-01)
 

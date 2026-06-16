@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Shipped (V1.47); V1.48 extensions folded (§9)  
+**Status**: Shipped (V1.49 — findings lifecycle F6 integrated)  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-15 (V1.47 P-last — spec promotion Draft → Shipped)  
+**Last updated**: 2026-06-17 (V1.49 P-last — findings lifecycle F6 folded from overlay)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
@@ -35,13 +35,13 @@ V1.36 shipped inline `llm_judge` 五问 on finalize. V1.39 implements a durable 
 | `chapter` | INTEGER NULL | Optional chapter binding |
 | `kind` | TEXT | `continuity`, `craft`, `plot_hole`, `world_inconsistency`, … |
 | `severity` | TEXT | `info`, `minor`, `major`, `blocker` |
-| `status` | TEXT | `open`, `resolved`, `wont_fix` |
+| `status` | TEXT | **V1.49 P0**: 6-state — `open`, `triaged`, `in_review`, `resolved`, `wont_fix`, `duplicate` (supersedes V1.39 three-state `open` / `resolved` / `wont_fix`) |
 | `target_executor` | TEXT | `write`, `brainstorm`, `none`, `master` |
 | `body` | TEXT | Human-readable finding |
 | `rule_suggestion` | TEXT NULL | **V1.47** — optional prose suggestion for Layer 2 rules; persisted on finding row only (no `AGENTS.md` write in P0) |
 | `created_at` / `updated_at` | INTEGER | Unix epoch |
 
-Indexes: `(work_id, status)`, `(work_id, chapter, status)`.
+Indexes: `(work_id, status)`, `(work_id, chapter, status)`. **V1.49 P0**: added composite index `idx_findings_status_updated_at` on `(status, updated_at)`.
 
 ### 2.2 Executor routing
 
@@ -53,6 +53,47 @@ Indexes: `(work_id, status)`, `(work_id, chapter, status)`.
 | `master` | `novel-review-master` |
 
 Auto-chain must not fork driver when routing spawns auxiliary schedules; at most one active FL-E driver per Work remains invariant.
+
+### 2.3 Extended status enum (V1.49 P0 — F6 lifecycle)
+
+V1.49 P0 extends the V1.39 three-state model (`open` / `resolved` / `wont_fix`) to a 6-state lifecycle:
+
+| Status | Meaning |
+| --- | --- |
+| `open` | New finding; not yet triaged |
+| `triaged` | Reviewed; actionable for write/brainstorm routing |
+| `in_review` | Under master review (`novel-review-master` active) |
+| `resolved` | Addressed; eligible for retention prune |
+| `wont_fix` | Explicitly waived; never pruned by retention DAO |
+| `duplicate` | Superseded by another finding; terminal |
+
+### 2.4 Allowed transitions
+
+```text
+open → triaged | in_review | resolved | wont_fix | duplicate
+triaged → in_review | resolved | wont_fix | duplicate
+in_review → resolved | wont_fix | duplicate
+resolved → (terminal; may be pruned by retention policy)
+wont_fix → (terminal)
+duplicate → (terminal)
+```
+
+Invalid transitions return `422` with stable error code on Local API (see §2.7 error classification).
+
+### 2.5 Actionable set for prompt consumer
+
+Findings with status ∈ `{ open, triaged }` are included in `open_findings_block` (V1.48 naming preserved). Status `in_review` is **excluded** from produce prompts unless a future spec amends.
+
+### 2.6 Migration
+
+Existing rows remain valid. No automatic status rewrite on migration. Default for new rows: `open`.
+
+### 2.7 API error classification (V1.49 P0)
+
+| Error | Trigger | HTTP |
+| --- | --- | --- |
+| `INVALID_TRANSITION` | Status change violates allowed transition graph (§2.4) | 422 |
+| `INVALID_INPUT` | Unknown status value, missing fields, or malformed payload | 400 |
 
 ---
 

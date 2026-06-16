@@ -1,9 +1,10 @@
-# Novel Findings Lifecycle — Draft Overlay v1.49
+# Novel Findings Lifecycle — Superseded Overlay
 
-**Status**: Draft (V1.49)  
-**Document class**: Draft overlay  
+**Status**: Superseded by `novel-writing/quality-loop.md` §2 (V1.49 P-last)  
+**Document class**: Draft overlay (archived)  
 **Created**: 2026-06-17  
 **Last updated**: 2026-06-17  
+**Supersession note**: folded into `quality-loop.md` §2 on 2026-06-17 (commit TBD); preserved here for historical reference.  
 **Scope**: Extended findings status lifecycle (F6) — supersedes three-state minimum in [quality-loop.md](quality-loop.md) §2 for V1.49 implement wave  
 **Coordinates with**:
 

@@ -1,9 +1,10 @@
-# Novel Narrative Indexes — Draft Overlay v1.49
+# Novel Narrative Indexes — Superseded Overlay
 
-**Status**: Draft (V1.49)  
-**Document class**: Draft overlay  
+**Status**: Superseded by `novel-writing/workflow-profile.md` §4.6 (V1.49 P-last)  
+**Document class**: Draft overlay (archived)  
 **Created**: 2026-06-17  
 **Last updated**: 2026-06-17  
+**Supersession note**: folded into `workflow-profile.md` §4.6 on 2026-06-17 (commit TBD); 5-column F### schema per R-V149P1-01 reconciliation; preserved here for historical reference.  
 **Scope**: Runtime contract for `Works/<work_ref>/Outlines/foreshadowing.md` (F###) and `event-index.md` (E###) — supersedes empty-stub-only behavior from V1.36 scaffold  
 **Coordinates with**:
 
