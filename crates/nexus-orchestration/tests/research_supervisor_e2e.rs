@@ -35,6 +35,14 @@ use nexus_orchestration::stage_gates::{build_schedule_for_stage, WorkFields};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
+/// R-V146P3-QC1-S1: the `research` preset's `version` from
+/// `embedded-presets/research/preset.yaml`. The seed SQL and the
+/// structural assertion previously hard-coded the literal `2` in two
+/// unrelated places, so a future version bump could update one and silently
+/// desync the other (the seed row would no longer match the manifest the
+/// supervisor loads). Pin both to this single named constant.
+const RESEARCH_PRESET_VERSION: u32 = 2;
+
 // ── Hermetic DB helpers (modeled on tests/auto_chain.rs) ─────────────────────
 
 /// Open an in-memory-tempfile `SQLite` pool with migrations applied.
@@ -105,7 +113,8 @@ async fn seed_work(pool: &SqlitePool, work: &WorkRecord) {
 /// validation so the test controls `work_id` + status precisely).
 ///
 /// Mirrors `insert_driver_schedule` in `tests/auto_chain.rs`, pinned to the
-/// research preset (`preset_version = 2`, matching the embedded manifest).
+/// research preset (`preset_version = RESEARCH_PRESET_VERSION`, matching the
+/// embedded manifest).
 async fn insert_research_schedule(
     pool: &SqlitePool,
     schedule_id: &str,
@@ -121,10 +130,11 @@ async fn insert_research_schedule(
            (schedule_id, creator_id, preset_id, preset_version, status,
             concurrency_kind, current_core_context_version,
             label, created_at, updated_at, work_id)
-           VALUES (?, ?, 'research', 2, ?, 'serial', 0, ?, ?, ?, ?)",
+           VALUES (?, ?, 'research', ?, ?, 'serial', 0, ?, ?, ?, ?)",
     )
     .bind(schedule_id)
     .bind(creator_id)
+    .bind(RESEARCH_PRESET_VERSION)
     .bind(status)
     .bind(format!("FL-E stage: research (work: {work_id})"))
     .bind(now)
@@ -182,8 +192,8 @@ async fn research_preset_loads_and_structurally_valid() {
     // Header contract.
     assert_eq!(loaded.id, "research", "preset id");
     assert_eq!(
-        loaded.version, 2,
-        "preset version (bump on breaking changes)"
+        loaded.version, RESEARCH_PRESET_VERSION,
+        "preset version (bump on breaking changes; pinned to RESEARCH_PRESET_VERSION)"
     );
     assert_eq!(
         loaded.manifest.preset.kind,

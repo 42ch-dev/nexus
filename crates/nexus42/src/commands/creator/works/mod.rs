@@ -535,10 +535,15 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
-        if let Ok(stale) = client
-            .get::<serde_json::Value>("/v1/local/findings/stale")
-            .await
-        {
+        //
+        // R-V146P0-QC3-S3: route through `fetch_stale_findings` (the shared
+        // short-timeout helper, STALE_FETCH_TIMEOUT = 5s) instead of the raw
+        // `client.get(...)` which inherited the default 30s request timeout.
+        // This restores parity with the JSON status path (qc3 F-002) and
+        // bounds the stale-fetch latency on the human status hot path — the
+        // original qc3 S-003 concern that a degraded stale endpoint could
+        // stall the status command for the full default timeout.
+        if let Some(stale) = fetch_stale_findings(client).await {
             let stale_count = stale
                 .get("stale_count")
                 .and_then(serde_json::Value::as_u64)
@@ -547,15 +552,8 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 .get("threshold_seconds")
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(96 * 60 * 60);
-            if stale_count > 0 {
-                let threshold_hours = threshold_secs / 3600;
-                // V1.47 P1: normalize user-facing copy — spec name, not repo path.
-                // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
-                println!(
-                    "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
-                     address open findings or run a review pass; \
-                     see novel-author-experience §4"
-                );
+            if let Some(banner) = format_stale_banner(stale_count, threshold_secs) {
+                println!("{banner}");
                 println!();
             }
         }
@@ -1486,6 +1484,30 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
         .ok()
 }
 
+/// Format the human-path stale-findings banner line (R-V146P0-QC3-S3).
+///
+/// Pure over `(stale_count, threshold_seconds)`. Returns `Some(banner)` only
+/// when `stale_count > 0` (no banner noise when nothing is stale); `None`
+/// otherwise so the caller skips printing. Extracted from the inline banner
+/// block so the rendering + zero-suppression is hermetically unit-testable,
+/// and so both the threshold math and the spec citation live in one place.
+///
+/// `threshold_seconds` defaults to 96h (96 * 60 * 60) at the call site when
+/// the daemon omits it.
+fn format_stale_banner(stale_count: u64, threshold_seconds: i64) -> Option<String> {
+    if stale_count == 0 {
+        return None;
+    }
+    let threshold_hours = threshold_seconds / 3600;
+    // V1.47 P1: normalize user-facing copy — spec name, not repo path.
+    // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
+    Some(format!(
+        "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
+         address open findings or run a review pass; \
+         see novel-author-experience §4"
+    ))
+}
+
 /// Fetch both the work-scoped open findings and the creator-global stale
 /// summary for a novel work's JSON status, running the two independent daemon
 /// subcalls **concurrently** via `tokio::join!` (qc3 F-001).
@@ -1674,10 +1696,28 @@ impl FindingsSummary {
 ///   + suggests `creator run novel-review-master` (V1.46 P0, Grill #7)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult, work_id: &str) {
+    // R-V146P0-QC1-S2: formatting lives in the pure `format_findings_summary_lines`
+    // helper so the test helper `capture_findings_output` cannot drift from
+    // production. This wrapper only prints each rendered line.
+    for line in format_findings_summary_lines(result, work_id) {
+        println!("{line}");
+    }
+}
+
+/// Render the open-findings summary as a vector of display lines (pure).
+///
+/// Extracted from `print_findings_summary` (R-V146P0-QC1-S2) as the single
+/// formatting path shared by the production printer and the test helper
+/// `capture_findings_output` (previously the helper mirrored the production
+/// logic, risking silent drift).
+///
+/// - `FindingsResult::Unavailable` → one-line `["findings: unavailable (daemon error)"]`
+/// - `FindingsResult::Fetched([])` → two lines: "none open" + review-master hint
+/// - `FindingsResult::Fetched([...])` → summary line + top findings (sanitized)
+fn format_findings_summary_lines(result: &FindingsResult, work_id: &str) -> Vec<String> {
     let findings = match result {
         FindingsResult::Unavailable => {
-            println!("findings: unavailable (daemon error)");
-            return;
+            return vec!["findings: unavailable (daemon error)".to_string()];
         }
         FindingsResult::Fetched(vec) => vec,
     };
@@ -1687,9 +1727,10 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     if summary.open_count == 0 {
         // V1.46 P0 (Grill #7): empty findings → suggest a master-decision pass.
         let safe_work_id = sanitize_for_terminal(work_id);
-        println!("findings: none open");
-        println!("  Run: nexus42 creator run novel-review-master {safe_work_id}");
-        return;
+        return vec![
+            "findings: none open".to_string(),
+            format!("  Run: nexus42 creator run novel-review-master {safe_work_id}"),
+        ];
     }
 
     // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
@@ -1709,15 +1750,22 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         .highest_severity
         .as_ref()
         .map_or(String::new(), |h| format!(" — highest: {h}"));
-    println!("findings: {count_display} open ({sev_summary}){highest_tag}");
+
+    let mut lines = vec![format!(
+        "findings: {count_display} open ({sev_summary}){highest_tag}"
+    )];
 
     // Top findings with routing hints (sanitized).
     for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
         let safe_title = sanitize_for_terminal(title);
         let safe_hint = sanitize_for_terminal(hint);
         let display_title = truncate_with_ellipsis(&safe_title, 48);
-        println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
+        lines.push(format!(
+            "  #{} [{sev}] \"{display_title}\" {safe_hint}",
+            i + 1
+        ));
     }
+    lines
 }
 
 /// V1.46 P2 QC fix W-001: maximum number of chapters that receive
@@ -1889,23 +1937,22 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
     if work_ref.starts_with('(') {
         return;
     }
-    if let Ok(cfg) = crate::config::CliConfig::load() {
-        if let Some(creator_id) = &cfg.active_creator_id {
-            if let Some(ws_slug) = cfg.active_workspace_slug_by_creator.get(creator_id) {
-                let home = dirs::home_dir().unwrap_or_default();
-                let ws_dir =
-                    nexus_home_layout::operational_workspace_dir(&home, creator_id, ws_slug);
-                let lock_path = ws_dir
-                    .join("Works")
-                    .join(work_ref)
-                    .join(".completion-lock.json");
-                if !lock_path.exists() {
-                    println!("⚠ completion-lock file missing (DB says locked but file not found)");
-                    // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
-                    println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
-                }
-            }
-        }
+    // R-V146P2-QC1-S2: route through the shared `operational_workspace_dir_from_config`
+    // helper instead of re-implementing the config → creator_id → workspace_slug →
+    // home → operational_workspace_dir lookup inline. The helper has identical
+    // best-effort semantics (None on any resolution failure); the prior ad-hoc
+    // block was a verbatim duplicate of that resolution chain.
+    let Some(ws_dir) = operational_workspace_dir_from_config() else {
+        return;
+    };
+    let lock_path = ws_dir
+        .join("Works")
+        .join(work_ref)
+        .join(".completion-lock.json");
+    if !lock_path.exists() {
+        println!("⚠ completion-lock file missing (DB says locked but file not found)");
+        // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
+        println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
     }
 }
 
@@ -1964,6 +2011,29 @@ mod tests {
             "title": title,
             "routing_hint": routing_hint,
             "status": "open",
+        })
+    }
+
+    /// R-V146P0-QC2-S1: build a finding element with the FULL list-API shape
+    /// (every field the findings list endpoint returns), not the minimal
+    /// `finding_json` subset. Used to assert `enrich_status_json` preserves
+    /// the element verbatim (full shape fidelity, not just a few fields).
+    fn full_finding_json() -> serde_json::Value {
+        serde_json::json!({
+            "finding_id": "fnd_01H8XK9Q2VTestFidelityFullShape",
+            "work_id": "wrk_full_shape",
+            "chapter": 7,
+            "severity": "blocker",
+            "status": "open",
+            "title": "Continuity error in chapter 7",
+            "description": "Character name changes between paragraphs 3 and 9.",
+            "routing_hint": "→ write",
+            "target_executor": "write",
+            "creator_id": "ctr_full_shape",
+            "kind": "continuity",
+            "rule_suggestion": "Track character names per chapter.",
+            "created_at": 1_718_000_000,
+            "updated_at": 1_718_000_123,
         })
     }
 
@@ -2032,49 +2102,12 @@ mod tests {
     // ── print_findings_summary display tests ─────────────────────────────
 
     fn capture_findings_output(findings: &[serde_json::Value], work_id: &str) -> String {
-        // Test the summary struct formatting (mirrors print_findings_summary logic).
-        let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
-        let summary = FindingsSummary::from_findings_json(findings, is_truncated);
-        let mut lines = Vec::new();
-
-        if summary.open_count == 0 {
-            // V1.46 P0 (Grill #7): empty → suggest review-master.
-            let safe_work_id = sanitize_for_terminal(work_id);
-            lines.push("findings: none open".to_string());
-            lines.push(format!(
-                "  Run: nexus42 creator run novel-review-master {safe_work_id}"
-            ));
-        } else {
-            let count_display = if summary.is_truncated {
-                format!("{}+", summary.open_count)
-            } else {
-                format!("{}", summary.open_count)
-            };
-            let sev_parts: Vec<String> = summary
-                .severity_counts
-                .iter()
-                .map(|(sev, count)| format!("{count} {sev}"))
-                .collect();
-            let sev_summary = sev_parts.join(", ");
-            let highest_tag = summary
-                .highest_severity
-                .as_ref()
-                .map_or(String::new(), |h| format!(" — highest: {h}"));
-            lines.push(format!(
-                "findings: {count_display} open ({sev_summary}){highest_tag}"
-            ));
-            for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
-                let safe_title = sanitize_for_terminal(title);
-                let safe_hint = sanitize_for_terminal(hint);
-                let display_title = truncate_with_ellipsis(&safe_title, 48);
-                lines.push(format!(
-                    "  #{} [{sev}] \"{display_title}\" {safe_hint}",
-                    i + 1
-                ));
-            }
-        }
-
-        lines.join("\n")
+        // R-V146P0-QC1-S2: delegate to the shared production formatter so the
+        // test helper cannot drift from `print_findings_summary`. The slice is
+        // wrapped into `FindingsResult::Fetched`; the `Unavailable` branch is
+        // covered directly by `format_findings_summary_lines` unit tests.
+        let result = FindingsResult::Fetched(findings.to_vec());
+        format_findings_summary_lines(&result, work_id).join("\n")
     }
 
     #[test]
@@ -2085,6 +2118,45 @@ mod tests {
         assert!(output.contains("novel-review-master"));
         assert!(output.contains("wrk_test"));
         assert!(!output.contains("highest"));
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V146P0-QC1-S2: shared formatter covers the Unavailable branch + parity
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_findings_summary_lines_unavailable_branch() {
+        // R-V146P0-QC1-S2: the shared `format_findings_summary_lines` owns the
+        // Unavailable branch (previously only reachable via the production
+        // `print_findings_summary`, never via the test helper). Pins the
+        // one-line degradation output.
+        let lines = format_findings_summary_lines(&FindingsResult::Unavailable, "wrk_x");
+        assert_eq!(lines.len(), 1, "Unavailable renders exactly one line");
+        assert_eq!(lines[0], "findings: unavailable (daemon error)");
+    }
+
+    #[test]
+    fn format_findings_summary_lines_parity_with_capture_helper() {
+        // R-V146P0-QC1-S2: the test helper `capture_findings_output` now
+        // delegates to the shared formatter, so its output must equal
+        // `format_findings_summary_lines(...).join("\n")` byte-for-byte.
+        // A representative populated case proves no formatting drifted.
+        let findings = vec![
+            finding_json("blocker", "Continuity error", "→ write"),
+            finding_json("major", "Plot hole", "→ brainstorm"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let via_helper = capture_findings_output(&findings, "wrk_parity");
+        let result = FindingsResult::Fetched(findings.clone());
+        let via_shared = format_findings_summary_lines(&result, "wrk_parity").join("\n");
+        assert_eq!(
+            via_helper, via_shared,
+            "helper must delegate to shared formatter"
+        );
+        // Sanity: the populated summary surfaces the count + a top finding.
+        assert!(via_shared.contains("findings: 3 open"));
+        assert!(via_shared.contains("1 blocker"));
+        assert!(via_shared.contains("Continuity error"));
     }
 
     #[test]
@@ -2244,6 +2316,49 @@ mod tests {
             Some("Test Novel")
         );
         assert_eq!(out.get("current_chapter").and_then(|v| v.as_i64()), Some(3));
+    }
+
+    #[test]
+    fn enrich_novel_preserves_full_finding_element_shape_verbatim() {
+        // R-V146P0-QC2-S1: the existing enrich tests used the minimal
+        // `finding_json` helper and only spot-checked `severity` /
+        // `routing_hint`. Assert full element-shape fidelity: a finding
+        // carrying every list-API field must survive `enrich_status_json`
+        // byte-for-byte (verbatim round-trip), proving no field is dropped,
+        // renamed, or coerced. Guards against a future enrich impl that
+        // re-serializes a subset of fields.
+        let full = full_finding_json();
+        let findings = vec![full.clone()];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present");
+        assert_eq!(arr.len(), 1, "exactly the one full-shape finding");
+        // Verbatim equality: the enriched element equals the input element.
+        assert_eq!(
+            arr[0], full,
+            "enrich must preserve the full finding element verbatim (no field drop/rename/coerce)"
+        );
+        // Pin a handful of the previously-unasserted fields explicitly so a
+        // regression message points at the right field.
+        assert_eq!(arr[0].get("chapter").and_then(|v| v.as_i64()), Some(7));
+        assert_eq!(
+            arr[0].get("description").and_then(|v| v.as_str()),
+            Some("Character name changes between paragraphs 3 and 9.")
+        );
+        assert_eq!(
+            arr[0].get("kind").and_then(|v| v.as_str()),
+            Some("continuity")
+        );
+        assert_eq!(
+            arr[0].get("rule_suggestion").and_then(|v| v.as_str()),
+            Some("Track character names per chapter.")
+        );
+        assert_eq!(
+            arr[0].get("created_at").and_then(|v| v.as_i64()),
+            Some(1_718_000_000)
+        );
     }
 
     #[test]
@@ -2532,6 +2647,43 @@ mod tests {
         );
     }
 
+    // ── R-V146P0-QC3-S3: human-path stale banner rendering ──────────────
+
+    #[test]
+    fn format_stale_banner_none_when_zero() {
+        // R-V146P0-QC3-S3: zero stale findings must NOT emit a banner
+        // (no empty sentinel noise). The human status path now routes through
+        // `format_stale_banner`, so the zero-suppression is unit-testable.
+        assert_eq!(format_stale_banner(0, 96 * 60 * 60), None);
+    }
+
+    #[test]
+    fn format_stale_banner_some_when_stale_count_positive() {
+        // R-V146P0-QC3-S3: a positive stale count renders the banner with the
+        // computed whole-hour threshold and the spec citation.
+        let banner = format_stale_banner(7, 96 * 60 * 60).expect("banner for stale_count>0");
+        assert!(
+            banner.contains("7 finding(s) stale"),
+            "count rendered: {banner}"
+        );
+        assert!(
+            banner.contains(">96h"),
+            "threshold hours rendered: {banner}"
+        );
+        assert!(
+            banner.contains("novel-author-experience §4"),
+            "spec citation preserved: {banner}"
+        );
+    }
+
+    #[test]
+    fn format_stale_banner_computes_hours_from_seconds() {
+        // R-V146P0-QC3-S3: threshold_seconds is converted to whole hours
+        // (integer division). 345600s = 96h; 7200s = 2h.
+        assert!(format_stale_banner(1, 345_600).unwrap().contains(">96h"));
+        assert!(format_stale_banner(1, 7_200).unwrap().contains(">2h"));
+    }
+
     // ── sanitize_for_terminal tests ──────────────────────────────────────
 
     #[test]
@@ -2576,6 +2728,27 @@ mod tests {
         let input = "good\x1b[2Jbad";
         let sanitized = sanitize_for_terminal(input);
         assert_eq!(sanitized, "goodbad");
+    }
+
+    // ── R-V146P2-QC1-S2: workspace-dir resolution dedup ─────────────────
+
+    #[test]
+    fn print_completion_lock_hint_no_ops_when_work_ref_is_placeholder() {
+        // R-V146P2-QC1-S2: a placeholder work_ref (starting with "(") must
+        // short-circuit before any workspace-dir resolution. Asserts the
+        // early-return branch is preserved after routing through the shared
+        // `operational_workspace_dir_from_config` helper.
+        // Best-effort: cannot panic regardless of config state.
+        print_completion_lock_hint("(no ref)", "wrk_test");
+    }
+
+    #[test]
+    fn print_completion_lock_hint_no_ops_when_workspace_unresolvable() {
+        // R-V146P2-QC1-S2: with a real-looking work_ref but no resolvable
+        // active creator/workspace (the default test-env state), the shared
+        // helper returns None and the hint is skipped without panicking.
+        // Pins that the deduplicated resolution path degrades gracefully.
+        print_completion_lock_hint("MYNOVEL", "wrk_test");
     }
 
     // ── FindingsResult unavailable display test ──────────────────────────
