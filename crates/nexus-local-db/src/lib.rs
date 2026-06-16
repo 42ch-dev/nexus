@@ -34,6 +34,11 @@ mod error;
 mod seed_shared;
 mod version;
 
+// Test-only tracing-capture helpers shared by DAO mutation-path tests
+// (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
+#[cfg(test)]
+mod test_tracing;
+
 // Re-export version constants
 pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 
