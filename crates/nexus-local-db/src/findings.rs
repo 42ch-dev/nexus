@@ -703,7 +703,7 @@ pub async fn delete_finding(
 /// daemon task / CLI command / tests can exercise the cutoff deterministically
 /// — same pattern as [`list_stale_open_findings`].
 ///
-/// **Transaction**: the DELETE runs inside a single SQLite transaction so
+/// **Transaction**: the DELETE runs inside a single `SQLite` transaction so
 /// the prune is atomic and future archival side-effects can be added in the
 /// same tx without changing the public signature.
 ///
@@ -1114,8 +1114,9 @@ pub async fn create_finding_from_review_tx(
 #[cfg(test)]
 mod tests {
     use super::{
-        list_open_findings_for_chapter, normalize_rule_suggestion, prune_resolved_findings_older_than,
-        update_finding, Finding, FindingKind, FindingPatch, RULE_SUGGESTION_MAX_BYTES,
+        list_open_findings_for_chapter, normalize_rule_suggestion,
+        prune_resolved_findings_older_than, update_finding, Finding, FindingKind, FindingPatch,
+        RULE_SUGGESTION_MAX_BYTES,
     };
     use crate::error::LocalDbError;
     use sqlx::SqlitePool;
@@ -1446,7 +1447,7 @@ mod tests {
     ///  - `old_wont_fix`   — wont_fix, updated_at same vintage           ← kept (wont_fix)
     ///  - `recent_resolved`— resolved, updated_at inside the window      ← kept (recent)
     #[tokio::test]
-    async fn prune_resolved_findings_older_than_removes_old_resolved_rows() {
+    async fn findings_retention_removes_old_resolved_rows() {
         let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune";
@@ -1508,10 +1509,7 @@ mod tests {
         let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
             .await
             .unwrap();
-        assert_eq!(
-            deleted, 1,
-            "exactly one old resolved row should be pruned"
-        );
+        assert_eq!(deleted, 1, "exactly one old resolved row should be pruned");
 
         // Verify: pr1 gone; pr2, pr3, pr4 still present.
         let remaining: Vec<String> = sqlx::query_scalar(
@@ -1531,7 +1529,7 @@ mod tests {
     /// V1.48 P3 T2 — `open` rows are never purged even when their
     /// `updated_at` is far past the retention window.
     #[tokio::test]
-    async fn prune_resolved_findings_older_than_skips_open_rows() {
+    async fn findings_retention_skips_open_rows() {
         let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune_open";
@@ -1544,7 +1542,15 @@ mod tests {
         // Only open rows — all old.
         super::create_finding(
             &pool,
-            &row("sk1", WORK, Some(1), "blocker", "old_open_1", old_ts, "open"),
+            &row(
+                "sk1",
+                WORK,
+                Some(1),
+                "blocker",
+                "old_open_1",
+                old_ts,
+                "open",
+            ),
         )
         .await
         .unwrap();
@@ -1560,19 +1566,18 @@ mod tests {
             .unwrap();
         assert_eq!(deleted, 0, "no rows should be pruned when all are open");
 
-        let remaining: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
-                .bind(WORK)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+            .bind(WORK)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(remaining, 2, "both open rows must survive");
     }
 
     /// V1.48 P3 T2 — `resolved` rows whose `updated_at` falls inside the
     /// retention window are kept.
     #[tokio::test]
-    async fn prune_resolved_findings_older_than_skips_recent_resolved_rows() {
+    async fn findings_retention_skips_recent_resolved_rows() {
         let (pool, _dir) = fresh_pool().await;
         const CREATOR: &str = "ctr_test";
         const WORK: &str = "wrk_prune_recent";
@@ -1622,12 +1627,11 @@ mod tests {
         // inside_ts  > cutoff   → kept.
         assert_eq!(deleted, 0, "boundary and inside-window rows must survive");
 
-        let remaining: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
-                .bind(WORK)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+            .bind(WORK)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(remaining, 2, "both recent resolved rows must survive");
     }
 
@@ -1662,7 +1666,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(before.rule_suggestion.as_deref(), Some("original suggestion"));
+        assert_eq!(
+            before.rule_suggestion.as_deref(),
+            Some("original suggestion")
+        );
 
         // Patch: Some(None) → clear to NULL.
         let updated = update_finding(
