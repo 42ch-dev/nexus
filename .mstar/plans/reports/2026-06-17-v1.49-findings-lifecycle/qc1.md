@@ -3,9 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-17-v1.49-findings-lifecycle
-verdict: Request Changes
-generated_at: 2026-06-17T12:00:00Z
-review_range: 1fd3a9c4..04608722
+verdict: Approve
+generated_at: 2026-06-16T21:10:00+08:00
+review_range: bc8efc8d..c4b4500f
 working_branch: iteration/v1.49
 ---
 
@@ -125,3 +125,58 @@ The read-before-write pattern has a theoretical TOCTOU window under concurrent w
 **Verdict**: Request Changes
 
 The implementation is architecturally sound — single-SSOT transition table, zero-drift actionable-set propagation, clean helper extraction, well-structured hermetic tests, and a correctly-documented migration no-op. The one blocking finding (W-1) is a public API contract issue: the `INVALID_TRANSITION` error code is overloaded for all DAO `ConstraintViolation` subtypes, making it semantically incorrect for non-transition validation failures (bad severity, bad executor, unknown status membership). The fix is low-cost and should be applied before the API contract solidifies. The three Suggestions are documentation/ergonomics improvements with no behavior change required.
+
+## Revalidation
+
+- **Re-review kind**: Targeted re-review (Reviewer 1 of 2; `qc-specialist-3` stays approved).
+- **Re-review date**: 2026-06-16T21:10:00+08:00
+- **Re-review focus**: Architecture coherence and maintainability risk (qc1's lens) — **not** duplicating qc2's security/correctness pass.
+- **Re-review scope (diff basis)**: `bc8efc8d..c4b4500f` (single fix commit `7da35dd5` + completion report `c9f10af6` + merge `c4b4500f`; equivalent to `git diff bc8efc8d...c4b4500f`).
+  - Original (wave-1) range preserved above in `## Scope`: `1fd3a9c4..04608722`.
+- **Working branch (verified)**: `iteration/v1.49` @ `c4b4500f9f13234ea28d9b291fa4fe735438e8e3`
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus`
+- **Files re-reviewed**: 5 (`error.rs`, `findings.rs`, `handlers/findings.rs`, `errors.rs`, `tests/findings_api.rs`) + `fix-w1-completion.md`.
+- **Tools run**: `git diff bc8efc8d...c4b4500f --stat` / per-file diff, `Read`/`Grep` over changed files + `ConstraintViolation` workspace boundary, `SQLX_OFFLINE=true cargo check -p nexus-local-db -p nexus-daemon-runtime` (Finished, 0 warnings, 6.24s).
+
+### Per-finding disposition (wave-1 findings)
+
+- **W-1 (`INVALID_TRANSITION` overloaded) — ✅ RESOLVED.** The fix implements the preferred DAO-level option (b) from the original finding:
+  - `LocalDbError` gains two typed variants: `IllegalTransition { from, to }` (emitted by `enforce_status_transition`) and `InvalidEnum { field, value, allowed }` (emitted by the 3 inline enum checks in `update_finding`). `ConstraintViolation` is correctly **retained** for its unrelated callers (create-path validators in `findings.rs`, `works.rs:1271`, `inspiration_items.rs:219`, and the works handler arms at `handlers/works.rs:980/1713`).
+  - The PATCH handler now has **two typed match arms** — `IllegalTransition → 422 INVALID_TRANSITION` and `InvalidEnum → 422 INVALID_INPUT` — followed by the unchanged `other => other.into()` catch-all. **No string-prefix sniffing**: classification is by enum variant, never by parsing the `constraint` text. The public `message` no longer contains the internal table name `"findings"`.
+  - `errors.rs` maps both `INVALID_TRANSITION` and `INVALID_INPUT` to `UNPROCESSABLE_ENTITY` (422); the `_ => BAD_REQUEST` default is unchanged.
+  - Coverage: `findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum` exercises all four original cases (bad severity, bad target_executor, unknown status word → `INVALID_INPUT`; illegal transition → `INVALID_TRANSITION`). The renamed `findings_lifecycle_rejects_unknown_status_with_invalid_input` locks the new contract.
+- **S-1 (self-loop surface doc) — ✅ ADDRESSED.** `update_finding_handler` rustdoc now states that `status: "<current>"` is rejected as `INVALID_TRANSITION` and that callers must omit `status` to refresh `updated_at`.
+- **S-2 (actionable-set scope boundary) — ✅ ADDRESSED.** Both `list_stale_open_findings` and `count_open_findings_by_severity` carry a one-line note that they intentionally query `status = 'open'` only (not the actionable set), pointing at the produce-prompt consumer as the sole widening target.
+- **S-3 (CAS alternative note) — ✅ ADDRESSED.** `enforce_status_transition` docstring documents the TOCTOU window and the concrete single-statement CAS upgrade path with example SQL, plus the qc2/qc3-rolled `duplicate`/`in_review` semantics now documented on `is_valid_transition`.
+
+### Maintainability observations (architecture/maintainability lens)
+
+- **Single SSOT preserved — boundary clean.** The three `LocalDbError` variants are non-overlapping at the call site: `IllegalTransition` and `InvalidEnum` are emitted **only** on the findings PATCH path; `ConstraintViolation` remains the generic constraint signal everywhere else. A workspace grep confirms no half-migrated caller and no path where a `ConstraintViolation` can still reach `update_finding_handler` (the only emitters inside `update_finding` are the 3 `InvalidEnum` checks + `enforce_status_transition`'s `IllegalTransition`). The `other => other.into()` catch-all therefore only ever sees `Sqlx`/`NotFound`-class errors on this path — it cannot regress to the old overload. `ConstraintViolation` need not be renamed; it is still semantically accurate for its remaining (generic-constraint) use cases.
+- **Re-export surface — clean, no change required.** The `lib.rs` diff is intentionally empty: `LocalDbError` was already re-exported at the crate root (the original handler already used `nexus_local_db::LocalDbError::ConstraintViolation`), so the new variants are reachable as `nexus_local_db::LocalDbError::IllegalTransition` / `::InvalidEnum` via the existing enum re-export. Confirmed by a clean `cargo check -p nexus-local-db -p nexus-daemon-runtime`.
+- **Handler match expression — readable, structured fields consistent.** The two arms destructure consistently (`from`/`to` vs `field`/`value`) and each is followed by a `tracing::warn!` carrying `creator_id` + `finding_id` plus the discriminating fields — sufficient to correlate a misbehaving client across repeated attempts. `warn` is the right level (client-side 4xx worth a daemon trail; not `error!` since no server fault).
+- **Test co-location & discoverability — good.** Both new tests live in the single `tests/findings_api.rs`, grouped under a `// ─── V1.49 P0 W-1: error-classification coverage` banner. The rename `…_rejects_unknown_status_value → …_rejects_unknown_status_with_invalid_input` correctly re-asserts the new public contract.
+- **Rolled docstrings — substantive, not boilerplate.** Each of S-1/S-2/S-3 + the qc2/qc3-rolled notes carries concrete, actionable content (lifecycle edge semantics, the exact CAS SQL, the actionable-set scope rationale) that would actually help a future reader.
+
+### 🟢 Suggestion (re-review)
+
+#### RS-1: Public message `format!` duplicates `LocalDbError::Display` (minor SSOT nit)
+
+**Location**: `crates/nexus-daemon-runtime/src/api/handlers/findings.rs` (`update_finding_handler`, both typed arms) vs `crates/nexus-local-db/src/error.rs` `impl Display` (lines 115–128).
+
+**Issue**: The handler constructs the public `message` with `format!("invalid status transition '{from}' → '{to}'")` and `format!("invalid {field} value '{value}'; allowed: {}", allowed.join(", "))` — byte-identical to the corresponding `Display` impls in `error.rs`. The two are in sync today, but a future edit to one representation (e.g. localizing the arrow, adding the spec section ref back) would not propagate to the other, silently diverging the public wire message from the error type's canonical text.
+
+**Fix (optional)**: since the handler already destructures each variant to feed the `tracing::warn!` fields, it could derive the `message` from the canonical text via `err.to_string()` (the `Display` impl) instead of re-formatting — single SSOT, identical output, no allocation penalty relative to the current `format!`. Low priority; current code is correct and the duplication is two short strings.
+
+**Sub-note**: the `InvalidEnum` `tracing::warn!` logs `field`/`value` but not the static `allowed` set. The allowed set is recoverable from code, so this is acceptable; including it would only marginally aid log-based debugging. No action required.
+
+### Re-review summary
+
+| Severity | Count (re-review scope) |
+|----------|-------------------------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 1 (RS-1, non-blocking) |
+
+**Updated verdict**: **Approve** (flipped from `Request Changes`).
+
+The wave-1 W-1 blocking finding is fully resolved via the preferred DAO-level typed-variant split, with no new Critical/Warning introduced and a clean `ConstraintViolation` boundary. All three wave-1 Suggestions (S-1/S-2/S-3) are addressed via substantive docstrings. One non-blocking maintainability Suggestion (RS-1, message SSOT) is recorded for optional future polish. R-V149P0-02 is clear to close from the qc1 seat. The pre-existing clippy `--all` failure is explicitly out of W-1 scope (R-V149P0-03, deferred to V1.50) and is not raised here.
