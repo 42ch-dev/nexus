@@ -1,0 +1,38 @@
+{
+  "id": "2026-06-16-v1.48-findings-data-hygiene",
+  "title": "P3 — Retention/cleanup + rule_suggestion NULL clear",
+  "file": ".mstar/plans/2026-06-16-v1.48-findings-data-hygiene.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 0,
+  "tags": [
+    "v1.48",
+    "findings",
+    "p3"
+  ],
+  "created_at": "2026-06-16",
+  "updated_at": "2026-06-16T11:13:44+08:00",
+  "metadata": {
+    "working_branch": "feature/v1.48-findings-data-hygiene",
+    "merge_target": "iteration/v1.48",
+    "depends_on": "2026-06-16-v1.48-rules-runtime",
+    "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+    "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+    "track": "A",
+    "target_residuals": [
+      "R-V147P0-02",
+      "R-V147P0-03"
+    ]
+  },
+  "done_at": "2026-06-16T11:13:44+08:00",
+  "notes": [
+    {
+      "at": "2026-06-16",
+      "event": "qa_approved_done",
+      "evidence": "PM-consolidated QC + QA (degraded tri-review). 6 hermetic tests pass. clippy + fmt clean. R-V147P0-02 + R-V147P0-03 closed."
+    }
+  ]
+}

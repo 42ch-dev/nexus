@@ -1,37 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16T10:37:47+08:00",
+  "updated_at": "2026-06-16T11:13:44+08:00",
   "plans": [
-    {
-      "id": "2026-06-16-v1.48-findings-data-hygiene",
-      "title": "P3 — Retention/cleanup + rule_suggestion NULL clear",
-      "file": ".mstar/plans/2026-06-16-v1.48-findings-data-hygiene.md",
-      "status": "Todo",
-      "owner": "@fullstack-dev",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.48",
-        "findings",
-        "p3"
-      ],
-      "created_at": "2026-06-16",
-      "updated_at": "2026-06-16",
-      "metadata": {
-        "working_branch": "feature/v1.48-findings-data-hygiene",
-        "merge_target": "iteration/v1.48",
-        "depends_on": "2026-06-16-v1.48-rules-runtime",
-        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
-        "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
-        "track": "A",
-        "target_residuals": [
-          "R-V147P0-02",
-          "R-V147P0-03"
-        ]
-      }
-    },
     {
       "id": "2026-06-16-v1.48-hygiene-and-closeout",
       "title": "P-last — WL-A residual closure, overlay promotion, Profile B compaction",
@@ -484,7 +454,11 @@
         "owner": "@fullstack-dev",
         "target": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-02]",
-        "note": "P3 close."
+        "note": "P3 close.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P3 T0+T2: retention policy implemented via prune_resolved_findings_older_than DAO; hermetic tests cover old-resolved removal + open-row skip + recent-resolved skip.",
+        "closure_evidence": "iteration/v1.48 @ 469b76ac (commits 25f8bfb8, 4841a0a1, 54315904, b6059e89)"
       },
       {
         "id": "R-V147P0-03",
@@ -496,7 +470,11 @@
         "owner": "@fullstack-dev",
         "target": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-03]",
-        "note": "P3 close."
+        "note": "P3 close.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P3 T3: FindingPatch.rule_suggestion uses tri-state Option<Option<String>>; update_finding dynamic SQL builder; wire PATCH verifies clear-to-NULL via deserialize_some helper.",
+        "closure_evidence": "iteration/v1.48 @ 469b76ac (commits 25f8bfb8, 4841a0a1, 54315904, b6059e89)"
       },
       {
         "id": "R-V147P0-04",
