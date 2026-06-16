@@ -208,6 +208,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 /// unknown preset, empty `cli_args`), returns `None`.
 ///
 /// Called from `main()` before `Cli::parse()`.
+#[must_use]
 pub fn maybe_render_preset_run_help() -> Option<String> {
     let argv: Vec<String> = std::env::args().collect();
     let preset_id = extract_run_help_target(&argv)?;
