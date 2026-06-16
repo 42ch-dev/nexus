@@ -203,15 +203,16 @@ impl NexusApiError {
             Self::ApiKeyExpired => "API_KEY_EXPIRED",
             Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
             Self::BadRequest { code, .. } => {
-                // Surface canonical tool-bridge codes (spec §12.4).
+                // Surface canonical tool-bridge codes (spec §12.4), plus
+                // V1.40 world-binding and V1.49 F6 lifecycle codes, as-is.
                 match code.as_str() {
-                    "POLICY_BLOCKED" | "NOT_SUPPORTED" | "INVALID_INPUT" => code.as_str(),
-                    // V1.40: surface world-binding validation codes as-is.
-                    "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
-                        code.as_str()
-                    }
-                    // V1.49 F6: surface findings-lifecycle transition codes as-is.
-                    "INVALID_TRANSITION" => code.as_str(),
+                    "POLICY_BLOCKED"
+                    | "NOT_SUPPORTED"
+                    | "INVALID_INPUT"
+                    | "INVALID_TRANSITION"
+                    | "WORLD_ID_REQUIRED"
+                    | "INVALID_WORLD_ID"
+                    | "WORLD_CLEAR_FORBIDDEN" => code.as_str(),
                     _ => "BAD_REQUEST",
                 }
             }

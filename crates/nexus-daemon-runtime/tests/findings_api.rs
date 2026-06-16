@@ -402,3 +402,177 @@ async fn findings_routing_hints_all_executors() {
         );
     }
 }
+
+// ─── V1.49 F6: extended lifecycle transitions (findings-lifecycle.md §2) ───
+
+/// Helper: PATCH a finding's status and return either the updated DTO or
+/// the resulting `NexusApiError`. Used by the V1.49 lifecycle tests so they
+/// can assert both happy paths (Ok) and rejection paths (Err).
+async fn patch_status(
+    state: &WorkspaceState,
+    work_id: &str,
+    finding_id: &str,
+    new_status: &str,
+) -> Result<FindingApiDto, nexus_daemon_runtime::api::errors::NexusApiError> {
+    update_finding_handler(
+        State(state.clone()),
+        Path((work_id.to_string(), finding_id.to_string())),
+        axum::Json(UpdateFindingRequest {
+            status: Some(new_status.to_string()),
+            severity: None,
+            title: None,
+            description: None,
+            target_executor: None,
+            kind: None,
+            rule_suggestion: None,
+        }),
+    )
+    .await
+    .map(|ok| ok.0)
+}
+
+/// V1.49 F6 — happy path: `open → triaged → in_review → resolved`.
+/// Each PATCH returns 200 with the new status reflected verbatim.
+#[tokio::test]
+async fn findings_lifecycle_open_to_resolved_via_triage_and_review() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let created = create_finding(&state, &work_id, "major", "lifecycle happy path").await;
+    let finding_id = created.finding_id.clone();
+
+    let triaged = patch_status(&state, &work_id, &finding_id, "triaged")
+        .await
+        .expect("open → triaged should succeed");
+    assert_eq!(triaged.status, "triaged");
+
+    let in_review = patch_status(&state, &work_id, &finding_id, "in_review")
+        .await
+        .expect("triaged → in_review should succeed");
+    assert_eq!(in_review.status, "in_review");
+
+    let resolved = patch_status(&state, &work_id, &finding_id, "resolved")
+        .await
+        .expect("in_review → resolved should succeed");
+    assert_eq!(resolved.status, "resolved");
+}
+
+/// V1.49 F6 — direct terminal transitions from `open`: `open → wont_fix`
+/// and `open → duplicate` succeed without an intermediate triage step.
+#[tokio::test]
+async fn findings_lifecycle_open_direct_to_terminal_states() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    let wont_fix_seed = create_finding(&state, &work_id, "minor", "waive me").await;
+    let wont_fix = patch_status(&state, &work_id, &wont_fix_seed.finding_id, "wont_fix")
+        .await
+        .expect("open → wont_fix should succeed");
+    assert_eq!(wont_fix.status, "wont_fix");
+
+    let dup_seed = create_finding(&state, &work_id, "minor", "dup me").await;
+    let duplicate = patch_status(&state, &work_id, &dup_seed.finding_id, "duplicate")
+        .await
+        .expect("open → duplicate should succeed");
+    assert_eq!(duplicate.status, "duplicate");
+}
+
+/// V1.49 F6 — illegal transitions return HTTP 422 with the stable
+/// `INVALID_TRANSITION` error code. Three representative rejections cover
+/// the terminal-locked, reverse-edge, and self-loop classes.
+#[tokio::test]
+async fn findings_lifecycle_rejects_illegal_transitions_with_422() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    // (a) Seed a finding and walk it to `resolved` (terminal).
+    let resolved_seed = create_finding(&state, &work_id, "major", "now resolved").await;
+    let resolved_id = resolved_seed.finding_id.clone();
+    patch_status(&state, &work_id, &resolved_id, "triaged")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "in_review")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "resolved")
+        .await
+        .unwrap();
+
+    // resolved → open: rejected with 422 INVALID_TRANSITION.
+    let err = patch_status(&state, &work_id, &resolved_id, "open")
+        .await
+        .expect_err("resolved → open must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        err.error_code(),
+        "INVALID_TRANSITION",
+        "illegal transition must surface the stable INVALID_TRANSITION code"
+    );
+
+    // (b) Seed an `in_review` finding and attempt a reverse-edge back to
+    // `open` (in_review may only advance to terminal states per §2.1).
+    let review_seed = create_finding(&state, &work_id, "major", "now in review").await;
+    let review_id = review_seed.finding_id.clone();
+    patch_status(&state, &work_id, &review_id, "triaged")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &review_id, "in_review")
+        .await
+        .unwrap();
+    let err = patch_status(&state, &work_id, &review_id, "open")
+        .await
+        .expect_err("in_review → open must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+
+    // (c) Self-loop on a fresh `open` finding: rejected (callers must omit
+    // the patch field to refresh).
+    let fresh = create_finding(&state, &work_id, "minor", "self loop").await;
+    let err = patch_status(&state, &work_id, &fresh.finding_id, "open")
+        .await
+        .expect_err("open → open self-loop must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+
+    // The rejected transitions must leave the rows unchanged.
+    assert_eq!(
+        get_finding_handler(
+            State(state.clone()),
+            Path((work_id.clone(), resolved_id.clone())),
+        )
+        .await
+        .unwrap()
+        .0
+        .status,
+        "resolved",
+        "rejected transition must not mutate the row"
+    );
+}
+
+/// V1.49 F6 — unknown status values are rejected at the API layer too.
+/// `closed` is not a member of the V1.49 enum; the PATCH must fail with
+/// 422 INVALID_TRANSITION (the handler remaps every ConstraintViolation
+/// from the DAO uniformly).
+#[tokio::test]
+async fn findings_lifecycle_rejects_unknown_status_value() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let created = create_finding(&state, &work_id, "minor", "unknown status").await;
+
+    let err = patch_status(&state, &work_id, &created.finding_id, "closed")
+        .await
+        .expect_err("unknown status 'closed' must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+}
