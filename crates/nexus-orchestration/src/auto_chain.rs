@@ -1066,6 +1066,184 @@ async fn compute_open_findings_block_for_produce(
     }
 }
 
+/// V1.49 P1 — Foreshadowing promotion hook (narrative-indexes overlay §4).
+///
+/// Called from the supervisor's `on_schedule_terminal(Completed)` for
+/// `novel-writing` schedules. After a produce run writes one or more chapter
+/// outlines under `Works/<work_ref>/Outlines/chapters/`, this hook extracts
+/// every `## Foreshadowing Touched (F###)` section and promotes the inline
+/// `F###` declarations into `Works/<work_ref>/Outlines/foreshadowing.md` via
+/// [`crate::narrative_index::promote_outline_to_index`].
+///
+/// # Behavior
+///
+/// 1. Loads the schedule row to read `preset_id`, `work_id`, `creator_id`.
+/// 2. Returns `Ok(0)` early when the preset is not `novel-writing`.
+/// 3. Loads the Work record for `work_ref`.
+/// 4. When `workspace_dir` is `Some`, scans every `Outlines/chapters/*.md`
+///    outline, extracts its foreshadowing section, and promotes it. Promotion
+///    is idempotent, so re-scanning all outlines on every produce run is safe.
+/// 5. When `workspace_dir` is `None` (hermetic DB-only tests) or no outlines
+///    declare foreshadowing, this is a no-op (`Ok(0)`).
+///
+/// Best-effort + non-blocking by contract: the caller logs any `Err` and does
+/// NOT fail the terminal transition (mirrors `persist_review_findings_for_schedule`).
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the schedule/Work lookup fails.
+/// Promotion-internal errors (e.g. conflicting-description duplicate) are
+/// logged at `warn!` and counted as zero for that outline so one bad outline
+/// does not abort the rest.
+pub async fn promote_foreshadowing_for_schedule(
+    pool: &SqlitePool,
+    schedule_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<usize, AutoChainError> {
+    use crate::preset_ids::NOVEL_WRITING_PRESET_ID;
+
+    // SAFETY: dynamic SQL — single-row schedule lookup by PK (nullable work_id).
+    let row = sqlx::query(
+        "SELECT preset_id, work_id, creator_id
+         FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(schedule_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(nexus_local_db::LocalDbError::from)?;
+
+    let Some(row) = row else {
+        tracing::debug!(
+            schedule_id,
+            "foreshadowing-promote: schedule row not found; skipping"
+        );
+        return Ok(0);
+    };
+
+    let preset_id: String = sqlx::Row::try_get(&row, "preset_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode preset_id: {e}")))?;
+    let work_id: Option<String> = sqlx::Row::try_get(&row, "work_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode work_id: {e}")))?;
+    let creator_id: String = sqlx::Row::try_get(&row, "creator_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode creator_id: {e}")))?;
+
+    if preset_id != NOVEL_WRITING_PRESET_ID {
+        return Ok(0);
+    }
+    let Some(work_id) = work_id else {
+        tracing::warn!(
+            schedule_id,
+            "foreshadowing-promote: schedule has NULL work_id; skipping"
+        );
+        return Ok(0);
+    };
+    let Some(ws_dir) = workspace_dir else {
+        // Hermetic DB-only tests / no workspace bound — nothing to promote.
+        tracing::debug!(
+            schedule_id,
+            "foreshadowing-promote: no workspace_dir; skipping"
+        );
+        return Ok(0);
+    };
+
+    let work = match works::get_work(pool, &creator_id, &work_id).await {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            tracing::warn!(
+                schedule_id,
+                work_id = %work_id,
+                "foreshadowing-promote: work not found; skipping"
+            );
+            return Ok(0);
+        }
+        Err(e) => return Err(AutoChainError::from(e)),
+    };
+    let Some(work_ref) = work.work_ref.as_deref() else {
+        tracing::warn!(
+            schedule_id,
+            work_id = %work_id,
+            "foreshadowing-promote: work has no work_ref; skipping"
+        );
+        return Ok(0);
+    };
+
+    let work_dir = ws_dir.join("Works").join(work_ref);
+    let outlines_chapters = work_dir.join("Outlines").join("chapters");
+    if !outlines_chapters.is_dir() {
+        tracing::debug!(
+            schedule_id,
+            work_ref,
+            "foreshadowing-promote: no Outlines/chapters/ dir; skipping"
+        );
+        return Ok(0);
+    }
+
+    promote_outlines_in(&work_dir, &outlines_chapters, schedule_id, work_ref)
+}
+
+/// Scan every `*-outline.md` in `outlines_dir`, extract its foreshadowing
+/// section, and promote it into `work_dir/Outlines/foreshadowing.md`.
+///
+/// Returns the total count of newly-allocated `F###` ids across all outlines.
+/// Per-outline promotion errors (e.g. conflicting-description duplicate) are
+/// logged at `warn!` and counted as zero so one bad outline does not abort the
+/// rest. Outline filenames are sorted for reproducible promotion order.
+fn promote_outlines_in(
+    work_dir: &std::path::Path,
+    outlines_dir: &std::path::Path,
+    schedule_id: &str,
+    work_ref: &str,
+) -> Result<usize, AutoChainError> {
+    let mut entries: Vec<String> = std::fs::read_dir(outlines_dir)
+        .map_err(|e| AutoChainError::InvalidState(format!("read {}: {e}", outlines_dir.display())))?
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            let name = p.file_name()?.to_string_lossy().to_string();
+            (p.is_file() && name.ends_with("-outline.md")).then_some(name)
+        })
+        .collect();
+    entries.sort();
+
+    let mut total = 0usize;
+    for name in &entries {
+        let path = outlines_dir.join(name);
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(section) = crate::narrative_index::extract_foreshadowing_section(&content) else {
+            continue;
+        };
+        match crate::narrative_index::promote_outline_to_index(work_dir, &section) {
+            Ok(allocated) => {
+                total += allocated.len();
+                if !allocated.is_empty() {
+                    tracing::info!(
+                        schedule_id,
+                        work_ref,
+                        outline = %name,
+                        allocated = ?allocated,
+                        "foreshadowing-promote: promoted inline F### declarations"
+                    );
+                }
+            }
+            Err(e) => {
+                // Conflicting-description duplicate etc. — surface to the
+                // operator without aborting the remaining outlines or the
+                // terminal transition.
+                tracing::warn!(
+                    schedule_id,
+                    work_ref,
+                    outline = %name,
+                    error = %e,
+                    "foreshadowing-promote: promotion failed for one outline (non-fatal)"
+                );
+            }
+        }
+    }
+    Ok(total)
+}
+
 /// Enqueue a new auto-chain schedule and update the Work checkpoint.
 ///
 /// This is the single shared path for:
