@@ -16,7 +16,12 @@ async fn main() {
     // than calling `std::process::exit` itself; the binary owns the exit so
     // the library call is unit-testable and never terminates a consumer.
     if let Some(help) = nexus42::commands::creator::run::maybe_render_preset_run_help() {
+        // R-V146P2-QC3-S1: flush stdout before exit so the buffered `print!`
+        // text is not dropped when the process terminates. Without the flush,
+        // `std::process::exit(0)` skips the normal stdout teardown and piped
+        // consumers (e.g. `nexus42 ... --help | less`) can lose the tail.
         print!("{help}");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
         std::process::exit(0);
     }
 
