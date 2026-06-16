@@ -1,9 +1,9 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37–V1.42 extensions; **V1.47–V1.48** quality-loop consumer + `AGENTS.md` runtime (SSOT: [quality-loop.md](quality-loop.md)). **V1.49** narrative indexes overlay → [narrative-indexes.md](narrative-indexes.md).
-**Document class**: Feature line (profile overlay)  
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37–V1.48 extensions; **V1.49** narrative indexes folded into §4.6 (P-last from [narrative-indexes.md](narrative-indexes.md))  
+**Document class**: Feature line (profile overlay)
 **Created**: 2026-06-07  
-**Last updated**: 2026-06-15 (V1.47 P-last — spec promotion Draft → Shipped)
+**Last updated**: 2026-06-17 (V1.49 P-last — narrative indexes folded into §4.6)
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
@@ -394,6 +394,72 @@ A future implementation plan for this roadmap must include at least these tests:
 4. **Resume behavior**: a new run against a Work with one `draft` row resumes that row and does not create a new row.
 5. **Reconciliation**: `creator run reconcile-chapters <work_id>` rebuilds missing `work_chapters` rows/files from `Works/<work_ref>/Stories/` while preserving DB-as-status-SSOT conflict resolution (§4.5.3).
 6. **Future multi-volume migration**: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data.
+
+### 4.6 Narrative indexes — F### / E### runtime (V1.49 P1)
+
+V1.36 scaffolded `Outlines/foreshadowing.md` and `Outlines/event-index.md` as empty table stubs. V1.49 P1 implements the **minimum viable index runtime** — file-first SSOT (see [narrative-indexes.md](narrative-indexes.md) overlay, folded here at P-last).
+
+#### 4.6.1 SSOT and boundaries
+
+| Path | SSOT | Notes |
+| --- | --- | --- |
+| `Works/<work_ref>/Outlines/foreshadowing.md` | **File** | F### rows; not scanned as chapter by sync module |
+| `Works/<work_ref>/Outlines/event-index.md` | **File** | E### rows; P1 read-only + stub writer |
+| `work_chapters` table | DB | Unchanged; no index mirror table in V1.49 |
+
+`sync_module.rs` `SKIP_FILES` must continue to exclude index files from chapter discovery.
+
+#### 4.6.2 F### row schema (5-column — ground truth)
+
+Markdown table columns (aligned with embedded template; per R-V149P1-01 reconciliation):
+
+| Column | Required | Description |
+| --- | --- | --- |
+| `ID` | yes | `F` + three-digit zero-padded integer (`F001`) |
+| `Description` | yes | Short human label |
+| `Planted` | yes | Chapter number(s) where first introduced / buried |
+| `Paid off` | no | Chapter number(s) where resolved |
+| `Status` | yes | `planned` \| `buried` \| `paid_off` |
+
+> **Note**: The 4-column summary in the Draft overlay (`id` / `description` / `status` / `chapters`) is deprecated. The 5-column schema above is ground truth per P1 runtime.
+
+#### 4.6.3 Id allocation
+
+- Next id = `max(existing numeric suffix) + 1` for the Work.
+- Inline outline declaration `F###: description` creates row if id absent.
+- Duplicate id with conflicting description → fail outline step with remediation citing reconcile or manual edit.
+
+#### 4.6.4 Inline F### declaration format
+
+Canonical format in chapter outline (§4.2 "Foreshadowing Touched" section):
+
+```text
+F001: description of the foreshadowing item
+```
+
+This is parsed by the outline section parser during `novel-writing`. New F### ids are allocated sequentially when no number is specified.
+
+#### 4.6.5 Promotion path (outline → index)
+
+After `outline_chapter` writes `Outlines/chapters/ch<nn>-outline.md`:
+
+1. Parse "Foreshadowing Touched" section for F### references and inline new items.
+2. Upsert rows into `foreshadowing.md` (atomic temp + rename).
+3. Inject `foreshadowing_summary` block into subsequent draft prompt via `preset.yaml` → `foreshadowing_summary` template variable.
+
+#### 4.6.6 Read-for-prompt path
+
+The orchestration engine reads `Outlines/foreshadowing.md` before each draft prompt and injects a compact `foreshadowing_summary` block listing active (non-`paid_off`) F### rows with their status and chapter context.
+
+#### 4.6.7 E### read stub
+
+Event-index (`Outlines/event-index.md`): **P1 minimum** — preserve scaffold; read existing rows for prompt if present. Full E### promotion (write + upsert) deferred to V1.50.
+
+#### 4.6.8 World KB boundary
+
+Explicit promotion from index rows to World KB remains **manual/opt-in** per §3.5.1.5. V1.49 does not auto-sync index → World KB.
+
+---
 
 ---
 
