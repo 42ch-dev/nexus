@@ -146,7 +146,8 @@ fn render_outline_prompt(preset_input: &serde_json::Value) -> String {
         "world_kb_block",
         "open_findings_block",
     ] {
-        ctx.entry(k.to_string()).or_insert(serde_json::Value::String(String::new()));
+        ctx.entry(k.to_string())
+            .or_insert(serde_json::Value::String(String::new()));
     }
 
     render_core_context_template(body, &serde_json::Value::Object(ctx))
@@ -177,19 +178,43 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     // Seed 3 open findings: 2 chapter-scoped, 1 work-level.
     findings::create_finding(
         &pool,
-        &finding("fnd_fc_1", WORK, Some(1), "major", "Plot thread dropped", "Thread X introduced then forgotten.", 1_000),
+        &finding(
+            "fnd_fc_1",
+            WORK,
+            Some(1),
+            "major",
+            "Plot thread dropped",
+            "Thread X introduced then forgotten.",
+            1_000,
+        ),
     )
     .await
     .unwrap();
     findings::create_finding(
         &pool,
-        &finding("fnd_fc_2", WORK, Some(1), "minor", "POV slip in para 4", "Brief POV break in chapter 1.", 2_000),
+        &finding(
+            "fnd_fc_2",
+            WORK,
+            Some(1),
+            "minor",
+            "POV slip in para 4",
+            "Brief POV break in chapter 1.",
+            2_000,
+        ),
     )
     .await
     .unwrap();
     findings::create_finding(
         &pool,
-        &finding("fnd_fc_3", WORK, None, "blocker", "World rule break", "Magic system contradicts ch0.", 500),
+        &finding(
+            "fnd_fc_3",
+            WORK,
+            None,
+            "blocker",
+            "World rule break",
+            "Magic system contradicts ch0.",
+            500,
+        ),
     )
     .await
     .unwrap();
@@ -211,24 +236,29 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
     // `open_findings_block`. The handler-level tests assert the full
     // request shape; here we re-derive the block from the DAO + builder
     // and assert the rendered outline prompt contains it.
-    let stored: Option<String> = sqlx::query_scalar(
-        "SELECT preset_id FROM creator_schedules WHERE schedule_id = ?",
-    )
-    .bind(&schedule_id)
-    .fetch_optional(&pool)
-    .await
-    .unwrap();
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT preset_id FROM creator_schedules WHERE schedule_id = ?")
+            .bind(&schedule_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
     assert_eq!(stored, Some("novel-writing".to_string()));
 
     // Re-render the block via the same path the enqueue used.
     let open_findings = findings::list_open_findings_for_chapter(&pool, CREATOR, WORK, 1)
         .await
         .unwrap();
-    assert_eq!(open_findings.len(), 3,
+    assert_eq!(
+        open_findings.len(),
+        3,
         "expected 3 open findings (2 ch1 + 1 work-level); got {}",
-        open_findings.len());
+        open_findings.len()
+    );
     let block = build_open_findings_block(&open_findings, "01");
-    assert!(!block.is_empty(), "block should be non-empty when findings seeded");
+    assert!(
+        !block.is_empty(),
+        "block should be non-empty when findings seeded"
+    );
 
     let preset_input = serde_json::json!({
         "work_ref": WORK_REF,
@@ -250,7 +280,11 @@ async fn novel_writing_outline_includes_open_findings_block_when_seeded() {
         rendered.contains("## Open Findings to Address"),
         "expected '## Open Findings to Address' section in rendered outline; got:\n{rendered}"
     );
-    for title in ["Plot thread dropped", "POV slip in para 4", "World rule break"] {
+    for title in [
+        "Plot thread dropped",
+        "POV slip in para 4",
+        "World rule break",
+    ] {
         assert!(
             rendered.contains(title),
             "expected finding title '{title}' in rendered outline; got:\n{rendered}"
