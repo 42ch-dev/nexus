@@ -504,12 +504,22 @@ fn sync_frontmatter_status(path: &std::path::Path, status: &str) -> Result<(), L
 /// Returns `LocalDbError` if any database or I/O operation fails.
 /// Returns `LocalDbError::PathEscape` if `work_ref` would cause the resolved
 /// path to escape the `Works/<work_ref>/` subtree.
+///
+/// # Dry-run (V1.49 P2, R-V148P4-W2)
+///
+/// When `dry_run` is `true`, the function walks the filesystem and the DB to
+/// compute the **same** `ReconcileReport` it would return when mutating, but
+/// performs **no** writes: no chapter rows are inserted/updated, no chapter
+/// file frontmatter is rewritten. Counters (`created` / `updated` / `resynced`
+/// / `preserved`) reflect what the mutating path would do. Callers that only
+/// want a preview should pass `dry_run = true`; the daemon reconcile handler
+/// additionally skips the runtime-lock acquire on this path (overlay §8.2).
 //
 // Allow `clippy::too_many_lines` (pedantic): this is a single-purpose
 // reconcile routine that walks the filesystem and updates DB rows in one
 // pass; splitting into helper functions would hide the linear control flow
 // without reducing real complexity. Volume-aware per V1.43 P-last
-// (R-V142P1-F-003).
+// (R-V142P1-F-003). Dry-run gating per V1.49 P2 (R-V148P4-W2).
 #[allow(clippy::too_many_lines)]
 pub async fn reconcile_from_filesystem(
     pool: &SqlitePool,
@@ -517,6 +527,7 @@ pub async fn reconcile_from_filesystem(
     work_ref: &str,
     workspace_root: &std::path::Path,
     now: &str,
+    dry_run: bool,
 ) -> Result<ReconcileReport, LocalDbError> {
     let stories_dir = workspace_root.join("Works").join(work_ref).join("Stories");
 
@@ -594,33 +605,35 @@ pub async fn reconcile_from_filesystem(
             None => {
                 // New chapter — insert with defaults, then apply frontmatter
                 // status if available (insert_chapter defaults to 'not_started').
-                let body_path = format!("Works/{work_ref}/Stories/{fname}");
-                insert_chapter(
-                    pool,
-                    &InsertChapterParams {
-                        work_id,
-                        chapter: ch_num,
-                        volume: Some(fm_volume),
-                        slug: None,
-                        planned_word_count: 4000,
-                        outline_path: None,
-                        body_path: Some(&body_path),
-                        now,
-                    },
-                )
-                .await?;
-                // Apply frontmatter status + word_count if present.
-                if fm_status.as_deref() != Some("not_started") || fm_word_count.is_some() {
-                    update_status(
+                if !dry_run {
+                    let body_path = format!("Works/{work_ref}/Stories/{fname}");
+                    insert_chapter(
                         pool,
-                        work_id,
-                        ch_num,
-                        fm_volume,
-                        fm_status.as_deref().unwrap_or("not_started"),
-                        fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
-                        now,
+                        &InsertChapterParams {
+                            work_id,
+                            chapter: ch_num,
+                            volume: Some(fm_volume),
+                            slug: None,
+                            planned_word_count: 4000,
+                            outline_path: None,
+                            body_path: Some(&body_path),
+                            now,
+                        },
                     )
                     .await?;
+                    // Apply frontmatter status + word_count if present.
+                    if fm_status.as_deref() != Some("not_started") || fm_word_count.is_some() {
+                        update_status(
+                            pool,
+                            work_id,
+                            ch_num,
+                            fm_volume,
+                            fm_status.as_deref().unwrap_or("not_started"),
+                            fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
+                            now,
+                        )
+                        .await?;
+                    }
                 }
                 created += 1;
             }
@@ -633,7 +646,9 @@ pub async fn reconcile_from_filesystem(
                 // without inventing an extra chapter transition.
                 let status_conflicts = fm_status.as_ref().is_some_and(|s| s != &db_status);
                 let file_resynced = if status_conflicts {
-                    sync_frontmatter_status(&path, &db_status)?;
+                    if !dry_run {
+                        sync_frontmatter_status(&path, &db_status)?;
+                    }
                     resynced += 1;
                     true
                 } else {
@@ -646,16 +661,18 @@ pub async fn reconcile_from_filesystem(
                 let needs_word_count_update =
                     fm_word_count.is_some_and(|wc| row.actual_word_count != Some(wc));
                 if needs_word_count_update {
-                    update_status(
-                        pool,
-                        work_id,
-                        ch_num,
-                        fm_volume,
-                        &db_status,
-                        fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
-                        now,
-                    )
-                    .await?;
+                    if !dry_run {
+                        update_status(
+                            pool,
+                            work_id,
+                            ch_num,
+                            fm_volume,
+                            &db_status,
+                            fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
+                            now,
+                        )
+                        .await?;
+                    }
                     updated += 1;
                 } else if !file_resynced {
                     preserved += 1;
@@ -1363,6 +1380,7 @@ mod tests {
             "my-novel",
             dir.path(),
             "2026-06-07T10:00:00Z",
+            false,
         )
         .await
         .unwrap();
@@ -1427,6 +1445,7 @@ mod tests {
             "my-novel",
             dir.path(),
             "2026-06-07T11:00:00Z",
+            false,
         )
         .await
         .unwrap();
@@ -1477,6 +1496,7 @@ mod tests {
             "my-novel",
             dir.path(),
             "2026-06-07T12:00:00Z",
+            false,
         )
         .await
         .unwrap();
@@ -1531,6 +1551,7 @@ mod tests {
             "my-novel",
             dir.path(),
             "2026-06-07T12:00:00Z",
+            false,
         )
         .await
         .unwrap();
@@ -1604,6 +1625,7 @@ mod tests {
             "my-novel",
             dir.path(),
             "2026-06-12T10:00:00Z",
+            false,
         )
         .await
         .unwrap();
@@ -2133,6 +2155,7 @@ mod tests {
             "my-novel",
             dir.path(),
             "2026-06-12T10:00:00Z",
+            false,
         )
         .await
         .unwrap();

@@ -179,6 +179,7 @@ async fn v148_serial_reconcile_preserves_db_status_and_creates_missing() {
         work_ref,
         tmp.path(),
         "2026-06-16T12:00:00Z",
+        false,
     )
     .await
     .unwrap();
