@@ -13,6 +13,7 @@ pub mod preset_gates;
 pub mod preset_ids;
 pub mod review_report;
 pub mod rules_history;
+pub mod rules_layers;
 pub mod schedule;
 pub mod scheduler;
 pub mod skill_link;
