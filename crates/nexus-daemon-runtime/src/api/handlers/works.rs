@@ -1559,20 +1559,47 @@ pub async fn reconcile_chapters(
         return Ok((StatusCode::OK, Json(report)));
     }
 
-    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
+    // V1.49 P3 (R-V148P4-W3): shorten the runtime-lock window.
+    //
+    // The previous implementation acquired the lock for the *entire* reconcile
+    // — filesystem walk + per-chapter DB reads + writes + file frontmatter
+    // syncs — blocking other schedule operations on the same Work for the
+    // full duration. Reconcile is now split into a read-only
+    // [`compute_reconcile_diff`] (unlocked; the slow walk + reads live here)
+    // and a write-only [`apply_reconcile_diff`] (the only phase that needs the
+    // lock). Trade-off: under concurrent reconcile + mutate from the same
+    // client the diff may be stale by the time the lock is re-acquired; this is
+    // accepted for the local-first single-writer daemon model (documented in
+    // the plan). The V1.48 P4-fix1 lock-release-on-error guarantee is
+    // preserved on the apply phase below.
+    let diff = nexus_local_db::work_chapters::compute_reconcile_diff(
+        pool,
+        &work_id,
+        work_ref,
+        workspace_root,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("reconcile diff failed: {e}"),
+    })?;
+
+    // Phase B: acquire the lock and apply only the writes.
     let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+    let lock_acquired_at = chrono::Utc::now();
+    tracing::info!(
+        work_id = %work_id,
+        acquired_at = %lock_acquired_at.to_rfc3339(),
+        pending_ops = diff.ops.len(),
+        "runtime_lock: acquired for reconcile write phase"
+    );
 
     // V1.48 P4-fix1 (W-2 qc3): release the lock on both Ok and Err paths.
     // The previous `?` propagation on the reconcile call could return early
     // without releasing the runtime lock, leaving the Work unwritable until
     // restart. Mirrors the V1.42.1 hotfix pattern (R-V142-MERGE-CI-001).
-    let report = match nexus_local_db::work_chapters::reconcile_from_filesystem(
-        pool,
-        &work_id,
-        work_ref,
-        workspace_root,
-        &now,
-        false,
+    let report = match nexus_local_db::work_chapters::apply_reconcile_diff(
+        pool, &work_id, &now, &diff,
     )
     .await
     {
@@ -1581,13 +1608,21 @@ pub async fn reconcile_chapters(
             lock.release().await;
             return Err(NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
-                message: format!("reconcile failed: {e}"),
+                message: format!("reconcile apply failed: {e}"),
             });
         }
     };
 
     // V1.42 P0 (T2): Release runtime lock before returning.
     lock.release().await;
+    let held_ms = (chrono::Utc::now() - lock_acquired_at)
+        .num_milliseconds()
+        .max(0);
+    tracing::info!(
+        work_id = %work_id,
+        held_ms,
+        "runtime_lock: released after reconcile write phase"
+    );
 
     Ok((StatusCode::OK, Json(report)))
 }
