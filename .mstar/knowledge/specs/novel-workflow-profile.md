@@ -638,6 +638,8 @@ open → resolved | wont_fix
 
 The richer workflow `open → triaged → in_review → resolved | wont_fix | duplicate` remains a possible later extension, but V1.37 P3 selects the three-state model to keep the first migration and CLI surface narrow.
 
+> **V1.49 conflict (Draft overlay)**: [novel-findings-lifecycle.md](novel-findings-lifecycle.md) (Draft V1.49) **supersedes** this §5.5.1 three-state choice for implement authority during V1.49. P0 will add migration + API for extended lifecycle; P-last folds the overlay into [novel-quality-loop.md](novel-quality-loop.md) §2. Until P-last, cite the overlay for F6 behavior; this paragraph remains historical rationale for the V1.37–V1.48 shipped baseline.
+
 Finding severities are author-facing and map to Morning Star machine residual severities as follows:
 
 | Finding severity | Meaning | `status.json` residual severity mapping |

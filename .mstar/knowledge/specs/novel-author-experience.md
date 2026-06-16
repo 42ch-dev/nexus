@@ -195,3 +195,45 @@ At V1.46 P-last:
 - [ ] Draft → **Shipped (V1.46)** header
 - [ ] BL-10 archive supersede note in shipped tracker (Grill #15)
 - [ ] Confirm zero runtime quickstart references
+
+---
+
+## 8. Author desk deltas (Draft V1.49)
+
+> **Status**: Draft overlay — merge into Shipped body at V1.49 P-last.  
+> **Plan**: [2026-06-17-v1.49-author-desk-ux.md](../../plans/2026-06-17-v1.49-author-desk-ux.md)
+
+### 8.1 Intake re-trigger on existing Work (R-V147P1-01)
+
+**Problem**: `creator bootstrap` creates a new Work and schedules `creative-brief-intake`. Existing Works have no equivalent.
+
+**Normative CLI** (V1.49 target):
+
+```bash
+nexus42 creator works intake [<work_id>] [--json]
+```
+
+| Behavior | Requirement |
+| --- | --- |
+| Default work | Resolves active/default Work when `work_id` omitted |
+| Schedule | Enqueues `creative-brief-intake` for the resolved Work without creating a new Work row |
+| Driver interaction | Must not cancel active FL-E auto-chain driver |
+| Remediation | On failure, cite this §8.1 + `creator bootstrap` for new-Work path |
+
+### 8.2 Reconcile preview (R-V148P4-W2)
+
+**Problem**: `creator works reconcile-chapters` mutates filesystem frontmatter and `work_chapters` without preview.
+
+**Normative CLI** (mirror `works rules reset` safety flags):
+
+```bash
+nexus42 creator works reconcile-chapters [<work_id>] [--dry-run] [--yes] [--json]
+```
+
+| Flag | Requirement |
+| --- | --- |
+| `--dry-run` | Compute `ReconcileReport` only; **no** filesystem or DB writes; **no** runtime lock acquire |
+| `--yes` | Skip interactive confirmation when not dry-run |
+| default | Prompt before mutating when stderr is a TTY (same policy family as rules reset) |
+
+**Remediation copy** in `creator works status` must cite `reconcile-chapters --dry-run` when filesystem/DB drift detected.

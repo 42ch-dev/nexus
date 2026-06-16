@@ -520,11 +520,11 @@ When a version ships, append new closed rows here and remove them from the activ
 | **Profile B compaction** | 6 V1.47 plan JSON files in `.mstar/archived/plans/<plan-id>.json` + index in `.mstar/archived/plans-done.json`; 5 residual closure notes in `.mstar/archived/residuals/<key>.json` |
 
 
-### V1.48 delivery snapshot (Shipped 2026-06-16, ready for PR)
+### V1.48 delivery snapshot (Shipped 2026-06-16)
 
 | Aspect | Detail |
 |---|---|
-| **PR / Merge** | (pending PR from `iteration/v1.48` to `main` at integration HEAD `99a1fa09`+; integration branch will be retired post-merge) |
+| **PR / Merge** | PR [#61](https://github.com/42ch-dev/nexus/pull/61) MERGED to `main` at `8fcf2d68` (2026-06-16); integration branch `iteration/v1.48` retired |
 |---|---|
 | **Theme** | **Novel Quality Loop Completion** — F-D findings chain: P0 producer parse `review-report.md` (SSOT preset id + SSOT FindingKind enum expansion) + P1 consumer `novel-writing` prompt injection + P2 `AGENTS.md` Layer 2 runtime + accept `rule_suggestion` + `rules reset` CLI (`--dry-run`/`--yes`) + P3 retention policy + `rule_suggestion` tri-state NULL clear + P4 §4.5.7 #4 resume + #5 reconcile (DB-as-status-SSOT, atomic write, runtime-lock release on error) |
 | **Compass** | [v1.48-novel-quality-loop-completion-delivery-compass-v1.md](../iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md) — 12 grill-me decisions locked; 7 plans (P-1 + P0–P4 + P-last) |

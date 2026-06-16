@@ -99,13 +99,15 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
-| [novel-workflow-profile.md](novel-workflow-profile.md) | Feature line | **Shipped (V1.36 → V1.47)** — §5.5.4 `AGENTS.md`; §5.5.6 reflection→findings; V1.48 amends §5.5.2 consumer + §5.5.4 runtime via overlay |
+| [novel-workflow-profile.md](novel-workflow-profile.md) | Feature line | **Shipped (V1.36 → V1.47)** — §5.5.4 `AGENTS.md`; §5.5.6 reflection→findings; V1.48 amends §5.5.2 consumer + §5.5.4 runtime via overlay; **§5.5.1 superseded by V1.49** [novel-findings-lifecycle.md](novel-findings-lifecycle.md) (extended lifecycle) |
 | [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) | Feature line | **Shipped (V1.41 → V1.42 P0)** — §4.2 runtime_lock production wiring implemented V1.42 P0 |
 | [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
-| [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.47)** — findings producer + `rule_suggestion` metadata; V1.48 merge target for overlay |
-| [novel-findings-maturity.md](novel-findings-maturity.md) | Draft overlay | **Draft (V1.48)** — producer parse, consumer, rules runtime, retention; P-last → `novel-quality-loop.md` |
+| [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.47 → V1.48)** — findings chain + §9 maturity; V1.49 P0 amends §2 via overlay |
+| [novel-findings-lifecycle.md](novel-findings-lifecycle.md) | Draft overlay | **Draft (V1.49)** — F6 extended lifecycle (`triaged`/`in_review`/`duplicate`); P-last → `novel-quality-loop.md` §2 |
+| [novel-narrative-indexes.md](novel-narrative-indexes.md) | Draft overlay | **Draft (V1.49)** — F###/E### file-first index runtime; P-last → `novel-workflow-profile.md` §4.6 |
+| [novel-findings-maturity.md](novel-findings-maturity.md) | Reference | **Superseded (V1.48)** — folded into `novel-quality-loop.md` §3; retained for trace history |
 | [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
-| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.46)** — §3 embedded author path; BL-10 quickstart retired P1; V1.47 P3 spec reconcile |
+| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.46)** — §3 embedded author path; BL-10 quickstart retired P1; V1.47 P3 spec reconcile; **Draft V1.49 §8** author desk UX (intake + reconcile) |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

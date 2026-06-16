@@ -1,12 +1,101 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16T12:14:57+08:00",
-  "plans": [],
+  "updated_at": "2026-06-17T10:00:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-17-v1.49-harness-docs-prepare",
+      "title": "P-1 — V1.49 compass, plans, spec overlays, tracker, status (docs-only)",
+      "file": ".mstar/plans/2026-06-17-v1.49-harness-docs-prepare.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@project-manager", "@writing-specialist"],
+      "working_branch": "iteration/v1.49",
+      "merge_target": "iteration/v1.49",
+      "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "task_category": "docs",
+      "created_at": "2026-06-17",
+      "updated_at": "2026-06-17T10:00:00+08:00"
+    },
+    {
+      "id": "2026-06-17-v1.49-findings-lifecycle",
+      "title": "P0 — F6 extended findings lifecycle",
+      "file": ".mstar/plans/2026-06-17-v1.49-findings-lifecycle.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "working_branch": "feature/v1.49-findings-lifecycle",
+      "merge_target": "iteration/v1.49",
+      "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-findings-lifecycle.md",
+      "task_category": "feature",
+      "created_at": "2026-06-17",
+      "updated_at": "2026-06-17T10:00:00+08:00"
+    },
+    {
+      "id": "2026-06-17-v1.49-narrative-indexes",
+      "title": "P1 — F###/E### narrative index runtime MVP",
+      "file": ".mstar/plans/2026-06-17-v1.49-narrative-indexes.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "working_branch": "feature/v1.49-narrative-indexes",
+      "merge_target": "iteration/v1.49",
+      "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-narrative-indexes.md",
+      "task_category": "feature",
+      "created_at": "2026-06-17",
+      "updated_at": "2026-06-17T10:00:00+08:00"
+    },
+    {
+      "id": "2026-06-17-v1.49-author-desk-ux",
+      "title": "P2 — Intake re-trigger + reconcile preview",
+      "file": ".mstar/plans/2026-06-17-v1.49-author-desk-ux.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "working_branch": "feature/v1.49-author-desk-ux",
+      "merge_target": "iteration/v1.49",
+      "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-author-experience.md",
+      "task_category": "feature",
+      "created_at": "2026-06-17",
+      "updated_at": "2026-06-17T10:00:00+08:00"
+    },
+    {
+      "id": "2026-06-17-v1.49-serial-reliability",
+      "title": "P3 — Reconcile lock optimization + findings prune CLI + path guard",
+      "file": ".mstar/plans/2026-06-17-v1.49-serial-reliability.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev"],
+      "working_branch": "feature/v1.49-serial-reliability",
+      "merge_target": "iteration/v1.49",
+      "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "task_category": "feature",
+      "created_at": "2026-06-17",
+      "updated_at": "2026-06-17T10:00:00+08:00"
+    },
+    {
+      "id": "2026-06-17-v1.49-hygiene-and-closeout",
+      "title": "P-last — WL-A hygiene + overlay promotion + Profile B",
+      "file": ".mstar/plans/2026-06-17-v1.49-hygiene-and-closeout.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@project-manager", "@fullstack-dev", "@writing-specialist"],
+      "working_branch": "feature/v1.49-hygiene-and-closeout",
+      "merge_target": "iteration/v1.49",
+      "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "task_category": "hygiene",
+      "created_at": "2026-06-17",
+      "updated_at": "2026-06-17T10:00:00+08:00"
+    }
+  ],
   "v1_43_iteration_complete": true,
   "v1_44_iteration_complete": true,
   "v1_45_iteration_complete": true,
   "v1_46_iteration_complete": true,
   "v1_47_iteration_complete": true,
+  "v1_48_iteration_complete": true,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -14,54 +103,49 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.48",
-    "last_integration_branch": "iteration/v1.47",
+    "integration_branch": "iteration/v1.49",
+    "last_integration_branch": "iteration/v1.48",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
-    "integration_branch_retired": "(pending PR to main)",
-    "latest_shipped_iteration": "v1.47",
-    "latest_shipped_at": "2026-06-15 (PR #60 @ 8f4f9f2b)",
-    "latest_active_iteration": "v1.48 (DONE — all 7 plans complete)",
-    "latest_active_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+    "integration_branch_retired": null,
+    "latest_shipped_iteration": "v1.48",
+    "latest_shipped_at": "2026-06-16 (PR #61 @ 8fcf2d68)",
+    "latest_active_iteration": "v1.49 (prepare GO)",
+    "latest_active_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO — V1.48 P-1 Done 2026-06-16",
+    "pre_implement_gate": "GO — V1.49 P-1 Done 2026-06-17",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
-    "wave_0_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
-    "pre_iteration_hotfix": {
-      "id": "R-V147P0-05",
-      "recommended_branch": "fix/master-decision-timeout-pk-collision",
-      "policy": "H-1 — merge to main before or at iteration/v1.48 cut"
-    },
+    "wave_0_spec": ".mstar/knowledge/specs/novel-findings-lifecycle.md, .mstar/knowledge/specs/novel-narrative-indexes.md",
+    "pre_iteration_hotfix": null,
     "latest_ship": {
       "iteration": "v1.48",
-      "merge_commit": "(pending PR)",
+      "merge_commit": "8fcf2d68",
       "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
       "shipped_at": "2026-06-16"
     },
     "tech_debt_summary": {
       "updated_at": "2026-06-16",
-      "total_open": 31,
+      "total_open": 18,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 1,
-        "low": 30,
+        "low": 17,
         "nit": 0
       },
       "by_target": {
-        "V1.48": 31
+        "V1.49": 18
       },
       "by_plan": {
-        "2026-06-13-v1.45-hygiene-and-closeout": 1,
-        "2026-06-14-v1.46-author-desk-status-ux": 4,
-        "2026-06-14-v1.46-novel-runtime-ux-edges": 5,
+        "2026-06-14-v1.46-author-desk-status-ux": 3,
+        "2026-06-14-v1.46-novel-runtime-ux-edges": 4,
         "2026-06-14-v1.46-pool-observability": 4,
         "2026-06-14-v1.46-research-auto-chain-e2e": 3,
-        "2026-06-14-v1.46-spec-cli-hygiene": 7,
         "2026-06-15-v1.47-gate-remediation-audit": 1,
-        "2026-06-15-v1.47-reflection-loop-findings": 6
+        "2026-06-16-v1.48-serial-hardening": 2,
+        "2026-06-16-v1.48-findings-producer": 1
       },
-      "notes": "31 open carry-forward; 7× R-V147P* targeted for closure in V1.48 P0–P4; WL-A 10 lows in P-last; remainder defer V1.49 at P-last."
+      "notes": "18 open carry-forward @ V1.49 (14× V1.46 lows + 4× V1.47/48 product seams). V1.49 harness prepare GO 2026-06-17."
     }
   },
   "residual_findings": {
