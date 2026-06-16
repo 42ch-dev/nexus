@@ -65,9 +65,16 @@ pub struct FindingPatch {
     pub target_executor: Option<String>,
     /// V1.47: new `kind` (optional).
     pub kind: Option<String>,
-    /// V1.47: new `rule_suggestion` (optional; pass `Some(None)` via separate
-    /// sentinel is not supported — `None` means "do not patch").
-    pub rule_suggestion: Option<String>,
+    /// V1.48 P3 T3 — tri-state `rule_suggestion` patch.
+    ///
+    /// - `None` → omit (do not touch the column).
+    /// - `Some(Some(value))` → set `rule_suggestion` to `value`.
+    /// - `Some(None)` → **clear** `rule_suggestion` to SQL NULL.
+    ///
+    /// This resolves R-V147P0-03: the previous `COALESCE(?, rule_suggestion)`
+    /// semantics made it impossible to clear the column because SQL `NULL`
+    /// was treated as "use the existing value" rather than "set to NULL".
+    pub rule_suggestion: Option<Option<String>>,
 }
 
 /// Filters for listing findings.
@@ -536,8 +543,14 @@ pub async fn get_finding(
 
 /// Update (patch) a finding, scoped to a creator.
 ///
-/// Only non-None fields in `patch` are applied. `updated_at` is always
-/// set to the current Unix epoch.
+/// Only non-`None` fields in `patch` are applied. `updated_at` is always
+/// set to `now_epoch`.
+///
+/// **V1.48 P3 T3** (R-V147P0-03): `rule_suggestion` uses a tri-state
+/// [`Option<Option<String>>`] — `Some(None)` clears the column to SQL NULL,
+/// `None` omits it entirely. This required switching from a compile-time
+/// `COALESCE` UPDATE (which treated SQL NULL as "keep existing") to a dynamic
+/// SET-clause builder (mirrors [`works::patch_work`]).
 ///
 /// # Errors
 ///
@@ -583,30 +596,70 @@ pub async fn update_finding(
             });
         }
     }
-    let result = sqlx::query!(
-        "UPDATE findings
-         SET severity        = COALESCE(?, severity),
-             status          = COALESCE(?, status),
-             title           = COALESCE(?, title),
-             description     = COALESCE(?, description),
-             target_executor = COALESCE(?, target_executor),
-             kind            = COALESCE(?, kind),
-             rule_suggestion = COALESCE(?, rule_suggestion),
-             updated_at      = ?
-         WHERE creator_id = ? AND finding_id = ?",
-        patch.severity,
-        patch.status,
-        patch.title,
-        patch.description,
-        patch.target_executor,
-        patch.kind,
-        patch.rule_suggestion,
-        now_epoch,
-        creator_id,
-        finding_id
-    )
-    .execute(pool)
-    .await?;
+
+    // Build the SET clause dynamically so `rule_suggestion = ?` is only
+    // included when the caller explicitly wants to touch the column.
+    // This lets `Some(None)` bind SQL NULL (clear) rather than COALESCE
+    // back to the existing value.
+    let mut set_clauses = Vec::new();
+    if patch.severity.is_some() {
+        set_clauses.push("severity = ?");
+    }
+    if patch.status.is_some() {
+        set_clauses.push("status = ?");
+    }
+    if patch.title.is_some() {
+        set_clauses.push("title = ?");
+    }
+    if patch.description.is_some() {
+        set_clauses.push("description = ?");
+    }
+    if patch.target_executor.is_some() {
+        set_clauses.push("target_executor = ?");
+    }
+    if patch.kind.is_some() {
+        set_clauses.push("kind = ?");
+    }
+    if patch.rule_suggestion.is_some() {
+        set_clauses.push("rule_suggestion = ?");
+    }
+    set_clauses.push("updated_at = ?");
+
+    // SAFETY: dynamic SQL — conditional SET clauses for tri-state
+    // rule_suggestion. Mirrors the patch_work pattern in works.rs; bind order
+    // matches set_clauses order exactly.
+    let sql = format!(
+        "UPDATE findings SET {} WHERE creator_id = ? AND finding_id = ?",
+        set_clauses.join(", ")
+    );
+    let mut q = sqlx::query(&sql);
+    if let Some(ref v) = patch.severity {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.status {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.title {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.description {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.target_executor {
+        q = q.bind(v);
+    }
+    if let Some(ref v) = patch.kind {
+        q = q.bind(v);
+    }
+    // rule_suggestion is Option<Option<String>> — the if-guard unwraps the
+    // outer Option; the inner &Option<String> binds directly (None → NULL).
+    if let Some(ref v) = patch.rule_suggestion {
+        q = q.bind(v);
+    }
+    q = q.bind(now_epoch);
+    q = q.bind(creator_id);
+    q = q.bind(finding_id);
+    let result = q.execute(pool).await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -1062,7 +1115,7 @@ pub async fn create_finding_from_review_tx(
 mod tests {
     use super::{
         list_open_findings_for_chapter, normalize_rule_suggestion, prune_resolved_findings_older_than,
-        Finding, FindingKind, RULE_SUGGESTION_MAX_BYTES,
+        update_finding, Finding, FindingKind, FindingPatch, RULE_SUGGESTION_MAX_BYTES,
     };
     use crate::error::LocalDbError;
     use sqlx::SqlitePool;
@@ -1576,6 +1629,138 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(remaining, 2, "both recent resolved rows must survive");
+    }
+
+    // ── V1.48 P3 T3: FindingPatch tri-state rule_suggestion (R-V147P0-03) ───
+
+    /// Helper: build a FindingPatch with only `rule_suggestion` set.
+    fn patch_rule_suggestion(v: Option<Option<String>>) -> FindingPatch {
+        FindingPatch {
+            rule_suggestion: v,
+            ..Default::default()
+        }
+    }
+
+    /// V1.48 P3 T3 — `Some(None)` clears `rule_suggestion` to SQL NULL.
+    ///
+    /// Seeds a finding with `rule_suggestion = Some("...")`, patches with
+    /// `Some(None)`, then verifies the column is NULL after the update.
+    #[tokio::test]
+    async fn update_finding_can_clear_rule_suggestion_to_null() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_clr";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed with a non-empty rule_suggestion.
+        let mut f = row("cl1", WORK, Some(1), "major", "clear-test", 1000, "open");
+        f.rule_suggestion = Some("original suggestion".to_string());
+        super::create_finding(&pool, &f).await.unwrap();
+
+        // Verify seed.
+        let before = super::get_finding(&pool, CREATOR, "cl1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.rule_suggestion.as_deref(), Some("original suggestion"));
+
+        // Patch: Some(None) → clear to NULL.
+        let updated = update_finding(
+            &pool,
+            CREATOR,
+            "cl1",
+            &patch_rule_suggestion(Some(None)),
+            2000,
+        )
+        .await
+        .unwrap();
+        assert!(updated, "row should be updated");
+
+        let after = super::get_finding(&pool, CREATOR, "cl1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            after.rule_suggestion.is_none(),
+            "rule_suggestion should be NULL after Some(None) clear; got {:?}",
+            after.rule_suggestion
+        );
+    }
+
+    /// V1.48 P3 T3 — `Some(Some(value))` sets `rule_suggestion` to the value.
+    #[tokio::test]
+    async fn update_finding_can_set_rule_suggestion() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_set";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed with no rule_suggestion (NULL).
+        super::create_finding(
+            &pool,
+            &row("st1", WORK, Some(1), "major", "set-test", 1000, "open"),
+        )
+        .await
+        .unwrap();
+
+        // Patch: Some(Some("new value")) → set.
+        let updated = update_finding(
+            &pool,
+            CREATOR,
+            "st1",
+            &patch_rule_suggestion(Some(Some("new suggestion".to_string()))),
+            2000,
+        )
+        .await
+        .unwrap();
+        assert!(updated, "row should be updated");
+
+        let after = super::get_finding(&pool, CREATOR, "st1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.rule_suggestion.as_deref(),
+            Some("new suggestion"),
+            "rule_suggestion should be set to the new value"
+        );
+    }
+
+    /// V1.48 P3 T3 — `None` (outer) leaves `rule_suggestion` unchanged.
+    #[tokio::test]
+    async fn update_finding_can_omit_rule_suggestion_to_keep_unchanged() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_omit";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed with a non-empty rule_suggestion.
+        let mut f = row("om1", WORK, Some(1), "major", "omit-test", 1000, "open");
+        f.rule_suggestion = Some("keep me".to_string());
+        super::create_finding(&pool, &f).await.unwrap();
+
+        // Patch a DIFFERENT field (severity) while omitting rule_suggestion
+        // (None outer). The rule_suggestion must survive unchanged.
+        let mut patch = FindingPatch {
+            severity: Some("minor".to_string()),
+            ..Default::default()
+        };
+        patch.rule_suggestion = None; // omit
+        let updated = update_finding(&pool, CREATOR, "om1", &patch, 2000)
+            .await
+            .unwrap();
+        assert!(updated, "row should be updated");
+
+        let after = super::get_finding(&pool, CREATOR, "om1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.severity, "minor", "severity should be updated");
+        assert_eq!(
+            after.rule_suggestion.as_deref(),
+            Some("keep me"),
+            "rule_suggestion must be unchanged when omitted from the patch"
+        );
     }
 
     /// Insert a minimal works row to satisfy the `findings.work_id` FK.

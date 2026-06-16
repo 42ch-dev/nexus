@@ -26,6 +26,26 @@ use serde::{Deserialize, Serialize};
 
 use super::works::read_active_creator_id;
 
+// ─── Tri-state serde helper (V1.48 P3 T3 / R-V147P0-03) ────────────────────
+
+/// Deserialize a JSON field into `Option<Option<T>>` so that **absent**,
+/// **null**, and **value** are all distinguishable.
+///
+/// - Field absent → `None` (do not patch the column).
+/// - Field `null` → `Some(None)` (clear the column to SQL NULL).
+/// - Field `value` → `Some(Some(value))` (set the column).
+///
+/// Combined with `#[serde(default)]` on the field, this is the standard
+/// tri-state pattern for nullable PATCH fields. See
+/// `FindingPatch::rule_suggestion` rustdoc for the full semantics.
+fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
+
 // ─── Request / Response types ──────────────────────────────────────────────
 
 /// API representation of a Finding record.
@@ -107,8 +127,16 @@ pub struct UpdateFindingRequest {
     pub target_executor: Option<String>,
     /// V1.47: optional new `kind`.
     pub kind: Option<String>,
-    /// V1.47: optional new `rule_suggestion`.
-    pub rule_suggestion: Option<String>,
+    /// V1.48 P3 T3 (R-V147P0-03): tri-state `rule_suggestion`.
+    ///
+    /// - Absent in JSON → `None` (do not touch the column).
+    /// - `null` in JSON → `Some(None)` (clear to SQL NULL).
+    /// - `"value"` in JSON → `Some(Some("value"))` (set).
+    ///
+    /// `#[serde(default)]` makes absent → `None`; `deserialize_some` wraps
+    /// every present value (including `null`) in `Some(...)`.
+    #[serde(default, deserialize_with = "deserialize_some")]
+    pub rule_suggestion: Option<Option<String>>,
 }
 
 /// List findings query parameters.
