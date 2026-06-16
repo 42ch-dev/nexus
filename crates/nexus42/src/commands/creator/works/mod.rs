@@ -18,6 +18,8 @@ use crate::api::DaemonClient;
 use crate::config::CliConfig;
 // V1.42 P-last (R-V141P0-06): completion-lock file path check
 use nexus_home_layout;
+// V1.49 P2 (R-V147P1-01): intake re-trigger schedules via AddScheduleRequest.
+use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
 /// Work management subcommands (DF-60 §6.2H).
 #[derive(Debug, Subcommand)]
@@ -116,7 +118,41 @@ pub enum WorksCommand {
     /// Scans the Work's `Stories/` directory and creates or updates
     /// `work_chapters` rows to match the files on disk.
     /// Migrated from `creator run reconcile-chapters`.
+    ///
+    /// V1.49 P2 (R-V148P4-W2): `--dry-run` previews the `ReconcileReport`
+    /// without filesystem/DB writes; `--yes` skips the confirmation prompt
+    /// on the mutating path (mirrors `works rules reset` safety flags).
     ReconcileChapters {
+        /// Work ID (wrk_...). Omit to use pool active Work.
+        work_id: Option<String>,
+        /// Preview the reconcile as a `ReconcileReport` without writing.
+        ///
+        /// No filesystem or DB rows are modified, no runtime lock is acquired,
+        /// and no confirmation prompt is shown. Takes precedence over `--yes`.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Skip the confirmation prompt and mutate immediately.
+        ///
+        /// By default (when stderr/stdin is a TTY) the reconcile prints a
+        /// preview and asks for confirmation before mutating `work_chapters`
+        /// and chapter frontmatter. Pass `--yes` (or `-y`) to proceed
+        /// non-interactively. Mirrors `apt-get -y` / `pacman --noconfirm`.
+        #[arg(long = "yes", short = 'y', default_value_t = false)]
+        yes: bool,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    // ── V1.49 P2: intake re-trigger on existing Work (R-V147P1-01) ──────
+    /// Re-trigger the `creative-brief-intake` preset on an existing Work
+    /// (V1.49 P2).
+    ///
+    /// Schedules `creative-brief-intake` for the resolved Work **without**
+    /// creating a new Work row (unlike `creator bootstrap`, which is the sole
+    /// composite entry for new Works). Use this to re-run intake when a Work's
+    /// creative brief needs revision.
+    Intake {
         /// Work ID (wrk_...). Omit to use pool active Work.
         work_id: Option<String>,
         /// Emit machine-readable JSON instead of human text
@@ -346,8 +382,14 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         WorksCommand::ResumeChain { work_id, json } => {
             handle_resume_chain(&client, work_id, json).await
         }
-        WorksCommand::ReconcileChapters { work_id, json } => {
-            handle_reconcile_chapters(&client, work_id, json).await
+        WorksCommand::ReconcileChapters {
+            work_id,
+            dry_run,
+            yes,
+            json,
+        } => handle_reconcile_chapters(&client, work_id, dry_run, yes, json).await,
+        WorksCommand::Intake { work_id, json } => {
+            handle_intake(&client, config, work_id, json).await
         }
         WorksCommand::Findings { command } => {
             super::rules_runtime::handle_findings(&client, command).await
@@ -823,16 +865,74 @@ async fn handle_resume_chain(
     Ok(())
 }
 
-/// Handle `creator works reconcile-chapters` — rebuild `work_chapters` (V1.45 P2).
+/// Handle `creator works reconcile-chapters` — rebuild `work_chapters`
+/// (V1.45 P2; V1.49 P2 adds `--dry-run` / `--yes`).
 ///
-/// Scans the Work's Stories/ directory and syncs `work_chapters` rows.
+/// Scans the Work's `Stories/` directory and syncs `work_chapters` rows.
 /// Migrated from `creator run reconcile-chapters`.
+///
+/// # Flag policy (V1.49 P2, R-V148P4-W2; overlay §8.2)
+///
+/// Mirrors `works rules reset` safety flags:
+/// - `--dry-run`: compute the `ReconcileReport` only; **no** filesystem/DB
+///   writes; **no** confirmation prompt; takes precedence over `--yes`.
+/// - `--yes` (or `-y`): skip the confirmation prompt and mutate immediately.
+/// - Default (neither flag): when stdin is a TTY, prompt before mutating;
+///   when stdin is not a TTY, require `--yes` (error otherwise) so scripted
+///   use cannot accidentally mutate without consent.
+///
+/// The daemon handler threads `dry_run` as a query parameter; the mutating
+/// path is unchanged when `--dry-run` is absent.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] on daemon API failure, work
+/// resolution failure, or non-interactive use without `--yes`.
 async fn handle_reconcile_chapters(
     client: &DaemonClient,
     work_id: Option<String>,
+    dry_run: bool,
+    yes: bool,
     json: bool,
 ) -> Result<()> {
     let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
+
+    // `--dry-run`: preview only, never write, never prompt.
+    if dry_run {
+        // Thread dry_run as a query param; the daemon skips the runtime lock
+        // and all filesystem/DB writes (overlay §8.2).
+        let path = format!("/v1/local/works/{resolved_id}/reconcile-chapters?dry_run=true");
+        let report: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print_reconcile_report(&resolved_id, &report, true);
+        }
+        return Ok(());
+    }
+
+    // Mutating path: confirm unless `--yes` (mirror `works rules reset`).
+    if !yes {
+        if json {
+            // Machine-readable mode cannot host an interactive prompt; report
+            // that confirmation is required and exit without writing.
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "work_id": resolved_id,
+                    "reconciled": false,
+                    "confirmation_required": true,
+                    "hint": "pass --yes to proceed non-interactively, or --dry-run to preview",
+                }))
+                .unwrap_or_default()
+            );
+            return Ok(());
+        }
+        if !confirm_reconcile_interactive(&resolved_id)? {
+            println!("• Reconcile declined; work_chapters left unchanged.");
+            return Ok(());
+        }
+    }
 
     let report: serde_json::Value = client
         .post(
@@ -844,27 +944,147 @@ async fn handle_reconcile_chapters(
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        let created = report
-            .get("created")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let updated = report
-            .get("updated")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let resynced = report
-            .get("resynced")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let preserved = report
-            .get("preserved")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        println!("Reconcile complete for Work {resolved_id}:");
-        println!("  Created:   {created}");
-        println!("  Updated:   {updated}");
-        println!("  Resynced:  {resynced}");
-        println!("  Preserved: {preserved}");
+        print_reconcile_report(&resolved_id, &report, false);
+    }
+
+    Ok(())
+}
+
+/// Render a `ReconcileReport` (created / updated / resynced / preserved) for
+/// the human path. `is_dry_run` toggles the leading label.
+fn print_reconcile_report(resolved_id: &str, report: &serde_json::Value, is_dry_run: bool) {
+    let created = report
+        .get("created")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let updated = report
+        .get("updated")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let resynced = report
+        .get("resynced")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let preserved = report
+        .get("preserved")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let label = if is_dry_run {
+        "Dry run — no files modified. Reconcile preview"
+    } else {
+        "Reconcile complete"
+    };
+    println!("{label} for Work {resolved_id}:");
+    println!("  Created:   {created}");
+    println!("  Updated:   {updated}");
+    println!("  Resynced:  {resynced}");
+    println!("  Preserved: {preserved}");
+}
+
+/// Human-mode confirmation before a mutating reconcile (V1.49 P2).
+///
+/// Mirrors `rules_runtime::confirm_reset_interactive`. Returns `Ok(true)` when
+/// the user confirms, `Ok(false)` when they decline. Errors when stdin is not a
+/// terminal — callers should pass `--yes` for non-interactive use.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] when stdin is non-interactive.
+fn confirm_reconcile_interactive(resolved_id: &str) -> Result<bool> {
+    use std::io::IsTerminal;
+
+    if !std::io::stdin().is_terminal() {
+        return Err(crate::errors::CliError::Config(format!(
+            "Reconciling work_chapters for Work {resolved_id} requires confirmation \
+             but stdin is not a terminal. Pass --yes to proceed, or --dry-run to preview."
+        )));
+    }
+    let confirmed = dialoguer::Confirm::new()
+        .with_prompt(format!(
+            "Reconcile work_chapters from filesystem for Work {resolved_id}? \
+             This may create/update chapter rows and rewrite chapter frontmatter."
+        ))
+        .default(false)
+        .show_default(true)
+        .interact_opt()
+        .map_err(|e| crate::errors::CliError::Other(format!("confirmation prompt failed: {e}")))?;
+    Ok(confirmed == Some(true))
+}
+
+/// Handle `creator works intake [<work_id>]` — re-trigger creative-brief-intake
+/// on an existing Work (V1.49 P2, R-V147P1-01; overlay §8.1).
+///
+/// Schedules the `creative-brief-intake` preset for the resolved Work via the
+/// daemon schedule endpoint, **without** creating a new Work row. This is the
+/// first-class re-trigger path that `creator bootstrap` cannot serve (bootstrap
+/// is the sole composite entry for new Works).
+///
+/// The `creative-brief-intake` preset declares no gates, so the existing
+/// schedule-add handler accepts it on any existing Work bound via
+/// `input.work_id`. Must not cancel an active FL-E auto-chain driver (the
+/// schedule is enqueued independently).
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] when no active creator is selected, the
+/// Work cannot be resolved, or the daemon schedule-add call fails.
+async fn handle_intake(
+    client: &DaemonClient,
+    config: &CliConfig,
+    work_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
+
+    // resolve_active_work_id passes an explicit id through without an existence
+    // check; GET the Work so a nonexistent work_id surfaces a clear error
+    // (overlay §8.1 remediation: cite this command + `creator bootstrap`).
+    let _work: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{resolved_id}"))
+        .await
+        .map_err(|e| {
+            crate::errors::CliError::Config(format!(
+                "Work '{resolved_id}' could not be loaded: {e}.\n  \
+             ↳ Verify the work_id, or for a brand-new Work use \
+             `nexus42 creator bootstrap --idea \"...\"` (see author-experience §8.1)."
+            ))
+        })?;
+
+    let creator_id = config
+        .active_creator_id
+        .clone()
+        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+    // Bind the schedule to the existing Work via input.work_id. The
+    // creative-brief-intake preset reads work_id from preset.input.work_id.
+    let request = AddScheduleRequest {
+        creator_id,
+        preset_id: "creative-brief-intake".to_string(),
+        seed: None,
+        label: None,
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(serde_json::json!({ "work_id": resolved_id })),
+        force_gates: false,
+        reason: None,
+    };
+
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
+        .await?;
+
+    let schedule_id = resp
+        .get("schedule_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("Intake scheduled for Work {resolved_id}");
+        println!("  preset:   creative-brief-intake");
+        println!("  schedule: {schedule_id}");
     }
 
     Ok(())
@@ -2505,8 +2725,15 @@ mod tests {
         let cli = WorksCli::try_parse_from(["nexus42", "reconcile-chapters"])
             .expect("works reconcile-chapters should parse");
         match cli.command {
-            WorksCommand::ReconcileChapters { work_id, json: _ } => {
+            WorksCommand::ReconcileChapters {
+                work_id,
+                dry_run,
+                yes,
+                json: _,
+            } => {
                 assert!(work_id.is_none(), "work_id should be optional");
+                assert!(!dry_run, "dry_run should default to false");
+                assert!(!yes, "yes should default to false");
             }
             _ => panic!("expected ReconcileChapters variant"),
         }
@@ -2517,11 +2744,135 @@ mod tests {
         let cli = WorksCli::try_parse_from(["nexus42", "reconcile-chapters", "wrk_abc"])
             .expect("works reconcile-chapters <work_id> should parse");
         match cli.command {
-            WorksCommand::ReconcileChapters { work_id, json: _ } => {
+            WorksCommand::ReconcileChapters {
+                work_id,
+                dry_run: _,
+                yes: _,
+                json: _,
+            } => {
                 assert_eq!(work_id.as_deref(), Some("wrk_abc"));
             }
             _ => panic!("expected ReconcileChapters variant"),
         }
+    }
+
+    /// V1.49 P2 (R-V148P4-W2): `--dry-run` and `--yes` flags parse correctly.
+    #[test]
+    fn works_reconcile_chapters_parses_dry_run_and_yes_flags() {
+        let cli =
+            WorksCli::try_parse_from(["nexus42", "reconcile-chapters", "wrk_abc", "--dry-run"])
+                .expect("works reconcile-chapters --dry-run should parse");
+        match cli.command {
+            WorksCommand::ReconcileChapters {
+                work_id,
+                dry_run,
+                yes: _,
+                json: _,
+            } => {
+                assert_eq!(work_id.as_deref(), Some("wrk_abc"));
+                assert!(dry_run, "dry_run flag must be true");
+            }
+            _ => panic!("expected ReconcileChapters variant"),
+        }
+
+        let cli = WorksCli::try_parse_from(["nexus42", "reconcile-chapters", "-y"])
+            .expect("works reconcile-chapters -y (short form) should parse");
+        match cli.command {
+            WorksCommand::ReconcileChapters {
+                dry_run: _, yes, ..
+            } => {
+                assert!(yes, "yes flag must be true via the -y short form");
+            }
+            _ => panic!("expected ReconcileChapters variant"),
+        }
+    }
+
+    // ── V1.49 P2 (R-V147P1-01): intake re-trigger request shape ──────────
+
+    /// `handle_intake` schedules `creative-brief-intake` bound to the existing
+    /// Work via `input.work_id`, without creating a new Work row. Verifies the
+    /// full request contract against a wiremock daemon (overlay §8.1).
+    #[tokio::test]
+    async fn handle_intake_schedules_creative_brief_intake_on_existing_work() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let work_id = "wrk_intake_test";
+
+        // GET the Work to verify existence → 200.
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/local/works/{work_id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "work_id": work_id,
+                "title": "Intake Test",
+                "intake_status": "complete",
+            })))
+            .mount(&mock_server)
+            .await;
+
+        // POST schedule — assert the body binds preset_id + work_id.
+        Mock::given(method("POST"))
+            .and(path("/v1/local/orchestration/schedules"))
+            .and(body_string_contains("\"creative-brief-intake\""))
+            .and(body_string_contains(work_id))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "schedule_id": "SCH_intake_001",
+                "status": "pending",
+                "core_context_version": 0,
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let config = CliConfig {
+            active_creator_id: Some("creator_test".to_string()),
+            daemon_url: mock_server.uri(),
+            ..Default::default()
+        };
+
+        let result = handle_intake(&client, &config, Some(work_id.to_string()), false).await;
+        assert!(
+            result.is_ok(),
+            "intake scheduling should succeed: {result:?}"
+        );
+    }
+
+    /// `handle_intake` surfaces a clear error when the Work does not exist
+    /// (overlay §8.1 remediation: cite §8.1 + `creator bootstrap`).
+    #[tokio::test]
+    async fn handle_intake_errors_clearly_when_work_missing() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let work_id = "wrk_does_not_exist";
+
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/local/works/{work_id}")))
+            .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let config = CliConfig {
+            active_creator_id: Some("creator_test".to_string()),
+            daemon_url: mock_server.uri(),
+            ..Default::default()
+        };
+
+        let err = handle_intake(&client, &config, Some(work_id.to_string()), false)
+            .await
+            .expect_err("missing work should error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(work_id),
+            "error should name the missing work_id: {msg}"
+        );
+        assert!(
+            msg.contains("creator bootstrap"),
+            "error should cite the bootstrap remediation path: {msg}"
+        );
     }
 
     // ── Rejected subcommand tests (Grill #10/#11) ───────────────────────
