@@ -3,7 +3,7 @@
 //! Manages the `inspiration_items` table — creator-scoped inspiration
 //! items with optional markdown file scaffold under `{workspace}/Pool/Ideas/`.
 //!
-//! Spec: novel-work-pool.md §3, local-db-schema.md §4.1.5.
+//! Spec: novel-writing/work-pool.md §3, local-db-schema.md §4.1.5.
 //!
 //! # Instrumented mutation paths (V1.46 P4 audit)
 //!

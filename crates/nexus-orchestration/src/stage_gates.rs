@@ -257,7 +257,7 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
 ///   (compiled into the binary via `include_str!`). User override at
 ///   `~/.nexus42/rules/writing-craft.md` takes precedence when it exists.
 /// - **Layer 2 (preferred)**: `Works/<work_ref>/AGENTS.md` — V1.47 normative
-///   per [novel-workflow-profile.md §5.5.4]. New scaffolds write this path.
+///   per [novel-writing/workflow-profile.md §5.5.4]. New scaffolds write this path.
 /// - **Layer 2 (legacy fallback, read-only)**: `Works/<work_ref>/Rules/novel-rules.md`
 ///   — used only when `AGENTS.md` is absent, for Works scaffolded before the
 ///   V1.48 migration. No bulk migration is performed (compass §0.1 #9).

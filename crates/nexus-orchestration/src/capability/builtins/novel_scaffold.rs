@@ -520,7 +520,7 @@ impl Capability for NovelProjectScaffold {
         }
 
         // ── T2j: Layer 2 AGENTS.md (V1.48 P2, overlay §3.1 #4) ─────────
-        // V1.47 normative (novel-workflow-profile.md §5.5.4) declares
+        // V1.47 normative (novel-writing/workflow-profile.md §5.5.4) declares
         // `Works/<work_ref>/AGENTS.md` as Layer 2. V1.48 P2 migrates the
         // scaffold away from the legacy `Rules/novel-rules.md`. The
         // `Rules/` directory is no longer created for new Works; existing

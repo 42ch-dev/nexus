@@ -1,5 +1,5 @@
 -- V1.41 multi-work lifecycle columns + novel_pool_entries (DF-60, DF-61 P0 minimal)
--- Spec: novel-multi-work-lifecycle.md, novel-work-pool.md, local-db-schema.md §4.1.4–§4.1.5
+-- Spec: novel-writing/multi-work-lifecycle.md, novel-writing/work-pool.md, local-db-schema.md §4.1.4–§4.1.5
 
 -- ─── works table: additive columns ─────────────────────────────────────
 

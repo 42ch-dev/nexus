@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 /// RAII guard that acquires a runtime lock on creation and releases on drop.
 ///
-/// Spec: `novel-multi-work-lifecycle.md` §4.2 — CLI holder format
+/// Spec: `novel-writing/multi-work-lifecycle.md` §4.2 — CLI holder format
 /// `cli:<caller>:<uuid>`. For HTTP callers, `caller` is `http` since the
 /// actual PID isn't available over the API.
 struct RuntimeLockGuard {

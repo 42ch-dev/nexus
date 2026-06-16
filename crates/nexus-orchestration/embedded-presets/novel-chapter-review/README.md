@@ -3,7 +3,7 @@
 This preset replaces the generic `reflection-loop` demo (V1.31 agentic-design
 pattern) per V1.47 compass §0.1 #6. It is the FL-E `review` stage producer
 that writes ≥1 finding row per review pass via the supervisor's terminal hook
-(novel-quality-loop.md §8).
+(novel-writing/quality-loop.md §8).
 
 ## What it does
 

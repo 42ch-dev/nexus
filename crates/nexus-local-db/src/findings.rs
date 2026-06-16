@@ -115,7 +115,7 @@ pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "ma
 /// function is the single hook both a future CLI subcommand and a potential
 /// daemon task would call.
 ///
-/// **Spec note**: `novel-findings-maturity.md` §5.1 lists both `resolved` and
+/// **Spec note**: `archived/knowledge/novel-findings-maturity.md` §5.1 lists both `resolved` and
 /// `wont_fix` as purge-eligible. The V1.48 P3 Assignment (T2) explicitly
 /// restricts pruning to `resolved` only and skips `wont_fix`. This deviation
 /// is intentional for this delivery slice; PM reconciles with the overlay at
@@ -139,7 +139,7 @@ pub const SUGGESTED_FINDING_KINDS: &[&str] =
 /// are rejected with [`LocalDbError::ConstraintViolation`].
 ///
 /// V1.48 P0 T4: expanded to include `plot_hole` and `world_inconsistency`
-/// per `.mstar/knowledge/specs/novel-quality-loop.md` §2.1 (the V1.47 P0
+/// per `.mstar/knowledge/specs/novel-writing/quality-loop.md` §2.1 (the V1.47 P0
 /// quick-closure missed these spec-listed kinds; the producer's
 /// `review-report.md` parser emits them and the DB layer must accept).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,10 +155,10 @@ pub enum FindingKind {
     /// Catch-all for review findings that don't fit the above.
     Other,
     /// Plot-level issue (introduced-then-dropped thread, contradiction).
-    /// V1.48 P0: added per `novel-quality-loop.md` §2.1.
+    /// V1.48 P0: added per `novel-writing/quality-loop.md` §2.1.
     PlotHole,
     /// World-building inconsistency (timeline, geography, lore).
-    /// V1.48 P0: added per `novel-quality-loop.md` §2.1.
+    /// V1.48 P0: added per `novel-writing/quality-loop.md` §2.1.
     WorldInconsistency,
 }
 
@@ -420,7 +420,7 @@ pub async fn list_findings(
 }
 
 /// V1.48 P1 — chapter-scoped open findings query for `novel-writing` prompt
-/// injection (`novel-findings-maturity.md` §2 Consumer).
+/// injection (`archived/knowledge/novel-findings-maturity.md` §2 Consumer).
 ///
 /// Returns all **open** findings for a Work that should influence the
 /// `novel-writing` outline/draft prompt for chapter `N`:
@@ -962,7 +962,7 @@ pub struct ReviewVerdictFinding {
 /// (a finding already exists for this `(work_id, chapter, source_schedule_id)`
 /// triple), the existing finding id is returned — the call is a no-op. This
 /// guarantees that calling the review terminal hook twice on the same chapter
-/// does not create duplicate findings (novel-quality-loop.md §8.3 decision).
+/// does not create duplicate findings (novel-writing/quality-loop.md §8.3 decision).
 ///
 /// When `verdict.source_schedule_id` is `None` (manual CRUD / API path), the
 /// standard insert is used with no idempotency guard.
@@ -1142,7 +1142,7 @@ mod tests {
         }
         // sanity: the enum variant count matches the const ALL_STRS slice
         // length. V1.48 P0 T4: expanded from 5 → 7 to include `plot_hole`
-        // and `world_inconsistency` per `novel-quality-loop.md` §2.1.
+        // and `world_inconsistency` per `novel-writing/quality-loop.md` §2.1.
         assert_eq!(
             FindingKind::ALL_STRS.len(),
             7,
@@ -1231,7 +1231,7 @@ mod tests {
 
     /// C-1 fix: Verify the spec-required composite index on
     /// (work_id, chapter, status) exists after migration.
-    /// Per novel-quality-loop.md §2.1: chapter-scoped finding lookups
+    /// Per novel-writing/quality-loop.md §2.1: chapter-scoped finding lookups
     /// (the review-stage hook's hot path) must use this index.
     #[tokio::test]
     async fn test_findings_work_chapter_status_index_exists() {

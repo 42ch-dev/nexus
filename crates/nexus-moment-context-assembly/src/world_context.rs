@@ -1,6 +1,6 @@
 //! World context block builder for novel-writing prompts.
 //!
-//! Implements §3.5.1.3 of `novel-workflow-profile.md`: a compact, prompt-safe YAML
+//! Implements §3.5.1.3 of `novel-writing/workflow-profile.md`: a compact, prompt-safe YAML
 //! block injected before each outline and draft prompt for World-bound Works.
 //!
 //! # Architecture (per `world-kb-runtime-architecture.md` §6)
@@ -64,7 +64,7 @@ pub struct WorldContextBlock {
 }
 
 impl WorldContextBlock {
-    /// Render the block as YAML per `novel-workflow-profile.md` §3.5.1.3.
+    /// Render the block as YAML per `novel-writing/workflow-profile.md` §3.5.1.3.
     ///
     /// Output shape:
     /// ```yaml

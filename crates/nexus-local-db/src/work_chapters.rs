@@ -44,7 +44,7 @@ pub struct WorkChapterRecord {
 ///
 /// For `chapter IN 1..total`, inserts one row per chapter. On PK conflict
 /// `(work_id, chapter)`, existing rows are **not** overwritten (idempotency
-/// per novel-workflow-profile.md §5.4.5).
+/// per novel-writing/workflow-profile.md §5.4.5).
 ///
 /// All inserts run in a single transaction; rolls back on any failure.
 ///
