@@ -991,7 +991,7 @@ mod tests {
     /// V1.43 (P1 §3 remediation — `preset_gates_failed`): `work_field` remediation
     /// strings cite the preset-entry spec and an executable command.
     #[tokio::test]
-    async fn remediation_work_field_cites_quickstart() {
+    async fn remediation_work_field_cites_preset_entry_spec() {
         // R-V146P1-QC3-S2: exercise the `work_ref` branch (not `work_profile`)
         // so the remediation includes an executable `creator bootstrap`
         // command, giving command-validity coverage in addition to the spec
