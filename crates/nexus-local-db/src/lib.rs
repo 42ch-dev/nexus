@@ -105,9 +105,10 @@ pub use prompt_injection::{
 // Re-export findings types
 pub use findings::{
     count_open_findings_by_severity, create_finding, create_finding_from_review,
-    create_finding_from_review_tx, delete_finding, get_finding, list_findings,
-    prune_resolved_findings_older_than, update_finding, Finding, FindingListFilters, FindingPatch,
-    ReviewVerdictFinding, SeverityCount, RETENTION_DEFAULT_DAYS,
+    create_finding_from_review_tx, delete_finding, get_finding, is_valid_status,
+    is_valid_transition, list_findings, prune_resolved_findings_older_than, update_finding,
+    Finding, FindingListFilters, FindingPatch, ReviewVerdictFinding, SeverityCount,
+    ACTIONABLE_FINDING_STATUSES, RETENTION_DEFAULT_DAYS, VALID_STATUSES,
 };
 
 // Re-export works types
