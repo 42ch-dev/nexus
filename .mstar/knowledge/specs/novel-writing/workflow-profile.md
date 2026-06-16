@@ -694,7 +694,7 @@ The grill-me offers an "overwrite templates" option for users who want to re-ren
 
 **Implement authority** for findings lifecycle, review presets (`novel-chapter-review`, `novel-brainstorm`, `novel-review-master`), rules runtime, `Logs/` discipline, 96h escalation, and producer/consumer behavior: **[quality-loop.md](quality-loop.md)**.
 
-**V1.49 overlay**: extended findings status → [findings-lifecycle.md](findings-lifecycle.md) (Draft; merges into `quality-loop.md` §2 at P-last).
+**V1.49 shipped**: 6-state findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (Shipped V1.49 P0; §5.5.1 three-state `open` / `resolved` / `wont_fix` paragraph superseded).
 
 **Profile-local gate (this file)**: §5.1 `llm_judge` 五问 finalize on `novel-writing` remains the per-chapter craft gate.
 
