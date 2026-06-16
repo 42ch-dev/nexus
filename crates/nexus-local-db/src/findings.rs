@@ -630,6 +630,51 @@ pub async fn delete_finding(
     Ok(result.rows_affected() > 0)
 }
 
+/// V1.48 P3 T2 — purge resolved findings older than the retention window.
+///
+/// Deletes every finding row with `status = 'resolved'` AND
+/// `updated_at < (now_epoch - retention_seconds)`. Returns the number of
+/// rows deleted.
+///
+/// **Retention clock**: `updated_at` (epoch seconds) is used as the proxy
+/// for "when the finding was resolved" — [`update_finding`] stamps it on
+/// every transition including status → `'resolved'`. No separate
+/// `resolved_at` column exists; this is the simplest durable choice that
+/// avoids a schema migration for a new column.
+///
+/// **Scope**: only `'resolved'` rows are purged. `'open'` and `'wont_fix'`
+/// rows are never touched (per V1.48 P3 Assignment T2). See
+/// [`RETENTION_DEFAULT_DAYS`] for the spec-deviation note.
+///
+/// **Hermetic testing**: `now_epoch` is a parameter (not wall-clock) so the
+/// daemon task / CLI command / tests can exercise the cutoff deterministically
+/// — same pattern as [`list_stale_open_findings`].
+///
+/// **Transaction**: the DELETE runs inside a single SQLite transaction so
+/// the prune is atomic and future archival side-effects can be added in the
+/// same tx without changing the public signature.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the transaction cannot be started, the DELETE
+/// fails, or the commit fails.
+pub async fn prune_resolved_findings_older_than(
+    pool: &SqlitePool,
+    now_epoch: i64,
+    retention_seconds: i64,
+) -> Result<u32, LocalDbError> {
+    let cutoff = now_epoch.saturating_sub(retention_seconds);
+    let mut tx = pool.begin().await?;
+    let result = sqlx::query!(
+        "DELETE FROM findings WHERE status = 'resolved' AND updated_at < ?",
+        cutoff
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(u32::try_from(result.rows_affected()).unwrap_or(u32::MAX))
+}
+
 /// Severity count row — used by `count_open_findings_by_severity`.
 #[derive(Debug, Clone)]
 pub struct SeverityCount {
@@ -1016,8 +1061,8 @@ pub async fn create_finding_from_review_tx(
 #[cfg(test)]
 mod tests {
     use super::{
-        list_open_findings_for_chapter, normalize_rule_suggestion, Finding, FindingKind,
-        RULE_SUGGESTION_MAX_BYTES,
+        list_open_findings_for_chapter, normalize_rule_suggestion, prune_resolved_findings_older_than,
+        Finding, FindingKind, RULE_SUGGESTION_MAX_BYTES,
     };
     use crate::error::LocalDbError;
     use sqlx::SqlitePool;
@@ -1335,6 +1380,202 @@ mod tests {
             .await
             .unwrap();
         assert!(got.is_empty(), "expected empty result on unseeded table");
+    }
+
+    // ── V1.48 P3 T2: resolved-finding retention pruning ─────────────────────
+
+    /// V1.48 P3 T2 — old `resolved` rows past the retention window are purged;
+    /// `open` and `wont_fix` rows are never touched.
+    ///
+    /// Seeds:
+    ///  - `old_resolved`   — resolved, updated_at well past the cutoff   ← purged
+    ///  - `old_open`       — open,     created_at same vintage           ← kept (open)
+    ///  - `old_wont_fix`   — wont_fix, updated_at same vintage           ← kept (wont_fix)
+    ///  - `recent_resolved`— resolved, updated_at inside the window      ← kept (recent)
+    #[tokio::test]
+    async fn prune_resolved_findings_older_than_removes_old_resolved_rows() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_prune";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 10_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600; // 90 days
+        let old_ts = now - retention_seconds - 1; // 1s past the cutoff
+
+        super::create_finding(
+            &pool,
+            &row(
+                "pr1",
+                WORK,
+                Some(1),
+                "major",
+                "old_resolved",
+                old_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("pr2", WORK, Some(1), "major", "old_open", old_ts, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "pr3",
+                WORK,
+                Some(1),
+                "major",
+                "old_wont_fix",
+                old_ts,
+                "wont_fix",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "pr4",
+                WORK,
+                Some(1),
+                "major",
+                "recent_resolved",
+                now,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(
+            deleted, 1,
+            "exactly one old resolved row should be pruned"
+        );
+
+        // Verify: pr1 gone; pr2, pr3, pr4 still present.
+        let remaining: Vec<String> = sqlx::query_scalar(
+            "SELECT finding_id FROM findings WHERE work_id = ? ORDER BY finding_id",
+        )
+        .bind(WORK)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            remaining,
+            vec!["pr2".to_string(), "pr3".to_string(), "pr4".to_string()],
+            "open, wont_fix, and recent resolved rows must survive the prune"
+        );
+    }
+
+    /// V1.48 P3 T2 — `open` rows are never purged even when their
+    /// `updated_at` is far past the retention window.
+    #[tokio::test]
+    async fn prune_resolved_findings_older_than_skips_open_rows() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_prune_open";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 20_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600;
+        let old_ts = now - retention_seconds - 100_000;
+
+        // Only open rows — all old.
+        super::create_finding(
+            &pool,
+            &row("sk1", WORK, Some(1), "blocker", "old_open_1", old_ts, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("sk2", WORK, Some(1), "minor", "old_open_2", old_ts, "open"),
+        )
+        .await
+        .unwrap();
+
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 0, "no rows should be pruned when all are open");
+
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+                .bind(WORK)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(remaining, 2, "both open rows must survive");
+    }
+
+    /// V1.48 P3 T2 — `resolved` rows whose `updated_at` falls inside the
+    /// retention window are kept.
+    #[tokio::test]
+    async fn prune_resolved_findings_older_than_skips_recent_resolved_rows() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_prune_recent";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 30_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600;
+
+        // A resolved row exactly at the cutoff boundary (not older).
+        let boundary_ts = now - retention_seconds;
+        // A resolved row 1 second inside the window.
+        let inside_ts = now - retention_seconds + 1;
+
+        super::create_finding(
+            &pool,
+            &row(
+                "rc1",
+                WORK,
+                Some(1),
+                "major",
+                "boundary_resolved",
+                boundary_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "rc2",
+                WORK,
+                Some(1),
+                "major",
+                "inside_resolved",
+                inside_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        // boundary_ts == cutoff → NOT < cutoff → kept.
+        // inside_ts  > cutoff   → kept.
+        assert_eq!(deleted, 0, "boundary and inside-window rows must survive");
+
+        let remaining: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+                .bind(WORK)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(remaining, 2, "both recent resolved rows must survive");
     }
 
     /// Insert a minimal works row to satisfy the `findings.work_id` FK.
