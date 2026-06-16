@@ -279,7 +279,11 @@ fn format_preset_run_help(preset_id: &str, description: &str, cli_args: &[Preset
         "nexus42 creator run {preset_id} [<work_id>] [global flags] [preset args...]"
     );
     let _ = writeln!(out);
-    let _ = writeln!(out, "{description}");
+    // R-V146P2-QC2-W: sanitize manifest-supplied description before rendering
+    // to terminal — defense-in-depth against escape/control chars in local
+    // user YAML. Same sanitizer as the works status path.
+    let safe_description = super::works::sanitize_for_terminal(description);
+    let _ = writeln!(out, "{safe_description}");
     let _ = writeln!(out);
     let _ = writeln!(out, "Global flags (apply before preset-specific args):");
     let _ = writeln!(
@@ -1551,5 +1555,28 @@ mod tests {
         );
         // Global flags still present so the help is usable.
         assert!(out.contains("--json"));
+    }
+
+    #[test]
+    fn format_help_sanitizes_manifest_description() {
+        // R-V146P2-QC2-W: manifest-supplied description must be sanitized
+        // before terminal rendering so ANSI/control chars cannot corrupt
+        // the help output.
+        let dirty = "Bad \x1B[31mred\x1B[0m\x07 description";
+        let out = format_preset_run_help("novel-brainstorm", dirty, &[]);
+        assert!(
+            !out.contains('\x1B'),
+            "ANSI escape must be stripped from description: {out}"
+        );
+        assert!(
+            !out.contains('\x07'),
+            "BEL control char must be stripped from description: {out}"
+        );
+        // The safe remainder is still rendered.
+        assert!(
+            out.contains("Bad"),
+            "safe description text must survive sanitization: {out}"
+        );
+        assert!(out.contains("red"), "safe text 'red' must survive: {out}");
     }
 }

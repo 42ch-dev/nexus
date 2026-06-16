@@ -1686,7 +1686,11 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
 /// Preserves printable ASCII, Unicode, `\n`, and `\t`. Strips:
 /// - ASCII control chars 0x00–0x1F (except `\n` 0x0A and `\t` 0x09) and 0x7F (DEL)
 /// - ANSI CSI sequences (`ESC [ ... letter`)
-fn sanitize_for_terminal(s: &str) -> String {
+//
+// `pub(crate)` so sibling modules (e.g. `creator::run`) can reuse the same
+// sanitizer for manifest description text (R-V146P2-QC2-W) instead of
+// duplicating the ANSI/control-char stripping logic.
+pub(crate) fn sanitize_for_terminal(s: &str) -> String {
     // Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
     let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap_or_else(|e| {
         // The pattern is a compile-time constant; panic is unreachable.
