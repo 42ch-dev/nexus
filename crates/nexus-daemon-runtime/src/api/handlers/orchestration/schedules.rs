@@ -74,6 +74,16 @@ const RESERVED_INPUT_KEYS: &[&str] = &["creator_id", "workspace_slug", "core_con
 /// Maximum length for --reason / --gate-reason (W-5).
 const MAX_REASON_LEN: usize = 512;
 
+/// Novel-completion guard message (V1.36 P4 T2, per novel-workflow-profile §5.2).
+///
+/// Returned as a 409 CONFLICT body when a `novel-writing` schedule is enqueued
+/// on a creator that already has a completed novel. Extracted to a `const`
+/// (R-V146P1-QC2-S1) so the test asserts against the **production** source
+/// rather than a parallel string snapshot that drifts silently on copy edits.
+const NOVEL_COMPLETION_GUARD_MESSAGE: &str = "This Work is complete; see the novel-author-experience spec. \
+     To start a new Work, use `nexus42 creator bootstrap --init-preset \
+     novel-project-init` (see the creator-run-preset-entry spec)";
+
 /// Strip ANSI escape sequences and control characters from a string (W-5).
 fn sanitize_reason(raw: &str) -> String {
     let re = regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").expect("ANSI escape regex is valid");
@@ -181,10 +191,7 @@ pub async fn add_schedule(
             // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
             return Err((
                 StatusCode::CONFLICT,
-                "This Work is complete; see the novel-author-experience spec. \
-                 To start a new Work, use `nexus42 creator bootstrap --init-preset \
-                 novel-project-init` (see the creator-run-preset-entry spec)"
-                    .to_string(),
+                NOVEL_COMPLETION_GUARD_MESSAGE.to_string(),
             ));
         }
     }
@@ -1580,11 +1587,15 @@ mod tests {
     /// V1.47 P1: the completion-guard message cites spec names (not repo
     /// paths). V1.46 P1 (spec hygiene): cites the spec, not the deleted
     /// quickstart.
+    ///
+    /// R-V146P1-QC2-S1: the test now asserts against the **production**
+    /// `NOVEL_COMPLETION_GUARD_MESSAGE` const (extracted from the handler)
+    /// rather than a parallel string snapshot, so copy edits are covered by a
+    /// single source and the assertions check semantic keywords instead of a
+    /// full-string match.
     #[test]
     fn completion_guard_message_cites_spec_paths() {
-        let msg = "This Work is complete; see the novel-author-experience spec. \
-                   To start a new Work, use `nexus42 creator bootstrap --init-preset \
-                   novel-project-init` (see the creator-run-preset-entry spec)";
+        let msg = NOVEL_COMPLETION_GUARD_MESSAGE;
         assert!(
             msg.contains("novel-author-experience"),
             "completion guard should cite the author-experience spec"
@@ -1592,6 +1603,11 @@ mod tests {
         assert!(
             msg.contains("creator-run-preset-entry"),
             "completion guard should cite the preset-entry spec for new Work"
+        );
+        // Command validity: the remediation must include an executable command.
+        assert!(
+            msg.contains("creator bootstrap"),
+            "completion guard should reference the executable `creator bootstrap` command"
         );
         // R-V146P1-QC3-S4: no raw .mstar/ paths in user-facing copy.
         assert!(
