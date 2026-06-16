@@ -7,6 +7,7 @@
 //! - `PATCH  /v1/local/works/{work_id}/findings/{finding_id}` — Update finding
 //! - `DELETE /v1/local/works/{work_id}/findings/{finding_id}` — Delete finding
 //! - `POST   /v1/local/works/{work_id}/findings/from-review` — Create from review verdict (T3)
+//! - `GET    /v1/local/findings/{finding_id}` — Get one finding, creator-scoped (V1.48 P2 — accept path)
 //! - `GET    /v1/local/findings/stale` — Stale open-findings count for active creator (V1.39 P4 T3)
 
 #![allow(clippy::missing_errors_doc)]
@@ -236,7 +237,23 @@ pub async fn get_finding_handler(
     Ok(Json(f.into()))
 }
 
-/// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
+/// `GET /v1/local/findings/{finding_id}` — get one finding, creator-scoped.
+///
+/// V1.48 P2: added so the CLI `creator works findings accept <finding_id>`
+/// command can resolve a finding by ID alone (without the caller knowing
+/// the `work_id` upfront). Mirrors [`get_finding_handler`] but skips the
+/// work-ownership precheck; the DAO lookup is already creator-scoped.
+pub async fn get_finding_creator_scoped_handler(
+    State(state): State<WorkspaceState>,
+    Path(finding_id): Path<String>,
+) -> Result<Json<FindingApiDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
+        .await?
+        .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
+    Ok(Json(f.into()))
+}
 ///
 /// # Panics
 /// Panics if the finding row disappears between successful update and re-fetch

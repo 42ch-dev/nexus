@@ -124,6 +124,25 @@ pub enum WorksCommand {
         json: bool,
     },
 
+    // ── V1.48 P2: findings + rules (Layer 2 AGENTS.md) ──────────────
+    /// Finding-level operations (accept rule suggestions, future prune / …).
+    ///
+    /// V1.48 P2 introduces the `accept` subcommand which appends a finding's
+    /// `rule_suggestion` to the Work's `AGENTS.md` Layer 2 file.
+    Findings {
+        #[command(subcommand)]
+        command: FindingsCommand,
+    },
+
+    /// Layer 2 rules file operations for a Work (`Works/<work_ref>/AGENTS.md`).
+    ///
+    /// V1.48 P2 introduces the `reset` subcommand which restores the
+    /// default `AGENTS.md` scaffold.
+    Rules {
+        #[command(subcommand)]
+        command: RulesCommand,
+    },
+
     // ── Rejected subcommands (Grill #10/#11) ──────────────────────────
     // `creator works start` and `creator works create` are NOT available.
     // New Work creation is via `creator bootstrap` ONLY. These hidden
@@ -151,6 +170,44 @@ pub enum CompletionLockCommand {
     Release {
         /// Work ID (wrk_...) to release the completion lock for
         work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// Findings subcommands (V1.48 P2).
+#[derive(Debug, Subcommand)]
+pub enum FindingsCommand {
+    /// Accept a finding's `rule_suggestion` and append it to the Work's
+    /// `AGENTS.md` Layer 2 file (V1.48 P2, overlay §3.2).
+    ///
+    /// Loads the finding by ID (creator-scoped), validates that
+    /// `rule_suggestion` is non-empty, appends an audit-friendly entry
+    /// under `## Accepted rule suggestions` in
+    /// `Works/<work_ref>/AGENTS.md` (idempotent on `finding_id`), and
+    /// marks the finding `status=resolved`.
+    Accept {
+        /// Finding ID (fnd_...) to accept.
+        finding_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// Layer 2 rules subcommands (V1.48 P2).
+#[derive(Debug, Subcommand)]
+pub enum RulesCommand {
+    /// Reset the Work's `AGENTS.md` to the default scaffold (V1.48 P2,
+    /// overlay §4).
+    ///
+    /// Overwrites `Works/<work_ref>/AGENTS.md` with the embedded default
+    /// scaffold. Does NOT delete the Work or any chapter artifacts.
+    /// Use when the file has drifted and you want to start fresh.
+    Reset {
+        /// Work ID (wrk_...). Omit to use pool active Work.
+        work_id: Option<String>,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -268,6 +325,12 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         }
         WorksCommand::ReconcileChapters { work_id, json } => {
             handle_reconcile_chapters(&client, work_id, json).await
+        }
+        WorksCommand::Findings { command } => {
+            super::rules_runtime::handle_findings(&client, command).await
+        }
+        WorksCommand::Rules { command } => {
+            super::rules_runtime::handle_rules(&client, command).await
         }
         WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
             "`creator works start` is not available. \
@@ -1492,6 +1555,13 @@ fn operational_workspace_dir_from_config() -> Option<std::path::PathBuf> {
     ))
 }
 
+/// V1.48 P2: crate-public re-export so `rules_runtime` can resolve the
+/// operational workspace dir for `AGENTS.md` file operations. Same
+/// semantics as [`operational_workspace_dir_from_config`] (best-effort).
+pub(crate) fn operational_workspace_dir_from_config_public() -> Option<std::path::PathBuf> {
+    operational_workspace_dir_from_config()
+}
+
 /// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort check of a chapter's
 /// configured `body_path` / `outline_path` against the filesystem.
 ///
@@ -2684,5 +2754,72 @@ mod tests {
             chapter_path_hint_skipped_summary(skipped).is_none(),
             "no summary when skipped == 0"
         );
+    }
+
+    // ── V1.48 P2: CLI parsing for findings + rules subcommands ────────
+
+    #[test]
+    fn works_findings_accept_parses_with_finding_id() {
+        let cli = WorksCli::try_parse_from(["nexus42", "findings", "accept", "fnd_01HMV8KX"])
+            .expect("works findings accept <finding_id> should parse");
+        match cli.command {
+            WorksCommand::Findings {
+                command:
+                    FindingsCommand::Accept {
+                        finding_id,
+                        json: _,
+                    },
+            } => {
+                assert_eq!(finding_id, "fnd_01HMV8KX");
+            }
+            _ => panic!("expected Findings::Accept variant"),
+        }
+    }
+
+    #[test]
+    fn works_findings_accept_supports_json_flag() {
+        let cli =
+            WorksCli::try_parse_from(["nexus42", "findings", "accept", "fnd_01HMV8KX", "--json"])
+                .expect("works findings accept <finding_id> --json should parse");
+        match cli.command {
+            WorksCommand::Findings {
+                command: FindingsCommand::Accept { finding_id, json },
+            } => {
+                assert_eq!(finding_id, "fnd_01HMV8KX");
+                assert!(json, "--json should set json=true");
+            }
+            _ => panic!("expected Findings::Accept variant"),
+        }
+    }
+
+    // ── V1.48 P2 T4: rules reset CLI parsing ──────────────────────────
+
+    #[test]
+    fn works_rules_reset_parses_without_work_id() {
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset"])
+            .expect("works rules reset (no work_id) should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { work_id, json: _ },
+            } => {
+                assert!(work_id.is_none(), "work_id should default to None");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    #[test]
+    fn works_rules_reset_parses_with_work_id_and_json() {
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset", "wrk_abc", "--json"])
+            .expect("works rules reset <work_id> --json should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { work_id, json },
+            } => {
+                assert_eq!(work_id.as_deref(), Some("wrk_abc"));
+                assert!(json, "--json should set json=true");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
     }
 }

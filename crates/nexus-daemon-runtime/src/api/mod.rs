@@ -312,6 +312,11 @@ fn works_routes() -> Router<WorkspaceState> {
             "/v1/local/findings/stale",
             get(handlers::findings::list_stale_findings_handler),
         )
+        // ── Creator-scoped finding lookup (V1.48 P2 — accept path) ────
+        .route(
+            "/v1/local/findings/{finding_id}",
+            get(handlers::findings::get_finding_creator_scoped_handler),
+        )
 }
 /// Create the Local API router
 ///
