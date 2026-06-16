@@ -8,7 +8,7 @@
 **Coordinates with**:
 
 - [work-experience-model.md](work-experience-model.md) — Work entity, intake, run_intents
-- [novel-workflow-profile.md](novel-workflow-profile.md) — novel `produce` artifacts and completion (Draft V1.36)
+- [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) — novel `produce` artifacts and completion (Draft V1.36)
 - [cli-spec.md](cli-spec.md) — `creator run <preset_id>` (see §6.2D) and `creator bootstrap`
 - [orchestration-engine.md](orchestration-engine.md) — presets, schedules, capabilities
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — Agent-initiated context/tools (parallel channel)
@@ -101,9 +101,9 @@ creator run <preset_id> [<work_id>] # e.g. creator run research, creator run nov
 | --- | --- | --- |
 | `intake` | `creative-brief-intake` | Shipped V1.33 |
 | `research` | `research` | May append references to Work context |
-| `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log`; novel profile writes to `Works/<work_ref>/` per [novel-workflow-profile.md](novel-workflow-profile.md) |
-| `review` | `novel-chapter-review` | V1.47 P0: renamed from `reflection-loop` (compass §0.1 #6). Persists ≥1 finding per review pass via the supervisor terminal hook; see [novel-quality-loop.md §8](novel-quality-loop.md#8-reflection-loop-output-contract-v147-draft). |
-| `persist` | `kb-extract` (via queue) + CLI memory review | **V1.40 P3**: World-bound novel Works enqueue extract with `work.world_id`; worldless Works skip World promotion. See [novel-workflow-profile.md §3.5.1.5](novel-workflow-profile.md). |
+| `produce` | `novel-writing` | Uses `creative_brief` + `inspiration_log`; novel profile writes to `Works/<work_ref>/` per [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) |
+| `review` | `novel-chapter-review` | V1.47 P0: renamed from `reflection-loop` (compass §0.1 #6). Persists ≥1 finding per review pass via the supervisor terminal hook; see [novel-writing/quality-loop.md §8](novel-writing/quality-loop.md#8-reflection-loop-output-contract-v147-draft). |
+| `persist` | `kb-extract` (via queue) + CLI memory review | **V1.40 P3**: World-bound novel Works enqueue extract with `work.world_id`; worldless Works skip World promotion. See [novel-writing/workflow-profile.md §3.5.1.5](novel-writing/workflow-profile.md). |
 
 P2 may add wiring presets or seeds only; **no** new conditional `next.kind`.
 
@@ -173,11 +173,11 @@ Invariant: at most one active FL-E stage driver schedule per Work remains enforc
 | Conditional routing | **Not** used for stage selection (DF-56) |
 | `--auto-chain` | **V1.39 target (DF-53)**: default true for full FL-E chain + chapter outer loop; `--no-auto-chain` opt-out; manual `creator run <preset>` dispatch still valid for power users |
 | Novel project init | Separate preset `novel-project-init` (DF-58); **not** part of `novel-writing` auto-chain |
-| Novel completion | Work `status == completed` stops further `novel-writing`; V1.41 extends `mark_work_completed` per [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) (DF-60) |
+| Novel completion | Work `status == completed` stops further `novel-writing`; V1.41 extends `mark_work_completed` per [novel-writing/multi-work-lifecycle.md](novel-writing/multi-work-lifecycle.md) (DF-60) |
 | Completion-lock | While `.completion-lock.json` exists, auto-chain **must not** tick that Work; after release, `resume --reopen` may resume same `work_id` (V1.41 P0) |
 | Runtime lock | `works.runtime_lock_holder` blocks concurrent mutating CLI/API on same Work (V1.41 P0) |
 | Multi-Work concurrency | Multiple Works may auto-chain concurrently; pool `active` is CLI default only (DF-60/61) |
-| Selection pool | `creator works pool` + `works use` via [novel-work-pool.md](novel-work-pool.md); not a Work profile (DF-61) |
+| Selection pool | `creator works pool` + `works use` via [novel-writing/work-pool.md](novel-writing/work-pool.md); not a Work profile (DF-61) |
 | CLI IA | `creator run` = single-Work actions; `creator works` = list/status/use/pool (V1.41) |
 | Platform cloud assemble | Not part of this workflow; see agent-nexus-tool-bridge `policy_blocked` |
 

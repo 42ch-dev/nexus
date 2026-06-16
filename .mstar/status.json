@@ -26,7 +26,7 @@
       "working_branch": "feature/v1.49-findings-lifecycle",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-findings-lifecycle.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
       "updated_at": "2026-06-17T10:00:00+08:00"
@@ -41,7 +41,7 @@
       "working_branch": "feature/v1.49-narrative-indexes",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-narrative-indexes.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/narrative-indexes.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
       "updated_at": "2026-06-17T10:00:00+08:00"
@@ -56,7 +56,7 @@
       "working_branch": "feature/v1.49-author-desk-ux",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-author-experience.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/author-experience.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
       "updated_at": "2026-06-17T10:00:00+08:00"
@@ -115,7 +115,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "GO — V1.49 P-1 Done 2026-06-17",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
-    "wave_0_spec": ".mstar/knowledge/specs/novel-findings-lifecycle.md, .mstar/knowledge/specs/novel-narrative-indexes.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md, .mstar/knowledge/specs/novel-writing/narrative-indexes.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
       "iteration": "v1.48",

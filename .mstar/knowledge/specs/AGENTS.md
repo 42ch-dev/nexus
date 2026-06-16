@@ -8,8 +8,9 @@ Parent rules: [`knowledge/AGENTS.md`](../AGENTS.md). Repo root: [`AGENTS.md`](..
 
 ## Layout invariant
 
-- **Flat directory only** — one spec file per kebab-case basename; **no version suffix** in filenames.
-- **No subdirectories** unless an ADR authorizes bulk link migration.
+- **Default: flat** — one spec file per kebab-case basename at `specs/` root; no version suffix in filenames.
+- **`novel-writing/` subtree** — all `work_profile: novel` Feature line specs and Draft overlays (index: [novel-writing/README.md](novel-writing/README.md)). Flat `novel-*.md` at `specs/` root are **redirect stubs** only.
+- **No other subdirectories** unless an ADR authorizes bulk link migration.
 - **Exploration and draft overlays** live here with explicit header status — not under `knowledge/` root or `iterations/`.
 
 ---

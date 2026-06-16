@@ -3,7 +3,7 @@
 **Status**: Normative  
 **Document class**: Master  
 **V1.40 Shipped amendments:** §4.1.2 `kb_key_blocks` validation intent — application-layer validation in `nexus-kb::validation` module (ValidationMode::Novel enforces `body.attributes.novel_category`); `narrative_worlds` rows via `creator world create` (V1.40 P0); `kb_extract_jobs` artifact locator columns (`source_kind`, `source_locator`, `profile_hint`, `work_id`) added V1.40 P3.  
-**V1.42 Draft amendment:** `work_chapters` PK migration — composite primary key `(work_id, volume, chapter)` with `volume INTEGER NOT NULL DEFAULT 1`; backfill existing rows `volume = 1`; drop legacy `(work_id, chapter)` PK. Normative detail: [novel-workflow-profile.md §4.5.4](novel-workflow-profile.md). Plan: [2026-06-11-v1.42-multi-volume.md](../../plans/2026-06-11-v1.42-multi-volume.md).  
+**V1.42 Draft amendment:** `work_chapters` PK migration — composite primary key `(work_id, volume, chapter)` with `volume INTEGER NOT NULL DEFAULT 1`; backfill existing rows `volume = 1`; drop legacy `(work_id, chapter)` PK. Normative detail: [novel-writing/workflow-profile.md §4.5.4](novel-writing/workflow-profile.md). Plan: [2026-06-11-v1.42-multi-volume.md](../../plans/2026-06-11-v1.42-multi-volume.md).  
 **Last updated**: 2026-06-11 — V1.42 prepare overlay  
 
 ## 0. 文档定位
@@ -248,7 +248,7 @@ Column notes:
 
 #### 4.1.4 `works` lifecycle lock columns (V1.41 Draft — DF-60)
 
-Additive columns on existing `works` table. Normative: [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md).
+Additive columns on existing `works` table. Normative: [novel-writing/multi-work-lifecycle.md](novel-writing/multi-work-lifecycle.md).
 
 | Column | Type | Required | Notes |
 | --- | --- | --- | --- |
@@ -260,7 +260,7 @@ Additive columns on existing `works` table. Normative: [novel-multi-work-lifecyc
 
 #### 4.1.5 Novel work pool tables (V1.41 Draft — DF-61)
 
-Creator-scoped; not Work rows. Normative: [novel-work-pool.md](novel-work-pool.md). Validation rules for KB taxonomy: see [nexus-kb::validation](../../../crates/nexus-kb/src/validation.rs) (World KB — separate concern).
+Creator-scoped; not Work rows. Normative: [novel-writing/work-pool.md](novel-writing/work-pool.md). Validation rules for KB taxonomy: see [nexus-kb::validation](../../../crates/nexus-kb/src/validation.rs) (World KB — separate concern).
 
 **`novel_pool_entries`**
 

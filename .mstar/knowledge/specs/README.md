@@ -48,7 +48,7 @@ See [AGENTS.md](AGENTS.md) for create/extend/merge rules.
 
 ## Layout
 
-All spec files live **flat** in this directory (kebab-case, no version suffix). Subdirectories are intentionally unused.
+Spec files live **flat** in this directory except **`novel-writing/`** — the novel `work_profile` subtree (relocated 2026-06-17). See [novel-writing/README.md](novel-writing/README.md) for the domain index. Flat `novel-*.md` paths are redirect stubs only.
 
 ---
 
@@ -99,15 +99,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [work-experience-model.md](work-experience-model.md) | Feature line | Shipped (V1.33) |
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
-| [novel-workflow-profile.md](novel-workflow-profile.md) | Feature line | **Shipped (V1.36 → V1.47)** — §5.5.4 `AGENTS.md`; §5.5.6 reflection→findings; V1.48 amends §5.5.2 consumer + §5.5.4 runtime via overlay; **§5.5.1 superseded by V1.49** [novel-findings-lifecycle.md](novel-findings-lifecycle.md) (extended lifecycle) |
-| [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) | Feature line | **Shipped (V1.41 → V1.42 P0)** — §4.2 runtime_lock production wiring implemented V1.42 P0 |
-| [novel-work-pool.md](novel-work-pool.md) | Feature line | **Shipped (V1.41)** — `set_pool_active` authz |
-| [novel-quality-loop.md](novel-quality-loop.md) | Feature line | **Shipped (V1.47 → V1.48)** — findings chain + §9 maturity; V1.49 P0 amends §2 via overlay |
-| [novel-findings-lifecycle.md](novel-findings-lifecycle.md) | Draft overlay | **Draft (V1.49)** — F6 extended lifecycle (`triaged`/`in_review`/`duplicate`); P-last → `novel-quality-loop.md` §2 |
-| [novel-narrative-indexes.md](novel-narrative-indexes.md) | Draft overlay | **Draft (V1.49)** — F###/E### file-first index runtime; P-last → `novel-workflow-profile.md` §4.6 |
-| [novel-findings-maturity.md](novel-findings-maturity.md) | Reference | **Superseded (V1.48)** — folded into `novel-quality-loop.md` §3; retained for trace history |
-| [novel-manuscript-audit.md](novel-manuscript-audit.md) | Feature line | **Shipped (V1.44)** — DF-69 on-demand chapter audit (review + extract); preset split into `novel-manuscript-audit-review` + `novel-manuscript-audit-extract` per R-V144P0-001 fix wave |
-| [novel-author-experience.md](novel-author-experience.md) | Feature line | **Shipped (V1.46)** — §3 embedded author path; BL-10 quickstart retired P1; V1.47 P3 spec reconcile; **Draft V1.49 §8** author desk UX (intake + reconcile) |
+| **[novel-writing/](novel-writing/README.md)** | Feature subtree | **`work_profile: novel`** — see [novel-writing/README.md](novel-writing/README.md) for per-file index (workflow-profile, quality-loop, author-experience, overlays, …) |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 
@@ -126,8 +118,9 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [novel-writing-sync-contract.md](novel-writing-sync-contract.md) | Companion | Normative (module contract) |
 | [canonical-hash.md](canonical-hash.md) | Companion | Normative (OSS notes; platform ADR-006 authoritative) |
+
+*Novel-writing sync module contract: [novel-writing/sync-contract.md](novel-writing/sync-contract.md).*
 
 ---
 
@@ -152,11 +145,11 @@ When specs disagree, higher row wins:
 | Top-level CLI groups | cli-spec §6.0B | cli-command-ia (Shipped V1.35 supplement) |
 | First-run / local vs platform | cli-spec §7 | creator-centric-entry-model (Shipped V1.35 supplement), compass audit appendix |
 | Work / `creator run` | [creator-run-preset-entry.md](creator-run-preset-entry.md) (V1.45 Draft) | work-experience-model, cli-spec §6.2 |
-| Novel profile / `Works/<work_ref>/` layout | novel-workflow-profile | work-experience-model, novel-writing-sync-contract, cli-spec §13.1 |
-| Creator workflow stages / chain | creator-workflow | work-experience-model, novel-workflow-profile (produce) |
+| Novel profile / `Works/<work_ref>/` layout | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) | work-experience-model, [novel-writing/sync-contract.md](novel-writing/sync-contract.md), cli-spec §13.1 |
+| Creator workflow stages / chain | creator-workflow | work-experience-model, novel-writing/workflow-profile (produce) |
 | Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
 | Schedule / core_context | creator-schedule-and-core-context | orchestration-engine sessions |
-| On-demand chapter audit (DF-69) | novel-manuscript-audit | novel-quality-loop §3, cli-spec §6.2 |
+| On-demand chapter audit (DF-69) | [novel-writing/manuscript-audit.md](novel-writing/manuscript-audit.md) | novel-writing/quality-loop §3, cli-spec §6.2 |
 | Agent `nexus.*` tools | agent-nexus-tool-bridge | acp-capability-set, agent-host |
 | ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
 | KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
@@ -200,6 +193,7 @@ Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and archite
 | `nexus42-single-binary-daemon-runtime-architecture.md` | [daemon-runtime.md](daemon-runtime.md) |
 | `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
 | [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
+| [novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 
