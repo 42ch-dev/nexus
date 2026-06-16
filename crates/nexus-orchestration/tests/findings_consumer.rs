@@ -362,3 +362,97 @@ async fn novel_writing_outline_omits_block_when_no_findings() {
         "AC2: no sentinel header should appear when no findings exist"
     );
 }
+
+// ── W-1 (qc1) regression guard — direct wiring assertion ───────────────────
+//
+// The two integration tests above exercise `enqueue_auto_chain_schedule` but
+// then independently re-derive the findings block via DAO + builder and feed
+// a hand-built `preset_input` into the template renderer. They never assert
+// that the production wiring (`Some(block)` → `WorkFields.open_findings_block`
+// → `build_preset_input` → `AddScheduleRequest.input`) actually forwards the
+// block. A regression that silently dropped the block in
+// `build_auto_chain_schedule` or `build_preset_input` would pass those tests.
+//
+// The test below calls the same pure helper the enqueue path uses
+// (`build_auto_chain_schedule`), passes a known non-empty block, and asserts
+// the returned `AddScheduleRequest.input` JSON carries it through verbatim —
+// plus the `None` → empty-string coercion (AC2) — so any future regression in
+// the `Some → preset.input.open_findings_block` mapping is caught directly.
+
+/// W-1 fix — `Some(block)` is forwarded verbatim through the wiring.
+///
+/// Asserts the full chain
+/// `build_auto_chain_schedule(.., Some(block))` → `WorkFields` →
+/// `build_schedule_for_stage` → `build_preset_input` →
+/// `AddScheduleRequest.input["open_findings_block"]` preserves the block.
+#[test]
+fn novel_writing_persists_open_findings_block_to_preset_input() {
+    let work = novel_work("wrk_fc_w1_some", "fc-w1-novel-some");
+
+    // A known, non-empty block (mirrors what `build_open_findings_block`
+    // emits for a chapter with open findings).
+    let known_block = "## Open findings (chapter 01)\n\n- [blocker] World rule break\n";
+
+    let req = auto_chain::build_auto_chain_schedule(
+        "produce",
+        CREATOR,
+        &work,
+        Some(1),
+        None,
+        Some(known_block.to_string()),
+    )
+    .expect("produce stage should map to the novel-writing preset");
+
+    assert_eq!(
+        req.preset_id, "novel-writing",
+        "produce stage must map to novel-writing"
+    );
+
+    let input = req
+        .input
+        .as_ref()
+        .expect("AddScheduleRequest.input must be set for produce stage");
+
+    // Direct wiring assertion: the block threaded in as `Some(...)` must
+    // appear unchanged in the preset input JSON. Catches regressions where
+    // `build_auto_chain_schedule` drops the param, or `build_preset_input`
+    // removes/empties/replaces the key.
+    assert_eq!(
+        input["open_findings_block"].as_str(),
+        Some(known_block),
+        "Some(block) must be forwarded verbatim through \
+         build_auto_chain_schedule → WorkFields → build_preset_input → input JSON"
+    );
+}
+
+/// W-1 fix (companion / AC2) — `None` coerces to empty string.
+///
+/// When no findings exist, `open_findings_block: None` must coerce to `""`
+/// so the template's `{{#if open_findings_block}}` guard omits the section
+/// (no empty sentinel noise).
+#[test]
+fn novel_writing_preset_input_coerces_none_open_findings_block_to_empty() {
+    let work = novel_work("wrk_fc_w1_none", "fc-w1-novel-none");
+
+    let req = auto_chain::build_auto_chain_schedule(
+        "produce",
+        CREATOR,
+        &work,
+        Some(1),
+        None,
+        None, // no open findings for this chapter
+    )
+    .expect("produce stage should map to the novel-writing preset");
+
+    let input = req
+        .input
+        .as_ref()
+        .expect("AddScheduleRequest.input must be set for produce stage");
+
+    assert_eq!(
+        input["open_findings_block"].as_str(),
+        Some(""),
+        "None must coerce to empty string so the {{#if open_findings_block}} \
+         guard omits the section (AC2: no sentinel noise)"
+    );
+}
