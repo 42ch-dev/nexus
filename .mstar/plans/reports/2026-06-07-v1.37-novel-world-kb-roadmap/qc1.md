@@ -38,8 +38,8 @@ generated_at: "2026-06-08"
 | AC | Result | Evidence |
 | --- | --- | --- |
 | 1. DF-63 has a clear V1.37 disposition | Pass | Plan §4.2 and §7 mark P2 as roadmap-only; deferred tracker §3.3 DF-63 says “V1.37 P2 roadmap-only; implementation deferred to V1.37+”. |
-| 2. Specs do not reintroduce per-Work `Worldbuilding/` directories | Pass | `novel-workflow-profile.md` §3.5 and §3.5.1 explicitly reject per-Work `Worldbuilding/`; §5.4.1 lists it under “Not created”. Diff contains no code/schema migration that creates such a subtree. |
-| 3. World-bound and worldless user paths are both described | Pass | `novel-workflow-profile.md` §3.5 describes `world_id != NULL` vs `world_id == NULL`; §3.5.1.3 omits the World context block for worldless Works; §5.4.2 documents README rendering for both paths. |
+| 2. Specs do not reintroduce per-Work `Worldbuilding/` directories | Pass | `novel-writing/workflow-profile.md` §3.5 and §3.5.1 explicitly reject per-Work `Worldbuilding/`; §5.4.1 lists it under “Not created”. Diff contains no code/schema migration that creates such a subtree. |
+| 3. World-bound and worldless user paths are both described | Pass | `novel-writing/workflow-profile.md` §3.5 describes `world_id != NULL` vs `world_id == NULL`; §3.5.1.3 omits the World context block for worldless Works; §5.4.2 documents README rendering for both paths. |
 | 4. Any implementation scope has testable acceptance for `world_id` validation and prompt context | Pass | P2 is roadmap-only. Future implementation acceptance in §3.5.1.5 requires tests for valid/invalid `world_id`, prompt block presence/absence, `world_refs` timing, and `kb-extract` target selection. |
 | 5. Open pieces remain visible in the deferred tracker | Pass | Deferred tracker §3.3 DF-63 explicitly enumerates deferred work items: `creator world create`, KB taxonomy schema, World KB query, `world_refs` validation, and `kb-extract` binding. Header `Last updated` is bumped to 2026-06-08. |
 
@@ -67,7 +67,7 @@ generated_at: "2026-06-08"
 - Source Type: git-diff | doc-rule | manual-reasoning
 - Source Reference:
   - `.mstar/knowledge/specs/entity-scope-model.md` §5.1.1
-  - `.mstar/knowledge/specs/novel-workflow-profile.md` §3.5, §3.5.1, §5.3.4, §5.4
+  - `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §3.5, §3.5.1, §5.3.4, §5.4
   - `.mstar/knowledge/deferred-features-cross-version-tracker.md` header and §3.3 DF-63
   - `.mstar/plans/2026-06-07-v1.37-novel-world-kb-roadmap.md` §4–§7
   - `.mstar/status.json` plan row for `2026-06-07-v1.37-novel-world-kb-roadmap`

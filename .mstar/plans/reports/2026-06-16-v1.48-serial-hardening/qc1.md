@@ -60,7 +60,7 @@ run in `test_reconcile_update_and_idempotent`: `report2.updated == 0`,
 
 **SSOT fix (positive, spec-aligned):** The pre-V1.48 branch overwrote the DB
 row with file frontmatter status whenever they disagreed — a direct violation
-of `novel-workflow-profile.md` §4.5.3 ("the DB row wins"). The new branch
+of `novel-writing/workflow-profile.md` §4.5.3 ("the DB row wins"). The new branch
 inverts the direction: when `status_conflicts`, the **file** is re-synced to
 the DB status via `sync_frontmatter_status`, and the DB row is left
 untouched on the status axis. Word-count mirroring (file → DB) is preserved

@@ -5,7 +5,7 @@
 - **Working branch (verified)**: `iteration/v1.46`
 - **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus`
 - **Review range / Diff basis**: `merge-base: c9fb1abb (original P0 integrated HEAD before qc-consolidated) → tip: bb0deae9 (current iteration/v1.46 HEAD after fix + qc revalidations)` — equivalent to `git diff c9fb1abb..bb0deae9`. The full code delta is `c9fb1abb..52a7330d` (P0 + fix); the `f54c928d` and `bb0deae9` commits are qc report docs only.
-- **Files reviewed**: `crates/nexus42/src/commands/creator/works/mod.rs` (primary), `.mstar/knowledge/specs/novel-author-experience.md`, `.mstar/plans/2026-06-14-v1.46-author-desk-status-ux.md`, all three qcN.md + qc-consolidated.md, `.mstar/status.json` residual section.
+- **Files reviewed**: `crates/nexus42/src/commands/creator/works/mod.rs` (primary), `.mstar/knowledge/specs/novel-writing/author-experience.md`, `.mstar/plans/2026-06-14-v1.46-author-desk-status-ux.md`, all three qcN.md + qc-consolidated.md, `.mstar/status.json` residual section.
 - **Commits covered**: Original P0 (26a09085–a134a98f + c9fb1abb docs), fix round (36b96205–04bd7aca + 52a7330d merge), qc revalidations (f54c928d, bb0deae9).
 
 ## Acceptance criteria evidence
@@ -69,7 +69,7 @@
 All tests are present in the test binary and pass. No CI failures attributable to scope.
 
 ## Spec / scope discipline
-- `git diff c9fb1abb..52a7330d -- .mstar/knowledge/specs/novel-author-experience.md` (excerpt):
+- `git diff c9fb1abb..52a7330d -- .mstar/knowledge/specs/novel-writing/author-experience.md` (excerpt):
   ```diff
   @@ -144,15 +144,20 @@ For **`work_profile=novel`** only, `creator works status <work_id> --json` **ext
    | --- | --- | --- | --- |
@@ -131,7 +131,7 @@ cargo clippy --all -- -D warnings
 cargo test -p nexus42 --lib -- 'works::tests'
 cargo +nightly fmt --all --check
 
-git diff c9fb1abb..52a7330d -- .mstar/knowledge/specs/novel-author-experience.md
+git diff c9fb1abb..52a7330d -- .mstar/knowledge/specs/novel-writing/author-experience.md
 python3 -c 'import json,sys; d=json.load(sys.stdin); r=d["residual_findings"]["2026-06-14-v1.46-author-desk-status-ux"]; print(len(r)); [print(f"  {x[\"id\"]}: {x[\"severity\"]}") for x in r]' < .mstar/status.json
 ```
 All outputs match the excerpts above.

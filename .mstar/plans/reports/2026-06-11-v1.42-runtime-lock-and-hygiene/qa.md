@@ -151,7 +151,7 @@ $ cargo +nightly fmt --all --check 2>&1 | tail -20
 ### AC3 spec status stamp
 
 ```text
-$ grep -B 1 -A 3 '4.2 Production acquire contract' .mstar/knowledge/specs/novel-multi-work-lifecycle.md
+$ grep -B 1 -A 3 '4.2 Production acquire contract' .mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md
 
 ### 4.2 Production acquire contract (V1.42 P0 — Implemented)
 

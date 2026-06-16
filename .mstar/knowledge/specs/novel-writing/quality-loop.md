@@ -178,7 +178,7 @@ Finding creation MUST NOT fork or cancel the active FL-E auto-chain driver sched
 
 ---
 
-## 9. V1.48 Shipped — Findings maturity (folded from novel-findings-maturity.md overlay)
+## 9. V1.48 Shipped — Findings maturity (folded from archived/knowledge/novel-findings-maturity.md overlay)
 
 V1.48 closes the novel quality loop: durable findings enrich the writing prompt, accepted suggestions mutate the runtime Layer 2, and a retention policy prevents unbounded growth.
 

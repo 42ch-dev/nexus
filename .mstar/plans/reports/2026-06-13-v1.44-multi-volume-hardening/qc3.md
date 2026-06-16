@@ -50,7 +50,7 @@ None.
   - Source: `crates/nexus-local-db/src/work_chapters.rs:769–815`
   - Confidence: Medium
 
-- **S-003 (reliability / single-volume preset-input shape change)**: The supervisor `NextChapter` arm now passes `Some(next_volume)` for every chapter loop, including single-volume Works where `next_volume == 1`. This means single-volume `novel-writing` schedules will now carry `"volume": 1` in `preset.input`. Existing templates that do not reference `volume` are unaffected, but any new or user-installed template that treats `volume` as "multi-volume only" may render unexpected "Volume 1" labels. Document this behavior in `novel-workflow-profile.md` or the preset template guidance so authors know `volume` is always present when the schedule originates from the supervisor auto-chain.
+- **S-003 (reliability / single-volume preset-input shape change)**: The supervisor `NextChapter` arm now passes `Some(next_volume)` for every chapter loop, including single-volume Works where `next_volume == 1`. This means single-volume `novel-writing` schedules will now carry `"volume": 1` in `preset.input`. Existing templates that do not reference `volume` are unaffected, but any new or user-installed template that treats `volume` as "multi-volume only" may render unexpected "Volume 1" labels. Document this behavior in `novel-writing/workflow-profile.md` or the preset template guidance so authors know `volume` is always present when the schedule originates from the supervisor auto-chain.
   - Source: `crates/nexus-orchestration/src/schedule/supervisor.rs:491–518`, `crates/nexus-orchestration/src/stage_gates.rs:215–221`
   - Confidence: Medium
 

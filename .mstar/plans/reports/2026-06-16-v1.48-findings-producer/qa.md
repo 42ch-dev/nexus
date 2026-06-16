@@ -47,7 +47,7 @@ running 1 test
 test parsed_report_persists_findings_with_parsed_fields ... ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 9 filtered out; finished in 0.04s
 ```
-**Evidence**: The test asserts parsed `kind`, `severity`, `body`, and optional `rule_suggestion` round-trip from a synthetic valid `review-report.md` into the findings table (via `persist_parsed_findings` + DAO). Matches `novel-findings-maturity.md` §1.2 mapping table exactly. (QC1/QC2/QC3 revalidation also cite this test passing.)
+**Evidence**: The test asserts parsed `kind`, `severity`, `body`, and optional `rule_suggestion` round-trip from a synthetic valid `review-report.md` into the findings table (via `persist_parsed_findings` + DAO). Matches `archived/knowledge/novel-findings-maturity.md` §1.2 mapping table exactly. (QC1/QC2/QC3 revalidation also cite this test passing.)
 
 **Verdict for AC1**: **PASS**
 
@@ -72,7 +72,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 9 filtered out; finished in 0.04
   ```
   Result: PASSED (`large_report_falls_back_to_placeholder ... ok`)
 
-**Evidence**: All three fallback paths (Missing, empty Issues, TooLarge > 256 KiB) correctly degrade to the V1.47 placeholder synthesis (≥1 finding with `kind=craft`, `severity=info`, bare `schedule_id`), emit `tracing::warn!` with `work_id`/`chapter`/`schedule_id`/error context (including the P0-fix1 `chapter` field addition), and preserve the "≥1 finding per review pass" contract. Hermetic (fresh temp DB + temp workspace root per test). Matches `novel-findings-maturity.md` §1.3 exactly. (P0-fix1 W-1/W-3 fixes + re-review by qc3 confirm the chapter-in-warn and bounded-read behaviors.)
+**Evidence**: All three fallback paths (Missing, empty Issues, TooLarge > 256 KiB) correctly degrade to the V1.47 placeholder synthesis (≥1 finding with `kind=craft`, `severity=info`, bare `schedule_id`), emit `tracing::warn!` with `work_id`/`chapter`/`schedule_id`/error context (including the P0-fix1 `chapter` field addition), and preserve the "≥1 finding per review pass" contract. Hermetic (fresh temp DB + temp workspace root per test). Matches `archived/knowledge/novel-findings-maturity.md` §1.3 exactly. (P0-fix1 W-1/W-3 fixes + re-review by qc3 confirm the chapter-in-warn and bounded-read behaviors.)
 
 **Verdict for AC2**: **PASS** (all sub-cases)
 
@@ -166,7 +166,7 @@ All P0 hermetic tests (parsed fields, fallbacks, large-report cap, transaction b
 
 **Rationale**:
 - All five Acceptance Criteria (AC1–AC5) are satisfied with explicit, reproducible command output and evidence cited inline.
-- P0 + P0-fix1 changes (review-report parser, fallback ladder with tracing, SSOT constant, RVM hotfix, bounded read, batched tx, chapter-in-warn) are correctly implemented, hermetically tested, and match the plan §4 ACs + `novel-findings-maturity.md` §1 and `novel-quality-loop.md` §8 contracts.
+- P0 + P0-fix1 changes (review-report parser, fallback ladder with tracing, SSOT constant, RVM hotfix, bounded read, batched tx, chapter-in-warn) are correctly implemented, hermetically tested, and match the plan §4 ACs + `archived/knowledge/novel-findings-maturity.md` §1 and `novel-writing/quality-loop.md` §8 contracts.
 - QC tri-review (qc1/qc2 Approve; qc3 Request Changes → P0-fix1 targeted re-review Approve) is complete; all qc3-blocking Warnings (W-1/W-2/W-3) were addressed and re-validated.
 - Workspace-wide lint and nightly fmt are clean.
 - Full-suite failures are pre-existing and outside the changed crates/paths (creator-memory FS races and a CDN-dependent CLI test). P0-scoped tests (orchestration review_report + daemon findings paths) pass reliably.

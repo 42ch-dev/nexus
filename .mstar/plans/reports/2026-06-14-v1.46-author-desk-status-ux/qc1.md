@@ -21,7 +21,7 @@ generated_at: "2026-06-14"
 - Review range / Diff basis: `merge-base: de30a702 → tip: c9fb1abb (5 commits on iteration/v1.46; equivalent to git diff de30a702..c9fb1abb or git show --stat de30a702..c9fb1abb)`
 - Working branch (verified): `iteration/v1.46`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
-- Files reviewed: 3 (`crates/nexus42/src/commands/creator/works/mod.rs`, `.mstar/knowledge/specs/novel-author-experience.md`, `.mstar/plans/2026-06-14-v1.46-author-desk-status-ux.md`)
+- Files reviewed: 3 (`crates/nexus42/src/commands/creator/works/mod.rs`, `.mstar/knowledge/specs/novel-writing/author-experience.md`, `.mstar/plans/2026-06-14-v1.46-author-desk-status-ux.md`)
 - Commit range: `de30a702..c9fb1abb` (T1 `26a09085`, T2 `b26b4415`, T3 `6411e925`, T4 `35f5d085`, merge `a134a98f`, docs `c9fb1abb`)
 - Tools run: `cargo clippy -p nexus42 -- -D warnings` (clean), `cargo test -p nexus42 --lib -- 'works::tests'` (40 passed, 0 failed)
 
@@ -35,7 +35,7 @@ None.
 
 #### W-1: Spec §4.1 table marks `findings` "Required: yes" but code omits it on daemon unavailability
 
-**Triggering condition**: The spec §4.1 contract table (`novel-author-experience.md` line 146) declares:
+**Triggering condition**: The spec §4.1 contract table (`novel-writing/author-experience.md` line 146) declares:
 
 ```
 | `findings` | array | yes | Same element shape as findings list API; empty array if none |
@@ -119,12 +119,12 @@ This mirrors the existing human-path pattern (line 398 also uses `client` direct
 
 - **Finding ID: W-1**
   - Source Type: manual-reasoning + spec-code cross-check
-  - Source Reference: `.mstar/knowledge/specs/novel-author-experience.md` lines 146 vs 151–155; `crates/nexus42/src/commands/creator/works/mod.rs` lines 1141–1146, 380–383; test `enrich_novel_unavailable_findings_omits_key` line 1678–1686
+  - Source Reference: `.mstar/knowledge/specs/novel-writing/author-experience.md` lines 146 vs 151–155; `crates/nexus42/src/commands/creator/works/mod.rs` lines 1141–1146, 380–383; test `enrich_novel_unavailable_findings_omits_key` line 1678–1686
   - Confidence: High
 
 - **Finding ID: W-2**
   - Source Type: manual-reasoning + cross-crate scope verification
-  - Source Reference: `crates/nexus42/src/commands/creator/works/mod.rs` lines 385–388, 1147–1155; `crates/nexus-daemon-runtime/src/api/handlers/findings.rs` lines 349–362 (`read_active_creator_id` → creator-scoped); `.mstar/knowledge/specs/novel-author-experience.md` line 147
+  - Source Reference: `crates/nexus42/src/commands/creator/works/mod.rs` lines 385–388, 1147–1155; `crates/nexus-daemon-runtime/src/api/handlers/findings.rs` lines 349–362 (`read_active_creator_id` → creator-scoped); `.mstar/knowledge/specs/novel-writing/author-experience.md` line 147
   - Confidence: High
 
 - **Finding ID: S-1**
@@ -169,7 +169,7 @@ The three Suggestions (dead code, test-helper duplication, timeout asymmetry) ar
 
 | Initial ID | Initial severity | PM disposition | Status after fix round | Evidence |
 |---|---|---|---|---|
-| **W-1** (spec §4.1 "Required: yes" vs omission-on-unreachable) | 🟡 Warning | Deferred to P1 | **Still open — deferred to P1** (not touched in this round) | Spec §4.1 `findings` row still reads `Required: yes`; the F-003 row addition + best-effort paragraph update (FINDINGS_FETCH_TIMEOUT / STALE_FETCH_TIMEOUT / tokio::join! notes) did not widen into W-1 territory. Verified via `git diff 399cd296..52a7330d -- .mstar/knowledge/specs/novel-author-experience.md`. |
+| **W-1** (spec §4.1 "Required: yes" vs omission-on-unreachable) | 🟡 Warning | Deferred to P1 | **Still open — deferred to P1** (not touched in this round) | Spec §4.1 `findings` row still reads `Required: yes`; the F-003 row addition + best-effort paragraph update (FINDINGS_FETCH_TIMEOUT / STALE_FETCH_TIMEOUT / tokio::join! notes) did not widen into W-1 territory. Verified via `git diff 399cd296..52a7330d -- .mstar/knowledge/specs/novel-writing/author-experience.md`. |
 | **W-2** (`findings_stale` creator-global scope embedded in work-scoped JSON) | 🟡 Warning | Deferred to P1 | **Still open — deferred to P1** (not touched) | Spec §4.1 `findings_stale` row unchanged (still "Present when 96h master-review stale banner would show (human parity)"; no scope clarification). The new `fetch_stale_findings` helper preserves the existing creator-global fetch behavior (calls `/v1/local/findings/stale` unchanged) — no scope regression, but also no scope fix. P1 spec sweep owns this. |
 | **S-1** (dead `let _ = work_id;` at end of `print_findings_summary`) | 🟢 Suggestion | Fixed in this round | **Resolved in this round** | Commit `e07d4538` removed the dead statement + its 2-line comment. Confirmed at `works/mod.rs` — `print_findings_summary` now ends cleanly after the findings for-loop (line 1370). `work_id` parameter still legitimately used in the empty-findings early-return branch; no unused-warning regression (clippy clean). |
 

@@ -129,7 +129,7 @@ Minimum preset surface:
 
 At V1.44 P-last hygiene:
 
-- [ ] Promote Status to **Shipped (V1.44)** or merge into `novel-quality-loop.md` §3 if section stabilizes.
+- [ ] Promote Status to **Shipped (V1.44)** or merge into `novel-writing/quality-loop.md` §3 if section stabilizes.
 - [ ] Update deferred tracker DF-69 → shipped archive.
 
 ---

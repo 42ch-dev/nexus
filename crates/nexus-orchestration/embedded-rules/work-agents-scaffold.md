@@ -1,7 +1,7 @@
 # AGENTS.md — {{work_ref}}
 
 > Per-work style and craft constraints for coding agents and orchestration
-> presets (Layer 2 per `novel-workflow-profile.md` §5.5.4). Edit freely.
+> presets (Layer 2 per `novel-writing/workflow-profile.md` §5.5.4). Edit freely.
 >
 > This file is the runtime source-of-truth for how this Work should be
 > written: POV, tense, chapter size, style preferences, banned motifs,

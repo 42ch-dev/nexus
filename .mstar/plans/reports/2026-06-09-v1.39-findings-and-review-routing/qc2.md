@@ -32,7 +32,7 @@ generated_at: "2026-06-09"
   - `cargo test -p nexus-orchestration --lib -- research`
   - `cargo test -p nexus-local-db --lib -- work_chapters`
   - `cargo +nightly fmt --all -- --check`
-  - Context reads: plan, iteration compass v1.39, novel-quality-loop.md, novel-workflow-profile.md §5.5, key source (DAO, handlers, migration, CLI status, acp_worker)
+  - Context reads: plan, iteration compass v1.39, novel-writing/quality-loop.md, novel-writing/workflow-profile.md §5.5, key source (DAO, handlers, migration, CLI status, acp_worker)
 
 ## Findings
 

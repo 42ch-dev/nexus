@@ -44,8 +44,8 @@ crates/nexus42/tests/command_surface_contract.rs
 
 ## 3. Spec preflight summary
 
-- **Primary spec**: `novel-multi-work-lifecycle.md` — normative for completion ceremony, lock semantics, reopen flow
-- **Supporting specs**: `novel-work-pool.md` (pool schema), `cli-spec.md §6.2H` (creator works IA), `work-experience-model.md` (default work_id resolution)
+- **Primary spec**: `novel-writing/multi-work-lifecycle.md` — normative for completion ceremony, lock semantics, reopen flow
+- **Supporting specs**: `novel-writing/work-pool.md` (pool schema), `cli-spec.md §6.2H` (creator works IA), `work-experience-model.md` (default work_id resolution)
 - **Tightening**: Spec says `novel_completion_status = completed` but migration CHECK allows `finalize_complete`/`reopened`. Used `finalize_complete` per migration (matches auto-chain engine).
 - **Conflicts**: None detected.
 

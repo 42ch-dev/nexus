@@ -34,15 +34,15 @@ generated_at: "2026-06-13"
 
 #### W-1: `cli-command-ia.md` not updated despite plan T5 listing it — ✅ RESOLVED
 
-**Original**: Plan T5 explicitly lists `cli-command-ia.md` as a target for spec amendments alongside `cli-spec.md`, `novel-workflow-profile.md`, and `novel-quality-loop.md`. However, `cli-command-ia.md` had zero changes in the original diff range — it did not mention `review-master` or `audit-chapter` at all.
+**Original**: Plan T5 explicitly lists `cli-command-ia.md` as a target for spec amendments alongside `cli-spec.md`, `novel-writing/workflow-profile.md`, and `novel-writing/quality-loop.md`. However, `cli-command-ia.md` had zero changes in the original diff range — it did not mention `review-master` or `audit-chapter` at all.
 
-**Resolution** (commit `9e953abd`): Added a `creator run` subcommands table to `cli-command-ia.md` §3.1 documenting both `review-master` and `audit-chapter` with role, shipped version, and cross-references to `novel-quality-loop.md` and `novel-manuscript-audit.md`.
+**Resolution** (commit `9e953abd`): Added a `creator run` subcommands table to `cli-command-ia.md` §3.1 documenting both `review-master` and `audit-chapter` with role, shipped version, and cross-references to `novel-writing/quality-loop.md` and `novel-writing/manuscript-audit.md`.
 
-#### W-2: `novel-author-experience.md` not updated despite being a plan primary spec — ✅ RESOLVED
+#### W-2: `novel-writing/author-experience.md` not updated despite being a plan primary spec — ✅ RESOLVED
 
-**Original**: The plan listed `novel-author-experience.md` as a primary spec, but the file had zero changes and did not mention `review-master`.
+**Original**: The plan listed `novel-writing/author-experience.md` as a primary spec, but the file had zero changes and did not mention `review-master`.
 
-**Resolution** (commit `9e953abd`): Added a "How do I run master-decision review?" row to the author questions table in `novel-author-experience.md` §4, with cross-reference to `novel-quality-loop.md` §3.4.
+**Resolution** (commit `9e953abd`): Added a "How do I run master-decision review?" row to the author questions table in `novel-writing/author-experience.md` §4, with cross-reference to `novel-writing/quality-loop.md` §3.4.
 
 #### W-3: Duplicate Work fetch when both `--finding-id` and `--auto-schedule` are used — ✅ RESOLVED
 
@@ -81,7 +81,7 @@ generated_at: "2026-06-13"
 | Finding ID | Source Type | Source Reference | Confidence |
 |------------|-------------|------------------|------------|
 | W-1 | git-diff (re-review) | `git diff c54b1aa6..a9262c33 -- .mstar/knowledge/specs/cli-command-ia.md` — 9 lines added | High |
-| W-2 | git-diff (re-review) | `git diff c54b1aa6..a9262c33 -- .mstar/knowledge/specs/novel-author-experience.md` — 1 line added | High |
+| W-2 | git-diff (re-review) | `git diff c54b1aa6..a9262c33 -- .mstar/knowledge/specs/novel-writing/author-experience.md` — 1 line added | High |
 | W-3 | git-diff (re-review) | `git diff c54b1aa6..a9262c33 -- crates/nexus42/src/commands/creator/run.rs` — `fetch_work_context` helper extracted | High |
 | W-4 | git-diff (re-review) | `git diff c54b1aa6..a9262c33 -- crates/nexus42/src/commands/creator/run.rs` — work-scoped stale filter | High |
 
@@ -101,7 +101,7 @@ generated_at: "2026-06-13"
 
 - **Fix-wave range**: `c54b1aa6..a9262c33` (2 fix commits + 1 fix-merge)
 - **Fix commits**:
-  - `9e953abd` — R-V144P1-001/002: spec updates for `cli-command-ia.md` and `novel-author-experience.md`
+  - `9e953abd` — R-V144P1-001/002: spec updates for `cli-command-ia.md` and `novel-writing/author-experience.md`
   - `a5a9bd7e` — R-V144P1-003/004/005/006: code fixes for stale scoping, target_executor check, shared helper, limit raise
 - **Re-review date**: 2026-06-13
 
@@ -110,7 +110,7 @@ generated_at: "2026-06-13"
 | Finding | Fix Commit | Resolution | Status |
 |---------|-----------|------------|--------|
 | W-1 (cli-command-ia.md) | `9e953abd` | Added `creator run` subcommands table to §3.1 | ✅ RESOLVED |
-| W-2 (novel-author-experience.md) | `9e953abd` | Added "How do I run master-decision review?" row to §4 | ✅ RESOLVED |
+| W-2 (novel-writing/author-experience.md) | `9e953abd` | Added "How do I run master-decision review?" row to §4 | ✅ RESOLVED |
 | W-3 (Duplicate Work fetch) | `a5a9bd7e` | Extracted `fetch_work_context` shared helper | ✅ RESOLVED |
 | W-4 (Global stale count) | `a5a9bd7e` | Client-side filter to work-scoped stale count | ✅ RESOLVED |
 
@@ -130,7 +130,7 @@ The fix commit `a5a9bd7e` also includes:
 
 ### Architecture Coherence Assessment (updated)
 
-The fix wave cleanly addresses all four Warnings without introducing new coupling or complexity. The `fetch_work_context` helper is well-scoped (single responsibility, clear return type). The work-scoped stale filter is implemented as a client-side filter on the existing `/stale` endpoint — a pragmatic choice that avoids a new daemon endpoint while correctly scoping the behavior. The spec updates in `cli-command-ia.md` and `novel-author-experience.md` are minimal and well-placed — the IA table uses the same format as existing tables, and the author-experience row follows the established question-answer pattern.
+The fix wave cleanly addresses all four Warnings without introducing new coupling or complexity. The `fetch_work_context` helper is well-scoped (single responsibility, clear return type). The work-scoped stale filter is implemented as a client-side filter on the existing `/stale` endpoint — a pragmatic choice that avoids a new daemon endpoint while correctly scoping the behavior. The spec updates in `cli-command-ia.md` and `novel-writing/author-experience.md` are minimal and well-placed — the IA table uses the same format as existing tables, and the author-experience row follows the established question-answer pattern.
 
 ### Maintainability Risk (updated)
 

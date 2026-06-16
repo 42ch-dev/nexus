@@ -114,7 +114,7 @@ pub async fn find_work_for_driver(
 ///    each row is persisted via [`findings::create_finding_from_review_tx`]
 ///    inside a single transaction with the parsed `kind` / `severity` /
 ///    `body` / optional `rule_suggestion`
-///    (per `.mstar/knowledge/specs/novel-findings-maturity.md` §1.2).
+///    (per `.mstar/archived/knowledge/novel-findings-maturity.md` §1.2).
 /// 5. **Fallback** (V1.47 placeholder shape): when the report is missing,
 ///    unparsable, or yields zero findings — OR when `workspace_dir` is
 ///    `None` (e.g. hermetic DB-only tests) — synthesizes ≥1 finding with
@@ -209,7 +209,7 @@ pub async fn persist_review_findings_for_schedule(
 
     // V1.48 P0 T2: parse `Works/<work_ref>/Logs/review/review-report.md`
     // when a workspace_dir is available. Spec
-    // (`.mstar/knowledge/specs/novel-findings-maturity.md` §1.2) — parsed
+    // (`.mstar/archived/knowledge/novel-findings-maturity.md` §1.2) — parsed
     // findings persist with their `kind` / `severity` / `body` / optional
     // `rule_suggestion`. Any failure (missing file, read error, parse error,
     // zero parsed findings) falls through to the V1.47 placeholder synthesis
@@ -436,7 +436,7 @@ async fn try_persist_parsed_findings(
 /// Failures that can occur while loading + parsing `review-report.md`.
 ///
 /// Used by [`persist_review_findings_for_schedule`] to emit the right
-/// `tracing::warn!` shape per `.mstar/knowledge/specs/novel-findings-maturity.md`
+/// `tracing::warn!` shape per `.mstar/archived/knowledge/novel-findings-maturity.md`
 /// §1.3 (each branch is a documented fallback trigger).
 #[derive(Debug)]
 enum ReportLoadError {

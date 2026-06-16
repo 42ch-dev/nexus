@@ -31,7 +31,7 @@ generated_at: 2026-06-12T20:15:00+08:00
 
 ### 🟡 Warning
 - **W-001**: `creator works pool` (line 220) is a bare subcommand with no sub-action. The CLI spec (cli-spec.md §6.2H line 452) defines `nexus42 creator works pool list` as the list subcommand — bare `pool` is not a valid command. Copy-paste will fail or show help text. → Fix: change to `nexus42 creator works pool list`.
-- **W-002**: Spec overlay divergence — `novel-author-experience.md` §2 row for Part I §4 says `creator run status`, but the doc correctly uses `creator works status` (per V1.41 migration, cli-spec.md line 370). The doc is correct; the spec overlay is stale. → Fix: amend spec overlay at P-last hygiene (per writing-specialist Completion Report §7). No doc change needed; this is a spec-maintenance residual.
+- **W-002**: Spec overlay divergence — `novel-writing/author-experience.md` §2 row for Part I §4 says `creator run status`, but the doc correctly uses `creator works status` (per V1.41 migration, cli-spec.md line 370). The doc is correct; the spec overlay is stale. → Fix: amend spec overlay at P-last hygiene (per writing-specialist Completion Report §7). No doc change needed; this is a spec-maintenance residual.
 
 ### 🟢 Suggestion
 - **S-001**: ACP prerequisite (line 10) states "ACP setup is outside this quickstart's scope" but provides no pointer to where ACP setup documentation lives. A brief "See [ACP setup guide](...)" or equivalent would reduce user friction at the only blocking prerequisite.
@@ -46,7 +46,7 @@ generated_at: 2026-06-12T20:15:00+08:00
 
 - Finding ID: W-002
 - Source Type: spec-cross-reference
-- Source Reference: .mstar/knowledge/specs/novel-author-experience.md §2 row 4 vs docs/novel-writing-quickstart.md §4
+- Source Reference: .mstar/knowledge/specs/novel-writing/author-experience.md §2 row 4 vs docs/novel-writing-quickstart.md §4
 - Confidence: High
 
 - Finding ID: S-001
@@ -120,7 +120,7 @@ generated_at: 2026-06-12T20:15:00+08:00
 - No new runtime features implied in Part II ✅
 
 ### Further Reading table
-- Links to stable normative sources (ARCHITECTURE.md, cli-spec.md, cli-command-ia.md, creator-centric-entry-model.md, novel-workflow-profile.md, CONTRIBUTING.md) ✅
+- Links to stable normative sources (ARCHITECTURE.md, cli-spec.md, cli-command-ia.md, creator-centric-entry-model.md, novel-writing/workflow-profile.md, CONTRIBUTING.md) ✅
 - All 6 links resolve from `docs/` ✅
 - Uses `../` relative paths to harness specs — see S-002 ⚠️
 
@@ -157,4 +157,4 @@ generated_at: 2026-06-12T20:15:00+08:00
 
 **Verdict**: **Approve**
 
-**Rationale**: Both previously raised blocking Warnings are resolved for the doc. W-001 (bare `creator works pool`) is fixed — line 220 now reads `nexus42 creator works pool list`, matching cli-spec.md §6.2H line 452, and the bare form is absent. W-002 (spec overlay divergence) is a spec-maintenance residual — the doc itself is correct and unchanged; the `creator run status` in `novel-author-experience.md` §2 row 4 is a P-last hygiene task tracked by the P-last plan `2026-06-12-v1.43-hygiene-and-residuals`. The R-V143P0-001 residual ID is not yet registered in `status.json` — PM should register it before closing the P-last plan. No new Critical or Warning findings in the fix wave. Static checks all pass.
+**Rationale**: Both previously raised blocking Warnings are resolved for the doc. W-001 (bare `creator works pool`) is fixed — line 220 now reads `nexus42 creator works pool list`, matching cli-spec.md §6.2H line 452, and the bare form is absent. W-002 (spec overlay divergence) is a spec-maintenance residual — the doc itself is correct and unchanged; the `creator run status` in `novel-writing/author-experience.md` §2 row 4 is a P-last hygiene task tracked by the P-last plan `2026-06-12-v1.43-hygiene-and-residuals`. The R-V143P0-001 residual ID is not yet registered in `status.json` — PM should register it before closing the P-last plan. No new Critical or Warning findings in the fix wave. Static checks all pass.

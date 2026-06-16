@@ -52,10 +52,10 @@ None.
 
 ```text
 Complete intake via `creator bootstrap --preset creative-brief-intake`.
-See .mstar/knowledge/specs/novel-author-experience.md §3
+See .mstar/knowledge/specs/novel-writing/author-experience.md §3
 ```
 
-The same phrasing appears in the spec example at `.mstar/knowledge/specs/novel-workflow-profile.md` §5.3.5.
+The same phrasing appears in the spec example at `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §5.3.5.
 
 **Impact**: `creator bootstrap` creates a **new** Work; `--preset` overrides the *production* preset, not the intake preset (which is always `creative-brief-intake`). For an existing Work whose `intake_status` is `pending`, running this command will not complete intake on that Work — it will spin up a second Work with `creative-brief-intake` as its production preset. The remediation therefore fails its stated purpose of telling the user how to recover from the gate failure in-place.
 
@@ -99,7 +99,7 @@ This locks both the destination spec *and* the actionable next step.
 
 - **Finding ID: S-1**
   - Source Type: manual-reasoning + spec-runtime cross-check
-  - Source Reference: `crates/nexus-orchestration/src/preset_gates.rs` lines 355–360; `.mstar/knowledge/specs/novel-workflow-profile.md` lines 531–536; `cargo run -p nexus42 -- creator bootstrap --help`
+  - Source Reference: `crates/nexus-orchestration/src/preset_gates.rs` lines 355–360; `.mstar/knowledge/specs/novel-writing/workflow-profile.md` lines 531–536; `cargo run -p nexus42 -- creator bootstrap --help`
   - Confidence: Medium
 
 - **Finding ID: S-2**

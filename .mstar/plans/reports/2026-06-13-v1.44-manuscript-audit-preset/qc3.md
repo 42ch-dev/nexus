@@ -36,7 +36,7 @@ generated_at: "2026-06-13"
 
 #### F-001: Extract mode is unreachable in the preset state machine
 - **Issue**: `crates/nexus-orchestration/embedded-presets/novel-manuscript-audit/preset.yaml` declares `load_chapter.next: review_report` unconditionally. The `extract_sync` state exists but is never entered, so `mode=extract` schedules follow the review path (`load_chapter → review_report → done`) instead of invoking `kb.extract_work`.
-- **Impact**: The extract-mode feature required by [novel-manuscript-audit.md](../../../../knowledge/specs/novel-manuscript-audit.md) §3.2 is completely non-functional. Users can request `--mode extract`, the CLI accepts it, but the daemon will run a review prompt instead.
+- **Impact**: The extract-mode feature required by [novel-writing/manuscript-audit.md](../../../../knowledge/specs/novel-writing/manuscript-audit.md) §3.2 is completely non-functional. Users can request `--mode extract`, the CLI accepts it, but the daemon will run a review prompt instead.
 - **Evidence**:
   - `preset.yaml` lines 60–76: `load_chapter.next: review_report` with no conditional branch.
   - `crates/nexus-orchestration/src/preset/loader.rs` rejects `NextTarget::Conditional` in V1.4 (`conditional next is not yet supported`), confirming there is no hidden branching mechanism.
@@ -62,7 +62,7 @@ generated_at: "2026-06-13"
 - **Issue**: The helper matches only on `chapter` and discards the `_volume` parameter.
 - **Impact**: For multi-volume Works where the same chapter number exists in multiple volumes, the helper may return the wrong `body_path` or fail to resolve the intended chapter. This directly conflicts with the spec's multi-volume support and the compass R-V142P1 hardening theme.
 - **Evidence**: `run.rs:884-901` matches `c.get("chapter")` only.
-- **Fix**: Match the tuple `(chapter, volume)` against the chapters array, or document that chapter numbers are globally unique (which contradicts `novel-workflow-profile.md`).
+- **Fix**: Match the tuple `(chapter, volume)` against the chapters array, or document that chapter numbers are globally unique (which contradicts `novel-writing/workflow-profile.md`).
 - **Source Trace**: `run.rs:884-901`, unit tests `resolve_audit_body_path_*`.
 
 #### F-004: Missing `body_path` causes strict template-render failure at runtime

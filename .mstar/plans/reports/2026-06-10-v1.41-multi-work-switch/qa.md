@@ -47,7 +47,7 @@ $ git rev-parse --verify 556897061f625c53cd172e2bdb40d509dac61775
 - `completion-report.md`: initial implementation + fix-wave closeout.
 - Plan §4 acceptance criteria and §5 T1–T9.
 - Iteration compass §1.1 rows 2–6.
-- Primary spec `novel-multi-work-lifecycle.md`, especially §3.2 DB SSOT amendment.
+- Primary spec `novel-writing/multi-work-lifecycle.md`, especially §3.2 DB SSOT amendment.
 
 ## Acceptance criteria verification
 
@@ -139,12 +139,12 @@ decision_ok True []
 
 ## Spec amendment verification
 
-- File: `.mstar/knowledge/specs/novel-multi-work-lifecycle.md` §3.2
+- File: `.mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md` §3.2
 - DB SSOT declaration present: yes
 - File as derived artifact declared: yes
 
 ```text
-$ grep -n "completion_locked_at\|authoritative\|derived artifact" .mstar/knowledge/specs/novel-multi-work-lifecycle.md
+$ grep -n "completion_locked_at\|authoritative\|derived artifact" .mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md
 80:1. Removes file + clears `works.completion_locked_at`.
 86:DB column `works.completion_locked_at` is the authoritative lock state. The `.completion-lock.json` file is a derived artifact for cross-tool observation. The supervisor gates ticks on the DB column. If the file exists but the DB column is NULL, the supervisor treats the work as unlocked. If the file is missing but the DB column is set, the supervisor treats the work as locked.
 ```

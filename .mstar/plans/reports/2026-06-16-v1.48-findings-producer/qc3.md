@@ -59,7 +59,7 @@ None.
 - **Confidence**: High.
 
 #### W-3: Fallback `tracing::warn!` spans omit required `chapter` field
-- **Issue**: The spec (`novel-findings-maturity.md` §1.3) requires fallback `tracing::warn!` calls to include `work_id`, `chapter`, `schedule_id`, and the parse error summary. The current fallback branches in `try_persist_parsed_findings` log `schedule_id`, `work_id`, `work_ref`, and the error, but `chapter` is never attached to the span. This weakens operator debugging for chapter-scoped review passes.
+- **Issue**: The spec (`archived/knowledge/novel-findings-maturity.md` §1.3) requires fallback `tracing::warn!` calls to include `work_id`, `chapter`, `schedule_id`, and the parse error summary. The current fallback branches in `try_persist_parsed_findings` log `schedule_id`, `work_id`, `work_ref`, and the error, but `chapter` is never attached to the span. This weakens operator debugging for chapter-scoped review passes.
 - **Fix**: Pass `chapter` into `try_persist_parsed_findings` and include it in every fallback `tracing::warn!` macro invocation.
 - **Source**: `crates/nexus-orchestration/src/auto_chain.rs:367-406` (`try_persist_parsed_findings` fallback branches).
 - **Confidence**: High.
@@ -133,7 +133,7 @@ The implementation correctly delivers the P0 functional contract (parsed finding
 - **Change made**: Added `chapter = ?chapter` to all four pre-existing fallback `tracing::warn!` arms in `try_persist_parsed_findings` (empty-parsed, Missing, Read, Parse); the W-1 TooLarge arm already included `chapter`.
 - **Test**: `fallback_warn_includes_chapter_field` in `crates/nexus-orchestration/tests/review_report.rs`.
 - **Evidence**: `cargo test -p nexus-orchestration --test review_report fallback_warn` — passed (2/2 runs, no flakes).
-- **Verdict**: Fixed. Every fallback warn span now carries the `chapter` field per `novel-findings-maturity.md` §1.3.
+- **Verdict**: Fixed. Every fallback warn span now carries the `chapter` field per `archived/knowledge/novel-findings-maturity.md` §1.3.
 
 ### Validation Runbook (re-review)
 

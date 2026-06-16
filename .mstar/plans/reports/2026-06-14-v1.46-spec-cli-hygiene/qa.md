@@ -55,7 +55,7 @@
    $ rg 'novel-writing-quickstart|quickstart' docs/ARCHITECTURE.md 2>&1 || echo "AC4: zero hits (as expected)"
    AC4: zero hits (as expected)
    ```
-   - ARCHITECTURE.md § now correctly points to `.mstar/knowledge/specs/novel-author-experience.md` and `creator-run-preset-entry.md`.
+   - ARCHITECTURE.md § now correctly points to `.mstar/knowledge/specs/novel-writing/author-experience.md` and `creator-run-preset-entry.md`.
    **PASS**.
 
 5. **AC 5** (`cli-spec.md` has no normative §6.2E stage subcommand section):
@@ -86,9 +86,9 @@
   - AC2 still passes **organically** (filter exclusion not required).
   **PASS** (surgical, 1 line).
 
-### P0-deferred folded into T3 (W-1 + W-2 in `novel-author-experience.md` §4.1)
+### P0-deferred folded into T3 (W-1 + W-2 in `novel-writing/author-experience.md` §4.1)
 ```bash
-$ git diff 1f92016f..36226453 -- .mstar/knowledge/specs/novel-author-experience.md | cat
+$ git diff 1f92016f..36226453 -- .mstar/knowledge/specs/novel-writing/author-experience.md | cat
 @@ -143,9 +143,9 @@ For **`work_profile=novel`** only...
  | Field | Type | Required | Notes |
  | --- | --- | --- |
@@ -137,7 +137,7 @@ $ git diff 1f92016f..36226453 -- .mstar/knowledge/specs/novel-author-experience.
   - **P1-mandated test** (`completion_guard_message_cites_spec_paths`, formerly at schedules.rs:1583-1591, the spec-path message copy test):
     ```bash
     $ cargo test -p nexus-daemon-runtime completion_guard_message_cites_spec_paths -- --nocapture 2>&1 | tail -20
-    ... (test binary runs; the string assertion for "novel-author-experience.md" + "creator-run-preset-entry.md" passes in context)
+    ... (test binary runs; the string assertion for "novel-writing/author-experience.md" + "creator-run-preset-entry.md" passes in context)
     ```
     **PASS** (verified via source diff of the renamed test + assertion on spec paths; the exact multi-line error message now cites specs, not quickstart).
   - The 1 failure (`repeated_sweeps_remain_stable` in `master_decision_timeout.rs:270`) is **pre-existing and out of scope**:
@@ -149,7 +149,7 @@ $ git diff 1f92016f..36226453 -- .mstar/knowledge/specs/novel-author-experience.
 
 - **Specific P1 test evidence** (the one Assignment explicitly requires to pass):
   - Renamed from `completion_guard_message_cites_quickstart_section_6` → `completion_guard_message_cites_spec_paths`.
-  - Asserts the exact remediation strings now contain `.mstar/knowledge/specs/novel-author-experience.md` and `creator-run-preset-entry.md` (no quickstart).
+  - Asserts the exact remediation strings now contain `.mstar/knowledge/specs/novel-writing/author-experience.md` and `creator-run-preset-entry.md` (no quickstart).
   - **PASS**.
 
 ## Findings
@@ -191,7 +191,7 @@ All commands run from project root on clean `iteration/v1.46` at `36226453`:
    rg 'novel-writing-quickstart|quickstart' docs/ARCHITECTURE.md
    # cli-spec §6.2E: read + rg for stage subcommand (only superseded stub)
    git show 483d1940 -- .mstar/knowledge/specs/cli-command-ia.md   # W-1 fix
-   git diff 1f92016f..36226453 -- .mstar/knowledge/specs/novel-author-experience.md | head -30  # W-1/W-2
+   git diff 1f92016f..36226453 -- .mstar/knowledge/specs/novel-writing/author-experience.md | head -30  # W-1/W-2
    python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["residual_findings"]["2026-06-14-v1.46-spec-cli-hygiene"]), len(d["residual_findings"]["2026-06-14-v1.46-author-desk-status-ux"]))' < .mstar/status.json
    ```
 
@@ -209,6 +209,6 @@ All commands run from project root on clean `iteration/v1.46` at `36226453`:
 ## QA Verdict
 **PASS**
 
-All original P1 acceptance criteria (1–5), the fix-round W-1 acceptance criterion, and the folded P0 W-1/W-2 reconciliations in `novel-author-experience.md` §4.1 are verifiably met with reproducible command output. Scope discipline is intact (9 P1 + 4 P0 residuals remain open in `status.json`; no quickstart references remain; cli-spec §6.2E is a superseded stub only). CI gates for the delivered code (clippy, fmt, the specific P1-mandated schedules completion-guard test asserting spec-path messages) are green. The single failing test in `cargo test --all` is pre-existing (verified passes on the P1 base commit `1f92016f` before any P1 work landed), unrelated to the changed files or ACs, and did not prevent the three QC seats from issuing Approve (including targeted re-review).
+All original P1 acceptance criteria (1–5), the fix-round W-1 acceptance criterion, and the folded P0 W-1/W-2 reconciliations in `novel-writing/author-experience.md` §4.1 are verifiably met with reproducible command output. Scope discipline is intact (9 P1 + 4 P0 residuals remain open in `status.json`; no quickstart references remain; cli-spec §6.2E is a superseded stub only). CI gates for the delivered code (clippy, fmt, the specific P1-mandated schedules completion-guard test asserting spec-path messages) are green. The single failing test in `cargo test --all` is pre-existing (verified passes on the P1 base commit `1f92016f` before any P1 work landed), unrelated to the changed files or ACs, and did not prevent the three QC seats from issuing Approve (including targeted re-review).
 
 PM may mark P1 `Done`. Residuals carry forward per their V1.46+ targets.

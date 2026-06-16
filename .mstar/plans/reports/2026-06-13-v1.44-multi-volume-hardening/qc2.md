@@ -82,7 +82,7 @@ None.
 - Problem: chapter numbers reset per volume (vol1 ch3, vol2 ch1). Flat `current_chapter` + length check is semantically wrong for multi-volume Works.
 - Fix: single runtime `SELECT COUNT(*) AS total_rows, SUM(CASE WHEN status='finalized'...) AS finalized_rows FROM work_chapters WHERE work_id = ?`.
 - Then: `total_rows == expected && finalized_rows == expected`.
-- This matches novel-workflow-profile.md §6.1 ("all rows finalized across volumes; row count == total_planned_chapters").
+- This matches novel-writing/workflow-profile.md §6.1 ("all rows finalized across volumes; row count == total_planned_chapters").
 - Also removed the now-unnecessary `current_chapter` fetch for the novel completion path (still present in other progress surfaces).
 - The query is parameterized; no injection surface.
 - Single query reduces TOCTOU window vs prior two-roundtrip `list_chapters` path.

@@ -160,7 +160,7 @@ No behavior regression was observed in the P2 verification scope.
 
 The implementation behavior matches the P2 plan’s corrected multi-volume interpretation of novel completion: completion is now based on all seeded `work_chapters` rows across volumes being finalized and the planned row count being present. This is the behavior needed after the V1.42 `(work_id, volume, chapter)` PK migration where chapter numbers can repeat per volume.
 
-The normative spec section `.mstar/knowledge/specs/novel-workflow-profile.md` §6.1 still contains legacy wording that names `current_chapter >= total_planned_chapters`; P2 intentionally hardens beyond that stale flat predicate per the plan problem statement. The tested behavior aligns with the P2 plan and the multi-volume invariant under §4.5.4–§6.1.
+The normative spec section `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §6.1 still contains legacy wording that names `current_chapter >= total_planned_chapters`; P2 intentionally hardens beyond that stale flat predicate per the plan problem statement. The tested behavior aligns with the P2 plan and the multi-volume invariant under §4.5.4–§6.1.
 
 ## Evidence
 

@@ -5,10 +5,10 @@
   "entries": [
     {
       "id": "R-V143P0-001",
-      "title": "Spec overlay novel-author-experience.md §2 row 4 references stale 'creator run status' (CLI has 'creator works status' per V1.41 cli-spec.md §6.2H); quickstart correctly uses the live command; P-last spec amendment needed",
+      "title": "Spec overlay novel-writing/author-experience.md §2 row 4 references stale 'creator run status' (CLI has 'creator works status' per V1.41 cli-spec.md §6.2H); quickstart correctly uses the live command; P-last spec amendment needed",
       "severity": "low",
       "source": "qc1-W-002 (qc1.md initial wave); see also writing-specialist Completion Report §7 spec discrepancy note",
-      "scope": ".mstar/knowledge/specs/novel-author-experience.md §2 (Draft overlay V1.43)",
+      "scope": ".mstar/knowledge/specs/novel-writing/author-experience.md §2 (Draft overlay V1.43)",
       "decision": "fix",
       "owner": "@fullstack-dev",
       "target": "V1.43 P-last (2026-06-12-v1.43-hygiene-and-residuals)",
@@ -19,10 +19,10 @@
     },
     {
       "id": "R-V143P0-002",
-      "title": "Spec/CLI drift: novel-workflow-profile.md §5.5.3 and novel-quality-loop.md §6 reference the future 'review-master' surface (creator run review-master <work_id>), but the current CLI does not implement it; quickstart uses 'stage advance --stage review' as the available remediation path; P-last spec/CLI convergence",
+      "title": "Spec/CLI drift: novel-writing/workflow-profile.md §5.5.3 and novel-writing/quality-loop.md §6 reference the future 'review-master' surface (creator run review-master <work_id>), but the current CLI does not implement it; quickstart uses 'stage advance --stage review' as the available remediation path; P-last spec/CLI convergence",
       "severity": "low",
       "source": "QA verification (qa.md) AC1 fail; see also writing-specialist fix wave 2 Completion Report §9",
-      "scope": ".mstar/knowledge/specs/novel-workflow-profile.md §5.5.3 + .mstar/knowledge/specs/novel-quality-loop.md §6 + nexus-daemon-runtime CLI subcommand surface",
+      "scope": ".mstar/knowledge/specs/novel-writing/workflow-profile.md §5.5.3 + .mstar/knowledge/specs/novel-writing/quality-loop.md §6 + nexus-daemon-runtime CLI subcommand surface",
       "decision": "defer",
       "owner": "@fullstack-dev",
       "target": "V1.44+ (review-master surface convergence)",

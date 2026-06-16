@@ -15,11 +15,11 @@ reviewers:
 plan_review:
   reviewer: "@project-manager"
   scope: "Plan-vs-spec re-read + plan-vs-implementation completion audit"
-  notes: "Plan §5 T1 said 'tighten spec if needed during implement'. Implementer added one clarifying sentence to novel-work-pool.md but did not amend cli-spec.md or the path layout. User 2026-06-10 also flagged the path itself is conceptually wrong (Pool is creator-scoped, not Work-scoped). Spec gaps to fix in this wave:"
+  notes: "Plan §5 T1 said 'tighten spec if needed during implement'. Implementer added one clarifying sentence to novel-writing/work-pool.md but did not amend cli-spec.md or the path layout. User 2026-06-10 also flagged the path itself is conceptually wrong (Pool is creator-scoped, not Work-scoped). Spec gaps to fix in this wave:"
   spec_gaps:
-    - "novel-work-pool.md §3.1 + §3.3 still hard-codes Works/_pool/灵感池/ path; spec must be amended to {workspace}/Pool/Ideas/."
+    - "novel-writing/work-pool.md §3.1 + §3.3 still hard-codes Works/_pool/灵感池/ path; spec must be amended to {workspace}/Pool/Ideas/."
     - "cli-spec.md §6.2D/H does not mention the path at all but the deferred-tracker references Works/_pool/灵感池/; tracker should also be updated to match."
-    - "novel-work-pool.md §5 (CLI surface) does not document inspiration promote's --idea semantics (CLI currently allows --idea as optional; spec implies MD body should drive it)."
+    - "novel-writing/work-pool.md §5 (CLI surface) does not document inspiration promote's --idea semantics (CLI currently allows --idea as optional; spec implies MD body should drive it)."
 ---
 
 # QC Consolidated Gate — V1.41 P1 (DF-61 selection pool + inspiration)
@@ -55,7 +55,7 @@ The current path is `Works/_pool/灵感池/<slug>.md` (inspiration_items.rs:140)
 **Action items**:
 - (a) `inspiration_items.rs`: change `format!("Works/_pool/灵感池/{slug}.md")` → `format!("Pool/Ideas/{slug}.md")`. (`rel_path` is workspace-relative; the workspace root is the operational workspace dir passed by the caller.)
 - (b) `inspiration_items.rs`: document the `workspace_dir` parameter as **must be the resolved operational workspace path** in the function's doc comment.
-- (c) `novel-work-pool.md` §3.1 + §3.3: amend path. Remove the `Works/` prefix. Add an explicit note that the path is relative to the operational workspace root.
+- (c) `novel-writing/work-pool.md` §3.1 + §3.3: amend path. Remove the `Works/` prefix. Add an explicit note that the path is relative to the operational workspace root.
 - (d) `deferred-features-cross-version-tracker.md` DF-61 row: update the "in-scope" line "DB SSOT + `Works/_pool/灵感池/`" → "DB SSOT + `{workspace}/Pool/Ideas/`".
 - (e) `cli-spec.md` §6.2H (or wherever inspiration add is documented): update path.
 - (f) **Add a `nexus-home-layout` helper** for the inspiration directory so callers don't have to hand-build the path. New helper: `inspiration_dir(home, creator_id, workspace_slug) -> PathBuf` returning `{workspace_root}/Pool/Ideas/`. Add it to `crates/nexus-home-layout/src/lib.rs` and have the daemon layer use it. This is the canonical place to centralize the layout (per `nexus-home-layout/AGENTS.md` "All crates touching the filesystem must use these helpers — do not hardcode paths.").
@@ -129,9 +129,9 @@ The current path is `Works/_pool/灵感池/<slug>.md` (inspiration_items.rs:140)
 
 ### 9. Spec gaps (plan review + user feedback)
 
-- `novel-work-pool.md` §3.1, §3.3, §5 — amend path (see Item 1). Add explicit "MD scaffold is at `{workspace_root}/Pool/Ideas/<slug>.md`" to §3.1; replace path in §3.3 + §5.
+- `novel-writing/work-pool.md` §3.1, §3.3, §5 — amend path (see Item 1). Add explicit "MD scaffold is at `{workspace_root}/Pool/Ideas/<slug>.md`" to §3.1; replace path in §3.3 + §5.
 - `cli-spec.md` §6.2H — same path amendment.
-- `novel-work-pool.md` §5 — document `inspiration promote --idea` behavior: if `--idea` is supplied, the new Work's idea = `--idea`; otherwise the new Work's idea = first non-empty line of the MD body; if MD body is empty, the Work is created with idea = `Untitled from <item title>`. This makes the behavior explicit and CLI-help-testable.
+- `novel-writing/work-pool.md` §5 — document `inspiration promote --idea` behavior: if `--idea` is supplied, the new Work's idea = `--idea`; otherwise the new Work's idea = first non-empty line of the MD body; if MD body is empty, the Work is created with idea = `Untitled from <item title>`. This makes the behavior explicit and CLI-help-testable.
 - `deferred-features-cross-version-tracker.md` DF-61 row — path + "P1 Implemented (pending QC/QA) → Shipped" status (after fix wave + re-review).
 
 ## Out-of-scope (confirmed pre-existing, NOT in P1 fix wave)

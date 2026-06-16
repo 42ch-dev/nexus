@@ -224,8 +224,8 @@
       ],
       "spec_overlays_replaced_with_superseded_stub": [
         "creator-workflow.md",
-        "novel-quality-loop.md",
-        "novel-manuscript-audit.md",
+        "novel-writing/quality-loop.md",
+        "novel-writing/manuscript-audit.md",
         "work-experience-model.md",
         "orchestration-engine.md",
         "cli-spec.md"

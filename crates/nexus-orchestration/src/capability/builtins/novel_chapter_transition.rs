@@ -4,7 +4,7 @@
 //! and the chapter `.md` frontmatter atomically. Also advances the
 //! `works.current_chapter` field when appropriate (T4).
 //!
-//! Design: novel-workflow-profile.md §4.1.2 (truth model), §5.1 (finalize gate).
+//! Design: novel-writing/workflow-profile.md §4.1.2 (truth model), §5.1 (finalize gate).
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;

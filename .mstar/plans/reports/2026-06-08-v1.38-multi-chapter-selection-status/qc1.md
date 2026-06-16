@@ -70,8 +70,8 @@ generated_at: "2026-06-08"
 
 | Finding ID | Source Type | Source Reference | Confidence |
 | --- | --- | --- | --- |
-| F-001 | manual-reasoning + git-diff | Spec §4.5.2 (`novel-workflow-profile.md:309-328`), plan AC2/AC3 (`2026-06-08-v1.38-multi-chapter-selection-status.md:109-115`), implementation/tests (`work_chapters.rs:511-560`, `:1125-1242`) | High |
-| F-002 | manual-reasoning + git-diff | Spec §6.1 (`novel-workflow-profile.md:759-778`), implementation (`work_chapters.rs:581-628`), daemon promotion (`works.rs:320-365`) | High |
+| F-001 | manual-reasoning + git-diff | Spec §4.5.2 (`novel-writing/workflow-profile.md:309-328`), plan AC2/AC3 (`2026-06-08-v1.38-multi-chapter-selection-status.md:109-115`), implementation/tests (`work_chapters.rs:511-560`, `:1125-1242`) | High |
+| F-002 | manual-reasoning + git-diff | Spec §6.1 (`novel-writing/workflow-profile.md:759-778`), implementation (`work_chapters.rs:581-628`), daemon promotion (`works.rs:320-365`) | High |
 | F-003 | grep + manual-reasoning | Prompt templates (`outline-chapter.md:18-20`, `draft-chapter.md:18-22`, `draft-chapter.md:47-48`, `draft-intro.md:13-16`) | Medium |
 
 ## Diff Scope Check

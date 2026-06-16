@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.41",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-work-pool.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/work-pool.md",
       "depends_on": ["2026-06-10-v1.41-multi-work-switch", "2026-06-10-v1.41-harness-docs-prepare"],
       "description": "P1 — DF-61 selection pool and inspiration pool (DB SSOT)",
       "targets_deferred": ["DF-61"],
@@ -38,7 +38,7 @@
         "InspirationItemDto: From<InspirationItem> extraction; 2 construction sites deduped",
         "mark_work_completed: on pool update failure, logs tracing::error! + clears completion_locked_at so supervisor retries on next tick",
         "Path change: inspiration MD scaffold moved from Works/_pool/灵感池/<slug>.md to {workspace}/Pool/Ideas/<slug>.md (creator-scoped, per user 2026-06-10). New nexus-home-layout::creator_inspiration_dir helper centralizes the layout.",
-        "Spec amendments: novel-work-pool.md §3.1/§3.3/§3.4/§5 (path + why Pool/Ideas/) + §5.1 (--idea semantics); cli-spec.md §6.2H; local-db-schema.md §4.1.5; deferred-tracker DF-61 row (Shipped) + §3.6.1 V1.41 overlay line 208 (Pool/Ideas/)",
+        "Spec amendments: novel-writing/work-pool.md §3.1/§3.3/§3.4/§5 (path + why Pool/Ideas/) + §5.1 (--idea semantics); cli-spec.md §6.2H; local-db-schema.md §4.1.5; deferred-tracker DF-61 row (Shipped) + §3.6.1 V1.41 overlay line 208 (Pool/Ideas/)",
         "CLI contract test: v141_pool_inspiration_help_disambiguates_from_work_log (asserts --help mentions distinct from per-Work works.inspiration_log)"
       ],
       "closed_residuals": [],

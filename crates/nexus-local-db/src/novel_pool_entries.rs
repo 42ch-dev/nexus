@@ -3,7 +3,7 @@
 //! Manages the `novel_pool_entries` table — creator-scoped selection pool
 //! tracking active/queued/completed Work references.
 //!
-//! Spec: novel-work-pool.md §2, local-db-schema.md §4.1.5.
+//! Spec: novel-writing/work-pool.md §2, local-db-schema.md §4.1.5.
 //!
 //! # Instrumented mutation paths (V1.46 P4 audit)
 //!

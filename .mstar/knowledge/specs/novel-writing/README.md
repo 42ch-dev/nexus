@@ -2,7 +2,7 @@
 
 Normative specifications for `work_profile: novel` — layout, presets, quality loop, author desk, and sync.
 
-**Relocated**: 2026-06-17 from flat `specs/novel-*.md` (spec hygiene). Flat-path stubs redirect here.
+**Relocated**: 2026-06-17 from flat `specs/novel-*.md` (spec hygiene).
 
 **Parent index**: [specs/README.md](../README.md) · **Rules**: [specs/AGENTS.md](../AGENTS.md)
 
@@ -65,6 +65,6 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 
 ## Maintaining this subtree
 
-1. Edit canonical files under `novel-writing/` only — not flat redirect stubs.
+1. Edit canonical files under `novel-writing/` only.
 2. On overlay promotion (P-last), fold into the merge-target Master and archive the overlay.
 3. Update this README when adding or retiring a novel spec.

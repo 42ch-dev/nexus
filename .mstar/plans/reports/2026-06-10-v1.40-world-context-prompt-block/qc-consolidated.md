@@ -11,7 +11,7 @@ generated_at: 2026-06-10
 - **Working branch**: `feature/v1.40-world-context-prompt-block` (HEAD `91e4a40e`)
 - **Review range / Diff basis**: `iteration/v1.40..feature/v1.40-world-context-prompt-block`
 - **Iteration compass**: `.mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md` (DF-63 W3)
-- **Primary spec**: `.mstar/knowledge/specs/novel-workflow-profile.md` §3.5.1.3
+- **Primary spec**: `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §3.5.1.3
 
 ## Reviewer verdicts
 | Reviewer | Lens | Verdict (initial) | Verdict (re-validation) |

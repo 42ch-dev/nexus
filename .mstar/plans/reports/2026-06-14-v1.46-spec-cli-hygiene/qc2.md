@@ -47,7 +47,7 @@ None.
 **Confidence**: High
 
 #### S-2: Four remediation_* tests in `preset_gates.rs` are string-contains snapshots (lines 954–1071)
-**Triggering condition**: The four new/renamed tests (`remediation_work_field_cites_quickstart` → now spec, plus three new `remediation_*_cites_*_spec`) use `contains("creator-run-preset-entry.md")` / `contains("novel-author-experience.md")` on the `remediation` field of `FailedGate`. These are the T4 updates that replaced the old quickstart citations.
+**Triggering condition**: The four new/renamed tests (`remediation_work_field_cites_quickstart` → now spec, plus three new `remediation_*_cites_*_spec`) use `contains("creator-run-preset-entry.md")` / `contains("novel-writing/author-experience.md")` on the `remediation` field of `FailedGate`. These are the T4 updates that replaced the old quickstart citations.
 
 **Impact**: Same as S-1 — if any of the three remediation helper functions (`work_field_remediation`, `filesystem_remediation`, `previous_preset_remediation`) are edited, the corresponding test must be kept in sync. The tests are now correct (they validate the P1 hygiene goal), but they are snapshot-style rather than structural.
 
@@ -72,14 +72,14 @@ None.
   - `test ! -f docs/novel-writing-quickstart.md` → PASS (exit 0)
   - `rg -n 'creator run start|creator run stage|stage advance' .mstar/knowledge/specs/ --glob '*.md' | rg -v 'Removed in V1\.45|Superseded by|changelog'` → zero hits (PASS)
   - `rg 'novel-writing-quickstart' crates/ docs/` → zero hits (PASS)
-  - `docs/ARCHITECTURE.md` links only to `.mstar/knowledge/specs/novel-author-experience.md §3` and `creator-run-preset-entry.md` (PASS)
+  - `docs/ARCHITECTURE.md` links only to `.mstar/knowledge/specs/novel-writing/author-experience.md §3` and `creator-run-preset-entry.md` (PASS)
 
 - CI gates (all green, no scope-attributable failures):
   - `cargo clippy --all -- -D warnings` → clean
   - `cargo test --all` → green (full suite)
   - `cargo +nightly fmt --all --check` → clean (EXIT 0)
 
-- Spec sweep (T3) + W-1/W-2 reconcile: `novel-author-experience.md` §4.1 table now correctly documents the three-state `findings` contract and creator-global scope of `findings_stale` (matches P0 runtime behavior that was previously mismatched). All 12 touched specs satisfy the Grill #11 normative zero-hit AC for stale CLI patterns.
+- Spec sweep (T3) + W-1/W-2 reconcile: `novel-writing/author-experience.md` §4.1 table now correctly documents the three-state `findings` contract and creator-global scope of `findings_stale` (matches P0 runtime behavior that was previously mismatched). All 12 touched specs satisfy the Grill #11 normative zero-hit AC for stale CLI patterns.
 
 - Shipped Master hygiene (T3): `creator-run-preset-entry.md` lines 63/110 received only minimal explanatory-keyword additions ("Removed in V1.45; see changelog"). Body content and normative meaning unchanged — correct non-substantive tag per assignment.
 
@@ -96,13 +96,13 @@ None.
 
 **Verdict**: Approve
 
-All four mechanical ACs pass. CI gates (clippy, test, nightly fmt) are clean. The core P1 goal — retire the quickstart file, delete the stale `cli-spec` §6.2E block, sweep 12 satellite specs to normative zero-hit on deleted CLI patterns, and remediate ~26 runtime user-facing strings + tests to cite the current SSOT specs (`creator-run-preset-entry.md` and `novel-author-experience.md`) instead of the deleted quickstart — is executed correctly and atomically.
+All four mechanical ACs pass. CI gates (clippy, test, nightly fmt) are clean. The core P1 goal — retire the quickstart file, delete the stale `cli-spec` §6.2E block, sweep 12 satellite specs to normative zero-hit on deleted CLI patterns, and remediate ~26 runtime user-facing strings + tests to cite the current SSOT specs (`creator-run-preset-entry.md` and `novel-writing/author-experience.md`) instead of the deleted quickstart — is executed correctly and atomically.
 
 From the security/correctness perspective:
 - No new injection, path-traversal, or control-flow surfaces were introduced (remediation strings are compile-time literals; no user data is interpolated into the cited paths).
 - The completion-guard SQL path (COUNT on completed novels) is unchanged; only the error string was updated.
 - `force_gates` / omitted-`work_id` / work-not-found error paths continue to return structured `PresetGatesFailed` with remediation citing the spec.
-- W-1/W-2 from P0 (spec/runtime contract mismatch on `findings` three-state and `findings_stale` scope) are reconciled in the spec sweep; the table in `novel-author-experience.md` §4.1 now accurately describes runtime behavior.
+- W-1/W-2 from P0 (spec/runtime contract mismatch on `findings` three-state and `findings_stale` scope) are reconciled in the spec sweep; the table in `novel-writing/author-experience.md` §4.1 now accurately describes runtime behavior.
 - The four remediation tests and the completion-guard test are now semantically valid (they assert the new correct citations).
 
 The two Suggestions are low-impact maintainability notes about string-snapshot tests. They do not affect security, correctness, or the ability of users/automation to follow the remediation instructions. Per `mstar-review-qc` gate rule (Critical = 0 and Warning = 0 ⇒ Approve), this seat returns **Approve**.

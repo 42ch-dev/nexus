@@ -35,7 +35,7 @@ revalidated_at: 2026-06-07T20:45:00Z
 
 **W-1: Template engine divergence — custom string replacement instead of handlebars-rust**
 - **Location**: `crates/nexus-orchestration/src/capability/builtins/novel_scaffold.rs:41-51`
-- **Issue**: The spec (novel-workflow-profile.md §5.4.2) explicitly states templates are rendered "using `handlebars-rust` (per orchestration-engine.md §7.3)". The implementation uses a custom `render_template()` function that does naive `String::replace` for `{{key}}` placeholders. This diverges from the declared engine, lacks handlebars features (conditionals, loops, partials), and sets a precedent for ad-hoc template parsing across presets.
+- **Issue**: The spec (novel-writing/workflow-profile.md §5.4.2) explicitly states templates are rendered "using `handlebars-rust` (per orchestration-engine.md §7.3)". The implementation uses a custom `render_template()` function that does naive `String::replace` for `{{key}}` placeholders. This diverges from the declared engine, lacks handlebars features (conditionals, loops, partials), and sets a precedent for ad-hoc template parsing across presets.
 - **Fix**: Replace `render_template` with the `handlebars` crate (already in `Cargo.toml` as a dependency). Pre-compile templates at capability construction time or use a static registry.
 - **Blocks P2?**: No — functional for V1.36 MVP, but should be fixed before P3 novel-writing preset templates (which may need conditionals for world-bound vs worldless Works).
 
@@ -73,9 +73,9 @@ revalidated_at: 2026-06-07T20:45:00Z
 
 | Finding ID | Source Type | Source Reference | Confidence |
 |---|---|---|---|
-| W-1 | manual-reasoning | `novel_scaffold.rs:41-51`, `novel-workflow-profile.md §5.4.2` | High |
+| W-1 | manual-reasoning | `novel_scaffold.rs:41-51`, `novel-writing/workflow-profile.md §5.4.2` | High |
 | W-2 | manual-reasoning | `work_chapters.rs:56-87`, JSON schema `minimum: 1` (no maximum) | High |
-| W-3 | manual-reasoning | `novel_scaffold.rs:177-270`, `novel-workflow-profile.md §5.4` | High |
+| W-3 | manual-reasoning | `novel_scaffold.rs:177-270`, `novel-writing/workflow-profile.md §5.4` | High |
 | W-4 | manual-reasoning | `novel_scaffold.rs:228-248` | Medium |
 | S-1 | manual-reasoning | `preset/mod.rs:207-214` | Low |
 | S-2 | manual-reasoning | `run.rs` CLI args | Low |

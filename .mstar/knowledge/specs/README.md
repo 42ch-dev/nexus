@@ -48,7 +48,7 @@ See [AGENTS.md](AGENTS.md) for create/extend/merge rules.
 
 ## Layout
 
-Spec files live **flat** in this directory except **`novel-writing/`** — the novel `work_profile` subtree (relocated 2026-06-17). See [novel-writing/README.md](novel-writing/README.md) for the domain index. Flat `novel-*.md` paths are redirect stubs only.
+Spec files live **flat** in this directory except **`novel-writing/`** — the novel `work_profile` subtree (relocated 2026-06-17). See [novel-writing/README.md](novel-writing/README.md) for the domain index.
 
 ---
 
@@ -164,7 +164,7 @@ When specs disagree, higher row wins:
 | **FL-D compass locks implement** | Promote preset-conditional-routing; update orchestration-engine §7.5 | Deferred (FL-D still out of scope) |
 | **ACP spec hygiene plan** | Evaluate merging skills-export-compatibility into acp-client-tech-spec appendix | Backlog |
 | **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract | Module still shipped (V1.36+); sync contract retained |
-| **V1.40 shipped (DF-63 closed)** | Mark `entity-scope-model.md` §5.1.1 + `cli-spec.md` §6.2G + `creator-workflow.md` persist + `local-db-schema.md` §4.1.2 + `novel-workflow-profile.md` §3.5.1 as Shipped V1.40 in their headers | **Done 2026-06-11** (see headers + this index) |
+| **V1.40 shipped (DF-63 closed)** | Mark `entity-scope-model.md` §5.1.1 + `cli-spec.md` §6.2G + `creator-workflow.md` persist + `local-db-schema.md` §4.1.2 + `novel-writing/workflow-profile.md` §3.5.1 as Shipped V1.40 in their headers | **Done 2026-06-11** (see headers + this index) |
 | **V1.41 prep** | Decide which V1.40-tagged open residuals (`status.json.residual_findings`) to address in V1.41 hygiene; re-evaluate DF-60/61/56/47/59 targets | Pending V1.41 compass |
 
 **Retained splits (do not merge):** creator-schedule-and-core-context (schedule domain); ACP cluster (independent evolution cadence).
@@ -193,7 +193,7 @@ Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and archite
 | `nexus42-single-binary-daemon-runtime-architecture.md` | [daemon-runtime.md](daemon-runtime.md) |
 | `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
 | [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
-| [novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
+| [archived/knowledge/novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 

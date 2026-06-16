@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.39",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "depends_on": [
         "2026-06-09-v1.39-harness-docs-prepare",
         "2026-06-09-v1.39-fl-e-auto-chain-engine"

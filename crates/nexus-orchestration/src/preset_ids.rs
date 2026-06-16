@@ -18,7 +18,7 @@
 /// - [`crate::preset::validation::STAGE_PRESET_ALLOWLIST`] (review stage
 ///   allowlist entry)
 ///
-/// See `.mstar/knowledge/specs/novel-quality-loop.md` §3 for the normative
+/// See `.mstar/knowledge/specs/novel-writing/quality-loop.md` §3 for the normative
 /// preset table.
 pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
 

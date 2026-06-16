@@ -1,8 +1,8 @@
 //! `review-report.md` parser (V1.48 P0 T1).
 //!
 //! Implements the producer-side parsing contract from
-//! `.mstar/knowledge/specs/novel-findings-maturity.md` §1 and the vocabulary
-//! table in `.mstar/knowledge/specs/novel-quality-loop.md` §8 / §2.1.
+//! `.mstar/archived/knowledge/novel-findings-maturity.md` §1 and the vocabulary
+//! table in `.mstar/knowledge/specs/novel-writing/quality-loop.md` §8 / §2.1.
 //!
 //! ## Hermeticity
 //!
@@ -31,7 +31,7 @@ use std::collections::HashMap;
 /// for parser-side validation. A spec §1.2 fallback applies when the report's
 /// kind token is not in this set. Kept in lockstep with the DB enum — both
 /// were expanded together in V1.48 P0 T4 to include `plot_hole` and
-/// `world_inconsistency` per `novel-quality-loop.md` §2.1.
+/// `world_inconsistency` per `novel-writing/quality-loop.md` §2.1.
 pub const KNOWN_FINDING_KINDS: &[&str] = &[
     "craft",
     "continuity",
@@ -56,7 +56,7 @@ pub const KNOWN_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "ma
 /// table stores `blocker / major / minor / info` (spec §2.1). Unknown tokens
 /// fall back to `info` per spec §1.2.
 ///
-/// Spec: `novel-findings-maturity.md` §1.2 + `novel-quality-loop.md` §2.1.
+/// Spec: `archived/knowledge/novel-findings-maturity.md` §1.2 + `novel-writing/quality-loop.md` §2.1.
 #[must_use]
 pub fn map_severity(report_token: &str) -> &'static str {
     match report_token.trim().to_ascii_lowercase().as_str() {

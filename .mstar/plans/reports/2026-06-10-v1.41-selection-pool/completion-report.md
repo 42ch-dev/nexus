@@ -27,7 +27,7 @@ crates/nexus42/src/commands/creator/works/mod.rs
 
 | T# | Title | Status | Evidence |
 |----|-------|--------|----------|
-| T1 | Spec preflight | PASS | 4 spec refs + primary spec + plan read; no spec-vs-plan conflicts; tightened `novel-work-pool.md` §pool/inspiration ownership |
+| T1 | Spec preflight | PASS | 4 spec refs + primary spec + plan read; no spec-vs-plan conflicts; tightened `novel-writing/work-pool.md` §pool/inspiration ownership |
 | T2 | SQL migrations for `inspiration_items` | PASS | migration `202606100003_v141_inspiration_items.sql` (committed in `b3a1f023`); P0's `novel_pool_entries` left untouched per P0/P1 split |
 | T3 | DAO + Local API handlers | PASS | `crates/nexus-local-db/src/novel_pool_entries.rs` (419 lines) + `inspiration_items.rs` (353 lines); handlers in `crates/nexus-daemon-runtime/src/api/handlers/works.rs` |
 | T4 | CLI `creator works pool` subcommands | PASS | commit `dfff13f8`; full subcommand tree: list/promote/archive + inspiration add/list/promote/archive |
@@ -39,9 +39,9 @@ crates/nexus42/src/commands/creator/works/mod.rs
 
 ## 3. Spec preflight summary
 
-- **Primary spec**: `novel-work-pool.md` — DB SSOT for pool + inspiration; `Works/_pool/灵感池/` MD refs.
-- **Supporting specs**: `novel-multi-work-lifecycle.md` §3.2 (P0 SSOT contract), `work-experience-model.md` (pool ≠ Work profile), `cli-spec.md` §6.2D/H (CLI surface), `local-db-schema.md` (DDL intent).
-- **Tightening**: Added clarifying sentence to `novel-work-pool.md` distinguishing `novel_pool_entries` (P0 minimal, `pool_section` field) from `inspiration_items` (P1).
+- **Primary spec**: `novel-writing/work-pool.md` — DB SSOT for pool + inspiration; `Works/_pool/灵感池/` MD refs.
+- **Supporting specs**: `novel-writing/multi-work-lifecycle.md` §3.2 (P0 SSOT contract), `work-experience-model.md` (pool ≠ Work profile), `cli-spec.md` §6.2D/H (CLI surface), `local-db-schema.md` (DDL intent).
+- **Tightening**: Added clarifying sentence to `novel-writing/work-pool.md` distinguishing `novel_pool_entries` (P0 minimal, `pool_section` field) from `inspiration_items` (P1).
 - **Conflicts**: None detected.
 
 ## 4. Verification log
@@ -167,7 +167,7 @@ After QC1/QC2/QC3 tri-review and plan re-review, a consolidated fix wave address
 | 6 | No pagination (F-06) | `45cc8d22` | `list_pool_entries` and `list_inspiration` now accept `limit`/`offset` (default 200, max 1000); new `count_*` functions; response shape includes `{total, limit, offset}` |
 | 7 | Missing indexes (F-07) | `9e3a57b1` | Covering indexes on `(creator_id, status, updated_at DESC)` for pool and `(creator_id, status, created_at DESC)` for inspiration |
 | 8 | Sync I/O in async (F-08) | `e02b99f5` | `create_inspiration_with_scaffold` file I/O wrapped in `tokio::task::spawn_blocking` |
-| 9 | Spec gap (F-09) | `0830831c` | Documented `--idea` semantics in `novel-work-pool.md` §5.1 |
+| 9 | Spec gap (F-09) | `0830831c` | Documented `--idea` semantics in `novel-writing/work-pool.md` §5.1 |
 | — | Fmt + clippy | `077e0769` | Nightly fmt pass + `needless_borrows_for_generic_args` fix |
 
 ### Post-fix-wave verification

@@ -281,7 +281,7 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest shipped iteration**
 
-- **V1.48** (Shipped 2026-06-16, P-last closeout): [v1.48-novel-quality-loop-completion-delivery-compass-v1.md](../iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md) — Novel Quality Loop Completion (F-D findings chain + serial §4.5.7 #4/#5); PR [#61](https://github.com/42ch-dev/nexus/pull/61) MERGED to `main` at `8fcf2d68` (2026-06-16); integration branch `iteration/v1.48` retired. 7 plans all Done (P-1 + P0–P4 + P-last); 18 open lows deferred to V1.49; `novel-findings-maturity.md` overlay folded into `novel-writing/quality-loop.md` §9; Profile B compaction complete.
+- **V1.48** (Shipped 2026-06-16, P-last closeout): [v1.48-novel-quality-loop-completion-delivery-compass-v1.md](../iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md) — Novel Quality Loop Completion (F-D findings chain + serial §4.5.7 #4/#5); PR [#61](https://github.com/42ch-dev/nexus/pull/61) MERGED to `main` at `8fcf2d68` (2026-06-16); integration branch `iteration/v1.48` retired. 7 plans all Done (P-1 + P0–P4 + P-last); 18 open lows deferred to V1.49; `archived/knowledge/novel-findings-maturity.md` overlay folded into `novel-writing/quality-loop.md` §9; Profile B compaction complete.
 
 **Recent shipped compasses** (detail in archive §2)
 

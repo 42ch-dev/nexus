@@ -7,7 +7,7 @@
       "severity": "low",
       "lifecycle": "resolved",
       "source": "qc1 P3 revalidation",
-      "title": "Broader spec-tree migration gaps: other specs (novel-workflow-profile.md, creator-workflow.md, cli-spec.md body) still reference deleted creator run subcommands; requires dedicated spec-hygiene pass",
+      "title": "Broader spec-tree migration gaps: other specs (novel-writing/workflow-profile.md, creator-workflow.md, cli-spec.md body) still reference deleted creator run subcommands; requires dedicated spec-hygiene pass",
       "decision": "defer to P-last",
       "owner": "@fullstack-dev or @writing-specialist",
       "target": "P-last (hygiene-and-closeout)",

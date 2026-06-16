@@ -87,7 +87,7 @@ All five fallback triggers are implemented and emit `tracing::warn!`: (1) `works
 
 ### FindingKind enum expansion (5→7) — consistent
 
-`plot_hole` and `world_inconsistency` were added per `novel-quality-loop.md` §2.1. Both `as_str()` and `ALL_STRS` are updated in lockstep, the unit test asserts `ALL_STRS.len() == 7`, and the expansion closes the gap where the V1.47 quick-closure missed these spec-listed kinds. The DB `validate()` path now accepts them, and the parser emits them.
+`plot_hole` and `world_inconsistency` were added per `novel-writing/quality-loop.md` §2.1. Both `as_str()` and `ALL_STRS` are updated in lockstep, the unit test asserts `ALL_STRS.len() == 7`, and the expansion closes the gap where the V1.47 quick-closure missed these spec-listed kinds. The DB `validate()` path now accepts them, and the parser emits them.
 
 ### RVM_COUNTER hotfix (R-V147P0-05) — mirrors precedent exactly
 
@@ -109,4 +109,4 @@ The fix adds `static RVM_COUNTER: AtomicU32 = AtomicU32::new(0)` and formats the
 
 **Verdict**: Approve
 
-Rationale: The P0 scope delivers exactly what the plan and `novel-findings-maturity.md` §1 specify — a pure-function parser, clean SSOT centralization, a well-reasoned fallback ladder with operator-visible `tracing::warn!` at every branch, a correct enum expansion, and a precedent-mirroring hotfix with a hermetic regression test. The two Suggestions are non-blocking maintainability refinements (a cross-crate vocabulary-lockstep guard and numbered-bullet robustness) that do not affect correctness, safety, or the spec contract. No Critical or Warning findings. Lint (`cargo clippy --all -- -D warnings`) and nightly fmt are clean; all in-scope tests pass.
+Rationale: The P0 scope delivers exactly what the plan and `archived/knowledge/novel-findings-maturity.md` §1 specify — a pure-function parser, clean SSOT centralization, a well-reasoned fallback ladder with operator-visible `tracing::warn!` at every branch, a correct enum expansion, and a precedent-mirroring hotfix with a hermetic regression test. The two Suggestions are non-blocking maintainability refinements (a cross-crate vocabulary-lockstep guard and numbered-bullet robustness) that do not affect correctness, safety, or the spec contract. No Critical or Warning findings. Lint (`cargo clippy --all -- -D warnings`) and nightly fmt are clean; all in-scope tests pass.

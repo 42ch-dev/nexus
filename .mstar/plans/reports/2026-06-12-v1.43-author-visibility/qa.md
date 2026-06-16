@@ -31,7 +31,7 @@ mode: report-only
 | AC1 | Author with open findings sees count + highest severity in status output | PASS | `FindingsSummary::from_findings_json` parses counts/highest/top findings; `print_findings_summary` prints `findings: {count} open (...) — highest: ...`; test `display_findings_with_severity_summary` asserts count, severity breakdown, highest tag, top findings, routing hint, work id/action hint, and quickstart link. |
 | AC2 | Completed Work shows unambiguous terminal state | PASS | Completed status path prints the framed banner, Work title/id/profile, `COMPLETED at`, finalized chapter count, stop message, findings summary, quickstart §6 link, and new-work command; test `display_findings_completed_work_shows_summary` covers findings formatting used by the completed path. |
 | AC3 | Hermetic test covers findings summary + completion display | PASS | `cargo test -p nexus42 --lib commands::creator::works::tests` ran 19 hermetic unit tests: 19 passed; 0 failed. |
-| AC4 | novel-author-experience §4 rows marked implemented | PASS | `rg -n 'Shipped \(V1.43 P2\)|Shipped \(V1.39 P4 T3\)' .mstar/knowledge/specs/novel-author-experience.md` returned all 4 §4 rows (lines 68-71). |
+| AC4 | novel-author-experience §4 rows marked implemented | PASS | `rg -n 'Shipped \(V1.43 P2\)|Shipped \(V1.39 P4 T3\)' .mstar/knowledge/specs/novel-writing/author-experience.md` returned all 4 §4 rows (lines 68-71). |
 
 ## Fix wave re-verification (4 fixes)
 

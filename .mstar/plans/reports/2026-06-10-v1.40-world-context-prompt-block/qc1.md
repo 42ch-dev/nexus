@@ -37,7 +37,7 @@ generated_at: "2026-06-10"
   -> Either implement T4 (capability wrapper calling `build_chapter_kb_block`) in this plan, or defer the preset YAML wiring to a follow-up plan and revert the `world_kb_block` capability arg from `preset.yaml` for now. If deferring, add a residual tracking the wiring gap.
 
 - **W-002: `chapter_text` field is dead code — heuristic fallback not implemented** (`crates/nexus-moment-context-assembly/src/world_context.rs:141`)  
-  `ChapterKbBlockParams::chapter_text` is defined and documented as "Optional outline or body text for heuristic fallback" but is never read by `build_chapter_kb_block`. The spec (`novel-workflow-profile.md` §3.5.1.3) says characters/locations should be selected "from outline/body heuristics if needed" when `world_refs` is empty, but the current implementation only falls back to all characters/locations in the world — no text-based heuristic extraction.  
+  `ChapterKbBlockParams::chapter_text` is defined and documented as "Optional outline or body text for heuristic fallback" but is never read by `build_chapter_kb_block`. The spec (`novel-writing/workflow-profile.md` §3.5.1.3) says characters/locations should be selected "from outline/body heuristics if needed" when `world_refs` is empty, but the current implementation only falls back to all characters/locations in the world — no text-based heuristic extraction.  
   -> Either implement the heuristic fallback using `chapter_text`, or remove the field and update the doc comment to clarify that the fallback is "all items" (not text-based heuristics). If deferring heuristics, register a residual.
 
 ### 🟢 Suggestion

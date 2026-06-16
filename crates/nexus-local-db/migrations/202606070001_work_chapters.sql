@@ -1,5 +1,5 @@
 -- V1.36: work_chapters table — per-chapter state SSOT
--- (novel-workflow-profile.md §4.1.1)
+-- (novel-writing/workflow-profile.md §4.1.1)
 CREATE TABLE IF NOT EXISTS work_chapters (
     work_id              TEXT NOT NULL,
     chapter              INTEGER NOT NULL,        -- chapter number; 1..total_planned_chapters

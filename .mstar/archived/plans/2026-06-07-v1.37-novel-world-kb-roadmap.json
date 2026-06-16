@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.37",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "spec_refs": [
         ".mstar/knowledge/specs/entity-scope-model.md",
         ".mstar/knowledge/specs/work-experience-model.md",
@@ -37,11 +37,11 @@
       "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, preset YAML, CLI implementation, prompt runtime, validator, or kb-extract binding in P2",
       "spec_amendments": [
         ".mstar/knowledge/specs/entity-scope-model.md §5.1.1",
-        ".mstar/knowledge/specs/novel-workflow-profile.md §3.5.1"
+        ".mstar/knowledge/specs/novel-writing/workflow-profile.md §3.5.1"
       ],
       "shipped": [
         "entity-scope-model.md: extended §5.4 with narrative World KB item taxonomy (foundation, background, character, location, society, rules, economy) + minimum-viable schemas",
-        "novel-workflow-profile.md §3.5 extension: world_id validation contract, prompt-time World context block format (YAML/JSON), world_refs validation rules, Chapter → World KB extraction path via kb-extract/persist stage",
+        "novel-writing/workflow-profile.md §3.5 extension: world_id validation contract, prompt-time World context block format (YAML/JSON), world_refs validation rules, Chapter → World KB extraction path via kb-extract/persist stage",
         "creator world create CLI command contract (T3) — future implementation, contract-only in V1.37 P2",
         "Deferred tracker: DF-63 disposition updated to 'V1.37 P2 roadmap-only; implementation deferred to V1.37+' with 5 work items enumerated",
         "Plan markdown: status updated to Done with roadmap-only scope decision recorded"

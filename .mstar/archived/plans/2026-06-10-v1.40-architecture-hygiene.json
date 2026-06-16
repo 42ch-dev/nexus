@@ -6,7 +6,7 @@
   "merge_target": "iteration/v1.40",
   "metadata": {
     "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
-    "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+    "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
     "depends_on": [
       "2026-06-10-v1.40-harness-docs-prepare"
     ],

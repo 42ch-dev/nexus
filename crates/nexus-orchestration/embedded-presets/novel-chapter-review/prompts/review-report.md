@@ -51,7 +51,7 @@ Save the report under `Works/{{work_ref}}/Logs/review/ch{{chapter_label}}-review
 `chapter_label` is unavailable) for the author's reference.
 
 The supervisor's terminal hook will persist ≥1 finding row from this review
-pass via `create_finding_from_review` (novel-quality-loop.md §8). The
+pass via `create_finding_from_review` (novel-writing/quality-loop.md §8). The
 finding's `rule_suggestion` (optional prose for Layer 2 rules) is metadata
 only — accepting it does **not** mutate `Works/<work_ref>/AGENTS.md` in
 V1.47 P0.

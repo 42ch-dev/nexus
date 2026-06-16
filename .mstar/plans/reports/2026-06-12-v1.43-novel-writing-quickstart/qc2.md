@@ -26,7 +26,7 @@ generated_at: 2026-06-12T18:26:57+0800
 - Tools run:
   - git rev-parse --show-toplevel / branch --show-current / log -1 / status --short / rev-parse iteration/v1.43 / rev-parse 23dac267 / rev-parse ae7c9415 / diff --stat ae7c9415..23dac267 -- docs/
   - git diff ae7c9415..23dac267 -- docs/
-  - Read: .mstar/plans/2026-06-12-v1.43-novel-writing-quickstart.md, .mstar/knowledge/specs/novel-author-experience.md §2, docs/novel-writing-quickstart.md (full), AGENTS.md (root + .mstar/), .mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md (excerpt)
+  - Read: .mstar/plans/2026-06-12-v1.43-novel-writing-quickstart.md, .mstar/knowledge/specs/novel-writing/author-experience.md §2, docs/novel-writing-quickstart.md (full), AGENTS.md (root + .mstar/), .mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md (excerpt)
   - Static: rg emoji, absolute paths, secrets, dangerous cmds, cross-link in ARCHITECTURE.md
   - CLI audit (main worktree): target/debug/nexus42 --help, creator/daemon/system group help, and targeted subcommand --help for all 19 commands cited in the doc (system doctor, creator register/use/workspace, daemon start, creator world create/list, creator run start/continue/resume/reconcile-chapters/stage, creator works status/list/use/pool/completion-lock release)
 

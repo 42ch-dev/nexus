@@ -32,7 +32,7 @@
   },
   "working_branch": "feature/v1.48-serial-hardening",
   "merge_target": "iteration/v1.48",
-  "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
   "iteration_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
   "notes": [
     {

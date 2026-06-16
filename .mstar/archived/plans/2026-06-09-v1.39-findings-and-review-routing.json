@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.39",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-quality-loop.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/quality-loop.md",
       "depends_on": [
         "2026-06-09-v1.39-harness-docs-prepare",
         "2026-06-09-v1.39-research-stage-wiring"
@@ -23,7 +23,7 @@
       "description": "P1 — findings table/API + review executor routing",
       "updated_at": "2026-06-09T04:45:00+08:00",
       "done_at": "2026-06-09T04:45:00+08:00",
-      "qc": "Initial tri-review: qc1+qc2 Approve, qc3 Request Changes (C-1 spec violation: missing (work_id, chapter, status) index per novel-quality-loop.md §2.1). PM fix wave closed C-1. PM-validated merge after green tests.",
+      "qc": "Initial tri-review: qc1+qc2 Approve, qc3 Request Changes (C-1 spec violation: missing (work_id, chapter, status) index per novel-writing/quality-loop.md §2.1). PM fix wave closed C-1. PM-validated merge after green tests.",
       "qa": "skipped — initial QC + PM C-1 fix + green test sweep",
       "shipped": [
         "findings table migration 202606090002_findings.sql with severity/status/target_executor TEXT enums + 3 indexes (work_id,status), (creator_id,status), (work_id,chapter,status) — C-1 fix added the 3rd index",

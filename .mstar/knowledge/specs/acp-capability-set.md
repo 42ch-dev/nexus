@@ -101,7 +101,7 @@ Agents must declare supported `(capability_id, major)` pairs at minimum. Clients
 | --- | --- | --- |
 | `nexus.context.whoami` | yes | Resolve active Nexus profile / creator context |
 | `nexus.workspace.info` | yes | Workspace root, linked world ref, environment flags |
-| `nexus.workspace.paths` | yes | Enumerate allowed roots from the active preset: e.g. V1.36 `novel-writing` **`Works/<work_ref>/`** (正文 under **`Stories/`**), **`.nexus42/references/<run-id>/`**, workspace `.agents/skills/`, and other policy-defined subtrees — see [novel-workflow-profile.md](./novel-workflow-profile.md) |
+| `nexus.workspace.paths` | yes | Enumerate allowed roots from the active preset: e.g. V1.36 `novel-writing` **`Works/<work_ref>/`** (正文 under **`Stories/`**), **`.nexus42/references/<run-id>/`**, workspace `.agents/skills/`, and other policy-defined subtrees — see [novel-writing/workflow-profile.md](./novel-writing/workflow-profile.md) |
 | `nexus.context.assemble` | yes | Assemble a stable writing context from confirmed KB / canon timeline / memory slices |
 
 ### 4.2 World read

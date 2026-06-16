@@ -24,7 +24,7 @@ verdict_summary: "Approve: qc1, qc2; Request Changes: qc3"
 |----|--------|-------|----------|
 | W-1 | qc3 | `load_and_parse_review_report` reads unbounded `review-report.md` into memory (`std::fs::read_to_string`); no size cap | **Fix** (P0-fix1) |
 | W-2 | qc3 | `persist_parsed_findings` issues N sequential `INSERT` round-trips for parsed findings; no transaction | **Fix** (P0-fix1) |
-| W-3 | qc3 | Fallback `tracing::warn!` spans in `try_persist_parsed_findings` omit required `chapter` field per `novel-findings-maturity.md` §1.3 | **Fix** (P0-fix1) |
+| W-3 | qc3 | Fallback `tracing::warn!` spans in `try_persist_parsed_findings` omit required `chapter` field per `archived/knowledge/novel-findings-maturity.md` §1.3 | **Fix** (P0-fix1) |
 
 ## Warnings Deferred as Residuals
 

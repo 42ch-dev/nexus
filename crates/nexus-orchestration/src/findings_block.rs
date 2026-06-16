@@ -1,7 +1,7 @@
 //! V1.48 P1 — open findings → prompt block builder.
 //!
 //! Implements the Consumer side of the findings quality loop
-//! (`novel-findings-maturity.md` §2 Consumer; `novel-workflow-profile.md`
+//! (`archived/knowledge/novel-findings-maturity.md` §2 Consumer; `novel-writing/workflow-profile.md`
 //! §5.5.2 deferred consumer). The builder renders a bounded, prompt-safe
 //! Markdown summary of open findings so the `novel-writing` preset can
 //! inject it into outline and draft prompt context.

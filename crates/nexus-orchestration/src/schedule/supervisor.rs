@@ -414,7 +414,7 @@ impl ScheduleSupervisor {
                 // V1.48 P0 T2: thread the supervisor's optional
                 // `workspace_dir` so the producer can read
                 // `Works/<work_ref>/Logs/review/review-report.md` and parse
-                // richer findings (`.mstar/knowledge/specs/novel-findings-maturity.md`
+                // richer findings (`.mstar/archived/knowledge/novel-findings-maturity.md`
                 // §1). When the workspace is None (e.g. hermetic DB-only
                 // tests) or the report is missing, the producer falls back
                 // to the V1.47 placeholder synthesis with `tracing::warn!`.

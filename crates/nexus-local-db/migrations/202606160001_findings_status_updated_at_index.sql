@@ -1,6 +1,6 @@
 -- V1.48 P3 T1 — composite index to support resolved-finding retention pruning.
 --
--- Implements novel-findings-maturity.md §5.1 (V1.48 Draft): the prune query
+-- Implements archived/knowledge/novel-findings-maturity.md §5.1 (V1.48 Draft): the prune query
 -- (`prune_resolved_findings_older_than`) filters on
 --   `status = 'resolved' AND updated_at < ?`
 -- which was not covered by any existing index:

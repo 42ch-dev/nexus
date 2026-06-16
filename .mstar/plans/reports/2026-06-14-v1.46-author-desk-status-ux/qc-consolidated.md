@@ -43,8 +43,8 @@ Per `mstar-review-qc` gate rule (Critical>0 or Warning>0 ⇒ Request Changes): *
 
 | ID | Source | Where | Note |
 |---|---|---|---|
-| W-1 | qc1 | `.mstar/knowledge/specs/novel-author-experience.md` §4.1 line 146 (table) | Reconcile "Required: yes" with omission-on-unreachable three-state contract. P1 `2026-06-14-v1.46-spec-cli-hygiene` is chartered for spec sweep (compass §1.1 row 3) and already touches §4.1. |
-| W-2 | qc1 | `novel-author-experience.md` §4.1 line 147 (table) | Clarify `findings_stale` is creator-global scope (not work-scoped); mirror human-path stale-banner separation. Same P1 sweep applies. |
+| W-1 | qc1 | `.mstar/knowledge/specs/novel-writing/author-experience.md` §4.1 line 146 (table) | Reconcile "Required: yes" with omission-on-unreachable three-state contract. P1 `2026-06-14-v1.46-spec-cli-hygiene` is chartered for spec sweep (compass §1.1 row 3) and already touches §4.1. |
+| W-2 | qc1 | `novel-writing/author-experience.md` §4.1 line 147 (table) | Clarify `findings_stale` is creator-global scope (not work-scoped); mirror human-path stale-banner separation. Same P1 sweep applies. |
 
 ### Track as open low-severity residuals (registered in `.mstar/status.json` `residual_findings["2026-06-14-v1.46-author-desk-status-ux"]`)
 
