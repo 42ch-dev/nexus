@@ -1236,14 +1236,14 @@ mod tests {
                     description: "the locket".to_string(),
                     planted: "1".to_string(),
                     paid_off: String::new(),
-                    status: "planned".to_string(),
+                    status: crate::narrative_index::ForeshadowingStatus::Planned,
                 },
                 crate::narrative_index::ForeshadowingRow {
                     id: "F002".to_string(),
                     description: "the prophecy".to_string(),
                     planted: "2".to_string(),
                     paid_off: String::new(),
-                    status: "buried".to_string(),
+                    status: crate::narrative_index::ForeshadowingStatus::Buried,
                 },
             ]),
         )
