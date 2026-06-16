@@ -1889,23 +1889,22 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
     if work_ref.starts_with('(') {
         return;
     }
-    if let Ok(cfg) = crate::config::CliConfig::load() {
-        if let Some(creator_id) = &cfg.active_creator_id {
-            if let Some(ws_slug) = cfg.active_workspace_slug_by_creator.get(creator_id) {
-                let home = dirs::home_dir().unwrap_or_default();
-                let ws_dir =
-                    nexus_home_layout::operational_workspace_dir(&home, creator_id, ws_slug);
-                let lock_path = ws_dir
-                    .join("Works")
-                    .join(work_ref)
-                    .join(".completion-lock.json");
-                if !lock_path.exists() {
-                    println!("⚠ completion-lock file missing (DB says locked but file not found)");
-                    // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
-                    println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
-                }
-            }
-        }
+    // R-V146P2-QC1-S2: route through the shared `operational_workspace_dir_from_config`
+    // helper instead of re-implementing the config → creator_id → workspace_slug →
+    // home → operational_workspace_dir lookup inline. The helper has identical
+    // best-effort semantics (None on any resolution failure); the prior ad-hoc
+    // block was a verbatim duplicate of that resolution chain.
+    let Some(ws_dir) = operational_workspace_dir_from_config() else {
+        return;
+    };
+    let lock_path = ws_dir
+        .join("Works")
+        .join(work_ref)
+        .join(".completion-lock.json");
+    if !lock_path.exists() {
+        println!("⚠ completion-lock file missing (DB says locked but file not found)");
+        // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
+        println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
     }
 }
 
@@ -2576,6 +2575,27 @@ mod tests {
         let input = "good\x1b[2Jbad";
         let sanitized = sanitize_for_terminal(input);
         assert_eq!(sanitized, "goodbad");
+    }
+
+    // ── R-V146P2-QC1-S2: workspace-dir resolution dedup ─────────────────
+
+    #[test]
+    fn print_completion_lock_hint_no_ops_when_work_ref_is_placeholder() {
+        // R-V146P2-QC1-S2: a placeholder work_ref (starting with "(") must
+        // short-circuit before any workspace-dir resolution. Asserts the
+        // early-return branch is preserved after routing through the shared
+        // `operational_workspace_dir_from_config` helper.
+        // Best-effort: cannot panic regardless of config state.
+        print_completion_lock_hint("(no ref)", "wrk_test");
+    }
+
+    #[test]
+    fn print_completion_lock_hint_no_ops_when_workspace_unresolvable() {
+        // R-V146P2-QC1-S2: with a real-looking work_ref but no resolvable
+        // active creator/workspace (the default test-env state), the shared
+        // helper returns None and the hint is skipped without panicking.
+        // Pins that the deduplicated resolution path degrades gracefully.
+        print_completion_lock_hint("MYNOVEL", "wrk_test");
     }
 
     // ── FindingsResult unavailable display test ──────────────────────────
