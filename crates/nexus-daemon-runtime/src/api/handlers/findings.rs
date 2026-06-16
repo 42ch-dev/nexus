@@ -38,6 +38,9 @@ use super::works::read_active_creator_id;
 /// Combined with `#[serde(default)]` on the field, this is the standard
 /// tri-state pattern for nullable PATCH fields. See
 /// `FindingPatch::rule_suggestion` rustdoc for the full semantics.
+// V1.48 P3 T3: Option<Option<T>> is the tri-state pattern required by the
+// R-V147P0-03 spec (distinguish absent / null / value). Not a code smell.
+#[allow(clippy::option_option)]
 fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
