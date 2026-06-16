@@ -7,7 +7,7 @@
 //! optional `rule_suggestion`, and a routing hint (`target_executor`)
 //! indicating which preset should address it.
 
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
@@ -910,6 +910,40 @@ pub async fn prune_resolved_findings_older_than(
     Ok(u32::try_from(result.rows_affected()).unwrap_or(u32::MAX))
 }
 
+/// Count `resolved` findings older than `retention_seconds` without deleting.
+///
+/// The read-only counterpart of [`prune_resolved_findings_older_than`], used
+/// by the `creator works findings prune --dry-run` preview (V1.49 P3,
+/// `novel-writing/quality-loop.md` §9.4).
+///
+/// Same cutoff semantics: `status = 'resolved'` AND `updated_at < now_epoch -
+/// retention_seconds`. `open` and `wont_fix` rows are never counted (per the
+/// retention scope documented on [`prune_resolved_findings_older_than`]).
+///
+/// Uses a runtime query (rather than `sqlx::query_scalar!`) so this additive
+/// seam does not churn the shared `.sqlx/` offline cache, matching the
+/// runtime-query precedent in `work_chapters` (waiver R-V140P0-S3).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn count_resolved_findings_older_than(
+    pool: &SqlitePool,
+    now_epoch: i64,
+    retention_seconds: i64,
+) -> Result<i64, LocalDbError> {
+    let cutoff = now_epoch.saturating_sub(retention_seconds);
+    // SAFETY: SELECT COUNT against findings — runtime query (R-V140P0-S3).
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS cnt FROM findings WHERE status = 'resolved' AND updated_at < ?",
+    )
+    .bind(cutoff)
+    .fetch_one(pool)
+    .await?;
+    let count: i64 = row.get("cnt");
+    Ok(count)
+}
+
 /// Severity count row — used by `count_open_findings_by_severity`.
 #[derive(Debug, Clone)]
 pub struct SeverityCount {
@@ -1719,6 +1753,93 @@ mod tests {
             vec!["pr2".to_string(), "pr3".to_string(), "pr4".to_string()],
             "open, wont_fix, and recent resolved rows must survive the prune"
         );
+    }
+
+    /// V1.49 P3 — `count_resolved_findings_older_than` previews the prune
+    /// count without deleting, and the count matches what
+    /// [`prune_resolved_findings_older_than`] actually deletes (§9.4).
+    #[tokio::test]
+    async fn findings_retention_count_preview_matches_prune() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_count";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 20_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600;
+        let old_ts = now - retention_seconds - 100_000;
+
+        // cp1: old resolved (eligible). cp2: old open (skipped).
+        // cp3: old wont_fix (skipped). cp4: recent resolved (skipped).
+        super::create_finding(
+            &pool,
+            &row(
+                "cp1",
+                WORK,
+                Some(1),
+                "major",
+                "old_resolved",
+                old_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("cp2", WORK, Some(1), "major", "old_open", old_ts, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "cp3",
+                WORK,
+                Some(1),
+                "major",
+                "old_wont_fix",
+                old_ts,
+                "wont_fix",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "cp4",
+                WORK,
+                Some(1),
+                "major",
+                "recent_resolved",
+                now,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+
+        // Preview must report exactly the old resolved count (1)...
+        let preview = super::count_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(preview, 1, "count preview should report 1 old resolved row");
+
+        // ...and nothing was deleted yet.
+        let total_before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+                .bind(WORK)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(total_before, 4, "count preview must not delete any rows");
+
+        // The actual prune deletes the same count the preview reported.
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
     }
 
     /// V1.48 P3 T2 — `open` rows are never purged even when their

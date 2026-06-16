@@ -231,6 +231,23 @@ pub enum FindingsCommand {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+    /// Prune `resolved` findings older than the retention window (V1.49 P3,
+    /// `novel-writing/quality-loop.md` §9.4).
+    ///
+    /// Deletes `resolved` findings whose `updated_at` is older than the
+    /// retention window (default 90 days). `open` and `wont_fix` findings are
+    /// never touched. Pass `--dry-run` to preview the count without deleting.
+    Prune {
+        /// Retention window in days (default 90 = `RETENTION_DEFAULT_DAYS`).
+        #[arg(long, default_value_t = nexus_local_db::RETENTION_DEFAULT_DAYS)]
+        older_than_days: i64,
+        /// Preview the count that WOULD be pruned without deleting.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Emit machine-readable JSON instead of human text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 /// Layer 2 rules subcommands (V1.48 P2).
