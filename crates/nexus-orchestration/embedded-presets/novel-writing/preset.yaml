@@ -90,6 +90,7 @@ states:
             slug: "{{preset.input.slug}}"
             world_kb_block: "{{preset.input.world_kb_block}}"
             open_findings_block: "{{preset.input.open_findings_block}}"
+            foreshadowing_summary: "{{preset.input.foreshadowing_summary}}"
     exit_when:
       kind: manual
     next: draft_chapter
@@ -113,6 +114,7 @@ states:
             slug: "{{preset.input.slug}}"
             world_kb_block: "{{preset.input.world_kb_block}}"
             open_findings_block: "{{preset.input.open_findings_block}}"
+            foreshadowing_summary: "{{preset.input.foreshadowing_summary}}"
       # Transition chapter status from outlined to draft
       - kind: capability
         name: novel.chapter_transition

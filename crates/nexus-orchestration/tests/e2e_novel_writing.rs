@@ -73,6 +73,11 @@ async fn seed_novel_writing_preset_input(
     // does not fail. e2e tests do not exercise findings; empty string means
     // the `{{#if open_findings_block}}` guard omits the section.
     ctx.set("preset.input.open_findings_block", "").await;
+    // V1.49 P1: seed foreshadowing_summary so strict-mode template rendering
+    // does not fail on `{{preset.input.foreshadowing_summary}}`. e2e tests do
+    // not populate the foreshadowing index; empty string means the
+    // `{{#if foreshadowing_summary}}` guard omits the section.
+    ctx.set("preset.input.foreshadowing_summary", "").await;
 }
 
 async fn start_novel_writing_session(

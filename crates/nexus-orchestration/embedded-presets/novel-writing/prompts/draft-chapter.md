@@ -11,6 +11,7 @@ vars:
   slug: { type: string, default: "ch01" }
   world_kb_block: { type: string, default: "" }
   open_findings_block: { type: string, default: "" }
+  foreshadowing_summary: { type: string, default: "" }
 max_tokens: 8000
 ---
 
@@ -42,6 +43,14 @@ The following World context block provides characters, locations, and active rul
 The following open quality findings were surfaced by prior review passes for this chapter (and Work-level findings that affect every chapter). When drafting the body, **actively address** each item — either by writing prose that resolves it, or by deliberately writing around it with a documented reason in the frontmatter `notes`. Do not silently ignore them:
 
 {{open_findings_block}}
+{{/if}}
+
+{{#if foreshadowing_summary}}
+## Active Foreshadowing
+
+The current foreshadowing index (`Works/{{work_ref}}/Outlines/foreshadowing.md`) lists these active items. When the body touches any of them, stay consistent with their `F###` id and status, and pay off / bury them at the right moment:
+
+{{foreshadowing_summary}}
 {{/if}}
 
 ## Frontmatter (REQUIRED)
