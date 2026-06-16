@@ -109,7 +109,7 @@
       "id": "2026-06-17-v1.49-serial-reliability",
       "title": "P3 — Reconcile lock optimization + findings prune CLI + path guard",
       "file": ".mstar/plans/2026-06-17-v1.49-serial-reliability.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": [
         "@fullstack-dev"
@@ -117,9 +117,18 @@
       "working_branch": "feature/v1.49-serial-reliability",
       "merge_target": "iteration/v1.49",
       "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/quality-loop.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
-      "updated_at": "2026-06-17T10:00:00+08:00"
+      "updated_at": "2026-06-18T00:15:00+08:00",
+      "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-serial-reliability/completion.md",
+      "completion_commits": [
+        "aeb95397",
+        "f868961c",
+        "c10e4337",
+        "34c90305"
+      ],
+      "head_sha": "34c90305"
     },
     {
       "id": "2026-06-17-v1.49-hygiene-and-closeout",
