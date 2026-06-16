@@ -528,3 +528,86 @@ pub async fn list_stale_findings_handler(
         findings,
     }))
 }
+
+// ─── Retention prune (V1.49 P3, quality-loop §9.4) ──────────────────────────
+
+/// Query parameters for `POST /v1/local/findings/prune`.
+#[derive(Debug, Default, Deserialize)]
+pub struct PruneFindingsQuery {
+    /// Retention window in days; defaults to [`findings::RETENTION_DEFAULT_DAYS`]
+    /// (90). `resolved` findings whose `updated_at` is older than
+    /// `now - older_than_days` are eligible.
+    #[serde(default)]
+    pub older_than_days: Option<i64>,
+    /// When `true`, return the count of rows that WOULD be deleted without
+    /// deleting them.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
+}
+
+/// Response for `POST /v1/local/findings/prune`.
+#[derive(Debug, Serialize)]
+pub struct PruneFindingsResponse {
+    /// Number of `resolved` rows deleted (or, in dry-run, that WOULD be deleted).
+    pub count: u64,
+    /// Retention window (days) used for the cutoff.
+    pub older_than_days: i64,
+    /// Whether this was a dry-run (no rows deleted).
+    pub dry_run: bool,
+    /// Server-side epoch used as `now` for the cutoff calculation.
+    pub now_epoch: i64,
+}
+
+/// `POST /v1/local/findings/prune` — prune (or preview) `resolved` findings
+/// older than the retention window (V1.49 P3, `novel-writing/quality-loop.md`
+/// §9.4).
+///
+/// Wraps [`findings::prune_resolved_findings_older_than`] (or the read-only
+/// [`findings::count_resolved_findings_older_than`] when `dry_run=true`). The
+/// DAO is global across creators, which matches the local-first single-creator
+/// daemon model (one active creator per workspace). Requires an active creator
+/// for auth consistency with the other Local API endpoints.
+///
+/// # Errors
+///
+/// Returns [`NexusApiError::AuthRequired`] when no active creator is set, or
+/// [`NexusApiError::Internal`] on database failure.
+pub async fn prune_findings_handler(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<PruneFindingsQuery>,
+) -> Result<Json<PruneFindingsResponse>, NexusApiError> {
+    let _creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let older_than_days = query
+        .older_than_days
+        .unwrap_or(findings::RETENTION_DEFAULT_DAYS);
+    let dry_run = query.dry_run.unwrap_or(false);
+    let retention_seconds = older_than_days.saturating_mul(86_400);
+    let now_epoch = chrono::Utc::now().timestamp();
+
+    let count: u64 = if dry_run {
+        let n = findings::count_resolved_findings_older_than(
+            state.pool(),
+            now_epoch,
+            retention_seconds,
+        )
+        .await?;
+        u64::try_from(n).unwrap_or(0)
+    } else {
+        u64::from(
+            findings::prune_resolved_findings_older_than(
+                state.pool(),
+                now_epoch,
+                retention_seconds,
+            )
+            .await?,
+        )
+    };
+
+    Ok(Json(PruneFindingsResponse {
+        count,
+        older_than_days,
+        dry_run,
+        now_epoch,
+    }))
+}

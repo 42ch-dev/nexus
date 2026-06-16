@@ -312,6 +312,11 @@ fn works_routes() -> Router<WorkspaceState> {
             "/v1/local/findings/stale",
             get(handlers::findings::list_stale_findings_handler),
         )
+        // ── Retention prune endpoint (V1.49 P3, quality-loop §9.4) ───
+        .route(
+            "/v1/local/findings/prune",
+            post(handlers::findings::prune_findings_handler),
+        )
         // ── Creator-scoped finding lookup (V1.48 P2 — accept path) ────
         .route(
             "/v1/local/findings/{finding_id}",
