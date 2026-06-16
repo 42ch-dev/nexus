@@ -237,48 +237,6 @@
     ],
     "2026-06-14-v1.46-author-desk-status-ux": [
       {
-        "id": "R-V146P0-QC1-S2",
-        "title": "capture_findings_output test helper duplicates print_findings_summary formatting logic",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-2",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs (production lines 1264-1313; test helper lines 1485-1529)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A; defer V1.49 at P-last unless swept early. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit 435973b5): share findings-summary formatter between prod and test; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (435973b5) — share findings-summary formatter between prod and test. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "435973b5"
-        ]
-      },
-      {
-        "id": "R-V146P0-QC2-S1",
-        "title": "enrich_status_json tests use minimal finding_json helper; full element shape fidelity not asserted",
-        "severity": "low",
-        "source": "qc2 (security/correctness) S-1",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs:1638-1752 (enrich_* tests) + helper at 1411",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit 7b92f317): assert full finding element-shape fidelity in enrich; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (7b92f317) — assert full finding element-shape fidelity in enrich. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "7b92f317"
-        ]
-      },
-      {
         "id": "R-V146P0-QC3-S2",
         "title": "JSON-path findings/stale degradation paths lack tracing observability",
         "severity": "low",
@@ -294,27 +252,6 @@
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: tracing::warn! added at the two silent degradation sites in works/mod.rs (fetch_open_findings Unavailable path + fetch_stale_findings via map_err).",
         "closure_evidence": "iteration/v1.48 @ 397ee075 (commit da8f8a69)"
-      },
-      {
-        "id": "R-V146P0-QC3-S3",
-        "title": "Consider skipping stale fetch when findings fetch already failed",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-003",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs:379-389",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit 940efdc0): route human stale banner through short-timeout fetch; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (940efdc0) — route human stale banner through short-timeout fetch. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "940efdc0"
-        ]
       }
     ],
     "2026-06-14-v1.46-novel-runtime-ux-edges": [
@@ -334,114 +271,9 @@
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: sanitize_for_terminal made pub(crate); applied to Manifest.description in format_preset_run_help; regression test added.",
         "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 83140200)"
-      },
-      {
-        "id": "R-V146P2-QC1-S1",
-        "title": "std::process::exit(0) in library module (maybe_print_preset_run_help_and_exit)",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-1",
-        "scope": "crates/nexus42/src/commands/creator/run.rs:231-235",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit d77a3627): move process::exit out of library help-intercept; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (d77a3627) — move process::exit out of library help-intercept. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "d77a3627"
-        ]
-      },
-      {
-        "id": "R-V146P2-QC1-S2",
-        "title": "Config-resolution dedup opportunity (operational_workspace_dir_from_config helper extracted but callers still ad-hoc)",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-2",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs (pre-existing duplication)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit ed6a64ea): dedup workspace-dir resolution in completion-lock hint; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (ed6a64ea) — dedup workspace-dir resolution in completion-lock hint. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "ed6a64ea"
-        ]
-      },
-      {
-        "id": "R-V146P2-QC3-S1",
-        "title": "T2 help-intercept exit path should flush stdout before std::process::exit(0)",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-001",
-        "scope": "crates/nexus42/src/commands/creator/run.rs:231-235 (maybe_print_preset_run_help_and_exit)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit 3e1c12af): flush stdout before exit in help-intercept path; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (3e1c12af) — flush stdout before exit in help-intercept path. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "3e1c12af"
-        ]
-      },
-      {
-        "id": "R-V146P2-QC3-S2",
-        "title": "CapabilityRegistry::with_builtins() rebuilt on every help intercept",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-002",
-        "scope": "crates/nexus42/src/commands/creator/run.rs:214",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit b88feaf6): extract registry-injected help core (single build); merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (b88feaf6) — extract registry-injected help core (single build). Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "b88feaf6"
-        ]
       }
     ],
     "2026-06-14-v1.46-pool-observability": [
-      {
-        "id": "R-V146P4-QC1-S1",
-        "title": "Only promote_to_active has tracing assertion in T3 capture test (other 8 paths untested)",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-1",
-        "scope": "crates/nexus-local-db/src/novel_pool_entries.rs (test_promote_to_active_emits_trace)",
-        "decision": "defer",
-        "owner": "@fullstack-dev-2",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit 2ccbaeed): cover remaining 3 pool mutation trace paths; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (2ccbaeed) — cover remaining 3 pool mutation trace paths. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "2ccbaeed"
-        ]
-      },
       {
         "id": "R-V146P4-QC1-S2",
         "title": "Verbose UFCS subscriber construction in T3 capture test",
@@ -454,27 +286,6 @@
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
         "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
         "target": "V1.50"
-      },
-      {
-        "id": "R-V146P4-QC3-S1",
-        "title": "Expand trace coverage beyond promote_to_active (only 1 of 9 mutation paths has capture test)",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-1",
-        "scope": "crates/nexus-local-db/src/novel_pool_entries.rs + inspiration_items.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev-2",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit 024bc961): cover all 5 inspiration mutation trace paths; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (024bc961) — cover all 5 inspiration mutation trace paths. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "024bc961"
-        ]
       },
       {
         "id": "R-V146P4-QC3-S2",
@@ -491,27 +302,6 @@
       }
     ],
     "2026-06-14-v1.46-research-auto-chain-e2e": [
-      {
-        "id": "R-V146P3-QC1-S1",
-        "title": "preset_version = 2 magic number duplicated across test assertion and seed SQL",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-1",
-        "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:184 (assertion) + :123 (seed SQL)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave (commit fec1d81a): dedup research preset_version magic number; merged at 60311a9b. CI gates clean (cargo +nightly fmt --all, cargo clippy --all -- -D warnings). 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates.",
-        "closure_note": "V1.49 P-last T1 fix wave (fec1d81a) — dedup research preset_version magic number. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added; two clippy lints fixed at the source. No wire-contract changes.",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
-        "fix_commits": [
-          "fec1d81a"
-        ]
-      },
       {
         "id": "R-V146P3-QC3-S1",
         "title": "Raw SQL fixture duplicates schema knowledge (insert_research_schedule)",
@@ -775,24 +565,6 @@
         "target_date": "V1.50",
         "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md §Residual additions",
         "note": "V1.49 P0 widened DAO SQL + auto_chain consumer; CLI client-side fetch at run.rs::assemble_open_findings_block still hard-codes `?status=open`. Suggested fix at V1.50: extend Local API ListFindingsQuery.status to accept comma-separated list (or add `:actionable` endpoint) + update CLI to pass `open,triaged` + CLI integration test. Auto-chain path (production) is unaffected — already uses widened DAO filter."
-      },
-      {
-        "id": "R-V149P0-03",
-        "title": "Pre-existing `cargo clippy --all -- -D warnings` failure on clean V1.49 integration HEAD (local toolchain drift)",
-        "severity": "low",
-        "source": "P0 fix-wave implementer (out-of-scope finding); verified pre-existing per `.mstar/AGENTS.md` protocol",
-        "scope": "crates/nexus-contracts/src/local/schedule/http.rs:236 (redundant_clone); crates/nexus-orchestration + crates/nexus-daemon-runtime test targets (doc_markdown, unwrap_used). 131 errors on clean base, identical count in W-1 fix worktree (clippy-neutral diff).",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.50",
-        "target_date": "V1.50",
-        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/fix-w1-completion.md §Risks",
-        "note": "Local clippy rust-1.93.0 is stricter than the clippy version CI/qc3 used (qc3 reported --all clean against the same code). Verified pre-existing on iteration/v1.49 @ bc8efc8d (clean base before W-1 fix) with identical 131-error count. Not a V1.49 regression. W-1 fix is clippy-neutral on the directly modified crates. Suggested fix at V1.50: pin rust-toolchain.toml to CI's resolved version, or run `cargo clippy --fix --allow-dirty --allow-staged` and address residual manually per AGENTS.md fix-cadence.",
-        "lifecycle": "resolved",
-        "closed_at": "2026-06-18T01:15:00+08:00",
-        "closure_evidence": "V1.49 P-last T1 fix wave confirmed `cargo clippy --all -- -D warnings` is CLEAN on iteration/v1.49 @ 60311a9b (CI gate). Local clippy rust-1.93.0 was stricter than the clippy used by the original V1.49 P0 implementer; the V1.49 P-last T1 implementer ran the CI gate and confirmed 0 errors. Not a V1.49 regression — confirmed pre-existing was a toolchain-specific drift, not a code issue. Suggested fix (pin rust-toolchain.toml) is no longer needed for V1.49.",
-        "closure_note": "V1.49 P-last T1 fix wave (commit fb52ea11 merge at 60311a9b) — `cargo clippy --all -- -D warnings` CLEAN. The 'pre-existing clippy failure' claim by the V1.49 P0 fix-wave implementer was a toolchain-specific drift, not a V1.49 code issue. Resolved without code change (verified by the V1.49 P-last T1 implementer + QC3 (P0) + QC3 (P1) + QC3 (P2) + QC3 (P3) all independently verifying the CI gate is clean).",
-        "closure_plan_id": "2026-06-17-v1.49-hygiene-and-closeout"
       }
     ],
     "2026-06-17-v1.49-narrative-indexes": [

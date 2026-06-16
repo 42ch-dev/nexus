@@ -1,0 +1,41 @@
+{
+  "plan_id": "2026-06-14-v1.46-pool-observability",
+  "archived_at": "2026-06-18T01:15:00+08:00",
+  "archived_by": "PM (V1.49 P-last T1 WL-A hygiene fix wave)",
+  "residual_findings": [
+    {
+      "id": "R-V146P4-QC1-S1",
+      "title": "Only promote_to_active has tracing assertion in T3 capture test (other 8 paths untested)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 (architecture/maintainability) S-1",
+      "scope": "crates/nexus-local-db/src/novel_pool_entries.rs",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit 2ccbaeed, merged at 60311a9b): cover remaining 3 pool mutation trace paths (4/4 in novel_pool_entries). Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + 2ccbaeed (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "2ccbaeed"
+      ],
+      "re_review_commits": []
+    },
+    {
+      "id": "R-V146P4-QC3-S1",
+      "title": "Expand trace coverage beyond promote_to_active (only 1 of 9 mutation paths has capture test)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc3 (performance/reliability) S-1",
+      "scope": "crates/nexus-local-db/src/novel_pool_entries.rs + inspiration_items.rs",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit 024bc961, merged at 60311a9b): cover all 5 inspiration mutation trace paths (9/9 instrumented across both DAOs). Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + 024bc961 (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "024bc961"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}
