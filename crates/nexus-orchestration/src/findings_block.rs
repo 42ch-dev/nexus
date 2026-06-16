@@ -1,9 +1,9 @@
 //! V1.48 P1 — open findings → prompt block builder.
 //!
 //! Implements the Consumer side of the findings quality loop
-//! (`archived/knowledge/novel-findings-maturity.md` §2 Consumer; `novel-writing/workflow-profile.md`
+//! (`findings-lifecycle.md` §2 Consumer; `novel-writing/workflow-profile.md`
 //! §5.5.2 deferred consumer). The builder renders a bounded, prompt-safe
-//! Markdown summary of open findings so the `novel-writing` preset can
+//! Markdown summary of actionable findings so the `novel-writing` preset can
 //! inject it into outline and draft prompt context.
 //!
 //! ## Why a pure function (no DB handle here)
@@ -16,9 +16,30 @@
 //! passing the rendered block into [`crate::stage_gates::WorkFields`].
 //! This mirrors the established `world_kb_block` pattern and keeps the
 //! DB I/O at the call site that already owns a `SqlitePool`.
+//!
+//! ## V1.49 F6 — actionable set
+//!
+//! Per `findings-lifecycle.md` §2.2, the actionable set expanded from
+//! `{ open }` to `{ open, triaged }`. The canonical constant lives in
+//! the DAO crate ([`nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES`])
+//! so the SQL filter and this builder share one source of truth. The
+//! builder itself does not filter by status — it renders whatever slice
+//! the caller passes — but the docstring and constant re-export below
+//! document the contract for callers building the input slice.
 
 use nexus_local_db::findings::Finding;
 use std::fmt::Write;
+
+/// V1.49 F6 — re-export of the canonical actionable-status set.
+///
+/// Statuses that the prompt consumer (`open_findings_block`) treats as
+/// eligible for prompt injection. Mirrors
+/// [`nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES`] so orchestration
+/// callers can reference it without crossing the crate boundary twice.
+/// `in_review` and the terminal statuses are excluded by default per
+/// `findings-lifecycle.md` §2.2.
+pub const ACTIONABLE_FINDING_STATUSES: &[&str] =
+    nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES;
 
 /// Overlay §2.2 — max number of findings listed in the block.
 pub const MAX_FINDINGS: usize = 8;

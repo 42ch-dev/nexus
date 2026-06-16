@@ -165,6 +165,11 @@ impl NexusApiError {
                     "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
                         StatusCode::UNPROCESSABLE_ENTITY
                     }
+                    // V1.49 F6 (findings-lifecycle.md §2.1): illegal lifecycle
+                    // transitions return 422 with the stable `INVALID_TRANSITION`
+                    // code so callers can distinguish "no such finding" (404)
+                    // from "finding exists but the move is not allowed".
+                    "INVALID_TRANSITION" => StatusCode::UNPROCESSABLE_ENTITY,
                     _ => StatusCode::BAD_REQUEST,
                 }
             }
@@ -205,6 +210,8 @@ impl NexusApiError {
                     "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
                         code.as_str()
                     }
+                    // V1.49 F6: surface findings-lifecycle transition codes as-is.
+                    "INVALID_TRANSITION" => code.as_str(),
                     _ => "BAD_REQUEST",
                 }
             }

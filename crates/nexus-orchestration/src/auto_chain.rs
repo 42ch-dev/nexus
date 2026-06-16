@@ -1016,9 +1016,16 @@ pub async fn set_driver(
 
 // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt block
 // for the produce stage with a selected chapter. Returns `None` when the
-// stage is not `produce`, no chapter is selected, no open findings exist,
-// or the DAO errors (best-effort: logs and proceeds without the block so
-// the auto-chain step is not blocked by a findings-fetch failure).
+// stage is not `produce`, no chapter is selected, no actionable findings
+// exist, or the DAO errors (best-effort: logs and proceeds without the
+// block so the auto-chain step is not blocked by a findings-fetch failure).
+//
+// V1.49 F6: the DAO (`list_open_findings_for_chapter`) now returns rows
+// with `status IN ('open', 'triaged')` per `findings-lifecycle.md` §2.2.
+// The canonical actionable set lives in
+// `nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES` (mirrored by
+// `crate::findings_block::ACTIONABLE_FINDING_STATUSES`); this call site
+// does not re-filter — the DAO is the source of truth.
 async fn compute_open_findings_block_for_produce(
     pool: &SqlitePool,
     creator_id: &str,
