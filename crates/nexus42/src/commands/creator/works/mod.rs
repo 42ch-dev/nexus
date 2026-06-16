@@ -1992,6 +1992,29 @@ mod tests {
         })
     }
 
+    /// R-V146P0-QC2-S1: build a finding element with the FULL list-API shape
+    /// (every field the findings list endpoint returns), not the minimal
+    /// `finding_json` subset. Used to assert `enrich_status_json` preserves
+    /// the element verbatim (full shape fidelity, not just a few fields).
+    fn full_finding_json() -> serde_json::Value {
+        serde_json::json!({
+            "finding_id": "fnd_01H8XK9Q2VTestFidelityFullShape",
+            "work_id": "wrk_full_shape",
+            "chapter": 7,
+            "severity": "blocker",
+            "status": "open",
+            "title": "Continuity error in chapter 7",
+            "description": "Character name changes between paragraphs 3 and 9.",
+            "routing_hint": "→ write",
+            "target_executor": "write",
+            "creator_id": "ctr_full_shape",
+            "kind": "continuity",
+            "rule_suggestion": "Track character names per chapter.",
+            "created_at": 1_718_000_000,
+            "updated_at": 1_718_000_123,
+        })
+    }
+
     // ── FindingsSummary parsing tests ────────────────────────────────────
 
     #[test]
@@ -2268,6 +2291,43 @@ mod tests {
             Some("Test Novel")
         );
         assert_eq!(out.get("current_chapter").and_then(|v| v.as_i64()), Some(3));
+    }
+
+    #[test]
+    fn enrich_novel_preserves_full_finding_element_shape_verbatim() {
+        // R-V146P0-QC2-S1: the existing enrich tests used the minimal
+        // `finding_json` helper and only spot-checked `severity` /
+        // `routing_hint`. Assert full element-shape fidelity: a finding
+        // carrying every list-API field must survive `enrich_status_json`
+        // byte-for-byte (verbatim round-trip), proving no field is dropped,
+        // renamed, or coerced. Guards against a future enrich impl that
+        // re-serializes a subset of fields.
+        let full = full_finding_json();
+        let findings = vec![full.clone()];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present");
+        assert_eq!(arr.len(), 1, "exactly the one full-shape finding");
+        // Verbatim equality: the enriched element equals the input element.
+        assert_eq!(
+            arr[0], full,
+            "enrich must preserve the full finding element verbatim (no field drop/rename/coerce)"
+        );
+        // Pin a handful of the previously-unasserted fields explicitly so a
+        // regression message points at the right field.
+        assert_eq!(arr[0].get("chapter").and_then(|v| v.as_i64()), Some(7));
+        assert_eq!(
+            arr[0].get("description").and_then(|v| v.as_str()),
+            Some("Character name changes between paragraphs 3 and 9.")
+        );
+        assert_eq!(arr[0].get("kind").and_then(|v| v.as_str()), Some("continuity"));
+        assert_eq!(
+            arr[0].get("rule_suggestion").and_then(|v| v.as_str()),
+            Some("Track character names per chapter.")
+        );
+        assert_eq!(arr[0].get("created_at").and_then(|v| v.as_i64()), Some(1_718_000_000));
     }
 
     #[test]
