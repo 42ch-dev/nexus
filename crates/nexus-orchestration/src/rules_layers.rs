@@ -147,11 +147,7 @@ fn format_accepted_entry(finding_id: &str, rule_text: &str, timestamp_rfc3339: &
     // Trim and normalize newlines so the entry renders as a tight block.
     let body = rule_text.trim();
     format!(
-        "{marker}\n**Accepted {ts}** (finding `{fid}`)\n\n{body}\n",
-        marker = format!("<!-- finding_id: {finding_id} -->"),
-        ts = timestamp_rfc3339,
-        fid = finding_id,
-        body = body,
+        "<!-- finding_id: {finding_id} -->\n**Accepted {timestamp_rfc3339}** (finding `{finding_id}`)\n\n{body}\n",
     )
 }
 
@@ -163,8 +159,7 @@ fn ensure_accepted_section(content: &str) -> String {
         content.to_string()
     } else {
         format!(
-            "{content}\n\n{header}\n\n<!-- Appended by `creator works findings accept <finding_id>`. -->\n",
-            header = ACCEPTED_SECTION_HEADER,
+            "{content}\n\n{ACCEPTED_SECTION_HEADER}\n\n<!-- Appended by `creator works findings accept <finding_id>`. -->\n",
         )
     }
 }
