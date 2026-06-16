@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-16-v1.48-rules-runtime"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-16"
 ---
 
@@ -142,3 +142,60 @@ None.
 **Verdict**: **Request Changes**
 
 Rationale: W-1 (lost doc-comment summary on `update_finding_handler`) is a maintainability regression that is independent of any behavior change and is trivial to fix (restore one summary line, drop the orphan `///`). Per `mstar-review-qc` gate rules, an unresolved Warning mandates `Request Changes`. All four Suggestions are non-blocking and can be deferred (S-3 should be tracked for the P5 spec merge). Architecture, test coverage, lint, and format are otherwise clean; the module decomposition, idempotency, atomicity, route registration, and creator-scoping are all sound.
+
+---
+
+## Revalidation (targeted re-review — P2-fix1, W-1 qc1)
+
+- **Re-review timestamp**: 2026-06-16
+- **Reviewer**: @qc-specialist (seat #1, architecture/maintainability)
+- **Assignment scope**: targeted re-review of **P2-fix1 commit `1a5fccac`** (W-1 qc1 doc restore) only.
+- **Review range / Diff basis (re-review)**: `merge-base: 6b6602bd (pre-fix integration HEAD) + tip: 4fc1371d (current integration HEAD)`; focus on commit `1a5fccac`.
+- **Working branch (verified)**: `iteration/v1.48`
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus` (root worktree)
+- **Fix-wave commit list** (`git log --oneline 6b6602bd..4fc1371d`):
+  - `1a5fccac` — fix(findings): restore update_finding_handler doc summary (**W-1 qc1** — in scope)
+  - `469679f4` — feat(rules): add `--dry-run` and `--yes` to `creator works rules reset` (W-1 qc2 — out of scope, owned by `@qc-specialist-2`)
+  - `5dbbf94c` — docs(plan): record P2-fix1 fix wave
+  - `4fc1371d` — harness(v1.48): P2-fix1 integration commit
+
+### W-1 (qc1) — status: **Fixed**
+
+- **Commit**: `1a5fccac` (1 insertion, 0 deletions; surgical doc-only edit)
+- **File**: `crates/nexus-daemon-runtime/src/api/handlers/findings.rs`
+- **Change made**: Restored the PATCH endpoint summary line `` /// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding. `` above the existing `# Panics` block. The previously-orphan `///` (flagged in wave 1) is now a proper rustdoc separator between the summary and the `# Panics` section, matching the local convention documented in the commit message (`create_from_review_handler` uses summary + blank `///` separator + `# Panics`).
+- **Verification of fix (current file L256–L262)**:
+  ```rust
+  256: }
+  257: /// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
+  258: ///
+  259: /// # Panics
+  260: /// Panics if the finding row disappears between successful update and re-fetch
+  261: /// (database invariant violation — should never happen).
+  262: pub async fn update_finding_handler(
+  ```
+  The summary line is restored; the `# Panics` doc block follows correctly; the PATCH endpoint is documented again. No behavior change (doc-comment only).
+- **Disposition**: **Resolved** — the fix matches the wave-1 recommendation exactly (restore the summary line; surgical, no behavior change).
+
+### Re-review verification (lint + tests)
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Workspace clippy | `cargo clippy --all -- -D warnings 2>&1 \| tail -10` | clean (`Finished dev profile`, no warnings) |
+| Nightly fmt | `cargo +nightly fmt --all --check 2>&1 \| tail -5` | clean (no diff emitted) |
+| findings regression | `cargo test -p nexus-daemon-runtime --test findings_api 2>&1 \| tail -15` | **7 passed**, 0 failed — incl. `findings_creator_isolation_cross_creator_404` (the regression-flagged test) |
+| rules_layers | `cargo test -p nexus-orchestration --lib rules_layers 2>&1 \| tail -30` | **16 passed** (10 in `rules_layers::tests` + 6 in `stage_gates::tests::read_rules_layers_*`), 0 failed |
+
+No new findings introduced by `1a5fccac`. The qc2 W-1 fix (`469679f4`) is out of this seat's scope and is handled by `@qc-specialist-2`.
+
+### Updated Summary
+
+| Severity | Count (wave 1) | Count (re-review) |
+|----------|----------------|-------------------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning | 1 → **0** (W-1 Fixed via `1a5fccac`) | 0 |
+| 🟢 Suggestion | 4 (non-blocking; deferred) | 4 (unchanged, deferred) |
+
+### Re-review Verdict: **Approve**
+
+With W-1 (qc1) resolved by the surgical doc-only commit `1a5fccac`, there are **0 Critical** and **0 Warning** findings remaining from this seat's wave-1 report. Per `mstar-review-qc` gate rules, the absence of unresolved Critical/Warning findings permits `Approve`. The four Suggestions (S-1 … S-4) remain non-blocking and deferred — S-3 should be tracked for the P5 spec merge; the others are acknowledged future-work items. Architecture, test coverage, lint, and format are clean.
