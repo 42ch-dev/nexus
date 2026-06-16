@@ -287,6 +287,12 @@ pub async fn get_finding_creator_scoped_handler(
 }
 /// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
 ///
+/// V1.49 F6 (`findings-lifecycle.md` §2.1): when the patch moves `status`,
+/// the DAO validates the lifecycle transition. Illegal transitions surface
+/// as HTTP `422` with the stable error code `INVALID_TRANSITION` (see
+/// [`NexusApiError::BadRequest`] mapping in `errors.rs`). The DAO's
+/// `ConstraintViolation` error string carries the `from → to` context.
+///
 /// # Panics
 /// Panics if the finding row disappears between successful update and re-fetch
 /// (database invariant violation — should never happen).
@@ -310,8 +316,23 @@ pub async fn update_finding_handler(
         rule_suggestion: body.rule_suggestion,
     };
     let now = chrono::Utc::now().timestamp();
-    let updated =
-        findings::update_finding(state.pool(), &creator_id, &finding_id, &patch, now).await?;
+    let updated = findings::update_finding(state.pool(), &creator_id, &finding_id, &patch, now)
+        .await
+        .map_err(|err| match err {
+            // V1.49 F6: surface lifecycle-transition failures and enum
+            // ConstraintViolations from the DAO as 422 INVALID_TRANSITION
+            // so callers can distinguish them from 404 NotFound and from
+            // 500 DATABASE_ERROR. The DAO message already describes the
+            // rejected `from → to` pair (transition) or the bad enum
+            // value (severity / target_executor / unknown status).
+            nexus_local_db::LocalDbError::ConstraintViolation { constraint, .. } => {
+                NexusApiError::BadRequest {
+                    code: "INVALID_TRANSITION".to_string(),
+                    message: constraint,
+                }
+            }
+            other => other.into(),
+        })?;
     if !updated {
         return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
     }

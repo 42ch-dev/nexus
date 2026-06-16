@@ -1,0 +1,42 @@
+-- V1.49 P0 (F6) — extend `findings.status` lifecycle.
+--
+-- Implements `.mstar/knowledge/specs/novel-writing/findings-lifecycle.md` §2
+-- (Draft overlay V1.49): the status enum grows from the V1.39 three-state
+-- minimum (`open`, `resolved`, `wont_fix`) to a six-state lifecycle:
+--
+--   open | triaged | in_review | resolved | wont_fix | duplicate
+--
+-- ## Why this migration is a no-op DDL marker
+--
+-- `SQLite` does **not** support `ALTER TABLE ADD CONSTRAINT` for `CHECK`
+-- constraints on existing tables (see R-V139P1-W-1 in
+-- `crates/nexus-local-db/src/findings.rs::validate_finding_enums`). The
+-- original `202606090002_findings.sql` migration created the `findings`
+-- table **without** a `CHECK` constraint on `status`; runtime validation
+-- (`VALID_STATUSES` + `validate_finding_enums`) is the sole enforcement
+-- mechanism. There is therefore no schema object to alter.
+--
+-- This migration exists to:
+--   1. Document the V1.49 lifecycle expansion at the canonical site
+--      (the migrations directory) so a fresh `git clone` + `run_migrations`
+--      produces a database whose `schema_migrations` history reflects the
+--      enum change.
+--   2. Run a harmless, idempotent `ANALYZE` so sqlx records the migration
+--      as applied (sqlx's migrator expects at least one SQL statement).
+--
+-- ## Backward compatibility
+--
+-- Per overlay §2.3: existing rows remain valid. No automatic status
+-- rewrite is performed on migration. The default for new rows remains
+-- `open`. Existing rows with `open`, `resolved`, or `wont_fix` keep
+-- their original status values.
+--
+-- ## Enforcement ownership
+--
+-- `VALID_STATUSES` (in `findings.rs`) and the transition table
+-- (`is_valid_transition`) are the runtime contract. Any non-Rust caller
+-- (future API, direct SQL) must be validated before reaching the DB;
+-- the DAO (`update_finding`) performs the transition check on every
+-- status patch.
+
+ANALYZE findings;
