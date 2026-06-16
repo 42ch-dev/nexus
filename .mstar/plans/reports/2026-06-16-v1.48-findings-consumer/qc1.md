@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-16-v1.48-findings-consumer"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-16"
+revalidation_at: "2026-06-16T09:20:00Z"
 ---
 
 # Code Review Report
@@ -185,3 +186,119 @@ mandates `Request Changes`. The fix is small and localized (add a
 stored-row assertion or a `build_preset_input` unit test with
 `Some(block)`). No Critical findings; the architecture and
 maintainability of the P1 slice are sound.
+
+---
+
+## Revalidation
+
+**Reviewer**: @qc-specialist (reviewer #1, architecture/maintainability)
+**Re-review Timestamp**: 2026-06-16T09:20:00Z
+**Trigger**: Targeted re-review after P1-fix1 (fix wave for W-1).
+**Scope of re-review**: P1-fix1 commit `1acabc2c` only (and the
+no-op merge `d7502672`); the original P1 work is **not** re-reviewed.
+**Diff basis**: `53108f79..d7502672` (fix-wave); focus commit `1acabc2c`.
+
+### Fix wave inspected
+
+```
+d7502672 harness(v1.48): P1-fix1 — W-1 (qc1) regression test for open_findings_block wiring
+1acabc2c fix(v1.48-p1): W-1 regression test for open_findings_block wiring
+```
+
+`git diff 53108f79..d7502672 --stat` shows the code-bearing change is
+isolated to commit `1acabc2c`:
+
+```
+.mstar/plans/2026-06-16-v1.48-findings-consumer.md            |  1 +
+crates/nexus-orchestration/tests/findings_consumer.rs          | 94 ++++++++++++++
+```
+
+The merge `d7502672` is a no-op carry-over of the same change set.
+Production code under `crates/nexus-orchestration/src/` is **unchanged**
+by this fix wave — consistent with the implementer's "production code is
+unchanged" claim in the commit message.
+
+### W-1 — Fixed
+
+**Commit**: `1acabc2c`
+**Change made**: Added two integration tests in
+`crates/nexus-orchestration/tests/findings_consumer.rs` that call the
+**production** helper `auto_chain::build_auto_chain_schedule` directly
+(not a synthetic re-derivation) and assert the wiring output.
+
+1. `novel_writing_persists_open_findings_block_to_preset_input`
+   - Calls `build_auto_chain_schedule("produce", CREATOR, &work, Some(1), None, Some(known_block))`
+     — the same pure helper the enqueue path uses (no DB pool, no async).
+   - Asserts `AddScheduleRequest.input["open_findings_block"].as_str() ==
+     Some(known_block)` — i.e. the `Some(block)` value is forwarded
+     **verbatim** through
+     `build_auto_chain_schedule → WorkFields.open_findings_block →
+     build_schedule_for_stage → build_preset_input → input JSON`.
+   - Guards the exact regression class described in W-1: if
+     `build_auto_chain_schedule` dropped the param (→ `WorkFields` field
+     defaults to `None` → `unwrap_or_default()` → `""`) or if
+     `build_preset_input` removed the `open_findings_block` key insert
+     (→ JSON `Null` → `.as_str()` returns `None`), this assertion fails.
+     Confirmed by static trace of the production chain
+     (`auto_chain.rs:791`, `stage_gates.rs:100`, `stage_gates.rs:237-243`).
+
+2. `novel_writing_preset_input_coerces_none_open_findings_block_to_empty`
+   - Companion for AC2: `open_findings_block: None` coerces to `""` so
+     the template's `{{#if open_findings_block}}` guard omits the section
+     (no empty sentinel noise).
+   - Asserts `input["open_findings_block"].as_str() == Some("")`.
+
+**Verdict (W-1)**: **Fixed**. The fix addresses both sub-options of the
+W-1 "Fix" recommendation (asserts the stored/input JSON rather than
+re-deriving via DAO+builder). The test names and rationale are documented
+in situ. The implementer's mutation-probe claim ("test verified to FAIL
+when `open_findings_block` dropped to `None` in `WorkFields`, then
+reverted") is consistent with the production code trace above — a wiring
+break would change the asserted value and fail the test.
+
+**Hermeticity**: both tests use `novel_work` (an in-memory `WorkRecord`
+helper) and `CREATOR` (a const `&str`); `build_auto_chain_schedule` is a
+pure synchronous function with no pool, no I/O, no timing assumptions,
+and no shared mutable state. Confirmed hermetic.
+
+### Other findings (unchanged)
+
+- **S-1** (builder H2 redundancy): not in fix-wave scope; remains a
+  non-blocking Suggestion. No change.
+- **S-2** (`preset_version_for_id` mirror): not in fix-wave scope;
+  remains a non-blocking Suggestion (pre-existing pattern). No change.
+- No new findings introduced by the fix wave.
+
+### Validation (re-review)
+
+| Check | Command | Result |
+|-------|---------|--------|
+| findings_consumer tests (run 1) | `cargo test -p nexus-orchestration --test findings_consumer` | 4 passed; 0 failed (incl. both new W-1 tests) |
+| findings_consumer tests (run 2) | same | 4 passed; 0 failed |
+| findings_consumer tests (run 3) | same | 4 passed; 0 failed |
+| broader findings scope (run 1) | `cargo test -p nexus-orchestration -- findings_consumer findings_block` | lib 7 + matched 3 = 10 passed; 0 failed |
+| broader findings scope (run 2) | same | 10 passed; 0 failed |
+| broader findings scope (run 3) | same | 10 passed; 0 failed |
+| clippy (workspace) | `cargo clippy --all -- -D warnings` | clean (no warnings) |
+| nightly fmt (workspace) | `cargo +nightly fmt --all --check` | clean (no output) |
+
+**Flake assessment**: 0 flakes across 6 total test runs (3 × narrow,
+3 × broader). Tests are deterministic and hermetic; no flake risk
+identified.
+
+### Summary (post re-review)
+
+| Severity | Count | Status |
+|----------|-------|--------|
+| 🔴 Critical | 0 | — |
+| 🟡 Warning | 0 | W-1 **Fixed** in `1acabc2c` |
+| 🟢 Suggestion | 2 | S-1, S-2 — non-blocking, unchanged |
+
+**Final Verdict (re-review)**: **Approve**
+
+Rationale: the sole blocking Warning (W-1) is resolved by commit
+`1acabc2c`, which adds a direct wiring-assertion test that would catch
+the described regression class. No Critical findings; no new findings
+introduced; all validation (tests × 6 runs, clippy, nightly fmt) is
+clean. S-1 and S-2 remain non-blocking Suggestions carried forward
+(architectural awareness only).
