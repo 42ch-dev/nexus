@@ -159,3 +159,87 @@ fn works_help_lists_all_expected_subcommands() {
         );
     }
 }
+
+// =============================================================================
+// `creator works intake` — CLI surface (V1.49 P2, R-V147P1-01)
+// =============================================================================
+
+/// `creator works intake --help` documents the subcommand and flags.
+#[test]
+fn works_intake_help_shows_expected_text() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "intake", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    assert!(
+        help_text.contains("[<WORK_ID>]") || help_text.contains("WORK_ID"),
+        "works intake --help must show the optional WORK_ID argument: {help_text}"
+    );
+    assert!(
+        help_text.contains("--json"),
+        "works intake --help must list --json flag: {help_text}"
+    );
+    assert!(
+        help_text.contains("creative-brief-intake"),
+        "works intake --help must mention the creative-brief-intake preset: {help_text}"
+    );
+}
+
+/// `creator works --help` lists the `intake` subcommand.
+#[test]
+fn works_help_lists_intake_subcommand() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    assert!(
+        help_text.contains("intake"),
+        "creator works --help must list 'intake' subcommand: {help_text}"
+    );
+}
+
+// =============================================================================
+// `creator works reconcile-chapters` — dry-run / --yes flags (V1.49 P2, R-V148P4-W2)
+// =============================================================================
+
+/// `creator works reconcile-chapters --help` documents the new safety flags.
+#[test]
+fn works_reconcile_chapters_help_lists_dry_run_and_yes() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "reconcile-chapters", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    assert!(
+        help_text.contains("--dry-run"),
+        "reconcile-chapters --help must list --dry-run: {help_text}"
+    );
+    assert!(
+        help_text.contains("--yes"),
+        "reconcile-chapters --help must list --yes: {help_text}"
+    );
+    assert!(
+        help_text.contains("-y"),
+        "reconcile-chapters --help must list the -y short form: {help_text}"
+    );
+}
