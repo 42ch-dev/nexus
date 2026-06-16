@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-17T10:00:00+08:00",
+  "updated_at": "2026-06-17T18:30:00+08:00",
   "plans": [
     {
       "id": "2026-06-17-v1.49-harness-docs-prepare",
@@ -20,7 +20,7 @@
       "id": "2026-06-17-v1.49-findings-lifecycle",
       "title": "P0 — F6 extended findings lifecycle",
       "file": ".mstar/plans/2026-06-17-v1.49-findings-lifecycle.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.49-findings-lifecycle",
@@ -29,7 +29,15 @@
       "primary_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
-      "updated_at": "2026-06-17T10:00:00+08:00"
+  "updated_at": "2026-06-17T18:45:00+08:00",
+      "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md",
+      "completion_commits": [
+        "237eec20",
+        "613ef56e",
+        "4356bf1f",
+        "bb4ea654"
+      ],
+      "head_sha": "bb4ea654"
     },
     {
       "id": "2026-06-17-v1.49-narrative-indexes",
@@ -96,6 +104,7 @@
   "v1_46_iteration_complete": true,
   "v1_47_iteration_complete": true,
   "v1_48_iteration_complete": true,
+  "v1_49_p0_status": "InReview — QC tri-review complete 2026-06-17; consolidated verdict Request Changes; fix wave pending (R-V149P0-02)",
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -664,6 +673,34 @@
         "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-findings-producer/qc-consolidated.md",
         "note": "Deferred. P0 work_ref is app-controlled today; P1+ prompt injection surfaces `rule_suggestion` and `body` to LLMs, so a small safe-resolve guard or invariant test should be added before that touch point. [P-last T3: bulk-deferred to V1.49.]",
         "target": "V1.49"
+      }
+    ],
+    "2026-06-17-v1.49-findings-lifecycle": [
+      {
+        "id": "R-V149P0-01",
+        "title": "CLI `creator run` client-side findings fetch still uses `?status=open`, missing V1.49 `triaged` actionable set",
+        "severity": "medium",
+        "source": "P0 implementer (out-of-scope finding)",
+        "scope": "crates/nexus42/src/commands/creator/run.rs::assemble_open_findings_block (line ~586 builds `/v1/local/works/{work_id}/findings?status=open&limit=200`)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50",
+        "target_date": "V1.50",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md §Residual additions",
+        "note": "V1.49 P0 widened DAO SQL + auto_chain consumer; CLI client-side fetch at run.rs::assemble_open_findings_block still hard-codes `?status=open`. Suggested fix at V1.50: extend Local API ListFindingsQuery.status to accept comma-separated list (or add `:actionable` endpoint) + update CLI to pass `open,triaged` + CLI integration test. Auto-chain path (production) is unaffected — already uses widened DAO filter."
+      },
+      {
+        "id": "R-V149P0-02",
+        "title": "LocalDbError::ConstraintViolation overloading leaks DAO internals + collapses distinct failure classes on the PATCH public surface",
+        "severity": "medium",
+        "source": "qc1 W-1 + qc2 W-1 (converging); qc3 S-1 cross-reference",
+        "scope": "crates/nexus-local-db/src/findings.rs (DAO ConstraintViolation emission sites); crates/nexus-daemon-runtime/src/api/handlers/findings.rs::update_finding_handler (lines 319-335); crates/nexus-daemon-runtime/src/api/errors.rs (line 172, 422 mapping)",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.49 P0 fix wave",
+        "target_date": "V1.49 P0 fix wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/qc-consolidated.md §W-1",
+        "note": "Single LocalDbError::ConstraintViolation variant is emitted for at least four distinct conditions (illegal transition, invalid severity, invalid target_executor, unknown status membership). Handler remaps every occurrence to BadRequest { code: INVALID_TRANSITION, message: <raw DAO constraint text> }. Fix: DAO-level split — IllegalTransition { from, to } + InvalidEnum { field, value, allowed }. Handler maps IllegalTransition→INVALID_TRANSITION (422), InvalidEnum→INVALID_INPUT (422). Add tracing::warn! on both arms. Update the test findings_lifecycle_rejects_unknown_status_value to assert INVALID_INPUT. Add 1 malformed-status injection test."
       }
     ]
   }
