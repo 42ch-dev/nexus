@@ -74,7 +74,7 @@
       "id": "2026-06-17-v1.49-author-desk-ux",
       "title": "P2 — Intake re-trigger + reconcile preview",
       "file": ".mstar/plans/2026-06-17-v1.49-author-desk-ux.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.49-author-desk-ux",
@@ -83,7 +83,15 @@
       "primary_spec": ".mstar/knowledge/specs/novel-writing/author-experience.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
-      "updated_at": "2026-06-17T10:00:00+08:00"
+      "updated_at": "2026-06-17T22:30:00+08:00",
+      "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-author-desk-ux/completion.md",
+      "completion_commits": [
+        "4ab9e0be",
+        "0948cb87",
+        "9aea7091",
+        "7fe873f7"
+      ],
+      "head_sha": "7fe873f7"
     },
     {
       "id": "2026-06-17-v1.49-serial-reliability",
