@@ -80,7 +80,8 @@ const MAX_REASON_LEN: usize = 512;
 /// on a creator that already has a completed novel. Extracted to a `const`
 /// (R-V146P1-QC2-S1) so the test asserts against the **production** source
 /// rather than a parallel string snapshot that drifts silently on copy edits.
-const NOVEL_COMPLETION_GUARD_MESSAGE: &str = "This Work is complete; see the novel-author-experience spec. \
+const NOVEL_COMPLETION_GUARD_MESSAGE: &str =
+    "This Work is complete; see the novel-author-experience spec. \
      To start a new Work, use `nexus42 creator bootstrap --init-preset \
      novel-project-init` (see the creator-run-preset-entry spec)";
 
