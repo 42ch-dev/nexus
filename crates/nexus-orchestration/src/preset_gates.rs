@@ -977,14 +977,30 @@ mod tests {
         );
     }
 
+    /// Assert the remediation references an executable command token, not just
+    /// a spec filename. Per R-V146P1-QC3-S2: remediation copy must be
+    /// actionable (cite a runnable command), not merely point at a doc.
+    fn assert_remediation_references_command(failed: &FailedGate, command: &str) {
+        assert!(
+            failed.remediation.contains(command),
+            "remediation should reference executable command `{command}`: {:?}",
+            failed.remediation
+        );
+    }
+
     /// V1.43 (P1 §3 remediation — `preset_gates_failed`): `work_field` remediation
-    /// strings cite quickstart §2/§3.
+    /// strings cite the preset-entry spec and an executable command.
     #[tokio::test]
     async fn remediation_work_field_cites_quickstart() {
+        // R-V146P1-QC3-S2: exercise the `work_ref` branch (not `work_profile`)
+        // so the remediation includes an executable `creator bootstrap`
+        // command, giving command-validity coverage in addition to the spec
+        // citation. `work_profile`'s remediation is field-setting guidance
+        // with no command and is covered by the spec-citation helper.
         let gates = vec![Gate::WorkField {
-            field: "work_profile".to_string(),
+            field: "work_ref".to_string(),
             op: GateOp::Equals {
-                value: serde_json::json!("essay"),
+                value: serde_json::json!("nonexistent"),
             },
         }];
         let work = make_work();
@@ -1000,6 +1016,7 @@ mod tests {
             .unwrap();
         let err = result.unwrap_err();
         assert_remediation_cites_spec(&err.failed_gates[0], "creator-run-preset-entry");
+        assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
     /// V1.46 P1 (spec hygiene): filesystem gate remediation cites the
@@ -1023,6 +1040,7 @@ mod tests {
             .unwrap();
         let err = result.unwrap_err();
         assert_remediation_cites_spec(&err.failed_gates[0], "creator-run-preset-entry");
+        assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
     /// V1.46 P1 (spec hygiene): `previous_preset` remediation for
@@ -1047,6 +1065,7 @@ mod tests {
             .unwrap();
         let err = result.unwrap_err();
         assert_remediation_cites_spec(&err.failed_gates[0], "creator-run-preset-entry");
+        assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
     /// V1.46 P1 (spec hygiene): `previous_preset` remediation for
@@ -1071,6 +1090,7 @@ mod tests {
             .unwrap();
         let err = result.unwrap_err();
         assert_remediation_cites_spec(&err.failed_gates[0], "novel-author-experience");
+        assert_remediation_references_command(&err.failed_gates[0], "creator bootstrap");
     }
 
     // ── V1.47 P1 intake remediation tests (R-V146P1-QC3-S1) ──────────────
