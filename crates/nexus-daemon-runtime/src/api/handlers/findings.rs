@@ -289,9 +289,17 @@ pub async fn get_finding_creator_scoped_handler(
 ///
 /// V1.49 F6 (`findings-lifecycle.md` §2.1): when the patch moves `status`,
 /// the DAO validates the lifecycle transition. Illegal transitions surface
-/// as HTTP `422` with the stable error code `INVALID_TRANSITION` (see
-/// [`NexusApiError::BadRequest`] mapping in `errors.rs`). The DAO's
-/// `ConstraintViolation` error string carries the `from → to` context.
+/// as HTTP `422` with the stable error code `INVALID_TRANSITION`; invalid
+/// PATCH enum values (`severity` / `status` membership / `target_executor`)
+/// surface as `422 INVALID_INPUT`. The DAO emits **typed** variants
+/// (`IllegalTransition` / `InvalidEnum`) for these, so the mapping below
+/// carries no string-prefix sniffing (see [`NexusApiError::BadRequest`] in
+/// `errors.rs`).
+///
+/// V1.49 P0 W-1 (qc1 S-1): a self-loop — `status: "<current>"` on a finding
+/// already in that state — is **rejected** as `INVALID_TRANSITION`. Callers
+/// that only want to refresh `updated_at` (without changing status) must
+/// omit `status` from the patch body entirely.
 ///
 /// # Panics
 /// Panics if the finding row disappears between successful update and re-fetch
@@ -319,16 +327,43 @@ pub async fn update_finding_handler(
     let updated = findings::update_finding(state.pool(), &creator_id, &finding_id, &patch, now)
         .await
         .map_err(|err| match err {
-            // V1.49 F6: surface lifecycle-transition failures and enum
-            // ConstraintViolations from the DAO as 422 INVALID_TRANSITION
-            // so callers can distinguish them from 404 NotFound and from
-            // 500 DATABASE_ERROR. The DAO message already describes the
-            // rejected `from → to` pair (transition) or the bad enum
-            // value (severity / target_executor / unknown status).
-            nexus_local_db::LocalDbError::ConstraintViolation { constraint, .. } => {
+            // V1.49 P0 W-1: the DAO now emits typed variants for the PATCH
+            // surface. `IllegalTransition` → INVALID_TRANSITION (422);
+            // `InvalidEnum` → INVALID_INPUT (422). Both are observed with a
+            // structured `tracing::warn!` (qc3 S-2) so repeated illegal PATCH
+            // attempts leave a daemon-side trail. No string-sniffing: each
+            // variant carries its own structured payload.
+            nexus_local_db::LocalDbError::IllegalTransition { from, to } => {
+                tracing::warn!(
+                    creator_id = %creator_id,
+                    finding_id = %finding_id,
+                    from = %from,
+                    to = %to,
+                    "findings PATCH: illegal lifecycle transition"
+                );
                 NexusApiError::BadRequest {
                     code: "INVALID_TRANSITION".to_string(),
-                    message: constraint,
+                    message: format!("invalid status transition '{from}' → '{to}'"),
+                }
+            }
+            nexus_local_db::LocalDbError::InvalidEnum {
+                field,
+                value,
+                allowed,
+            } => {
+                tracing::warn!(
+                    creator_id = %creator_id,
+                    finding_id = %finding_id,
+                    field = %field,
+                    value = %value,
+                    "findings PATCH: invalid enum value"
+                );
+                NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: format!(
+                        "invalid {field} value '{value}'; allowed: {}",
+                        allowed.join(", ")
+                    ),
                 }
             }
             other => other.into(),

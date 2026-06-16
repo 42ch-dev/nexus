@@ -153,6 +153,15 @@ pub fn is_valid_status(status: &str) -> bool {
 /// to refresh `updated_at` without changing status must omit `status` from
 /// the patch. Both endpoints must already be valid members of
 /// [`VALID_STATUSES`]; unknown endpoints return `false`.
+///
+/// V1.49 P0 W-1 (qc2 S-3): `duplicate` and `in_review` are owner-controlled
+/// "hide from prompt" levers. `duplicate` is a **terminal sink** (no
+/// outbound edges) — it is not a "parked for later" state. `in_review` is
+/// the intended holding pen for master review: it is reachable from
+/// `open`/`triaged` and can only advance to a terminal state. Moving a
+/// finding into either state excludes it from the actionable set
+/// (`open` | `triaged`) and from the produce-prompt consumer; this is by
+/// design and creator-scoped (no cross-creator abuse is possible).
 #[must_use]
 pub fn is_valid_transition(from: &str, to: &str) -> bool {
     if from == to || !is_valid_status(from) || !is_valid_status(to) {
@@ -635,12 +644,25 @@ pub async fn get_finding(
 /// Returns:
 /// - `Ok(())` when the row is missing (the UPDATE will surface `NotFound`
 ///   via `rows_affected = 0`), or when `current → new_status` is a legal edge.
-/// - `Err(ConstraintViolation)` when the transition violates
+/// - `Err(IllegalTransition)` when the transition violates
 ///   [`is_valid_transition`].
+///
+/// V1.49 P0 W-1: the typed [`LocalDbError::IllegalTransition`] variant
+/// carries the structured `from`/`to` pair so the PATCH handler can map it
+/// to the stable `INVALID_TRANSITION` code without inspecting constraint
+/// text (qc1 W-1 / qc2 W-1).
+///
+/// V1.49 P0 W-1 (qc1 S-3 / qc3 S-3): this read-before-write is best-effort
+/// single-statement under `SQLite`'s serialized writer. A stronger
+/// atomicity guarantee is achievable by folding the guard into the UPDATE
+/// as a compare-and-swap, e.g.
+/// `UPDATE findings SET status = ?, updated_at = ? WHERE creator_id = ? AND finding_id = ? AND status = ?`
+/// and detecting a lost race via `rows_affected()`. The current two-statement
+/// form is retained for V1.49; the CAS form is the documented upgrade path.
 ///
 /// # Errors
 ///
-/// Returns [`LocalDbError::ConstraintViolation`] on illegal transition and
+/// Returns [`LocalDbError::IllegalTransition`] on illegal transition and
 /// [`LocalDbError::Sqlx`] on database failure.
 async fn enforce_status_transition(
     pool: &SqlitePool,
@@ -667,12 +689,11 @@ async fn enforce_status_transition(
     if is_valid_transition(&from, new_status) {
         Ok(())
     } else {
-        Err(LocalDbError::ConstraintViolation {
-            table: "findings".to_string(),
-            constraint: format!(
-                "invalid status transition '{from}' → '{new_status}'; \
-                 see findings-lifecycle.md §2.1 for the lifecycle diagram"
-            ),
+        // V1.49 P0 W-1: typed variant so the PATCH handler maps this to
+        // `INVALID_TRANSITION` without string-prefix sniffing.
+        Err(LocalDbError::IllegalTransition {
+            from,
+            to: new_status.to_string(),
         })
     }
 }
@@ -691,8 +712,12 @@ async fn enforce_status_transition(
 /// **V1.49 F6** (`findings-lifecycle.md` §2.1): when `patch.status` is
 /// `Some(new_status)`, the DAO fetches the row's current status and rejects
 /// the transition via [`is_valid_transition`]. Invalid transitions return
-/// [`LocalDbError::ConstraintViolation`] (which the daemon API maps to HTTP
-/// 422 — see `nexus-daemon-runtime::api::handlers::findings::update_finding_handler`).
+/// [`LocalDbError::IllegalTransition`] and invalid enum values
+/// (`severity` / `status` membership / `target_executor`) return
+/// [`LocalDbError::InvalidEnum`] — both of which the daemon API maps to
+/// HTTP 422 with distinct stable codes (`INVALID_TRANSITION` vs
+/// `INVALID_INPUT` — see
+/// `nexus-daemon-runtime::api::handlers::findings::update_finding_handler`).
 /// This read-before-write is best-effort single-statement: under concurrent
 /// writes a TOCTOU race is possible, but `SQLite` serialises writes and the
 /// WHERE clause scopes the UPDATE to `(creator_id, finding_id)`.
@@ -700,7 +725,9 @@ async fn enforce_status_transition(
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails, the finding is not
-/// found, or `patch.status` proposes an illegal lifecycle transition.
+/// found, `patch.status` proposes an illegal lifecycle transition
+/// ([`LocalDbError::IllegalTransition`]), or a patched enum field is not a
+/// member of its allowed set ([`LocalDbError::InvalidEnum`]).
 pub async fn update_finding(
     pool: &SqlitePool,
     creator_id: &str,
@@ -708,37 +735,36 @@ pub async fn update_finding(
     patch: &FindingPatch,
     now_epoch: i64,
 ) -> Result<bool, LocalDbError> {
-    // R-V139P1-W-1: validate patch enum fields if provided
+    // R-V139P1-W-1: validate patch enum fields if provided.
+    // V1.49 P0 W-1: PATCH-path enum failures emit the typed `InvalidEnum`
+    // variant (mapped to `INVALID_INPUT` by the handler) so they are
+    // distinguishable from illegal transitions (`INVALID_TRANSITION`). The
+    // create path continues to use the shared `validate_finding_enums`
+    // helper, which still emits `ConstraintViolation`.
     if let Some(ref sev) = patch.severity {
         if !VALID_SEVERITIES.contains(&sev.as_str()) {
-            return Err(LocalDbError::ConstraintViolation {
-                table: "findings".to_string(),
-                constraint: format!(
-                    "invalid severity '{sev}'; expected one of: {}",
-                    VALID_SEVERITIES.join(", ")
-                ),
+            return Err(LocalDbError::InvalidEnum {
+                field: "severity",
+                value: sev.clone(),
+                allowed: VALID_SEVERITIES,
             });
         }
     }
     if let Some(ref st) = patch.status {
         if !VALID_STATUSES.contains(&st.as_str()) {
-            return Err(LocalDbError::ConstraintViolation {
-                table: "findings".to_string(),
-                constraint: format!(
-                    "invalid status '{st}'; expected one of: {}",
-                    VALID_STATUSES.join(", ")
-                ),
+            return Err(LocalDbError::InvalidEnum {
+                field: "status",
+                value: st.clone(),
+                allowed: VALID_STATUSES,
             });
         }
     }
     if let Some(ref te) = patch.target_executor {
         if !VALID_TARGET_EXECUTORS.contains(&te.as_str()) {
-            return Err(LocalDbError::ConstraintViolation {
-                table: "findings".to_string(),
-                constraint: format!(
-                    "invalid target_executor '{te}'; expected one of: {}",
-                    VALID_TARGET_EXECUTORS.join(", ")
-                ),
+            return Err(LocalDbError::InvalidEnum {
+                field: "target_executor",
+                value: te.clone(),
+                allowed: VALID_TARGET_EXECUTORS,
             });
         }
     }
@@ -934,6 +960,12 @@ pub struct StaleFindingSummary {
 /// timeout daemon task can be exercised hermetically with a mocked clock
 /// (V1.39 P4 T5).
 ///
+/// V1.49 P0 W-1 (qc1 S-2): this intentionally queries `status = 'open'`
+/// only — **not** the actionable set (`open` | `triaged`). Stale detection
+/// is about unactioned *open* findings; the V1.49 actionable-set widening
+/// applies solely to the produce-prompt consumer
+/// ([`list_open_findings_for_chapter`]).
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
@@ -1014,6 +1046,12 @@ pub async fn list_all_stale_open_findings(
 /// Count open findings for a Work, grouped by severity.
 ///
 /// Returns a list of (severity, count) pairs for all open findings.
+///
+/// V1.49 P0 W-1 (qc1 S-2): this intentionally queries `status = 'open'`
+/// only — **not** the actionable set (`open` | `triaged`). The severity
+/// summary is the "open" bucket specifically; the V1.49 actionable-set
+/// widening applies solely to the produce-prompt consumer
+/// ([`list_open_findings_for_chapter`]).
 ///
 /// R-V139P1-W-5: investigated compile-time `query_as!` conversion; `SQLite`'s
 /// `COUNT(*)` return type is not reliably inferred by `sqlx` offline macros.
@@ -2158,7 +2196,7 @@ mod tests {
     }
 
     /// V1.49 F6 — `update_finding` rejects illegal transitions with
-    /// `ConstraintViolation`. Three representative rejections cover the
+    /// `IllegalTransition`. Three representative rejections cover the
     /// terminal-locked, self-loop, and reverse-edge classes.
     #[tokio::test]
     async fn update_finding_rejects_illegal_transitions() {
@@ -2197,17 +2235,11 @@ mod tests {
         .await
         .expect_err("resolved → open must be rejected");
         match err {
-            LocalDbError::ConstraintViolation {
-                ref table,
-                ref constraint,
-            } => {
-                assert_eq!(table, "findings");
-                assert!(
-                    constraint.contains("resolved") && constraint.contains("open"),
-                    "constraint should describe the rejected pair: {constraint}"
-                );
+            LocalDbError::IllegalTransition { from, to } => {
+                assert_eq!(from.as_str(), "resolved");
+                assert_eq!(to.as_str(), "open");
             }
-            other => panic!("expected ConstraintViolation, got {other:?}"),
+            other => panic!("expected IllegalTransition, got {other:?}"),
         }
 
         // (b) self-loop resolved → resolved: rejected (callers must omit
@@ -2225,8 +2257,8 @@ mod tests {
         .await
         .expect_err("self-loop resolved → resolved must be rejected");
         assert!(
-            matches!(err, LocalDbError::ConstraintViolation { .. }),
-            "self-loop should surface as ConstraintViolation, got {err:?}"
+            matches!(err, LocalDbError::IllegalTransition { .. }),
+            "self-loop should surface as IllegalTransition, got {err:?}"
         );
 
         // (c) reverse-edge in_review → open: rejected (in_review may only
@@ -2258,8 +2290,8 @@ mod tests {
         .await
         .expect_err("in_review → open must be rejected");
         assert!(
-            matches!(err, LocalDbError::ConstraintViolation { .. }),
-            "reverse-edge should surface as ConstraintViolation, got {err:?}"
+            matches!(err, LocalDbError::IllegalTransition { .. }),
+            "reverse-edge should surface as IllegalTransition, got {err:?}"
         );
 
         // The rejected rows must be unchanged.
@@ -2276,6 +2308,10 @@ mod tests {
 
     /// V1.49 F6 — `update_finding` still rejects unknown status values
     /// (the membership check precedes the transition check).
+    ///
+    /// V1.49 P0 W-1: the PATCH-path membership failure now surfaces as the
+    /// typed `InvalidEnum` variant (field=`status`) rather than the generic
+    /// `ConstraintViolation`, so the handler can map it to `INVALID_INPUT`.
     #[tokio::test]
     async fn update_finding_rejects_unknown_status_value() {
         let (pool, _dir) = fresh_pool().await;
@@ -2302,8 +2338,18 @@ mod tests {
         .await
         .expect_err("unknown status value 'closed' must be rejected");
         assert!(
-            matches!(err, LocalDbError::ConstraintViolation { .. }),
-            "unknown status should surface as ConstraintViolation, got {err:?}"
+            matches!(
+                err,
+                LocalDbError::InvalidEnum {
+                    field: "status",
+                    ..
+                }
+            ),
+            "unknown status should surface as InvalidEnum(field=status), got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("closed"),
+            "InvalidEnum message should echo the rejected value: {err}"
         );
     }
 

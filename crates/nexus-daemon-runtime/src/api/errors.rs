@@ -169,7 +169,10 @@ impl NexusApiError {
                     // transitions return 422 with the stable `INVALID_TRANSITION`
                     // code so callers can distinguish "no such finding" (404)
                     // from "finding exists but the move is not allowed".
-                    "INVALID_TRANSITION" => StatusCode::UNPROCESSABLE_ENTITY,
+                    // V1.49 P0 W-1: invalid PATCH enum values (severity /
+                    // status membership / target_executor) return 422 with the
+                    // stable `INVALID_INPUT` code, distinct from transitions.
+                    "INVALID_TRANSITION" | "INVALID_INPUT" => StatusCode::UNPROCESSABLE_ENTITY,
                     _ => StatusCode::BAD_REQUEST,
                 }
             }
