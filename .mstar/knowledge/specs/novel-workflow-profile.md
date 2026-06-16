@@ -1,6 +1,6 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Shipped** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md); **V1.42 Shipped** — multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) via plan [2026-06-11-v1.42-multi-volume](../../plans/2026-06-11-v1.42-multi-volume.md). **V1.47 Shipped** — §5.5.4 two-layer rules (`AGENTS.md`); §5.5.6 normative reflection→findings.
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Shipped** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md); **V1.42 Shipped** — multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) via plan [2026-06-11-v1.42-multi-volume](../../plans/2026-06-11-v1.42-multi-volume.md). **V1.47 Shipped** — §5.5.4 two-layer rules (`AGENTS.md`); §5.5.6 normative reflection→findings. **V1.48 Shipped** — §5.5.4 AGENTS.md Layer 2 runtime + accept `rule_suggestion` + `rules reset`; §5.5.2 open-findings prompt injection.
 **Document class**: Feature line (profile overlay)  
 **Created**: 2026-06-07  
 **Last updated**: 2026-06-15 (V1.47 P-last — spec promotion Draft → Shipped)
