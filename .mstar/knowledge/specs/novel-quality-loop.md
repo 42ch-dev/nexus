@@ -1,6 +1,6 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Shipped (V1.47)  
+**Status**: Shipped (V1.47); V1.48 extensions folded (§9)  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
 **Last updated**: 2026-06-15 (V1.47 P-last — spec promotion Draft → Shipped)  
@@ -152,6 +152,47 @@ Finding creation MUST NOT fork or cancel the active FL-E auto-chain driver sched
 ---
 
 *Shipped V1.47. Normative text reconciled to [novel-workflow-profile.md §5.5](novel-workflow-profile.md).*
+
+---
+
+## 9. V1.48 Shipped — Findings maturity (folded from novel-findings-maturity.md overlay)
+
+V1.48 closes the novel quality loop: durable findings enrich the writing prompt, accepted suggestions mutate the runtime Layer 2, and a retention policy prevents unbounded growth.
+
+### 9.1 Producer (V1.48 P0)
+
+- `novel-chapter-review` preset id hoisted to `crates/nexus-orchestration/src/preset_ids.rs::NOVEL_CHAPTER_REVIEW_PRESET_ID` (SSOT).
+- `Works/<work_ref>/Logs/review/review-report.md` is parsed to populate `kind`/`severity`/`body`/optional `rule_suggestion` per finding row (per §2.1 vocabulary).
+- Report file read is bounded (256 KiB cap); on miss/parse failure the placeholder synthesis is used and a `tracing::warn!` is emitted with `work_id`/`chapter`/`schedule_id`/`size_bytes`/`cap_bytes`.
+- Findings are persisted in a single SQLite transaction (idempotent retries).
+- R-V147P0-01 (review-report parsing), R-V147P0-05 (RVM schedule_id PK collision hotfix), R-V147P0-06 (preset-id SSOT) — **closed**.
+
+### 9.2 Consumer (V1.48 P1)
+
+- Open findings for the active `work_id` + chapter (or work-level with `chapter IS NULL`) are summarized into a `open_findings_block` and injected into `novel-writing` outline + draft prompts via the `{{open_findings_block}}` template variable.
+- Cap: 8 findings max, 400 chars/body, 3200 chars total block (per overlay §2.2).
+- Empty input → no block (no sentinel noise; `{{#if open_findings_block}}` guard in templates).
+
+### 9.3 Rules runtime (V1.48 P2)
+
+- Runtime `read_rules_layers` prefers `Works/<work_ref>/AGENTS.md` (Layer 2 per V1.47 normative); falls back to legacy `Rules/novel-rules.md` read-only when `AGENTS.md` absent.
+- New scaffolds write `AGENTS.md` (not `Rules/novel-rules.md`).
+- Accept path: `creator works findings accept <finding_id>` appends a structured entry to `AGENTS.md` (idempotent on `finding_id` marker, atomic temp+rename, timestamped).
+- Reset path: `creator works rules reset [<work_id>]` restores the default scaffold (supports `--dry-run` for preview, `--yes`/`-y` to skip prompt; default prompts via `dialoguer`).
+- R-V147P0-04 (AGENTS.md runtime + accept + reset) — **closed**.
+
+### 9.4 Data hygiene (V1.48 P3)
+
+- Retention: `prune_resolved_findings_older_than(pool, now_epoch, retention_seconds)` DAO removes `resolved` rows whose `updated_at` is older than `RETENTION_DEFAULT_DAYS` (default 90 days). Skips `open` and `wont_fix` rows. CLI command (e.g. `creator works findings prune`) is a future wiring item; the DAO is the seam.
+- `FindingPatch.rule_suggestion` is tri-state `Option<Option<String>>`: `Some(Some(value))` sets, `Some(None)` clears to NULL, `None` leaves unchanged. Wire PATCH uses `deserialize_some` helper to accept explicit null.
+- New composite index `idx_findings_status_updated_at` on `(status, updated_at)`.
+- R-V147P0-02 (retention policy) and R-V147P0-03 (NULL clear) — **closed**.
+
+### 9.5 Acceptance (V1.48)
+
+- All P0–P3 acceptance criteria pass hermetically.
+- All R-V147P0-* targets (6) closed in V1.48 (R-V147P0-01, 02, 03, 04, 05, 06).
+- R-V147P1-01 (intake re-trigger on existing Work) — **deferred to V1.49** (per V1.48 P4 §8).
 
 ---
 
