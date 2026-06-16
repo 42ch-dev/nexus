@@ -557,12 +557,13 @@ async fn findings_lifecycle_rejects_illegal_transitions_with_422() {
     );
 }
 
-/// V1.49 F6 — unknown status values are rejected at the API layer too.
-/// `closed` is not a member of the V1.49 enum; the PATCH must fail with
-/// 422 INVALID_TRANSITION (the handler remaps every ConstraintViolation
-/// from the DAO uniformly).
+/// V1.49 F6 / P0 W-1 — unknown status values are rejected at the API layer.
+/// `closed` is not a member of the V1.49 enum; the PATCH fails with
+/// `422 INVALID_INPUT` (distinct from `INVALID_TRANSITION`). The DAO emits
+/// the typed `InvalidEnum { field: "status", ... }` variant, which the
+/// handler maps to `INVALID_INPUT` without string-prefix sniffing.
 #[tokio::test]
-async fn findings_lifecycle_rejects_unknown_status_value() {
+async fn findings_lifecycle_rejects_unknown_status_with_invalid_input() {
     let (state, _tmp) = handler_state().await;
     let work_id = create_work(&state).await;
     let created = create_finding(&state, &work_id, "minor", "unknown status").await;
@@ -574,5 +575,185 @@ async fn findings_lifecycle_rejects_unknown_status_value() {
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
+    assert_eq!(
+        err.error_code(),
+        "INVALID_INPUT",
+        "unknown status membership must surface INVALID_INPUT, not INVALID_TRANSITION"
+    );
+    // The public message is structured from the typed variant: it names the
+    // field, echoes the rejected value, and lists the allowed members.
+    let message = err.to_string();
+    assert!(
+        message.contains("status"),
+        "message should name the field: {message}"
+    );
+    assert!(
+        message.contains("closed"),
+        "message should echo the bad value: {message}"
+    );
+    assert!(
+        message.contains("open") && message.contains("resolved"),
+        "message should list allowed members: {message}"
+    );
+}
+
+// ─── V1.49 P0 W-1: error-classification coverage (qc1/qc2 W-1) ────────────
+
+/// Helper: build an all-`None` patch request, ready for a single field
+/// override. Keeps the W-1 distinction test readable.
+fn empty_patch() -> UpdateFindingRequest {
+    UpdateFindingRequest {
+        severity: None,
+        status: None,
+        title: None,
+        description: None,
+        target_executor: None,
+        kind: None,
+        rule_suggestion: None,
+    }
+}
+
+/// Helper: PATCH a finding with an arbitrary request body, returning either
+/// the updated DTO or the resulting `NexusApiError`.
+async fn patch_req(
+    state: &WorkspaceState,
+    work_id: &str,
+    finding_id: &str,
+    req: UpdateFindingRequest,
+) -> Result<FindingApiDto, nexus_daemon_runtime::api::errors::NexusApiError> {
+    update_finding_handler(
+        State(state.clone()),
+        Path((work_id.to_string(), finding_id.to_string())),
+        axum::Json(req),
+    )
+    .await
+    .map(|ok| ok.0)
+}
+
+/// V1.49 P0 W-1 — invalid enum values surface as `422 INVALID_INPUT`,
+/// distinct from illegal transitions (`422 INVALID_TRANSITION`). Covers bad
+/// `severity`, bad `target_executor`, unknown `status` word, and — for
+/// contrast — an illegal transition that must remain `INVALID_TRANSITION`.
+#[tokio::test]
+async fn findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    // (1) Bad severity → 422 INVALID_INPUT; message names `severity`.
+    let f1 = create_finding(&state, &work_id, "major", "bad severity").await;
+    let mut req = empty_patch();
+    req.severity = Some("extreme".to_string());
+    let err = patch_req(&state, &work_id, &f1.finding_id, req)
+        .await
+        .expect_err("invalid severity must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("severity"),
+        "message should name the field: {msg}"
+    );
+    assert!(
+        msg.contains("extreme"),
+        "message should echo the bad value: {msg}"
+    );
+
+    // (2) Bad target_executor → 422 INVALID_INPUT.
+    let f2 = create_finding(&state, &work_id, "minor", "bad executor").await;
+    let mut req = empty_patch();
+    req.target_executor = Some("foo".to_string());
+    let err = patch_req(&state, &work_id, &f2.finding_id, req)
+        .await
+        .expect_err("invalid target_executor must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("target_executor"),
+        "message should name the field: {msg}"
+    );
+
+    // (3) Unknown status word → 422 INVALID_INPUT (membership, not transition).
+    let f3 = create_finding(&state, &work_id, "minor", "unknown status").await;
+    let err = patch_status(&state, &work_id, &f3.finding_id, "closed")
+        .await
+        .expect_err("unknown status 'closed' must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert!(
+        err.to_string().contains("status"),
+        "message should name the field: {}",
+        err
+    );
+
+    // (4) Illegal transition (resolved → open) → 422 INVALID_TRANSITION;
+    // message carries the `from`/`to` pair.
+    let resolved_seed = create_finding(&state, &work_id, "major", "now resolved").await;
+    let resolved_id = resolved_seed.finding_id.clone();
+    patch_status(&state, &work_id, &resolved_id, "triaged")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "in_review")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "resolved")
+        .await
+        .unwrap();
+    let err = patch_status(&state, &work_id, &resolved_id, "open")
+        .await
+        .expect_err("resolved → open must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
     assert_eq!(err.error_code(), "INVALID_TRANSITION");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("resolved") && msg.contains("open"),
+        "transition message should carry from/to: {msg}"
+    );
+}
+
+/// V1.49 P0 W-1 (qc2 S-2) — a SQL-meta status string is rejected as
+/// `422 INVALID_INPUT` by the membership check **before** any SQL is built,
+/// and the findings table is left intact (no `DROP` executed). Documents
+/// the "no injection surface" claim for auditors.
+#[tokio::test]
+async fn findings_lifecycle_rejects_sql_injection_style_status() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let created = create_finding(&state, &work_id, "minor", "injection attempt").await;
+
+    let injection = "'; DROP TABLE findings; --";
+    let err = patch_status(&state, &work_id, &created.finding_id, injection)
+        .await
+        .expect_err("SQL-meta status must be rejected before any SQL runs");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+
+    // The table must still exist and the seeded row still queryable —
+    // proving the membership check ran before any SQL reached the DB.
+    let still_there = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), created.finding_id.clone())),
+    )
+    .await
+    .expect("findings table must still be queryable after the injection attempt")
+    .0;
+    assert_eq!(
+        still_there.status, "open",
+        "seeded row must be unchanged after the rejected PATCH"
+    );
 }
