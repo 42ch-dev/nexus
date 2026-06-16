@@ -96,6 +96,25 @@ pub const VALID_STATUSES: &[&str] = &["open", "resolved", "wont_fix"];
 /// Valid `target_executor` values (R-V139P1-W-1).
 pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
 
+/// V1.48 P3 T0 — default retention window for resolved findings (days).
+///
+/// Findings with `status = 'resolved'` whose `updated_at` is older than this
+/// many days are eligible for pruning by [`prune_resolved_findings_older_than`].
+/// `open` and `wont_fix` rows are never purged.
+///
+/// **Design decision (T0)**: the retention trigger is a **CLI command**
+/// (`creator works findings prune`), not a daemon periodic task. Rationale:
+/// simpler, manual control, no background scheduler complexity. The DAO
+/// function is the single hook both a future CLI subcommand and a potential
+/// daemon task would call.
+///
+/// **Spec note**: `novel-findings-maturity.md` §5.1 lists both `resolved` and
+/// `wont_fix` as purge-eligible. The V1.48 P3 Assignment (T2) explicitly
+/// restricts pruning to `resolved` only and skips `wont_fix`. This deviation
+/// is intentional for this delivery slice; PM reconciles with the overlay at
+/// P-last merge.
+pub const RETENTION_DEFAULT_DAYS: i64 = 90;
+
 /// V1.47 §2.1 / §8.2: suggested minimum `kind` vocabulary for findings.
 ///
 /// Open vocabulary — callers MAY use other kind strings; this list is the
