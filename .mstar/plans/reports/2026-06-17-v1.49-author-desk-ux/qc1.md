@@ -3,9 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-17-v1.49-author-desk-ux
-verdict: Request Changes
-generated_at: 2026-06-16T15:33:12Z
-review_range: c993ad15..1fa8002
+verdict: Approve
+generated_at: 2026-06-16T17:10:00Z
+review_range: 1475f1fa..0b98e194
 working_branch: iteration/v1.49
 ---
 
@@ -178,3 +178,42 @@ dry-run report before the prompt, or correct one sentence of help text). No Crit
 issues; architecture, scope discipline, test design (especially the dry-run zero-mutation
 proof), and overlay §8 accuracy are all strong. S-1 through S-4 are non-blocking
 maintainability notes for PM to triage (accept-as-residual or schedule).
+
+## Revalidation
+
+- Re-review kind: Targeted (Reviewer 1 of 1 — only qc1 raised blocking; qc2/qc3 stay approved)
+- Re-review date: 2026-06-16T17:10:00Z
+- Re-review range / Diff basis: `1475f1fa..0b98e194` (verbatim from Assignment — single fix commit `bdd646dc` + merge `0b98e194`; equivalent to `git diff 1475f1fa...0b98e194`)
+- Original review range (cross-ref): `c993ad15..1fa8002` (wave 1 — preserved in `## Scope` above)
+- Working branch (verified): `iteration/v1.49` @ `0b98e1942410ae93f71fc82883f1aa0fcd9f2753`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+- Files re-reviewed: 2 (`crates/nexus42/src/commands/creator/works/mod.rs` doc comment ±9; `crates/nexus42/tests/creator_works.rs` +28 regression test)
+- Tools run: `git diff 1475f1fa...0b98e194`, `Read`, `Grep`, `cargo +nightly fmt --all --check` (exit 0), `cargo clippy -p nexus42 -- -D warnings` (exit 0), `cargo test -p nexus42 --test creator_works` (11 passed / 0 failed)
+
+### Per-finding disposition
+
+| Original finding | Disposition | Evidence |
+|---|---|---|
+| W-1 (`--yes` help text over-promises an inline preview the default flow never prints) | **Resolved** | Doc comment rewritten to "asks for confirmation" + routes preview to `--dry-run`; matches `confirm_reconcile_interactive()` which emits only a `dialoguer::Confirm` prompt (no preview print). Regression test `works_reconcile_chapters_help_yes_does_not_promise_inline_preview` locks in the fix (passes). |
+
+### Architecture / maintainability re-assessment (focus lens)
+
+1. **Help text accuracy — ✅ resolved.** The new `--yes` doc comment (`works/mod.rs:134-141`) now states the default TTY flow "asks for confirmation before mutating `work_chapters` and chapter frontmatter" and explicitly directs the user to `--dry-run` to "preview the changes without writing". This is fully consistent with `confirm_reconcile_interactive()` (`works/mod.rs:994-1013`), which produces only the generic `dialoguer::Confirm` prompt — no `created`/`updated`/`resynced`/`preserved` counts are printed before the prompt. The over-promise is gone; the help text now mirrors reality. (Cross-check: the non-TTY error message at `mod.rs:1000` already correctly said "Pass --yes to proceed, or --dry-run to preview" — now consistent with the flag doc.)
+2. **Behavior unchanged — ✅ surgical.** The only implementation-file edit is the `--yes` doc comment (diff hunk `@@ -133,10 +133,11 @@`). `handle_reconcile_chapters` (`mod.rs:892`) and `confirm_reconcile_interactive` (`mod.rs:994`) are byte-for-byte unchanged; no flag parsing, precedence (`--dry-run` still takes precedence over `--yes`), runtime-lock acquisition, or write-gating logic was touched. The `reconcile_from_filesystem(dry_run: bool)` signature and its 8 call sites are untouched. The dry-run zero-mutation correctness property (R-V148P4-W2) is unaffected.
+3. **Regression test solidity — ✅ adequate.** `works_reconcile_chapters_help_yes_does_not_promise_inline_preview` (`creator_works.rs:247-273`) asserts (i) `!help_text.contains("prints a preview")` — the exact over-promising phrase from wave-1 W-1 is gone — and (ii) `help_text.contains("--dry-run") && help_text.contains("preview")` — the preview is routed to `--dry-run`. The first assertion is the strong guard against the specific regression; the second confirms the routing. Test passes (verified: 1 passed / 0 failed). Minor robustness note (not a finding): the assertions scan the entire `--help` output rather than the `--yes` section in isolation, and guard the literal phrase rather than the semantic property — acceptable for a regression lock-in.
+4. **Scope discipline — ✅ clean.** Exactly 2 files, +33/-4. The doc rewrite is one logical change (re-wrapped across 5 lines); the test is the new regression guard. No piggyback refactors, no unrelated formatting churn. Implementer's "strict 1-line + test" claim is accurate.
+5. **CI gates — ✅ green.** `cargo +nightly fmt --all --check` exit 0; `cargo clippy -p nexus42 -- -D warnings` exit 0; `cargo test -p nexus42 --test creator_works` → 11 passed / 0 failed (includes the new test).
+
+### Choice of fix path
+
+My original W-1 offered two acceptable options: (a) print a dry-run report before the prompt (mirrors `rules_runtime::confirm_reset_interactive`, better UX), or (b) correct the help text (minimal doc fix). The implementer chose (b) — the conservative, surgical, lowest-risk option that fully eliminates the over-promise and routes users to `--dry-run` for previews. This aligns with the "Surgical Changes" principle and is the right call for a fix wave; (a) remains a valid future UX enhancement (adjacent to S-4 "richer `ReconcileReport` for previews"), but is **not** required to resolve W-1.
+
+### New findings in re-review scope
+
+- 🔴 Critical: 0
+- 🟡 Warning: 0
+- 🟢 Suggestion: 0
+
+### Updated verdict
+
+**Approve** — W-1 is resolved. 0 Critical, 0 Warning in the re-review scope. Original S-1..S-4 remain non-blocking and out of scope for this fix wave (already deferred in the qc-consolidated roll-up).
