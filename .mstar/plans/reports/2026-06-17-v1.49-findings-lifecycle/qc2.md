@@ -3,9 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: 2026-06-17-v1.49-findings-lifecycle
-verdict: Request Changes
-generated_at: 2026-06-17T14:30:00Z
-review_range: 1fd3a9c4..04608722
+verdict: Approve
+generated_at: 2026-06-16T20:20:00Z
+review_range: bc8efc8d..c4b4500f
 working_branch: iteration/v1.49
 ---
 
@@ -179,10 +179,37 @@ The implementer already recorded the CLI consumer not picking up `triaged` rows.
 | 🟡 Warning | 1 |
 | 🟢 Suggestion | 4 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
 The core state machine, creator-scoped authorization, and widened SQL filter are sound. No new injection surface, no cross-creator write, and no relaxation of the pre-P0 permission model. The single Warning (W-1) is the security/correctness sibling of qc1 W-1: the uniform remapping of every `ConstraintViolation` (enum membership *and* transition legality) to the stable public code `INVALID_TRANSITION`, with raw DAO constraint text in the message. This collapses distinct failure classes for clients and leaks a small amount of implementation phrasing on the public error surface. Fixing the classification (handler inspection or DAO variant split) would resolve both the maintainability concern (qc1) and the security/client-reasoning concern (this report).
 
 The four Suggestions are documentation, test-coverage, and future-hardening items. None are blocking on their own.
 
 All CI-equivalent checks performed in-scope (`cargo check` on the three crates) were clean. No implementation files were modified during this review.
+
+## Revalidation
+
+**Re-review scope**: Targeted W-1 fix wave (DAO-level error split) per consolidated qc-consolidated.md §W-1 and fix-w1-completion.md. Diff range `bc8efc8d..c4b4500f` (single fix commit `7da35dd5` + completion report `c9f10af6` + merge `c4b4500f`; equivalent to `git diff bc8efc8d...c4b4500f`). Files in scope: `crates/nexus-local-db/src/error.rs`, `crates/nexus-local-db/src/findings.rs`, `crates/nexus-daemon-runtime/src/api/handlers/findings.rs`, `crates/nexus-daemon-runtime/src/api/errors.rs`, `crates/nexus-daemon-runtime/tests/findings_api.rs`.
+
+**Re-review date**: 2026-06-16
+
+**Re-review focus (qc2 security/correctness lens, per assignment)**:
+- Information disclosure: `message` no longer contains internal table name "findings" or raw DAO constraint phrasing. Messages are now structured: `"invalid status transition '{from}' → '{to}'"` for `IllegalTransition`; `"invalid {field} value '{value}'; allowed: ..."` for `InvalidEnum`.
+- Error classification: distinct stable codes — `INVALID_TRANSITION` (422) for lifecycle violations vs. `INVALID_INPUT` (422) for enum-membership failures. Verified via `NexusApiError::error_code()` and `status_code()` (both → 422). Clients can now key off `error.code`.
+- Structured details: the new variants carry typed `from`/`to`/`field`/`value`/`allowed`. These are formatted into the public `message` and emitted via `tracing::warn!` with structured fields (`creator_id`, `finding_id`, the error payload). No top-level `error.details` object (consistent with V1.48 P1 baseline error contract). For this local-first pre-1.0 surface, the formatted message + structured logs are acceptable; a future structured `details` field would be a non-breaking enhancement.
+- `tracing::warn!` fields: include `creator_id`, `finding_id`, `from`/`to` or `field`/`value`. Sufficient for investigating a malicious or buggy client without leaking secrets (no PII or credentials in scope).
+- Permission model: unchanged. `update_finding_handler` still performs `read_active_creator_id` + `works::get_work` ownership check + creator-scoped DAO WHERE. The W-1 fix only touched error emission paths inside the same guard.
+- `InvalidEnum` allowed list: `allowed` is `&'static [&'static str]` listing valid members (e.g. status values, severity levels). For findings `status`/`severity`/`target_executor` this is intentional public contract (helps clients) and not a secret. No security concern.
+- Negative-path test (qc2 S-2): `findings_lifecycle_rejects_sql_injection_style_status` sends `status: "'; DROP TABLE findings; --"`, asserts exactly 422 + `INVALID_INPUT` (not 500), then re-queries via `get_finding_handler` to prove the row and table are intact post-rejection. Passes.
+- New variants reachability: `IllegalTransition` is emitted only by `enforce_status_transition` (called exclusively from `update_finding` on the PATCH path). `InvalidEnum` is emitted only by the three inline enum checks inside `update_finding` (severity / status membership / target_executor). Other DAO paths (create, shared validators, works.rs, etc.) continue to use the retained `ConstraintViolation`. The match arms in `update_finding_handler` are the only consumer of the new variants. No surprising cross-path behaviour.
+- Pre-existing clippy `--all` failure: explicitly out of scope per assignment and fix-w1-completion.md (R-V149P0-03 defer to V1.50). Verified clippy-neutral on the changed crates.
+
+**Evidence**:
+- Code inspection of the 5 changed files (error.rs, findings.rs, handlers/findings.rs, errors.rs, findings_api.rs).
+- Test execution: `cargo test -p nexus-daemon-runtime --test findings_api -- findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum findings_lifecycle_rejects_sql_injection_style_status --exact` → both pass (2/2).
+- Original W-1 (uniform `ConstraintViolation → INVALID_TRANSITION`) is resolved: no string-prefix sniffing remains; distinct codes and clean messages.
+- All 9 security/correctness checklist items from the assignment are satisfied with no new Critical or Warning in the re-review scope.
+
+**New findings in re-review scope**: 0 Critical, 0 Warning.
+
+**Updated verdict**: Approve (0 Critical + 0 Warning in the W-1 fix re-review scope; R-V149P0-02 is addressed). The original review's 1 Warning and 4 Suggestions remain as historical record in the sections above; they are either fixed by this wave (W-1) or tracked as non-blocking follow-ups / pre-existing residuals (R-V149P0-01). No new residuals raised by this re-review.
