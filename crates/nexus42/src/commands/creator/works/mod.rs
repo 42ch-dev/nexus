@@ -205,9 +205,32 @@ pub enum RulesCommand {
     /// Overwrites `Works/<work_ref>/AGENTS.md` with the embedded default
     /// scaffold. Does NOT delete the Work or any chapter artifacts.
     /// Use when the file has drifted and you want to start fresh.
+    ///
+    /// Safety flags (V1.48 P2-fix1):
+    ///
+    /// - By default the command prints a unified diff of what would be
+    ///   discarded and prompts for confirmation before overwriting.
+    /// - `--dry-run` prints the diff and exits WITHOUT writing (preview).
+    /// - `--yes` (or `-y`) skips the confirmation prompt and writes
+    ///   immediately, intended for scripted use (matches the `apt-get -y` /
+    ///   `pacman --noconfirm` convention).
+    /// - `--dry-run` takes precedence over `--yes`.
     Reset {
         /// Work ID (wrk_...). Omit to use pool active Work.
         work_id: Option<String>,
+        /// Preview the reset as a unified diff without writing.
+        ///
+        /// No file is modified and no confirmation prompt is shown. Takes
+        /// precedence over `--yes`.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Skip the confirmation prompt and write immediately.
+        ///
+        /// By default the reset prints a diff and asks for confirmation before
+        /// overwriting `AGENTS.md`. Pass `--yes` (or `-y`) to proceed
+        /// non-interactively. Mirrors `apt-get -y` / `pacman --noconfirm`.
+        #[arg(long = "yes", short = 'y', default_value_t = false)]
+        yes: bool,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -2800,9 +2823,17 @@ mod tests {
             .expect("works rules reset (no work_id) should parse");
         match cli.command {
             WorksCommand::Rules {
-                command: RulesCommand::Reset { work_id, json: _ },
+                command:
+                    RulesCommand::Reset {
+                        work_id,
+                        dry_run,
+                        yes,
+                        json: _,
+                    },
             } => {
                 assert!(work_id.is_none(), "work_id should default to None");
+                assert!(!dry_run, "dry_run should default to false");
+                assert!(!yes, "yes should default to false");
             }
             _ => panic!("expected Rules::Reset variant"),
         }
@@ -2814,10 +2845,84 @@ mod tests {
             .expect("works rules reset <work_id> --json should parse");
         match cli.command {
             WorksCommand::Rules {
-                command: RulesCommand::Reset { work_id, json },
+                command:
+                    RulesCommand::Reset {
+                        work_id,
+                        dry_run,
+                        yes,
+                        json,
+                    },
             } => {
                 assert_eq!(work_id.as_deref(), Some("wrk_abc"));
+                assert!(!dry_run, "dry_run should default to false");
+                assert!(!yes, "yes should default to false");
                 assert!(json, "--json should set json=true");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    // ── V1.48 P2-fix1: --dry-run / --yes flag parsing ─────────────────
+
+    #[test]
+    fn works_rules_reset_supports_dry_run_flag() {
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset", "--dry-run"])
+            .expect("works rules reset --dry-run should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { dry_run, .. },
+            } => {
+                assert!(dry_run, "--dry-run should set dry_run=true");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    #[test]
+    fn works_rules_reset_supports_yes_long_and_short_flags() {
+        let long = WorksCli::try_parse_from(["nexus42", "rules", "reset", "--yes"])
+            .expect("works rules reset --yes should parse");
+        match long.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { yes, .. },
+            } => assert!(yes, "--yes should set yes=true"),
+            _ => panic!("expected Rules::Reset variant"),
+        }
+
+        let short = WorksCli::try_parse_from(["nexus42", "rules", "reset", "-y"])
+            .expect("works rules reset -y should parse");
+        match short.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { yes, .. },
+            } => assert!(yes, "-y should set yes=true"),
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    #[test]
+    fn works_rules_reset_combines_dry_run_yes_and_json() {
+        let cli = WorksCli::try_parse_from([
+            "nexus42",
+            "rules",
+            "reset",
+            "wrk_xyz",
+            "--dry-run",
+            "--yes",
+            "--json",
+        ])
+        .expect("works rules reset <work_id> --dry-run --yes --json should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command:
+                    RulesCommand::Reset {
+                        work_id,
+                        dry_run,
+                        yes,
+                        json,
+                    },
+            } => {
+                assert_eq!(work_id.as_deref(), Some("wrk_xyz"));
+                assert!(dry_run && yes && json, "all three flags should be true");
             }
             _ => panic!("expected Rules::Reset variant"),
         }

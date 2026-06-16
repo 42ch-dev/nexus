@@ -254,6 +254,7 @@ pub async fn get_finding_creator_scoped_handler(
         .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
     Ok(Json(f.into()))
 }
+/// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
 ///
 /// # Panics
 /// Panics if the finding row disappears between successful update and re-fetch
