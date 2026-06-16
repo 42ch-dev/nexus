@@ -7,6 +7,7 @@ pub mod completion_lock;
 pub mod embedded_rules;
 pub mod embedded_skills;
 pub mod engine;
+pub mod findings_block;
 pub mod preset;
 pub mod preset_gates;
 pub mod preset_ids;

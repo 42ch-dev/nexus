@@ -742,6 +742,15 @@ pub async fn evaluate_after_persist_volume_aware(
 /// V1.44 P2 (F-004): `volume` is threaded through to `WorkFields` so the
 /// `novel-writing` preset input includes a `volume` template var for
 /// cross-volume context preservation.
+///
+/// V1.48 P1 (overlay §2 Consumer): `open_findings_block` is threaded
+/// through to `WorkFields` so the `novel-writing` preset input includes
+/// an `open_findings_block` template var. The caller
+/// ([`enqueue_auto_chain_schedule`]) computes the block via
+/// [`crate::findings_block::build_open_findings_block`] from the
+/// chapter-scoped DAO query. Pass `None` when the stage is not `produce`
+/// or no chapter is selected; the preset's `{{#if open_findings_block}}`
+/// guard omits the section in that case.
 #[allow(clippy::missing_panics_doc)] // panic only on invalid stage names, which we validate
 pub fn build_auto_chain_schedule(
     stage: &str,
@@ -749,6 +758,7 @@ pub fn build_auto_chain_schedule(
     work: &WorkRecord,
     chapter: Option<i32>,
     volume: Option<i32>,
+    open_findings_block: Option<String>,
 ) -> Option<AddScheduleRequest> {
     let work_ref = work.work_ref.clone();
     let chapter_label = chapter.map(stage_gates::chapter_label);
@@ -778,6 +788,7 @@ pub fn build_auto_chain_schedule(
         research_artifacts_dir,
         workspace_dir: None,
         world_kb_block: None,
+        open_findings_block,
         world_id: work.world_id.clone(),
         volume,
     };
@@ -1002,6 +1013,52 @@ pub async fn set_driver(
 // Fix A (W-A): Shared enqueue logic — single source of truth for ACH schedule
 // ID minting, pending INSERT, and set_driver. Used by both the supervisor
 // terminal hook and the boot recovery path to eliminate duplication.
+
+// V1.48 P1 (overlay §2 Consumer): render the open-findings prompt block
+// for the produce stage with a selected chapter. Returns `None` when the
+// stage is not `produce`, no chapter is selected, no open findings exist,
+// or the DAO errors (best-effort: logs and proceeds without the block so
+// the auto-chain step is not blocked by a findings-fetch failure).
+async fn compute_open_findings_block_for_produce(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    stage: &str,
+    chapter: Option<i32>,
+) -> Option<String> {
+    if stage != "produce" {
+        return None;
+    }
+    let ch = chapter?;
+    let findings = match nexus_local_db::findings::list_open_findings_for_chapter(
+        pool,
+        creator_id,
+        work_id,
+        i64::from(ch),
+    )
+    .await
+    {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!(
+                target: "fl_e.auto_chain",
+                work_id = %work_id,
+                chapter = ch,
+                error = %e,
+                "Failed to fetch open findings for prompt block; proceeding without block"
+            );
+            return None;
+        }
+    };
+    let label = stage_gates::chapter_label(ch);
+    let block = crate::findings_block::build_open_findings_block(&findings, &label);
+    if block.is_empty() {
+        None
+    } else {
+        Some(block)
+    }
+}
+
 /// Enqueue a new auto-chain schedule and update the Work checkpoint.
 ///
 /// This is the single shared path for:
@@ -1024,10 +1081,22 @@ pub async fn enqueue_auto_chain_schedule(
     volume: Option<i32>,
     work: &WorkRecord,
 ) -> Result<String, AutoChainError> {
-    let schedule_req = build_auto_chain_schedule(stage, creator_id, work, chapter, volume)
-        .ok_or_else(|| {
-            AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
-        })?;
+    // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt
+    // block when the produce stage targets a selected chapter.
+    let open_findings_block =
+        compute_open_findings_block_for_produce(pool, creator_id, work_id, stage, chapter).await;
+
+    let schedule_req = build_auto_chain_schedule(
+        stage,
+        creator_id,
+        work,
+        chapter,
+        volume,
+        open_findings_block,
+    )
+    .ok_or_else(|| {
+        AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
+    })?;
 
     // Fix A: Single source of truth for ACH schedule ID format.
     // R-V139P0-W-B: append per-process monotonic counter for collision resistance.
@@ -1127,7 +1196,11 @@ pub async fn enqueue_auto_chain_schedule(
 /// in `creator_schedules` at enqueue time and used by the loader for compat checks.
 fn preset_version_for_id(preset_id: &str) -> i64 {
     match preset_id {
-        "novel-writing" => 7,
+        // V1.48 P1: bumped 7 → 8 — added `open_findings_block` template var
+        // to outline_chapter and draft_chapter prompt contracts (new prompt
+        // input, not a breaking state-machine change, but versioned up so
+        // pre-V1.48 schedules are correctly identified).
+        "novel-writing" => 8,
         "research" | "novel-review-master" => 2,
         "kb-extract" => 3,
         // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
@@ -1421,7 +1494,7 @@ mod tests {
     #[test]
     fn build_auto_chain_schedule_produce_includes_chapter() {
         let work = work_at("produce", "active", 2, 5);
-        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(2), None)
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(2), None, None)
             .expect("produce should have a preset");
         assert_eq!(req.preset_id, "novel-writing");
         let input = req.input.expect("input should be set");
@@ -1432,7 +1505,7 @@ mod tests {
     #[test]
     fn build_auto_chain_schedule_research() {
         let work = work_at("research", "active", 0, 5);
-        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None)
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None, None)
             .expect("research should have a preset");
         assert_eq!(req.preset_id, "research");
     }
@@ -1612,7 +1685,7 @@ mod tests {
     #[test]
     fn research_schedule_seed_includes_context_for_produce() {
         let work = work_at("research", "active", 0, 5);
-        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None)
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None, None)
             .expect("research should have a preset");
         assert_eq!(req.preset_id, "research");
 
@@ -1633,7 +1706,7 @@ mod tests {
     #[test]
     fn produce_schedule_seed_carries_research_enrichable_fields() {
         let work = work_at("produce", "active", 1, 5);
-        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1), None)
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1), None, None)
             .expect("produce should have a preset");
         assert_eq!(req.preset_id, "novel-writing");
 
@@ -1653,7 +1726,7 @@ mod tests {
         let mut work = work_at("produce", "active", 1, 5);
         // Simulate: driver_schedule_id is the research schedule that just completed
         work.driver_schedule_id = Some("ACH20260609120000000".to_string());
-        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1), None)
+        let req = build_auto_chain_schedule("produce", "ctr_test", &work, Some(1), None, None)
             .expect("produce should have a preset");
 
         let input = req.input.expect("input must be set");
@@ -1675,7 +1748,7 @@ mod tests {
     fn research_schedule_does_not_include_research_artifacts_dir() {
         let mut work = work_at("research", "active", 0, 5);
         work.driver_schedule_id = Some("SCH_prev_research".to_string());
-        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None)
+        let req = build_auto_chain_schedule("research", "ctr_test", &work, None, None, None)
             .expect("research should have a preset");
 
         let input = req.input.expect("input must be set");

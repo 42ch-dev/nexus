@@ -67,6 +67,11 @@ The FL-E review preset id (`novel-chapter-review`) MUST be defined in exactly on
 
 **Implements**: [novel-workflow-profile.md §5.5.2](novel-workflow-profile.md) deferred consumer
 
+**Status (V1.48 P1 — shipped)**: implementation landed in plan
+`2026-06-16-v1.48-findings-consumer`. The sub-sections below record the
+normative contract; `### 2.4 Implementation cross-ref` records the
+concrete wiring choices for this iteration.
+
 ### 2.1 Query scope
 
 For `novel-writing` runs with selected chapter `N`:
@@ -98,6 +103,35 @@ When no qualifying findings exist, `open_findings_block` MUST be empty string (o
 
 - Do not auto-resolve findings from produce stage.
 - Do not inject into finalize `llm_judge` prompt unless a follow-up plan explicitly extends scope.
+
+### 2.4 Implementation cross-ref (V1.48 P1)
+
+Recorded so reviewers and downstream plans can locate the concrete wiring
+without re-deriving it. The normative contract above is unaffected by the
+choices in this sub-section; they document **how** the contract is met.
+
+| Concern | Implementation locus | Notes |
+| --- | --- | --- |
+| Chapter-scoped DAO query | `crates/nexus-local-db/src/findings.rs::list_open_findings_for_chapter` | Compile-time `sqlx::query!`. Severity DESC via a `CASE` rank ladder; `created_at` ASC tiebreaker. Returns all matches; the builder enforces the §2.2 count cap. |
+| Block builder (pure) | `crates/nexus-orchestration/src/findings_block.rs::build_open_findings_block` | Pure `&[Finding] -> String`. Caps: `MAX_FINDINGS=8`, `MAX_BODY_CHARS=400`, `MAX_TOTAL_BLOCK_CHARS=3200`. Empty input → empty string (AC2). Exposes `severity_rank` + `sort_open_findings` for callers that fetch via paths other than the chapter-scoped DAO (e.g. the CLI Local-API round-trip). |
+| `WorkFields` plumbing | `crates/nexus-orchestration/src/stage_gates.rs::WorkFields::open_findings_block` | New `Option<String>` field; `build_preset_input` injects it as `preset.input.open_findings_block` (default empty string when `None`, same pattern as `world_kb_block`). |
+| Preset YAML wiring | `crates/nexus-orchestration/embedded-presets/novel-writing/preset.yaml` | Preset version bumped 7 → 8. `outline_chapter` and `draft_chapter` states pass `open_findings_block: "{{preset.input.open_findings_block}}"` to their prompt vars. |
+| Prompt template sections | `embedded-presets/novel-writing/prompts/{outline-chapter,draft-chapter}.md` | Each declares `open_findings_block` in frontmatter `vars` and adds a `{{#if open_findings_block}}` section instructing the writer to actively address each finding. |
+| Auto-chain produce path | `crates/nexus-orchestration/src/auto_chain.rs::enqueue_auto_chain_schedule` | For `stage=="produce"` with a selected chapter, computes the block from the chapter-scoped DAO and threads it through `build_auto_chain_schedule`. Best-effort: DAO error logs and continues without the block. |
+| CLI direct path | `crates/nexus42/src/commands/creator/run.rs::assemble_open_findings_block` | `creator run stage advance --stage produce` fetches via daemon Local API `GET /v1/local/works/{id}/findings?status=open`, client-side filters to overlay §2.1 scope, calls the shared `sort_open_findings` + `build_open_findings_block`. No new endpoint or wire contract added. |
+| Round-trip DTO | `nexus-local-db/src/findings.rs::Finding` | Derives `Deserialize` so the CLI can deserialize the daemon Local API response without a parallel DTO. Daemon's `FindingApiDto.routing_hint` extra field is ignored by `serde` default. |
+
+**Cap value note**: the plan task T2 prose and the PM Assignment suggested
+"max 10 findings / 200 char body" as defaults, but the normative §2.2
+table above lists **8 / 400 / 3200**. Per the specs/AGENTS.md authority
+hierarchy (Draft overlay wins for delivery batching), the implementation
+ships the overlay values. P2 or P-last may amend the overlay if a
+different footprint turns out to be more useful in practice.
+
+**No-new-wire-schema invariant** (compass §0.1 #9): P1 adds **no** new
+JSON Schema and **no** new daemon endpoint. The CLI's Local-API call
+uses the existing `GET /v1/local/works/{work_id}/findings` endpoint
+shipped in V1.39 P1.
 
 ---
 
