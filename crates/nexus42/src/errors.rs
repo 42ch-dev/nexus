@@ -255,10 +255,14 @@ impl CliError {
         }
     }
 
-    /// Create a `DaemonNotReachable` error with the canonical V1.43
-    /// quickstart remediation string (Part I §1 step 5).
+    /// Create a `DaemonNotReachable` error with the canonical remediation
+    /// suggestion (start daemon + spec pointer).
+    ///
+    /// Renamed from `daemon_not_reachable_quickstart` (R-V146P1-QC1-S2): the
+    /// suggestion no longer cites the deleted quickstart, so the stale suffix
+    /// was misleading.
     #[must_use]
-    pub fn daemon_not_reachable_quickstart() -> Self {
+    pub fn daemon_not_reachable_with_remediation() -> Self {
         Self::DaemonNotReachable {
             message: "The nexus42 daemon is not reachable.".to_string(),
             // V1.47 P1: normalize user-facing copy — spec name, not repo path.
@@ -589,10 +593,10 @@ mod tests {
         );
     }
 
-    // V1.43 (P1 §3 remediation — daemon not reachable): quickstart §1 citation
+    // V1.43 (P1 §3 remediation — daemon not reachable): spec citation
     #[test]
-    fn daemon_not_reachable_quickstart_cites_section_1() {
-        let err = CliError::daemon_not_reachable_quickstart();
+    fn daemon_not_reachable_with_remediation_cites_spec() {
+        let err = CliError::daemon_not_reachable_with_remediation();
         let msg = format!("{err}");
         assert!(
             msg.contains("daemon is not reachable"),
