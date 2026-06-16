@@ -18,6 +18,7 @@
 //! DB I/O at the call site that already owns a `SqlitePool`.
 
 use nexus_local_db::findings::Finding;
+use std::fmt::Write;
 
 /// Overlay §2.2 — max number of findings listed in the block.
 pub const MAX_FINDINGS: usize = 8;
@@ -45,9 +46,11 @@ pub fn severity_rank(severity: &str) -> i32 {
     }
 }
 
-/// Overlay §2.1 — sort a `&mut [Finding]` in place by severity DESC,
-/// then `created_at` ASC. This is the same ordering the chapter-scoped
-/// DAO query ([`nexus_local_db::findings::list_open_findings_for_chapter`])
+/// Overlay §2.1 — sort a `&mut [Finding]` in place.
+///
+/// Severity DESC (blocker > major > minor > info), then `created_at`
+/// ASC. This is the same ordering the chapter-scoped DAO query
+/// ([`nexus_local_db::findings::list_open_findings_for_chapter`])
 /// applies server-side; exposed as a helper for callers that fetch via
 /// paths which do not (yet) use that DAO (e.g. CLI Local API round-trip).
 pub fn sort_open_findings(findings: &mut [Finding]) {
@@ -99,9 +102,7 @@ pub fn build_open_findings_block(findings: &[Finding], chapter_label: &str) -> S
     }
 
     let mut out = String::new();
-    out.push_str(&format!(
-        "## Open findings (chapter {chapter_label})\n\n"
-    ));
+    let _ = write!(out, "## Open findings (chapter {chapter_label})\n\n");
 
     for (idx, f) in findings.iter().enumerate() {
         if idx >= MAX_FINDINGS {
@@ -139,8 +140,8 @@ pub fn build_open_findings_block(findings: &[Finding], chapter_label: &str) -> S
     // If after applying the total-char cap nothing got appended past the
     // heading, return empty so the template guard omits the whole block
     // (avoids rendering a heading with no body).
-    let heading_len = format!("## Open findings (chapter {chapter_label})\n\n").len();
-    if out.len() == heading_len {
+    let heading = format!("## Open findings (chapter {chapter_label})\n\n");
+    if out.len() == heading.len() {
         return String::new();
     }
 

@@ -1013,6 +1013,52 @@ pub async fn set_driver(
 // Fix A (W-A): Shared enqueue logic — single source of truth for ACH schedule
 // ID minting, pending INSERT, and set_driver. Used by both the supervisor
 // terminal hook and the boot recovery path to eliminate duplication.
+
+// V1.48 P1 (overlay §2 Consumer): render the open-findings prompt block
+// for the produce stage with a selected chapter. Returns `None` when the
+// stage is not `produce`, no chapter is selected, no open findings exist,
+// or the DAO errors (best-effort: logs and proceeds without the block so
+// the auto-chain step is not blocked by a findings-fetch failure).
+async fn compute_open_findings_block_for_produce(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    stage: &str,
+    chapter: Option<i32>,
+) -> Option<String> {
+    if stage != "produce" {
+        return None;
+    }
+    let ch = chapter?;
+    let findings = match nexus_local_db::findings::list_open_findings_for_chapter(
+        pool,
+        creator_id,
+        work_id,
+        i64::from(ch),
+    )
+    .await
+    {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::warn!(
+                target: "fl_e.auto_chain",
+                work_id = %work_id,
+                chapter = ch,
+                error = %e,
+                "Failed to fetch open findings for prompt block; proceeding without block"
+            );
+            return None;
+        }
+    };
+    let label = stage_gates::chapter_label(ch);
+    let block = crate::findings_block::build_open_findings_block(&findings, &label);
+    if block.is_empty() {
+        None
+    } else {
+        Some(block)
+    }
+}
+
 /// Enqueue a new auto-chain schedule and update the Work checkpoint.
 ///
 /// This is the single shared path for:
@@ -1035,55 +1081,22 @@ pub async fn enqueue_auto_chain_schedule(
     volume: Option<i32>,
     work: &WorkRecord,
 ) -> Result<String, AutoChainError> {
-    // V1.48 P1 (overlay §2 Consumer): for the produce stage with a
-    // selected chapter, fetch chapter-scoped open findings and render
-    // the prompt block. The block is empty (→ omitted by template guard)
-    // when no findings exist or the stage is not `produce`. Best-effort:
-    // a DAO error logs a warning and continues with `None` so the
-    // auto-chain step still proceeds.
-    let open_findings_block = if stage == "produce" {
-        if let Some(ch) = chapter {
-            match nexus_local_db::findings::list_open_findings_for_chapter(
-                pool,
-                creator_id,
-                work_id,
-                i64::from(ch),
-            )
-            .await
-            {
-                Ok(findings) => {
-                    let label = stage_gates::chapter_label(ch);
-                    let block =
-                        crate::findings_block::build_open_findings_block(&findings, &label);
-                    if block.is_empty() {
-                        None
-                    } else {
-                        Some(block)
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target: "fl_e.auto_chain",
-                        work_id = %work_id,
-                        chapter = ch,
-                        error = %e,
-                        "Failed to fetch open findings for prompt block; proceeding without block"
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt
+    // block when the produce stage targets a selected chapter.
+    let open_findings_block =
+        compute_open_findings_block_for_produce(pool, creator_id, work_id, stage, chapter).await;
 
-    let schedule_req =
-        build_auto_chain_schedule(stage, creator_id, work, chapter, volume, open_findings_block)
-            .ok_or_else(|| {
-                AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
-            })?;
+    let schedule_req = build_auto_chain_schedule(
+        stage,
+        creator_id,
+        work,
+        chapter,
+        volume,
+        open_findings_block,
+    )
+    .ok_or_else(|| {
+        AutoChainError::InvalidState(format!("no schedule mapping for stage '{stage}'"))
+    })?;
 
     // Fix A: Single source of truth for ACH schedule ID format.
     // R-V139P0-W-B: append per-process monotonic counter for collision resistance.

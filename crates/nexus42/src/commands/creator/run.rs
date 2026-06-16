@@ -579,9 +579,7 @@ async fn assemble_open_findings_block(
 ) -> crate::errors::Result<Option<String>> {
     use nexus_orchestration::findings_block::{build_open_findings_block, sort_open_findings};
 
-    let path = format!(
-        "/v1/local/works/{work_id}/findings?status=open&limit=200"
-    );
+    let path = format!("/v1/local/works/{work_id}/findings?status=open&limit=200");
     let resp: Vec<nexus_local_db::findings::Finding> = client.get(&path).await?;
 
     // Overlay §2.1 scope: chapter == N OR chapter IS NULL (Work-level).
@@ -806,7 +804,7 @@ async fn stage_advance(
     // or when no open findings exist (AC2: no empty sentinel noise).
     // Best-effort: on fetch failure, log and proceed without the block.
     let open_findings_block = if target_stage == "produce" {
-        if let (Some(ch), Some(ref cl)) = (next_chapter, chapter_label.as_ref()) {
+        if let (Some(ch), Some(cl)) = (next_chapter, chapter_label.as_ref()) {
             match assemble_open_findings_block(client, work_id, ch, cl).await {
                 Ok(Some(block)) => Some(block),
                 Ok(None) => None,

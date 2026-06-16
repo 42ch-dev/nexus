@@ -997,7 +997,7 @@ pub async fn create_finding_from_review_tx(
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_rule_suggestion, list_open_findings_for_chapter, Finding, FindingKind,
+        list_open_findings_for_chapter, normalize_rule_suggestion, Finding, FindingKind,
         RULE_SUGGESTION_MAX_BYTES,
     };
     use crate::error::LocalDbError;
@@ -1188,9 +1188,12 @@ mod tests {
         //  - chapter=1 resolved (major)       ← must NOT appear
         //  - chapter=1 wont_fix (blocker)     ← must NOT appear
         //  - different work_id, chapter=1     ← must NOT appear
-        super::create_finding(&pool, &row("f1", WORK, Some(1), "minor", "ch1-minor", 100, "open"))
-            .await
-            .unwrap();
+        super::create_finding(
+            &pool,
+            &row("f1", WORK, Some(1), "minor", "ch1-minor", 100, "open"),
+        )
+        .await
+        .unwrap();
         super::create_finding(
             &pool,
             &row("f2", WORK, Some(2), "blocker", "ch2-blocker", 100, "open"),
@@ -1205,19 +1208,43 @@ mod tests {
         .unwrap();
         super::create_finding(
             &pool,
-            &row("f4", WORK, Some(1), "major", "ch1-resolved", 200, "resolved"),
+            &row(
+                "f4",
+                WORK,
+                Some(1),
+                "major",
+                "ch1-resolved",
+                200,
+                "resolved",
+            ),
         )
         .await
         .unwrap();
         super::create_finding(
             &pool,
-            &row("f5", WORK, Some(1), "blocker", "ch1-wontfix", 300, "wont_fix"),
+            &row(
+                "f5",
+                WORK,
+                Some(1),
+                "blocker",
+                "ch1-wontfix",
+                300,
+                "wont_fix",
+            ),
         )
         .await
         .unwrap();
         super::create_finding(
             &pool,
-            &row("f6", "wrk_other", Some(1), "blocker", "other-work", 100, "open"),
+            &row(
+                "f6",
+                "wrk_other",
+                Some(1),
+                "blocker",
+                "other-work",
+                100,
+                "open",
+            ),
         )
         .await
         .unwrap();
@@ -1250,22 +1277,34 @@ mod tests {
         seed_minimal_work(&pool, WORK, "ctr_test").await;
 
         // Three minors on chapter 1, inserted with decreasing created_at.
-        super::create_finding(&pool, &row("g1", WORK, Some(1), "minor", "newest", 5000, "open"))
-            .await
-            .unwrap();
-        super::create_finding(&pool, &row("g2", WORK, Some(1), "minor", "middle", 3000, "open"))
-            .await
-            .unwrap();
-        super::create_finding(&pool, &row("g3", WORK, Some(1), "minor", "oldest", 1000, "open"))
-            .await
-            .unwrap();
+        super::create_finding(
+            &pool,
+            &row("g1", WORK, Some(1), "minor", "newest", 5000, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("g2", WORK, Some(1), "minor", "middle", 3000, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("g3", WORK, Some(1), "minor", "oldest", 1000, "open"),
+        )
+        .await
+        .unwrap();
 
         let got = list_open_findings_for_chapter(&pool, "ctr_test", WORK, 1)
             .await
             .unwrap();
         let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
-        assert_eq!(ids, vec!["g3", "g2", "g1"],
-            "expected oldest-first within minor bucket; got {ids:?}");
+        assert_eq!(
+            ids,
+            vec!["g3", "g2", "g1"],
+            "expected oldest-first within minor bucket; got {ids:?}"
+        );
     }
 
     /// V1.48 P1 T4 — empty result when no open findings match.
