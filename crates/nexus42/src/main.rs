@@ -11,7 +11,14 @@ async fn main() {
     // V1.46 P2 (Grill #20, #21): intercept `creator run <preset_id> --help`
     // before clap parses so manifest-declared `cli_args` surface in --help.
     // Falls through silently for any non-matching invocation.
-    nexus42::commands::creator::run::maybe_print_preset_run_help_and_exit();
+    //
+    // R-V146P2-QC1-S1: the library entry returns the rendered help rather
+    // than calling `std::process::exit` itself; the binary owns the exit so
+    // the library call is unit-testable and never terminates a consumer.
+    if let Some(help) = nexus42::commands::creator::run::maybe_render_preset_run_help() {
+        print!("{help}");
+        std::process::exit(0);
+    }
 
     let cli = Cli::parse();
 

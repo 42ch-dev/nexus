@@ -189,50 +189,47 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 
 /// Intercept `creator run <preset_id> --help` before clap parses.
 ///
-/// When the resolved preset declares non-empty `cli_args`, print a help
-/// block that surfaces those manifest-declared flags, then exit(0).
+/// When the resolved preset declares non-empty `cli_args`, render a help
+/// block that surfaces those manifest-declared flags and return it as
+/// `Some(text)`. Returns `None` in every other case so the caller falls
+/// through to clap's generic `RunCommand` `--help`.
+///
+/// This library function does **not** call `std::process::exit` — the
+/// returned text is printed and exited by the binary `main()`
+/// (R-V146P2-QC1-S1: keep `exit` in the binary, not in a library module,
+/// so the call is unit-testable and never terminates a library consumer).
 ///
 /// Data-driven (Grill #20): any preset whose manifest declares `cli_args`
 /// gets the enriched help — no per-preset hardcode. The first slice (Grill
 /// #21) covers `novel-manuscript-audit-review`, `novel-manuscript-audit-extract`,
 /// and `novel-review-master`; future presets drop in via YAML only.
 ///
-/// Best-effort: on any failure (unknown preset, no `nexus_home`, no active
-/// workspace, empty `cli_args`), the function returns without printing so
-/// clap's generic `RunCommand` `--help` renders as before.
+/// Best-effort: on any failure (no help target in argv, no `nexus_home`,
+/// unknown preset, empty `cli_args`), returns `None`.
 ///
 /// Called from `main()` before `Cli::parse()`.
-pub fn maybe_print_preset_run_help_and_exit() {
+pub fn maybe_render_preset_run_help() -> Option<String> {
     let argv: Vec<String> = std::env::args().collect();
-    let Some(preset_id) = extract_run_help_target(&argv) else {
-        return;
-    };
-    // Best-effort manifest resolution; fall through to clap on any failure.
-    let Ok(nexus_home) = crate::config::nexus_home() else {
-        return;
-    };
+    let preset_id = extract_run_help_target(&argv)?;
+    // Best-effort manifest resolution; None on any failure.
+    let nexus_home = crate::config::nexus_home().ok()?;
     let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
     let loaded =
         match nexus_orchestration::preset::lookup_preset_by_id(&preset_id, &nexus_home, &caps) {
             Some(loaded) => loaded,
-            None => {
-                match nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps) {
-                    Ok(loaded) => loaded,
-                    Err(_) => return,
-                }
-            }
+            None => match nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps)
+            {
+                Ok(loaded) => loaded,
+                Err(_) => return None,
+            },
         };
     let cli_args = &loaded.manifest.preset.cli_args;
     if cli_args.is_empty() {
         // No preset-specific flags → let clap render the generic RunCommand help.
-        return;
+        return None;
     }
     let description = &loaded.manifest.preset.description;
-    print!(
-        "{}",
-        format_preset_run_help(&preset_id, description, cli_args)
-    );
-    std::process::exit(0);
+    Some(format_preset_run_help(&preset_id, description, cli_args))
 }
 
 /// Pure argv parser: extract the `preset_id` targeted by a
@@ -1555,6 +1552,25 @@ mod tests {
         );
         // Global flags still present so the help is usable.
         assert!(out.contains("--json"));
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V146P2-QC1-S1: library help-intercept must return, not exit
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn maybe_render_preset_run_help_returns_none_under_test_argv() {
+        // R-V146P2-QC1-S1: `maybe_render_preset_run_help` must RETURN
+        // `Option<String>` rather than call `std::process::exit(0)`. Under
+        // `cargo test`, `std::env::args()` is the test-harness argv, which
+        // never contains `creator run <preset_id> --help`, so the function
+        // must short-circuit to `None`. If it still exited, this test body
+        // could not run — reaching the assertion is the regression guard.
+        let rendered = maybe_render_preset_run_help();
+        assert!(
+            rendered.is_none(),
+            "library help-intercept must return None for non-matching argv (no exit); got: {rendered:?}"
+        );
     }
 
     #[test]
