@@ -29,7 +29,7 @@
       "primary_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
-  "updated_at": "2026-06-17T18:45:00+08:00",
+  "updated_at": "2026-06-17T19:10:00+08:00",
       "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md",
       "completion_commits": [
         "237eec20",
@@ -104,7 +104,7 @@
   "v1_46_iteration_complete": true,
   "v1_47_iteration_complete": true,
   "v1_48_iteration_complete": true,
-  "v1_49_p0_status": "InReview — QC tri-review complete 2026-06-17; consolidated verdict Request Changes; fix wave pending (R-V149P0-02)",
+  "v1_49_p0_status": "InReview — QC tri-review + W-1 fix wave complete 2026-06-17; targeted re-review pending (qc1+2)",
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -690,17 +690,17 @@
         "note": "V1.49 P0 widened DAO SQL + auto_chain consumer; CLI client-side fetch at run.rs::assemble_open_findings_block still hard-codes `?status=open`. Suggested fix at V1.50: extend Local API ListFindingsQuery.status to accept comma-separated list (or add `:actionable` endpoint) + update CLI to pass `open,triaged` + CLI integration test. Auto-chain path (production) is unaffected — already uses widened DAO filter."
       },
       {
-        "id": "R-V149P0-02",
-        "title": "LocalDbError::ConstraintViolation overloading leaks DAO internals + collapses distinct failure classes on the PATCH public surface",
-        "severity": "medium",
-        "source": "qc1 W-1 + qc2 W-1 (converging); qc3 S-1 cross-reference",
-        "scope": "crates/nexus-local-db/src/findings.rs (DAO ConstraintViolation emission sites); crates/nexus-daemon-runtime/src/api/handlers/findings.rs::update_finding_handler (lines 319-335); crates/nexus-daemon-runtime/src/api/errors.rs (line 172, 422 mapping)",
-        "decision": "fix-in-wave",
+        "id": "R-V149P0-03",
+        "title": "Pre-existing `cargo clippy --all -- -D warnings` failure on clean V1.49 integration HEAD (local toolchain drift)",
+        "severity": "low",
+        "source": "P0 fix-wave implementer (out-of-scope finding); verified pre-existing per `.mstar/AGENTS.md` protocol",
+        "scope": "crates/nexus-contracts/src/local/schedule/http.rs:236 (redundant_clone); crates/nexus-orchestration + crates/nexus-daemon-runtime test targets (doc_markdown, unwrap_used). 131 errors on clean base, identical count in W-1 fix worktree (clippy-neutral diff).",
+        "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.49 P0 fix wave",
-        "target_date": "V1.49 P0 fix wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/qc-consolidated.md §W-1",
-        "note": "Single LocalDbError::ConstraintViolation variant is emitted for at least four distinct conditions (illegal transition, invalid severity, invalid target_executor, unknown status membership). Handler remaps every occurrence to BadRequest { code: INVALID_TRANSITION, message: <raw DAO constraint text> }. Fix: DAO-level split — IllegalTransition { from, to } + InvalidEnum { field, value, allowed }. Handler maps IllegalTransition→INVALID_TRANSITION (422), InvalidEnum→INVALID_INPUT (422). Add tracing::warn! on both arms. Update the test findings_lifecycle_rejects_unknown_status_value to assert INVALID_INPUT. Add 1 malformed-status injection test."
+        "target": "V1.50",
+        "target_date": "V1.50",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/fix-w1-completion.md §Risks",
+        "note": "Local clippy rust-1.93.0 is stricter than the clippy version CI/qc3 used (qc3 reported --all clean against the same code). Verified pre-existing on iteration/v1.49 @ bc8efc8d (clean base before W-1 fix) with identical 131-error count. Not a V1.49 regression. W-1 fix is clippy-neutral on the directly modified crates. Suggested fix at V1.50: pin rust-toolchain.toml to CI's resolved version, or run `cargo clippy --fix --allow-dirty --allow-staged` and address residual manually per AGENTS.md fix-cadence."
       }
     ]
   }
