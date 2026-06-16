@@ -243,3 +243,31 @@ fn works_reconcile_chapters_help_lists_dry_run_and_yes() {
         "reconcile-chapters --help must list the -y short form: {help_text}"
     );
 }
+
+/// `--yes` help text must not over-promise an inline preview (V1.49 P2 fix,
+/// R-V149P2-01 / qc1 W-1). `confirm_reconcile_interactive` only prompts; the
+/// preview lives behind `--dry-run`, which the help text must point to.
+#[test]
+fn works_reconcile_chapters_help_yes_does_not_promise_inline_preview() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "reconcile-chapters", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    // The over-promising phrase from qc1 W-1 must be gone.
+    assert!(
+        !help_text.contains("prints a preview"),
+        "reconcile-chapters --help for --yes must not promise an inline preview: {help_text}"
+    );
+    // The preview is accurately routed to --dry-run.
+    assert!(
+        help_text.contains("--dry-run") && help_text.contains("preview"),
+        "reconcile-chapters --help must point to --dry-run for the preview: {help_text}"
+    );
+}

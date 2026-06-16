@@ -133,10 +133,11 @@ pub enum WorksCommand {
         dry_run: bool,
         /// Skip the confirmation prompt and mutate immediately.
         ///
-        /// By default (when stderr/stdin is a TTY) the reconcile prints a
-        /// preview and asks for confirmation before mutating `work_chapters`
-        /// and chapter frontmatter. Pass `--yes` (or `-y`) to proceed
-        /// non-interactively. Mirrors `apt-get -y` / `pacman --noconfirm`.
+        /// By default (when stderr/stdin is a TTY) the reconcile asks for
+        /// confirmation before mutating `work_chapters` and chapter
+        /// frontmatter. Pass `--yes` (or `-y`) to proceed non-interactively;
+        /// use `--dry-run` to preview the changes without writing. Mirrors
+        /// `apt-get -y` / `pacman --noconfirm`.
         #[arg(long = "yes", short = 'y', default_value_t = false)]
         yes: bool,
         /// Emit machine-readable JSON instead of human text
