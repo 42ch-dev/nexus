@@ -699,6 +699,21 @@
         "target": "V1.49"
       }
     ],
+    "2026-06-17-v1.49-author-desk-ux": [
+      {
+        "id": "R-V149P2-01",
+        "title": "clap `--yes` help text for `creator works reconcile-chapters` over-promises an inline preview that `confirm_reconcile_interactive` does not print in the default flow",
+        "severity": "low",
+        "source": "qc1 W-1 (architecture/maintainability)",
+        "scope": "crates/nexus42/src/commands/creator/works/mod.rs::handle_reconcile_chapters (clap arg help)",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.49 P2 fix wave",
+        "target_date": "V1.49 P2 fix wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-author-desk-ux/qc-consolidated.md §W-1",
+        "note": "Doc/behavior mismatch isolated to user-visible --help. Fix: update --yes help text to 'Skip the confirmation prompt for the mutating path' (no preview promise). 1-line change in clap arg; no behavior change. Handler docstring + overlay §8.2 are already accurate."
+      }
+    ],
     "2026-06-17-v1.49-findings-lifecycle": [
       {
         "id": "R-V149P0-01",
