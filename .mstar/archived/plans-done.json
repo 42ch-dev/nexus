@@ -194,7 +194,8 @@
     "2026-06-16-v1.48-serial-hardening",
     "2026-06-16-v1.48-findings-consumer",
     "2026-06-16-v1.48-rules-runtime",
-    "2026-06-16-v1.48-findings-data-hygiene"
+    "2026-06-16-v1.48-findings-data-hygiene",
+    "2026-06-16-v1.48-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

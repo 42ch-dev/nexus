@@ -1,46 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16T11:13:44+08:00",
-  "plans": [
-    {
-      "id": "2026-06-16-v1.48-hygiene-and-closeout",
-      "title": "P-last — WL-A residual closure, overlay promotion, Profile B compaction",
-      "file": ".mstar/plans/2026-06-16-v1.48-hygiene-and-closeout.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev",
-        "@writing-specialist",
-        "@project-manager"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.48",
-        "hygiene",
-        "p-last"
-      ],
-      "created_at": "2026-06-16",
-      "updated_at": "2026-06-16",
-      "metadata": {
-        "working_branch": "feature/v1.48-hygiene-and-closeout",
-        "merge_target": "iteration/v1.48",
-        "depends_on": "P0-P4 merged",
-        "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
-        "wl_a_whitelist": [
-          "R-V145B3-001",
-          "R-V146P1-QC1-S3",
-          "R-V146P1-QC1-S1",
-          "R-V146P1-QC1-S2",
-          "R-V146P1-QC3-S3",
-          "R-V146P2-QC2-W",
-          "R-V146P1-QC3-S2",
-          "R-V146P0-QC3-S2",
-          "R-V146P1-QC2-S1",
-          "R-V146P1-QC2-S2"
-        ]
-      }
-    }
-  ],
+  "updated_at": "2026-06-16T12:14:57+08:00",
+  "plans": [],
   "v1_43_iteration_complete": true,
   "v1_44_iteration_complete": true,
   "v1_45_iteration_complete": true,
@@ -57,10 +18,10 @@
     "last_integration_branch": "iteration/v1.47",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
-    "integration_branch_retired": "iteration/v1.47 (PR #60 @ 8f4f9f2b)",
+    "integration_branch_retired": "(pending PR to main)",
     "latest_shipped_iteration": "v1.47",
     "latest_shipped_at": "2026-06-15 (PR #60 @ 8f4f9f2b)",
-    "latest_active_iteration": "v1.48",
+    "latest_active_iteration": "v1.48 (DONE — all 7 plans complete)",
     "latest_active_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "GO — V1.48 P-1 Done 2026-06-16",
@@ -72,11 +33,10 @@
       "policy": "H-1 — merge to main before or at iteration/v1.48 cut"
     },
     "latest_ship": {
-      "iteration": "v1.47",
-      "pr": 60,
-      "merge_commit": "8f4f9f2b3ff8f3f7b21c7b88e4123c59ad45888b",
-      "compass": ".mstar/iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md",
-      "shipped_at": "2026-06-15"
+      "iteration": "v1.48",
+      "merge_commit": "(pending PR)",
+      "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+      "shipped_at": "2026-06-16"
     },
     "tech_debt_summary": {
       "updated_at": "2026-06-16",
@@ -109,13 +69,16 @@
       {
         "id": "R-V145B3-001",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "P-last cli-spec.md supersession",
         "title": "cli-spec.md §6.2D/E body still references shipped V1.33-V1.44 subcommand table; needs to be rewritten to match the new Shipped Master (creator-run-preset-entry.md). Tracked for follow-up spec-hygiene pass.",
         "decision": "defer",
         "owner": "@fullstack-dev or @writing-specialist",
         "target": "V1.48",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: cli-spec.md §6.2D updated with authoritative-surface pointer to Shipped Master creator-run-preset-entry.md; §6.2E note rewritten to record that the body was rewritten in 4aa5aa53 and §6.2E deleted in V1.46 P1.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit a4d1f3f6)"
       }
     ],
     "2026-06-14-v1.46-author-desk-status-ux": [
@@ -129,7 +92,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A; defer V1.49 at P-last unless swept early."
+        "note": "Out of WL-A; defer V1.49 at P-last unless swept early. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P0-QC2-S1",
@@ -141,7 +105,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P0-QC3-S2",
@@ -154,7 +119,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
         "note": "WL-A — add tracing::debug/warn.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: tracing::warn! added at the two silent degradation sites in works/mod.rs (fetch_open_findings Unavailable path + fetch_stale_findings via map_err).",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit da8f8a69)"
       },
       {
         "id": "R-V146P0-QC3-S3",
@@ -166,7 +135,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       }
     ],
     "2026-06-14-v1.46-novel-runtime-ux-edges": [
@@ -181,7 +151,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: sanitize_for_terminal made pub(crate); applied to Manifest.description in format_preset_run_help; regression test added.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 83140200)"
       },
       {
         "id": "R-V146P2-QC1-S1",
@@ -193,7 +167,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P2-QC1-S2",
@@ -205,7 +180,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P2-QC3-S1",
@@ -217,7 +193,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P2-QC3-S2",
@@ -229,7 +206,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       }
     ],
     "2026-06-14-v1.46-pool-observability": [
@@ -243,7 +221,8 @@
         "owner": "@fullstack-dev-2",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P4-QC1-S2",
@@ -255,7 +234,8 @@
         "owner": "@fullstack-dev-2",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P4-QC3-S1",
@@ -267,7 +247,8 @@
         "owner": "@fullstack-dev-2",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P4-QC3-S2",
@@ -279,7 +260,8 @@
         "owner": "@fullstack-dev-2",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       }
     ],
     "2026-06-14-v1.46-research-auto-chain-e2e": [
@@ -293,7 +275,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P3-QC3-S1",
@@ -305,7 +288,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V146P3-QC3-S2",
@@ -317,7 +301,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Out of WL-A."
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       }
     ],
     "2026-06-14-v1.46-spec-cli-hygiene": [
@@ -332,7 +317,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: creator-run-preset-entry.md §4 step 4 inline parenthetical rewritten to clarify the normative 'apply stage advance semantics' step is live; only the subcommand was removed.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit c0c0b7e3)"
       },
       {
         "id": "R-V146P1-QC1-S2",
@@ -345,7 +334,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: mechanical rename daemon_not_reachable_quickstart → daemon_not_reachable_with_remediation across definition + 4 call sites + test.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit bb5f7ac8)"
       },
       {
         "id": "R-V146P1-QC1-S3",
@@ -358,7 +351,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: creator-workflow.md §2 column relabeled from 'Work model (V1.33)' to 'Work model (baseline)' to reflect current commands.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 8efcac69)"
       },
       {
         "id": "R-V146P1-QC2-S1",
@@ -371,7 +368,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: extracted novel-completion-guard message to module-level const NOVEL_COMPLETION_GUARD_MESSAGE; test now asserts against production source.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 903fbde3 + 4c78940b)"
       },
       {
         "id": "R-V146P1-QC2-S2",
@@ -384,7 +385,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: extracted assert_remediation_cites_spec helper; 4 remediation tests refactored to use it.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d4b6a4ab)"
       },
       {
         "id": "R-V146P1-QC3-S2",
@@ -397,7 +402,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: added assert_remediation_references_command helper with command-validity assertions; 4 remediation tests updated.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit adc9979f)"
       },
       {
         "id": "R-V146P1-QC3-S3",
@@ -410,7 +419,11 @@
         "target_date": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-spec-cli-hygiene]",
         "note": "WL-A.",
-        "p_last_whitelist": true
+        "p_last_whitelist": true,
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P-last T1: test renamed from remediation_work_field_cites_quickstart → remediation_work_field_cites_preset_entry_spec.",
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d17c3182)"
       }
     ],
     "2026-06-15-v1.47-gate-remediation-audit": [
@@ -422,9 +435,10 @@
         "scope": "nexus42 CLI / daemon schedule add surface",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.48",
+        "target": "V1.49",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-gate-remediation-audit][R-V147P1-01]",
-        "note": "P4 attach if capacity."
+        "note": "P4 attach if capacity. [P-last T3: bulk-deferred to V1.49.]",
+        "target_date": "V1.49"
       }
     ],
     "2026-06-15-v1.47-reflection-loop-findings": [
@@ -536,7 +550,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-serial-hardening/qc-consolidated.md",
-        "note": "Deferred to V1.49 UX plan. P4-fix1 scope covers atomic write + resynced counter + lock release only."
+        "note": "Deferred to V1.49 UX plan. P4-fix1 scope covers atomic write + resynced counter + lock release only. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       },
       {
         "id": "R-V148P4-W3",
@@ -548,7 +563,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-serial-hardening/qc-consolidated.md",
-        "note": "Deferred to V1.49. Consider batching / chunked async processing or not holding runtime lock during best-effort file rewrites."
+        "note": "Deferred to V1.49. Consider batching / chunked async processing or not holding runtime lock during best-effort file rewrites. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       }
     ],
     "2026-06-16-v1.48-findings-producer": [
@@ -562,7 +578,8 @@
         "owner": "@fullstack-dev",
         "target_date": "V1.49",
         "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-findings-producer/qc-consolidated.md",
-        "note": "Deferred. P0 work_ref is app-controlled today; P1+ prompt injection surfaces `rule_suggestion` and `body` to LLMs, so a small safe-resolve guard or invariant test should be added before that touch point."
+        "note": "Deferred. P0 work_ref is app-controlled today; P1+ prompt injection surfaces `rule_suggestion` and `body` to LLMs, so a small safe-resolve guard or invariant test should be added before that touch point. [P-last T3: bulk-deferred to V1.49.]",
+        "target": "V1.49"
       }
     ]
   }
