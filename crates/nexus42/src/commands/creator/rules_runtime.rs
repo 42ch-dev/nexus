@@ -23,8 +23,9 @@
 use serde::Deserialize;
 
 use crate::api::DaemonClient;
-use crate::errors::{CliError, Result};
+use crate::commands::creator::work_utils::resolve_active_work_id;
 use crate::commands::creator::works::{FindingsCommand, RulesCommand};
+use crate::errors::{CliError, Result};
 
 /// Subset of the daemon `GET /v1/local/works/{work_id}` payload that this
 /// module needs. Deserializing via `serde_json::Value` keeps the CLI
@@ -57,19 +58,17 @@ pub async fn handle_findings(client: &DaemonClient, command: FindingsCommand) ->
     }
 }
 
-/// Handle `creator works rules …` (V1.48 P2 — T4 fills in the Reset body).
+/// Handle `creator works rules …` (V1.48 P2).
 ///
 /// # Errors
 ///
-/// Returns [`crate::errors::CliError`] when the Reset subcommand is invoked
-/// before T4 lands (stub). T4 will replace this with the real handler.
-pub fn handle_rules(client: &DaemonClient, command: RulesCommand) -> Result<()> {
-    let _ = client;
+/// Returns [`crate::errors::CliError`] on daemon API failure, missing
+/// `work_ref`, or filesystem write error.
+pub async fn handle_rules(client: &DaemonClient, command: RulesCommand) -> Result<()> {
     match command {
-        RulesCommand::Reset { work_id, json } => Err(CliError::Other(format!(
-            "`creator works rules reset` (work_id={work_id:?}, json={json}) \
-             is implemented in T4 (same plan). This stub will be replaced in the next commit."
-        ))),
+        RulesCommand::Reset { work_id, json } => {
+            handle_rules_reset(client, work_id, json).await
+        }
     }
 }
 
@@ -194,7 +193,59 @@ fn operational_workspace_dir_or_error() -> Result<std::path::PathBuf> {
     })
 }
 
-// T4 (next commit): `handle_rules_reset` body + reset tests.
+// T4: rules reset handler below.
+
+/// `creator works rules reset [<work_id>]` (overlay §4).
+///
+/// Restores `Works/<work_ref>/AGENTS.md` to the default scaffold. Does NOT
+/// delete the Work or any chapter artifacts.
+async fn handle_rules_reset(
+    client: &DaemonClient,
+    work_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let resolved_work_id = resolve_active_work_id(client, work_id).await?;
+
+    // Resolve work_ref from the Work record.
+    let work_path = format!("/v1/local/works/{resolved_work_id}");
+    let work: WorkRefResponse = client.get(&work_path).await?;
+    let work_ref = work.work_ref.as_deref().ok_or_else(|| {
+        CliError::Config(format!(
+            "Work {resolved_work_id} has no `work_ref`; cannot locate `AGENTS.md`."
+        ))
+    })?;
+
+    let ws_dir = operational_workspace_dir_or_error()?;
+    let agents_md_path = nexus_home_layout::work_agents_md_path(&ws_dir, work_ref);
+
+    nexus_orchestration::rules_layers::reset_agents_md(&agents_md_path, work_ref).map_err(
+        |e| {
+            CliError::Other(format!(
+                "Failed to reset {}: {e}",
+                agents_md_path.display()
+            ))
+        },
+    )?;
+
+    let agents_md_rel = std::path::Path::new("Works")
+        .join(work_ref)
+        .join("AGENTS.md");
+    if json {
+        let body = serde_json::json!({
+            "work_id": resolved_work_id,
+            "work_ref": work_ref,
+            "agents_md_path": agents_md_path.to_string_lossy(),
+            "reset": true,
+        });
+        println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
+    } else {
+        println!(
+            "✓ Reset {rel} to default scaffold",
+            rel = agents_md_rel.display()
+        );
+    }
+    Ok(())
+}
 
 /// PATCH a finding's status to `resolved` via the daemon API.
 async fn patch_finding_resolved(

@@ -330,7 +330,7 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
             super::rules_runtime::handle_findings(&client, command).await
         }
         WorksCommand::Rules { command } => {
-            super::rules_runtime::handle_rules(&client, command)
+            super::rules_runtime::handle_rules(&client, command).await
         }
         WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
             "`creator works start` is not available. \
@@ -2807,5 +2807,44 @@ mod tests {
         }
     }
 
-    // T4 (next commit): works_rules_reset_* parsing tests.
+    // ── V1.48 P2 T4: rules reset CLI parsing ──────────────────────────
+
+    #[test]
+    fn works_rules_reset_parses_without_work_id() {
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset"])
+            .expect("works rules reset (no work_id) should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { work_id, json: _ },
+            } => {
+                assert!(work_id.is_none(), "work_id should default to None");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    #[test]
+    fn works_rules_reset_parses_with_work_id_and_json() {
+        let cli = WorksCli::try_parse_from([
+            "nexus42",
+            "rules",
+            "reset",
+            "wrk_abc",
+            "--json",
+        ])
+        .expect("works rules reset <work_id> --json should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command:
+                    RulesCommand::Reset {
+                        work_id,
+                        json,
+                    },
+            } => {
+                assert_eq!(work_id.as_deref(), Some("wrk_abc"));
+                assert!(json, "--json should set json=true");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
 }
