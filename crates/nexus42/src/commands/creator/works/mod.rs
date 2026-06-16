@@ -1198,12 +1198,22 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
     );
     let path =
         format!("/v1/local/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
-    findings_client
+    // R-V146P0-QC3-S2: observe the silent degradation path — a failed/timeout
+    // findings fetch previously vanished into `Unavailable` with no trace.
+    let result = findings_client
         .get::<serde_json::Value>(&path)
         .await
         .map_or(FindingsResult::Unavailable, |v| {
             FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
-        })
+        });
+    if matches!(result, FindingsResult::Unavailable) {
+        tracing::warn!(
+            work_id = %work_id,
+            path = %path,
+            "open findings fetch failed or timed out; degrading to Unavailable"
+        );
+    }
+    result
 }
 
 /// Fetch the creator-global stale-findings summary for the JSON status path —
@@ -1226,6 +1236,15 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
     stale_client
         .get::<serde_json::Value>("/v1/local/findings/stale")
         .await
+        .map_err(|e| {
+            // R-V146P0-QC3-S2: observe the silent `.ok()` swallow — a failed
+            // stale fetch previously vanished into `None` with no trace.
+            tracing::warn!(
+                error = %e,
+                "stale findings fetch failed or timed out; degrading to None"
+            );
+            e
+        })
         .ok()
 }
 
@@ -1667,7 +1686,11 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
 /// Preserves printable ASCII, Unicode, `\n`, and `\t`. Strips:
 /// - ASCII control chars 0x00–0x1F (except `\n` 0x0A and `\t` 0x09) and 0x7F (DEL)
 /// - ANSI CSI sequences (`ESC [ ... letter`)
-fn sanitize_for_terminal(s: &str) -> String {
+//
+// `pub(crate)` so sibling modules (e.g. `creator::run`) can reuse the same
+// sanitizer for manifest description text (R-V146P2-QC2-W) instead of
+// duplicating the ANSI/control-char stripping logic.
+pub(crate) fn sanitize_for_terminal(s: &str) -> String {
     // Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
     let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap_or_else(|e| {
         // The pattern is a compile-time constant; panic is unreachable.

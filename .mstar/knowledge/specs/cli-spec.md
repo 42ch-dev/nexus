@@ -352,6 +352,8 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 ### 6.2D `nexus42 creator run` (Work experience — V1.33 target, V1.45 generic runner)
 
+> **Authoritative surface**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Shipped Master, V1.45). The detail below is kept for cli-spec continuity; on any divergence the Master wins.
+
 **V1.45 rewrite:** The bespoke subcommand dispatch (`start`, `continue`, `stage`, `resume`, `reconcile-chapters`, `audit-chapter`, `review-master`) is replaced by a single generic entry point:
 
 ```
@@ -1087,5 +1089,5 @@ v1 至少应保证：
 
 **Superseded by**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Shipped Master V1.45). The §6.2D/E `creator run` preset-entry table, FL-E stage advance mapping, preset-id examples, and global flags on `creator run` are now part of the canonical Master body.
 
-> **Note on §6.2D/E body**: The shipped V1.33–V1.44 text in §6.2D/E below has not been rewritten in this P-last pass (out of plan scope; the overlay was the canonical update channel). The Master [creator-run-preset-entry.md](./creator-run-preset-entry.md) is the authoritative reference for the V1.45 surface. A follow-up spec-hygiene pass should rewrite the §6.2D/E body to match. Tracked as residual `R-V145B3-001`.
+> **Note on §6.2D/E body**: The §6.2D/E body now defers to the Shipped Master [creator-run-preset-entry.md](./creator-run-preset-entry.md) (V1.45) for the canonical `creator run` surface — see the authoritative-surface pointer at the top of §6.2D and the supersession note in §6.2E. The V1.33–V1.44 bespoke subcommand table was replaced by the generic dispatch entry in commit `4aa5aa53` (V1.45 P-last); the stale `creator run stage` section was deleted in V1.46 P1. Closes residual `R-V145B3-001`.
 
