@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-16-v1.48-rules-runtime"
-verdict: "Request Changes"
-generated_at: "2026-06-16"
+verdict: "Approve"
+generated_at: "2026-06-16T02:32:34Z"
 ---
 
 # Code Review Report
@@ -137,3 +137,82 @@ N/A — initial QC wave.
 ## Residual / follow-up (for PM)
 - The Warning (W-1) on reset safety should be tracked if not addressed before merge. Adding `--dry-run` (and optionally a confirmation UX or `--yes`) would close it without changing functional behavior for scripted use.
 - Suggestions are non-blocking for this delivery slice but should be captured as low-severity residuals or handled in docs/readme touch-ups if the plan is otherwise ready.
+
+## Revalidation
+
+**Re-review timestamp**: 2026-06-16T02:32:34Z (targeted re-review of P2-fix1 only)  
+**Re-review range**: merge-base `6b6602bd` (pre-fix integration HEAD) .. tip `4fc1371d` (current integration HEAD)  
+**Focus**: W-1 (qc2) only — `creator works rules reset` safety flags.
+
+### Git / scope evidence
+```
+$ git rev-parse --show-toplevel && git branch --show-current
+/Users/bibi/workspace/organizations/42ch/nexus
+iteration/v1.48
+
+$ git log --oneline 6b6602bd..4fc1371d
+4fc1371d harness(v1.48): P2-fix1 — W-1 qc1 doc restore + W-1 qc2 reset CLI flags
+5dbbf94c docs(plan): record V1.48 P2-fix1 fix wave (W-1 qc1 + W-1 qc2)
+469679f4 feat(rules): add --dry-run and --yes to 'creator works rules reset' (W-1 qc2)
+1a5fccac fix(findings): restore update_finding_handler doc summary (W-1 qc1)
+
+$ git diff 6b6602bd..4fc1371d --stat
+ .../src/api/handlers/findings.rs                   |   1 +
+ crates/nexus-orchestration/src/rules_layers.rs     | 222 +++++++++++++++++++++
+ .../nexus42/src/commands/creator/rules_runtime.rs  | 194 +++++++++++++++++-
+ crates/nexus42/src/commands/creator/works/mod.rs   | 109 +++++++++-
+ 5 files changed, 534 insertions(+), 13 deletions(-)
+```
+
+### W-1 (qc2) — reset CLI safety (commit `469679f4`)
+- **Change**: Added `--dry-run` and `--yes` / `-y` flags to `creator works rules reset`.
+  - Default (no flags): prints unified diff (via new pure `diff_agents_md_vs_scaffold`), then prompts via `dialoguer` before atomic overwrite.
+  - `--dry-run`: prints diff (or "no change" / "absent" message) and exits without writing; no prompt.
+  - `--yes` / `-y`: skips prompt and writes immediately.
+  - `--dry-run` takes precedence over `--yes`.
+  - JSON mode without `--yes`: emits `confirmation_required: true` and exits cleanly (no write).
+  - Non-interactive stdin without `--yes` is a `CliError::Config`.
+- **Files touched (P2-fix1 scope)**:
+  - `crates/nexus42/src/commands/creator/works/mod.rs` — clap definition + parsing tests.
+  - `crates/nexus42/src/commands/creator/rules_runtime.rs` — 6-phase handler (`handle_rules_reset`) + `confirm_reset_interactive`.
+  - `crates/nexus-orchestration/src/rules_layers.rs` — new pure `diff_agents_md_vs_scaffold` + internal `unified_diff` / LCS helpers (no DB/IO) + 3 hermetic diff tests.
+- **Tests added / updated** (commit `469679f4`):
+  - `crates/nexus42` lib: `works_rules_reset_supports_dry_run_flag`, `works_rules_reset_supports_yes_long_and_short_flags`, `works_rules_reset_combines_dry_run_yes_and_json`, plus 2 pre-existing reset parse tests updated for new fields.
+  - `crates/nexus-orchestration` lib (`rules_layers`): `rules_layers_diff_empty_when_current_equals_scaffold`, `rules_layers_diff_marks_accepted_entries_as_removed`, `rules_layers_diff_has_unified_format_headers`.
+- **Lint / fmt / full relevant test evidence** (this re-review run):
+  ```
+  $ cargo clippy --all -- -D warnings 2>&1 | tail -15
+  ... Finished `dev` profile ... (clean; exit 0)
+
+  $ cargo +nightly fmt --all --check 2>&1 | tail -10
+  (no output — clean)
+
+  $ cargo test -p nexus42 --lib -- rules_reset 2>&1 | tail -20
+  running 5 tests
+  test commands::creator::works::tests::works_rules_reset_parses_without_work_id ... ok
+  test commands::creator::works::tests::works_rules_reset_supports_dry_run_flag ... ok
+  test commands::creator::works::tests::works_rules_reset_combines_dry_run_yes_and_json ... ok
+  test commands::creator::works::tests::works_rules_reset_parses_with_work_id_and_json ... ok
+  test commands::creator::works::tests::works_rules_reset_supports_yes_long_and_short_flags ... ok
+  test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 702 filtered out
+
+  $ cargo test -p nexus-orchestration --lib rules_layers 2>&1 | tail -30
+  running 16 tests
+  ... (all 16 pass, including the 3 new diff tests + reset/append/idempotency tests)
+  test result: ok. 16 passed
+  ```
+- **Pure function check**: `diff_agents_md_vs_scaffold(current: &str, work_ref: &str) -> String` (and all internal helpers) are pure — only string slicing / LCS / formatting; no `std::fs`, no DB, no network. The handler in `rules_runtime.rs` owns all FS reads/writes.
+- **Precedence verified in source**: `if dry_run { ... return Ok(()); }` precedes the `if !would_change` and the `if !yes { confirm ... }` block.
+- **JSON confirmation path**: when `json && !yes && would_change`, emits `{"reset": false, "confirmation_required": true, ...}` and returns early — no write.
+- **Verdict for W-1 (qc2)**: **Fixed**. The safety gap identified in the initial qc2 review is closed. No new Critical / Warning introduced in the fix-wave delta for this seat's scope.
+
+### Updated Summary (post-revalidation)
+| Severity | Count (initial) | Count (after P2-fix1) |
+|----------|-----------------|-----------------------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning | 1 (W-1) | 0 |
+| 🟢 Suggestion | 4 | 4 (unchanged; non-blocking) |
+
+**Final Verdict**: **Approve**
+
+(The W-1 from qc2 is resolved. Suggestions S-1..S-4 remain deferred per prior plan note and consolidated decision; they are non-blocking for this slice.)
