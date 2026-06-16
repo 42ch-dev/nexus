@@ -31,7 +31,7 @@ without introducing a second scheduler or replacing World/KB SSOT. After V1.35 P
 
 ## 2. Relationship to Work model
 
-| Concept | Work model (V1.33) | Staged workflow (this spec) |
+| Concept | Work model (baseline) | Staged workflow (this spec) |
 | --- | --- | --- |
 | Work container | Shipped | Extended with `stage`, `stage_status` |
 | Entry | `creator bootstrap` | Composite onboarding; intake still `work_init` |

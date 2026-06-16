@@ -279,7 +279,11 @@ fn format_preset_run_help(preset_id: &str, description: &str, cli_args: &[Preset
         "nexus42 creator run {preset_id} [<work_id>] [global flags] [preset args...]"
     );
     let _ = writeln!(out);
-    let _ = writeln!(out, "{description}");
+    // R-V146P2-QC2-W: sanitize manifest-supplied description before rendering
+    // to terminal — defense-in-depth against escape/control chars in local
+    // user YAML. Same sanitizer as the works status path.
+    let safe_description = super::works::sanitize_for_terminal(description);
+    let _ = writeln!(out, "{safe_description}");
     let _ = writeln!(out);
     let _ = writeln!(out, "Global flags (apply before preset-specific args):");
     let _ = writeln!(
@@ -552,6 +556,60 @@ async fn assemble_world_kb_block(
     }
 }
 
+/// V1.48 P1 (overlay §2 Consumer) — fetch open findings for the active
+/// Work + chapter via the daemon Local API and render the
+/// `{{ open_findings_block }}` prompt block.
+///
+/// Fetches `GET /v1/local/works/{work_id}/findings?status=open`, filters
+/// client-side to overlay §2.1 scope (`chapter == N OR chapter == NULL`),
+/// re-sorts by severity DESC + `created_at` ASC (the daemon's generic
+/// `list_findings` orders by `created_at` DESC), and feeds the result
+/// through [`nexus_orchestration::findings_block::build_open_findings_block`].
+///
+/// Returns `Ok(None)` when no qualifying findings exist (AC2: no empty
+/// sentinel noise) so the caller leaves `WorkFields.open_findings_block`
+/// as `None` and the preset's `{{#if open_findings_block}}` guard omits
+/// the section.
+///
+/// # Errors
+///
+/// Returns an error if the daemon Local API call fails or the response
+/// body cannot be deserialized.
+async fn assemble_open_findings_block(
+    client: &crate::api::DaemonClient,
+    work_id: &str,
+    chapter: i32,
+    chapter_label: &str,
+) -> crate::errors::Result<Option<String>> {
+    use nexus_orchestration::findings_block::{build_open_findings_block, sort_open_findings};
+
+    let path = format!("/v1/local/works/{work_id}/findings?status=open&limit=200");
+    let resp: Vec<nexus_local_db::findings::Finding> = client.get(&path).await?;
+
+    // Overlay §2.1 scope: chapter == N OR chapter IS NULL (Work-level).
+    let chapter_i64 = i64::from(chapter);
+    let mut scoped: Vec<_> = resp
+        .into_iter()
+        .filter(|f| f.chapter == Some(chapter_i64) || f.chapter.is_none())
+        .collect();
+
+    if scoped.is_empty() {
+        return Ok(None);
+    }
+
+    // Overlay §2.1 ordering: severity DESC (blocker > major > minor > info),
+    // then created_at ASC. The shared helper mirrors the DAO ordering used
+    // by `list_open_findings_for_chapter`.
+    sort_open_findings(&mut scoped);
+
+    let block = build_open_findings_block(&scoped, chapter_label);
+    if block.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(block))
+    }
+}
+
 /// Validates:
 /// 1. Target stage is a known FL-E stage
 /// 2. Target stage is ahead of current stage (unless `--force`)
@@ -743,6 +801,35 @@ async fn stage_advance(
         None
     };
 
+    // V1.48 P1 (overlay §2 Consumer): for the produce stage with a
+    // selected chapter, fetch open findings via the daemon Local API and
+    // render the `{{ open_findings_block }}` prompt block. The block is
+    // `None` when the stage is not `produce`, when no chapter is selected,
+    // or when no open findings exist (AC2: no empty sentinel noise).
+    // Best-effort: on fetch failure, log and proceed without the block.
+    let open_findings_block = if target_stage == "produce" {
+        if let (Some(ch), Some(cl)) = (next_chapter, chapter_label.as_ref()) {
+            match assemble_open_findings_block(client, work_id, ch, cl).await {
+                Ok(Some(block)) => Some(block),
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "fl_e.stage",
+                        work_id = %work_id,
+                        chapter = ch,
+                        error = %e,
+                        "Failed to fetch open findings; proceeding without prompt block"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let fields = WorkFields {
         work_id: work_id.to_string(),
         fl_e_stage: target_stage.to_string(),
@@ -759,6 +846,7 @@ async fn stage_advance(
         world_kb_block,
         world_id,
         volume: None,
+        open_findings_block,
     };
 
     if let Some(mut request) =
@@ -1467,5 +1555,28 @@ mod tests {
         );
         // Global flags still present so the help is usable.
         assert!(out.contains("--json"));
+    }
+
+    #[test]
+    fn format_help_sanitizes_manifest_description() {
+        // R-V146P2-QC2-W: manifest-supplied description must be sanitized
+        // before terminal rendering so ANSI/control chars cannot corrupt
+        // the help output.
+        let dirty = "Bad \x1B[31mred\x1B[0m\x07 description";
+        let out = format_preset_run_help("novel-brainstorm", dirty, &[]);
+        assert!(
+            !out.contains('\x1B'),
+            "ANSI escape must be stripped from description: {out}"
+        );
+        assert!(
+            !out.contains('\x07'),
+            "BEL control char must be stripped from description: {out}"
+        );
+        // The safe remainder is still rendered.
+        assert!(
+            out.contains("Bad"),
+            "safe description text must survive sanitization: {out}"
+        );
+        assert!(out.contains("red"), "safe text 'red' must survive: {out}");
     }
 }

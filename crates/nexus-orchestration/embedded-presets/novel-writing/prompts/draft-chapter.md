@@ -10,6 +10,7 @@ vars:
   body_path: { type: string, required: true }
   slug: { type: string, default: "ch01" }
   world_kb_block: { type: string, default: "" }
+  open_findings_block: { type: string, default: "" }
 max_tokens: 8000
 ---
 
@@ -33,6 +34,14 @@ The following World context block provides characters, locations, and active rul
 ```yaml
 {{world_kb_block}}
 ```
+{{/if}}
+
+{{#if open_findings_block}}
+## Open Findings to Address
+
+The following open quality findings were surfaced by prior review passes for this chapter (and Work-level findings that affect every chapter). When drafting the body, **actively address** each item — either by writing prose that resolves it, or by deliberately writing around it with a documented reason in the frontmatter `notes`. Do not silently ignore them:
+
+{{open_findings_block}}
 {{/if}}
 
 ## Frontmatter (REQUIRED)

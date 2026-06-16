@@ -1,8 +1,8 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.48 awaiting prepare** · **V1.47 Shipped** (2026-06-15, PR #60 merged) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.48 Active (prepare GO)** · **V1.47 Shipped** (2026-06-15, PR #60 merged) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.47 Shipped (2026-06-15, P-last closeout); V1.48 Active (awaiting prepare)
+**Status**: V1.47 Shipped (2026-06-15, P-last closeout); V1.48 Active (prepare complete 2026-06-16 — implement GO)
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
@@ -277,7 +277,7 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.48** (awaiting prepare) — compass not yet authored; expected focus: V1.47 follow-ups (R-V147P0-* / R-V147P1-01) + deferred V1.45/V1.46 lows (`target: V1.48`).
+- **V1.48** (Active — prepare GO 2026-06-16) — [v1.48-novel-quality-loop-completion-delivery-compass-v1.md](../iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md) — Novel Quality Loop Completion: findings F-D (produce→consume→rules→data hygiene) + serial §4.5.7 #4/#5 (S-B dual track); overlay [novel-findings-maturity.md](specs/novel-findings-maturity.md); P-last WL-A (10 lows). Integration branch `iteration/v1.48`.
 
 **Latest shipped iteration**
 

@@ -7,6 +7,7 @@
 //! - `PATCH  /v1/local/works/{work_id}/findings/{finding_id}` — Update finding
 //! - `DELETE /v1/local/works/{work_id}/findings/{finding_id}` — Delete finding
 //! - `POST   /v1/local/works/{work_id}/findings/from-review` — Create from review verdict (T3)
+//! - `GET    /v1/local/findings/{finding_id}` — Get one finding, creator-scoped (V1.48 P2 — accept path)
 //! - `GET    /v1/local/findings/stale` — Stale open-findings count for active creator (V1.39 P4 T3)
 
 #![allow(clippy::missing_errors_doc)]
@@ -24,6 +25,29 @@ use nexus_local_db::works;
 use serde::{Deserialize, Serialize};
 
 use super::works::read_active_creator_id;
+
+// ─── Tri-state serde helper (V1.48 P3 T3 / R-V147P0-03) ────────────────────
+
+/// Deserialize a JSON field into `Option<Option<T>>` so that **absent**,
+/// **null**, and **value** are all distinguishable.
+///
+/// - Field absent → `None` (do not patch the column).
+/// - Field `null` → `Some(None)` (clear the column to SQL NULL).
+/// - Field `value` → `Some(Some(value))` (set the column).
+///
+/// Combined with `#[serde(default)]` on the field, this is the standard
+/// tri-state pattern for nullable PATCH fields. See
+/// `FindingPatch::rule_suggestion` rustdoc for the full semantics.
+// V1.48 P3 T3: Option<Option<T>> is the tri-state pattern required by the
+// R-V147P0-03 spec (distinguish absent / null / value). Not a code smell.
+#[allow(clippy::option_option)]
+fn deserialize_some<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Deserialize::deserialize(deserializer).map(Some)
+}
 
 // ─── Request / Response types ──────────────────────────────────────────────
 
@@ -106,8 +130,16 @@ pub struct UpdateFindingRequest {
     pub target_executor: Option<String>,
     /// V1.47: optional new `kind`.
     pub kind: Option<String>,
-    /// V1.47: optional new `rule_suggestion`.
-    pub rule_suggestion: Option<String>,
+    /// V1.48 P3 T3 (R-V147P0-03): tri-state `rule_suggestion`.
+    ///
+    /// - Absent in JSON → `None` (do not touch the column).
+    /// - `null` in JSON → `Some(None)` (clear to SQL NULL).
+    /// - `"value"` in JSON → `Some(Some("value"))` (set).
+    ///
+    /// `#[serde(default)]` makes absent → `None`; `deserialize_some` wraps
+    /// every present value (including `null`) in `Some(...)`.
+    #[serde(default, deserialize_with = "deserialize_some")]
+    pub rule_suggestion: Option<Option<String>>,
 }
 
 /// List findings query parameters.
@@ -236,6 +268,23 @@ pub async fn get_finding_handler(
     Ok(Json(f.into()))
 }
 
+/// `GET /v1/local/findings/{finding_id}` — get one finding, creator-scoped.
+///
+/// V1.48 P2: added so the CLI `creator works findings accept <finding_id>`
+/// command can resolve a finding by ID alone (without the caller knowing
+/// the `work_id` upfront). Mirrors [`get_finding_handler`] but skips the
+/// work-ownership precheck; the DAO lookup is already creator-scoped.
+pub async fn get_finding_creator_scoped_handler(
+    State(state): State<WorkspaceState>,
+    Path(finding_id): Path<String>,
+) -> Result<Json<FindingApiDto>, NexusApiError> {
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
+        .await?
+        .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
+    Ok(Json(f.into()))
+}
 /// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
 ///
 /// # Panics

@@ -582,8 +582,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
-                return Err(CliError::daemon_not_reachable_quickstart());
+                // V1.43 (P1 §3): daemon not reachable → canonical remediation
+                return Err(CliError::daemon_not_reachable_with_remediation());
             }
         };
 
@@ -618,8 +618,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
-                return Err(CliError::daemon_not_reachable_quickstart());
+                // V1.43 (P1 §3): daemon not reachable → canonical remediation
+                return Err(CliError::daemon_not_reachable_with_remediation());
             }
         };
 
@@ -654,8 +654,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
-                return Err(CliError::daemon_not_reachable_quickstart());
+                // V1.43 (P1 §3): daemon not reachable → canonical remediation
+                return Err(CliError::daemon_not_reachable_with_remediation());
             }
         };
 
@@ -689,8 +689,8 @@ impl DaemonClient {
                 if let CliError::Api { .. } = &e {
                     return Err(e);
                 }
-                // V1.43 (P1 §3): daemon not reachable → canonical quickstart §1
-                return Err(CliError::daemon_not_reachable_quickstart());
+                // V1.43 (P1 §3): daemon not reachable → canonical remediation
+                return Err(CliError::daemon_not_reachable_with_remediation());
             }
         };
 

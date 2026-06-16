@@ -17,6 +17,7 @@ pub mod kb;
 pub mod knowledge;
 pub mod memory;
 pub mod reference;
+pub mod rules_runtime;
 pub mod run;
 pub mod soul;
 pub mod work_utils;

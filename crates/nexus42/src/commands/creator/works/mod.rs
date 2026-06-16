@@ -124,6 +124,25 @@ pub enum WorksCommand {
         json: bool,
     },
 
+    // ── V1.48 P2: findings + rules (Layer 2 AGENTS.md) ──────────────
+    /// Finding-level operations (accept rule suggestions, future prune / …).
+    ///
+    /// V1.48 P2 introduces the `accept` subcommand which appends a finding's
+    /// `rule_suggestion` to the Work's `AGENTS.md` Layer 2 file.
+    Findings {
+        #[command(subcommand)]
+        command: FindingsCommand,
+    },
+
+    /// Layer 2 rules file operations for a Work (`Works/<work_ref>/AGENTS.md`).
+    ///
+    /// V1.48 P2 introduces the `reset` subcommand which restores the
+    /// default `AGENTS.md` scaffold.
+    Rules {
+        #[command(subcommand)]
+        command: RulesCommand,
+    },
+
     // ── Rejected subcommands (Grill #10/#11) ──────────────────────────
     // `creator works start` and `creator works create` are NOT available.
     // New Work creation is via `creator bootstrap` ONLY. These hidden
@@ -151,6 +170,67 @@ pub enum CompletionLockCommand {
     Release {
         /// Work ID (wrk_...) to release the completion lock for
         work_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// Findings subcommands (V1.48 P2).
+#[derive(Debug, Subcommand)]
+pub enum FindingsCommand {
+    /// Accept a finding's `rule_suggestion` and append it to the Work's
+    /// `AGENTS.md` Layer 2 file (V1.48 P2, overlay §3.2).
+    ///
+    /// Loads the finding by ID (creator-scoped), validates that
+    /// `rule_suggestion` is non-empty, appends an audit-friendly entry
+    /// under `## Accepted rule suggestions` in
+    /// `Works/<work_ref>/AGENTS.md` (idempotent on `finding_id`), and
+    /// marks the finding `status=resolved`.
+    Accept {
+        /// Finding ID (fnd_...) to accept.
+        finding_id: String,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+}
+
+/// Layer 2 rules subcommands (V1.48 P2).
+#[derive(Debug, Subcommand)]
+pub enum RulesCommand {
+    /// Reset the Work's `AGENTS.md` to the default scaffold (V1.48 P2,
+    /// overlay §4).
+    ///
+    /// Overwrites `Works/<work_ref>/AGENTS.md` with the embedded default
+    /// scaffold. Does NOT delete the Work or any chapter artifacts.
+    /// Use when the file has drifted and you want to start fresh.
+    ///
+    /// Safety flags (V1.48 P2-fix1):
+    ///
+    /// - By default the command prints a unified diff of what would be
+    ///   discarded and prompts for confirmation before overwriting.
+    /// - `--dry-run` prints the diff and exits WITHOUT writing (preview).
+    /// - `--yes` (or `-y`) skips the confirmation prompt and writes
+    ///   immediately, intended for scripted use (matches the `apt-get -y` /
+    ///   `pacman --noconfirm` convention).
+    /// - `--dry-run` takes precedence over `--yes`.
+    Reset {
+        /// Work ID (wrk_...). Omit to use pool active Work.
+        work_id: Option<String>,
+        /// Preview the reset as a unified diff without writing.
+        ///
+        /// No file is modified and no confirmation prompt is shown. Takes
+        /// precedence over `--yes`.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Skip the confirmation prompt and write immediately.
+        ///
+        /// By default the reset prints a diff and asks for confirmation before
+        /// overwriting `AGENTS.md`. Pass `--yes` (or `-y`) to proceed
+        /// non-interactively. Mirrors `apt-get -y` / `pacman --noconfirm`.
+        #[arg(long = "yes", short = 'y', default_value_t = false)]
+        yes: bool,
         /// Emit machine-readable JSON instead of human text
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -268,6 +348,12 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         }
         WorksCommand::ReconcileChapters { work_id, json } => {
             handle_reconcile_chapters(&client, work_id, json).await
+        }
+        WorksCommand::Findings { command } => {
+            super::rules_runtime::handle_findings(&client, command).await
+        }
+        WorksCommand::Rules { command } => {
+            super::rules_runtime::handle_rules(&client, command).await
         }
         WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
             "`creator works start` is not available. \
@@ -766,6 +852,10 @@ async fn handle_reconcile_chapters(
             .get("updated")
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0);
+        let resynced = report
+            .get("resynced")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
         let preserved = report
             .get("preserved")
             .and_then(serde_json::Value::as_u64)
@@ -773,6 +863,7 @@ async fn handle_reconcile_chapters(
         println!("Reconcile complete for Work {resolved_id}:");
         println!("  Created:   {created}");
         println!("  Updated:   {updated}");
+        println!("  Resynced:  {resynced}");
         println!("  Preserved: {preserved}");
     }
 
@@ -1107,12 +1198,22 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
     );
     let path =
         format!("/v1/local/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
-    findings_client
+    // R-V146P0-QC3-S2: observe the silent degradation path — a failed/timeout
+    // findings fetch previously vanished into `Unavailable` with no trace.
+    let result = findings_client
         .get::<serde_json::Value>(&path)
         .await
         .map_or(FindingsResult::Unavailable, |v| {
             FindingsResult::Fetched(v.as_array().cloned().unwrap_or_default())
-        })
+        });
+    if matches!(result, FindingsResult::Unavailable) {
+        tracing::warn!(
+            work_id = %work_id,
+            path = %path,
+            "open findings fetch failed or timed out; degrading to Unavailable"
+        );
+    }
+    result
 }
 
 /// Fetch the creator-global stale-findings summary for the JSON status path —
@@ -1135,6 +1236,15 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
     stale_client
         .get::<serde_json::Value>("/v1/local/findings/stale")
         .await
+        .map_err(|e| {
+            // R-V146P0-QC3-S2: observe the silent `.ok()` swallow — a failed
+            // stale fetch previously vanished into `None` with no trace.
+            tracing::warn!(
+                error = %e,
+                "stale findings fetch failed or timed out; degrading to None"
+            );
+            e
+        })
         .ok()
 }
 
@@ -1487,6 +1597,13 @@ fn operational_workspace_dir_from_config() -> Option<std::path::PathBuf> {
     ))
 }
 
+/// V1.48 P2: crate-public re-export so `rules_runtime` can resolve the
+/// operational workspace dir for `AGENTS.md` file operations. Same
+/// semantics as [`operational_workspace_dir_from_config`] (best-effort).
+pub(crate) fn operational_workspace_dir_from_config_public() -> Option<std::path::PathBuf> {
+    operational_workspace_dir_from_config()
+}
+
 /// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort check of a chapter's
 /// configured `body_path` / `outline_path` against the filesystem.
 ///
@@ -1569,7 +1686,11 @@ fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
 /// Preserves printable ASCII, Unicode, `\n`, and `\t`. Strips:
 /// - ASCII control chars 0x00–0x1F (except `\n` 0x0A and `\t` 0x09) and 0x7F (DEL)
 /// - ANSI CSI sequences (`ESC [ ... letter`)
-fn sanitize_for_terminal(s: &str) -> String {
+//
+// `pub(crate)` so sibling modules (e.g. `creator::run`) can reuse the same
+// sanitizer for manifest description text (R-V146P2-QC2-W) instead of
+// duplicating the ANSI/control-char stripping logic.
+pub(crate) fn sanitize_for_terminal(s: &str) -> String {
     // Phase 1: strip ANSI CSI sequences (ESC [ <params> <letter>).
     let ansi_re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap_or_else(|e| {
         // The pattern is a compile-time constant; panic is unreachable.
@@ -2679,5 +2800,154 @@ mod tests {
             chapter_path_hint_skipped_summary(skipped).is_none(),
             "no summary when skipped == 0"
         );
+    }
+
+    // ── V1.48 P2: CLI parsing for findings + rules subcommands ────────
+
+    #[test]
+    fn works_findings_accept_parses_with_finding_id() {
+        let cli = WorksCli::try_parse_from(["nexus42", "findings", "accept", "fnd_01HMV8KX"])
+            .expect("works findings accept <finding_id> should parse");
+        match cli.command {
+            WorksCommand::Findings {
+                command:
+                    FindingsCommand::Accept {
+                        finding_id,
+                        json: _,
+                    },
+            } => {
+                assert_eq!(finding_id, "fnd_01HMV8KX");
+            }
+            _ => panic!("expected Findings::Accept variant"),
+        }
+    }
+
+    #[test]
+    fn works_findings_accept_supports_json_flag() {
+        let cli =
+            WorksCli::try_parse_from(["nexus42", "findings", "accept", "fnd_01HMV8KX", "--json"])
+                .expect("works findings accept <finding_id> --json should parse");
+        match cli.command {
+            WorksCommand::Findings {
+                command: FindingsCommand::Accept { finding_id, json },
+            } => {
+                assert_eq!(finding_id, "fnd_01HMV8KX");
+                assert!(json, "--json should set json=true");
+            }
+            _ => panic!("expected Findings::Accept variant"),
+        }
+    }
+
+    // ── V1.48 P2 T4: rules reset CLI parsing ──────────────────────────
+
+    #[test]
+    fn works_rules_reset_parses_without_work_id() {
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset"])
+            .expect("works rules reset (no work_id) should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command:
+                    RulesCommand::Reset {
+                        work_id,
+                        dry_run,
+                        yes,
+                        json: _,
+                    },
+            } => {
+                assert!(work_id.is_none(), "work_id should default to None");
+                assert!(!dry_run, "dry_run should default to false");
+                assert!(!yes, "yes should default to false");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    #[test]
+    fn works_rules_reset_parses_with_work_id_and_json() {
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset", "wrk_abc", "--json"])
+            .expect("works rules reset <work_id> --json should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command:
+                    RulesCommand::Reset {
+                        work_id,
+                        dry_run,
+                        yes,
+                        json,
+                    },
+            } => {
+                assert_eq!(work_id.as_deref(), Some("wrk_abc"));
+                assert!(!dry_run, "dry_run should default to false");
+                assert!(!yes, "yes should default to false");
+                assert!(json, "--json should set json=true");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    // ── V1.48 P2-fix1: --dry-run / --yes flag parsing ─────────────────
+
+    #[test]
+    fn works_rules_reset_supports_dry_run_flag() {
+        let cli = WorksCli::try_parse_from(["nexus42", "rules", "reset", "--dry-run"])
+            .expect("works rules reset --dry-run should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { dry_run, .. },
+            } => {
+                assert!(dry_run, "--dry-run should set dry_run=true");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    #[test]
+    fn works_rules_reset_supports_yes_long_and_short_flags() {
+        let long = WorksCli::try_parse_from(["nexus42", "rules", "reset", "--yes"])
+            .expect("works rules reset --yes should parse");
+        match long.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { yes, .. },
+            } => assert!(yes, "--yes should set yes=true"),
+            _ => panic!("expected Rules::Reset variant"),
+        }
+
+        let short = WorksCli::try_parse_from(["nexus42", "rules", "reset", "-y"])
+            .expect("works rules reset -y should parse");
+        match short.command {
+            WorksCommand::Rules {
+                command: RulesCommand::Reset { yes, .. },
+            } => assert!(yes, "-y should set yes=true"),
+            _ => panic!("expected Rules::Reset variant"),
+        }
+    }
+
+    #[test]
+    fn works_rules_reset_combines_dry_run_yes_and_json() {
+        let cli = WorksCli::try_parse_from([
+            "nexus42",
+            "rules",
+            "reset",
+            "wrk_xyz",
+            "--dry-run",
+            "--yes",
+            "--json",
+        ])
+        .expect("works rules reset <work_id> --dry-run --yes --json should parse");
+        match cli.command {
+            WorksCommand::Rules {
+                command:
+                    RulesCommand::Reset {
+                        work_id,
+                        dry_run,
+                        yes,
+                        json,
+                    },
+            } => {
+                assert_eq!(work_id.as_deref(), Some("wrk_xyz"));
+                assert!(dry_run && yes && json, "all three flags should be true");
+            }
+            _ => panic!("expected Rules::Reset variant"),
+        }
     }
 }

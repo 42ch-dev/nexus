@@ -91,6 +91,13 @@ pub struct WorkFields {
     /// When set, `build_preset_input` includes a `volume` template var so that
     /// the `novel-writing` preset preserves cross-volume context.
     pub volume: Option<i32>,
+    /// V1.48 P1 (overlay §2 Consumer): pre-rendered open-findings block
+    /// for chapter-scoped prompt injection. Populated by the caller (CLI
+    /// `stage advance` or auto-chain enqueue) via
+    /// [`crate::findings_block::build_open_findings_block`]. When `None`
+    /// or empty, the template guard `{{#if open_findings_block}}` omits
+    /// the section (AC2: no empty sentinel noise).
+    pub open_findings_block: Option<String>,
 }
 
 /// Build the `presetInput` map for a stage schedule (T2, spec §4).
@@ -220,6 +227,21 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
             .map(|o| o.insert("volume".to_string(), serde_json::Value::Number(vol.into())));
     }
 
+    // V1.48 P1 (overlay §2 Consumer): inject the pre-rendered open-findings
+    // block. The caller (CLI/auto-chain) builds it via
+    // `findings_block::build_open_findings_block` from the chapter-scoped DAO
+    // query. When `None` (worldless Works, no open findings, or auto-chain
+    // path without pool access yet), default to empty string so strict-mode
+    // template rendering does not fail on `{{preset.input.open_findings_block}}`.
+    // The preset's `{{#if open_findings_block}}` guard omits the section.
+    let findings_block = fields.open_findings_block.clone().unwrap_or_default();
+    map.as_object_mut().map(|o| {
+        o.insert(
+            "open_findings_block".to_string(),
+            serde_json::Value::String(findings_block),
+        )
+    });
+
     map
 }
 
@@ -229,12 +251,16 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
 /// layer is present. Returns `None` when no rules content is available
 /// (neither Layer 1 default nor Layer 2 per-work file exists).
 ///
-/// # Layer resolution (DF-65)
+/// # Layer resolution (DF-65; V1.48 P2 — `AGENTS.md` migration)
 ///
 /// - **Layer 1**: `crates/nexus-orchestration/embedded-rules/writing-craft.md`
 ///   (compiled into the binary via `include_str!`). User override at
 ///   `~/.nexus42/rules/writing-craft.md` takes precedence when it exists.
-/// - **Layer 2**: `Works/<work_ref>/Rules/novel-rules.md` — per-work editable rules.
+/// - **Layer 2 (preferred)**: `Works/<work_ref>/AGENTS.md` — V1.47 normative
+///   per [novel-workflow-profile.md §5.5.4]. New scaffolds write this path.
+/// - **Layer 2 (legacy fallback, read-only)**: `Works/<work_ref>/Rules/novel-rules.md`
+///   — used only when `AGENTS.md` is absent, for Works scaffolded before the
+///   V1.48 migration. No bulk migration is performed (compass §0.1 #9).
 #[must_use]
 pub fn read_rules_layers(workspace_dir: &str, work_ref: &str) -> Option<String> {
     let mut parts = Vec::new();
@@ -253,11 +279,19 @@ pub fn read_rules_layers(workspace_dir: &str, work_ref: &str) -> Option<String> 
     }
 
     // Layer 2: per-work rules file.
-    let layer2_path = std::path::Path::new(workspace_dir)
-        .join("Works")
-        .join(work_ref)
-        .join("Rules/novel-rules.md");
-    if let Ok(content) = std::fs::read_to_string(&layer2_path) {
+    // V1.48 P2: prefer `Works/<work_ref>/AGENTS.md` (V1.47 normative); fall
+    // back to legacy `Works/<work_ref>/Rules/novel-rules.md` read-only when
+    // the AGENTS.md file is absent. The fallback preserves backward
+    // compatibility for Works scaffolded before the migration; no bulk
+    // migration is performed (compass §0.1 #9, overlay §3.3).
+    let ws = std::path::Path::new(workspace_dir);
+    let agents_md = nexus_home_layout::work_agents_md_path(ws, work_ref);
+    let legacy_rules = nexus_home_layout::work_novel_rules_path(ws, work_ref);
+
+    let layer2_content = std::fs::read_to_string(&agents_md)
+        .or_else(|_| std::fs::read_to_string(&legacy_rules))
+        .ok();
+    if let Some(content) = layer2_content {
         if !content.trim().is_empty() {
             parts.push(format!("## Layer 2 — Novel Rules (per-work)\n\n{content}"));
         }
@@ -607,6 +641,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         }
@@ -783,6 +818,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         }
@@ -849,6 +885,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         };
@@ -990,6 +1027,77 @@ mod tests {
         );
     }
 
+    // ── V1.48 P2: AGENTS.md preference (overlay §3.1) ──────────────────
+
+    #[test]
+    fn read_rules_layers_prefers_agents_md_when_present() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+        let work_root = ws.join("Works").join("neon-river");
+
+        // Create BOTH the new AGENTS.md and the legacy Rules/novel-rules.md.
+        // The AGENTS.md content must win.
+        std::fs::create_dir_all(&work_root).expect("mkdir root");
+        std::fs::write(
+            work_root.join("AGENTS.md"),
+            "# AGENTS.md — neon-river\n\n- POV: first (from AGENTS.md)\n",
+        )
+        .expect("write agents");
+        std::fs::create_dir_all(work_root.join("Rules")).expect("mkdir rules");
+        std::fs::write(
+            work_root.join("Rules").join("novel-rules.md"),
+            "- POV: third (from legacy)\n",
+        )
+        .expect("write legacy");
+
+        let result = read_rules_layers(&ws.to_string_lossy(), "neon-river");
+        let content = result.expect("content");
+        assert!(
+            content.contains("from AGENTS.md"),
+            "AGENTS.md should win over legacy Rules/novel-rules.md"
+        );
+        assert!(
+            !content.contains("from legacy"),
+            "legacy Rules/novel-rules.md must NOT be read when AGENTS.md exists"
+        );
+    }
+
+    #[test]
+    fn read_rules_layers_falls_back_to_legacy_when_agents_md_absent() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+
+        // Only legacy file exists (pre-V1.48 Work).
+        let rules_dir = ws.join("Works").join("legacy-novel").join("Rules");
+        std::fs::create_dir_all(&rules_dir).expect("mkdir");
+        std::fs::write(
+            rules_dir.join("novel-rules.md"),
+            "- Tense: past (legacy fallback)\n",
+        )
+        .expect("write");
+
+        let result = read_rules_layers(&ws.to_string_lossy(), "legacy-novel");
+        let content = result.expect("content");
+        assert!(
+            content.contains("legacy fallback"),
+            "legacy Rules/novel-rules.md should be read when AGENTS.md is absent"
+        );
+    }
+
+    #[test]
+    fn read_rules_layers_neither_agents_md_nor_legacy_returns_layer1_only() {
+        // No Layer 2 files at all (fresh Work with neither file).
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+        std::fs::create_dir_all(ws.join("Works").join("bare-novel")).expect("mkdir");
+
+        let result = read_rules_layers(&ws.to_string_lossy(), "bare-novel");
+        assert!(result.is_some(), "Layer 1 must still be present");
+        let content = result.expect("content");
+        assert!(content.contains("Layer 1"));
+        assert!(!content.contains("Layer 2"));
+    }
+
     #[test]
     fn build_preset_input_includes_rules_content_when_workspace_dir_set() {
         let tmp = tempfile::tempdir().expect("tmpdir");
@@ -1014,6 +1122,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: Some(ws.to_string_lossy().to_string()),
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         };
@@ -1043,6 +1152,7 @@ mod tests {
             research_artifacts_dir: None,
             workspace_dir: None,
             world_kb_block: None,
+            open_findings_block: None,
             world_id: None,
             volume: None,
         };

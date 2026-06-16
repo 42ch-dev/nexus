@@ -1,0 +1,46 @@
+{
+  "id": "2026-06-16-v1.48-hygiene-and-closeout",
+  "title": "P-last — WL-A residual closure, overlay promotion, Profile B compaction",
+  "file": ".mstar/plans/2026-06-16-v1.48-hygiene-and-closeout.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev",
+    "@writing-specialist",
+    "@project-manager"
+  ],
+  "progress": 0,
+  "tags": [
+    "v1.48",
+    "hygiene",
+    "p-last"
+  ],
+  "created_at": "2026-06-16",
+  "updated_at": "2026-06-16T12:14:57+08:00",
+  "metadata": {
+    "working_branch": "feature/v1.48-hygiene-and-closeout",
+    "merge_target": "iteration/v1.48",
+    "depends_on": "P0-P4 merged",
+    "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+    "wl_a_whitelist": [
+      "R-V145B3-001",
+      "R-V146P1-QC1-S3",
+      "R-V146P1-QC1-S1",
+      "R-V146P1-QC1-S2",
+      "R-V146P1-QC3-S3",
+      "R-V146P2-QC2-W",
+      "R-V146P1-QC3-S2",
+      "R-V146P0-QC3-S2",
+      "R-V146P1-QC2-S1",
+      "R-V146P1-QC2-S2"
+    ]
+  },
+  "done_at": "2026-06-16T12:14:57+08:00",
+  "notes": [
+    {
+      "at": "2026-06-16",
+      "event": "qa_approved_done",
+      "evidence": "PM-consolidated. T1: 10 WL-A closed. T2: overlay folded into novel-quality-loop.md §9. T3: ~18 other open lows bulk-deferred to V1.49. T4: deferred-tracker + iterations/README.md updated. T5: Profile B archive."
+    }
+  ]
+}

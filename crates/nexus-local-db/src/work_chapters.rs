@@ -355,6 +355,8 @@ pub struct ReconcileReport {
     pub created: u32,
     /// Number of existing chapter rows updated.
     pub updated: u32,
+    /// Number of chapter files re-synced to the DB status (DB-as-SSOT).
+    pub resynced: u32,
     /// Number of chapter rows preserved unchanged.
     pub preserved: u32,
 }
@@ -396,6 +398,100 @@ fn verify_stories_dir_in_workspace(
     Ok(())
 }
 
+/// Rewrite the `status` key in a chapter file's YAML frontmatter to match the
+/// DB source of truth, preserving the body content.
+///
+/// If the file lacks a well-formed frontmatter block (opening `---` without a
+/// closing `---`), it is left unchanged.
+///
+/// The write is performed atomically: content is written to a sibling temp
+/// file, flushed, and then renamed over the target. This prevents a partial
+/// write from corrupting the chapter file if the process crashes or the
+/// filesystem loses power between the write and the rename.
+fn sync_frontmatter_status(path: &std::path::Path, status: &str) -> Result<(), LocalDbError> {
+    let content = std::fs::read_to_string(path).map_err(|e| LocalDbError::IoWithPath {
+        path: path.to_string_lossy().to_string(),
+        source: e,
+    })?;
+
+    // Only process files that start with a frontmatter delimiter.
+    if !content.trim_start().starts_with("---") {
+        return Ok(());
+    }
+
+    let mut output = Vec::new();
+    let mut in_frontmatter = false;
+    let mut found_first = false;
+    let mut status_set = false;
+    let mut body_started = false;
+
+    for line in content.lines() {
+        if !body_started && line.trim() == "---" {
+            if !found_first {
+                found_first = true;
+                in_frontmatter = true;
+                output.push(line.to_string());
+                continue;
+            }
+            // Closing delimiter: ensure DB status is written before body starts.
+            if !status_set {
+                output.push(format!("status: {status}"));
+                status_set = true;
+            }
+            output.push(line.to_string());
+            in_frontmatter = false;
+            body_started = true;
+            continue;
+        }
+
+        if in_frontmatter {
+            if line.trim_start().starts_with("status:") {
+                output.push(format!("status: {status}"));
+                status_set = true;
+            } else {
+                output.push(line.to_string());
+            }
+        } else {
+            output.push(line.to_string());
+        }
+    }
+
+    // If frontmatter was never closed or never opened, leave the file alone.
+    if !found_first || in_frontmatter {
+        return Ok(());
+    }
+
+    let mut new_content = output.join("\n");
+    if content.ends_with('\n') && !new_content.ends_with('\n') {
+        new_content.push('\n');
+    }
+
+    // Atomic write: temp file next to target, flush, then rename.
+    // On any error we try to clean up the temp file; the original error is
+    // still returned so callers see the actual failure mode.
+    let tmp_extension = format!(
+        "md.tmp.{}.{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    );
+    let temp_path = path.with_extension(&tmp_extension);
+    let write_result = std::fs::write(&temp_path, &new_content)
+        .and_then(|()| std::fs::File::open(&temp_path)?.sync_data())
+        .and_then(|()| std::fs::rename(&temp_path, path));
+
+    if let Err(e) = write_result {
+        // Best-effort cleanup; ignore failures because we're already returning
+        // the underlying I/O error.
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(LocalDbError::IoWithPath {
+            path: path.to_string_lossy().to_string(),
+            source: e,
+        });
+    }
+
+    Ok(())
+}
+
 /// Reconcile `work_chapters` rows from the filesystem.
 ///
 /// Walks `Works/<work_ref>/Stories/`, parses each `.md` file's frontmatter
@@ -433,12 +529,14 @@ pub async fn reconcile_from_filesystem(
         return Ok(ReconcileReport {
             created: 0,
             updated: 0,
+            resynced: 0,
             preserved: 0,
         });
     }
 
     let mut created: u32 = 0;
     let mut updated: u32 = 0;
+    let mut resynced: u32 = 0;
     let mut preserved: u32 = 0;
 
     let entries = std::fs::read_dir(&stories_dir).map_err(|e| LocalDbError::IoWithPath {
@@ -527,24 +625,39 @@ pub async fn reconcile_from_filesystem(
                 created += 1;
             }
             Some(row) => {
-                // Check if status changed
                 let db_status = row.status.clone();
-                let needs_update = fm_status.as_ref().is_some_and(|s| s != &db_status)
-                    || fm_word_count.is_some_and(|wc| row.actual_word_count != Some(wc));
 
-                if needs_update {
+                // §4.5.3: `work_chapters` is the queryable SSOT for status. If
+                // the file frontmatter disagrees, do NOT overwrite the DB row;
+                // instead re-sync the file so prompt-visible state catches up
+                // without inventing an extra chapter transition.
+                let status_conflicts = fm_status.as_ref().is_some_and(|s| s != &db_status);
+                let file_resynced = if status_conflicts {
+                    sync_frontmatter_status(&path, &db_status)?;
+                    resynced += 1;
+                    true
+                } else {
+                    false
+                };
+
+                // Mirror word_count from file to DB when present and different.
+                // This is not a status transition; it only updates the cached
+                // actual_word_count.
+                let needs_word_count_update =
+                    fm_word_count.is_some_and(|wc| row.actual_word_count != Some(wc));
+                if needs_word_count_update {
                     update_status(
                         pool,
                         work_id,
                         ch_num,
                         fm_volume,
-                        fm_status.as_deref().unwrap_or(&db_status),
+                        &db_status,
                         fm_word_count.map(|v| u32::try_from(v).unwrap_or(0)),
                         now,
                     )
                     .await?;
                     updated += 1;
-                } else {
+                } else if !file_resynced {
                     preserved += 1;
                 }
             }
@@ -554,6 +667,7 @@ pub async fn reconcile_from_filesystem(
     Ok(ReconcileReport {
         created,
         updated,
+        resynced,
         preserved,
     })
 }
@@ -1266,7 +1380,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Reconcile: update existing + idempotent
+    // Reconcile: existing row + file status conflict — DB status wins (§4.5.3)
     // -----------------------------------------------------------------------
     #[tokio::test]
     async fn test_reconcile_update_and_idempotent() {
@@ -1284,12 +1398,15 @@ mod tests {
         .await
         .unwrap();
 
-        // Create workspace with 1 changed frontmatter
+        // Create workspace with a file whose frontmatter claims a different
+        // status than the DB row. Per §4.5.3 the DB status must win; the file
+        // frontmatter is re-synced to the DB status.
         let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
         std::fs::create_dir_all(&stories_dir).unwrap();
 
+        let ch1_path = stories_dir.join("ch01-intro.md");
         std::fs::write(
-            stories_dir.join("ch01-intro.md"),
+            &ch1_path,
             "---\ntitle: Intro\nchapter: 1\nstatus: draft\nword_count: 3200\n---\nContent",
         )
         .unwrap();
@@ -1314,20 +1431,46 @@ mod tests {
         .await
         .unwrap();
 
-        // ch01 changed status: not_started → draft + word_count set
-        assert_eq!(report.updated, 1);
-        assert_eq!(report.preserved, 2);
+        // ch01: DB status stays `not_started` (SSOT), but word_count is mirrored
+        // and the file frontmatter is re-synced.
+        assert_eq!(
+            report.updated, 1,
+            "word_count should be mirrored from file to DB"
+        );
+        assert_eq!(
+            report.resynced, 1,
+            "status-conflict file should be re-synced to DB status"
+        );
+        assert_eq!(report.preserved, 2, "ch02 and ch03 are unchanged");
         assert_eq!(report.created, 0);
 
-        // Verify ch01 updated
+        // Verify ch01 DB status is preserved
         let ch1 = get_chapter(&pool, "wrk_recon_002", 1, 1)
             .await
             .unwrap()
             .expect("ch1");
-        assert_eq!(ch1.status, "draft");
-        assert_eq!(ch1.actual_word_count, Some(3200));
+        assert_eq!(
+            ch1.status, "not_started",
+            "DB status must win over filesystem frontmatter (§4.5.3)"
+        );
+        assert_eq!(
+            ch1.actual_word_count,
+            Some(3200),
+            "word_count should be mirrored"
+        );
 
-        // Re-run reconcile — should be fully idempotent
+        // Verify file frontmatter was re-synced to DB status.
+        let ch1_file = std::fs::read_to_string(&ch1_path).unwrap();
+        assert!(
+            ch1_file.contains("status: not_started"),
+            "reconcile should re-sync file frontmatter to DB status per §4.5.3"
+        );
+        assert!(
+            ch1_file.contains("Content"),
+            "reconcile must preserve chapter body content"
+        );
+
+        // Re-run reconcile — should be fully idempotent now that file matches DB.
         let report2 = reconcile_from_filesystem(
             &pool,
             "wrk_recon_002",
@@ -1338,7 +1481,95 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(report2.updated, 0);
+        assert_eq!(report2.resynced, 0);
         assert_eq!(report2.preserved, 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // V1.48 P4-fix1 (W-1 qc2): sync_frontmatter_status writes atomically.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_sync_frontmatter_status_writes_via_temp_file() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_recon_atomic").await;
+
+        // Pre-seed one chapter as `draft` in DB.
+        seed_chapters(
+            &pool,
+            "wrk_recon_atomic",
+            "my-novel",
+            1,
+            "2026-06-07T10:00:00Z",
+        )
+        .await
+        .unwrap();
+        update_status(
+            &pool,
+            "wrk_recon_atomic",
+            1,
+            1,
+            "draft",
+            None,
+            "2026-06-07T11:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        // Create a file whose frontmatter claims a different status.
+        let stories_dir = dir.path().join("Works").join("my-novel").join("Stories");
+        std::fs::create_dir_all(&stories_dir).unwrap();
+        let ch1_path = stories_dir.join("ch01-intro.md");
+        std::fs::write(
+            &ch1_path,
+            "---\ntitle: Intro\nchapter: 1\nstatus: finalized\n---\nContent",
+        )
+        .unwrap();
+
+        let report = reconcile_from_filesystem(
+            &pool,
+            "wrk_recon_atomic",
+            "my-novel",
+            dir.path(),
+            "2026-06-07T12:00:00Z",
+        )
+        .await
+        .unwrap();
+
+        // The file was re-synced; no DB update because word_count is absent.
+        assert_eq!(
+            report.resynced, 1,
+            "status conflict should count as resynced"
+        );
+        assert_eq!(report.updated, 0);
+        assert_eq!(report.preserved, 0);
+        assert_eq!(report.created, 0);
+
+        // Final file content matches DB status and body is preserved.
+        let ch1_file = std::fs::read_to_string(&ch1_path).unwrap();
+        assert!(
+            ch1_file.contains("status: draft"),
+            "frontmatter should be re-synced to DB status"
+        );
+        assert!(
+            ch1_file.contains("Content"),
+            "body content must be preserved"
+        );
+
+        // No temp file should be left behind.
+        let leftover_tmp: Vec<_> = std::fs::read_dir(&stories_dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.path()
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.contains(".tmp."))
+            })
+            .collect();
+        assert!(
+            leftover_tmp.is_empty(),
+            "atomic write should not leave temp files behind: {leftover_tmp:?}"
+        );
     }
 
     // -----------------------------------------------------------------------

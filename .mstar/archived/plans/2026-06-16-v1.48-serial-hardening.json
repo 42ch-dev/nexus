@@ -1,0 +1,65 @@
+{
+  "id": "2026-06-16-v1.48-serial-hardening",
+  "title": "P4 — §4.5.7 #4 resume + #5 reconcile",
+  "file": ".mstar/plans/2026-06-16-v1.48-serial-hardening.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 0,
+  "tags": [
+    "v1.48",
+    "serial",
+    "p4"
+  ],
+  "created_at": "2026-06-16",
+  "updated_at": "2026-06-16T07:38:26+08:00",
+  "metadata": {
+    "commits": [
+      "2b75aa81",
+      "7093ba2d",
+      "a61fc6a9",
+      "93f1c8e1",
+      "f3893a19"
+    ],
+    "merge_commit": "bfc1f332",
+    "qc_status": "approved",
+    "qc_re_review_commits": {
+      "qc2": "aa0d7d7b",
+      "qc3": "f9eaf857"
+    }
+  },
+  "working_branch": "feature/v1.48-serial-hardening",
+  "merge_target": "iteration/v1.48",
+  "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+  "iteration_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+  "notes": [
+    {
+      "at": "2026-06-16",
+      "event": "implement_dispatched",
+      "evidence": "feature/v1.48-serial-hardening @ f3893a19"
+    },
+    {
+      "at": "2026-06-16",
+      "event": "merged_to_integration",
+      "evidence": "iteration/v1.48 @ bfc1f332 (merge commit)"
+    },
+    {
+      "at": "2026-06-16",
+      "event": "in_review",
+      "evidence": "QC tri-review dispatched"
+    },
+    {
+      "at": "2026-06-16",
+      "event": "qc_tri_review_approved",
+      "evidence": "qc1+qc2+qc3 verdicts; targeted re-review on fix wave for qc3 findings"
+    },
+    {
+      "at": "2026-06-16",
+      "event": "qa_approved_done",
+      "evidence": "QC tri-review approved (qc1+qc2 Approve; qc3 Request Changes → P0-fix1/P4-fix1 re-review Approve). QA verdict: Approve. qa.md committed."
+    }
+  ],
+  "done_at": "2026-06-16T07:38:26+08:00"
+}

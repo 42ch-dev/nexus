@@ -1608,7 +1608,13 @@ pub const STAGE_PRESET_ALLOWLIST: &[(&str, &[&str])] = &[
     ("intake", &["creative-brief-intake"]),
     ("research", &["research"]),
     ("produce", &["novel-writing"]),
-    ("review", &["novel-chapter-review"]),
+    // R-V147P0-06 (V1.48 P0 T3): hoisted to `preset_ids` SSOT — shares the
+    // single definition with the supervisor terminal guard and the
+    // `persist_review_findings_for_schedule` findings hook.
+    (
+        "review",
+        &[crate::preset_ids::NOVEL_CHAPTER_REVIEW_PRESET_ID],
+    ),
     // R-FL-E-06: persist stage default is kb-extract (via queue)
     ("persist", &["kb-extract"]),
 ];
