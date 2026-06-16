@@ -309,7 +309,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 7); // V1.40 P2: world_kb_block template var for World context prompt injection
+        assert_eq!(loaded.version, 8); // V1.48 P1: open_findings_block template var for chapter-scoped findings injection
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(

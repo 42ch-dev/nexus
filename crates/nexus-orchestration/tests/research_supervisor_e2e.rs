@@ -161,6 +161,7 @@ fn research_work_fields(work_id: &str, work_ref: &str) -> WorkFields {
         research_artifacts_dir: None,
         workspace_dir: None,
         world_kb_block: None,
+        open_findings_block: None,
         world_id: None,
         volume: None,
     }

@@ -373,6 +373,7 @@ async fn f004_supervisor_enqueue_includes_volume_in_preset_input() {
         &work,
         Some(1), // next chapter is vol 2 ch 1
         Some(2), // volume 2
+        None,    // V1.48 P1: open_findings_block — test seed has none
     )
     .expect("should produce a schedule for produce stage");
 
@@ -403,6 +404,7 @@ async fn f004_single_volume_enqueue_has_no_volume_in_input() {
         &work,
         Some(2), // next chapter in vol 1
         None,    // single-volume — no volume context
+        None,    // V1.48 P1: open_findings_block — test seed has none
     )
     .expect("should produce a schedule");
 
