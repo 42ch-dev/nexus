@@ -1,0 +1,127 @@
+{
+  "id": "2026-06-17-v1.49-findings-lifecycle",
+  "title": "P0 — F6 extended findings lifecycle",
+  "file": ".mstar/plans/2026-06-17-v1.49-findings-lifecycle.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.49-findings-lifecycle",
+  "merge_target": "iteration/v1.49",
+  "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md",
+  "task_category": "feature",
+  "created_at": "2026-06-17",
+  "updated_at": "2026-06-17T19:10:00+08:00",
+  "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md",
+  "completion_commits": [
+    "237eec20",
+    "613ef56e",
+    "4356bf1f",
+    "bb4ea654"
+  ],
+  "head_sha": "bb4ea654",
+  "done_at": "2026-06-17T19:50:00+08:00",
+  "metadata": {
+    "commits": [
+      "237eec20",
+      "613ef56e",
+      "4356bf1f",
+      "bb4ea654",
+      "7da35dd5",
+      "c9f10af6"
+    ],
+    "merge_commits": [
+      "04608722",
+      "c4b4500f"
+    ],
+    "qc_reports": {
+      "qc1": {
+        "verdict_wave1": "Request Changes",
+        "verdict_re_review": "Approve",
+        "commits": [
+          "1538cdd3",
+          "1a3a3646"
+        ]
+      },
+      "qc2": {
+        "verdict_wave1": "Request Changes",
+        "verdict_re_review": "Approve",
+        "commits": [
+          "8a809ab3",
+          "fcf6cf95"
+        ]
+      },
+      "qc3": {
+        "verdict": "Approve",
+        "commit": "ecabd0ac"
+      }
+    },
+    "qc_consolidated": {
+      "commit": "bc8efc8d",
+      "final_verdict": "Approve"
+    },
+    "re_review_approval_commit": "e4f7823d",
+    "qa_report": {
+      "commit": "69ffd817",
+      "verdict": "PASS"
+    },
+    "residual_lifecycle": {
+      "archived": [
+        "R-V149P0-02"
+      ],
+      "open": [
+        "R-V149P0-01",
+        "R-V149P0-03"
+      ]
+    }
+  },
+  "notes": [
+    {
+      "at": "2026-06-17",
+      "event": "implement_dispatched",
+      "evidence": "feature/v1.49-findings-lifecycle @ bb4ea654 (4 commits T1-T5)"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "merged_to_integration",
+      "evidence": "iteration/v1.49 @ 04608722 (P0 merge)"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "in_review",
+      "evidence": "QC tri-review dispatched"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qc_wave1_verdict",
+      "evidence": "qc1+qc2 Request Changes (W-1), qc3 Approve → consolidated Request Changes"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "w1_fix_wave",
+      "evidence": "fix/v1.49-p0-w1-error-classification @ 7da35dd5 (DAO-level error split); merged at c4b4500f"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qc_targeted_re_review",
+      "evidence": "qc1 Approve @ 1a3a3646; qc2 Approve @ fcf6cf95; qc3 stays Approve"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "r_v149p0_02_archived",
+      "evidence": ".mstar/archived/residuals/2026-06-17-v1.49-findings-lifecycle.json"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qa_passed",
+      "evidence": "qa.md @ 69ffd817; verdict PASS"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "done",
+      "evidence": "plan marked Done in status.json; archived to .mstar/archived/plans/"
+    }
+  ]
+}

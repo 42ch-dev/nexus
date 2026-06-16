@@ -20,7 +20,7 @@
       "id": "2026-06-17-v1.49-findings-lifecycle",
       "title": "P0 — F6 extended findings lifecycle",
       "file": ".mstar/plans/2026-06-17-v1.49-findings-lifecycle.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.49-findings-lifecycle",
@@ -29,15 +29,19 @@
       "primary_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md",
       "task_category": "feature",
       "created_at": "2026-06-17",
-  "updated_at": "2026-06-17T19:10:00+08:00",
+      "updated_at": "2026-06-17T19:50:00+08:00",
       "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md",
       "completion_commits": [
         "237eec20",
         "613ef56e",
         "4356bf1f",
-        "bb4ea654"
+        "bb4ea654",
+        "7da35dd5",
+        "c9f10af6"
       ],
-      "head_sha": "bb4ea654"
+      "head_sha": "7da35dd5",
+      "done_at": "2026-06-17T19:50:00+08:00",
+      "archived_to": ".mstar/archived/plans/2026-06-17-v1.49-findings-lifecycle.json"
     },
     {
       "id": "2026-06-17-v1.49-narrative-indexes",
@@ -104,7 +108,7 @@
   "v1_46_iteration_complete": true,
   "v1_47_iteration_complete": true,
   "v1_48_iteration_complete": true,
-  "v1_49_p0_status": "InReview — QC tri-review + W-1 fix wave complete 2026-06-17; targeted re-review pending (qc1+2)",
+  "v1_49_p0_status": "Done 2026-06-17 — QC tri-review + W-1 fix wave + targeted re-review + QA PASS; archived to .mstar/archived/plans/2026-06-17-v1.49-findings-lifecycle.json; R-V149P0-02 archived; R-V149P0-01/03 open for V1.50",
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
