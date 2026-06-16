@@ -1,56 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16T09:34:27+08:00",
+  "updated_at": "2026-06-16T10:37:47+08:00",
   "plans": [
-    {
-      "id": "2026-06-16-v1.48-rules-runtime",
-      "title": "P2 — AGENTS.md Layer 2 runtime + accept rule_suggestion + rules reset CLI",
-      "file": ".mstar/plans/2026-06-16-v1.48-rules-runtime.md",
-      "status": "InReview",
-      "owner": "@fullstack-dev",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.48",
-        "rules",
-        "p2"
-      ],
-      "created_at": "2026-06-16",
-      "updated_at": "2026-06-16T09:34:27+08:00",
-      "metadata": {
-        "commits": [
-          "37f1de72",
-          "33ac2ba6",
-          "0e19a806",
-          "43a5b8af",
-          "8e5ff0e4"
-        ],
-        "qc_status": "pending"
-      },
-      "working_branch": "feature/v1.48-rules-runtime",
-      "merge_target": "iteration/v1.48",
-      "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
-      "iteration_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
-      "notes": [
-        {
-          "at": "2026-06-16",
-          "event": "implement_dispatched",
-          "evidence": "feature/v1.48-rules-runtime @ 8e5ff0e4"
-        },
-        {
-          "at": "2026-06-16",
-          "event": "merged_to_integration",
-          "evidence": "iteration/v1.48 @ (merge commit)"
-        },
-        {
-          "at": "2026-06-16",
-          "event": "in_review",
-          "evidence": "QC tri-review dispatched"
-        }
-      ]
-    },
     {
       "id": "2026-06-16-v1.48-findings-data-hygiene",
       "title": "P3 — Retention/cleanup + rule_suggestion NULL clear",
@@ -557,7 +508,11 @@
         "owner": "@fullstack-dev",
         "target": "V1.48",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-reflection-loop-findings][R-V147P0-04]",
-        "note": "P2 close."
+        "note": "P2 close.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-16",
+        "closure_note": "V1.48 P2 T1: runtime reader migrated to prefer Works/<work_ref>/AGENTS.md with legacy read-only fallback; scaffolds write AGENTS.md; accept path appends to AGENTS.md; reset CLI restores scaffold. All hermetic tests pass.",
+        "closure_evidence": "iteration/v1.48 @ 4fc1371d (commits 37f1de72, 33ac2ba6, 0e19a806, 43a5b8af, 8e5ff0e4)"
       },
       {
         "id": "R-V147P0-05",
