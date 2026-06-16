@@ -11,6 +11,14 @@ qc_reports:
 verdict: Request Changes
 ---
 
+# V1.49 P1 — Narrative Indexes QC Consolidated Report (wave-1, superseded)
+
+## Verdict (wave-1): Request Changes
+
+QC1 (architecture/maintainability) raised 2 Warnings that need to be addressed before merging. QC2 + QC3 approved.
+
+[Rest of wave-1 content preserved; see full file history.]
+
 # V1.49 P1 — Narrative Indexes QC Consolidated Report
 
 ## Verdict: Request Changes (one blocker; two Approve)
