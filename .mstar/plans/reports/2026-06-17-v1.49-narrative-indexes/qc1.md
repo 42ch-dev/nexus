@@ -3,9 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-17-v1.49-narrative-indexes
-verdict: Request Changes
-generated_at: 2026-06-17T00:00:00Z
-review_range: 3630a4e5..f448b658
+verdict: Approve
+generated_at: 2026-06-17T23:30:00+08:00
+review_range: eb75a73d..1fee7ada
 working_branch: iteration/v1.49
 ---
 
@@ -239,3 +239,144 @@ the plan advances to QA. The architecture is otherwise sound: the hook placement
 model, preset-input integration, and sync-invariant are all well-designed and well-tested.
 The 5-column template schema decision is correct (template is ground truth); the status-typing
 gap (W-1) is the one place where the runtime diverges from the overlay's closed vocabulary.
+
+## Revalidation
+
+**Re-review kind**: Targeted re-review (Reviewer 1 of 1; only QC1 raised blocking findings).
+**Re-review date**: 2026-06-17T23:30:00+08:00
+**Re-review range / Diff basis**: `eb75a73d..1fee7ada` (fix commit `3f2efc03` + completion
+report `480a7663` + merge `1fee7ada`; equivalent to `git diff eb75a73d...1fee7ada`).
+**Working branch (verified)**: `iteration/v1.49` @ `1fee7ada`.
+**Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus`.
+**Files re-reviewed**: 3 (2 implementation/test + 1 completion report).
+
+### Verification (cwd / branch / range)
+
+- `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus` ✓
+- `git branch --show-current` → `iteration/v1.49` ✓
+- `git rev-parse HEAD` → `1fee7ada` (matches Assignment) ✓
+- `git diff eb75a73d...1fee7ada --stat` → 3 files, +510/-95 (matches Assignment) ✓
+
+### W-1 disposition: RESOLVED ✅
+
+The typed `ForeshadowingStatus` enum (`crates/nexus-orchestration/src/narrative_index.rs:78`)
+is well-designed and directly addresses the original W-1 maintainability risk:
+
+1. **Variant naming** — `Planned | Buried | PaidOff` maps 1:1 to the overlay §3 vocabulary
+   `planned | buried | paid_off` via `as_canonical_str()` (lines 90-96). Correct.
+2. **Case-insensitive `FromStr`** — tolerates author typos (`PLANNED`, `Buried`, `PAID_OFF`,
+   surrounding whitespace); documented in the enum docstring (lines 73-76); locked by
+   `foreshadowing_status_fromstr_is_case_insensitive`. Appropriate policy for hand-edited
+   `foreshadowing.md` files. The implementer chose a strict closed enum (reject unknown)
+   rather than the `Other(String)` forward-compat variant suggested in wave 1 — this is a
+   sound alternative: it forces typo correction and the graceful degradation in
+   `read_foreshadowing_summary` (warn + None) prevents prompt-injection breakage.
+3. **Canonical `Display`** — always emits lowercase + underscore (`planned` / `buried` /
+   `paid_off`); locked by `foreshadowing_status_display_is_canonical_lowercase`. Correct
+   round-trip target.
+4. **`IndexParseError::InvalidStatus { row_index, value }`** — carries the zero-based
+   data-row index and the rejected value, giving the author enough context to locate and
+   fix the offending cell. Error type is `pub` and implements `std::error::Error`.
+   Locked by `parse_foreshadowing_index_rejects_unknown_status` (asserts row_index=1,
+   value="Payed off").
+5. **`Result<Vec<_>, IndexParseError>` propagation** — verified all callers:
+   - `promote_outline_to_index` (line 656): uses `?` — `IndexParseError: std::error::Error`
+     converts via anyhow's blanket impl. ✓
+   - `read_foreshadowing_summary` (line 724): explicit `match` with `warn!` + `None`
+     graceful degradation. ✓
+   - `auto_chain.rs:1217` caller of `promote_outline_to_index`: explicit `match` with
+     `warn!` non-fatal handling. ✓
+6. **Public API** — `ForeshadowingStatus`, `IndexParseError`, `ForeshadowingStatusError`
+   are all `pub` items in `pub mod narrative_index` (`lib.rs:11`). Accessible via
+   `nexus_orchestration::narrative_index::ForeshadowingStatus`. No additional `lib.rs`
+   re-export needed (module-path access is the established pattern). ✓
+
+### W-2 disposition: RESOLVED ✅
+
+The explicit `F###` token requirement (`parse_declaration_line`, lines 559-604) directly
+addresses the original W-2 index-corruption risk:
+
+1. **Policy enforced** — `parse_declaration_line` only yields a declaration when the
+   (bullet-stripped) line starts with `F` + digits + (`:` or whitespace). Prose bullets
+   (`- Note: ...`, `- TODO: ...`, `- (no new items ...)`) return `None`. The function
+   docstring (lines 525-544) documents the policy with concrete examples.
+2. **Promotion no longer allocates for prose** — `promote_outline_to_index` (lines 660-683)
+   iterates only over declarations from `extract_inline_f_declarations` (which now requires
+   the F### token). A defensive `let Some(id) = decl.id else { continue; }` guard (lines
+   665-667) documents that it is unreachable for well-formed extraction output and protects
+   against future regressions. Comment explains the rationale.
+3. **Token-matching robustness** — handles leading/trailing whitespace (`.trim()`), bullet
+   prefix (`- ` / `* `), `:` and space delimiters, empty-description rejection, and id-only
+   refs (e.g. bare `F001` with no description → skipped).
+4. **Tests** — 3 new W-2 tests, all in the correct file (`narrative_index.rs` test module):
+   - `extract_inline_f_declarations_ignores_bullets_without_f_token` (covers Note / TODO /
+     parenthetical prose → ignored; only F### bullet promoted).
+   - `extract_inline_f_declarations_handles_bullet_with_existing_f_id` (F### space form).
+   - `promote_outline_to_index_does_not_allocate_for_prose_bullets` (end-to-end: only F002
+     promoted; F003 NOT allocated for prose bullets).
+
+### Scope discipline
+
+Surgical. Only 2 implementation/test files changed (`narrative_index.rs` +469/-95,
+`stage_gates.rs` +4/-1 test-only enum update). Both scoped strictly to W-1 + W-2. No
+piggyback refactors, no unrelated changes. The `FDeclaration.id` stays `Option<String>`
+(documented decision to minimize struct-signature churn; defensive guard in promotion).
+
+### CI gates (re-verified on `iteration/v1.49 @ 1fee7ada`)
+
+| Gate | Result |
+|------|--------|
+| `cargo +nightly fmt --all --check` | clean (exit 0) |
+| `cargo clippy -p nexus-orchestration -- -D warnings` | clean (exit 0) |
+| `cargo clippy --all -- -D warnings` (CI equivalent) | clean (exit 0, 22.89s) |
+| `cargo test -p nexus-orchestration --lib narrative_index` | 31 passed; 0 failed |
+| `cargo test -p nexus-orchestration --lib stage_gates` | 52 passed; 0 failed |
+| `cargo test -p nexus-orchestration --test novel_project_init` | 22 passed; 0 failed |
+| `cargo test -p nexus-orchestration --test e2e_novel_writing` | 11 passed; 0 failed |
+
+Test count delta: narrative_index 25 → 31 (+8 new W-1/W-2 tests, −2 obsolete String-status
+tests). All integration tests unaffected.
+
+### New findings (re-review scope)
+
+#### 🟢 Suggestion
+
+##### S-RV1: `F###` token prefix matching is case-sensitive — minor inconsistency with status parsing
+
+**Location**: `crates/nexus-orchestration/src/narrative_index.rs:578` (`stripped.strip_prefix('F')`)
+
+The `F###` token matcher requires an uppercase `F` prefix, while `ForeshadowingStatus::from_str`
+is case-insensitive. An LLM-authored outline that emits lowercase `f001: the locket` would be
+silently ignored (not promoted). Low risk — the prompt contract (`outline-chapter.md`) uses
+uppercase `F###`, and the W-2 policy is specifically about preventing over-allocation, not
+case tolerance. Non-blocking; consider case-insensitive `F`/`f` prefix in a future hardening
+pass if LLM case drift is observed.
+
+##### S-RV2: Empty status cell is now a hard parse error (behavior change from wave-1 default)
+
+**Location**: `crates/nexus-orchestration/src/narrative_index.rs:255` (`parse_foreshadowing_index`)
+
+Wave-1 code defaulted empty status → `"planned"` in `read_foreshadowing_summary`. The typed
+enum now treats an empty status cell as `IndexParseError::InvalidStatus { value: "" }`. This is
+a deliberate, correct design choice (stricter validation per W-1 intent) and the graceful
+degradation is sound (`read_foreshadowing_summary`: warn + None; `promote_outline_to_index`:
+non-fatal warn). The only impact is on hand-edited files with a real `F###` row but an empty
+status cell — the summary will be omitted rather than defaulting to `planned`. The scaffolded
+template's placeholder row (`| | | | | |`) is unaffected (empty ID → skipped before status
+check). Non-blocking; documented here for traceability. If hand-edit UX becomes a concern,
+a future enhancement could default empty→`planned` with a `warn!`.
+
+### Updated verdict
+
+| Severity (re-review scope) | Count |
+|----------------------------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 2 (S-RV1, S-RV2 — non-blocking) |
+
+**Verdict**: **Approve**
+
+Both blocking Warnings (W-1, W-2) are fully resolved. The fix is well-designed, well-tested
+(8 new tests), surgically scoped, and all CI gates are green. The 2 new Suggestions are
+minor hardening observations that do not block approval or QA progression. Residuals
+R-V149P1-03 (W-1) and R-V149P1-04 (W-2) are ready for PM closure.
