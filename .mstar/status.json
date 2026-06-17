@@ -127,7 +127,8 @@
       "id": "2026-06-18-v1.50-kb-refreshable-scan",
       "title": "T-B P2 — creator kb rescan + extract sync",
       "file": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md",
-      "status": "InReview",
+      "status": "Done",
+      "done_at": "2026-06-18",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-kb-refreshable-scan",
@@ -137,8 +138,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-kb-auto-promotion"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T16:00:00+08:00",
-      "qc_status": "qc1 Approve + qc2 Approve + qc3 Request Changes (W-QC3-01 latent T-A P0 test defect; 1-line fix). 3 R-V150KBED-06/07/08 + R-V150KBED-06-MERGE registered. Fix-wave dispatched on same branch."
+      "updated_at": "2026-06-18T16:30:00+08:00",
+      "qc_status": "qc1+qc2 Approve + qc3 Request Changes (W-QC3-01) → fix-wave → qc3 revalidation Approve. R-V150KBED-FIX-WQC301 resolved. PM resolved cross-branch renumber conflict at merge (works_schedule_json_partial_idx → 202606180004). cargo test --workspace green (116 binaries)."
     },
     {
       "id": "2026-06-18-v1.50-hygiene-and-closeout",
@@ -856,7 +857,11 @@
         "target": "V1.50 P2 merge time",
         "target_date": "V1.50 P2 merge time",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-refreshable-scan/qc1.md §W-001",
-        "note": "PM must pick the canonical migration-number mapping. Both branches renumbered the same 202606180002 to 202606180003 (idempotent content). Net effect on a fresh merge: one renumber; conflict-free. PM should accept either branch's renumber as-is at merge."
+        "note": "PM must pick the canonical migration-number mapping. Both branches renumbered the same 202606180002 to 202606180003 (idempotent content). Net effect on a fresh merge: one renumber; conflict-free. PM should accept either branch's renumber as-is at merge.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P2 merge: PM resolved cross-branch renumber conflict by canonicalizing works_schedule_json_partial_idx → 202606180004 (keeping kb_extract_jobs_extend at 003). All 116 workspace test binaries green post-merge.",
+        "closure_evidence": "iteration/v1.50 (commit daba6e85 on iteration/v1.50)"
       },
       {
         "id": "R-V150KBED-07",
