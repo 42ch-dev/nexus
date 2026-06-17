@@ -1339,14 +1339,13 @@ pub async fn set_schedule_json(
 ) -> Result<(), LocalDbError> {
     // SAFETY: UPDATE against works table — runtime query (column added in the
     // same migration cycle; sqlx prepare cache hasn't run for this statement).
-    let result = sqlx::query(
-        "UPDATE works SET schedule_json = ?, updated_at = ? WHERE work_id = ?",
-    )
-    .bind(json)
-    .bind(now)
-    .bind(work_id)
-    .execute(pool)
-    .await?;
+    let result =
+        sqlx::query("UPDATE works SET schedule_json = ?, updated_at = ? WHERE work_id = ?")
+            .bind(json)
+            .bind(now)
+            .bind(work_id)
+            .execute(pool)
+            .await?;
 
     if result.rows_affected() == 0 {
         return Err(LocalDbError::MissingVersionKey {
@@ -1378,9 +1377,7 @@ pub async fn get_schedule_json(
             .await?;
 
     // None → work missing OR column NULL/empty → use defaults.
-    Ok(row
-        .and_then(|(opt,)| opt)
-        .filter(|s| !s.is_empty()))
+    Ok(row.and_then(|(opt,)| opt).filter(|s| !s.is_empty()))
 }
 
 /// Resolve a `<work_ref>` OR `<work_id>` positional to a concrete `work_id`.

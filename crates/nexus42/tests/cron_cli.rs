@@ -17,8 +17,7 @@
 //! `nexus-local-db` directly so it runs without a configured creator/home.
 
 use nexus42::commands::creator::works::cron::{
-    apply_set_args, render_list, render_show, resolve_schedule, CronSetArgs, ListRow,
-    WorkSchedule,
+    apply_set_args, render_list, render_show, resolve_schedule, CronSetArgs, ListRow, WorkSchedule,
 };
 
 /// AC #4: `creator works cron set my-work --brainstorm "0 3,9,15,21 * * *"
@@ -91,7 +90,9 @@ async fn cron_list_across_workspace() {
     let pool = fresh_seeded_pool().await;
     // Seed a second Work.
     let other = sample_work_record("wrk_other", "other-ref");
-    nexus_local_db::works::create_work(&pool, &other).await.unwrap();
+    nexus_local_db::works::create_work(&pool, &other)
+        .await
+        .unwrap();
     // Keep `wrk_other` at defaults; set a custom blob on `wrk_seed`.
     let custom = apply_set_args(
         WorkSchedule::defaults(),
@@ -133,7 +134,10 @@ async fn cron_show_on_unset_work_uses_defaults() {
     let stored = nexus_local_db::works::get_schedule_json(&pool, "wrk_seed")
         .await
         .unwrap();
-    assert!(stored.is_none(), "freshly-seeded Work must have no schedule");
+    assert!(
+        stored.is_none(),
+        "freshly-seeded Work must have no schedule"
+    );
     let resolved = resolve_schedule(stored.as_deref());
     assert_eq!(resolved, WorkSchedule::defaults());
     let rendered = render_show("seed-ref", &resolved);
@@ -229,7 +233,13 @@ fn cron_set_help_documents_flags() {
         .stdout
         .clone();
     let help = String::from_utf8(output).unwrap();
-    for flag in &["--brainstorm", "--write", "--review", "--tz", "--no-brainstorm"] {
+    for flag in &[
+        "--brainstorm",
+        "--write",
+        "--review",
+        "--tz",
+        "--no-brainstorm",
+    ] {
         assert!(
             help.contains(flag),
             "cron set --help must document {flag}: {help}"
