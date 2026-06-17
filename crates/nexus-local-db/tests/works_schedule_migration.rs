@@ -244,6 +244,45 @@ async fn resolve_work_id_by_ref_or_id_matches_both() {
     assert!(none.is_none());
 }
 
+/// R-V150-WLA-06 (V1.50 P-last WL-A / cron-foundation qc1 S6): when the
+/// `work_ref` of one row collides with the `work_id` of another row (a
+/// theoretical edge case — slugs and `wrk_...` IDs normally live in
+/// different namespaces), `resolve_work_id_by_ref_or_id` must
+/// deterministically prefer the row whose `work_ref` matches (the "ref
+/// wins over id" precedence the doc comment promises). The pre-fix query
+/// had `LIMIT 1` without `ORDER BY`, leaving the choice non-deterministic.
+#[tokio::test]
+async fn resolve_work_id_by_ref_or_id_prefers_work_ref_match_on_collision() {
+    let (pool, _dir) = fresh_pool().await;
+    // Row A: work_id = "wrk_collision", work_ref = "shared-token".
+    seed_work(&pool, "wrk_collision", "shared-token").await;
+    // Row B: work_id = "shared-token" (collides with A's work_ref), work_ref unset.
+    let mut row_b = sample_work("shared-token", "");
+    row_b.work_ref = None;
+    nexus_local_db::works::create_work(&pool, &row_b)
+        .await
+        .unwrap();
+
+    // Both rows match the positional `shared-token` (A via work_ref, B
+    // via work_id). The query must return A's work_id ("wrk_collision")
+    // because work_ref wins over id per the doc contract.
+    let resolved = nexus_local_db::works::resolve_work_id_by_ref_or_id(
+        &pool,
+        "ctr_test",
+        "default",
+        "shared-token",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        resolved.as_deref(),
+        Some("wrk_collision"),
+        "work_ref match must win over work_id match on collision; \
+         the ORDER BY work_ref IS NULL clause in resolve_work_id_by_ref_or_id \
+         guarantees the row with a non-null work_ref sorts first"
+    );
+}
+
 #[tokio::test]
 async fn list_works_schedule_returns_all_works() {
     let (pool, _dir) = fresh_pool().await;
