@@ -18,13 +18,26 @@
 /// - [`crate::preset::validation::STAGE_PRESET_ALLOWLIST`] (review stage
 ///   allowlist entry)
 ///
-/// See `.mstar/knowledge/specs/novel-quality-loop.md` §3 for the normative
+/// See `.mstar/knowledge/specs/novel-writing/quality-loop.md` §3 for the normative
 /// preset table.
 pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
 
+/// FL-E `produce` stage preset id — `novel-writing` (V1.36+).
+///
+/// Consumed by:
+/// - [`crate::auto_chain::preset_version_for_id`] (version map)
+/// - [`crate::auto_chain::promote_foreshadowing_for_schedule`] (V1.49 P1
+///   narrative-index promotion hook)
+/// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
+///   (terminal guard for the promotion hook)
+///
+/// See `.mstar/knowledge/specs/novel-writing/workflow-profile.md` for the
+/// normative preset table.
+pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
+
 #[cfg(test)]
 mod tests {
-    use super::NOVEL_CHAPTER_REVIEW_PRESET_ID;
+    use super::{NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_WRITING_PRESET_ID};
 
     /// Guard against accidental rename: the wire value is part of the
     /// persisted `creator_schedules.preset_id` column and the embedded
@@ -33,5 +46,10 @@ mod tests {
     #[test]
     fn novel_chapter_review_preset_id_value_is_frozen() {
         assert_eq!(NOVEL_CHAPTER_REVIEW_PRESET_ID, "novel-chapter-review");
+    }
+
+    #[test]
+    fn novel_writing_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_WRITING_PRESET_ID, "novel-writing");
     }
 }

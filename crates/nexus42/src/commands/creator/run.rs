@@ -189,50 +189,74 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 
 /// Intercept `creator run <preset_id> --help` before clap parses.
 ///
-/// When the resolved preset declares non-empty `cli_args`, print a help
-/// block that surfaces those manifest-declared flags, then exit(0).
+/// When the resolved preset declares non-empty `cli_args`, render a help
+/// block that surfaces those manifest-declared flags and return it as
+/// `Some(text)`. Returns `None` in every other case so the caller falls
+/// through to clap's generic `RunCommand` `--help`.
+///
+/// This library function does **not** call `std::process::exit` — the
+/// returned text is printed and exited by the binary `main()`
+/// (R-V146P2-QC1-S1: keep `exit` in the binary, not in a library module,
+/// so the call is unit-testable and never terminates a library consumer).
 ///
 /// Data-driven (Grill #20): any preset whose manifest declares `cli_args`
 /// gets the enriched help — no per-preset hardcode. The first slice (Grill
 /// #21) covers `novel-manuscript-audit-review`, `novel-manuscript-audit-extract`,
 /// and `novel-review-master`; future presets drop in via YAML only.
 ///
-/// Best-effort: on any failure (unknown preset, no `nexus_home`, no active
-/// workspace, empty `cli_args`), the function returns without printing so
-/// clap's generic `RunCommand` `--help` renders as before.
+/// Best-effort: on any failure (no help target in argv, no `nexus_home`,
+/// unknown preset, empty `cli_args`), returns `None`.
 ///
 /// Called from `main()` before `Cli::parse()`.
-pub fn maybe_print_preset_run_help_and_exit() {
+#[must_use]
+pub fn maybe_render_preset_run_help() -> Option<String> {
     let argv: Vec<String> = std::env::args().collect();
-    let Some(preset_id) = extract_run_help_target(&argv) else {
-        return;
-    };
-    // Best-effort manifest resolution; fall through to clap on any failure.
-    let Ok(nexus_home) = crate::config::nexus_home() else {
-        return;
-    };
+    let preset_id = extract_run_help_target(&argv)?;
+    // Best-effort manifest resolution; None on any failure.
+    let nexus_home = crate::config::nexus_home().ok()?;
+    // R-V146P2-QC3-S2: build the capability registry exactly once for this
+    // help intercept and inject it into the registry-parameterized core. The
+    // registry is pure in-memory (~18 builtin capabilities + index) and is
+    // constructed only on the user-initiated `--help` path, which exits
+    // immediately after — never on the hot runtime path. Keeping it an
+    // explicit dependency of `render_rich_preset_help` (rather than a hidden
+    // reconstruction inside the decision logic) makes that contract visible
+    // and lets the resolve+format decision be unit-tested directly.
     let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
-    let loaded =
-        match nexus_orchestration::preset::lookup_preset_by_id(&preset_id, &nexus_home, &caps) {
-            Some(loaded) => loaded,
-            None => {
-                match nexus_orchestration::preset::resolve_preset(&preset_id, &nexus_home, &caps) {
-                    Ok(loaded) => loaded,
-                    Err(_) => return,
-                }
-            }
-        };
+    render_rich_preset_help(&preset_id, &nexus_home, &caps)
+}
+
+/// Resolve a preset manifest and render its enriched `--help` text if it
+/// declares non-empty `cli_args` (R-V146P2-QC3-S2).
+///
+/// Registry-injected companion of [`maybe_render_preset_run_help`]: the
+/// caller supplies the [`CapabilityRegistry`] (built once) and the resolved
+/// `nexus_home`, so this core is hermetically testable without coupling to
+/// `std::env::args()` / global config, and the registry is not rebuilt
+/// inside the decision function.
+///
+/// Returns `None` when the preset is unknown or declares no `cli_args`
+/// (clap's generic help should render instead).
+fn render_rich_preset_help(
+    preset_id: &str,
+    nexus_home: &std::path::Path,
+    caps: &nexus_orchestration::capability::CapabilityRegistry,
+) -> Option<String> {
+    let loaded = match nexus_orchestration::preset::lookup_preset_by_id(preset_id, nexus_home, caps)
+    {
+        Some(loaded) => loaded,
+        None => match nexus_orchestration::preset::resolve_preset(preset_id, nexus_home, caps) {
+            Ok(loaded) => loaded,
+            Err(_) => return None,
+        },
+    };
     let cli_args = &loaded.manifest.preset.cli_args;
     if cli_args.is_empty() {
         // No preset-specific flags → let clap render the generic RunCommand help.
-        return;
+        return None;
     }
     let description = &loaded.manifest.preset.description;
-    print!(
-        "{}",
-        format_preset_run_help(&preset_id, description, cli_args)
-    );
-    std::process::exit(0);
+    Some(format_preset_run_help(preset_id, description, cli_args))
 }
 
 /// Pure argv parser: extract the `preset_id` targeted by a
@@ -1555,6 +1579,115 @@ mod tests {
         );
         // Global flags still present so the help is usable.
         assert!(out.contains("--json"));
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V146P2-QC1-S1: library help-intercept must return, not exit
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn maybe_render_preset_run_help_returns_none_under_test_argv() {
+        // R-V146P2-QC1-S1: `maybe_render_preset_run_help` must RETURN
+        // `Option<String>` rather than call `std::process::exit(0)`. Under
+        // `cargo test`, `std::env::args()` is the test-harness argv, which
+        // never contains `creator run <preset_id> --help`, so the function
+        // must short-circuit to `None`. If it still exited, this test body
+        // could not run — reaching the assertion is the regression guard.
+        let rendered = maybe_render_preset_run_help();
+        assert!(
+            rendered.is_none(),
+            "library help-intercept must return None for non-matching argv (no exit); got: {rendered:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V146P2-QC3-S1: help text must be flush-safe (complete on exit)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_preset_run_help_ends_with_newline_so_flush_is_complete() {
+        // R-V146P2-QC3-S1: the binary prints the help with `print!` (buffered)
+        // and then flushes stdout before `std::process::exit(0)`. The rendered
+        // text must be a complete, newline-terminated block so the flushed
+        // buffer is not a truncated tail. Every code path through
+        // `format_preset_run_help` ends with a `writeln!`, so assert that
+        // invariant here — if a future edit drops the trailing newline, the
+        // flush-before-exit path would emit a half-line to piped consumers.
+        let with_args = format_preset_run_help(
+            "novel-manuscript-audit-review",
+            "On-demand review.",
+            &[PresetCliArg {
+                name: "chapter".to_string(),
+                r#type: PresetCliArgType::Integer,
+                required: true,
+                default: None,
+                description: "Chapter number".to_string(),
+            }],
+        );
+        assert!(
+            with_args.ends_with('\n'),
+            "rich help must end with newline (flush-safe): {with_args:?}"
+        );
+
+        let without_args = format_preset_run_help("novel-brainstorm", "Brainstorm a novel.", &[]);
+        assert!(
+            without_args.ends_with('\n'),
+            "generic help must end with newline (flush-safe): {without_args:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V146P2-QC3-S2: registry-injected help core (no hidden rebuild)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn render_rich_preset_help_some_for_preset_with_cli_args() {
+        // R-V146P2-QC3-S2: the resolve+format decision lives in the
+        // registry-injected `render_rich_preset_help` core, separable from
+        // `std::env::args()` / global config. A preset that declares
+        // `cli_args` (novel-manuscript-audit-review) renders rich help.
+        //
+        // The registry is built ONCE by this test and passed in — proving the
+        // core does not reconstruct it internally (the qc3 S-2 concern).
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let empty_home = std::env::temp_dir().join("nexus42_wl_a_qc3_s2_empty_home");
+        let rendered = render_rich_preset_help("novel-manuscript-audit-review", &empty_home, &caps);
+        let help = rendered.expect("novel-manuscript-audit-review declares cli_args → rich help");
+        assert!(
+            help.contains("nexus42 creator run novel-manuscript-audit-review"),
+            "rich help must echo the preset id: {help}"
+        );
+        assert!(
+            !help.contains("declares no preset-specific flags"),
+            "rich help must not render the empty-args placeholder: {help}"
+        );
+    }
+
+    #[test]
+    fn render_rich_preset_help_none_for_preset_without_cli_args() {
+        // R-V146P2-QC3-S2: a preset with no `cli_args` returns None so clap's
+        // generic RunCommand help renders. Validates the empty-args branch of
+        // the injected core.
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let empty_home = std::env::temp_dir().join("nexus42_wl_a_qc3_s2_empty_home_b");
+        let rendered = render_rich_preset_help("novel-brainstorm", &empty_home, &caps);
+        assert!(
+            rendered.is_none(),
+            "novel-brainstorm declares no cli_args → None (generic clap help); got: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn render_rich_preset_help_none_for_unknown_preset() {
+        // R-V146P2-QC3-S2: an unknown preset id resolves to None (best-effort),
+        // falling through to clap. Pins the error-suppression branch.
+        let caps = nexus_orchestration::capability::CapabilityRegistry::with_builtins();
+        let empty_home = std::env::temp_dir().join("nexus42_wl_a_qc3_s2_empty_home_c");
+        let rendered = render_rich_preset_help("does-not-exist-preset", &empty_home, &caps);
+        assert!(
+            rendered.is_none(),
+            "unknown preset must return None (no rich help); got: {rendered:?}"
+        );
     }
 
     #[test]

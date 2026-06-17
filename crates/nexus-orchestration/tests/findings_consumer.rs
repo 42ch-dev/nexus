@@ -456,3 +456,101 @@ fn novel_writing_preset_input_coerces_none_open_findings_block_to_empty() {
          guard omits the section (AC2: no sentinel noise)"
     );
 }
+
+// ── V1.49 F6: actionable-set filter (findings-lifecycle.md §2.2) ───────────
+//
+// The V1.49 spec expands the actionable set from `{ open }` to
+// `{ open, triaged }`. `in_review` and the terminal statuses remain
+// excluded by default. The two tests below verify the DAO returns the
+// expanded set and the builder renders triaged findings, while
+// `in_review` rows never reach the produce prompt.
+
+/// V1.49 F6 — `triaged` findings are included in the actionable set and
+/// reach the produce prompt block, while `in_review` findings are
+/// excluded (the master-review surface owns those).
+#[tokio::test]
+async fn actionable_set_includes_triaged_and_excludes_in_review() {
+    let pool = test_pool().await;
+    const WORK: &str = "wrk_fc_actionable";
+    const WORK_REF: &str = "fc-actionable";
+
+    let work = novel_work(WORK, WORK_REF);
+    works::create_work(&pool, &work).await.unwrap();
+
+    // Seed one finding in each non-terminal lifecycle status, all on
+    // chapter 1 with the same severity. Use direct INSERTs so we can
+    // place `triaged` and `in_review` rows without going through the
+    // create path that forces `status = 'open'`.
+    // SAFETY: test-only — direct INSERT to seed lifecycle states the
+    // create path cannot produce. All values are members of
+    // VALID_STATUSES; runtime validation is the sole gate per R-V139P1-W-1.
+    for (id, status, ts) in [
+        ("fnd_open", "open", 1_000_i64),
+        ("fnd_triaged", "triaged", 2_000_i64),
+        ("fnd_in_review", "in_review", 3_000_i64),
+    ] {
+        sqlx::query(
+            "INSERT INTO findings
+               (finding_id, work_id, chapter, severity, status, title,
+                description, target_executor, creator_id, kind,
+                created_at, updated_at)
+             VALUES (?, ?, 1, 'major', ?, ?, 'desc', 'write', ?, 'craft', ?, ?)",
+        )
+        .bind(id)
+        .bind(WORK)
+        .bind(status)
+        .bind(format!("{status}-seed"))
+        .bind(CREATOR)
+        .bind(ts)
+        .bind(ts)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let got = findings::list_open_findings_for_chapter(&pool, CREATOR, WORK, 1)
+        .await
+        .expect("DAO query should succeed");
+
+    let returned: Vec<String> = got.iter().map(|f| f.status.clone()).collect();
+    assert_eq!(
+        returned,
+        vec!["open".to_string(), "triaged".to_string()],
+        "V1.49 F6 actionable set must be open + triaged; got {returned:?}"
+    );
+
+    // The builder must render both rows (it does not re-filter; the DAO
+    // is the SSOT for the actionable set). `in_review` must NOT appear.
+    let block = build_open_findings_block(&got, "01");
+    assert!(
+        block.contains("open-seed"),
+        "open finding must render: {block}"
+    );
+    assert!(
+        block.contains("triaged-seed"),
+        "triaged finding must render: {block}"
+    );
+    assert!(
+        !block.contains("in_review-seed"),
+        "in_review finding must NOT render in the produce prompt: {block}"
+    );
+}
+
+/// V1.49 F6 — `ACTIONABLE_FINDING_STATUSES` is the canonical constant the
+/// DAO uses; the orchestration re-export mirrors it. Locking the equality
+/// keeps the two crates from drifting if the spec amends the set.
+#[test]
+fn actionable_finding_statuses_constant_is_mirrored_across_crates() {
+    use nexus_orchestration::findings_block::ACTIONABLE_FINDING_STATUSES as ORCH_CONST;
+
+    assert_eq!(
+        ORCH_CONST,
+        &["open", "triaged"],
+        "orchestration re-export must match findings-lifecycle.md §2.2"
+    );
+    assert_eq!(
+        ORCH_CONST,
+        nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES,
+        "orchestration re-export must mirror the DAO canonical constant"
+    );
+}

@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 /// RAII guard that acquires a runtime lock on creation and releases on drop.
 ///
-/// Spec: `novel-multi-work-lifecycle.md` §4.2 — CLI holder format
+/// Spec: `novel-writing/multi-work-lifecycle.md` §4.2 — CLI holder format
 /// `cli:<caller>:<uuid>`. For HTTP callers, `caller` is `http` since the
 /// actual PID isn't available over the API.
 struct RuntimeLockGuard {
@@ -1474,10 +1474,19 @@ pub fn read_active_workspace_slug(
 
 /// Reconcile `work_chapters` from filesystem for a Work.
 ///
-/// `POST /v1/local/works/{work_id}/reconcile-chapters`
+/// `POST /v1/local/works/{work_id}/reconcile-chapters[?dry_run=true]`
+///
+/// # Dry-run (V1.49 P2, R-V148P4-W2; overlay §8.2)
+///
+/// When the `dry_run` query parameter is `true`, the handler computes the
+/// `ReconcileReport` it would return when mutating, but performs **no**
+/// filesystem or DB writes and **does not acquire the runtime lock**. The
+/// report's counters reflect what the mutating path would do. This is the
+/// preview surface for `creator works reconcile-chapters --dry-run`.
 pub async fn reconcile_chapters(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
+    Query(dry_run_query): Query<ReconcileDryRunQuery>,
 ) -> Result<
     (
         StatusCode,
@@ -1488,6 +1497,7 @@ pub async fn reconcile_chapters(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     let pool = state.pool();
+    let dry_run = dry_run_query.dry_run.unwrap_or(false);
 
     // Get the Work record to find work_ref
     let work = works::get_work(pool, &creator_id, &work_id)
@@ -1519,25 +1529,77 @@ pub async fn reconcile_chapters(
         });
     }
 
-    // V1.42 P0 (T2): Acquire runtime lock for this mutating operation.
-    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
-
     // Resolve workspace root from state
     let workspace_path_str = state.workspace_path().unwrap_or_default();
     let workspace_root = std::path::Path::new(&workspace_path_str);
 
     let now = chrono::Utc::now().to_rfc3339();
 
-    // V1.48 P4-fix1 (W-2 qc3): release the lock on both Ok and Err paths.
-    // The previous `?` propagation on the reconcile call could return early
-    // without releasing the runtime lock, leaving the Work unwritable until
-    // restart. Mirrors the V1.42.1 hotfix pattern (R-V142-MERGE-CI-001).
-    let report = match nexus_local_db::work_chapters::reconcile_from_filesystem(
+    // V1.49 P2 (R-V148P4-W2): dry-run path — compute the report only, with no
+    // runtime-lock acquire and no filesystem/DB writes (overlay §8.2).
+    if dry_run {
+        tracing::info!(
+            work_id = %work_id,
+            work_ref = %work_ref,
+            "dry-run reconcile for work_id={work_id}"
+        );
+        let report = nexus_local_db::work_chapters::reconcile_from_filesystem(
+            pool,
+            &work_id,
+            work_ref,
+            workspace_root,
+            &now,
+            true,
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("reconcile preview failed: {e}"),
+        })?;
+        return Ok((StatusCode::OK, Json(report)));
+    }
+
+    // V1.49 P3 (R-V148P4-W3): shorten the runtime-lock window.
+    //
+    // The previous implementation acquired the lock for the *entire* reconcile
+    // — filesystem walk + per-chapter DB reads + writes + file frontmatter
+    // syncs — blocking other schedule operations on the same Work for the
+    // full duration. Reconcile is now split into a read-only
+    // [`compute_reconcile_diff`] (unlocked; the slow walk + reads live here)
+    // and a write-only [`apply_reconcile_diff`] (the only phase that needs the
+    // lock). Trade-off: under concurrent reconcile + mutate from the same
+    // client the diff may be stale by the time the lock is re-acquired; this is
+    // accepted for the local-first single-writer daemon model (documented in
+    // the plan). The V1.48 P4-fix1 lock-release-on-error guarantee is
+    // preserved on the apply phase below.
+    let diff = nexus_local_db::work_chapters::compute_reconcile_diff(
         pool,
         &work_id,
         work_ref,
         workspace_root,
-        &now,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("reconcile diff failed: {e}"),
+    })?;
+
+    // Phase B: acquire the lock and apply only the writes.
+    let lock = RuntimeLockGuard::acquire(pool, &creator_id, &work_id).await?;
+    let lock_acquired_at = chrono::Utc::now();
+    tracing::info!(
+        work_id = %work_id,
+        acquired_at = %lock_acquired_at.to_rfc3339(),
+        pending_ops = diff.ops.len(),
+        "runtime_lock: acquired for reconcile write phase"
+    );
+
+    // V1.48 P4-fix1 (W-2 qc3): release the lock on both Ok and Err paths.
+    // The previous `?` propagation on the reconcile call could return early
+    // without releasing the runtime lock, leaving the Work unwritable until
+    // restart. Mirrors the V1.42.1 hotfix pattern (R-V142-MERGE-CI-001).
+    let report = match nexus_local_db::work_chapters::apply_reconcile_diff(
+        pool, &work_id, &now, &diff,
     )
     .await
     {
@@ -1546,15 +1608,33 @@ pub async fn reconcile_chapters(
             lock.release().await;
             return Err(NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
-                message: format!("reconcile failed: {e}"),
+                message: format!("reconcile apply failed: {e}"),
             });
         }
     };
 
     // V1.42 P0 (T2): Release runtime lock before returning.
     lock.release().await;
+    let held_ms = (chrono::Utc::now() - lock_acquired_at)
+        .num_milliseconds()
+        .max(0);
+    tracing::info!(
+        work_id = %work_id,
+        held_ms,
+        "runtime_lock: released after reconcile write phase"
+    );
 
     Ok((StatusCode::OK, Json(report)))
+}
+
+/// Query parameters for `reconcile-chapters` (V1.49 P2, R-V148P4-W2).
+///
+/// `dry_run=true` selects the preview path (no writes, no lock).
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct ReconcileDryRunQuery {
+    /// When `true`, compute the `ReconcileReport` without writing.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
 }
 
 /// Validate that `work_ref` is a safe slug: `[a-z0-9][a-z0-9-]{0,63}`.

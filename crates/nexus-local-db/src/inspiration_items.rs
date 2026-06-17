@@ -3,7 +3,7 @@
 //! Manages the `inspiration_items` table — creator-scoped inspiration
 //! items with optional markdown file scaffold under `{workspace}/Pool/Ideas/`.
 //!
-//! Spec: novel-work-pool.md §3, local-db-schema.md §4.1.5.
+//! Spec: novel-writing/work-pool.md §3, local-db-schema.md §4.1.5.
 //!
 //! # Instrumented mutation paths (V1.46 P4 audit)
 //!
@@ -612,5 +612,259 @@ mod tests {
     fn test_title_to_slug_reserved() {
         let slug = title_to_slug("..");
         assert!(slug.starts_with("idea-"));
+    }
+
+    // ── R-V146P4-QC3-S1: trace coverage for the 5 inspiration mutation paths.
+    //    Previously only `promote_to_active` (in novel_pool_entries) had a
+    //    capture test — 1 of 9 instrumented paths across both DAOs.
+
+    async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = crate::open_pool(&db_path).await.unwrap();
+        crate::run_migrations(&pool).await.unwrap();
+        (pool, dir)
+    }
+
+    /// Seed a works row so FK constraints (e.g. `inspiration_items.
+    /// promoted_work_id` → works) are satisfied. Mirrors the helper in
+    /// `novel_pool_entries::tests`.
+    async fn seed_work(pool: &SqlitePool, work_id: &str, creator_id: &str) {
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT OR IGNORE INTO works (work_id, creator_id, workspace_slug, status, title, \
+             long_term_goal, initial_idea, intake_status, inspiration_log, primary_preset_id, \
+             schedule_ids, created_at, updated_at, current_stage, stage_status, current_chapter, \
+             auto_chain_enabled, auto_chain_interrupted, auto_review_master_on_timeout) \
+             VALUES (?, ?, 'default', 'active', ?, 'goal', 'idea', 'pending', '[]', \
+             'novel-writing', '[]', ?, ?, 'intake', 'pending', 0, 1, 0, 0)",
+        )
+        .bind(work_id)
+        .bind(creator_id)
+        .bind(format!("Work {work_id}"))
+        .bind(&now)
+        .bind(&now)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// Build a minimal `WorkRecord` for `inspiration_promote_atomic` (all
+    /// 30 fields filled). The trace is emitted at function entry, so the
+    /// record's DB validity is not load-bearing for the capture assertion.
+    fn sample_work_record(work_id: &str, creator_id: &str) -> crate::works::WorkRecord {
+        crate::works::WorkRecord {
+            work_id: work_id.to_string(),
+            creator_id: creator_id.to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: format!("Work {work_id}"),
+            long_term_goal: "goal".to_string(),
+            initial_idea: "idea".to_string(),
+            creative_brief: None,
+            intake_status: "complete".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            current_stage: "intake".to_string(),
+            stage_status: "complete".to_string(),
+            work_profile: Some("novel".to_string()),
+            work_ref: Some("MYNOVEL".to_string()),
+            total_planned_chapters: Some(10),
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_inspiration_row_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, _dir) = fresh_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            create_inspiration_row(
+                &pool,
+                "npi_1",
+                "ctr_test",
+                "Pool/Ideas/x.md",
+                "Title 1",
+                &now,
+            )
+            .await
+            .unwrap();
+        }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=inspiration_create_row",
+                "item_id=npi_1",
+                "creator_id=ctr_test",
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_inspiration_with_scaffold_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, dir) = fresh_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            create_inspiration_with_scaffold(
+                &pool,
+                "npi_2",
+                "ctr_test",
+                "Cyber Heist",
+                dir.path(),
+                &now,
+            )
+            .await
+            .unwrap();
+        }
+
+        // The scaffold path emits its own `inspiration_create_with_scaffold`
+        // trace and then delegates to `create_inspiration_row` (which emits
+        // `inspiration_create_row`). Assert the scaffold-specific tag here.
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=inspiration_create_with_scaffold",
+                "item_id=npi_2",
+                "creator_id=ctr_test",
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_promote_inspiration_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, _dir) = fresh_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        create_inspiration_row(
+            &pool,
+            "npi_3",
+            "ctr_test",
+            "Pool/Ideas/y.md",
+            "Title 3",
+            &now,
+        )
+        .await
+        .unwrap();
+        // FK: inspiration_items.promoted_work_id → works.work_id.
+        seed_work(&pool, "wrk_promoted", "ctr_test").await;
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            promote_inspiration(&pool, "npi_3", "wrk_promoted", &now)
+                .await
+                .unwrap();
+        }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=inspiration_promote",
+                "item_id=npi_3",
+                "promoted_work_id=wrk_promoted",
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_inspiration_promote_atomic_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, _dir) = fresh_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        // Seed the inspiration row the atomic path updates in step 3.
+        create_inspiration_row(
+            &pool,
+            "npi_4",
+            "ctr_test",
+            "Pool/Ideas/z.md",
+            "Title 4",
+            &now,
+        )
+        .await
+        .unwrap();
+        let work = sample_work_record("wrk_atomic", "ctr_test");
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            // The trace is emitted at function entry. The subsequent works
+            // INSERT may succeed or fail depending on schema FKs; either way
+            // the structured trace has already been recorded.
+            let _ =
+                inspiration_promote_atomic(&pool, &work, "ctr_test", "wrk_atomic", "npi_4", &now)
+                    .await;
+        }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=inspiration_promote_atomic",
+                "creator_id=ctr_test",
+                "work_id=wrk_atomic",
+                "item_id=npi_4",
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_archive_inspiration_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, _dir) = fresh_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        create_inspiration_row(
+            &pool,
+            "npi_5",
+            "ctr_test",
+            "Pool/Ideas/a.md",
+            "Title 5",
+            &now,
+        )
+        .await
+        .unwrap();
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            archive_inspiration(&pool, "npi_5", "ctr_test")
+                .await
+                .unwrap();
+        }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=inspiration_archive",
+                "item_id=npi_5",
+                "creator_id=ctr_test",
+            ],
+        );
     }
 }

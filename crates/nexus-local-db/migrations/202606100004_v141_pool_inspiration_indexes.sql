@@ -1,5 +1,5 @@
 -- V1.41 P1: covering indexes for pool + inspiration list queries
--- Spec: novel-work-pool.md §2.2, local-db-schema.md §4.1.5
+-- Spec: novel-writing/work-pool.md §2.2, local-db-schema.md §4.1.5
 -- Both list_pool_entries and list_inspiration filter by (creator_id, status)
 -- with ORDER BY updated_at / created_at DESC + LIMIT/OFFSET.
 

@@ -1,5 +1,5 @@
 -- V1.36: Add novel-profile columns to works table
--- (novel-workflow-profile.md §2.1)
+-- (novel-writing/workflow-profile.md §2.1)
 
 ALTER TABLE works ADD COLUMN work_profile TEXT DEFAULT NULL
     CHECK (work_profile IS NULL OR work_profile IN ('novel'));

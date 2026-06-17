@@ -311,6 +311,12 @@ impl ScheduleSupervisor {
     ///
     /// # Errors
     /// Returns [`SupervisorError`] if database operations fail.
+    /// Evaluate terminal transitions for a schedule: status update, runtime
+    /// lock release, the review-findings + V1.49 foreshadowing-promote hooks,
+    /// and auto-chain continuation. Each block is an independent sequential
+    /// guard; splitting would add indirection without reducing complexity
+    /// (same shape as `process_auto_chain_after_terminal` below).
+    #[allow(clippy::too_many_lines)]
     pub async fn on_schedule_terminal(
         &self,
         schedule_id: &str,
@@ -414,7 +420,7 @@ impl ScheduleSupervisor {
                 // V1.48 P0 T2: thread the supervisor's optional
                 // `workspace_dir` so the producer can read
                 // `Works/<work_ref>/Logs/review/review-report.md` and parse
-                // richer findings (`.mstar/knowledge/specs/novel-findings-maturity.md`
+                // richer findings (`.mstar/archived/knowledge/novel-findings-maturity.md`
                 // §1). When the workspace is None (e.g. hermetic DB-only
                 // tests) or the report is missing, the producer falls back
                 // to the V1.47 placeholder synthesis with `tracing::warn!`.
@@ -431,6 +437,32 @@ impl ScheduleSupervisor {
                         schedule_id,
                         error = %e,
                         "review-findings: persist hook failed (non-fatal)"
+                    );
+                }
+            }
+            // V1.49 P1 (narrative-indexes overlay §4): promote inline F###
+            // declarations from chapter outlines into
+            // `Works/<work_ref>/Outlines/foreshadowing.md` after a
+            // `novel-writing` produce run completes. Runs BEFORE
+            // `process_auto_chain_after_terminal` so the updated index is
+            // visible when the next chapter's outline prompt is assembled.
+            // Best-effort + non-blocking: errors are logged and do NOT fail
+            // the terminal transition (mirrors the review-findings hook).
+            if schedule_row
+                .as_ref()
+                .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_WRITING_PRESET_ID)
+            {
+                use crate::auto_chain;
+                let ws_ref = self.workspace_dir.as_ref();
+                let ws_path = ws_ref.as_deref();
+                if let Err(e) =
+                    auto_chain::promote_foreshadowing_for_schedule(&self.pool, schedule_id, ws_path)
+                        .await
+                {
+                    tracing::warn!(
+                        schedule_id,
+                        error = %e,
+                        "foreshadowing-promote: hook failed (non-fatal)"
                     );
                 }
             }

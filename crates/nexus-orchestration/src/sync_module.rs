@@ -561,4 +561,50 @@ mod tests {
             "only Stories/*.md should appear — Rules/ and Logs/ excluded"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // 16. V1.49 P1: narrative index files are never chapter candidates
+    //     (narrative-indexes overlay §2 — foreshadowing.md / event-index.md
+    //     are SSOT files, not chapters).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn sync_module_skips_foreshadowing_index_file() {
+        // (a) Explicit boundary: both index filenames are in SKIP_FILES, so a
+        //     stray copy inside Stories/ is not treated as a chapter.
+        assert!(
+            SKIP_FILES.contains(&"foreshadowing.md"),
+            "foreshadowing.md must be in SKIP_FILES"
+        );
+        assert!(
+            SKIP_FILES.contains(&"event-index.md"),
+            "event-index.md must be in SKIP_FILES"
+        );
+
+        // (b) Canonical location: index files live in Outlines/, which is
+        //     never scanned for chapters (only Stories/ is). Even with a
+        //     populated Outlines/foreshadowing.md, chapter discovery must
+        //     return only the real chapter.
+        let workspace = setup_workspace();
+        let work_root = works_dir(workspace.path(), "my-novel");
+        let stories = work_root.join("Stories");
+        let outlines = work_root.join("Outlines");
+        fs::create_dir_all(&stories).expect("Stories");
+        fs::create_dir_all(&outlines).expect("Outlines");
+
+        write_file(&stories, "ch01-intro.md", "Chapter 1");
+        write_file(
+            &outlines,
+            "foreshadowing.md",
+            "# Foreshadowing Index\n\n| ID | Description |\n| --- | --- |\n| F001 | x |\n",
+        );
+        write_file(&outlines, "event-index.md", "# Event Index\n");
+
+        let result = discover_works(workspace.path());
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].chapters,
+            vec!["ch01-intro.md"],
+            "index files in Outlines/ must never be discovered as chapters"
+        );
+    }
 }

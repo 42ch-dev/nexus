@@ -34,6 +34,11 @@ mod error;
 mod seed_shared;
 mod version;
 
+// Test-only tracing-capture helpers shared by DAO mutation-path tests
+// (R-V146P4-QC1-S1 / R-V146P4-QC3-S1). Compiled only under `cfg(test)`.
+#[cfg(test)]
+mod test_tracing;
+
 // Re-export version constants
 pub use version::{DB_SCHEMA_VERSION, SCHEMA_VERSION};
 
@@ -104,10 +109,11 @@ pub use prompt_injection::{
 
 // Re-export findings types
 pub use findings::{
-    count_open_findings_by_severity, create_finding, create_finding_from_review,
-    create_finding_from_review_tx, delete_finding, get_finding, list_findings,
-    prune_resolved_findings_older_than, update_finding, Finding, FindingListFilters, FindingPatch,
-    ReviewVerdictFinding, SeverityCount, RETENTION_DEFAULT_DAYS,
+    count_open_findings_by_severity, count_resolved_findings_older_than, create_finding,
+    create_finding_from_review, create_finding_from_review_tx, delete_finding, get_finding,
+    is_valid_status, is_valid_transition, list_findings, prune_resolved_findings_older_than,
+    update_finding, Finding, FindingListFilters, FindingPatch, ReviewVerdictFinding, SeverityCount,
+    ACTIONABLE_FINDING_STATUSES, RETENTION_DEFAULT_DAYS, VALID_STATUSES,
 };
 
 // Re-export works types
@@ -133,10 +139,11 @@ pub use inspiration_items::{
 
 // Re-export work_chapters types
 pub use work_chapters::{
-    count_chapters, get_chapter, insert_chapter, is_work_completed, next_chapter,
-    next_chapter_volume_aware, reconcile_from_filesystem, seed_chapters,
-    seed_chapters_multi_volume, seed_chapters_multi_volume_tx, update_paths, update_status,
-    InsertChapterParams, ReconcileReport, WorkChapterRecord,
+    apply_reconcile_diff, compute_reconcile_diff, count_chapters, get_chapter, insert_chapter,
+    is_work_completed, next_chapter, next_chapter_volume_aware, reconcile_from_filesystem,
+    seed_chapters, seed_chapters_multi_volume, seed_chapters_multi_volume_tx, update_paths,
+    update_status, InsertChapterParams, ReconcileDiff, ReconcileOp, ReconcileReport,
+    WorkChapterRecord,
 };
 
 // Re-export force_gates_audit types

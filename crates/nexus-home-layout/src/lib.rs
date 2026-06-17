@@ -287,7 +287,7 @@ pub fn user_writing_craft_rules_path(home: &Path) -> PathBuf {
 /// Workspace-relative: `Works/<work_ref>/AGENTS.md` (V1.47 normative Layer 2).
 ///
 /// V1.48 P2: `AGENTS.md` at the Work root is the preferred Layer 2 location
-/// per [novel-workflow-profile.md §5.5.4]. The legacy
+/// per [novel-writing/workflow-profile.md §5.5.4]. The legacy
 /// [`work_novel_rules_path`] is retained for read-only fallback only.
 #[must_use]
 pub fn work_agents_md_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
@@ -298,7 +298,7 @@ pub fn work_agents_md_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
 ///
 /// V1.48 P2: this path is read-only fallback for Works scaffolded before
 /// the `AGENTS.md` migration. New scaffolds write [`work_agents_md_path`]
-/// instead. See [novel-workflow-profile.md §5.5.4].
+/// instead. See [novel-writing/workflow-profile.md §5.5.4].
 #[must_use]
 pub fn work_novel_rules_path(workspace_dir: &Path, work_ref: &str) -> PathBuf {
     workspace_dir

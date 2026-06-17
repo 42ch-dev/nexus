@@ -165,6 +165,14 @@ impl NexusApiError {
                     "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
                         StatusCode::UNPROCESSABLE_ENTITY
                     }
+                    // V1.49 F6 (findings-lifecycle.md §2.1): illegal lifecycle
+                    // transitions return 422 with the stable `INVALID_TRANSITION`
+                    // code so callers can distinguish "no such finding" (404)
+                    // from "finding exists but the move is not allowed".
+                    // V1.49 P0 W-1: invalid PATCH enum values (severity /
+                    // status membership / target_executor) return 422 with the
+                    // stable `INVALID_INPUT` code, distinct from transitions.
+                    "INVALID_TRANSITION" | "INVALID_INPUT" => StatusCode::UNPROCESSABLE_ENTITY,
                     _ => StatusCode::BAD_REQUEST,
                 }
             }
@@ -198,13 +206,16 @@ impl NexusApiError {
             Self::ApiKeyExpired => "API_KEY_EXPIRED",
             Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
             Self::BadRequest { code, .. } => {
-                // Surface canonical tool-bridge codes (spec §12.4).
+                // Surface canonical tool-bridge codes (spec §12.4), plus
+                // V1.40 world-binding and V1.49 F6 lifecycle codes, as-is.
                 match code.as_str() {
-                    "POLICY_BLOCKED" | "NOT_SUPPORTED" | "INVALID_INPUT" => code.as_str(),
-                    // V1.40: surface world-binding validation codes as-is.
-                    "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
-                        code.as_str()
-                    }
+                    "POLICY_BLOCKED"
+                    | "NOT_SUPPORTED"
+                    | "INVALID_INPUT"
+                    | "INVALID_TRANSITION"
+                    | "WORLD_ID_REQUIRED"
+                    | "INVALID_WORLD_ID"
+                    | "WORLD_CLEAR_FORBIDDEN" => code.as_str(),
                     _ => "BAD_REQUEST",
                 }
             }

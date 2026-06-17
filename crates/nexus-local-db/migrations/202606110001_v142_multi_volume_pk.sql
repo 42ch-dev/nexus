@@ -1,5 +1,5 @@
 -- V1.42 P1 (T1): Multi-volume PK migration for work_chapters.
--- Spec: novel-workflow-profile.md §4.5.4, local-db-schema.md V1.42 amendment.
+-- Spec: novel-writing/workflow-profile.md §4.5.4, local-db-schema.md V1.42 amendment.
 --
 -- Steps:
 -- 1. Backfill implicit volume = 1 for all existing rows (NULL → 1).
