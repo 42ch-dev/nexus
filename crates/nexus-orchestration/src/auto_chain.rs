@@ -33,6 +33,12 @@ static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32:
 /// Mirrors the `ACH_COUNTER` fix (R-V139P0-W-B) for the same class of bug.
 static RVM_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// V1.50 T-A P1: per-process monotonic counter for cron-triggered schedule ID
+/// collision resistance. Two cron roles can fire in the same millisecond
+/// (e.g. brainstorm + write both matching the same minute), so the bare
+/// `CRON<ts_ms>` prefix would collide. Mirrors `ACH_COUNTER` / `RVM_COUNTER`.
+static CRON_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 use crate::stage_gates::{self, WorkFields};
 
 /// Result of an `on_schedule_complete` evaluation.
@@ -1524,6 +1530,80 @@ pub async fn enqueue_review_master_schedule(
         work_id,
         schedule_id = %schedule_id,
         "stale-findings: enqueued novel-review-master (opt-in)"
+    );
+
+    Ok(schedule_id)
+}
+
+/// Enqueue a cron-triggered schedule (V1.50 T-A P1).
+///
+/// Called by [`crate::schedule::cron_supervisor::evaluate_cron_fires`] when a
+/// per-Work role cron (`brainstorm` / `write`) matches the current minute and
+/// passes gating + idempotency. Inserts a pending `Schedule` linked to
+/// `work_id` with the given `preset_id`.
+///
+/// **Out-of-band**: like [`enqueue_review_master_schedule`], this does NOT
+/// touch the Work's `driver_schedule_id` — a cron fire is an independent
+/// production nudge, not an FL-E stage step. The existing supervisor `tick()`
+/// admits the schedule; the existing executor runs the preset; the existing
+/// terminal pipeline handles completion. A cron fire therefore never disrupts
+/// an in-progress FL-E chain (spec `cron-staggering.md` §5: "Cron firing does
+/// not bypass `creator run`").
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the schedule INSERT fails.
+pub async fn enqueue_cron_schedule(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    preset_id: &str,
+    role: &str,
+) -> Result<String, AutoChainError> {
+    // CRON prefix + timestamp + per-process counter (collision-resistant,
+    // mirrors `ACH_COUNTER` / `RVM_COUNTER`). Two roles firing in the same
+    // millisecond must produce distinct PKs.
+    let counter = CRON_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let schedule_id = format!(
+        "CRON{}{:06x}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S%3f"),
+        counter & 0x00FF_FFFF
+    );
+    let now_ts = chrono::Utc::now().timestamp();
+    let label = format!("cron:{role}:{work_id}");
+    let preset_version = preset_version_for_id(preset_id);
+
+    // SAFETY: dynamic SQL — cron-triggered schedule insert with derived params.
+    // Matches the `enqueue_review_master_schedule` pattern (runtime sqlx is the
+    // established convention in this crate; see auto_chain.rs:354-355).
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+    )
+    .bind(&schedule_id)
+    .bind(creator_id)
+    .bind(preset_id)
+    .bind(preset_version)
+    .bind(&label)
+    .bind(now_ts)
+    .bind(now_ts)
+    .bind(work_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, work_id, preset_id, "cron-supervisor: failed to insert cron-triggered schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+
+    tracing::info!(
+        work_id,
+        preset_id,
+        role,
+        schedule_id = %schedule_id,
+        "cron-supervisor: enqueued cron-triggered schedule"
     );
 
     Ok(schedule_id)

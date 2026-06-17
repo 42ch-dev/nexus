@@ -33,6 +33,11 @@ nexus-home-layout = { path = "../nexus-home-layout" }
 nexus-kb = { path = "../nexus-kb" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
+# V1.50 T-A P1: cron expression parsing + IANA TZ conversion for the daemon-side
+# cron evaluator (novel-writing three-role staggering). Same workspace deps as
+# `nexus42` (T-A P0 cron CLI validation).
+cron = { workspace = true }
+chrono-tz = { workspace = true }
 blake3 = { workspace = true }
 sha2 = "0.10"
 include_dir = "0.7"
