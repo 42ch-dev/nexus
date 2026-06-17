@@ -18,6 +18,19 @@
 //! Read-only functions (`list_pool_entries`, `count_pool_entries`,
 //! `get_pool_entry`, `get_pool_entry_by_work`, `get_active_pool_entry`) are
 //! intentionally not traced.
+//!
+//! # Tracing level intent (R-V146P4-QC3-S2)
+//!
+//! The `tracing::info!` calls on the instrumented mutation paths below are
+//! **intentionally `INFO`-level**, not `DEBUG`. They emit one structured
+//! event per creator-initiated pool mutation (promote / archive / complete),
+//! so the volume scales with human operator action frequency, not with row
+//! count or daemon tick rate. The intended consumer is a single author or
+//! operator debugging pool lifecycle via `RUST_LOG=nexus_local_db=info`;
+//! they are **not** a high-throughput telemetry stream. Do not downgrade to
+//! `DEBUG!` or strip the opaque-ID fields without coordinating with the
+//! observability contract — the structured fields (`operation`, `entry_id`,
+//! `creator_id`, `work_id`) are the operator-debugging surface.
 
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
