@@ -254,9 +254,34 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
     } else {
         // No flags at all → reset to defaults (spec §3.1).
         schedule = WorkSchedule::defaults();
+        // R-V150P0-W1: honor an explicitly-resolved TZ (env/default fold from
+        // `handle_set`) when resetting, so NEXUS_TZ / UTC land correctly. The
+        // raw CLI args have `tz=None` on a reset, so this only fires when the
+        // caller folded a concrete TZ into `effective_args`.
+        if let Some(tz) = &args.tz {
+            schedule.tz.clone_from(tz);
+        }
     }
 
     Ok(schedule)
+}
+
+/// Resolve the TZ to persist for a `set` operation (R-V150P0-W1).
+///
+/// Pure merge semantic, unit-tested independently of `handle_set`:
+///
+/// - `args_tz` = the `--tz` flag value. When `Some`, it wins (explicit override).
+/// - `env` = the `NEXUS_TZ` env value. Callers pass this **only on the reset
+///   path**; on the patch path callers pass `None` so `base.tz` is preserved.
+///
+/// Returns `Some(tz)` when there is a TZ intent to write, or `None` when the
+/// caller should preserve `base.tz` (the patch-without-`--tz` case). The reset
+/// caller folds the `DEFAULT_TZ` (`UTC`) fallback itself when this returns
+/// `None`.
+fn resolve_tz(args_tz: Option<&str>, env: Option<&str>) -> Option<String> {
+    args_tz
+        .map(str::to_string)
+        .or_else(|| env.map(str::to_string))
 }
 
 // ── Rendering (spec §3.2 / §3.3) ─────────────────────────────────────────
@@ -510,17 +535,29 @@ async fn handle_set(
     let stored = nexus_local_db::works::get_schedule_json(pool, &work_id).await?;
     let base = resolve_schedule(stored.as_deref());
 
-    let resolved_tz = args
-        .tz
-        .clone()
-        .or_else(|| std::env::var("NEXUS_TZ").ok())
-        .unwrap_or_else(|| DEFAULT_TZ.to_string());
-
-    // Fold the resolved TZ into a copy of args so apply_set_args sees it.
+    // R-V150P0-W1: TZ merge semantics. Only fold env/default TZ on the reset
+    // path (no flags) or when `--tz` is passed. A role-only patch without
+    // `--tz` must preserve the previously-configured `base.tz` — folding the
+    // env/default here used to silently clobber it.
+    let is_reset = args.brainstorm.is_none()
+        && args.write.is_none()
+        && args.review.is_none()
+        && args.tz.is_none()
+        && !args.no_brainstorm
+        && !args.no_write
+        && !args.no_review;
+    let env_for_resolve = if is_reset {
+        std::env::var("NEXUS_TZ").ok()
+    } else {
+        None
+    };
+    let resolved_tz = resolve_tz(args.tz.as_deref(), env_for_resolve.as_deref());
     let mut effective_args = args.clone();
-    if args.tz.is_none() {
-        effective_args.tz = Some(resolved_tz.clone());
-    }
+    effective_args.tz = match resolved_tz {
+        Some(tz) => Some(tz),
+        None if is_reset => Some(DEFAULT_TZ.to_string()),
+        None => None,
+    };
 
     let schedule = apply_set_args(base, &effective_args)?;
     let blob = schedule.to_json_string()?;
@@ -799,6 +836,47 @@ mod tests {
     #[test]
     fn normalize_six_field_unchanged() {
         assert_eq!(normalize_cron_fields("0 0 3 * * *"), "0 0 3 * * *");
+    }
+
+    // ── R-V150P0-W1: TZ preservation on role-only patch ──────────────────
+
+    #[test]
+    fn resolve_tz_explicit_arg_wins() {
+        assert_eq!(
+            resolve_tz(Some("Asia/Shanghai"), Some("UTC")),
+            Some("Asia/Shanghai".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_tz_env_used_when_no_arg() {
+        assert_eq!(
+            resolve_tz(None, Some("America/New_York")),
+            Some("America/New_York".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_tz_none_when_no_intent() {
+        assert_eq!(resolve_tz(None, None), None);
+    }
+
+    #[test]
+    fn set_no_review_preserves_custom_tz() {
+        // Pre-store a Work with tz="Asia/Shanghai"; patch with --no-review and
+        // no --tz. apply_set_args must leave base.tz unchanged (R-V150P0-W1).
+        let mut base = WorkSchedule::defaults();
+        base.tz = "Asia/Shanghai".to_string();
+        let args = CronSetArgs {
+            no_review: true,
+            ..Default::default()
+        };
+        let out = apply_set_args(base, &args).expect("patch must apply");
+        assert_eq!(
+            out.tz, "Asia/Shanghai",
+            "role-only patch without --tz must preserve base.tz"
+        );
+        assert!(!out.roles.review.enabled);
     }
 
     fn error_message(err: &CliError) -> String {
