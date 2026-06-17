@@ -497,6 +497,245 @@ pub async fn mark_failed(
     Ok(())
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// V1.50 T-B P1 — World KB promotion lifecycle (entity-scope-model.md §5.5)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// The promotion lifecycle is *orthogonal* to the V1.29/V1.40 extraction queue
+// (`KbExtractJob` + `status` = queued/running/done/failed). Review-time
+// heuristic extraction produces candidate rows whose promotion state
+// (`promotion_status` = pending/confirmed/rejected) is governed by author
+// confirm/dismiss.
+//
+// All queries below use runtime `sqlx::query_as::<_, T>()` (dynamic SQL) so
+// they do NOT require regeneration of the shared `.sqlx` offline cache. This
+// mirrors the existing `list_by_creator` precedent in this file.
+
+/// Row from `kb_extract_jobs` carrying the V1.50 promotion-lifecycle columns.
+///
+/// Separate from [`KbExtractJob`] (the V1.29 extraction-queue row) so the two
+/// lifecycles do not share a struct or its `query_as!` macros.
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
+pub struct KbExtractPromotion {
+    /// Unique job ID (`xj_` prefix).
+    pub job_id: String,
+    /// Owning creator ID.
+    pub creator_id: String,
+    /// Workspace ID.
+    pub workspace_id: String,
+    /// Target world ID for the candidate.
+    pub world_id: String,
+    /// Source work ID (V1.40 P3 column; reused for promotion candidates).
+    pub work_id: Option<String>,
+    /// Promotion state: `pending`, `confirmed`, `rejected` (§5.5.1).
+    pub promotion_status: String,
+    /// Proposed `KeyBlock` body as JSON.
+    pub proposed_payload: Option<String>,
+    /// Source chapter number (NULL for work-level candidates).
+    pub source_chapter_id: Option<i64>,
+    /// Heuristic's `block_type` guess (`snake_case` wire value).
+    pub block_type_guess: Option<String>,
+    /// Heuristic's `canonical_name` guess.
+    pub canonical_name_guess: Option<String>,
+    /// Row creation timestamp.
+    pub created_at: String,
+}
+
+/// Default limit for `list_pending_for_world` when caller passes `None`.
+const DEFAULT_PENDING_LIMIT: i64 = 100;
+
+/// Insert a new promotion candidate with `promotion_status='pending'`.
+///
+/// Used by the review-time extraction hook
+/// (`nexus_orchestration::quality_loop`). The caller is expected to have
+/// already called [`is_idempotent`] to avoid duplicates; this function does
+/// not re-check.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_pending(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_id: &str,
+    world_id: &str,
+    work_id: Option<&str>,
+    source_chapter_id: Option<i64>,
+    block_type_guess: &str,
+    canonical_name_guess: &str,
+    proposed_payload: &str,
+) -> Result<KbExtractPromotion, sqlx::Error> {
+    let job_id = generate_job_id();
+    // `work_entry_id` reuses the V1.29 idempotency unique index
+    // `(creator_id, work_entry_id, world_id) WHERE status NOT IN ('failed')`
+    // as an additional DB-level guard: a pending candidate for the same
+    // `(creator, world, canonical_name)` is unique. Promotion rows set
+    // extraction `status='done'` (the heuristic runs inline, no queue), so the
+    // unique index applies (it excludes only 'failed').
+    // SAFETY: static INSERT with bind params; no user-controlled identifiers.
+    sqlx::query(
+        "INSERT INTO kb_extract_jobs \
+         (job_id, creator_id, workspace_id, work_entry_id, world_id, status, \
+          work_id, promotion_status, proposed_payload, source_chapter_id, \
+          block_type_guess, canonical_name_guess) \
+         VALUES (?, ?, ?, ?, ?, 'done', ?, 'pending', ?, ?, ?, ?)",
+    )
+    .bind(&job_id)
+    .bind(creator_id)
+    .bind(workspace_id)
+    .bind(canonical_name_guess)
+    .bind(world_id)
+    .bind(work_id)
+    .bind(proposed_payload)
+    .bind(source_chapter_id)
+    .bind(block_type_guess)
+    .bind(canonical_name_guess)
+    .execute(pool)
+    .await?;
+
+    fetch_promotion_by_id(pool, &job_id).await
+}
+
+/// Fetch a single promotion row by ID.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn get_promotion(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<Option<KbExtractPromotion>, sqlx::Error> {
+    fetch_promotion_optional_by_id(pool, job_id).await
+}
+
+/// List promotion candidates in the `pending` state for a world.
+///
+/// Ordered by creation date (oldest first) so the author sees candidates in
+/// extraction order. Bounded by `limit` (default [`DEFAULT_PENDING_LIMIT`]).
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn list_pending_for_world(
+    pool: &SqlitePool,
+    world_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<KbExtractPromotion>, sqlx::Error> {
+    let limit = limit.unwrap_or(DEFAULT_PENDING_LIMIT).clamp(1, 500);
+    // SAFETY: LIMIT interpolated from a clamped i64 (not user-controlled);
+    // column names are static; world_id is a bind param.
+    let query = format!(
+        "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
+                promotion_status, proposed_payload, source_chapter_id, \
+                block_type_guess, canonical_name_guess, created_at \
+         FROM kb_extract_jobs \
+         WHERE world_id = ? AND promotion_status = 'pending' \
+         ORDER BY created_at ASC LIMIT {limit}"
+    );
+    sqlx::query_as::<_, KbExtractPromotion>(&query)
+        .bind(world_id)
+        .fetch_all(pool)
+        .await
+}
+
+/// Idempotency pre-check: returns `true` if a `pending` or `confirmed` row
+/// already exists for the same `work_id` + `canonical_name_guess`.
+///
+/// Prevents the review-time extraction hook from duplicating candidates when
+/// `novel-review-master` re-runs over the same chapter (acceptance criterion
+/// §6). `rejected` rows do not block re-extraction (the author may change
+/// their mind on a later review pass).
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn is_idempotent(
+    pool: &SqlitePool,
+    work_id: &str,
+    canonical_name_guess: &str,
+) -> Result<bool, sqlx::Error> {
+    // SAFETY: static SELECT with bind params.
+    let existing: Option<(i64,)> = sqlx::query_as(
+        "SELECT COUNT(*) FROM kb_extract_jobs \
+         WHERE work_id = ? AND canonical_name_guess = ? \
+         AND promotion_status IN ('pending', 'confirmed')",
+    )
+    .bind(work_id)
+    .bind(canonical_name_guess)
+    .fetch_optional(pool)
+    .await?;
+    Ok(existing.is_some_and(|(c,)| c > 0))
+}
+
+/// Flip a promotion candidate to `confirmed`.
+///
+/// Only transitions from `pending`. Returns `Ok(true)` when the row was
+/// flipped, `Ok(false)` when the row was not in `pending` state (already
+/// confirmed/rejected or missing) — the caller surfaces a clean error.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn mark_confirmed(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed' \
+         WHERE job_id = ? AND promotion_status = 'pending'",
+    )
+    .bind(job_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Flip a promotion candidate to `rejected`.
+///
+/// Only transitions from `pending`. Returns `Ok(true)` when the row was
+/// flipped, `Ok(false)` otherwise.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn mark_rejected(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'rejected' \
+         WHERE job_id = ? AND promotion_status = 'pending'",
+    )
+    .bind(job_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+// ── internal fetchers ─────────────────────────────────────────────────
+
+async fn fetch_promotion_by_id(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<KbExtractPromotion, sqlx::Error> {
+    fetch_promotion_optional_by_id(pool, job_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)
+}
+
+async fn fetch_promotion_optional_by_id(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<Option<KbExtractPromotion>, sqlx::Error> {
+    // SAFETY: static SELECT by PK with bind param.
+    sqlx::query_as::<_, KbExtractPromotion>(
+        "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
+                promotion_status, proposed_payload, source_chapter_id, \
+                block_type_guess, canonical_name_guess, created_at \
+         FROM kb_extract_jobs WHERE job_id = ?",
+    )
+    .bind(job_id)
+    .fetch_optional(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
