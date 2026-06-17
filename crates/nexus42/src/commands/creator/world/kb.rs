@@ -541,7 +541,9 @@ pub async fn kb_adopt(
 /// # Errors
 ///
 /// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access.
-/// Returns `CliError::Other` on missing/non-pending rows or store errors.
+/// Returns `CliError::Other` on missing/non-pending rows, store errors, or
+/// (R-V150KBED-05) when an audit log is required but the candidate's `work_id`
+/// cannot be resolved to a human-readable `work_ref` (`works.story_ref`).
 pub async fn kb_reject(
     pool: &SqlitePool,
     creator_id: &str,
@@ -554,6 +556,14 @@ pub async fn kb_reject(
     // Author identity gate.
     require_world_owner(pool, world_id, creator_id).await?;
 
+    // R-V150KBED-05: resolve the human-readable work_ref (works.story_ref) for
+    // the reject audit-log path BEFORE the DB flip. A missing work_ref fails
+    // cleanly here — no rejected row, no orphan audit log under the wrong path.
+    // The prior behavior wrote under `Works/<work_id>/...` using the opaque DB
+    // id, which violated the home-layout `Works/<work_ref>/` convention.
+    let work_ref =
+        resolve_work_ref_for_log(pool, candidate.work_id.as_deref(), workspace_dir).await?;
+
     let flipped = mark_rejected(pool, extract_job_id)
         .await
         .map_err(|e| CliError::Other(format!("Failed to mark candidate rejected: {e}")))?;
@@ -565,7 +575,12 @@ pub async fn kb_reject(
 
     // Best-effort audit log (entity-scope-model §5.5.4). Non-fatal: a missing
     // workspace dir (hermetic tests) or write failure does not undo the reject.
-    if let Err(e) = write_rejected_log(workspace_dir, extract_job_id, &candidate) {
+    if let Err(e) = write_rejected_log(
+        workspace_dir,
+        extract_job_id,
+        &candidate,
+        work_ref.as_deref(),
+    ) {
         tracing::warn!(
             extract_job_id,
             error = %e,
@@ -713,20 +728,29 @@ fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
 /// Write the rejected-candidate audit log (entity-scope-model §5.5.4).
 ///
 /// Path: `<workspace_dir>/Works/<work_ref>/Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md`.
+///
+/// `work_ref` is the human-readable slug resolved upstream as `works.story_ref`
+/// by [`resolve_work_ref_for_log`] (R-V150KBED-05), matching the home-layout
+/// `Works/<work_ref>/` convention. When `workspace_dir` is `None` the function
+/// is a no-op (hermetic test path).
+///
 /// Best-effort: returns an error that the caller logs at `warn!` but does not
 /// propagate to the user (the DB row is already flipped to `rejected`).
 fn write_rejected_log(
     workspace_dir: Option<&std::path::Path>,
     extract_job_id: &str,
     candidate: &KbExtractPromotion,
+    work_ref: Option<&str>,
 ) -> std::result::Result<(), String> {
     let Some(ws_dir) = workspace_dir else {
         // No workspace bound (hermetic test) — skip log writing.
         return Ok(());
     };
-    // Use work_id as the path component (stable and unambiguous for the audit
-    // trail; resolving a friendlier work_ref would need a DB round-trip).
-    let work_ref = candidate.work_id.as_deref().unwrap_or("unknown-work");
+    // R-V150KBED-05: work_ref is resolved upstream from works.story_ref; fall
+    // back only if the caller passed None despite having a workspace dir
+    // (defensive — kb_reject resolves before calling, so this is unreachable
+    // in the CLI path but keeps the helper safe for direct callers).
+    let work_ref = work_ref.unwrap_or("unknown-work");
 
     let date = chrono::Utc::now().format("%Y-%m-%d");
     let log_dir = ws_dir
@@ -744,6 +768,7 @@ fn write_rejected_log(
          - **extract_job_id**: {job_id}\n\
          - **world_id**: {world_id}\n\
          - **work_id**: {work_id}\n\
+         - **work_ref**: {work_ref}\n\
          - **canonical_name_guess**: {name}\n\
          - **block_type_guess**: {btype}\n\
          - **source_chapter_id**: {chapter}\n\
@@ -751,6 +776,7 @@ fn write_rejected_log(
         job_id = extract_job_id,
         world_id = candidate.world_id,
         work_id = candidate.work_id.as_deref().unwrap_or("-"),
+        work_ref = work_ref,
         name = candidate.canonical_name_guess.as_deref().unwrap_or("-"),
         btype = candidate.block_type_guess.as_deref().unwrap_or("-"),
         chapter = candidate
@@ -760,4 +786,48 @@ fn write_rejected_log(
     );
     std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
     Ok(())
+}
+
+/// Resolve the human-readable `work_ref` (`works.story_ref`) for the reject
+/// audit-log path (entity-scope-model §5.5.4; home-layout `Works/<work_ref>/`
+/// convention). R-V150KBED-05.
+///
+/// Returns `Ok(None)` when no audit log is needed (no workspace dir bound —
+/// e.g. hermetic tests with `workspace_dir=None`). Returns `Err` if a log IS
+/// needed but the candidate has no `work_id`, the `works` row is absent, or
+/// `story_ref` is `NULL`. Failing before the DB flip keeps the reject
+/// side-effect-free when the audit trail cannot be written under the correct
+/// path.
+async fn resolve_work_ref_for_log(
+    pool: &SqlitePool,
+    work_id: Option<&str>,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<Option<String>> {
+    if workspace_dir.is_none() {
+        // No workspace bound (hermetic test) — no log to write, no ref needed.
+        return Ok(None);
+    }
+    let Some(wid) = work_id else {
+        return Err(CliError::Other(
+            "Cannot write reject audit log: candidate has no work_id.".to_string(),
+        ));
+    };
+    // SAFETY: SELECT against the known works table schema (story_ref is
+    // nullable TEXT, so fetch_optional returns Option<Option<String>>).
+    let row: Option<Option<String>> =
+        sqlx::query_scalar("SELECT story_ref FROM works WHERE work_id = ?")
+            .bind(wid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to query work_ref: {e}")))?;
+    match row {
+        None => Err(CliError::Other(format!(
+            "Cannot write reject audit log: work_id '{wid}' does not exist in the works table."
+        ))),
+        Some(None) => Err(CliError::Other(format!(
+            "Cannot write reject audit log: work '{wid}' has no story_ref (work_ref). \
+             Run `nexus42 creator bootstrap` or set story_ref before rejecting a candidate."
+        ))),
+        Some(Some(story_ref)) => Ok(Some(story_ref)),
+    }
 }
