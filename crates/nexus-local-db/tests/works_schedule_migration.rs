@@ -111,6 +111,13 @@ async fn rollback_drops_schedule_json_column() {
 
     // Simulate a down-migration: DROP COLUMN (SQLite 3.35+).
     // SAFETY: test-only DDL simulating rollback of the T1 migration.
+    // Drop the dependent partial index first: SQLite rejects DROP COLUMN
+    // while a partial index (`idx_works_schedule_json_nonempty`, added in
+    // T-A P1) still references the column (W-QC3-01).
+    sqlx::query("DROP INDEX IF EXISTS idx_works_schedule_json_nonempty")
+        .execute(&pool)
+        .await
+        .expect("drop dependent partial index before DROP COLUMN");
     sqlx::query("ALTER TABLE works DROP COLUMN schedule_json")
         .execute(&pool)
         .await
