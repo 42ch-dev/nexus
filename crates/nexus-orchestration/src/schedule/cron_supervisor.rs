@@ -61,7 +61,7 @@ pub struct CronFireSummary {
 impl CronFireSummary {
     /// Total roles evaluated across all Works (for log lines).
     #[must_use]
-    pub fn total_evaluated(&self) -> usize {
+    pub const fn total_evaluated(&self) -> usize {
         self.fired
             + self.skipped_gated
             + self.skipped_idempotent
@@ -100,12 +100,12 @@ struct CronRole {
     enabled: bool,
 }
 
-fn default_enabled() -> bool {
+const fn default_enabled() -> bool {
     // Spec §2.1: default `enabled = true`.
     true
 }
 
-/// Map a role name to its trigger preset_id (spec §2.1 table).
+/// Map a role name to its trigger preset id (spec §2.1 table).
 ///
 /// Returns `None` for roles out of scope for T-A P1 (e.g. `review`).
 fn role_preset(role: &str) -> Option<&'static str> {
@@ -176,110 +176,125 @@ async fn evaluate_work(
         }
     };
 
-    let tz: Tz = match Tz::from_str(&config.tz) {
-        Ok(t) => t,
-        Err(_) => {
-            summary.skipped_parse_error += 1;
-            warn!(
-                work_id = %row.work_id,
-                work_ref = ?row.work_ref,
-                tz = %config.tz,
-                "cron-supervisor: invalid IANA tz; skipping Work"
-            );
-            return;
-        }
+    let Ok(tz) = Tz::from_str(&config.tz) else {
+        summary.skipped_parse_error += 1;
+        warn!(
+            work_id = %row.work_id,
+            work_ref = ?row.work_ref,
+            tz = %config.tz,
+            "cron-supervisor: invalid IANA tz; skipping Work"
+        );
+        return;
     };
 
+    let gate = gate_reason(row);
     for (role_name, role_opt) in [
-        (ROLE_BRAINSTORM, &config.roles.brainstorm),
-        (ROLE_WRITE, &config.roles.write),
+        (ROLE_BRAINSTORM, config.roles.brainstorm.as_ref()),
+        (ROLE_WRITE, config.roles.write.as_ref()),
     ] {
-        let Some(role) = role_opt else {
-            // Role absent from the blob — not firing.
-            summary.skipped_no_match += 1;
-            continue;
-        };
-        if !role.enabled {
-            summary.skipped_no_match += 1;
-            debug!(
+        try_fire_role(pool, row, role_name, role_opt, tz, now, gate, summary).await;
+    }
+}
+
+/// Evaluate one role for one Work: skip (no-match / disabled / gated /
+/// idempotent) or enqueue. Mutates `summary` to record the outcome.
+//
+// 8 args is inherent to this private linear pipeline (each arg is read once in
+// a flat skip-or-fire sequence). A context struct would add indirection
+// without reducing real complexity — same rationale as `too_many_lines` allows
+// elsewhere in this crate (supervisor.rs, auto_chain.rs).
+#[allow(clippy::too_many_arguments)]
+async fn try_fire_role(
+    pool: &SqlitePool,
+    row: &nexus_local_db::works::WorkCronRow,
+    role_name: &str,
+    role: Option<&CronRole>,
+    tz: Tz,
+    now: DateTime<Utc>,
+    gate: Option<&'static str>,
+    summary: &mut CronFireSummary,
+) {
+    let Some(role) = role else {
+        summary.skipped_no_match += 1;
+        return;
+    };
+    if !role.enabled {
+        summary.skipped_no_match += 1;
+        debug!(
+            work_id = %row.work_id,
+            role = role_name,
+            "cron-supervisor: role disabled; skipping"
+        );
+        return;
+    }
+    if !cron_fires_at_minute(&role.cron, tz, now) {
+        summary.skipped_no_match += 1;
+        return;
+    }
+
+    // Per-Work gating (spec §4.3).
+    if let Some(reason) = gate {
+        summary.skipped_gated += 1;
+        debug!(
+            work_id = %row.work_id,
+            role = role_name,
+            gate_reason = reason,
+            "cron-supervisor: gated skip"
+        );
+        return;
+    }
+
+    // Idempotency guard (spec §4.2) + enqueue.
+    let Some(preset_id) = role_preset(role_name) else {
+        summary.skipped_no_match += 1;
+        return;
+    };
+    match has_active_role_schedule(pool, &row.work_id, preset_id).await {
+        Ok(true) => {
+            summary.skipped_idempotent += 1;
+            info!(
                 work_id = %row.work_id,
                 role = role_name,
-                "cron-supervisor: role disabled; skipping"
+                preset_id,
+                "cron-supervisor: prior schedule still active; skipping fire"
             );
-            continue;
         }
-        if !cron_fires_at_minute(&role.cron, tz, now) {
-            summary.skipped_no_match += 1;
-            continue;
-        }
-
-        // Per-Work gating (spec §4.3).
-        if let Some(reason) = gate_reason(row) {
-            summary.skipped_gated += 1;
-            debug!(
-                work_id = %row.work_id,
-                role = role_name,
-                gate_reason = reason,
-                "cron-supervisor: gated skip"
-            );
-            continue;
-        }
-
-        // Idempotency guard (spec §4.2).
-        let Some(preset_id) = role_preset(role_name) else {
-            summary.skipped_no_match += 1;
-            continue;
-        };
-        match has_active_role_schedule(pool, &row.work_id, preset_id).await {
-            Ok(true) => {
-                summary.skipped_idempotent += 1;
+        Ok(false) => match crate::auto_chain::enqueue_cron_schedule(
+            pool,
+            &row.creator_id,
+            &row.work_id,
+            preset_id,
+            role_name,
+        )
+        .await
+        {
+            Ok(schedule_id) => {
+                summary.fired += 1;
                 info!(
                     work_id = %row.work_id,
                     role = role_name,
                     preset_id,
-                    "cron-supervisor: prior schedule still active; skipping fire"
+                    schedule_id = %schedule_id,
+                    "cron-supervisor: enqueued cron-triggered schedule"
                 );
-            }
-            Ok(false) => {
-                // Enqueue (out-of-band; does not set driver).
-                match crate::auto_chain::enqueue_cron_schedule(
-                    pool,
-                    &row.creator_id,
-                    &row.work_id,
-                    preset_id,
-                    role_name,
-                )
-                .await
-                {
-                    Ok(schedule_id) => {
-                        summary.fired += 1;
-                        info!(
-                            work_id = %row.work_id,
-                            role = role_name,
-                            preset_id,
-                            schedule_id = %schedule_id,
-                            "cron-supervisor: enqueued cron-triggered schedule"
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            work_id = %row.work_id,
-                            role = role_name,
-                            preset_id,
-                            error = %e,
-                            "cron-supervisor: enqueue failed; skipping fire"
-                        );
-                    }
-                }
             }
             Err(e) => {
                 warn!(
                     work_id = %row.work_id,
                     role = role_name,
+                    preset_id,
                     error = %e,
-                    "cron-supervisor: idempotency check failed; skipping fire (non-fatal)"
+                    "cron-supervisor: enqueue failed; skipping fire"
                 );
             }
+        },
+        Err(e) => {
+            warn!(
+                work_id = %row.work_id,
+                role = role_name,
+                error = %e,
+                "cron-supervisor: idempotency check failed; skipping fire (non-fatal)"
+            );
         }
     }
 }
@@ -391,48 +406,100 @@ mod tests {
     #[test]
     fn cron_fires_every_minute_always_matches() {
         // `* * * * *` matches every minute in UTC.
-        assert!(cron_fires_at_minute("* * * * *", Tz::UTC, utc(2026, 6, 19, 3, 0)));
-        assert!(cron_fires_at_minute("* * * * *", Tz::UTC, utc(2026, 6, 19, 3, 7)));
+        assert!(cron_fires_at_minute(
+            "* * * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 3, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            "* * * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 3, 7)
+        ));
     }
 
     #[test]
     fn cron_fires_at_specific_hour_minute_matches() {
         // `0 3 * * *` fires at 03:00 UTC.
-        assert!(cron_fires_at_minute("0 3 * * *", Tz::UTC, utc(2026, 6, 19, 3, 0)));
+        assert!(cron_fires_at_minute(
+            "0 3 * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 3, 0)
+        ));
         // Not at 03:01.
-        assert!(!cron_fires_at_minute("0 3 * * *", Tz::UTC, utc(2026, 6, 19, 3, 1)));
+        assert!(!cron_fires_at_minute(
+            "0 3 * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 3, 1)
+        ));
         // Not at 04:00.
-        assert!(!cron_fires_at_minute("0 3 * * *", Tz::UTC, utc(2026, 6, 19, 4, 0)));
+        assert!(!cron_fires_at_minute(
+            "0 3 * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 4, 0)
+        ));
     }
 
     #[test]
     fn cron_fires_comma_lists_match_one_slot() {
         // `0 3,9,15,21 * * *` (brainstorm default) fires at 09:00.
-        assert!(cron_fires_at_minute("0 3,9,15,21 * * *", Tz::UTC, utc(2026, 6, 19, 9, 0)));
+        assert!(cron_fires_at_minute(
+            "0 3,9,15,21 * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 9, 0)
+        ));
         // Not at 10:00.
-        assert!(!cron_fires_at_minute("0 3,9,15,21 * * *", Tz::UTC, utc(2026, 6, 19, 10, 0)));
+        assert!(!cron_fires_at_minute(
+            "0 3,9,15,21 * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 10, 0)
+        ));
     }
 
     #[test]
     fn cron_fires_half_hour_pattern() {
         // `0,30 * * * *` (review default) fires at :00 and :30.
-        assert!(cron_fires_at_minute("0,30 * * * *", Tz::UTC, utc(2026, 6, 19, 14, 0)));
-        assert!(cron_fires_at_minute("0,30 * * * *", Tz::UTC, utc(2026, 6, 19, 14, 30)));
-        assert!(!cron_fires_at_minute("0,30 * * * *", Tz::UTC, utc(2026, 6, 19, 14, 15)));
+        assert!(cron_fires_at_minute(
+            "0,30 * * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 14, 0)
+        ));
+        assert!(cron_fires_at_minute(
+            "0,30 * * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 14, 30)
+        ));
+        assert!(!cron_fires_at_minute(
+            "0,30 * * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 14, 15)
+        ));
     }
 
     #[test]
     fn cron_fires_in_author_tz() {
         // `0 3 * * *` in Asia/Shanghai (UTC+8) fires when UTC == 19:00 prev day.
         // 03:00 CST = 2026-06-19 19:00 UTC (2026-06-18).
-        assert!(cron_fires_at_minute("0 3 * * *", Tz::Asia__Shanghai, utc(2026, 6, 18, 19, 0)));
+        assert!(cron_fires_at_minute(
+            "0 3 * * *",
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 18, 19, 0)
+        ));
         // Not at 19:01 UTC.
-        assert!(!cron_fires_at_minute("0 3 * * *", Tz::Asia__Shanghai, utc(2026, 6, 18, 19, 1)));
+        assert!(!cron_fires_at_minute(
+            "0 3 * * *",
+            Tz::Asia__Shanghai,
+            utc(2026, 6, 18, 19, 1)
+        ));
     }
 
     #[test]
     fn cron_fires_garbage_returns_false() {
-        assert!(!cron_fires_at_minute("not a cron", Tz::UTC, utc(2026, 6, 19, 3, 0)));
+        assert!(!cron_fires_at_minute(
+            "not a cron",
+            Tz::UTC,
+            utc(2026, 6, 19, 3, 0)
+        ));
         assert!(!cron_fires_at_minute("", Tz::UTC, utc(2026, 6, 19, 3, 0)));
     }
 

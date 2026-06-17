@@ -1459,14 +1459,14 @@ pub async fn list_works_schedule(
 
 // ── V1.50 T-A P1: daemon-side cron evaluator DAOs ─────────────────────────
 
-/// Row returned by [`list_works_with_schedule_json`] — the minimal column set
-/// the daemon cron evaluator needs to (a) read the per-Work cron config and
-/// (b) apply the per-Work gating rules (spec `cron-staggering.md` §4.3).
+/// Row for the daemon cron evaluator scan ([`list_works_with_schedule_json`]).
 ///
+/// Minimal column set needed to (a) read the per-Work cron config and (b)
+/// apply the per-Work gating rules (spec `cron-staggering.md` §4.3).
 /// `schedule_json` is always non-empty/non-NULL for returned rows (the scan
 /// predicate filters out unset Works). `creator_id` is included so the
 /// evaluator can enqueue schedules scoped to the right creator.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct WorkCronRow {
     /// Primary key (`wrk_...`).
     pub work_id: String,
@@ -1501,15 +1501,7 @@ pub async fn list_works_with_schedule_json(
     // SAFETY: SELECT against works table — runtime query (schedule_json column
     // + partial index added in the same migration cycle). The WHERE predicate
     // matches the partial index `idx_works_schedule_json_nonempty`.
-    let rows: Vec<(
-        String,
-        String,
-        Option<String>,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-    )> = sqlx::query_as(
+    let rows: Vec<WorkCronRow> = sqlx::query_as(
         "SELECT work_id, creator_id, work_ref, schedule_json, \
                 intake_status, runtime_lock_holder, completion_locked_at \
          FROM works \
@@ -1517,23 +1509,7 @@ pub async fn list_works_with_schedule_json(
     )
     .fetch_all(pool)
     .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(
-            |(work_id, creator_id, work_ref, schedule_json, intake_status, runtime_lock_holder, completion_locked_at)| {
-                WorkCronRow {
-                    work_id,
-                    creator_id,
-                    work_ref,
-                    schedule_json,
-                    intake_status,
-                    runtime_lock_holder,
-                    completion_locked_at,
-                }
-            },
-        )
-        .collect())
+    Ok(rows)
 }
 
 /// Transactional compare-and-swap write for `works.schedule_json`
@@ -1592,10 +1568,11 @@ pub async fn set_schedule_json_tx(
         // vs. surface a not-found error. A missing Work row matches neither the
         // PK nor the CAS; a CAS mismatch matches the PK but not the expected
         // value. Re-read to disambiguate.
-        let exists: Option<(String,)> = sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
-            .bind(work_id)
-            .fetch_optional(&mut **tx)
-            .await?;
+        let exists: Option<(String,)> =
+            sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(&mut **tx)
+                .await?;
         if exists.is_none() {
             return Err(LocalDbError::MissingVersionKey {
                 key: format!("works/{work_id}"),

@@ -38,7 +38,7 @@ pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
 /// Cron-triggered `brainstorm` role preset id — `novel-brainstorm` (V1.50 T-A P1).
 ///
 /// The daemon-side cron evaluator (`schedule::cron_supervisor`) enqueues a
-/// pending Schedule with this preset_id when the per-Work `brainstorm` role
+/// pending Schedule with this preset id when the per-Work `brainstorm` role
 /// cron fires (spec `cron-staggering.md` §2.1 / §4.1). The existing
 /// `ScheduleSupervisor::tick()` then admits it; the existing executor runs it.
 /// Out-of-band fire (does NOT touch `driver_schedule_id`), mirroring
@@ -51,7 +51,7 @@ pub const NOVEL_BRAINSTORM_PRESET_ID: &str = "novel-brainstorm";
 /// (spec `cron-staggering.md` §2.1 / §4.1). Out-of-band like brainstorm.
 ///
 /// **Note (R-V150P1CRONBW-01):** the `novel-write` embedded preset is not yet
-/// authored as of T-A P1; the cron evaluator enqueues the correct preset_id
+/// authored as of T-A P1; the cron evaluator enqueues the correct preset id
 /// string per spec, and the schedule is persisted + admitted normally, but the
 /// executor will fail to load the preset until it is authored in a follow-up
 /// plan. This is a preset-authoring gap, not an evaluator gap.
