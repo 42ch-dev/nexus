@@ -96,9 +96,13 @@ pub use reference_source::{
 pub use kb_extract_job::{
     claim_job as claim_extract_job, enqueue as enqueue_extract_job,
     enqueue_with_artifact as enqueue_extract_job_with_artifact, get as get_extract_job,
-    list_by_creator as list_extract_jobs, mark_done as mark_extract_job_done,
-    mark_failed as mark_extract_job_failed, mark_running as mark_extract_job_running,
-    next_queued as next_queued_extract_job, KbExtractJob,
+    get_promotion as get_extract_promotion, insert_pending as insert_pending_extract,
+    is_idempotent as is_extract_idempotent, list_by_creator as list_extract_jobs,
+    list_pending_for_world as list_pending_extracts_for_world,
+    mark_confirmed as mark_extract_confirmed, mark_done as mark_extract_job_done,
+    mark_failed as mark_extract_job_failed, mark_rejected as mark_extract_rejected,
+    mark_running as mark_extract_job_running, next_queued as next_queued_extract_job, KbExtractJob,
+    KbExtractPromotion,
 };
 
 // Re-export prompt_injection types
