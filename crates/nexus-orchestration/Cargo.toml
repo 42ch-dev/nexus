@@ -57,6 +57,17 @@ tracing-subscriber = { workspace = true }
 # Integration tests under tests/ need their own access to async runtime, DB pool
 # and serde helpers — these are also in [dependencies] but `tests/` are external crates.
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+# R-V149P1-02 (V1.50): `tests/review_report.rs` mixes tracing-capture tests
+# (set_default/with_default thread-local subscribers) with parallel siblings
+# that share the tokio blocking-thread pool used by sqlx. Under
+# `--test-threads=8` the capture layer intermittently dropped events the
+# function emitted (~15-20% failure rate, QC3 measured 2/10 on
+# origin/main @ be27111b). Marking every test in that binary
+# `#[serial_test::serial]` makes the whole file mutually exclusive within
+# the binary (same effect as `--test-threads=1` for this one binary;
+# other binaries still parallelise normally). `serial_test` is already a
+# dev-dep in `nexus-daemon-runtime` with the same version pin.
+serial_test = "3"
 sqlx = { workspace = true }
 serde_json = { workspace = true }
 nexus-local-db = { path = "../nexus-local-db" }
