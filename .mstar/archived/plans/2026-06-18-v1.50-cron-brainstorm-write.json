@@ -1,0 +1,22 @@
+{
+  "id": "2026-06-18-v1.50-cron-brainstorm-write",
+  "title": "T-A P1 — Brainstorm + write cron wiring into auto-chain",
+  "file": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.50-cron-brainstorm-write",
+  "merge_target": "iteration/v1.50",
+  "iteration_compass": ".mstar/iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/cron-staggering.md",
+  "task_category": "feature",
+  "depends_on": [
+    "2026-06-18-v1.50-cron-foundation"
+  ],
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T14:00:00+08:00",
+  "qc_status": "Initial wave: qc3 Request Changes (3 Ws R-V150P1CRONBW-03/04/05). Fix-wave resolved all 3; qc3 targeted re-review Approve. R-V150P0-W5 (T-A P0 carry-forward TOCTOU) also resolved. Merged into iteration/v1.50."
+}
