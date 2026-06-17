@@ -75,7 +75,8 @@
       "id": "2026-06-18-v1.50-auto-chronology",
       "title": "T-A P3 — Per-Work opt-in volume auto-advance on finish",
       "file": ".mstar/plans/2026-06-18-v1.50-auto-chronology.md",
-      "status": "InReview",
+      "status": "Done",
+      "done_at": "2026-06-18",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-auto-chronology",
@@ -85,8 +86,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-cron-review-staggering"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T17:00:00+08:00",
-      "qc_status": "qc1 Request Changes (1 W - spec §4.1 work title hardcoded); qc2 Approve; qc3 Request Changes (3 Ws - reliability, env-var race, sqlx macro). 4 blocking Ws total; fix-wave dispatched."
+      "updated_at": "2026-06-18T18:00:00+08:00",
+      "qc_status": "3/3 QC Approve post-fix-wave (qc1+qc3 re-review). 4 R-V150P3AUTOCHRONO-03/04/05/06 resolved (work title, outline atomicity, env-var override, sqlx macros). R-V150P3AUTOCHRONO-01/02 V1.51+ backlogs. cargo test --workspace 116 binaries green."
     },
     {
       "id": "2026-06-18-v1.50-kb-editor-cli",
