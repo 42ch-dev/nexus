@@ -159,6 +159,146 @@ async fn findings_list_filter_by_work_id() {
     assert_eq!(filtered[0].severity, "blocker");
 }
 
+/// R-V149P0-01 (V1.50): `?status=open,triaged` must return both the `open`
+/// and the `triaged` findings for the work while still excluding the
+/// `in_review` / `resolved` / `wont_fix` / `duplicate` rows. The
+/// produce-prompt consumer (`assemble_open_findings_block`) now sends this
+/// query so the V1.49 actionable set `{open, triaged}` reaches chapter
+/// prompts in a single round trip.
+#[tokio::test]
+async fn findings_list_filter_by_comma_separated_status() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    // Seed one finding in each lifecycle state. `create_finding` always
+    // starts the row at `status = open`; the rest are advanced via PATCH.
+    let open = create_finding(&state, &work_id, "minor", "open finding").await;
+    let triaged = create_finding(&state, &work_id, "minor", "triaged finding").await;
+    let in_review = create_finding(&state, &work_id, "minor", "in_review finding").await;
+    let resolved = create_finding(&state, &work_id, "minor", "resolved finding").await;
+
+    for (finding, target) in [
+        (&triaged, "triaged"),
+        (&in_review, "in_review"),
+        (&resolved, "resolved"),
+    ] {
+        update_finding_handler(
+            State(state.clone()),
+            Path((work_id.clone(), finding.finding_id.clone())),
+            axum::Json(UpdateFindingRequest {
+                severity: None,
+                status: Some(target.to_string()),
+                title: None,
+                description: None,
+                target_executor: None,
+                kind: None,
+                rule_suggestion: None,
+            }),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Single-status filter still works (regression guard for the unchanged
+    // compile-time-checked macro path).
+    let result = list_findings_handler(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::extract::Query(ListFindingsQuery {
+            chapter: None,
+            status: Some("open".to_string()),
+            severity: None,
+            limit: None,
+            offset: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let only_open = result.0;
+    assert_eq!(only_open.len(), 1, "expected just the open finding");
+    assert_eq!(only_open[0].finding_id, open.finding_id);
+
+    // Comma-separated `?status=open,triaged` — the V1.49 actionable set.
+    let result = list_findings_handler(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::extract::Query(ListFindingsQuery {
+            chapter: None,
+            status: Some("open,triaged".to_string()),
+            severity: None,
+            limit: None,
+            offset: None,
+        }),
+    )
+    .await
+    .unwrap();
+    let actionable = result.0;
+    assert_eq!(
+        actionable.len(),
+        2,
+        "actionable set must contain both open + triaged; got {actionable:?}"
+    );
+    let mut actionable_ids: Vec<String> =
+        actionable.iter().map(|f| f.finding_id.clone()).collect();
+    actionable_ids.sort();
+    let mut expected: Vec<String> =
+        vec![open.finding_id.clone(), triaged.finding_id.clone()];
+    expected.sort();
+    assert_eq!(actionable_ids, expected, "actionable set membership mismatch");
+
+    // `in_review`, `resolved` must be excluded.
+    for f in &actionable {
+        assert!(
+            !matches!(f.status.as_str(), "in_review" | "resolved" | "wont_fix" | "duplicate"),
+            "actionable filter leaked a non-actionable status: {}",
+            f.status
+        );
+    }
+
+    // Comma + whitespace tolerance (`"open, triaged"`).
+    let result = list_findings_handler(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::extract::Query(ListFindingsQuery {
+            chapter: None,
+            status: Some("open, triaged".to_string()),
+            severity: None,
+            limit: None,
+            offset: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result.0.len(),
+        2,
+        "comma + whitespace tolerant parse should still return 2"
+    );
+
+    // Unknown status token in the list surfaces as InvalidEnum → the
+    // handler maps LocalDbError::InvalidEnum to NexusApiError::BadRequest
+    // (HTTP 422 INVALID_INPUT). Assert on the status code (NexusApiError
+    // is not Serialize, so we cannot introspect the body here).
+    let err = list_findings_handler(
+        State(state.clone()),
+        Path(work_id.clone()),
+        axum::extract::Query(ListFindingsQuery {
+            chapter: None,
+            status: Some("open,bogus".to_string()),
+            severity: None,
+            limit: None,
+            offset: None,
+        }),
+    )
+    .await
+    .expect_err("unknown status token must surface as a handler error");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+        "unknown status token must map to 422 INVALID_INPUT; got {err:?}"
+    );
+}
+
 #[tokio::test]
 async fn findings_update_and_close_transition() {
     let (state, _tmp) = handler_state().await;
