@@ -57,7 +57,8 @@
       "id": "2026-06-18-v1.50-cron-review-staggering",
       "title": "T-A P2 — Review cron + quality-loop interplay",
       "file": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md",
-      "status": "InReview",
+      "status": "Done",
+      "done_at": "2026-06-18",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-cron-review-staggering",
@@ -67,8 +68,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-cron-brainstorm-write"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T15:00:00+08:00",
-      "qc_status": "Ready for QC tri-review (development complete; 22 cron_supervisor + 2 review_cron_e2e + 5 review_time_extraction tests pass; 2 R-V150P2CRONRV-01/02 cross-plan migration collision fixes)"
+      "updated_at": "2026-06-18T16:00:00+08:00",
+      "qc_status": "qc1+qc2+qc3 all Approve (3/3). 2 R-V150P2CRONRV-01/02 cross-plan migration collision fixes resolved. R-V150P2CRONRV-03 (plan text drift) deferred to P-last. Ready to merge."
     },
     {
       "id": "2026-06-18-v1.50-auto-chronology",
@@ -136,8 +137,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-kb-auto-promotion"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T15:00:00+08:00",
-      "qc_status": "Ready for QC tri-review (development complete; 6 kb_extract_jobs_upsert + 8 kb_rescan_cli + 19 regression tests pass; R-V150KBED-06 cross-plan migration collision fix)"
+      "updated_at": "2026-06-18T16:00:00+08:00",
+      "qc_status": "qc1 Approve + qc2 Approve + qc3 Request Changes (W-QC3-01 latent T-A P0 test defect; 1-line fix). 3 R-V150KBED-06/07/08 + R-V150KBED-06-MERGE registered. Fix-wave dispatched on same branch."
     },
     {
       "id": "2026-06-18-v1.50-hygiene-and-closeout",
@@ -775,6 +776,113 @@
         "target_date": "V1.51+",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
         "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode."
+      }
+    ],
+    "2026-06-18-v1.50-cron-review-staggering": [
+      {
+        "id": "R-V150P2CRONRV-01",
+        "title": "Cross-plan migration version collision: 202606180002 used by both T-A P1 (works_schedule_json_partial_idx) and T-B P1 (kb_extract_jobs_extend) breaks sqlx::migrate!",
+        "severity": "medium",
+        "source": "T-A P2 implementer (cross-plan defect discovered when T-A P2 tests required fresh DB)",
+        "scope": "crates/nexus-local-db/migrations/202606180002_*.sql (collision between T-A P1 and T-B P1)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P2 fix-wave",
+        "target_date": "V1.50 T-A P2 fix-wave",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md (Completion Report v2)",
+        "note": "Pre-existing T-A P1 / T-B P1 collision. T-A P2 renumbered works_schedule_json_partial_idx → 202606180003; T-B P2 also independently renumbered it. PM must reconcile at merge time (T-B P2 qc1 flagged R-V150KBED-06-MERGE). Renumber is pre-release safe (per-migration tx rolls back on UNIQUE conflict).",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P2: works_schedule_json_partial_idx renumbered to 202606180003 (filename only; content uses CREATE INDEX IF NOT EXISTS so idempotent). T-B P2 also independently renumbered the same migration; PM to reconcile at merge time (R-V150KBED-06-MERGE).",
+        "closure_evidence": "iteration/v1.50 (commit 12495be8 on feature/v1.50-cron-review-staggering)"
+      },
+      {
+        "id": "R-V150P2CRONRV-02",
+        "title": "Pre-existing T-A P0 latent rollback test bug: DROP COLUMN schedule_json fails because T-A P1 partial index references it",
+        "severity": "low",
+        "source": "T-A P2 implementer (latent test defect unmasked by R-V150P2CRONRV-01)",
+        "scope": "crates/nexus-local-db/tests/works_schedule_migration.rs (rollback test ordering)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P2 fix-wave",
+        "target_date": "V1.50 T-A P2 fix-wave",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md (Completion Report v2)",
+        "note": "Test-only fix: drop the dependent partial index before DROP COLUMN. Same root cause and same fix path as W-QC3-01 in T-B P2 qc3 review.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P2: rollback test fixed (drop idx_works_schedule_json_nonempty before ALTER TABLE works DROP COLUMN schedule_json). Test-only; no production code impact.",
+        "closure_evidence": "iteration/v1.50 (commit b7e438b5 on feature/v1.50-cron-review-staggering)"
+      },
+      {
+        "id": "R-V150P2CRONRV-03",
+        "title": "Plan text §2 Goal 4 / §4 AC3 describes a 'T-B P1 hook stub' that was never added (T-B P1 already filled the real hook)",
+        "severity": "low",
+        "source": "qc1 (architecture) S-001",
+        "scope": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md §2 Goal 4 / §4 AC3 (plan text vs implementation reality)",
+        "decision": "defer",
+        "owner": "@writing-specialist or @project-manager",
+        "target": "V1.50 P-last (plan archive + spec reconcile)",
+        "target_date": "V1.50 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-review-staggering/qc1.md §S-001",
+        "note": "Doc-only reconcile: implementer correctly avoided dead code per surgical principle; outcome is stronger than plan's literal requirement. At plan archive time, update Goal 4 + AC3 to reflect the real contract (T-B P1 hook is independent of T-A P2)."
+      }
+    ],
+    "2026-06-18-v1.50-kb-refreshable-scan": [
+      {
+        "id": "R-V150KBED-06",
+        "title": "Cross-plan migration version collision: 202606180002 used by both T-A P1 and T-B P1 (same as R-V150P2CRONRV-01)",
+        "severity": "medium",
+        "source": "T-B P2 implementer (cross-plan defect discovered when T-B P2 tests required fresh DB)",
+        "scope": "crates/nexus-local-db/migrations/202606180002_kb_extract_jobs_extend.sql vs 202606180002_works_schedule_json_partial_idx.sql",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P2 fix-wave",
+        "target_date": "V1.50 T-B P2 fix-wave",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
+        "note": "Pre-existing T-A P1 / T-B P1 collision. T-B P2 also independently renumbered works_schedule_json_partial_idx to 202606180003 (idempotent content). T-B P2 qc1 flagged R-V150KBED-06-MERGE for PM: T-B P2 keeps kb_extract_jobs_extend at 0002; T-A P2 renumbers the other direction. PM must pick one canonical mapping at merge time.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P2: works_schedule_json_partial_idx renumbered to 202606180003. Same fix as R-V150P2CRONRV-01 (T-A P2). PM to reconcile at merge time: both branches renumbered the same migration; canonical pick is 202606180003 (idempotent content).",
+        "closure_evidence": "iteration/v1.50 (commit 2cbd5498 on feature/v1.50-kb-refreshable-scan)"
+      },
+      {
+        "id": "R-V150KBED-06-MERGE",
+        "title": "T-B P2 qc1 flagged cross-branch merge-coordination: T-B P2 keeps kb_extract_jobs_extend at 0002, T-A P2 renumbers works_schedule_json_partial_idx → 0003; T-B P2 also renumbers the other direction. PM must reconcile at merge time",
+        "severity": "medium",
+        "source": "T-B P2 qc1 W-001",
+        "scope": "PM merge of feature/v1.50-cron-review-staggering + feature/v1.50-kb-refreshable-scan into iteration/v1.50",
+        "decision": "defer",
+        "owner": "@project-manager",
+        "target": "V1.50 P2 merge time",
+        "target_date": "V1.50 P2 merge time",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-refreshable-scan/qc1.md §W-001",
+        "note": "PM must pick the canonical migration-number mapping. Both branches renumbered the same 202606180002 to 202606180003 (idempotent content). Net effect on a fresh merge: one renumber; conflict-free. PM should accept either branch's renumber as-is at merge."
+      },
+      {
+        "id": "R-V150KBED-07",
+        "title": "Delta deliberately applies only body refreshes to kb_key_blocks (never insert/delete — §5.5 reserves those for adopt/edit/delete). Revisit for V1.51+ LLM extraction",
+        "severity": "low",
+        "source": "T-B P2 implementer (scope decision)",
+        "scope": "crates/nexus-kb/src/extract_sync.rs (delta-write contract)",
+        "decision": "defer",
+        "owner": "@architect or @fullstack-dev",
+        "target": "V1.51+ LLM extraction",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
+        "note": "Current design: refreshable scan only updates bodies of existing candidates. Inserts (new candidates) happen via T-B P1 review-time extraction; deletes happen via author explicit `reject` or `delete`. Rescan is a sync tool, not a discovery tool. Acceptable at V1.50 scope."
+      },
+      {
+        "id": "R-V150KBED-08",
+        "title": "`--dry-run` candidate preview is chapter-scoped; non-dry DB upsert also reconciles cross-chapter reuse. Target V1.51+ for cross-chapter scope",
+        "severity": "low",
+        "source": "T-B P2 implementer (scope decision)",
+        "scope": "creator kb rescan CLI (chapter scope; cross-chapter deferred)",
+        "decision": "defer",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.51+",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
+        "note": "Current design: rescan operates on a single chapter. Work-scoped rescan is out of scope; V1.51+ backlog."
       }
     ],
     "2026-06-18-v1.50-kb-auto-promotion": [
