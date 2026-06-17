@@ -1531,11 +1531,16 @@ pub async fn list_works_with_schedule_json(
 /// applied, `Ok(false)` when the CAS check failed (another writer raced ahead).
 ///
 /// This closes the read-modify-write TOCTOU window flagged in T-A P0 qc3
-/// W-004 / R-V150P0-W5: the daemon-side cron evaluator (T-A P1) is the racing
-/// party against the CLI `creator works cron set` writer. Both now go through
-/// a CAS-guarded path — the CLI uses this `_tx` variant in
-/// `handle_set` (replacing the old unconditional `set_schedule_json`), and the
-/// daemon cron evaluator does not write `schedule_json` (it only reads).
+/// W-004 / R-V150P0-W5. R-V150-WLA-08 (V1.50 P-last WL-A /
+/// cron-brainstorm-write qc1 S-003): the prior wording was internally
+/// contradictory — it first called the daemon-side cron evaluator "the
+/// racing party" against the CLI writer, then admitted the evaluator
+/// "does not write `schedule_json`". The actual race the CAS protects
+/// against is between **two concurrent CLI invocations** (or future
+/// daemon-side `schedule_json` mutators such as the T-A P3
+/// auto-chronology task). The CLI now uses this `_tx` variant in
+/// `handle_set` (replacing the old unconditional `set_schedule_json`);
+/// the T-A P1 cron evaluator is read-only on this column.
 ///
 /// The CAS is enforced inside the caller's transaction so the read-check and
 /// the UPDATE are atomic with respect to other writers on the same Work row.
