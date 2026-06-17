@@ -182,3 +182,99 @@ PM may proceed to consolidated decision. The three Warning items are appropriate
 **Handoff**: PM to consolidate with qc1 (architecture / maintainability) and qc2 (security / correctness, already filed and `Approve`). My verdict is `Approve with residuals` — no blocking issues. Plan is ready for PM consolidated decision and merge to `iteration/v1.50` per plan §5.
 
 **Git**: `f04ecef0` — `qc(v1.50): T-A P1 cron-brainstorm-write QC review #3 (perf + reliability, Approve w/ residuals)` (commit on `feature/v1.50-cron-brainstorm-write`, single file staged: `.mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md`, 184 insertions; hash final after post-commit back-fill amend).
+
+---
+
+## Revalidation
+
+```yaml
+report_kind: qc-revalidation
+reviewer: qc-specialist-3
+reviewer_index: 3
+plan_id: 2026-06-18-v1.50-cron-brainstorm-write
+working_branch: feature/v1.50-cron-brainstorm-write
+review_cwd: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-cron-brainstorm-write
+review_range: f16daadd..f60270a4
+fix_wave_commits:
+  - 4c305674 (R-V150P1CRONBW-03 memoise cron parse)
+  - 75515b27 (R-V150P1CRONBW-04 debug! downgrade)
+  - abfbb855 (R-V150P1CRONBW-05 explicit match arms)
+  - f60270a4 (plan completion report)
+verdict: Approve
+generated_at: 2026-06-17T12:00:08Z
+```
+
+### Context
+
+Targeted re-review of the 3 blocking Warning findings raised in the initial wave (R-V150P1CRONBW-03 / -04 / -05). The original `## Scope` and `## Findings` sections above remain immutable. The fix-wave covers `f16daadd..f60270a4` (4 commits: 3 fix commits + 1 docs commit). qc1 (architecture / maintainability) and qc2 (security / correctness) were `Approve` in the initial wave; this re-review is performed by qc-specialist-3 only.
+
+**Tools run (re-review):**
+- `git diff f16daadd..f60270a4 --stat` → 7 files, +934 / −11
+- `git show 4c305674` / `75515b27` / `abfbb855` for per-commit evidence
+- `grep` + targeted `read` for the `info!` → `debug!` downgrade
+- `cargo test -p nexus-orchestration --lib schedule::cron_supervisor::tests::cron_fires_at_minute_uses_memoised_schedule` → **1 passed, 0 failed** (R-03 regression test)
+- `cargo test -p nexus-orchestration --lib auto_chain::tests::preset_version` → **2 passed, 0 failed** (R-05 regression tests)
+- `cargo test -p nexus-orchestration --lib schedule::cron_supervisor` → **14 passed, 0 failed** (full module; was 13, +1 new)
+- `cargo test -p nexus-orchestration --test cron_supervisor` → **18 passed, 0 failed** (no regression)
+- `cargo test -p nexus-daemon-runtime --test cron_supervisor_task` → **2 passed, 0 failed** (no regression)
+- `cargo clippy -p nexus-orchestration -p nexus-local-db -p nexus42 -p nexus-daemon-runtime -- -D warnings` → **clean**
+- `cargo +nightly fmt -p nexus-orchestration -p nexus-local-db -p nexus42 -p nexus-daemon-runtime -- --check` → **clean**
+
+### Per-W Disposition
+
+**R-03 (W-001 hot-path CPU, R-V150P1CRONBW-03): Resolved — evidence `4c305674` + passing regression test.**
+
+- `cron_fires_at_minute` (the per-Work raw-string parser) is now `#[cfg(test)]` and retained as a matcher-semantics fixture only (`crates/nexus-orchestration/src/schedule/cron_supervisor.rs:385-393`).
+- A new wrapper `cron_fires_at_minute_for_work` (lines 425-465) owns the daemon hot path. It looks up a `OnceLock<Mutex<HashMap<(String, String), (String, cron::Schedule)>>>` keyed by `(work_id, role)`, stores the raw cron string alongside the parsed `Schedule`, and re-parses only on cache miss **or** raw-string drift (content-based invalidation).
+- The critical section is tight: the `Schedule` is cloned out of the mutex before the µs-scale `schedule_fires_at_minute` matcher runs.
+- `try_fire_role` now calls the cached wrapper (line 233).
+- A public `invalidate_cron_schedule_cache` (lines 367-373) is exposed from `nexus_orchestration::schedule::cron_supervisor` and invoked by `nexus42::commands::creator::works::cron::handle_set` (line 680) after a successful `set_schedule_json_tx` CAS write. The daemon is read-only on `schedule_json`, so the CLI write site is the only invalidation hook (correctly documented in the fix commit message).
+- Regression test `cron_fires_at_minute_uses_memoised_schedule` (lines 624-722) uses an instrumented `AtomicU64` parse counter to assert: 100 calls for the same `(work, role, cron)` parse exactly once, repeat calls stay at 1, content drift on the same key re-parses (counter → 2), a new `(work, role)` re-parses (counter → 3), non-match minute does not re-parse (counter stays at 3), and `invalidate_cron_schedule_cache` forces a re-parse (counter → 4). **All 4 assertions pass locally.**
+- One minor implementation note: the cache is process-global, which is correct for the single-daemon-singleton topology documented in the plan §3. No thread-safety regression (Mutex is std, OnceLock initialisation is one-shot). The clippy-clean build confirms no `unwrap` on poisoned mutex propagation issues.
+
+**R-04 (W-002 tracing volume, R-V150P1CRONBW-04): Resolved — evidence `75515b27` + manual source verification.**
+
+- One-line `info!` → `debug!` change at `crates/nexus-orchestration/src/schedule/cron_supervisor.rs:263` (idempotency-skip branch in `try_fire_role`).
+- A 5-line justification comment (lines 258-262) names the residual id, the qc3 finding, the throughput reasoning (~12k info lines/hour at 100 Works on a 4×/day cadence), and the design rationale (sweep-complete summary line already aggregates the counter). The comment is sufficient for any future maintainer who scans the hot path.
+- The two other skip paths (disabled, gated) were already `debug!`, so this change brings the idempotency path into alignment — net effect: default-level logs now show only the `sweep complete` summary once per minute plus per-fire enqueues, with all three skip categories silent at the default level.
+- No regression test was added, which is consistent with the assignment's "no automated test" guidance and the commit's own note: the `sweep complete` summary line is the observable counter for ops. Log-level verification is behavioural and the field-level clippy check (`debug!` exists with the same `work_id` / `role` / `preset_id` fields) is sufficient to prevent accidental re-bumps.
+
+**R-05 (W-003 preset-version drift surface, R-V150P1CRONBW-05): Resolved — evidence `abfbb855` + 2 passing regression tests.**
+
+- An explicit match arm `"novel-brainstorm" | "novel-write" => 1` was added to `preset_version_for_id` (`crates/nexus-orchestration/src/auto_chain.rs:1477`). Both cron-triggered preset ids are now visible in the version map (discoverability for a future bump).
+- The `#[allow(clippy::match_same_arms)]` is documented in a 7-line comment (lines 1451-1459) explaining that the named arms intentionally share the catch-all body — the explicit arms exist for *discoverability* (a maintainer scanning the map sees the cron-triggered presets and knows to bump them in lockstep with their `preset.yaml`), and the regression test enforces the sync, so the named arms are documentation, not a behavioural fork. This is the correct trade-off given the version-policy invariant (R-V139P5-W-4).
+- The sync test was renamed to `preset_version_mapping_matches_yaml_includes_cron_presets` (lines 2146-2157) and its `known_ids` array extended with `"novel-brainstorm"` and `"novel-write"`. The test now strictly validates `novel-brainstorm` against its embedded `preset.yaml` version, and tolerates the deferred `novel-write` (asserts `mapping == 1` + cites `R-V150P1CRONBW-01` until authored). The strict-YAML-sync branch then auto-enforces the comparison the moment the preset YAML lands.
+- A focused regression test `preset_version_for_id_novel_brainstorm_resolves` (lines 2217-2250) was added — it explicitly guards `novel-brainstorm`'s mapping against silent drift even if someone later prunes the `known_ids` array in the sync test above. This is the right defensive test placement.
+- Both tests pass locally: `preset_version_for_id_novel_brainstorm_resolves` and `preset_version_mapping_matches_yaml_includes_cron_presets`. The full `nexus-orchestration --lib` now reports 651 passed (was 649, +2 new), 0 failed, 1 ignored — matches the fix commit's own verification line.
+
+### New Findings (specific to fix-wave)
+
+None. The fix-wave is surgical and contained:
+
+- **R-03:** 2 files touched, +228 / −2; the public invalidation API is correctly scoped and called from exactly one site (the CAS write path).
+- **R-04:** 1 file, +6 / −1; pure logging-level downgrade.
+- **R-05:** 1 file, +85 / −7; 2 new tests, 1 test renamed + extended.
+
+No new clippy warnings, no fmt drift, no public API surface change beyond `invalidate_cron_schedule_cache` (a clean `pub fn` with no safety contract surprises). The pre-existing `Suggestion` items S-001..S-007 from the initial wave remain open as forward-looking hardening; they are out of scope for the re-review and not blocking.
+
+### Residual Disposition
+
+The 3 residuals recommended by qc3 in the initial wave are now **resolved in-tree** (not "deferred") because the fix-wave delivered each one. PM-owned `status.json` lifecycle (per `mstar-plan-artifacts`): QC does not modify `status.json` directly. Recommendation to PM for residual closure:
+
+- `R-V150P1CRONBW-03` → mark `lifecycle: resolved` with `resolution.commit = 4c305674` and `resolution.evidence_test = "schedule::cron_supervisor::tests::cron_fires_at_minute_uses_memoised_schedule"`.
+- `R-V150P1CRONBW-04` → mark `lifecycle: resolved` with `resolution.commit = 75515b27` and `resolution.evidence_test = "(behavioural: per-skip `debug!` at cron_supervisor.rs:263)"`.
+- `R-V150P1CRONBW-05` → mark `lifecycle: resolved` with `resolution.commit = abfbb855` and `resolution.evidence_test = "auto_chain::tests::preset_version::{preset_version_for_id_novel_brainstorm_resolves, preset_version_mapping_matches_yaml_includes_cron_presets}"`.
+
+The pre-existing open residual `R-V150P1CRONBW-01` (`novel-write` preset authoring gap) is **out of scope** for this re-review and remains `defer` per the plan §5 / T-A P2.
+
+### Verdict
+
+**Verdict**: **Approve**
+
+**Rationale:**
+- All 3 blocking Warning findings (R-03 / R-04 / R-05) are properly resolved with surgical, well-commented, test-covered fixes.
+- The new regression tests directly assert the invariants the findings were protecting (memoised parse count = 1 for 100 calls; preset-version mapping in sync with embedded YAML for cron-triggered presets).
+- All 14 schedule::cron_supervisor lib tests, 18 cron_supervisor integration tests, 2 cron_supervisor_task daemon tests, and 2 preset_version tests pass locally with zero regressions.
+- Clippy is clean on the four touched crates; nightly fmt is clean.
+- No new findings introduced by the fix-wave.
+- The plan is ready for PM consolidated decision and merge to `iteration/v1.50` per plan §5. The 3 Warning items are no longer "Approve with residuals" — they are fully closed in this fix-wave.
