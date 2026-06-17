@@ -426,6 +426,9 @@ pub enum CronCommand {
     },
     /// List cron config across all Works in the active workspace (spec §3.3).
     List {
+        /// Maximum number of Works to return (default 100; R-V150P0-W4).
+        #[arg(long)]
+        limit: Option<u32>,
         /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -486,7 +489,9 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
         CronCommand::Show { work_ref, json } => {
             handle_show(&pool, &creator_id, &workspace_slug, &work_ref, json).await
         }
-        CronCommand::List { json } => handle_list(&pool, &creator_id, &workspace_slug, json).await,
+        CronCommand::List { limit, json } => {
+            handle_list(&pool, &creator_id, &workspace_slug, limit, json).await
+        }
     }
 }
 
@@ -556,10 +561,12 @@ async fn handle_list(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
     workspace_slug: &str,
+    limit: Option<u32>,
     json: bool,
 ) -> Result<()> {
     let rows_db =
-        nexus_local_db::works::list_works_schedule(pool, creator_id, workspace_slug).await?;
+        nexus_local_db::works::list_works_schedule(pool, creator_id, workspace_slug, limit)
+            .await?;
     let rows: Vec<ListRow> = rows_db
         .into_iter()
         .map(|r| ListRow {

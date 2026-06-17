@@ -247,7 +247,7 @@ async fn list_works_schedule_returns_all_works() {
     .await
     .unwrap();
 
-    let rows = nexus_local_db::works::list_works_schedule(&pool, "ctr_test", "default")
+    let rows = nexus_local_db::works::list_works_schedule(&pool, "ctr_test", "default", None)
         .await
         .unwrap();
     assert_eq!(rows.len(), 2);
@@ -256,4 +256,28 @@ async fn list_works_schedule_returns_all_works() {
     assert!(a.schedule_json.is_some());
     let b = rows.iter().find(|r| r.work_id == "wrk_b").unwrap();
     assert!(b.schedule_json.is_none(), "unset Work must read as None");
+}
+
+/// R-V150P0-W4: `list_works_schedule` honors the `limit` cap.
+#[tokio::test]
+async fn list_works_schedule_applies_limit() {
+    let (pool, _dir) = fresh_pool().await;
+    for i in 0..5u32 {
+        seed_work(&pool, &format!("wrk_l{i}"), &format!("l{i}-ref")).await;
+    }
+    let rows = nexus_local_db::works::list_works_schedule(&pool, "ctr_test", "default", Some(2))
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.len(),
+        2,
+        "limit=2 must cap the result to 2 rows (got {})",
+        rows.len()
+    );
+
+    // None → default cap (100) returns all 5 seeded rows.
+    let rows_all = nexus_local_db::works::list_works_schedule(&pool, "ctr_test", "default", None)
+        .await
+        .unwrap();
+    assert_eq!(rows_all.len(), 5);
 }
