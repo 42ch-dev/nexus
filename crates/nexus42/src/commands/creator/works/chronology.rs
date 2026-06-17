@@ -182,6 +182,11 @@ async fn handle_show(
 }
 
 /// `creator works chronology advance` — manual override (spec §2.2).
+// R-V150-WLA-02 (V1.50 P-last WL-A / auto-chronology qc1 S-002): the 8
+// inputs are read together from one CLI invocation + one Work row; packing
+// them into a struct would duplicate the `WorkAutoChronologyRow` shape
+// (mirrors the sibling `perform_advance` justification in
+// `nexus-orchestration/src/auto_chronology.rs:289-298`).
 #[allow(clippy::too_many_arguments)]
 async fn handle_advance(
     pool: &sqlx::SqlitePool,

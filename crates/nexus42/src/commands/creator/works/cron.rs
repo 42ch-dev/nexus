@@ -773,6 +773,8 @@ async fn resolve_work_id(
 }
 
 #[cfg(test)]
+// R-V150-WLA-01 (V1.50 P-last WL-A / cron-foundation qc1 S4): test-only —
+// `.unwrap()` keeps assertion intent readable; panics surface test names.
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
