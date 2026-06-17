@@ -1,8 +1,14 @@
-//! `creator world` subcommand — create worlds, add events, list/show worlds.
+//! `creator world` subcommand — create worlds, add events, list/show worlds,
+//! and manage World KB key blocks.
 //!
 //! Product write path for narrative worlds. Writes go through
 //! `nexus_local_db::narrative_write`, NOT through the `NarrativeGateway` trait.
 //! Read paths (list, show) use `NarrativeGateway` via `SqliteNarrativeGateway`.
+//!
+//! World KB author surface (`creator world kb list/show/edit/delete`) lives in
+//! the [`kb`] submodule (V1.50 T-B P0).
+
+pub mod kb;
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -62,6 +68,16 @@ pub enum WorldCommand {
         /// World ID (e.g. `wld_abc123`)
         world_id: String,
     },
+
+    /// World KB key-block author surface (list/show/edit/delete).
+    ///
+    /// Per entity-scope-model §5.5, `creator world kb` is the canonical author
+    /// CLI for inspecting and editing World-scoped `KeyBlock` rows. This is a
+    /// separate surface from `creator kb --scope world` (the legacy ingest path).
+    Kb {
+        #[command(subcommand)]
+        command: kb::WorldKbCommand,
+    },
 }
 
 /// Run a world subcommand.
@@ -110,6 +126,7 @@ pub async fn run(cmd: WorldCommand, config: &CliConfig) -> Result<()> {
         }
         WorldCommand::List => run_list(config).await,
         WorldCommand::Show { world_id } => run_show(config, &world_id).await,
+        WorldCommand::Kb { command } => kb::run(command, config).await,
     }
 }
 
