@@ -166,13 +166,31 @@ impl ResearchScheduleFixture {
 }
 
 /// Read a schedule row's status straight from the DB.
+///
+/// R-V146P3-QC3-S2: replaced `fetch_one(...).unwrap()` with a
+/// `fetch_optional` + explicit `match` so both failure modes (DB error,
+/// missing row) panic with a message that names the looked-up
+/// `schedule_id` and points at the likely cause (forgot to call
+/// `ResearchScheduleFixture::insert`). The return type stays `String`
+/// because every caller is an `assert_eq!` comparing to an expected
+/// literal status.
 async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> String {
     // SAFETY: test-only scalar lookup.
-    sqlx::query_scalar::<_, String>("SELECT status FROM creator_schedules WHERE schedule_id = ?")
-        .bind(schedule_id)
-        .fetch_one(pool)
-        .await
-        .unwrap()
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT status FROM creator_schedules WHERE schedule_id = ?")
+            .bind(schedule_id)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or_else(|e| {
+                panic!("schedule_status({schedule_id}): DB read failed: {e}")
+            });
+    match row {
+        Some((status,)) => status,
+        None => panic!(
+            "schedule_status({schedule_id}): no creator_schedules row — \
+             ResearchScheduleFixture::insert must be called before status lookup"
+        ),
+    }
 }
 
 /// Build the `WorkFields` used to construct a research stage schedule request.
