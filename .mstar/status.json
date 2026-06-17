@@ -14,8 +14,8 @@
     "integration_merge_target": "main",
     "integration_branch_role": "active",
     "integration_branch_retired": null,
-    "latest_shipped_iteration": "V1.50",
-    "latest_shipped_at": "2026-06-18",
+    "latest_shipped_iteration": "V1.50 (Shipped 2026-06-17 via PR #63)",
+    "latest_shipped_at": "2026-06-17T18:26:46Z",
     "latest_active_iteration": "V1.50",
     "latest_active_compass": "v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
@@ -29,8 +29,8 @@
       "integration_branch": "iteration/v1.50",
       "integration_merge_target": "main",
       "integration_branch_retired": false,
-      "pr": null,
-      "merged_at": null,
+      "pr": 63,
+      "merged_at": "2026-06-17T18:26:46Z",
       "plan_count": 9,
       "plan_count_done": 9,
       "closed_residuals": 16,
@@ -38,7 +38,9 @@
       "open_at_ship": 0,
       "wire_contracts_changed": false,
       "profile_b_compaction": "done",
-      "signoff_at": "2026-06-18T18:00:00Z"
+      "signoff_at": "2026-06-18T18:00:00Z",
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/63",
+      "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
     },
     "tech_debt_summary": {
       "updated_at": "2026-06-18 (V1.50 P-last closeout)",

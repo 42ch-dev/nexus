@@ -563,7 +563,7 @@ When a version ships, append new closed rows here and remove them from the activ
 
 | Aspect | Detail |
 |---|---|
-| **PR / Merge** | PR pending (iteration/v1.50 → main); P-last HEAD: `e7a14ddc` (T1+T2) + T3-T7 commits in P-last worktree |
+| **PR / Merge** | PR [#63](https://github.com/42ch-dev/nexus/pull/63) (iteration/v1.50 → main); P-last HEAD: `62a5b906` (T6+T7) + `6f0bce75` (R-V150-WLA-11 clippy fix); **Merged 2026-06-17T18:26:46Z at commit `4db0a37b3e6a01836d8d90f968c75bcdd89754fc`** |
 |---|---|
 | **Theme** | **Novel Author Production Loop & World KB Closure** — A+B mixed primary axis: T-A (novel-writing cron staggering: per-Work schedule config, three-role defaults, auto-chain wiring, auto-chronology on finish) ∥ T-B (World KB complete loop: editor CLI, review-time candidate extraction, refreshable rescan). 8 plans in tracks + P-1 docs + P-last hygiene = 9 plans total. |
 | **Compass** | [v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md](../iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md) — 18 grill-me decisions; 9 plans (P-1 + T-A P0-P3 + T-B P0-P2 + P-last) |
