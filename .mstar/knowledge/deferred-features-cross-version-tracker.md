@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.49 Active (prepare GO)** · **V1.48 Shipped** (2026-06-16, PR #61 @ `8fcf2d68`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.50 Active (prepare GO)** · **V1.49 Shipped** (2026-06-17, PR #62 @ `d160379f`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.48 Shipped (2026-06-16, P-last closeout, PR #61); V1.49 harness prepare Done (P-1 GO 2026-06-17)
-**Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).  
-**Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.  
-**Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.  
-**Created**: 2026-04-21  
-**Last updated**: 2026-06-17 (V1.49 harness prepare P-1 Done; integration `iteration/v1.49` active; 18 open residuals @ V1.49)
+**Status**: V1.49 Shipped (2026-06-17, P-last closeout, PR #62); V1.50 harness prepare in progress (P-1 GO target 2026-06-18)
+**Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
+**Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
+**Created**: 2026-04-21
+**Last updated**: 2026-06-18 (V1.50 harness prepare — compass + 9 plans + 3 overlays + status registered)
 
 ---
 
@@ -277,11 +277,11 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.49** (Active, prepare GO 2026-06-17) — [v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md](../iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md) — Novel Narrative Maturity & Author Desk: F6 extended findings lifecycle + F/E narrative indexes MVP + author desk UX + serial reliability; integration branch `iteration/v1.49`; wave-0 overlays [novel-writing/findings-lifecycle.md](specs/novel-writing/findings-lifecycle.md) + [novel-writing/narrative-indexes.md](specs/novel-writing/narrative-indexes.md) + [novel-writing/author-experience.md](specs/novel-writing/author-experience.md) §8.
+- **V1.50** (Active, prepare GO 2026-06-18) — [v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md](../iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md) — Novel Author Production Loop & World KB Closure: S-B dual track. Track A (T-A P0–P3) per-Work cron staggering (defaults brainstorm 03/09/15/21 / write 04/10/16/22 / review :00/:30) + volume auto-chronology opt-in. Track B (T-B P0–P2) `creator world kb list/show/edit/delete` + review-time auto-promotion (`pending → confirmed | rejected`) + `creator kb rescan` refreshable scan. 9 plans registered (P-1 + 4 cron/chronology + 3 KB + P-last); integration branch `iteration/v1.50`; wave-0 Draft overlays [novel-writing/cron-staggering.md](specs/novel-writing/cron-staggering.md) + [novel-writing/auto-chronology.md](specs/novel-writing/auto-chronology.md) + [entity-scope-model.md](specs/entity-scope-model.md) §5.5 extension.
 
 **Latest shipped iteration**
 
-- **V1.48** (Shipped 2026-06-16, P-last closeout): [v1.48-novel-quality-loop-completion-delivery-compass-v1.md](../iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md) — Novel Quality Loop Completion (F-D findings chain + serial §4.5.7 #4/#5); PR [#61](https://github.com/42ch-dev/nexus/pull/61) MERGED to `main` at `8fcf2d68` (2026-06-16); integration branch `iteration/v1.48` retired. 7 plans all Done (P-1 + P0–P4 + P-last); 18 open lows deferred to V1.49; `archived/knowledge/novel-findings-maturity.md` overlay folded into `novel-writing/quality-loop.md` §9; Profile B compaction complete.
+- **V1.49** (Shipped 2026-06-17, P-last closeout): [v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md](../iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md) — Novel Narrative Maturity & Author Desk (F6 extended findings lifecycle + F/E narrative indexes MVP + author desk UX + serial reliability); PR [#62](https://github.com/42ch-dev/nexus/pull/62) MERGED to `main` at `d160379f` (2026-06-17); integration branch `iteration/v1.49` retired. 6 plans all Done (P-1 + P0–P3 + P-last); 7 open residuals deferred to V1.50 (4 V1.46 lows + R-V149P0-01 medium + R-V149P1-02 low flake + R-V149P1-01 low schema); 3 Draft overlays folded into Masters; Profile B compaction complete.
 
 **Recent shipped compasses** (detail in archive §2)
 

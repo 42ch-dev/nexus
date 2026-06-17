@@ -35,9 +35,52 @@ pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
 /// normative preset table.
 pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
 
+/// Cron-triggered `brainstorm` role preset id — `novel-brainstorm` (V1.50 T-A P1).
+///
+/// The daemon-side cron evaluator (`schedule::cron_supervisor`) enqueues a
+/// pending Schedule with this preset id when the per-Work `brainstorm` role
+/// cron fires (spec `cron-staggering.md` §2.1 / §4.1). The existing
+/// `ScheduleSupervisor::tick()` then admits it; the existing executor runs it.
+/// Out-of-band fire (does NOT touch `driver_schedule_id`), mirroring
+/// `enqueue_review_master_schedule`.
+pub const NOVEL_BRAINSTORM_PRESET_ID: &str = "novel-brainstorm";
+
+/// Cron-triggered `write` role preset id — `novel-write` (V1.50 T-A P1).
+///
+/// Enqueued by the cron evaluator when the per-Work `write` role cron fires
+/// (spec `cron-staggering.md` §2.1 / §4.1). Out-of-band like brainstorm.
+///
+/// **Note (R-V150P1CRONBW-01):** the `novel-write` embedded preset is not yet
+/// authored as of T-A P1; the cron evaluator enqueues the correct preset id
+/// string per spec, and the schedule is persisted + admitted normally, but the
+/// executor will fail to load the preset until it is authored in a follow-up
+/// plan. This is a preset-authoring gap, not an evaluator gap.
+pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
+
+/// Out-of-band review-master preset id — `novel-review-master`.
+///
+/// V1.39 introduced this preset for stale-findings escalation
+/// (`auto_review_master_on_timeout`); V1.50 T-A P2 will wire the per-Work
+/// `review` cron role to fire it on a schedule. V1.50 T-B P1 consumes it as
+/// the trigger for review-time KB candidate extraction
+/// ([`crate::quality_loop::extract_kb_candidates_for_review`]).
+///
+/// Consumed by:
+/// - [`crate::auto_chain::enqueue_review_master_schedule`] (schedule insert)
+/// - [`crate::quality_loop::extract_kb_candidates_for_review`] (T-B P1 hook)
+/// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
+///   (terminal guard for the T-B P1 extraction hook)
+///
+/// See `.mstar/knowledge/specs/novel-writing/cron-staggering.md` §2.1 for the
+/// role→preset mapping.
+pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
+
 #[cfg(test)]
 mod tests {
-    use super::{NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_WRITING_PRESET_ID};
+    use super::{
+        NOVEL_BRAINSTORM_PRESET_ID, NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID,
+        NOVEL_WRITE_PRESET_ID, NOVEL_WRITING_PRESET_ID,
+    };
 
     /// Guard against accidental rename: the wire value is part of the
     /// persisted `creator_schedules.preset_id` column and the embedded
@@ -51,5 +94,20 @@ mod tests {
     #[test]
     fn novel_writing_preset_id_value_is_frozen() {
         assert_eq!(NOVEL_WRITING_PRESET_ID, "novel-writing");
+    }
+
+    #[test]
+    fn novel_brainstorm_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_BRAINSTORM_PRESET_ID, "novel-brainstorm");
+    }
+
+    #[test]
+    fn novel_write_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_WRITE_PRESET_ID, "novel-write");
+    }
+
+    #[test]
+    fn novel_review_master_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_REVIEW_MASTER_PRESET_ID, "novel-review-master");
     }
 }

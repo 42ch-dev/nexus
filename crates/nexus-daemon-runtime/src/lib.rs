@@ -7,8 +7,10 @@
 
 pub mod api;
 pub mod auth;
+pub mod auto_chronology;
 pub mod boot;
 pub mod config;
+pub mod cron_supervisor;
 pub mod db;
 pub mod lifecycle;
 pub mod stale_findings_watcher;

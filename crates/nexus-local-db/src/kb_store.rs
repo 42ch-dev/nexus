@@ -124,6 +124,95 @@ impl SqliteKbStore {
             validation_mode: mode,
         }
     }
+
+    /// Transaction-aware variant of [`KbStore::insert_key_block`] (R-V150KBED-03).
+    ///
+    /// Runs the same `canonical_name` + body validation as the trait method and
+    /// issues the same INSERT, but against a caller-managed transaction so the
+    /// `creator world kb adopt` path can wrap insert + promotion flip atomically.
+    /// If the caller rolls back the transaction (or drops it without commit),
+    /// neither the `KeyBlock` row nor any sibling writes in the same tx persist.
+    ///
+    /// **Keep in sync with `KbStore::insert_key_block`** (the trait impl on this
+    /// type): validation, serialization, and the INSERT statement must stay
+    /// identical. Both paths use `ValidationMode::Novel` for the adopt path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`KbStoreError::Validation`] / [`KbStoreError::ValidationLegacy`]
+    /// on `canonical_name` or body validation failure, [`KbStoreError::Duplicate`]
+    /// on the `kb_key_blocks_active_unique` violation, or [`KbStoreError::Storage`]
+    /// on database failure.
+    pub async fn insert_key_block_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        kb: KeyBlock,
+    ) -> Result<KbInsertResult, KbStoreError> {
+        // Validate canonical_name format/safety (same as trait impl).
+        validate_canonical_name(&kb.canonical_name).map_err(validation_err)?;
+
+        // Validate body semantics before persisting (same as trait impl).
+        validate_body(kb.block_type, kb.body.as_ref(), self.validation_mode)
+            .map_err(validation_err)?;
+
+        let key_block_id = kb.key_block_id.clone();
+        let world_id = kb.world_id.clone();
+        let created_at = kb.created_at.clone();
+
+        let body_json = kb
+            .body
+            .as_ref()
+            .map(|b| serde_json::to_string(b).unwrap_or_default());
+        let source_anchor_json = kb
+            .source_anchor
+            .as_ref()
+            .map(|a| serde_json::to_string(a).unwrap_or_default());
+        // Stable snake_case serialization matching wire format (not Debug)
+        let block_type_str = serde_json::to_string(&kb.block_type)
+            .unwrap_or_else(|_| format!("{:?}", kb.block_type));
+        // Strip surrounding quotes from serde_json string output
+        let block_type_str = block_type_str.trim_matches('"').to_string();
+        let revision_i64 = kb.revision.map(u64::cast_signed);
+
+        sqlx::query!(
+            r#"INSERT INTO kb_key_blocks
+                (key_block_id, world_id, block_type, canonical_name, status, revision,
+                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            key_block_id,
+            kb.world_id,
+            block_type_str,
+            kb.canonical_name,
+            kb.status,
+            revision_i64,
+            body_json,
+            source_anchor_json,
+            kb.created_from_command_id,
+            kb.created_at,
+            kb.updated_at,
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(|e| {
+            // SQLite UNIQUE constraint violation
+            if let sqlx::Error::Database(ref db_err_inner) = e {
+                if db_err_inner.code().as_deref() == Some("2067") {
+                    return KbStoreError::Duplicate {
+                        world_id: kb.world_id.clone(),
+                        name: kb.canonical_name.clone(),
+                        block_type: kb.block_type,
+                    };
+                }
+            }
+            db_err(&e)
+        })?;
+
+        Ok(KbInsertResult {
+            key_block_id,
+            world_id,
+            created_at,
+        })
+    }
 }
 
 // Row type matching the kb_key_blocks DDL.

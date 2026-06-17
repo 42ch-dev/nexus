@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-17 (V1.49 closeout: P0–P3 + P-last all Done; 10 WL-A V1.46 lows closed; 7 open residuals carry-forward to V1.50; wire contracts unchanged; Profile B pending)
+**Last updated**: 2026-06-18 (V1.50 closeout: 9 plans all Done — 8 implement plans (T-A 0-3 + T-B 0-2) + P-1 docs + P-last hygiene; 16 residuals closed (6 V1.49 carry + 10 V1.50 WL-A); 8 deferred to V1.51+; Profile B done; wire contracts unchanged; PR pending)
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -558,3 +558,33 @@ When a version ships, append new closed rows here and remove them from the activ
 | **Carry-forward (V1.50)** | **6 items**: 4 V1.46 lows (subscriber construction + tracing doc + SQL fixture + test panic) + R-V149P0-01 (CLI actionable-findings fetch) + R-V149P1-02 (review_report flake). R-V149P1-01 (overlay reconciliation) is spec-only at P-last fold; resolved in substance by T2 overlay promotion. |
 | **QC & QA** | **P0 findings-lifecycle**: qc1 (arch) Request Changes (3 W) + qc2 (security) Approve + qc3 (perf) Request Changes (2 W) → fix wave → targeted re-review Approve → QA Pass. **P1 narrative-indexes**: qc1 Request Changes (1 W) + qc2 Approve + qc3 Approve (1 W pre-existing flake verified per protocol) → fix wave → re-review Approve → QA Pass. **P2 author-desk-ux**: qc1+qc2+qc3 Approve → QA Pass. **P3 serial-reliability**: qc1+qc2+qc3 Approve → QA Pass. **P-last T1 WL-A**: fullstack-dev surgical commits; PM-consolidated QC. **P-last T2 overlay promotion**: docs-only; no QC required per PM rules. |
 | **Profile B compaction** | Pending — PM runs T5 after T4 merge to `iteration/v1.49`. 5 plan JSON files + index in `.mstar/archived/plans-done.json` + residual closures to `.mstar/archived/residuals/`.
+
+### V1.50 delivery snapshot (Shipped 2026-06-18)
+
+| Aspect | Detail |
+|---|---|
+| **PR / Merge** | PR pending (iteration/v1.50 → main); P-last HEAD: `e7a14ddc` (T1+T2) + T3-T7 commits in P-last worktree |
+|---|---|
+| **Theme** | **Novel Author Production Loop & World KB Closure** — A+B mixed primary axis: T-A (novel-writing cron staggering: per-Work schedule config, three-role defaults, auto-chain wiring, auto-chronology on finish) ∥ T-B (World KB complete loop: editor CLI, review-time candidate extraction, refreshable rescan). 8 plans in tracks + P-1 docs + P-last hygiene = 9 plans total. |
+| **Compass** | [v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md](../iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md) — 18 grill-me decisions; 9 plans (P-1 + T-A P0-P3 + T-B P0-P2 + P-last) |
+| **Active specs** | [novel-writing/workflow-profile.md §11](../knowledge/specs/novel-writing/workflow-profile.md) (cron staggering + auto-chronology normative) + [entity-scope-model.md §5.5](../knowledge/specs/entity-scope-model.md) (World KB promotion state machine Draft → Normative) |
+| **Draft overlays archived** | [novel-writing/cron-staggering.md](../knowledge/specs/novel-writing/cron-staggering.md) → Superseded (V1.50 P-last T3); [novel-writing/auto-chronology.md](../knowledge/specs/novel-writing/auto-chronology.md) → Superseded (V1.50 P-last T3) |
+| **Plans shipped** | **9 plans all Done**: P-1 (`2026-06-18-v1.50-harness-docs-prepare` — compass + plans + overlays + status activation + PM signoff) + T-A P0 (`2026-06-18-v1.50-cron-foundation` — works.schedule_json + default 3-role schedule + CLI surface) + T-A P1 (`2026-06-18-v1.50-cron-brainstorm-write` — cron_supervisor fire loop + auto-chain wiring) + T-A P2 (`2026-06-18-v1.50-cron-review-staggering` — review-time cron + quality_loop interplay) + T-A P3 (`2026-06-18-v1.50-auto-chronology` — per-Work opt-in volume auto-advance on finish) + T-B P0 (`2026-06-18-v1.50-kb-editor-cli` — creator world kb list/show/edit/delete) + T-B P1 (`2026-06-18-v1.50-kb-auto-promotion` — review-time candidate extraction → pending → confirm via adopt) + T-B P2 (`2026-06-18-v1.50-kb-refreshable-scan` — creator kb rescan + extract sync) + P-last (`2026-06-18-v1.50-hygiene-and-closeout` — V1.49 carry-forwards + WL-A 8-10 + overlay promotion + Profile B) |
+| **Closed at ship** | **6 V1.49 carry-forwards** + **10 V1.50 WL-A** = 16 total. V1.49 carry: R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2, R-V149P0-01 (medium — CLI ?status=open comma-separated, DAO branches to dynamic IN (?, ?)), R-V149P1-02 (flake — #[serial_test::serial] + current_thread + serial_test = "3" dev-dep). V1.50 WL-A 8-10 closed in T2 of P-last (15 surgical commits, full T-A and T-B worktree renumber + cron delta write idempotency + atomicity reorder + carry-forward + 6 V1.49 closure). |
+| **Wire contract changes** | None — per compass §0.1 #8. 8 DB migrations landed: 202606180001..202606180005 + 3 schema/TS. No new JSON Schema in `schemas/`. |
+| **Open residuals at ship** | **0 open**; **8 deferred to V1.51+** (per `status.json.tech_debt_summary`): R-V150P1CRONBW-01 (medium — novel-write preset authoring), R-V150KBED-01/02 (KB legacy coexistence + world ownership), R-V150P2CRONRV-03 (plan text reconcile), R-V150KBED-07/08 (delta write scope + cross-chapter rescan), R-V150P3AUTOCHRONO-01/02 (last-planned-volume edge) + R-V150-WLA-DEFER-V1.51 (low-priority WL-A aggregate). |
+| **Carry-forward (V1.51+)** | **8 items** listed above. R-V150P1CRONBW-01 (medium) is the only medium; rest are lows. |
+| **QC & QA** | All 8 implement plans passed QC tri-review (3/3 per plan = 24/24). Cross-worktree migration renumber collisions surfaced in T-A P2/T-B P2/T-A P3 fix waves; PM-coordinated resolution. V1.50 has 1 trivial flake (R-V150P3AUTOCHRONO-02 in serialized review report) — closed via `#[serial_test::serial]` guard. |
+| **Profile B compaction** | **Done** (V1.50 P-last T4): 8 plan JSON files in `.mstar/archived/plans/<plan-id>.json`; plans-done.json layout invariant verified (all 218 entries are strings); v1.50 iteration_summaries entry added; tech_debt_summary normalized (11 rows reconciled: 8 deferred + 3 archived via QC accept). |
+
+### V1.51+ carry-forward index
+
+- R-V150P1CRONBW-01 (medium): novel-write preset authoring needs operational write-gate; carry to V1.51.
+- R-V150KBED-01 (low): KB editor — legacy `<work>/Worldbuilding/` coexistence; sweep docs.
+- R-V150KBED-02 (low): KB editor — World vs World KB ownership narrative in `cli-spec.md`.
+- R-V150P2CRONRV-03 (low): review cron plan text reconciliation between preset labels.
+- R-V150KBED-07 (low): KB rescan delta write scope (entity body updates only; new entities via T-B P1 review-time).
+- R-V150KBED-08 (low): KB rescan cross-chapter propagation on body update.
+- R-V150P3AUTOCHRONO-01 (low): auto-chronology last-planned-volume edge (subsumed by completion_lock).
+- R-V150P3AUTOCHRONO-02 (low): auto-chronology serialized review report flake; closed in V1.50 via serial_test guard.
+- R-V150-WLA-DEFER-V1.51 (low): V1.50 QC tri-review Suggestion aggregate (≈30 items; non-blocking).

@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (BlockType + novel_category + canonical_name grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (BlockType + novel_category + canonical_name grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Shipped**: §5.5 World KB promotion state machine (T-B P1); promotion row promoted Draft → Normative at V1.50 P-last when the `kb_extract_jobs` migration landed and review-time extraction is verified end-to-end. |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-06-11 — V1.40 P1 World KB taxonomy shipped |
+| **Last updated** | 2026-06-18 — V1.50 §5.5 World KB promotion state machine drafted (T-B P1 prep) |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
@@ -208,6 +208,50 @@ The term `KB` MUST be qualified in architecture/spec text when ambiguity matters
 - Use **World KB** or **narrative KB** for `nexus-kb`.
 - Use **User knowledge** or **global knowledge index** for `nexus-knowledge`.
 - Use **CLI local work KB index** for `nexus42 creator kb --scope work`.
+
+### 5.5 World KB promotion state machine (V1.50 normative)
+
+> **Status**: Normative (V1.50) — V1.50 T-B P1 shipped on 2026-06-18. Migration `202606180002_kb_extract_jobs.sql` landed; review-time extraction hook verified end-to-end; promotion row promoted Draft → Normative at V1.50 P-last.
+> **Plan**: [2026-06-18-v1.50-kb-auto-promotion.md](../../plans/2026-06-18-v1.50-kb-auto-promotion.md) (Done; archived)
+> **Cross-refs**: [workflow-profile.md §11.5](novel-writing/workflow-profile.md#115-auto-chronology-per-work-opt-in) — auto-advance logs auto-promotion status; [quality-loop.md §3](novel-writing/quality-loop.md) — review-time extraction hook.
+
+World KB rows enter the World through a **promotion state machine** governed by `kb_extract_jobs.status` and the World-scoped `KeyBlocks` (`nexus-kb` storage, see §5.1.1).
+
+#### 5.5.1 States (normative)
+
+| State | Meaning | Visible to author via |
+| --- | --- | --- |
+| `manual` | Author inserted KB row directly via `creator world kb edit` (or initial scaffold) | `creator world kb list` |
+| `pending` | `novel-review-master` extracted candidate; awaiting author confirm | `creator world kb pending` |
+| `confirmed` | Author confirmed via `creator world kb adopt <id>`; row is now a regular `KeyBlock` | `creator world kb list` |
+| `rejected` | Author dismissed via `creator world kb reject <id>`; row archived in `Logs/kb/rejected/` | `creator world kb rejected` (audit only) |
+
+#### 5.5.2 Transitions (normative)
+
+```text
+manual   → confirmed | rejected           (initial state on direct insert; auto-marks confirmed unless `creator world kb edit --pending` requested)
+pending  → confirmed | rejected           (only via CLI adopt/reject)
+confirmed → (terminal; may be edited via creator world kb edit; deletion via creator world kb delete which logs to rejected)
+rejected → (terminal; archived)
+```
+
+Invalid transitions return `422` with stable error code on Local API.
+
+#### 5.5.3 Promotion gate (normative V1.50)
+
+`pending → confirmed` requires:
+
+- `creator world kb adopt <extract_job_id>` invocation
+- Author identity matches `works.creator_id` (no cross-author adoption)
+- Optional `--with-merge` flag (V1.50 T-B P1 extension) merges proposed payload into an existing KB row instead of creating a new one
+
+#### 5.5.4 Rejected retention
+
+Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md` for audit. Retention is **indefinite** by default (no TTL); future iterations may add a `--prune-rejected` CLI.
+
+#### 5.5.5 Relationship to existing `nexus-kb` taxonomy
+
+The promotion state machine does **not** change the `BlockType` enum (see §5.1.1 SSOT) or the `ValidationMode` constraints (see V1.40 P1 validation module). It governs **how** a row enters the World, not **what** the row contains.
 
 ---
 

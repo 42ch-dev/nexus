@@ -1,0 +1,22 @@
+{
+  "id": "2026-06-18-v1.50-cron-review-staggering",
+  "title": "T-A P2 — Review cron + quality-loop interplay",
+  "file": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.50-cron-review-staggering",
+  "merge_target": "iteration/v1.50",
+  "iteration_compass": ".mstar/iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/cron-staggering.md",
+  "task_category": "feature",
+  "depends_on": [
+    "2026-06-18-v1.50-cron-brainstorm-write"
+  ],
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T16:00:00+08:00",
+  "qc_status": "qc1+qc2+qc3 all Approve (3/3). 2 R-V150P2CRONRV-01/02 cross-plan migration collision fixes resolved. R-V150P2CRONRV-03 (plan text drift) deferred to P-last. Ready to merge."
+}

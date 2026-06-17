@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-17T12:00:00+08:00",
+  "updated_at": "2026-06-18T10:00:00+08:00",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -9,45 +9,59 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.49",
-    "last_integration_branch": "iteration/v1.48",
+    "integration_branch": "iteration/v1.50",
+    "last_integration_branch": "iteration/v1.49",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
     "integration_branch_retired": null,
-    "latest_shipped_iteration": "v1.48",
-    "latest_shipped_at": "2026-06-16 (PR #61 @ 8fcf2d68)",
-    "latest_active_iteration": "v1.49 (prepare GO)",
-    "latest_active_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+    "latest_shipped_iteration": "V1.50",
+    "latest_shipped_at": "2026-06-18",
+    "latest_active_iteration": "V1.50",
+    "latest_active_compass": "v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO — V1.49 P-1 Done 2026-06-17",
+    "pre_implement_gate": "GO",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
-    "wave_0_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md, .mstar/knowledge/specs/novel-writing/narrative-indexes.md",
+    "wave_0_spec": ".mstar/knowledge/specs/novel-writing/cron-staggering.md, .mstar/knowledge/specs/novel-writing/auto-chronology.md, .mstar/knowledge/specs/entity-scope-model.md §5.4",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "v1.49",
-      "merge_commit": "d160379ff5a635c38d8b91ef072688121851778c",
-      "compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
-      "shipped_at": "2026-06-17",
-      "pr": "PR #62"
+      "iteration": "V1.50",
+      "compass": "v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1",
+      "integration_branch": "iteration/v1.50",
+      "integration_merge_target": "main",
+      "integration_branch_retired": false,
+      "pr": null,
+      "merged_at": null,
+      "plan_count": 9,
+      "plan_count_done": 9,
+      "closed_residuals": 16,
+      "deferred_to_next": 8,
+      "open_at_ship": 0,
+      "wire_contracts_changed": false,
+      "profile_b_compaction": "done",
+      "signoff_at": "2026-06-18T18:00:00Z"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-06-18",
+      "updated_at": "2026-06-18 (V1.50 P-last closeout)",
       "total_open": 0,
-      "by_severity": {
+      "total_deferred": 8,
+      "total_resolved": 46,
+      "total_archived": 3,
+      "by_severity_active": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 0,
+        "medium": 1,
+        "low": 7,
         "nit": 0
       },
-      "by_target": {
-        "shipped": 0,
-        "V1.50": 0
+      "by_target_active": {
+        "V1.50": 3,
+        "V1.51+": 4
       },
-      "by_plan": {},
-      "notes": "V1.49 P-last T1 closed all 10 WL-A residuals + R-V149P0-03. V1.49 P-last T3 deferred 4 V1.50 lows (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2) — see residual_findings[2026-06-14-v1.46-pool-observability] and residual_findings[2026-06-14-v1.46-research-auto-chain-e2e] for the V1.50 carry-forward. V1.50 carry-forward totals: 4 (3 from V1.46 lows + 1 from R-V149P1-02 flake). R-V149P0-01 (CLI ?status=open gap) and R-V149P1-01 (overlay schema reconciliation) were also deferred to V1.50 in earlier waves; total V1.50 carry-forward = 6."
+      "notes": "V1.50 P-last T1-T2 closed 6 V1.49 carry-forwards (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2, R-V149P0-01 medium, R-V149P1-02 flake) + 10 V1.50 WL-A. 11 rows normalized to lifecycle (8 deferred to V1.51+, 3 archived via QC accept). 0 open at iteration close. 8 V1.50 plan rows archived; 9th (P-last hygiene-and-closeout) still in status.json — to be marked Done in T7. Profile B layout invariant verified."
     }
   },
+  "v1_50_iteration_complete": false,
+  "v1_50_status": "PREPARE GO 2026-06-18 — compass v1 + 9 plans + 3 spec overlays + status/tracker update",
   "residual_findings": {
     "2026-06-13-v1.45-hygiene-and-closeout": [
       {
@@ -62,7 +76,8 @@
         "p_last_whitelist": true,
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: cli-spec.md §6.2D updated with authoritative-surface pointer to Shipped Master creator-run-preset-entry.md; §6.2E note rewritten to record that the body was rewritten in 4aa5aa53 and §6.2E deleted in V1.46 P1.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit a4d1f3f6)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit a4d1f3f6)",
+        "_plan_id": "2026-06-13-v1.45-hygiene-and-closeout"
       }
     ],
     "2026-06-14-v1.46-author-desk-status-ux": [
@@ -81,7 +96,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: tracing::warn! added at the two silent degradation sites in works/mod.rs (fetch_open_findings Unavailable path + fetch_stale_findings via map_err).",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit da8f8a69)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit da8f8a69)",
+        "_plan_id": "2026-06-14-v1.46-author-desk-status-ux"
       }
     ],
     "2026-06-14-v1.46-novel-runtime-ux-edges": [
@@ -100,7 +116,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: sanitize_for_terminal made pub(crate); applied to Manifest.description in format_preset_run_help; regression test added.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 83140200)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 83140200)",
+        "_plan_id": "2026-06-14-v1.46-novel-runtime-ux-edges"
       }
     ],
     "2026-06-14-v1.46-pool-observability": [
@@ -115,7 +132,12 @@
         "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
         "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
-        "target": "V1.50"
+        "target": "V1.50",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T1: test_tracing::subscriber_with rewritten as tracing_subscriber::registry().with(layer) (idiomatic builder form per qc1 S-2 recommendation). Behaviour unchanged — the resulting subscriber is structurally identical to the UFCS form. 9 in-crate test-only callers unaffected.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit f8a155a8)",
+        "_plan_id": "2026-06-14-v1.46-pool-observability"
       },
       {
         "id": "R-V146P4-QC3-S2",
@@ -128,7 +150,12 @@
         "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
         "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
-        "target": "V1.50"
+        "target": "V1.50",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T1: added a '# Tracing level intent (R-V146P4-QC3-S2)' section to the module-level rustdoc of both novel_pool_entries.rs (4 mutation paths) and inspiration_items.rs (5 mutation paths) explaining why the tracing::info! calls are intentionally INFO-level (volume scales with human operator action frequency; not a high-throughput telemetry stream; do not downgrade to DEBUG!).",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 0df050d2)",
+        "_plan_id": "2026-06-14-v1.46-pool-observability"
       }
     ],
     "2026-06-14-v1.46-research-auto-chain-e2e": [
@@ -143,7 +170,12 @@
         "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
         "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
-        "target": "V1.50"
+        "target": "V1.50",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T1: extracted ResearchScheduleFixture struct + insert() method in tests/research_supervisor_e2e.rs so the creator_schedules column list + RESEARCH_PRESET_VERSION constant live in one place within the test file. Struct doc cites the canonical schema sources (20260419_creator_schedules.sql + 202606080002_creator_schedules_work_id.sql). execute().unwrap() replaced with unwrap_or_else + panic naming the fixture. The raw INSERT is preserved (intentional — bypasses insert_pending validation to control work_id + status); trade-off documented in the struct doc.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit c666a1d8)",
+        "_plan_id": "2026-06-14-v1.46-research-auto-chain-e2e"
       },
       {
         "id": "R-V146P3-QC3-S2",
@@ -156,7 +188,12 @@
         "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
         "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
-        "target": "V1.50"
+        "target": "V1.50",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T1: schedule_status helper rewritten to use fetch_optional + explicit match. Both failure modes (DB read error, missing row) now panic with a message naming the looked-up schedule_id and pointing at the likely cause (forgot ResearchScheduleFixture::insert). Return type stays String so all 7 assert_eq! call sites remain unchanged.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit fee12c37)",
+        "_plan_id": "2026-06-14-v1.46-research-auto-chain-e2e"
       }
     ],
     "2026-06-14-v1.46-spec-cli-hygiene": [
@@ -175,7 +212,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: creator-run-preset-entry.md §4 step 4 inline parenthetical rewritten to clarify the normative 'apply stage advance semantics' step is live; only the subcommand was removed.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit c0c0b7e3)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit c0c0b7e3)",
+        "_plan_id": "2026-06-14-v1.46-spec-cli-hygiene"
       },
       {
         "id": "R-V146P1-QC1-S2",
@@ -192,7 +230,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: mechanical rename daemon_not_reachable_quickstart → daemon_not_reachable_with_remediation across definition + 4 call sites + test.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit bb5f7ac8)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit bb5f7ac8)",
+        "_plan_id": "2026-06-14-v1.46-spec-cli-hygiene"
       },
       {
         "id": "R-V146P1-QC1-S3",
@@ -209,7 +248,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: creator-workflow.md §2 column relabeled from 'Work model (V1.33)' to 'Work model (baseline)' to reflect current commands.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 8efcac69)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 8efcac69)",
+        "_plan_id": "2026-06-14-v1.46-spec-cli-hygiene"
       },
       {
         "id": "R-V146P1-QC2-S1",
@@ -226,7 +266,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: extracted novel-completion-guard message to module-level const NOVEL_COMPLETION_GUARD_MESSAGE; test now asserts against production source.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 903fbde3 + 4c78940b)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 903fbde3 + 4c78940b)",
+        "_plan_id": "2026-06-14-v1.46-spec-cli-hygiene"
       },
       {
         "id": "R-V146P1-QC2-S2",
@@ -243,7 +284,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: extracted assert_remediation_cites_spec helper; 4 remediation tests refactored to use it.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d4b6a4ab)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d4b6a4ab)",
+        "_plan_id": "2026-06-14-v1.46-spec-cli-hygiene"
       },
       {
         "id": "R-V146P1-QC3-S2",
@@ -260,7 +302,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: added assert_remediation_references_command helper with command-validity assertions; 4 remediation tests updated.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit adc9979f)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit adc9979f)",
+        "_plan_id": "2026-06-14-v1.46-spec-cli-hygiene"
       },
       {
         "id": "R-V146P1-QC3-S3",
@@ -277,7 +320,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: test renamed from remediation_work_field_cites_quickstart → remediation_work_field_cites_preset_entry_spec.",
-        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d17c3182)"
+        "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d17c3182)",
+        "_plan_id": "2026-06-14-v1.46-spec-cli-hygiene"
       }
     ],
     "2026-06-15-v1.47-gate-remediation-audit": [],
@@ -296,7 +340,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P0 T1+T2: review-report.md parser wired into from-review synthesis path; findings now populate parsed kind/severity/body/rule_suggestion from Works/<work_ref>/Logs/review/review-report.md. Tests in crates/nexus-orchestration/tests/review_report.rs cover parsed + fallback paths.",
-        "closure_evidence": "iteration/v1.48 @ e2e51823 (commits 3adfb6ae, b1e23b86)"
+        "closure_evidence": "iteration/v1.48 @ e2e51823 (commits 3adfb6ae, b1e23b86)",
+        "_plan_id": "2026-06-15-v1.47-reflection-loop-findings"
       },
       {
         "id": "R-V147P0-02",
@@ -312,7 +357,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P3 T0+T2: retention policy implemented via prune_resolved_findings_older_than DAO; hermetic tests cover old-resolved removal + open-row skip + recent-resolved skip.",
-        "closure_evidence": "iteration/v1.48 @ 469b76ac (commits 25f8bfb8, 4841a0a1, 54315904, b6059e89)"
+        "closure_evidence": "iteration/v1.48 @ 469b76ac (commits 25f8bfb8, 4841a0a1, 54315904, b6059e89)",
+        "_plan_id": "2026-06-15-v1.47-reflection-loop-findings"
       },
       {
         "id": "R-V147P0-03",
@@ -328,7 +374,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P3 T3: FindingPatch.rule_suggestion uses tri-state Option<Option<String>>; update_finding dynamic SQL builder; wire PATCH verifies clear-to-NULL via deserialize_some helper.",
-        "closure_evidence": "iteration/v1.48 @ 469b76ac (commits 25f8bfb8, 4841a0a1, 54315904, b6059e89)"
+        "closure_evidence": "iteration/v1.48 @ 469b76ac (commits 25f8bfb8, 4841a0a1, 54315904, b6059e89)",
+        "_plan_id": "2026-06-15-v1.47-reflection-loop-findings"
       },
       {
         "id": "R-V147P0-04",
@@ -344,7 +391,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P2 T1: runtime reader migrated to prefer Works/<work_ref>/AGENTS.md with legacy read-only fallback; scaffolds write AGENTS.md; accept path appends to AGENTS.md; reset CLI restores scaffold. All hermetic tests pass.",
-        "closure_evidence": "iteration/v1.48 @ 4fc1371d (commits 37f1de72, 33ac2ba6, 0e19a806, 43a5b8af, 8e5ff0e4)"
+        "closure_evidence": "iteration/v1.48 @ 4fc1371d (commits 37f1de72, 33ac2ba6, 0e19a806, 43a5b8af, 8e5ff0e4)",
+        "_plan_id": "2026-06-15-v1.47-reflection-loop-findings"
       },
       {
         "id": "R-V147P0-05",
@@ -360,7 +408,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P0 T0: H-1 hotfix performed in-plan. RVM schedule_id PK collision root-caused: enqueue_review_master_schedule minted RVM<ts_ms> which collided when two opt-in Works enqueued in same millisecond. Fix: per-process RVM_COUNTER AtomicU32 appended as 6-hex suffix (mirrors ACH_COUNTER / R-V139P0-W-B). Regression test rvm_schedule_ids_are_unique_within_same_millisecond added.",
-        "closure_evidence": "iteration/v1.48 @ e2e51823 (commit cb893a91)"
+        "closure_evidence": "iteration/v1.48 @ e2e51823 (commit cb893a91)",
+        "_plan_id": "2026-06-15-v1.47-reflection-loop-findings"
       },
       {
         "id": "R-V147P0-06",
@@ -376,7 +425,8 @@
         "lifecycle": "resolved",
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P0 T3: REVIEW_PRESET_ID hoisted to crates/nexus-orchestration/src/preset_ids.rs::NOVEL_CHAPTER_REVIEW_PRESET_ID. All three duplication sites (auto_chain.rs, preset/validation.rs, schedule/supervisor.rs) now reference the SSOT.",
-        "closure_evidence": "iteration/v1.48 @ e2e51823 (commit cdae5c5f)"
+        "closure_evidence": "iteration/v1.48 @ e2e51823 (commit cdae5c5f)",
+        "_plan_id": "2026-06-15-v1.47-reflection-loop-findings"
       }
     ],
     "2026-06-16-v1.48-serial-hardening": [],
@@ -394,7 +444,12 @@
         "target": "V1.50",
         "target_date": "V1.50",
         "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md §Residual additions",
-        "note": "V1.49 P0 widened DAO SQL + auto_chain consumer; CLI client-side fetch at run.rs::assemble_open_findings_block still hard-codes `?status=open`. Suggested fix at V1.50: extend Local API ListFindingsQuery.status to accept comma-separated list (or add `:actionable` endpoint) + update CLI to pass `open,triaged` + CLI integration test. Auto-chain path (production) is unaffected — already uses widened DAO filter."
+        "note": "V1.49 P0 widened DAO SQL + auto_chain consumer; CLI client-side fetch at run.rs::assemble_open_findings_block still hard-codes `?status=open`. Suggested fix at V1.50: extend Local API ListFindingsQuery.status to accept comma-separated list (or add `:actionable` endpoint) + update CLI to pass `open,triaged` + CLI integration test. Auto-chain path (production) is unaffected — already uses widened DAO filter.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T1: (1) FindingListFilters.status now accepts comma-separated values; list_findings DAO branches to a dynamic IN (?, ...) query when the value contains a comma (tokens validated against VALID_STATUSES → LocalDbError::InvalidEnum on bad token). (2) list_findings_handler maps InvalidEnum → 422 INVALID_INPUT. (3) assemble_open_findings_block now sends ?status=<ACTIONABLE_FINDING_STATUSES joined by ','> — reads the canonical constant from nexus-local-db::findings. New integration test findings_list_filter_by_comma_separated_status covers single-status regression, actionable set membership, whitespace tolerance, and unknown-token rejection.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit c25cb926)",
+        "_plan_id": "2026-06-17-v1.49-findings-lifecycle"
       }
     ],
     "2026-06-17-v1.49-narrative-indexes": [
@@ -409,7 +464,9 @@
         "target": "V1.49 P5",
         "target_date": "V1.49 P5",
         "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision",
-        "note": "No runtime behavior gap — the runtime implements the template's 5-column shape (ground truth for round-trip), and the overlay §3 4-column summary maps onto it (Planted+Paid off realize `chapters`; Status honours planned|buried|paid_off). Documentation-only reconciliation when the overlay folds into workflow-profile.md §4.6 at P-last. Also tracks the deferred promotion-concurrency advisory-lock decision (single-writer daemon model + atomic temp+rename is the V1.49 choice; a hard advisory lock is a V1.50 follow-up if multi-writer arrives)."
+        "note": "No runtime behavior gap — the runtime implements the template's 5-column shape (ground truth for round-trip), and the overlay §3 4-column summary maps onto it (Planted+Paid off realize `chapters`; Status honours planned|buried|paid_off). Documentation-only reconciliation when the overlay folds into workflow-profile.md §4.6 at P-last. Also tracks the deferred promotion-concurrency advisory-lock decision (single-writer daemon model + atomic temp+rename is the V1.49 choice; a hard advisory lock is a V1.50 follow-up if multi-writer arrives).",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-17-v1.49-narrative-indexes"
       },
       {
         "id": "R-V149P1-02",
@@ -422,7 +479,608 @@
         "target": "V1.50",
         "target_date": "V1.50",
         "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Residual additions + qc3.md",
-        "note": "Verified pre-existing per the repo's 'Pre-existing claim verification protocol': reproduces on iteration/v1.49 @ 3630a4e5 (base) with `cargo test -p nexus-orchestration` (full parallel suite — 9 passed, 1 failed in review_report); passes with `cargo test -p nexus-orchestration --test review_report` (in isolation, parallel and serial). QC3 also verified on origin/main @ be27111b with 2/10 failure rate. Cause: global tracing registry contention when many test binaries install/inspect the subscriber concurrently. Not caused by V1.49 P1 — review_report.rs and its capture layer are untouched. Suggested fix: scoped subscriber guard or serializing that single test."
+        "note": "Verified pre-existing per the repo's 'Pre-existing claim verification protocol': reproduces on iteration/v1.49 @ 3630a4e5 (base) with `cargo test -p nexus-orchestration` (full parallel suite — 9 passed, 1 failed in review_report); passes with `cargo test -p nexus-orchestration --test review_report` (in isolation, parallel and serial). QC3 also verified on origin/main @ be27111b with 2/10 failure rate. Cause: global tracing registry contention when many test binaries install/inspect the subscriber concurrently. Not caused by V1.49 P1 — review_report.rs and its capture layer are untouched. Suggested fix: scoped subscriber guard or serializing that single test.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T1: marked every test in tests/review_report.rs with #[serial_test::serial] so the whole binary runs mutually exclusively (equivalent to --test-threads=1 for this binary; other binaries still parallelise). Diagnosis via eprintln probes confirmed the function fired its warn!/info! events on the calling thread with persisted_count=1 in both passing and failing runs — the capture layer was intermittently dropping the first event after install when sibling tests competed for the tokio blocking-thread pool that sqlx uses for SQLite I/O. Added serial_test = \"3\" to nexus-orchestration [dev-dependencies]. Verified 30/30 clean at --test-threads=8 (was ~3/30 failing), 5/5 at --test-threads=16, 5/5 cross-binary full suite. Also pinned the flaky test to #[tokio::test(flavor = \"current_thread\")] as defence-in-depth for the set_default guard's lifetime across .await.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit e4fba479)",
+        "_plan_id": "2026-06-17-v1.49-narrative-indexes"
+      }
+    ],
+    "2026-06-18-v1.50-cron-foundation": [
+      {
+        "id": "R-V150P0-W1",
+        "title": "TZ silently clobbered on role-only patch operations (data consistency)",
+        "severity": "high",
+        "source": "qc1 (architecture/maintainability) W1; corroborated by qc2/qc3 (no disagreement on the data-loss path)",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs:494-532 (handle_set) interacting with apply_set_args at cron.rs:208-260",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §W1",
+        "note": "Trigger: `set my-work --no-review` (or any patch omitting --tz) on a Work with custom TZ stored. handle_set folds env/default TZ into effective_args.tz unconditionally, then apply_set_args patches schedule.tz = resolved_tz, clobbering the previously-configured author TZ. Suggested fix: only fold env/default TZ when user explicitly resets (no-flags → defaults branch) or passes --tz; for patch operations without --tz leave base.tz unchanged. Recommend extracting TZ resolution into a pure helper (resolve_tz) for testability. Add regression test set_no_review_preserves_custom_tz.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: `resolve_tz(args_tz, env) -> Option<String>` pure helper extracted; `handle_set` only folds env/default TZ on explicit reset or --tz; for role-only patch operations, base.tz is preserved. Regression test `set_no_review_preserves_custom_tz` passes; 3 unit tests cover the pure helper.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit 000d63fd; feature/v1.50-cron-foundation)",
+        "_plan_id": "2026-06-18-v1.50-cron-foundation"
+      },
+      {
+        "id": "R-V150P0-W2",
+        "title": "Spec §3.1 'all-off' rule not enforced (spec compliance)",
+        "severity": "high",
+        "source": "qc1 (architecture/maintainability) W2 + qc3 (performance/reliability) W-001 (cross-reviewer corroborated)",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs :: CronCommand::Set (no --all-off flag) and apply_set_args (no all-disabled check)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §W2 + qc3.md §W-001",
+        "note": "Spec §3.1 verbatim: 'At least one role must remain enabled: true unless --all-off is passed (CLI rejects empty schedules).' Both --all-off flag and post-mutation check missing. `set my-work --no-brainstorm --no-write --no-review` succeeds silently. T-A P1 cron evaluator will then skip all fires indefinitely. Fix: add --all-off flag in CronCommand::Set clap; post-mutation count of enabled roles; if 0 and !all_off return CliError::Config with stable code (e.g. E_CRON_ALL_ROLES_DISABLED). Hermetic test apply_set_args_all_off_without_flag_rejects.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: `--all-off` flag added to `CronCommand::Set` clap definition; `apply_set_args` post-mutation check rejects all-disabled with stable code `E_CRON_ALL_ROLES_DISABLED`. `apply_set_args_all_off_without_flag_rejects` and `..._with_flag_succeeds` tests pass. `cron set --help` documents --all-off. Cross-corroborated by qc1 (W2) and qc3 (W-001) re-review.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit e478079c; feature/v1.50-cron-foundation)",
+        "_plan_id": "2026-06-18-v1.50-cron-foundation"
+      },
+      {
+        "id": "R-V150P0-W3",
+        "title": "Spec §3.2 show output missing Local time + Next fire (UTC) columns (spec completeness)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs :: render_show (lines 271-299)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-002",
+        "note": "Spec example mandates 4 columns: Role / Cron / Local time / Next fire (UTC). Implementation renders only Role / Cron / Enabled. The whole point of per-Work cron config is 'let authors set the work on autopilot' — show is the primary verification surface. Fix: Local time = parse hour/minute fields of cron expression + render in TZ + cap at 3 entries with …; Next fire (UTC) = cron::Schedule::from_str(&normalize_cron_fields(expr)).upcoming(Utc).next() (single .next() per role, O(1)). render disabled when !enabled. Hermetic test asserts the two new columns.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: 4-column `render_show` with Role / Cron / Local time / Next fire (UTC) columns. Single `.next()` per role (O(1)) for next-fire UTC; `local_time_display` parses min/hour fields; disabled state renders `--` / `disabled`. `render_show_includes_local_and_next_fire_columns` and `render_show_disabled_renders_disabled_for_next_fire` tests pass.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit a364f31a; feature/v1.50-cron-foundation)",
+        "_plan_id": "2026-06-18-v1.50-cron-foundation"
+      },
+      {
+        "id": "R-V150P0-W4",
+        "title": "list_works_schedule unbounded — workspace-scale performance risk",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-003",
+        "scope": "crates/nexus-local-db/src/works.rs :: list_works_schedule (lines 1425-1450)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-003",
+        "note": "SELECT work_ref, work_id, schedule_json FROM works WHERE creator_id = ? AND workspace_slug = ? ORDER BY updated_at DESC has no LIMIT. For N ~ 5000 Works (multi-author workspace) latency grows linearly and CLI output becomes unreadable. Existing list_works precedent uses WorkListFilters::limit/offset (default 100). Fix: add optional limit param on list_works_schedule (default 100), pass through handle_list via --limit <N> flag. Update unit test to assert the cap.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: `limit: Option<u32>` parameter (default 100) added to `list_works_schedule` DAO; `LIMIT ?` SQL bound; `--limit <N>` clap flag in `CronCommand::List`. `list_works_schedule_applies_limit` (DAO) + `cron_list_help_documents_limit_flag` (CLI) tests pass.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit 87ea2ef6; feature/v1.50-cron-foundation)",
+        "_plan_id": "2026-06-18-v1.50-cron-foundation"
+      },
+      {
+        "id": "R-V150P0-W5",
+        "title": "handle_set read-modify-write TOCTOU window (reliability, P0 single-user small risk; P1 daemon-writer introduces real race)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-004",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs :: handle_set (lines 494-532)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 (daemon writer race window)",
+        "target_date": "V1.50 T-A P1",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-004",
+        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. P0 fix-wave adds in-code TODO marker at cron.rs:613. Plan-level residual carried to T-A P1.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1: `set_schedule_json_tx` transactional CAS implemented; `handle_set` (and the cron evaluator) use the atomic variant. 4 hermetic tests cover rejection on stale preimage, concurrent-writer serialisation, successful apply on matching preimage, and missing-work error. In-code TODO marker removed.",
+        "closure_evidence": "iteration/v1.50 (commit 67db009b on feature/v1.50-cron-brainstorm-write)",
+        "_plan_id": "2026-06-18-v1.50-cron-foundation"
+      }
+    ],
+    "2026-06-18-v1.50-cron-brainstorm-write": [
+      {
+        "id": "R-V150P1CRONBW-01",
+        "title": "novel-write embedded preset not yet authored (defer to T-A P2)",
+        "severity": "medium",
+        "source": "P1 implementer (spec gap surfaced honestly)",
+        "scope": "embedded-presets/novel-writing/ (novel-write preset absent); cron evaluator enqueues the correct preset_id per spec but executor needs the preset authored",
+        "decision": "defer",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.50 T-A P2",
+        "target_date": "V1.50 T-A P2",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
+        "note": "Evaluator contract is complete and tested (18 cron_supervisor tests). novel-brainstorm works end-to-end. novel-write schedule persists + admits normally but the executor body is missing — author the embedded-presets/novel-writing/<write-stage>.yaml in T-A P2. This is a preset-authoring workstream, not an evaluator defect.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write"
+      },
+      {
+        "id": "R-V150P1CRONBW-02",
+        "title": "Full-workspace `cargo clippy --all` deferred to CI per `target/` hygiene policy",
+        "severity": "low",
+        "source": "P1 implementer (process)",
+        "scope": "CI gate on PR",
+        "decision": "accept",
+        "owner": "@qa-engineer",
+        "target": "V1.50 PR (CI)",
+        "target_date": "V1.50 PR (CI)",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
+        "note": "Touched crates (nexus-orchestration, nexus-local-db, nexus42, nexus-daemon-runtime) verified clean locally; full-workspace clippy is the authoritative CI gate per .mstar/AGENTS.md `target/` hygiene rule. Accept (CI verifies).",
+        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write",
+        "lifecycle": "archived"
+      },
+      {
+        "id": "R-V150P1CRONBW-03",
+        "title": "cron_fires_at_minute re-parses the cron expression per (Work, role) per tick (perf hot path)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-001",
+        "scope": "crates/nexus-orchestration/src/schedule/cron_supervisor.rs:330 (cron::Schedule::from_str re-invoked per (Work, role) per tick)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 fix-wave",
+        "target_date": "V1.50 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-001",
+        "note": "At 1000 Works × 3 roles/min this is ~30ms/tick of avoidable CPU. Suggested fix: parse once on set_schedule_json write (store normalized form) OR memoise per-Work using a small in-process HashMap<(work_id, role), Schedule> cache. Acceptable for V1.50 scale (60s tick budget absorbs); fix in this fix-wave for low-risk surgical change.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1 fix-wave: `OnceLock<Mutex<HashMap<(work_id, role), (raw, Schedule)>>>` memoisation cache with content-drift invalidation; pub `invalidate_cron_schedule_cache` called from CLI CAS-write path. Test `cron_fires_at_minute_uses_memoised_schedule` passes (100 calls = 1 parse).",
+        "closure_evidence": "iteration/v1.50 (commit 4c305674 on feature/v1.50-cron-brainstorm-write)",
+        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write"
+      },
+      {
+        "id": "R-V150P1CRONBW-04",
+        "title": "idempotency-skip log line at info-level → too noisy at scale (tracing volume)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus-orchestration/src/schedule/cron_supervisor.rs:255 (info! on prior-schedule-still-active path)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 fix-wave",
+        "target_date": "V1.50 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-002",
+        "note": "100 Works on * * * * * = 12k info lines/hour. One-line fix: downgrade to debug!. Aggregated sweep summary line at line 146 already covers observability.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1 fix-wave: one-line change `info!` → `debug!` at cron_supervisor.rs:263 with 5-line justification comment. Manual source verification; sweep summary line covers the counter (no automated test for log level).",
+        "closure_evidence": "iteration/v1.50 (commit 75515b27 on feature/v1.50-cron-brainstorm-write)",
+        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write"
+      },
+      {
+        "id": "R-V150P1CRONBW-05",
+        "title": "novel-brainstorm / novel-write fall through to _ => 1 in preset_version_for_id; no test guard (preset-version drift surface)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-003",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs:1451-1468 (preset_version_for_id fallback); :2127-2174 (sync test array omits new cron preset ids)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 fix-wave",
+        "target_date": "V1.50 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-003",
+        "note": "When T-A P2 authors novel-write (R-V150P1CRONBW-01) and bumps version, cron-fired schedules will be silently stamped preset_version=1 and treated as stale. Fix: add match arms for novel-brainstorm + novel-write in preset_version_for_id; extend preset_version_mapping_matches_yaml sync test array. Failure mode is silent but cheap to fix now.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1 fix-wave: explicit match arms for novel-brainstorm + novel-write in preset_version_for_id; sync test renamed + extended; 2 new tests pass. `novel-write` preset YAML still deferred (R-V150P1CRONBW-01) but the sync test now tolerates its absent YAML and will auto-enforce strict sync once authored.",
+        "closure_evidence": "iteration/v1.50 (commit abfbb855 on feature/v1.50-cron-brainstorm-write)",
+        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write"
+      }
+    ],
+    "2026-06-18-v1.50-kb-editor-cli": [
+      {
+        "id": "R-V150KBED-01",
+        "title": "creator world kb surface coexists with legacy creator kb --scope world (defer consolidation)",
+        "severity": "low",
+        "source": "implementer (Completion Report v2)",
+        "scope": "nexus42/CLI: creator world kb list/show/edit/delete vs creator kb --scope world",
+        "decision": "accept",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.51+ docs sweep",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
+        "note": "Future hygiene may consolidate; out of T-B P0 scope. PM tracked for V1.51+ backlog.",
+        "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
+        "lifecycle": "archived"
+      },
+      {
+        "id": "R-V150KBED-02",
+        "title": "Author identity uses world ownership (narrative_worlds.owner_creator_id) rather than works.creator_id; revisit if Work→KeyBlock provenance linkage is introduced",
+        "severity": "low",
+        "source": "implementer (Completion Report v2)",
+        "scope": "nexus42/CLI: author gate for edit/delete resolves via world ownership not works ownership",
+        "decision": "accept",
+        "owner": "@architect or @fullstack-dev",
+        "target": "V1.51+",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
+        "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode.",
+        "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
+        "lifecycle": "archived"
+      }
+    ],
+    "2026-06-18-v1.50-cron-review-staggering": [
+      {
+        "id": "R-V150P2CRONRV-01",
+        "title": "Cross-plan migration version collision: 202606180002 used by both T-A P1 (works_schedule_json_partial_idx) and T-B P1 (kb_extract_jobs_extend) breaks sqlx::migrate!",
+        "severity": "medium",
+        "source": "T-A P2 implementer (cross-plan defect discovered when T-A P2 tests required fresh DB)",
+        "scope": "crates/nexus-local-db/migrations/202606180002_*.sql (collision between T-A P1 and T-B P1)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P2 fix-wave",
+        "target_date": "V1.50 T-A P2 fix-wave",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md (Completion Report v2)",
+        "note": "Pre-existing T-A P1 / T-B P1 collision. T-A P2 renumbered works_schedule_json_partial_idx → 202606180003; T-B P2 also independently renumbered it. PM must reconcile at merge time (T-B P2 qc1 flagged R-V150KBED-06-MERGE). Renumber is pre-release safe (per-migration tx rolls back on UNIQUE conflict).",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P2: works_schedule_json_partial_idx renumbered to 202606180003 (filename only; content uses CREATE INDEX IF NOT EXISTS so idempotent). T-B P2 also independently renumbered the same migration; PM to reconcile at merge time (R-V150KBED-06-MERGE).",
+        "closure_evidence": "iteration/v1.50 (commit 12495be8 on feature/v1.50-cron-review-staggering)",
+        "_plan_id": "2026-06-18-v1.50-cron-review-staggering"
+      },
+      {
+        "id": "R-V150P2CRONRV-02",
+        "title": "Pre-existing T-A P0 latent rollback test bug: DROP COLUMN schedule_json fails because T-A P1 partial index references it",
+        "severity": "low",
+        "source": "T-A P2 implementer (latent test defect unmasked by R-V150P2CRONRV-01)",
+        "scope": "crates/nexus-local-db/tests/works_schedule_migration.rs (rollback test ordering)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P2 fix-wave",
+        "target_date": "V1.50 T-A P2 fix-wave",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md (Completion Report v2)",
+        "note": "Test-only fix: drop the dependent partial index before DROP COLUMN. Same root cause and same fix path as W-QC3-01 in T-B P2 qc3 review.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P2: rollback test fixed (drop idx_works_schedule_json_nonempty before ALTER TABLE works DROP COLUMN schedule_json). Test-only; no production code impact.",
+        "closure_evidence": "iteration/v1.50 (commit b7e438b5 on feature/v1.50-cron-review-staggering)",
+        "_plan_id": "2026-06-18-v1.50-cron-review-staggering"
+      },
+      {
+        "id": "R-V150P2CRONRV-03",
+        "title": "Plan text §2 Goal 4 / §4 AC3 describes a 'T-B P1 hook stub' that was never added (T-B P1 already filled the real hook)",
+        "severity": "low",
+        "source": "qc1 (architecture) S-001",
+        "scope": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md §2 Goal 4 / §4 AC3 (plan text vs implementation reality)",
+        "decision": "defer",
+        "owner": "@writing-specialist or @project-manager",
+        "target": "V1.50 P-last (plan archive + spec reconcile)",
+        "target_date": "V1.50 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-review-staggering/qc1.md §S-001",
+        "note": "Doc-only reconcile: implementer correctly avoided dead code per surgical principle; outcome is stronger than plan's literal requirement. At plan archive time, update Goal 4 + AC3 to reflect the real contract (T-B P1 hook is independent of T-A P2).",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.50-cron-review-staggering"
+      }
+    ],
+    "2026-06-18-v1.50-kb-refreshable-scan": [
+      {
+        "id": "R-V150KBED-06",
+        "title": "Cross-plan migration version collision: 202606180002 used by both T-A P1 and T-B P1 (same as R-V150P2CRONRV-01)",
+        "severity": "medium",
+        "source": "T-B P2 implementer (cross-plan defect discovered when T-B P2 tests required fresh DB)",
+        "scope": "crates/nexus-local-db/migrations/202606180002_kb_extract_jobs_extend.sql vs 202606180002_works_schedule_json_partial_idx.sql",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P2 fix-wave",
+        "target_date": "V1.50 T-B P2 fix-wave",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
+        "note": "Pre-existing T-A P1 / T-B P1 collision. T-B P2 also independently renumbered works_schedule_json_partial_idx to 202606180003 (idempotent content). T-B P2 qc1 flagged R-V150KBED-06-MERGE for PM: T-B P2 keeps kb_extract_jobs_extend at 0002; T-A P2 renumbers the other direction. PM must pick one canonical mapping at merge time.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P2: works_schedule_json_partial_idx renumbered to 202606180003. Same fix as R-V150P2CRONRV-01 (T-A P2). PM to reconcile at merge time: both branches renumbered the same migration; canonical pick is 202606180003 (idempotent content).",
+        "closure_evidence": "iteration/v1.50 (commit 2cbd5498 on feature/v1.50-kb-refreshable-scan)",
+        "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan"
+      },
+      {
+        "id": "R-V150KBED-06-MERGE",
+        "title": "T-B P2 qc1 flagged cross-branch merge-coordination: T-B P2 keeps kb_extract_jobs_extend at 0002, T-A P2 renumbers works_schedule_json_partial_idx → 0003; T-B P2 also renumbers the other direction. PM must reconcile at merge time",
+        "severity": "medium",
+        "source": "T-B P2 qc1 W-001",
+        "scope": "PM merge of feature/v1.50-cron-review-staggering + feature/v1.50-kb-refreshable-scan into iteration/v1.50",
+        "decision": "defer",
+        "owner": "@project-manager",
+        "target": "V1.50 P2 merge time",
+        "target_date": "V1.50 P2 merge time",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-refreshable-scan/qc1.md §W-001",
+        "note": "PM must pick the canonical migration-number mapping. Both branches renumbered the same 202606180002 to 202606180003 (idempotent content). Net effect on a fresh merge: one renumber; conflict-free. PM should accept either branch's renumber as-is at merge.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P2 merge: PM resolved cross-branch renumber conflict by canonicalizing works_schedule_json_partial_idx → 202606180004 (keeping kb_extract_jobs_extend at 003). All 116 workspace test binaries green post-merge.",
+        "closure_evidence": "iteration/v1.50 (commit daba6e85 on iteration/v1.50)",
+        "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan"
+      },
+      {
+        "id": "R-V150KBED-07",
+        "title": "Delta deliberately applies only body refreshes to kb_key_blocks (never insert/delete — §5.5 reserves those for adopt/edit/delete). Revisit for V1.51+ LLM extraction",
+        "severity": "low",
+        "source": "T-B P2 implementer (scope decision)",
+        "scope": "crates/nexus-kb/src/extract_sync.rs (delta-write contract)",
+        "decision": "defer",
+        "owner": "@architect or @fullstack-dev",
+        "target": "V1.51+ LLM extraction",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
+        "note": "Current design: refreshable scan only updates bodies of existing candidates. Inserts (new candidates) happen via T-B P1 review-time extraction; deletes happen via author explicit `reject` or `delete`. Rescan is a sync tool, not a discovery tool. Acceptable at V1.50 scope.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan"
+      },
+      {
+        "id": "R-V150KBED-08",
+        "title": "`--dry-run` candidate preview is chapter-scoped; non-dry DB upsert also reconciles cross-chapter reuse. Target V1.51+ for cross-chapter scope",
+        "severity": "low",
+        "source": "T-B P2 implementer (scope decision)",
+        "scope": "creator kb rescan CLI (chapter scope; cross-chapter deferred)",
+        "decision": "defer",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.51+",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
+        "note": "Current design: rescan operates on a single chapter. Work-scoped rescan is out of scope; V1.51+ backlog.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan"
+      }
+    ],
+    "2026-06-18-v1.50-kb-auto-promotion": [
+      {
+        "id": "R-V150KBED-01",
+        "title": "Heuristic extraction defaults all candidates to block_type_guess='character' (LLM extraction deferred)",
+        "severity": "low",
+        "source": "P1 implementer (heuristic limitation)",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs (review_time_extraction)",
+        "decision": "defer",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.51+ (LLM-driven extraction)",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
+        "note": "Heuristic (capitalized noun phrases) cannot distinguish character/location/organization. Authors correct on adopt via `creator world kb adopt`. LLM extraction is compass §0.1 OUT (defer V1.51+). Accept at P1; not blocking.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
+      },
+      {
+        "id": "R-V150KBED-02",
+        "title": "resolve_workspace_id reads narrative_gateway.workspace_id which may be stale; column is informational only (defer to T-B P2)",
+        "severity": "low",
+        "source": "P1 implementer (cross-plan dependency)",
+        "scope": "T-B P1 / T-B P2 boundary",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P2",
+        "target_date": "V1.50 T-B P2",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
+        "note": "T-B P2 refreshable scan will use the freshest workspace_id from the chapter frontmatter; resolve_workspace_id staleness self-corrects in T-B P2.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
+      },
+      {
+        "id": "R-V150KBED-03",
+        "title": "kb_adopt not wrapped in a single SQLite transaction (data integrity gap; recoverable orphan)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-001 + qc2 (security/correctness) Warning (cross-reviewer corroborated)",
+        "scope": "crates/nexus42/src/commands/creator/world/kb.rs:472-488 (kb_adopt: insert_key_block + mark_confirmed as two non-atomic operations)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P1 fix-wave",
+        "target_date": "V1.50 T-B P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc3.md §W-001 + qc2.md",
+        "note": "Failure modes: (1) insert succeeds, mark_confirmed returns Err → orphan KeyBlock + still-pending promotion row; (2) insert succeeds, mark_confirmed returns Ok(false) → misleading error message + orphan. Fix: wrap both calls in pool.begin() transaction; if either fails, ROLLBACK. The current hermetic test double_adopt_is_rejected does NOT cover the race between insert_key_block and mark_confirmed — add a regression test that mocks mark_confirmed failure to assert the orphan is not created.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P1 fix-wave: kb_adopt now does pool.begin() → insert_key_block_in_tx + mark_confirmed_in_tx → explicit tx.rollback() on !flipped or error before any commit. Misleading error message replaced with 'The transaction was rolled back; no orphan row created.' New regression test kb_adopt_failure_rolls_back_insert pre-flips the candidate and asserts zero orphan KeyBlock rows after rollback. Cross-corroborated by qc2 (security) + qc3 (reliability) re-review.",
+        "closure_evidence": "iteration/v1.50 (commit 2cfbd49e on feature/v1.50-kb-auto-promotion)",
+        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
+      },
+      {
+        "id": "R-V150KBED-04",
+        "title": "idx_kb_extract_jobs_promotion_status_work covers (status, work_id) but list_pending_for_world query filters on (status, world_id) — index unused for documented purpose",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus-local-db/migrations/202606180002_kb_extract_jobs_extend.sql:45-46 (index) vs crates/nexus-local-db/src/kb_extract_job.rs:620-640 (list_pending_for_world query)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P1 fix-wave",
+        "target_date": "V1.50 T-B P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc3.md §W-002",
+        "note": "Index does not cover the dominant list path (which filters on world_id). For V1.50 scale (10-100 pending rows per world) this is sub-millisecond and not a hot path, but the index is functionally unused. Fix: add idx_kb_extract_jobs_promotion_status_world (promotion_status, world_id, created_at); remove or rename the unused index. Migration comment also needs correction.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P1 fix-wave: DROP INDEX IF EXISTS idx_kb_extract_jobs_promotion_status_work; CREATE INDEX IF NOT EXISTS idx_kb_extract_jobs_promotion_status_world ON kb_extract_jobs (promotion_status, world_id, created_at). Trailing created_at gives index-ordered scan with no filesort. Migration comment fully rewritten. New regression test pending_list_uses_world_id_covering_index uses EXPLAIN QUERY PLAN to assert the planner picks the new world_id index.",
+        "closure_evidence": "iteration/v1.50 (commit 02cc52d5 on feature/v1.50-kb-auto-promotion)",
+        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
+      },
+      {
+        "id": "R-V150KBED-05",
+        "title": "reject audit log path uses internal work_id under Works/<work_id>/... instead of documented work_ref (path convention drift)",
+        "severity": "low",
+        "source": "qc2 (security/correctness) Warning",
+        "scope": "crates/nexus42/src/commands/creator/world/kb.rs (reject path; reject log file write)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P1 fix-wave",
+        "target_date": "V1.50 T-B P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc2.md",
+        "note": "Spec §5.5.4 mandates retention in Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md. Current code resolves work_id (numeric internal PK) and writes to Works/<work_id>/...; should resolve work_ref (user-facing identifier) and write to Works/<work_ref>/Logs/kb/rejected/. Fix: use work_ref not work_id for the filesystem path; validate work_ref exists before write.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P1 fix-wave: kb_reject calls resolve_work_ref_for_log before mark_rejected. Helper returns Err (and aborts) if work_id missing, works row absent, or story_ref NULL. write_rejected_log now takes work_ref and writes under Works/<work_ref>/Logs/kb/rejected/ (log body still records both work_id for audit and work_ref). 2 new regression tests: kb_reject_writes_log_under_work_ref_path + kb_reject_fails_when_work_ref_missing.",
+        "closure_evidence": "iteration/v1.50 (commit 125533a8 on feature/v1.50-kb-auto-promotion)",
+        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
+      }
+    ],
+    "2026-06-18-v1.50-hygiene-and-closeout": [
+      {
+        "id": "R-V150-WLA-01",
+        "title": "clippy allow(clippy::unwrap_used) on cron test module lacked justification comment",
+        "severity": "low",
+        "source": "cron-foundation qc1 S4",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs:776",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §S4",
+        "note": "Repo AGENTS.md mandates a brief justification comment on every #[allow(...)].",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: added justification comment 'test-only — .unwrap() keeps assertion intent readable; panics surface test names.'",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 17fd9fd0)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-02",
+        "title": "clippy allow(clippy::too_many_arguments) on handle_advance lacked justification comment",
+        "severity": "low",
+        "source": "auto-chronology qc1 S-002",
+        "scope": "crates/nexus42/src/commands/creator/works/chronology.rs:185",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-auto-chronology/qc1.md §S-002",
+        "note": "Sibling perform_advance in nexus-orchestration/src/auto_chronology.rs already carried the model comment; this site was missed during T-A P3 fix-wave.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: added justification mirroring the sibling perform_advance comment ('the 8 inputs are read together from one CLI invocation + one Work row; packing them into a struct would duplicate the WorkAutoChronologyRow shape').",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 17fd9fd0)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-04",
+        "title": "Conflicting flags (--role EXPR --no-role) silently last-write-wins",
+        "severity": "low",
+        "source": "cron-foundation qc3 S-004",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs::apply_set_args",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §S-004",
+        "note": "Pre-fix: --brainstorm '0 9 * * *' --no-brainstorm stored the cron expression on a role whose enabled=false. Authors reading the schedule back see the cron string attached to a disabled role.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: pre-mutation conflict check in apply_set_args rejects the (brainstorm, write, review) self-contradictions with stable code E_CRON_CONFLICTING_FLAGS. Hermetic test apply_set_args_conflicting_role_flags_rejected_with_stable_code covers all three pairs.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 5fdf2ea3)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-05",
+        "title": "list --json output omitted work_id (work_ref:null left row unidentifiable)",
+        "severity": "low",
+        "source": "cron-foundation qc1 S3",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs::handle_list (JSON branch)",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §S3",
+        "note": "JSON path emitted {work_ref, schedule} but not work_id. A Work with work_ref = null produced {\"work_ref\": null, ...} with no identifier for machine consumers.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: extracted JSON-row construction into pure helper list_row_to_json; emits {work_ref, work_id, schedule}. Hermetic test list_row_to_json_includes_work_id_and_work_ref covers both cases (with slug + null slug).",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit dec4fd4a)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-06",
+        "title": "resolve_work_id_by_ref_or_id used LIMIT 1 without ORDER BY (non-deterministic on collision)",
+        "severity": "low",
+        "source": "cron-foundation qc1 S6",
+        "scope": "crates/nexus-local-db/src/works.rs::resolve_work_id_by_ref_or_id",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §S6",
+        "note": "In the theoretical case where a work_ref slug collides with another row's work_id, the chosen row was non-deterministic and might disagree with the 'ref wins over id' precedence the doc comment promises.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: added ORDER BY work_ref IS NULL, work_id to the SELECT. Hermetic test resolve_work_id_by_ref_or_id_prefers_work_ref_match_on_collision seeds a deliberate collision and asserts work_ref wins.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 1585fc3c)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-07",
+        "title": "Idempotency-check error path skipped CronFireSummary counter",
+        "severity": "low",
+        "source": "cron-brainstorm-write qc1 S-001",
+        "scope": "crates/nexus-orchestration/src/schedule/cron_supervisor.rs::try_fire_role (Err arm of has_active_role_schedule)",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc1.md §S-001",
+        "note": "Err arm only logged at warn! and did not touch the summary; a Work whose idempotency check errored was silently absent from CronFireSummary::total_evaluated().",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: added dedicated summary bucket 'skipped_idempotency_check_error' (separate from skipped_idempotent so operators can spot a flaky reads path); incremented in the Err arm; surfaced in the 'sweep complete' log line. Contract test summary_total_evaluated_includes_idempotency_check_error_bucket covers the arithmetic.",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 8497911b)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-08",
+        "title": "set_schedule_json_tx rationale prose was internally contradictory",
+        "severity": "low",
+        "source": "cron-brainstorm-write qc1 S-003",
+        "scope": "crates/nexus-local-db/src/works.rs:1534 (set_schedule_json_tx doc)",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc1.md §S-003",
+        "note": "Doc first called the daemon-side cron evaluator 'the racing party' against the CLI writer, then admitted the evaluator 'does not write schedule_json'. The actual race is between two concurrent CLI invocations or future daemon-side mutators (e.g. T-A P3 auto-chronology).",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: reworded the doc comment to match reality (the CAS protects against concurrent CLI invocations + future daemon-side mutators; the T-A P1 cron evaluator is read-only on this column).",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 272e30a8)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-09",
+        "title": "CRON_SCHEDULE_CACHE / CRON_PARSE_COUNT process-globals had no test-isolation contract doc",
+        "severity": "low",
+        "source": "cron-review-staggering qc3 S-002",
+        "scope": "crates/nexus-orchestration/src/schedule/cron_supervisor.rs (static CRON_SCHEDULE_CACHE + CRON_PARSE_COUNT)",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-review-staggering/qc3.md §S-002",
+        "note": "Statics are shared across every test in the same binary. Mitigations hold today (per-binary process boundary; only one lib test reads CRON_PARSE_COUNT; integration tests use unique work_ids). Design is fragile to future test additions.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: added explicit test-isolation contract doc to both statics enumerating the three current mitigations and explicitly forbidding future tests from asserting on CRON_PARSE_COUNT from tests/ or reusing existing test work_ids (would regress to an R-V149P1-02-style flake).",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit 272e30a8)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-10",
+        "title": "existing_canonical_names read failure produced zero candidates with no warn! trail",
+        "severity": "low",
+        "source": "kb-auto-promotion qc3 S-001",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs::existing_canonical_names",
+        "decision": "resolved",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 P-last T2",
+        "target_date": "V1.50 P-last T2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc3.md §S-001",
+        "note": "Errors ARE propagated via '?', but the supervisor hook treats extraction as best-effort and does not fail the terminal transition. A flaky kb_key_blocks read silently produced zero candidates with no warn! trail at the orchestration layer.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 P-last T2: rewrote the error arm as an explicit match that logs at warn! before propagating. The warn names the world_id, the underlying error, and explicitly notes that the terminal transition still completes (best-effort contract preserved).",
+        "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit b29c0edf)",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      },
+      {
+        "id": "R-V150-WLA-DEFER-V1.51",
+        "title": "V1.50 P-last T2 WL-A defer bucket: 30+ low-priority suggestions across 7 plans (cron, kb, auto-chronology)",
+        "severity": "low",
+        "source": "V1.50 P-last T2 WL-A sweep (cron-foundation/cron-brainstorm-write/cron-review-staggering/auto-chronology/kb-editor-cli/kb-auto-promotion/kb-refreshable-scan qc1+qc2+qc3)",
+        "scope": "Various; see note for the full enumeration",
+        "decision": "defer",
+        "owner": "@fullstack-dev or @architect",
+        "target": "V1.51+",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-hygiene-and-closeout.md §5 T2",
+        "note": "V1.50 P-last T2 closed 10 WL-A items (R-V150-WLA-01/02/04/05/06/07/08/09/10 + R-V150-WLA-03 already resolved by T-A P0 spec update). The following qc Suggestions remain open and are deferred to V1.51+ as low-priority hygiene / feature work (no defect; no test gap; close on next touch):\n\nCRON-FAMILY:\n- cron-foundation/qc1 S1 (DEFAULT_SCHEDULE naming coherence with spec §2.2)\n- cron-foundation/qc1 S5 (doc_markdown clippy nits in works_schedule_migration.rs under --all-targets)\n- cron-foundation/qc2 S-1 (AC wording vs CliError::Config error type)\n- cron-foundation/qc2 S-2 (future blob size / structure guard for schedule_json)\n- cron-foundation/qc3 S-002 (no tracing on the cron hot path — feature work)\n- cron-brainstorm-write/qc1 S-002 (// COORDINATE-WITH-T-A-P2 literal marker — T-A P2 Done; marker no longer needed)\n- cron-brainstorm-write/qc1 S-004 (enqueue_cron_schedule near-duplicates enqueue_review_master_schedule — refactor; may diverge in V1.51+)\n- cron-brainstorm-write/qc1 S-005 (plan text vs impl drift on evaluate_next_step — doc only)\n- cron-brainstorm-write/qc1 S-006 (drift guard test between CLI WorkSchedule and daemon CronConfig — feature work)\n- cron-brainstorm-write/qc2 S-001/S-002 (test fidelity comment + has_active_role_schedule IN-list note)\n- cron-brainstorm-write/qc3 S-001..S-007 (per-tick heap/TZ/parse optimisations + shutdown drain + lost-fire catch-up + COUNT vs EXISTS — informational; current scale is fine)\n- cron-review-staggering/qc1 S-001 (plan text drift on T-B P1 hook stub — covered by R-V150P2CRONRV-03)\n- cron-review-staggering/qc2 (cron_review_respects_idempotency test label readability)\n- cron-review-staggering/qc3 S-001 (per-tick cost load note — informational)\n- cron-review-staggering/qc3 S-003 (CRON_COUNTER 16M-suffix overflow — astronomical; informational)\n- cron-review-staggering/qc3 S-004 (R-V150P2CRONRV-01 renumber rationale doc)\n\nAUTO-CHRONOLOGY:\n- auto-chronology/qc2 S-* (directory fsync after rename + last_advance_label scan hardening — defensive)\n- auto-chronology/qc3 S-1 (partial index on works.auto_chronology — V1.50 scale fine; revisit at scale)\n- auto-chronology/qc3 S-3 (clippy errors in tests/auto_chronology_tick.rs under --all-targets)\n- auto-chronology/qc3 S-4 (write_outline_atomic temp suffix — informational; concurrent calls serialized by gate)\n\nKB-FAMILY:\n- kb-auto-promotion/qc1 S-001 (work_entry_id semantic overload — schema-touch; defer to V1.51+ LLM extraction)\n- kb-auto-promotion/qc1 S-004 (adopt --block-type override — feature work; couples with R-V150KBED-01)\n- kb-auto-promotion/qc2 (proposed_payload bare serde_json + TOCTOU window notes — defensive)\n- kb-auto-promotion/qc3 S-002 (Logs/kb/rejected/ retention — feature work)\n- kb-auto-promotion/qc3 S-003 (KbStoreError::Duplicate surfaces generic message — UX; small fix)\n- kb-editor-cli/qc1 S-V150KBED-QC1-01 (plan Code touch references non-existent file — doc)\n- kb-editor-cli/qc1 S-V150KBED-QC1-02 (world_ref positional implies flexible resolution but only IDs accepted — UX)\n- kb-editor-cli/qc2 S-V150KBED-QC2-01 (WORLD_KB_FORBIDDEN as string constant — typed error catalog future)\n- kb-editor-cli/qc2 S-V150KBED-QC2-02 (map_kb_store_error uses verb 'show' for load step — cosmetic)\n- kb-editor-cli/qc2 S-V150KBED-QC2-03 (no test for soft-deleted block re-edit — feature work)\n- kb-editor-cli/qc3 S-1 (kb list silent truncation at 500 rows — UX)\n- kb-editor-cli/qc3 S-2 (soft-deleted KeyBlock silently re-editable — feature work)\n- kb-editor-cli/qc3 S-3 (BlockType Debug repr in human table vs wire format — cosmetic)\n- kb-refreshable-scan/qc1 S-001 (diff_and_apply O(N) per update — V1.50 scale fine)\n- kb-refreshable-scan/qc2 (rescan batch no outer transaction — design)\n- kb-refreshable-scan/qc3 S-QC3-01..05 (HashMap threading + tx wrapper + dry-run scope + parallel test safety + migration renumber note)\n\nALREADY-RESOLVED items verified during the sweep (closed by other V1.50 waves; not re-counted here):\n- cron-foundation/qc3 S-001 (partial index) — added by T-A P1 (cron_supervisor EXPLAIN test)\n- cron-foundation/qc3 S-003 (NEXUS_TZ docs) — already in cron-staggering.md §3.1 line 94\n- auto-chronology/qc3 S-2 (CompletionLocked log conflate) — tracked via R-V150P3AUTOCHRONO-01\n- kb-auto-promotion/qc1 S-002 + qc3 S-004 (misleading 'KeyBlock was not duplicated') — closed via R-V150KBED-03 transactional CAS\n- kb-auto-promotion/qc3 S-005 (transaction-boundary race test) — closed via kb_adopt_failure_rolls_back_insert regression test\n- kb-auto-promotion/qc1 S-003 (English-only heuristic) — tracked via R-V150KBED-01 (auto-promotion)",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
       }
     ]
   },

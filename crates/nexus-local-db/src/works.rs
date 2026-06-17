@@ -1303,6 +1303,420 @@ pub async fn advance_work_stage_atomic(
         })
 }
 
+// ── V1.50 T-A P0 (T1): per-Work cron schedule_json DAO ────────────────────
+
+/// Row for the cron `list` surface — (`work_ref`, `work_id`, `schedule_json`).
+///
+/// `work_ref` is `None` when the Work has no human slug set (V1.36 §2.1);
+/// callers fall back to `work_id` for display. `schedule_json` is `None`
+/// when the column is NULL or empty (= use defaults; spec §2.3).
+#[derive(Debug, Clone)]
+pub struct WorkScheduleRow {
+    /// Human slug for the Work (`Works/<work_ref>/`).
+    pub work_ref: Option<String>,
+    /// Primary key (`wrk_...`).
+    pub work_id: String,
+    /// Raw `schedule_json` text (NULL or empty = use defaults).
+    pub schedule_json: Option<String>,
+}
+
+/// Persist the per-Work cron configuration JSON (V1.50 §2.1).
+///
+/// Writes the full `schedule_json` blob for a Work. Pass an empty string to
+/// reset to defaults (spec §2.3). Keys by `work_id` (primary key) so callers
+/// must resolve `work_ref` → `work_id` first via
+/// [`resolve_work_id_by_ref_or_id`].
+///
+/// # Errors
+///
+/// Returns `LocalDbError::MissingVersionKey` if the Work does not exist, or
+/// `LocalDbError::Sqlx` if the UPDATE fails.
+pub async fn set_schedule_json(
+    pool: &SqlitePool,
+    work_id: &str,
+    json: &str,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    // SAFETY: UPDATE against works table — runtime query (column added in the
+    // same migration cycle; sqlx prepare cache hasn't run for this statement).
+    let result =
+        sqlx::query("UPDATE works SET schedule_json = ?, updated_at = ? WHERE work_id = ?")
+            .bind(json)
+            .bind(now)
+            .bind(work_id)
+            .execute(pool)
+            .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
+        });
+    }
+    Ok(())
+}
+
+/// Read the per-Work cron configuration JSON (V1.50 §2.1).
+///
+/// Returns `None` when the Work does not exist OR the column is NULL/empty
+/// (both mean "use defaults"; spec §2.3). Returns `Some(json)` only when a
+/// non-empty configuration blob is stored.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn get_schedule_json(
+    pool: &SqlitePool,
+    work_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (column added in the
+    // same migration cycle; sqlx prepare cache hasn't run for this statement).
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT schedule_json FROM works WHERE work_id = ?")
+            .bind(work_id)
+            .fetch_optional(pool)
+            .await?;
+
+    // None → work missing OR column NULL/empty → use defaults.
+    Ok(row.and_then(|(opt,)| opt).filter(|s| !s.is_empty()))
+}
+
+/// Resolve a `<work_ref>` OR `<work_id>` positional to a concrete `work_id`.
+///
+/// The cron CLI surface accepts either the human slug (`work_ref`) or the
+/// primary key (`wrk_...`). This helper matches `work_ref` first, then
+/// `work_id`, scoped to `(creator_id, workspace_slug)`.
+///
+/// Returns `None` if no Work matches in the active workspace.
+///
+/// R-V150-WLA-06 (V1.50 P-last WL-A / cron-foundation qc1 S6): the query
+/// uses `ORDER BY work_ref IS NULL, work_id` so the row choice is
+/// deterministic in the theoretical case where a `work_ref` slug collides
+/// with another row's `work_id` (slugs vs `wrk_...` IDs live in different
+/// namespaces in practice, so this is a clarity/determinism guard, not a
+/// live bug fix). `work_ref IS NULL` evaluates to 0 for non-null and 1
+/// for null, so non-null `work_refs` sort first — matches the "ref wins
+/// over id" precedence the doc comment promises.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn resolve_work_id_by_ref_or_id(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_slug: &str,
+    ref_or_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (dynamic match on
+    // work_ref / work_id). All inputs are bound parameters.
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT work_id FROM works \
+         WHERE creator_id = ? AND workspace_slug = ? \
+         AND (work_ref = ? OR work_id = ?) \
+         ORDER BY work_ref IS NULL, work_id \
+         LIMIT 1",
+    )
+    .bind(creator_id)
+    .bind(workspace_slug)
+    .bind(ref_or_id)
+    .bind(ref_or_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(wid,)| wid))
+}
+
+/// List all Works in the active workspace with their cron config (V1.50 §3.3).
+///
+/// Used by `creator works cron list`. Returns one [`WorkScheduleRow`] per Work,
+/// ordered by `updated_at` descending (consistent with [`list_works`]).
+///
+/// `limit` caps the result count (R-V150P0-W4). When `None`, defaults to 100
+/// (matching [`WorkListFilters::limit`]'s default) so the surface stays bounded
+/// for large workspaces.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn list_works_schedule(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_slug: &str,
+    limit: Option<u32>,
+) -> Result<Vec<WorkScheduleRow>, LocalDbError> {
+    let limit = i64::from(limit.unwrap_or(100));
+    // SAFETY: SELECT against works table — runtime query (schedule_json column
+    // added in the same migration cycle). `limit` is a bound parameter.
+    let rows: Vec<(Option<String>, String, Option<String>)> = sqlx::query_as(
+        "SELECT work_ref, work_id, schedule_json FROM works \
+         WHERE creator_id = ? AND workspace_slug = ? \
+         ORDER BY updated_at DESC \
+         LIMIT ?",
+    )
+    .bind(creator_id)
+    .bind(workspace_slug)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(work_ref, work_id, schedule_json)| WorkScheduleRow {
+            work_ref,
+            work_id,
+            schedule_json: schedule_json.filter(|s| !s.is_empty()),
+        })
+        .collect())
+}
+
+// ── V1.50 T-A P1: daemon-side cron evaluator DAOs ─────────────────────────
+
+/// Row for the daemon cron evaluator scan ([`list_works_with_schedule_json`]).
+///
+/// Minimal column set needed to (a) read the per-Work cron config and (b)
+/// apply the per-Work gating rules (spec `cron-staggering.md` §4.3).
+/// `schedule_json` is always non-empty/non-NULL for returned rows (the scan
+/// predicate filters out unset Works). `creator_id` is included so the
+/// evaluator can enqueue schedules scoped to the right creator.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct WorkCronRow {
+    /// Primary key (`wrk_...`).
+    pub work_id: String,
+    /// Owning creator — the enqueued schedule's `creator_id`.
+    pub creator_id: String,
+    /// Human slug (`Works/<work_ref>/`); `None` when unset.
+    pub work_ref: Option<String>,
+    /// Raw `schedule_json` blob (always non-empty for returned rows).
+    pub schedule_json: String,
+    /// `works.intake_status` — gate: cron fires only when `== "complete"`.
+    pub intake_status: String,
+    /// `works.runtime_lock_holder` — gate: cron skips when `Some`.
+    pub runtime_lock_holder: Option<String>,
+    /// `works.completion_locked_at` — gate: cron skips when `Some`.
+    pub completion_locked_at: Option<String>,
+}
+
+/// Scan all Works with a non-empty `schedule_json` (V1.50 §4.1).
+///
+/// This is the daemon cron evaluator's read path. It runs on a 1-min tick, so
+/// the query is backed by the partial index
+/// `idx_works_schedule_json_nonempty` (migration `202606180002`). Returns only
+/// the gating + config columns the evaluator needs — not the full
+/// [`WorkRecord`] — to keep the scan lean.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn list_works_with_schedule_json(
+    pool: &SqlitePool,
+) -> Result<Vec<WorkCronRow>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (schedule_json column
+    // + partial index added in the same migration cycle). The WHERE predicate
+    // matches the partial index `idx_works_schedule_json_nonempty`.
+    let rows: Vec<WorkCronRow> = sqlx::query_as(
+        "SELECT work_id, creator_id, work_ref, schedule_json, \
+                intake_status, runtime_lock_holder, completion_locked_at \
+         FROM works \
+         WHERE schedule_json IS NOT NULL AND schedule_json != ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Transactional compare-and-swap write for `works.schedule_json`
+/// (R-V150P0-W5 — TOCTOU-safe variant).
+///
+/// Updates `schedule_json` to `new_json` **only if** the current stored value
+/// equals `expected_current_json` (NULL and empty string are treated as equal
+/// — both mean "unset / use defaults"). Returns `Ok(true)` when the write
+/// applied, `Ok(false)` when the CAS check failed (another writer raced ahead).
+///
+/// This closes the read-modify-write TOCTOU window flagged in T-A P0 qc3
+/// W-004 / R-V150P0-W5. R-V150-WLA-08 (V1.50 P-last WL-A /
+/// cron-brainstorm-write qc1 S-003): the prior wording was internally
+/// contradictory — it first called the daemon-side cron evaluator "the
+/// racing party" against the CLI writer, then admitted the evaluator
+/// "does not write `schedule_json`". The actual race the CAS protects
+/// against is between **two concurrent CLI invocations** (or future
+/// daemon-side `schedule_json` mutators such as the T-A P3
+/// auto-chronology task). The CLI now uses this `_tx` variant in
+/// `handle_set` (replacing the old unconditional `set_schedule_json`);
+/// the T-A P1 cron evaluator is read-only on this column.
+///
+/// The CAS is enforced inside the caller's transaction so the read-check and
+/// the UPDATE are atomic with respect to other writers on the same Work row.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the UPDATE fails, or
+/// `LocalDbError::MissingVersionKey` if the Work row does not exist (zero rows
+/// touched even without the CAS mismatch).
+pub async fn set_schedule_json_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    work_id: &str,
+    expected_current_json: Option<&str>,
+    new_json: &str,
+    now: &str,
+) -> Result<bool, LocalDbError> {
+    // Normalize the expected value: NULL and "" are both "unset" (spec §2.3),
+    // so the CAS treats them as equal. COALESCE collapses NULL → '' for the
+    // comparison. The bound `expected` is also normalized to '' by the caller.
+    let expected_normalized = expected_current_json.unwrap_or("");
+    // SAFETY: UPDATE against works table — runtime query (CAS on schedule_json
+    // inside a caller-supplied transaction; sqlx prepare cache hasn't run for
+    // this statement). The WHERE clause enforces the CAS atomically with the
+    // UPDATE under SQLite's single-writer model.
+    let result = sqlx::query(
+        "UPDATE works SET schedule_json = ?, updated_at = ? \
+         WHERE work_id = ? \
+         AND COALESCE(schedule_json, '') = ?",
+    )
+    .bind(new_json)
+    .bind(now)
+    .bind(work_id)
+    .bind(expected_normalized)
+    .execute(&mut **tx)
+    .await?;
+
+    let rows_affected = result.rows_affected();
+    if rows_affected == 0 {
+        // Distinguish "Work missing" from "CAS mismatch" so callers can retry
+        // vs. surface a not-found error. A missing Work row matches neither the
+        // PK nor the CAS; a CAS mismatch matches the PK but not the expected
+        // value. Re-read to disambiguate.
+        let exists: Option<(String,)> =
+            sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+        if exists.is_none() {
+            return Err(LocalDbError::MissingVersionKey {
+                key: format!("works/{work_id}"),
+            });
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+// ── V1.50 T-A P3 (T1): per-Work auto-chronology opt-in DAOs ──────────────
+
+/// Persist the per-Work auto-chronology opt-in flag (V1.50 §2.1).
+///
+/// Keys by `work_id` (primary key) so callers must resolve `work_ref` →
+/// `work_id` first via [`resolve_work_id_by_ref_or_id`]. When `enabled` is
+/// `false` (the column default), the daemon `auto_chronology_tick` task skips
+/// this Work entirely.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::MissingVersionKey` if the Work does not exist, or
+/// `LocalDbError::Sqlx` if the UPDATE fails.
+pub async fn set_auto_chronology(
+    pool: &SqlitePool,
+    work_id: &str,
+    enabled: bool,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    let result = sqlx::query!(
+        "UPDATE works SET auto_chronology = ?, updated_at = ? WHERE work_id = ?",
+        enabled,
+        now,
+        work_id,
+    )
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
+        });
+    }
+    Ok(())
+}
+
+/// Read the per-Work auto-chronology opt-in flag (V1.50 §2.1).
+///
+/// Returns `false` when the Work does not exist OR the column is unset (both
+/// mean "not opted in"; the column default is `0`/false).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn get_auto_chronology(pool: &SqlitePool, work_id: &str) -> Result<bool, LocalDbError> {
+    let row = sqlx::query_scalar!(
+        r#"SELECT auto_chronology as "auto_chronology!" FROM works WHERE work_id = ?"#,
+        work_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.unwrap_or(false))
+}
+
+/// Row for the daemon auto-chronology scan
+/// ([`list_works_with_auto_chronology`]).
+///
+/// Minimal column set needed to run finish detection (spec §3), locate the
+/// Work's on-disk directory (`work_ref`), and render the volume outline
+/// (`title` / `total_planned_chapters`, spec §4.1 step 3). Mirrors the
+/// lean-scan precedent of [`WorkCronRow`] (V1.50 T-A P1).
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct WorkAutoChronologyRow {
+    /// Primary key (`wrk_...`).
+    pub work_id: String,
+    /// Owning creator — informational; the advance operates per `work_id`.
+    pub creator_id: String,
+    /// Human slug (`Works/<work_ref>/`); `None` when unset.
+    pub work_ref: Option<String>,
+    /// `works.intake_status` — gate: advance only when `== "complete"`.
+    pub intake_status: String,
+    /// `works.runtime_lock_holder` — gate: skip when `Some`.
+    pub runtime_lock_holder: Option<String>,
+    /// `works.completion_locked_at` — gate: skip when `Some` (Work fully
+    /// complete). This also serves as the "last planned volume" terminal guard
+    /// (spec §3.1): there is no `total_planned_volumes` column, so a Work with
+    /// no further volumes is expected to be completion-locked by the author.
+    pub completion_locked_at: Option<String>,
+    /// `works.title` — substituted into the outline template header (spec §4.1
+    /// step 3). Always non-NULL (`title` is a required column on `works`).
+    pub title: String,
+    /// `works.total_planned_chapters` — substituted into the outline template
+    /// (spec §4.1 step 3). `None` when the author has not set it (renders as
+    /// `(unset)`).
+    pub total_planned_chapters: Option<i32>,
+}
+
+/// Scan all Works with `auto_chronology = true` (V1.50 §4.1).
+///
+/// This is the daemon auto-chronology tick's read path. Returns only the
+/// gating + locator columns the evaluator needs — not the full
+/// [`WorkRecord`] — to keep the scan lean (precedent:
+/// [`list_works_with_schedule_json`]).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn list_works_with_auto_chronology(
+    pool: &SqlitePool,
+) -> Result<Vec<WorkAutoChronologyRow>, LocalDbError> {
+    let rows = sqlx::query_as!(
+        WorkAutoChronologyRow,
+        r#"SELECT
+            work_id as "work_id!",
+            creator_id as "creator_id!",
+            work_ref,
+            intake_status as "intake_status!",
+            runtime_lock_holder,
+            completion_locked_at,
+            title as "title!",
+            total_planned_chapters as "total_planned_chapters: i32"
+        FROM works
+        WHERE auto_chronology = 1"#,
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
 pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 

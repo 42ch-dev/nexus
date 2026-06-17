@@ -20,6 +20,20 @@
 //! Read-only functions (`list_inspiration`, `count_inspiration`,
 //! `get_inspiration`) and helpers (`title_to_slug`, `generate_fallback_slug`)
 //! are intentionally not traced.
+//!
+//! # Tracing level intent (R-V146P4-QC3-S2)
+//!
+//! The `tracing::info!` calls on the instrumented mutation paths below are
+//! **intentionally `INFO`-level**, not `DEBUG`. They emit one structured
+//! event per creator-initiated inspiration mutation (create / promote /
+//! archive), so the volume scales with human operator action frequency, not
+//! with row count or daemon tick rate. The intended consumer is a single
+//! author or operator debugging the inspiration pool lifecycle via
+//! `RUST_LOG=nexus_local_db=info`; they are **not** a high-throughput
+//! telemetry stream. Do not downgrade to `DEBUG!` or strip the opaque-ID
+//! fields without coordinating with the observability contract — the
+//! structured fields (`operation`, `item_id`, `creator_id`, `work_id`,
+//! `promoted_work_id`, `rel_path`) are the operator-debugging surface.
 
 use sqlx::{Row, SqlitePool};
 

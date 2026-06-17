@@ -11,7 +11,7 @@ Normative specifications for `work_profile: novel` — layout, presets, quality 
 ## Read order
 
 ```text
-workflow-profile.md     → artifact layout, chapter SSOT, preset gates, completion
+workflow-profile.md     → artifact layout, chapter SSOT, preset gates, completion, cron staggering (§11), auto-chronology (§11.5)
 quality-loop.md         → findings, review presets, rules, Logs, 96h escalation
 author-experience.md    → author path, status UX, remediation copy
 sync-contract.md        → chapter sync module scan rules (companion)
@@ -20,12 +20,14 @@ work-pool.md            → selection + inspiration pools (V1.41)
 manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 ```
 
-**Draft overlays (V1.49 P-last — folded)**:
+**Draft overlays (V1.49 / V1.50 P-last — folded)**:
 
 | Overlay | Merge target | Status |
 | --- | --- | --- |
 | [findings-lifecycle.md](findings-lifecycle.md) | `quality-loop.md` §2 | **Superseded** (V1.49 P-last) |
 | [narrative-indexes.md](narrative-indexes.md) | `workflow-profile.md` §4.6 | **Superseded** (V1.49 P-last) |
+| [cron-staggering.md](../../archived/knowledge/novel-writing/cron-staggering.md) | `workflow-profile.md` §11 | **Superseded** (V1.50 P-last) |
+| [auto-chronology.md](../../archived/knowledge/novel-writing/auto-chronology.md) | `workflow-profile.md` §11.5 | **Superseded** (V1.50 P-last) |
 
 ---
 
@@ -33,7 +35,7 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [workflow-profile.md](workflow-profile.md) | Feature line | Shipped V1.36 → V1.49 |
+| [workflow-profile.md](workflow-profile.md) | Feature line | Shipped V1.36 → V1.50 (§11 cron + auto-chronology) |
 | [quality-loop.md](quality-loop.md) | Feature line | Shipped V1.47 → V1.49 |
 | [author-experience.md](author-experience.md) | Feature line | Shipped V1.49 P2 |
 | [manuscript-audit.md](manuscript-audit.md) | Feature line | Shipped V1.44 |
@@ -52,8 +54,11 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 | Topic | Primary SSOT |
 | --- | --- |
 | `Works/<work_ref>/` layout + chapter frontmatter | `workflow-profile.md` |
+| Per-Work cron staggering (3-role) | `workflow-profile.md` §11 |
+| Per-Work auto-chronology (opt-in) | `workflow-profile.md` §11.5 |
 | Findings lifecycle + review chain | `quality-loop.md` §2 (6-state F6) |
 | F### / E### index files | `workflow-profile.md` §4.6 (5-col schema) |
+| World KB promotion state machine | [entity-scope-model.md §5.5](../entity-scope-model.md#55-world-kb-promotion-state-machine-v150-normative) |
 | Author happy path + remediation copy | `author-experience.md` |
 | On-demand chapter audit | `manuscript-audit.md` |
 | Multi-work completion + locks | `multi-work-lifecycle.md` |

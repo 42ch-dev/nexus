@@ -201,7 +201,16 @@
     "2026-06-17-v1.49-author-desk-ux",
     "2026-06-17-v1.49-serial-reliability",
     "2026-06-17-v1.49-harness-docs-prepare",
-    "2026-06-17-v1.49-hygiene-and-closeout"
+    "2026-06-17-v1.49-hygiene-and-closeout",
+    "2026-06-18-v1.50-harness-docs-prepare",
+    "2026-06-18-v1.50-cron-foundation",
+    "2026-06-18-v1.50-cron-brainstorm-write",
+    "2026-06-18-v1.50-cron-review-staggering",
+    "2026-06-18-v1.50-auto-chronology",
+    "2026-06-18-v1.50-kb-editor-cli",
+    "2026-06-18-v1.50-kb-auto-promotion",
+    "2026-06-18-v1.50-kb-refreshable-scan",
+    "2026-06-18-v1.50-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -295,10 +304,26 @@
       "carry_forward_v150": "7 residuals: 1 CLI gap (R-V149P0-01), 1 overlay reconciliation (R-V149P1-01), 1 flake (R-V149P1-02), 4 V1.46 lows (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2)",
       "pr": "PR #62",
       "note": "Merged to main at d160379ff5a6 via PR #62 on 2026-06-17. Integration branch iteration/v1.49 retired."
+    },
+    "v1.50": {
+      "compass": "v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1",
+      "integration_branch": "iteration/v1.50",
+      "pr": null,
+      "merged_at": null,
+      "plans_total": 9,
+      "plans_implemented": 9,
+      "residual_findings_open": 0,
+      "residual_findings_closed": 16,
+      "decisions_locked": 18,
+      "carry_forwards_v151": 8,
+      "qc_tri_review_pass_rate": "3/3 per plan (24/24 total)",
+      "highlight": "A+B mixed primary axis: novel-writing cron staggering (T-A 0-3) + World KB complete loop (T-B 0-2). 8 migrations landed (202606180001..202606180005 + 3 schema/TS) + 6 V1.49 carry-forwards. cron out-of-band, do not touch driver_schedule_id. review-time KB extraction via preset_id hook. auto-chronology atomicity reorder: DB tx first, FS outline write after.",
+      "note": "P-last T1-T7 Done: T1-T2 (carry-forwards + WL-A) Done; T3 (overlay promotion) Done; T4 (Profile B) Done; T5 (tech_debt rollup) Done; T6 (PR) pending; T7 (PM signoff) Done."
     }
   },
   "metadata": {
-    "last_updated": "2026-06-15 (V1.47 P-last closeout)",
-    "v1_47_iteration_complete": "yes — ready for PR to main"
+    "last_updated": "2026-06-18 (V1.50 P-last closeout)",
+    "v1_47_iteration_complete": "yes — ready for PR to main",
+    "v1_50_iteration_complete": "yes — ready for PR to main"
   }
 }
