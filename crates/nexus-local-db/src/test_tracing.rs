@@ -64,14 +64,15 @@ pub(crate) fn capture_layer() -> (CaptureLayer, Arc<Mutex<Vec<String>>>) {
 /// Compose a `tracing` subscriber wired to `layer` for use with
 /// `tracing::subscriber::set_default`. The composed subscriber owns its data
 /// (Registry + `Arc`-backed layer) and is `Send + Sync + 'static`.
+///
+/// R-V146P4-QC1-S2: uses the idiomatic `registry().with(layer)` builder form
+/// (canonic per `tracing-subscriber` docs) instead of the verbose UFCS
+/// `<Registry as SubscriberExt>::with(Registry::default(), layer)` shape.
 pub(crate) fn subscriber_with(
     layer: CaptureLayer,
 ) -> impl tracing::Subscriber + Send + Sync + 'static {
     use tracing_subscriber::layer::SubscriberExt;
-    <tracing_subscriber::Registry as tracing_subscriber::layer::SubscriberExt>::with(
-        tracing_subscriber::registry::Registry::default(),
-        layer,
-    )
+    tracing_subscriber::registry().with(layer)
 }
 
 /// Assert at least one captured INFO event contains every needle in `needles`.
