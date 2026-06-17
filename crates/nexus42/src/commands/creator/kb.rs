@@ -9,6 +9,9 @@ use crate::paths;
 use nexus_kb::KbStore;
 use std::path::PathBuf;
 
+mod rescan;
+pub use rescan::{kb_rescan, RescanReport};
+
 /// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb).
 ///
 /// Per entity-scope-model §5.3, `creator kb --scope work` is the **CLI local work KB index** —
@@ -133,6 +136,24 @@ pub enum KbCommand {
         #[arg(long)]
         job_id: Option<String>,
     },
+
+    /// Re-scan a chapter's current text and sync KB extract candidates + KB rows.
+    ///
+    /// V1.50 T-B P2. `creator kb rescan <work_ref>/<chapter>` re-runs the
+    /// review-time heuristic over the chapter's current prose, idempotently
+    /// upserts `kb_extract_jobs` candidates, refreshes confirmed `KeyBlock`
+    /// bodies so KB rows reflect the current text, and reports the diff.
+    /// Cross-author attempts return `403` (`WORLD_KB_FORBIDDEN`).
+    Rescan {
+        /// `<work_ref>/<chapter>` — e.g. `my-novel/05`
+        target: String,
+        /// Show what would change without writing
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Run KB subcommand dispatcher.
@@ -200,6 +221,11 @@ pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
             .await
         }
         KbCommand::ExtractStatus { job_id } => kb_extract_status(config, job_id.as_deref()).await,
+        KbCommand::Rescan {
+            target,
+            dry_run,
+            json,
+        } => rescan::kb_rescan(config, &target, dry_run, json).await,
     }
 }
 
