@@ -9,8 +9,12 @@ use crate::paths;
 use nexus_kb::KbStore;
 use std::path::PathBuf;
 
-mod rescan;
-pub use rescan::{kb_rescan, RescanReport};
+/// Refreshable-scan submodule (V1.50 T-B P2).
+///
+/// `pub` so integration tests under `tests/` can drive `kb_rescan_hermetic`
+/// against a fresh temp DB, mirroring the `world::kb` testability pattern.
+pub mod rescan;
+pub use rescan::{kb_rescan, kb_rescan_hermetic, RescanReport};
 
 /// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb).
 ///

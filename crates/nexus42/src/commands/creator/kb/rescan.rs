@@ -117,6 +117,14 @@ pub async fn kb_rescan(config: &CliConfig, target: &str, dry_run: bool, json: bo
 /// Takes an explicit pool, creator, and optional workspace dir so integration
 /// tests can drive it without `$HOME` or a daemon. `workspace_dir` being
 /// `None` surfaces a clean error (the heuristic needs chapter prose on disk).
+///
+/// # Errors
+///
+/// Returns [`CliError::Other`] for a malformed `<work_ref>/<chapter>` target,
+/// a missing work/chapter/body file, a work without a bound `world_id`, or DB
+/// / heuristic / KB-refresh failures. Returns [`CliError::Api`] with status
+/// `403` (`WORLD_KB_FORBIDDEN`) when the active creator does not own the work's
+/// world (AC4).
 // CLI helper — single-threaded tokio; Send not required.
 #[allow(clippy::future_not_send)]
 pub async fn kb_rescan_hermetic(
@@ -250,18 +258,24 @@ async fn sync_candidates(
         };
         match outcome {
             UpsertOutcome::Inserted(_) => {
-                report.candidates_inserted.push(candidate.canonical_name_guess.clone());
+                report
+                    .candidates_inserted
+                    .push(candidate.canonical_name_guess.clone());
             }
             UpsertOutcome::Updated(_) => {
-                report.candidates_updated.push(candidate.canonical_name_guess.clone());
+                report
+                    .candidates_updated
+                    .push(candidate.canonical_name_guess.clone());
             }
             UpsertOutcome::Unchanged(_) => report.candidates_unchanged += 1,
         }
     }
 
     // Stale pending candidates (sourced from this chapter, no longer present).
-    let new_names: std::collections::HashSet<&str> =
-        candidates.iter().map(|c| c.canonical_name_guess.as_str()).collect();
+    let new_names: std::collections::HashSet<&str> = candidates
+        .iter()
+        .map(|c| c.canonical_name_guess.as_str())
+        .collect();
     for old in old_for_chapter {
         if old.promotion_status != "pending" {
             continue;
@@ -314,21 +328,23 @@ async fn sync_kb_rows(
             .map_err(map_kb_sync_error)?
     };
     report.kb_inserted_advisory = diff.inserted;
-    report.kb_updated = diff.updated.iter().map(|u| u.canonical_name.clone()).collect();
+    report.kb_updated = diff
+        .updated
+        .iter()
+        .map(|u| u.canonical_name.clone())
+        .collect();
     report.kb_removed_advisory = diff.removed;
     Ok(())
 }
 
 /// Parse `<work_ref>/<chapter>` into `(work_ref, chapter)`.
 fn parse_target(target: &str) -> Result<(String, i32)> {
-    let (work_ref, chapter_str) = target
-        .rsplit_once('/')
-        .ok_or_else(|| {
-            CliError::Other(format!(
-                "Invalid target '{target}'. \
+    let (work_ref, chapter_str) = target.rsplit_once('/').ok_or_else(|| {
+        CliError::Other(format!(
+            "Invalid target '{target}'. \
                  Expected <work_ref>/<chapter> (e.g. my-novel/05)."
-            ))
-        })?;
+        ))
+    })?;
     if work_ref.is_empty() {
         return Err(CliError::Other(format!(
             "Invalid target '{target}': work_ref is empty."
@@ -348,28 +364,30 @@ struct ResolvedWork {
     world_id: Option<String>,
 }
 
-/// Resolve `<work_ref>` → Work for the active creator.
+/// Resolve `<work_ref>` → Work.
 ///
-/// Matches `work_ref`, `story_ref`, or `work_id` (most flexible for authors).
+/// Matches `work_ref`, `story_ref`, or `work_id` globally (the author typed a
+/// valid ref). Authz is enforced later by [`require_world_owner`] on **world**
+/// ownership (entity-scope-model §5.5.3 / T-B P0/P1), not at work resolution —
+/// so a cross-author attempt resolves the work and then surfaces `403` at the
+/// world gate rather than a misleading "not found".
 async fn resolve_work(
     pool: &SqlitePool,
-    creator_id: &str,
+    _creator_id: &str,
     work_ref: &str,
 ) -> Result<Option<ResolvedWork>> {
     // SAFETY: SELECT against the known works table schema; runtime query
     // (consistent with works.rs using runtime queries for this table).
-    let row: Option<(String, Option<String>)> =
-        sqlx::query_as(
-            "SELECT work_id, world_id FROM works \
-             WHERE creator_id = ? AND (work_ref = ? OR story_ref = ? OR work_id = ?) LIMIT 1",
-        )
-        .bind(creator_id)
-        .bind(work_ref)
-        .bind(work_ref)
-        .bind(work_ref)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| CliError::Other(format!("Failed to resolve work: {e}")))?;
+    let row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT work_id, world_id FROM works \
+             WHERE work_ref = ? OR story_ref = ? OR work_id = ? LIMIT 1",
+    )
+    .bind(work_ref)
+    .bind(work_ref)
+    .bind(work_ref)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| CliError::Other(format!("Failed to resolve work: {e}")))?;
     Ok(row.map(|(work_id, world_id)| ResolvedWork { work_id, world_id }))
 }
 
@@ -380,16 +398,15 @@ async fn read_chapter_prose(
     chapter: i32,
     ws_dir: &std::path::Path,
 ) -> Result<String> {
-    let chapter_row =
-        nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, 1)
-            .await
-            .map_err(|e| CliError::Other(format!("Failed to load chapter row: {e}")))?
-            .ok_or_else(|| {
-                CliError::Other(format!(
-                    "Chapter {chapter} for work '{work_id}' is not seeded. \
+    let chapter_row = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, 1)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to load chapter row: {e}")))?
+        .ok_or_else(|| {
+            CliError::Other(format!(
+                "Chapter {chapter} for work '{work_id}' is not seeded. \
                      Expected a work_chapters row for volume 1."
-                ))
-            })?;
+            ))
+        })?;
     let body_path_rel = chapter_row.body_path.ok_or_else(|| {
         CliError::Other(format!(
             "Chapter {chapter} has no body_path; nothing to scan."
@@ -501,9 +518,7 @@ fn parse_candidate_bodies(candidates: &[KbCandidate]) -> Result<Vec<(String, Key
 fn map_kb_sync_error(e: nexus_kb::KbStoreError) -> CliError {
     use nexus_kb::KbStoreError as E;
     match e {
-        E::Validation(ve) => {
-            CliError::Other(format!("ValidationError refreshing KB rows: {ve}"))
-        }
+        E::Validation(ve) => CliError::Other(format!("ValidationError refreshing KB rows: {ve}")),
         E::ValidationLegacy(msg) => {
             CliError::Other(format!("ValidationError refreshing KB rows: {msg}"))
         }
@@ -514,9 +529,12 @@ fn map_kb_sync_error(e: nexus_kb::KbStoreError) -> CliError {
 /// Print the rescan report (human-readable by default, JSON with `--json`).
 fn print_report(report: &RescanReport, json: bool) {
     if json {
-        println!("{}", serde_json::to_string_pretty(report).unwrap_or_else(|e| {
-            format!("{{\"error\":\"failed to serialize report: {e}\"}}")
-        }));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(report).unwrap_or_else(|e| {
+                format!("{{\"error\":\"failed to serialize report: {e}\"}}")
+            })
+        );
         return;
     }
 

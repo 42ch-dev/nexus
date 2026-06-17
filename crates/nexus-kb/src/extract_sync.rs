@@ -61,7 +61,7 @@ pub struct KbSyncDiff {
 impl KbSyncDiff {
     /// Returns `true` when the diff contains no changes.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.inserted.is_empty() && self.updated.is_empty() && self.removed.is_empty()
     }
 }
@@ -167,7 +167,7 @@ where
         };
         let new_body = new_extracted
             .iter()
-            .find(|(n, _)| n.to_ascii_lowercase() == old_kb.canonical_name.to_ascii_lowercase())
+            .find(|(n, _)| n.eq_ignore_ascii_case(&old_kb.canonical_name))
             .map(|(_, b)| b.clone());
 
         let Some(new_body) = new_body else {
@@ -242,7 +242,11 @@ mod tests {
         let old = vec![confirmed_block(world, "Lin Xia", body_with("v1"))];
         let new = vec![("lin xia".to_string(), body_with("v2"))];
         let diff = compute_kb_diff(&old, &new);
-        assert_eq!(diff.updated.len(), 1, "case-insensitive match should update");
+        assert_eq!(
+            diff.updated.len(),
+            1,
+            "case-insensitive match should update"
+        );
     }
 
     #[test]
@@ -277,12 +281,17 @@ mod tests {
         let old_rows = store.list_by_world(world).await.unwrap();
 
         let new = vec![("Lin Xia".to_string(), body_with("v2-edited"))];
-        let diff = diff_and_apply(&store, world, &old_rows, &new).await.unwrap();
+        let diff = diff_and_apply(&store, world, &old_rows, &new)
+            .await
+            .unwrap();
         assert_eq!(diff.updated.len(), 1);
 
         // The stored body was refreshed.
         let after = store.list_by_world(world).await.unwrap();
-        assert_eq!(after[0].body.as_ref().unwrap().summary.as_deref(), Some("v2-edited"));
+        assert_eq!(
+            after[0].body.as_ref().unwrap().summary.as_deref(),
+            Some("v2-edited")
+        );
     }
 
     #[tokio::test]
@@ -296,7 +305,9 @@ mod tests {
         let old_rows = store.list_by_world(world).await.unwrap();
 
         let new = vec![("Lin Xia".to_string(), body_with("same"))];
-        let diff = diff_and_apply(&store, world, &old_rows, &new).await.unwrap();
+        let diff = diff_and_apply(&store, world, &old_rows, &new)
+            .await
+            .unwrap();
         assert!(diff.is_empty(), "no body change → empty diff");
     }
 }
