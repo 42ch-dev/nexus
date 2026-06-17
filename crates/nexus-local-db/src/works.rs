@@ -1642,9 +1642,10 @@ pub async fn get_auto_chronology(pool: &SqlitePool, work_id: &str) -> Result<boo
 /// Row for the daemon auto-chronology scan
 /// ([`list_works_with_auto_chronology`]).
 ///
-/// Minimal column set needed to run finish detection (spec §3) and locate the
-/// Work's on-disk directory (`work_ref`). Mirrors the lean-scan precedent of
-/// [`WorkCronRow`] (V1.50 T-A P1).
+/// Minimal column set needed to run finish detection (spec §3), locate the
+/// Work's on-disk directory (`work_ref`), and render the volume outline
+/// (`title` / `total_planned_chapters`, spec §4.1 step 3). Mirrors the
+/// lean-scan precedent of [`WorkCronRow`] (V1.50 T-A P1).
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct WorkAutoChronologyRow {
     /// Primary key (`wrk_...`).
@@ -1662,6 +1663,13 @@ pub struct WorkAutoChronologyRow {
     /// (spec §3.1): there is no `total_planned_volumes` column, so a Work with
     /// no further volumes is expected to be completion-locked by the author.
     pub completion_locked_at: Option<String>,
+    /// `works.title` — substituted into the outline template header (spec §4.1
+    /// step 3). Always non-NULL (`title` is a required column on `works`).
+    pub title: String,
+    /// `works.total_planned_chapters` — substituted into the outline template
+    /// (spec §4.1 step 3). `None` when the author has not set it (renders as
+    /// `(unset)`).
+    pub total_planned_chapters: Option<i32>,
 }
 
 /// Scan all Works with `auto_chronology = true` (V1.50 §4.1).
@@ -1682,7 +1690,8 @@ pub async fn list_works_with_auto_chronology(
     // Works only.
     let rows: Vec<WorkAutoChronologyRow> = sqlx::query_as(
         "SELECT work_id, creator_id, work_ref, intake_status, \
-                runtime_lock_holder, completion_locked_at \
+                runtime_lock_holder, completion_locked_at, title, \
+                total_planned_chapters \
          FROM works \
          WHERE auto_chronology = 1",
     )
