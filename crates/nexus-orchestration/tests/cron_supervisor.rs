@@ -74,7 +74,12 @@ async fn set_schedule(pool: &SqlitePool, work_id: &str, json: &str) {
 }
 
 /// Build a per-Work schedule blob (spec §2.1 shape).
-fn schedule_blob(brainstorm_cron: &str, write_cron: &str, brainstorm_on: bool, write_on: bool) -> String {
+fn schedule_blob(
+    brainstorm_cron: &str,
+    write_cron: &str,
+    brainstorm_on: bool,
+    write_on: bool,
+) -> String {
     serde_json::json!({
         "tz": "UTC",
         "roles": {
@@ -167,12 +172,13 @@ async fn cron_no_match_does_not_enqueue() {
     .await;
 
     // Pick a `now` that does NOT match either cron (e.g. 2026-06-19 05:30 UTC).
-    let now = chrono::Utc
-        .with_ymd_and_hms(2026, 6, 19, 5, 30, 0)
-        .unwrap();
+    let now = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 5, 30, 0).unwrap();
     let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
 
-    assert_eq!(summary.fired, 0, "no role should fire at 05:30: {summary:?}");
+    assert_eq!(
+        summary.fired, 0,
+        "no role should fire at 05:30: {summary:?}"
+    );
     assert_eq!(
         count_schedules(&pool, "wrk_nomatch", "novel-brainstorm").await,
         0
@@ -203,10 +209,7 @@ async fn cron_fires_both_roles_same_minute() {
         count_schedules(&pool, "wrk_both", "novel-brainstorm").await,
         1
     );
-    assert_eq!(
-        count_schedules(&pool, "wrk_both", "novel-write").await,
-        1
-    );
+    assert_eq!(count_schedules(&pool, "wrk_both", "novel-write").await, 1);
 }
 
 /// A disabled role does not fire even when its cron matches.
@@ -224,7 +227,10 @@ async fn cron_skips_disabled_role() {
     let now = chrono::Utc::now();
     let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
 
-    assert_eq!(summary.fired, 0, "disabled roles must not fire: {summary:?}");
+    assert_eq!(
+        summary.fired, 0,
+        "disabled roles must not fire: {summary:?}"
+    );
     assert_eq!(summary.skipped_no_match, 2);
 }
 
@@ -492,7 +498,10 @@ async fn set_schedule_json_tx_concurrent_writers_serialise() {
     )
     .await
     .unwrap();
-    assert!(applied_a2, "A's retried CAS with fresh pre-image must apply");
+    assert!(
+        applied_a2,
+        "A's retried CAS with fresh pre-image must apply"
+    );
     tx2.commit().await.unwrap();
 
     let stored = works::get_schedule_json(&pool, "wrk_cas_race")
@@ -566,7 +575,10 @@ async fn cron_skips_malformed_schedule_json() {
     let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
 
     assert_eq!(summary.fired, 0);
-    assert_eq!(summary.skipped_parse_error, 1, "malformed blob → parse error");
+    assert_eq!(
+        summary.skipped_parse_error, 1,
+        "malformed blob → parse error"
+    );
 }
 
 /// A Work with no schedule_json at all is not even scanned (the partial index
@@ -581,7 +593,11 @@ async fn cron_ignores_works_without_schedule_json() {
     let now = chrono::Utc::now();
     let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
 
-    assert_eq!(summary.total_evaluated(), 0, "NULL schedule_json not scanned");
+    assert_eq!(
+        summary.total_evaluated(),
+        0,
+        "NULL schedule_json not scanned"
+    );
     assert_eq!(summary, CronFireSummary::default());
 }
 

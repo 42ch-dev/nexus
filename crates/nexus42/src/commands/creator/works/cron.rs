@@ -650,9 +650,10 @@ async fn handle_set(
 
     // R-V150P0-W5: CAS write inside a transaction. `stored` is the expected
     // pre-image; the UPDATE only applies if the row still matches.
-    let mut tx = pool.begin().await.map_err(|e| {
-        CliError::Other(format!("schedule_json transaction begin failed: {e}"))
-    })?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| CliError::Other(format!("schedule_json transaction begin failed: {e}")))?;
     let applied = nexus_local_db::works::set_schedule_json_tx(
         &mut tx,
         &work_id,
@@ -672,9 +673,9 @@ async fn handle_set(
                 .to_string(),
         ));
     }
-    tx.commit().await.map_err(|e| {
-        CliError::Other(format!("schedule_json transaction commit failed: {e}"))
-    })?;
+    tx.commit()
+        .await
+        .map_err(|e| CliError::Other(format!("schedule_json transaction commit failed: {e}")))?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&schedule)?);

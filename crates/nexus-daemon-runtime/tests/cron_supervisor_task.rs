@@ -117,10 +117,11 @@ async fn run_one_tick_no_match_is_noop() {
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
     cron_supervisor::run_one_tick(&pool, &supervisor).await;
 
-    let count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM creator_schedules WHERE work_id = 'wrk_daemon_idle'")
-            .fetch_one(&*pool)
-            .await
-            .unwrap();
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_schedules WHERE work_id = 'wrk_daemon_idle'",
+    )
+    .fetch_one(&*pool)
+    .await
+    .unwrap();
     assert_eq!(count, 0, "non-matching cron must not enqueue");
 }
