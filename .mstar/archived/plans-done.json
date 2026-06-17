@@ -241,8 +241,8 @@
       "version": "v1.49",
       "name": "Novel Narrative Maturity & Author Desk",
       "compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
-      "shipped_at": "TBD",
-      "merge_commit": "TBD",
+      "shipped_at": "2026-06-17",
+      "merge_commit": "d160379ff5a635c38d8b91ef072688121851778c",
       "plan_ids": [
         "2026-06-17-v1.49-harness-docs-prepare",
         "2026-06-17-v1.49-findings-lifecycle",
@@ -292,7 +292,9 @@
         "open_v150_count": 7
       },
       "wire_contract_changes": "None (per compass §0.1 #8)",
-      "carry_forward_v150": "7 residuals: 1 CLI gap (R-V149P0-01), 1 overlay reconciliation (R-V149P1-01), 1 flake (R-V149P1-02), 4 V1.46 lows (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2)"
+      "carry_forward_v150": "7 residuals: 1 CLI gap (R-V149P0-01), 1 overlay reconciliation (R-V149P1-01), 1 flake (R-V149P1-02), 4 V1.46 lows (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2)",
+      "pr": "PR #62",
+      "note": "Merged to main at d160379ff5a6 via PR #62 on 2026-06-17. Integration branch iteration/v1.49 retired."
     }
   },
   "metadata": {

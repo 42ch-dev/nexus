@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-18T02:00:00+08:00",
+  "updated_at": "2026-06-17T12:00:00+08:00",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -25,9 +25,10 @@
     "pre_iteration_hotfix": null,
     "latest_ship": {
       "iteration": "v1.49",
-      "merge_commit": "TBD — PR iteration/v1.49 → main to be opened by PM",
+      "merge_commit": "d160379ff5a635c38d8b91ef072688121851778c",
       "compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
-      "shipped_at": "TBD"
+      "shipped_at": "2026-06-17",
+      "pr": "PR #62"
     },
     "tech_debt_summary": {
       "updated_at": "2026-06-18",
@@ -425,5 +426,6 @@
       }
     ]
   },
-  "v1_49_iteration_complete": true
+  "v1_49_iteration_complete": true,
+  "v1_49_status": "SHIPPED 2026-06-17 — PR #62 merged at d160379ff5a6; all 6 V1.49 plans Done; 19 residuals archived; 7 carry-forward to V1.50"
 }
