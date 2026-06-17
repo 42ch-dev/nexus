@@ -131,10 +131,7 @@ pub fn render_volume_outline(
     total_planned_chapters: Option<i32>,
     generated_at: &str,
 ) -> String {
-    let total_str = total_planned_chapters.map_or_else(
-        || "(unset)".to_string(),
-        |n| n.to_string(),
-    );
+    let total_str = total_planned_chapters.map_or_else(|| "(unset)".to_string(), |n| n.to_string());
     VOLUME_OUTLINE_TMPL
         .replace("{{work_id}}", work_id)
         .replace("{{work_ref}}", work_ref)
@@ -268,6 +265,12 @@ async fn load_row_for_manual(
 /// `chapter_count` seeds that many `not_started` rows for `next_volume` inside
 /// the transaction (0 → no rows; placeholder-outline path). `trigger` is
 /// recorded in the log. `title`/`total_planned_chapters` feed the template.
+//
+// rationale: the 8 Work-specific inputs are read together from one row; packing
+// them into a struct would duplicate the WorkAutoChronologyRow shape without
+// clarifying the call sites (auto vs manual differ only in how the row is
+// resolved, not in what the advance needs).
+#[allow(clippy::too_many_arguments)]
 async fn perform_advance(
     pool: &SqlitePool,
     workspace_dir: &Path,
@@ -297,8 +300,15 @@ async fn perform_advance(
     }
 
     // Step 1+2 (spec §4.1): render + atomic outline write.
-    let rendered =
-        render_volume_outline(work_id, work_ref, title, prev_volume, next_volume, total_planned_chapters, &now);
+    let rendered = render_volume_outline(
+        work_id,
+        work_ref,
+        title,
+        prev_volume,
+        next_volume,
+        total_planned_chapters,
+        &now,
+    );
     if let Some(parent) = outline.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -312,7 +322,12 @@ async fn perform_advance(
         .map_err(nexus_local_db::LocalDbError::from)?;
     if seeded > 0 {
         work_chapters::seed_volume_chapters_tx(
-            &mut tx, work_id, work_ref, next_volume, seeded, &now,
+            &mut tx,
+            work_id,
+            work_ref,
+            next_volume,
+            seeded,
+            &now,
         )
         .await?;
     }
@@ -375,7 +390,11 @@ async fn advance_auto(
 
     // Gate 1: intake complete.
     if row.intake_status != "complete" {
-        return Ok(skip(work_id, SkipReason::IntakeIncomplete, "intake incomplete"));
+        return Ok(skip(
+            work_id,
+            SkipReason::IntakeIncomplete,
+            "intake incomplete",
+        ));
     }
     // Gate 2: no runtime lock.
     if row.runtime_lock_holder.is_some() {
@@ -383,14 +402,26 @@ async fn advance_auto(
     }
     // Gate 3: not completion-locked (terminal "last planned volume" guard).
     if row.completion_locked_at.is_some() {
-        return Ok(skip(work_id, SkipReason::CompletionLocked, "work completion-locked"));
+        return Ok(skip(
+            work_id,
+            SkipReason::CompletionLocked,
+            "work completion-locked",
+        ));
     }
     // Gate 4: current volume fully finalized.
     let Some(prev_volume) = work_chapters::current_volume(pool, work_id).await? else {
-        return Ok(skip(work_id, SkipReason::VolumeNotFinalized, "no chapters seeded"));
+        return Ok(skip(
+            work_id,
+            SkipReason::VolumeNotFinalized,
+            "no chapters seeded",
+        ));
     };
     if !work_chapters::is_volume_fully_finalized(pool, work_id, prev_volume).await? {
-        return Ok(skip(work_id, SkipReason::VolumeNotFinalized, "volume not fully finalized"));
+        return Ok(skip(
+            work_id,
+            SkipReason::VolumeNotFinalized,
+            "volume not fully finalized",
+        ));
     }
 
     let next_volume = prev_volume + 1;
@@ -439,7 +470,7 @@ pub async fn advance_manual(
     let work_ref = row.work_ref.clone().unwrap_or_else(|| work_id.to_string());
     let prev_volume = work_chapters::current_volume(pool, work_id)
         .await?
-        .unwrap_or(next_volume.saturating_sub(1).max(0));
+        .unwrap_or_else(|| next_volume.saturating_sub(1).max(0));
 
     perform_advance(
         pool,
@@ -475,16 +506,16 @@ pub async fn run_one_tick(pool: &SqlitePool, workspace_dir: &Path) {
     for row in &rows {
         match advance_auto(pool, workspace_dir, row).await {
             Ok(AdvanceOutcome::Advanced {
-                next_volume, chapters_seeded, ..
+                next_volume,
+                chapters_seeded,
+                ..
             }) => tracing::info!(
                 work_id = %row.work_id,
                 next_volume,
                 chapters_seeded,
                 "auto-chronology tick: advanced"
             ),
-            Ok(AdvanceOutcome::Skipped {
-                reason, ..
-            }) => tracing::debug!(
+            Ok(AdvanceOutcome::Skipped { reason, .. }) => tracing::debug!(
                 work_id = %row.work_id,
                 reason = ?reason,
                 "auto-chronology tick: skipped"
@@ -610,10 +641,7 @@ mod tests {
 
     #[test]
     fn now_utc_date_extracts_yyyy_mm_dd() {
-        assert_eq!(
-            now_utc_date("2026-06-18T10:00:00+00:00"),
-            "2026-06-18"
-        );
+        assert_eq!(now_utc_date("2026-06-18T10:00:00+00:00"), "2026-06-18");
     }
 
     #[test]

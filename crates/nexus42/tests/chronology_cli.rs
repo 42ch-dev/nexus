@@ -89,7 +89,9 @@ async fn chronology_advance_round_trip() {
     // Outline created at the spec path layout.
     let outline = outline_path(ws.path(), "seed-ref", 2);
     assert!(outline.exists(), "advance must create the outline");
-    assert!(std::fs::read_to_string(&outline).unwrap().contains("Volume 2 Outline"));
+    assert!(std::fs::read_to_string(&outline)
+        .unwrap()
+        .contains("Volume 2 Outline"));
 
     // Chapters seeded in the DB.
     let vol2_count: i64 = sqlx::query_scalar(

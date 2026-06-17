@@ -227,9 +227,7 @@ async fn handle_advance(
                     "Advanced Work {work_id} (ref: {work_ref}) to volume {next_volume} \
                      (from volume {prev_volume}); chapters seeded: {chapters_seeded}."
                 );
-                println!(
-                    "  Outline: Works/{work_ref}/Outlines/volume-{next_volume}-outline.md"
-                );
+                println!("  Outline: Works/{work_ref}/Outlines/volume-{next_volume}-outline.md");
                 println!(
                     "  Fill the outline, then seed chapters if needed: \
                      `creator works chronology advance {work_ref} --volume {next_volume} \

@@ -129,12 +129,20 @@ fn config_env_override_in_minutes() {
     // Invalid value falls back to default.
     std::env::set_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN", "garbage");
     let cfg = AutoChronologyConfig::from_env();
-    assert_eq!(cfg.interval.as_secs(), 5 * 60, "invalid env falls back to default");
+    assert_eq!(
+        cfg.interval.as_secs(),
+        5 * 60,
+        "invalid env falls back to default"
+    );
     std::env::remove_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN");
 
     // Zero is rejected (would busy-loop) → default.
     std::env::set_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN", "0");
     let cfg = AutoChronologyConfig::from_env();
-    assert_eq!(cfg.interval.as_secs(), 5 * 60, "zero interval falls back to default");
+    assert_eq!(
+        cfg.interval.as_secs(),
+        5 * 60,
+        "zero interval falls back to default"
+    );
     std::env::remove_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN");
 }
