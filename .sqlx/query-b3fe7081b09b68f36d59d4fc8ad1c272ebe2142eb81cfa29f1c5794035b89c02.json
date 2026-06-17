@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(volume) as \"volume: i32\" FROM work_chapters WHERE work_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "volume: i32",
+        "ordinal": 0,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "b3fe7081b09b68f36d59d4fc8ad1c272ebe2142eb81cfa29f1c5794035b89c02"
+}
