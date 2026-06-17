@@ -609,10 +609,14 @@ async fn handle_set(
 ) -> Result<()> {
     let work_id = resolve_work_id(pool, creator_id, workspace_slug, work_ref).await?;
 
-    // Base = current stored schedule (or defaults if unset).
-    // TODO(V1.50-T-A-P1): see R-V150P0-W5 — get→apply→set is a read-modify-write
-    // with a TOCTOU window. Acceptable for single-user CLI at P0; the T-A P1
-    // daemon writer needs a transactional / CAS variant to avoid lost updates.
+    // R-V150P0-W5 (resolved in T-A P1): transactional compare-and-swap write.
+    // The previous path (`get → apply → set`) was an unconditional
+    // read-modify-write with a TOCTOU window. The daemon-side cron evaluator
+    // (T-A P1) is the racing party. Both writers now go through the CAS-guarded
+    // `set_schedule_json_tx`: the CLI reads `stored`, computes the new blob,
+    // then writes only if the row still holds `stored`. A CAS mismatch means
+    // another writer raced ahead — surface a clear retry error instead of a
+    // silent lost update.
     let stored = nexus_local_db::works::get_schedule_json(pool, &work_id).await?;
     let base = resolve_schedule(stored.as_deref());
 
@@ -643,7 +647,34 @@ async fn handle_set(
     let schedule = apply_set_args(base, &effective_args)?;
     let blob = schedule.to_json_string()?;
     let now = chrono::Utc::now().to_rfc3339();
-    nexus_local_db::works::set_schedule_json(pool, &work_id, &blob, &now).await?;
+
+    // R-V150P0-W5: CAS write inside a transaction. `stored` is the expected
+    // pre-image; the UPDATE only applies if the row still matches.
+    let mut tx = pool.begin().await.map_err(|e| {
+        CliError::Other(format!("schedule_json transaction begin failed: {e}"))
+    })?;
+    let applied = nexus_local_db::works::set_schedule_json_tx(
+        &mut tx,
+        &work_id,
+        stored.as_deref(),
+        &blob,
+        &now,
+    )
+    .await
+    .map_err(|e| CliError::Other(format!("schedule_json CAS write failed: {e}")))?;
+    if !applied {
+        // CAS mismatch — another writer (daemon cron evaluator, or a concurrent
+        // CLI) raced ahead. Roll back and surface a retry hint.
+        let _ = tx.rollback().await;
+        return Err(CliError::Config(
+            "schedule_json changed by another writer between read and write; \
+             re-run `creator works cron set` to re-apply against the latest config"
+                .to_string(),
+        ));
+    }
+    tx.commit().await.map_err(|e| {
+        CliError::Other(format!("schedule_json transaction commit failed: {e}"))
+    })?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&schedule)?);

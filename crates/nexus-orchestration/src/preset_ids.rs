@@ -35,9 +35,34 @@ pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
 /// normative preset table.
 pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
 
+/// Cron-triggered `brainstorm` role preset id — `novel-brainstorm` (V1.50 T-A P1).
+///
+/// The daemon-side cron evaluator (`schedule::cron_supervisor`) enqueues a
+/// pending Schedule with this preset_id when the per-Work `brainstorm` role
+/// cron fires (spec `cron-staggering.md` §2.1 / §4.1). The existing
+/// `ScheduleSupervisor::tick()` then admits it; the existing executor runs it.
+/// Out-of-band fire (does NOT touch `driver_schedule_id`), mirroring
+/// `enqueue_review_master_schedule`.
+pub const NOVEL_BRAINSTORM_PRESET_ID: &str = "novel-brainstorm";
+
+/// Cron-triggered `write` role preset id — `novel-write` (V1.50 T-A P1).
+///
+/// Enqueued by the cron evaluator when the per-Work `write` role cron fires
+/// (spec `cron-staggering.md` §2.1 / §4.1). Out-of-band like brainstorm.
+///
+/// **Note (R-V150P1CRONBW-01):** the `novel-write` embedded preset is not yet
+/// authored as of T-A P1; the cron evaluator enqueues the correct preset_id
+/// string per spec, and the schedule is persisted + admitted normally, but the
+/// executor will fail to load the preset until it is authored in a follow-up
+/// plan. This is a preset-authoring gap, not an evaluator gap.
+pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
+
 #[cfg(test)]
 mod tests {
-    use super::{NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_WRITING_PRESET_ID};
+    use super::{
+        NOVEL_BRAINSTORM_PRESET_ID, NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_WRITE_PRESET_ID,
+        NOVEL_WRITING_PRESET_ID,
+    };
 
     /// Guard against accidental rename: the wire value is part of the
     /// persisted `creator_schedules.preset_id` column and the embedded
@@ -51,5 +76,15 @@ mod tests {
     #[test]
     fn novel_writing_preset_id_value_is_frozen() {
         assert_eq!(NOVEL_WRITING_PRESET_ID, "novel-writing");
+    }
+
+    #[test]
+    fn novel_brainstorm_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_BRAINSTORM_PRESET_ID, "novel-brainstorm");
+    }
+
+    #[test]
+    fn novel_write_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_WRITE_PRESET_ID, "novel-write");
     }
 }
