@@ -1457,6 +1457,132 @@ pub async fn list_works_schedule(
         .collect())
 }
 
+// ── V1.50 T-A P1: daemon-side cron evaluator DAOs ─────────────────────────
+
+/// Row for the daemon cron evaluator scan ([`list_works_with_schedule_json`]).
+///
+/// Minimal column set needed to (a) read the per-Work cron config and (b)
+/// apply the per-Work gating rules (spec `cron-staggering.md` §4.3).
+/// `schedule_json` is always non-empty/non-NULL for returned rows (the scan
+/// predicate filters out unset Works). `creator_id` is included so the
+/// evaluator can enqueue schedules scoped to the right creator.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct WorkCronRow {
+    /// Primary key (`wrk_...`).
+    pub work_id: String,
+    /// Owning creator — the enqueued schedule's `creator_id`.
+    pub creator_id: String,
+    /// Human slug (`Works/<work_ref>/`); `None` when unset.
+    pub work_ref: Option<String>,
+    /// Raw `schedule_json` blob (always non-empty for returned rows).
+    pub schedule_json: String,
+    /// `works.intake_status` — gate: cron fires only when `== "complete"`.
+    pub intake_status: String,
+    /// `works.runtime_lock_holder` — gate: cron skips when `Some`.
+    pub runtime_lock_holder: Option<String>,
+    /// `works.completion_locked_at` — gate: cron skips when `Some`.
+    pub completion_locked_at: Option<String>,
+}
+
+/// Scan all Works with a non-empty `schedule_json` (V1.50 §4.1).
+///
+/// This is the daemon cron evaluator's read path. It runs on a 1-min tick, so
+/// the query is backed by the partial index
+/// `idx_works_schedule_json_nonempty` (migration `202606180002`). Returns only
+/// the gating + config columns the evaluator needs — not the full
+/// [`WorkRecord`] — to keep the scan lean.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn list_works_with_schedule_json(
+    pool: &SqlitePool,
+) -> Result<Vec<WorkCronRow>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (schedule_json column
+    // + partial index added in the same migration cycle). The WHERE predicate
+    // matches the partial index `idx_works_schedule_json_nonempty`.
+    let rows: Vec<WorkCronRow> = sqlx::query_as(
+        "SELECT work_id, creator_id, work_ref, schedule_json, \
+                intake_status, runtime_lock_holder, completion_locked_at \
+         FROM works \
+         WHERE schedule_json IS NOT NULL AND schedule_json != ''",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Transactional compare-and-swap write for `works.schedule_json`
+/// (R-V150P0-W5 — TOCTOU-safe variant).
+///
+/// Updates `schedule_json` to `new_json` **only if** the current stored value
+/// equals `expected_current_json` (NULL and empty string are treated as equal
+/// — both mean "unset / use defaults"). Returns `Ok(true)` when the write
+/// applied, `Ok(false)` when the CAS check failed (another writer raced ahead).
+///
+/// This closes the read-modify-write TOCTOU window flagged in T-A P0 qc3
+/// W-004 / R-V150P0-W5: the daemon-side cron evaluator (T-A P1) is the racing
+/// party against the CLI `creator works cron set` writer. Both now go through
+/// a CAS-guarded path — the CLI uses this `_tx` variant in
+/// `handle_set` (replacing the old unconditional `set_schedule_json`), and the
+/// daemon cron evaluator does not write `schedule_json` (it only reads).
+///
+/// The CAS is enforced inside the caller's transaction so the read-check and
+/// the UPDATE are atomic with respect to other writers on the same Work row.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the UPDATE fails, or
+/// `LocalDbError::MissingVersionKey` if the Work row does not exist (zero rows
+/// touched even without the CAS mismatch).
+pub async fn set_schedule_json_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    work_id: &str,
+    expected_current_json: Option<&str>,
+    new_json: &str,
+    now: &str,
+) -> Result<bool, LocalDbError> {
+    // Normalize the expected value: NULL and "" are both "unset" (spec §2.3),
+    // so the CAS treats them as equal. COALESCE collapses NULL → '' for the
+    // comparison. The bound `expected` is also normalized to '' by the caller.
+    let expected_normalized = expected_current_json.unwrap_or("");
+    // SAFETY: UPDATE against works table — runtime query (CAS on schedule_json
+    // inside a caller-supplied transaction; sqlx prepare cache hasn't run for
+    // this statement). The WHERE clause enforces the CAS atomically with the
+    // UPDATE under SQLite's single-writer model.
+    let result = sqlx::query(
+        "UPDATE works SET schedule_json = ?, updated_at = ? \
+         WHERE work_id = ? \
+         AND COALESCE(schedule_json, '') = ?",
+    )
+    .bind(new_json)
+    .bind(now)
+    .bind(work_id)
+    .bind(expected_normalized)
+    .execute(&mut **tx)
+    .await?;
+
+    let rows_affected = result.rows_affected();
+    if rows_affected == 0 {
+        // Distinguish "Work missing" from "CAS mismatch" so callers can retry
+        // vs. surface a not-found error. A missing Work row matches neither the
+        // PK nor the CAS; a CAS mismatch matches the PK but not the expected
+        // value. Re-read to disambiguate.
+        let exists: Option<(String,)> =
+            sqlx::query_as("SELECT work_id FROM works WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+        if exists.is_none() {
+            return Err(LocalDbError::MissingVersionKey {
+                key: format!("works/{work_id}"),
+            });
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 /// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
 pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 
