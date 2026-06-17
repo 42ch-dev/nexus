@@ -21,6 +21,7 @@ use nexus_home_layout;
 // V1.49 P2 (R-V147P1-01): intake re-trigger schedules via AddScheduleRequest.
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
+pub mod chronology;
 pub mod cron;
 
 /// Work management subcommands (DF-60 §6.2H).
@@ -188,6 +189,15 @@ pub enum WorksCommand {
     Cron {
         #[command(subcommand)]
         command: cron::CronCommand,
+    },
+
+    // ── V1.50 T-A P3: per-Work auto-chronology ─────────────────────────
+    /// Manage per-Work auto-chronology (volume auto-advance on finish)
+    /// (V1.50 §2.2). `set` toggles the opt-in flag; `show` renders state;
+    /// `advance` manually overrides to a target volume.
+    Chronology {
+        #[command(subcommand)]
+        command: chronology::ChronologyCommand,
     },
 
     // ── Rejected subcommands (Grill #10/#11) ──────────────────────────
@@ -426,6 +436,9 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
             super::rules_runtime::handle_rules(&client, command).await
         }
         WorksCommand::Cron { command } => cron::handle_cron(command, config).await,
+        WorksCommand::Chronology { command } => {
+            chronology::handle_chronology(command, config).await
+        }
         WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
             "`creator works start` is not available. \
              To create a new Work, use `nexus42 creator bootstrap`."
