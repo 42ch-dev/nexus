@@ -704,7 +704,11 @@
         "target": "V1.50 T-A P1 fix-wave",
         "target_date": "V1.50 T-A P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-001",
-        "note": "At 1000 Works × 3 roles/min this is ~30ms/tick of avoidable CPU. Suggested fix: parse once on set_schedule_json write (store normalized form) OR memoise per-Work using a small in-process HashMap<(work_id, role), Schedule> cache. Acceptable for V1.50 scale (60s tick budget absorbs); fix in this fix-wave for low-risk surgical change."
+        "note": "At 1000 Works × 3 roles/min this is ~30ms/tick of avoidable CPU. Suggested fix: parse once on set_schedule_json write (store normalized form) OR memoise per-Work using a small in-process HashMap<(work_id, role), Schedule> cache. Acceptable for V1.50 scale (60s tick budget absorbs); fix in this fix-wave for low-risk surgical change.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1 fix-wave: `OnceLock<Mutex<HashMap<(work_id, role), (raw, Schedule)>>>` memoisation cache with content-drift invalidation; pub `invalidate_cron_schedule_cache` called from CLI CAS-write path. Test `cron_fires_at_minute_uses_memoised_schedule` passes (100 calls = 1 parse).",
+        "closure_evidence": "iteration/v1.50 (commit 4c305674 on feature/v1.50-cron-brainstorm-write)"
       },
       {
         "id": "R-V150P1CRONBW-04",
@@ -717,7 +721,11 @@
         "target": "V1.50 T-A P1 fix-wave",
         "target_date": "V1.50 T-A P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-002",
-        "note": "100 Works on * * * * * = 12k info lines/hour. One-line fix: downgrade to debug!. Aggregated sweep summary line at line 146 already covers observability."
+        "note": "100 Works on * * * * * = 12k info lines/hour. One-line fix: downgrade to debug!. Aggregated sweep summary line at line 146 already covers observability.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1 fix-wave: one-line change `info!` → `debug!` at cron_supervisor.rs:263 with 5-line justification comment. Manual source verification; sweep summary line covers the counter (no automated test for log level).",
+        "closure_evidence": "iteration/v1.50 (commit 75515b27 on feature/v1.50-cron-brainstorm-write)"
       },
       {
         "id": "R-V150P1CRONBW-05",
@@ -730,7 +738,11 @@
         "target": "V1.50 T-A P1 fix-wave",
         "target_date": "V1.50 T-A P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-003",
-        "note": "When T-A P2 authors novel-write (R-V150P1CRONBW-01) and bumps version, cron-fired schedules will be silently stamped preset_version=1 and treated as stale. Fix: add match arms for novel-brainstorm + novel-write in preset_version_for_id; extend preset_version_mapping_matches_yaml sync test array. Failure mode is silent but cheap to fix now."
+        "note": "When T-A P2 authors novel-write (R-V150P1CRONBW-01) and bumps version, cron-fired schedules will be silently stamped preset_version=1 and treated as stale. Fix: add match arms for novel-brainstorm + novel-write in preset_version_for_id; extend preset_version_mapping_matches_yaml sync test array. Failure mode is silent but cheap to fix now.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1 fix-wave: explicit match arms for novel-brainstorm + novel-write in preset_version_for_id; sync test renamed + extended; 2 new tests pass. `novel-write` preset YAML still deferred (R-V150P1CRONBW-01) but the sync test now tolerates its absent YAML and will auto-enforce strict sync once authored.",
+        "closure_evidence": "iteration/v1.50 (commit abfbb855 on feature/v1.50-cron-brainstorm-write)"
       }
     ],
     "2026-06-18-v1.50-kb-editor-cli": [
@@ -799,7 +811,11 @@
         "target": "V1.50 T-B P1 fix-wave",
         "target_date": "V1.50 T-B P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc3.md §W-001 + qc2.md",
-        "note": "Failure modes: (1) insert succeeds, mark_confirmed returns Err → orphan KeyBlock + still-pending promotion row; (2) insert succeeds, mark_confirmed returns Ok(false) → misleading error message + orphan. Fix: wrap both calls in pool.begin() transaction; if either fails, ROLLBACK. The current hermetic test double_adopt_is_rejected does NOT cover the race between insert_key_block and mark_confirmed — add a regression test that mocks mark_confirmed failure to assert the orphan is not created."
+        "note": "Failure modes: (1) insert succeeds, mark_confirmed returns Err → orphan KeyBlock + still-pending promotion row; (2) insert succeeds, mark_confirmed returns Ok(false) → misleading error message + orphan. Fix: wrap both calls in pool.begin() transaction; if either fails, ROLLBACK. The current hermetic test double_adopt_is_rejected does NOT cover the race between insert_key_block and mark_confirmed — add a regression test that mocks mark_confirmed failure to assert the orphan is not created.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P1 fix-wave: kb_adopt now does pool.begin() → insert_key_block_in_tx + mark_confirmed_in_tx → explicit tx.rollback() on !flipped or error before any commit. Misleading error message replaced with 'The transaction was rolled back; no orphan row created.' New regression test kb_adopt_failure_rolls_back_insert pre-flips the candidate and asserts zero orphan KeyBlock rows after rollback. Cross-corroborated by qc2 (security) + qc3 (reliability) re-review.",
+        "closure_evidence": "iteration/v1.50 (commit 2cfbd49e on feature/v1.50-kb-auto-promotion)"
       },
       {
         "id": "R-V150KBED-04",
@@ -812,7 +828,11 @@
         "target": "V1.50 T-B P1 fix-wave",
         "target_date": "V1.50 T-B P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc3.md §W-002",
-        "note": "Index does not cover the dominant list path (which filters on world_id). For V1.50 scale (10-100 pending rows per world) this is sub-millisecond and not a hot path, but the index is functionally unused. Fix: add idx_kb_extract_jobs_promotion_status_world (promotion_status, world_id, created_at); remove or rename the unused index. Migration comment also needs correction."
+        "note": "Index does not cover the dominant list path (which filters on world_id). For V1.50 scale (10-100 pending rows per world) this is sub-millisecond and not a hot path, but the index is functionally unused. Fix: add idx_kb_extract_jobs_promotion_status_world (promotion_status, world_id, created_at); remove or rename the unused index. Migration comment also needs correction.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P1 fix-wave: DROP INDEX IF EXISTS idx_kb_extract_jobs_promotion_status_work; CREATE INDEX IF NOT EXISTS idx_kb_extract_jobs_promotion_status_world ON kb_extract_jobs (promotion_status, world_id, created_at). Trailing created_at gives index-ordered scan with no filesort. Migration comment fully rewritten. New regression test pending_list_uses_world_id_covering_index uses EXPLAIN QUERY PLAN to assert the planner picks the new world_id index.",
+        "closure_evidence": "iteration/v1.50 (commit 02cc52d5 on feature/v1.50-kb-auto-promotion)"
       },
       {
         "id": "R-V150KBED-05",
@@ -825,7 +845,11 @@
         "target": "V1.50 T-B P1 fix-wave",
         "target_date": "V1.50 T-B P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc2.md",
-        "note": "Spec §5.5.4 mandates retention in Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md. Current code resolves work_id (numeric internal PK) and writes to Works/<work_id>/...; should resolve work_ref (user-facing identifier) and write to Works/<work_ref>/Logs/kb/rejected/. Fix: use work_ref not work_id for the filesystem path; validate work_ref exists before write."
+        "note": "Spec §5.5.4 mandates retention in Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md. Current code resolves work_id (numeric internal PK) and writes to Works/<work_id>/...; should resolve work_ref (user-facing identifier) and write to Works/<work_ref>/Logs/kb/rejected/. Fix: use work_ref not work_id for the filesystem path; validate work_ref exists before write.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-B P1 fix-wave: kb_reject calls resolve_work_ref_for_log before mark_rejected. Helper returns Err (and aborts) if work_id missing, works row absent, or story_ref NULL. write_rejected_log now takes work_ref and writes under Works/<work_ref>/Logs/kb/rejected/ (log body still records both work_id for audit and work_ref). 2 new regression tests: kb_reject_writes_log_under_work_ref_path + kb_reject_fails_when_work_ref_missing.",
+        "closure_evidence": "iteration/v1.50 (commit 125533a8 on feature/v1.50-kb-auto-promotion)"
       }
     ]
   },
