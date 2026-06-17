@@ -368,7 +368,7 @@ pub fn render_show(work_ref: &str, schedule: &WorkSchedule) -> String {
         } else {
             ("--".to_string(), "disabled".to_string())
         };
-        writeln!(out, "{name:<12}{cron_cell:<21}{local_cell:<21}{next_cell}",).expect(WRITE_OK);
+        writeln!(out, "{name:<12}{cron_cell:<21}{local_cell:<21}{next_cell}").expect(WRITE_OK);
     }
     out
 }
