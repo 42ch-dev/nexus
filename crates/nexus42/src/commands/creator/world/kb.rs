@@ -4,6 +4,11 @@
 //! World-scoped `KeyBlock` rows (per entity-scope-model.md §5.5), distinct from
 //! the legacy ingest path `creator kb --scope world`.
 //!
+//! V1.50 T-B P1 adds the review-time promotion surface:
+//! `creator world kb pending|adopt|reject` — list/confirm/dismiss candidates
+//! extracted by the `novel-review-master` review-time hook
+//! (`nexus_orchestration::quality_loop`).
+//!
 //! # Author identity
 //!
 //! `KeyBlock`s are World-scoped (entity-scope-model §1.2/§5.1). The only
@@ -27,6 +32,9 @@ use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
 use nexus_kb::store::KbStoreError;
 use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
+use nexus_local_db::kb_extract_job::{
+    get_promotion, list_pending_for_world, mark_confirmed_in_tx, mark_rejected, KbExtractPromotion,
+};
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
 
@@ -80,6 +88,33 @@ pub enum WorldKbCommand {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+
+    /// List review-time KB candidates awaiting confirmation (V1.50 T-B P1)
+    Pending {
+        /// World reference — the world ID (e.g. `wld_abc123`)
+        world_ref: String,
+        /// Maximum number of candidates to list
+        #[arg(long, default_value_t = 100)]
+        limit: i64,
+        /// Emit machine-readable JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Confirm a review-time KB candidate → promote to a `confirmed` `KeyBlock`
+    Adopt {
+        /// `kb_extract_jobs` job ID (e.g. `xj_...`)
+        extract_job_id: String,
+        /// Emit machine-readable JSON confirmation
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Dismiss a review-time KB candidate (archived to `Logs/kb/rejected/`)
+    Reject {
+        /// `kb_extract_jobs` job ID (e.g. `xj_...`)
+        extract_job_id: String,
+    },
 }
 
 /// Run a `creator world kb` subcommand.
@@ -115,6 +150,29 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             block_id,
             yes,
         } => kb_delete(&pool, &creator_id, &world_ref, &block_id, yes).await,
+        WorldKbCommand::Pending {
+            world_ref,
+            limit,
+            json,
+        } => kb_pending(&pool, &creator_id, &world_ref, Some(limit), json).await,
+        WorldKbCommand::Adopt {
+            extract_job_id,
+            json,
+        } => {
+            let ws_root = crate::config::find_workspace_root();
+            kb_adopt(
+                &pool,
+                &creator_id,
+                &extract_job_id,
+                ws_root.as_deref(),
+                json,
+            )
+            .await
+        }
+        WorldKbCommand::Reject { extract_job_id } => {
+            let ws_root = crate::config::find_workspace_root();
+            kb_reject(&pool, &creator_id, &extract_job_id, ws_root.as_deref()).await
+        }
     }
 }
 
@@ -304,6 +362,236 @@ pub async fn kb_delete(
     Ok(())
 }
 
+// ── V1.50 T-B P1: review-time promotion surface ──────────────────────
+
+/// `creator world kb pending` — list candidates awaiting confirmation.
+///
+/// Gates on world ownership: a cross-author attempt returns `403` with code
+/// `WORLD_KB_FORBIDDEN` (reuses the T-B P0 error code per acceptance §3).
+///
+/// # Errors
+///
+/// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access, or
+/// `CliError::Other` on store/serialization failure.
+pub async fn kb_pending(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+    limit: Option<i64>,
+    json: bool,
+) -> Result<()> {
+    // Author identity gate (same code path as edit/delete).
+    require_world_owner(pool, world_id, creator_id).await?;
+
+    let pending = list_pending_for_world(pool, world_id, limit)
+        .await
+        .map_err(|e| CliError::Other(format!("World KB pending list failed: {e}")))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&pending)?);
+        return Ok(());
+    }
+
+    if pending.is_empty() {
+        println!("No pending KB candidates in world {world_id}.");
+        return Ok(());
+    }
+
+    println!("Pending KB candidates in world {world_id}:");
+    println!(
+        "{:<22} {:<15} {:<30} CHAPTER",
+        "JOB_ID", "TYPE_GUESS", "NAME_GUESS"
+    );
+    for c in &pending {
+        println!(
+            "{:<22} {:<15} {:<30} {}",
+            c.job_id,
+            c.block_type_guess.as_deref().unwrap_or("?"),
+            c.canonical_name_guess.as_deref().unwrap_or("?"),
+            c.source_chapter_id
+                .map_or_else(|| "-".to_string(), |n| n.to_string()),
+        );
+    }
+    Ok(())
+}
+
+/// `creator world kb adopt` — confirm a candidate into a `confirmed` `KeyBlock`.
+///
+/// Steps (entity-scope-model.md §5.5.3 promotion gate):
+/// 1. Load the promotion row; require it is in `pending` state.
+/// 2. Author identity gate: the active creator must own the candidate's world.
+/// 3. Parse `proposed_payload` into a `KeyBlockBody`; parse `block_type_guess`
+///    into a wire `BlockType`.
+/// 4. Build a `KeyBlock` with `status="confirmed"`.
+/// 5. **Atomic promotion (R-V150KBED-03)**: wrap `insert_key_block` +
+///    `mark_confirmed` in a single `SQLite` transaction. If the validation,
+///    insert, or promotion flip fails (or the flip returns `Ok(false)` because
+///    a concurrent writer raced us), the transaction rolls back and **no orphan
+///    `KeyBlock` is persisted**. The candidate row is left in its pre-adopt
+///    state.
+/// 6. Validation uses `SqliteKbStore::with_validation_mode(Novel)` so V1.40 P1
+///    validation re-runs (entity-scope-model §5.5.5).
+///
+/// # Errors
+///
+/// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access.
+/// Returns `CliError::Other` on missing/non-pending rows, validation failure,
+/// transaction begin/commit failure, or store errors.
+pub async fn kb_adopt(
+    pool: &SqlitePool,
+    creator_id: &str,
+    extract_job_id: &str,
+    _workspace_dir: Option<&std::path::Path>,
+    json: bool,
+) -> Result<()> {
+    let candidate = load_pending_candidate(pool, extract_job_id).await?;
+    let world_id = candidate.world_id.as_str();
+
+    // Author identity gate.
+    require_world_owner(pool, world_id, creator_id).await?;
+
+    // Parse proposed body.
+    let body: KeyBlockBody =
+        serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
+            .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
+
+    // Parse block_type guess → wire BlockType.
+    let block_type_str = candidate.block_type_guess.as_deref().unwrap_or("character");
+    let block_type = parse_block_type_cli(block_type_str)?;
+
+    let canonical_name = candidate
+        .canonical_name_guess
+        .as_deref()
+        .ok_or_else(|| CliError::Other("Candidate has no canonical_name_guess".to_string()))?
+        .to_string();
+
+    // Novel-mode store so insert re-runs V1.40 P1 validation (§5.1.1).
+    let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
+
+    let mut kb = KeyBlock::new(world_id, block_type, &canonical_name);
+    kb.body = Some(body);
+    // §5.5.1: adopt transitions to `confirmed` (terminal KeyBlock status).
+    kb.status = "confirmed".to_string();
+    kb.created_at = chrono::Utc::now().to_rfc3339();
+
+    // R-V150KBED-03: atomic promotion. The KeyBlock insert and the promotion
+    // row flip share a single transaction; any failure (validation, insert,
+    // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
+    // KeyBlock is persisted.
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to begin adopt transaction: {e}")))?;
+
+    let insert_result = store
+        .insert_key_block_in_tx(&mut tx, kb)
+        .await
+        .map_err(|e| map_kb_store_error("adopt", extract_job_id, world_id, e))?;
+    // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
+
+    let flipped = mark_confirmed_in_tx(&mut tx, extract_job_id)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to mark candidate confirmed: {e}")))?;
+    // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
+
+    if !flipped {
+        // Race: the row was confirmed/rejected between `load_pending_candidate`
+        // and this flip. Explicit rollback so the orphan KeyBlock insert is
+        // undone before we surface the error. Best-effort: a rollback failure
+        // is logged but the row was never committed so no orphan persists.
+        if let Err(e) = tx.rollback().await {
+            tracing::error!(
+                extract_job_id,
+                error = %e,
+                "kb-adopt: transaction rollback failed after mark_confirmed race"
+            );
+        }
+        return Err(CliError::Other(format!(
+            "Candidate '{extract_job_id}' was no longer pending (already confirmed/rejected). \
+             The transaction was rolled back; no orphan row created."
+        )));
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to commit adopt transaction: {e}")))?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "extract_job_id": extract_job_id,
+                "key_block_id": insert_result.key_block_id,
+                "world_id": insert_result.world_id,
+                "status": "confirmed",
+            }))?
+        );
+    } else {
+        println!("✓ KB candidate adopted: {extract_job_id}");
+        println!("  Key block:  {}", insert_result.key_block_id);
+        println!("  World:      {}", insert_result.world_id);
+        println!("  Status:     confirmed");
+    }
+    Ok(())
+}
+
+/// `creator world kb reject` — dismiss a candidate (archived to
+/// `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md`).
+///
+/// # Errors
+///
+/// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access.
+/// Returns `CliError::Other` on missing/non-pending rows, store errors, or
+/// (R-V150KBED-05) when an audit log is required but the candidate's `work_id`
+/// cannot be resolved to a human-readable `work_ref` (`works.story_ref`).
+pub async fn kb_reject(
+    pool: &SqlitePool,
+    creator_id: &str,
+    extract_job_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<()> {
+    let candidate = load_pending_candidate(pool, extract_job_id).await?;
+    let world_id = candidate.world_id.as_str();
+
+    // Author identity gate.
+    require_world_owner(pool, world_id, creator_id).await?;
+
+    // R-V150KBED-05: resolve the human-readable work_ref (works.story_ref) for
+    // the reject audit-log path BEFORE the DB flip. A missing work_ref fails
+    // cleanly here — no rejected row, no orphan audit log under the wrong path.
+    // The prior behavior wrote under `Works/<work_id>/...` using the opaque DB
+    // id, which violated the home-layout `Works/<work_ref>/` convention.
+    let work_ref =
+        resolve_work_ref_for_log(pool, candidate.work_id.as_deref(), workspace_dir).await?;
+
+    let flipped = mark_rejected(pool, extract_job_id)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to mark candidate rejected: {e}")))?;
+    if !flipped {
+        return Err(CliError::Other(format!(
+            "Candidate '{extract_job_id}' was no longer pending (already confirmed/rejected)."
+        )));
+    }
+
+    // Best-effort audit log (entity-scope-model §5.5.4). Non-fatal: a missing
+    // workspace dir (hermetic tests) or write failure does not undo the reject.
+    if let Err(e) = write_rejected_log(
+        workspace_dir,
+        extract_job_id,
+        &candidate,
+        work_ref.as_deref(),
+    ) {
+        tracing::warn!(
+            extract_job_id,
+            error = %e,
+            "kb-reject: failed to write audit log (non-fatal)"
+        );
+    }
+
+    println!("✓ KB candidate rejected: {extract_job_id}");
+    Ok(())
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 /// Verify the referenced `KeyBlock` actually belongs to the requested world.
@@ -390,4 +678,156 @@ fn block_summary_json(block: &KeyBlock) -> serde_json::Value {
             .unwrap_or_else(|_| serde_json::json!(format!("{:?}", block.block_type))),
         "status": block.status,
     })
+}
+
+// ── V1.50 T-B P1 helpers ─────────────────────────────────────────────
+
+/// Load a promotion candidate by ID and require it is in `pending` state.
+///
+/// Surfaces a clean error if the row is missing, not a promotion candidate,
+/// or already confirmed/rejected.
+async fn load_pending_candidate(
+    pool: &SqlitePool,
+    extract_job_id: &str,
+) -> Result<KbExtractPromotion> {
+    let row = get_promotion(pool, extract_job_id)
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to load candidate: {e}")))?
+        .ok_or_else(|| {
+            CliError::Other(format!(
+                "KB extract job '{extract_job_id}' not found. \
+                 List pending candidates with: nexus42 creator world kb pending <world_ref>"
+            ))
+        })?;
+    if row.promotion_status != "pending" {
+        return Err(CliError::Other(format!(
+            "Candidate '{extract_job_id}' is not pending (status: {}). \
+             Only pending candidates can be adopted or rejected.",
+            row.promotion_status
+        )));
+    }
+    Ok(row)
+}
+
+/// Parse a `snake_case` `block_type` string into a wire `BlockType`.
+///
+/// Accepts the wire format (e.g. `"character"`). Returns a clear error on
+/// unknown values so the author can correct the `block_type_guess`.
+fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
+    serde_json::from_value::<nexus_contracts::BlockType>(serde_json::Value::String(
+        s.to_string(),
+    ))
+    .map_err(|_| {
+        CliError::Other(format!(
+            "Unknown block_type guess '{s}'. \
+             Valid values: character, ability, scene, organization, item, conflict, info_point, event."
+        ))
+    })
+}
+
+/// Write the rejected-candidate audit log (entity-scope-model §5.5.4).
+///
+/// Path: `<workspace_dir>/Works/<work_ref>/Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md`.
+///
+/// `work_ref` is the human-readable slug resolved upstream as `works.story_ref`
+/// by [`resolve_work_ref_for_log`] (R-V150KBED-05), matching the home-layout
+/// `Works/<work_ref>/` convention. When `workspace_dir` is `None` the function
+/// is a no-op (hermetic test path).
+///
+/// Best-effort: returns an error that the caller logs at `warn!` but does not
+/// propagate to the user (the DB row is already flipped to `rejected`).
+fn write_rejected_log(
+    workspace_dir: Option<&std::path::Path>,
+    extract_job_id: &str,
+    candidate: &KbExtractPromotion,
+    work_ref: Option<&str>,
+) -> std::result::Result<(), String> {
+    let Some(ws_dir) = workspace_dir else {
+        // No workspace bound (hermetic test) — skip log writing.
+        return Ok(());
+    };
+    // R-V150KBED-05: work_ref is resolved upstream from works.story_ref; fall
+    // back only if the caller passed None despite having a workspace dir
+    // (defensive — kb_reject resolves before calling, so this is unreachable
+    // in the CLI path but keeps the helper safe for direct callers).
+    let work_ref = work_ref.unwrap_or("unknown-work");
+
+    let date = chrono::Utc::now().format("%Y-%m-%d");
+    let log_dir = ws_dir
+        .join("Works")
+        .join(work_ref)
+        .join("Logs")
+        .join("kb")
+        .join("rejected");
+    std::fs::create_dir_all(&log_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    let log_path = log_dir.join(format!("{date}-{extract_job_id}.md"));
+
+    let body = format!(
+        "# Rejected KB candidate\n\
+         \n\
+         - **extract_job_id**: {job_id}\n\
+         - **world_id**: {world_id}\n\
+         - **work_id**: {work_id}\n\
+         - **work_ref**: {work_ref}\n\
+         - **canonical_name_guess**: {name}\n\
+         - **block_type_guess**: {btype}\n\
+         - **source_chapter_id**: {chapter}\n\
+         - **rejected_at**: {ts}\n",
+        job_id = extract_job_id,
+        world_id = candidate.world_id,
+        work_id = candidate.work_id.as_deref().unwrap_or("-"),
+        work_ref = work_ref,
+        name = candidate.canonical_name_guess.as_deref().unwrap_or("-"),
+        btype = candidate.block_type_guess.as_deref().unwrap_or("-"),
+        chapter = candidate
+            .source_chapter_id
+            .map_or_else(|| "-".to_string(), |n| n.to_string()),
+        ts = chrono::Utc::now().to_rfc3339(),
+    );
+    std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
+    Ok(())
+}
+
+/// Resolve the human-readable `work_ref` (`works.story_ref`) for the reject
+/// audit-log path (entity-scope-model §5.5.4; home-layout `Works/<work_ref>/`
+/// convention). R-V150KBED-05.
+///
+/// Returns `Ok(None)` when no audit log is needed (no workspace dir bound —
+/// e.g. hermetic tests with `workspace_dir=None`). Returns `Err` if a log IS
+/// needed but the candidate has no `work_id`, the `works` row is absent, or
+/// `story_ref` is `NULL`. Failing before the DB flip keeps the reject
+/// side-effect-free when the audit trail cannot be written under the correct
+/// path.
+async fn resolve_work_ref_for_log(
+    pool: &SqlitePool,
+    work_id: Option<&str>,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<Option<String>> {
+    if workspace_dir.is_none() {
+        // No workspace bound (hermetic test) — no log to write, no ref needed.
+        return Ok(None);
+    }
+    let Some(wid) = work_id else {
+        return Err(CliError::Other(
+            "Cannot write reject audit log: candidate has no work_id.".to_string(),
+        ));
+    };
+    // SAFETY: SELECT against the known works table schema (story_ref is
+    // nullable TEXT, so fetch_optional returns Option<Option<String>>).
+    let row: Option<Option<String>> =
+        sqlx::query_scalar("SELECT story_ref FROM works WHERE work_id = ?")
+            .bind(wid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to query work_ref: {e}")))?;
+    match row {
+        None => Err(CliError::Other(format!(
+            "Cannot write reject audit log: work_id '{wid}' does not exist in the works table."
+        ))),
+        Some(None) => Err(CliError::Other(format!(
+            "Cannot write reject audit log: work '{wid}' has no story_ref (work_ref). \
+             Run `nexus42 creator bootstrap` or set story_ref before rejecting a candidate."
+        ))),
+        Some(Some(story_ref)) => Ok(Some(story_ref)),
+    }
 }

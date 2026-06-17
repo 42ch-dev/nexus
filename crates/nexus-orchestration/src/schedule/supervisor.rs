@@ -466,6 +466,40 @@ impl ScheduleSupervisor {
                     );
                 }
             }
+            // V1.50 T-B P1 (entity-scope-model.md §5.5 / cron-staggering.md
+            // §4.4): review-time KB candidate extraction. When a
+            // `novel-review-master` schedule completes, scan the current
+            // chapter prose for capitalized noun phrases and insert
+            // `kb_extract_jobs` rows with `promotion_status='pending'`. The
+            // author confirms via `creator world kb adopt`.
+            //
+            // // COORDINATE-WITH-T-A-P2
+            // T-A P2 (`2026-06-18-v1.50-cron-review-staggering`) wires the
+            // per-Work `review` cron role that enqueues these schedules on a
+            // schedule. Until T-A P2 lands, this hook still fires for any
+            // `novel-review-master` schedule reaching the supervisor (V1.39
+            // stale-findings path or manual `creator run`), so the
+            // extraction pipeline is independently testable.
+            // Best-effort + non-blocking: errors are logged and do NOT fail
+            // the terminal transition (mirrors the review-findings hook).
+            if schedule_row
+                .as_ref()
+                .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID)
+            {
+                use crate::quality_loop;
+                let ws_ref = self.workspace_dir.as_ref();
+                let ws_path = ws_ref.as_deref();
+                if let Err(e) =
+                    quality_loop::extract_kb_candidates_for_review(&self.pool, schedule_id, ws_path)
+                        .await
+                {
+                    tracing::warn!(
+                        schedule_id,
+                        error = %e,
+                        "kb-extract: review-time extraction hook failed (non-fatal)"
+                    );
+                }
+            }
             if let Some(ref row) = schedule_row {
                 self.process_auto_chain_after_terminal(schedule_id, &row.creator_id)
                     .await;
