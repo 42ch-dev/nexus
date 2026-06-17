@@ -584,11 +584,19 @@ async fn assemble_world_kb_block(
 /// Work + chapter via the daemon Local API and render the
 /// `{{ open_findings_block }}` prompt block.
 ///
-/// Fetches `GET /v1/local/works/{work_id}/findings?status=open`, filters
-/// client-side to overlay §2.1 scope (`chapter == N OR chapter == NULL`),
-/// re-sorts by severity DESC + `created_at` ASC (the daemon's generic
-/// `list_findings` orders by `created_at` DESC), and feeds the result
-/// through [`nexus_orchestration::findings_block::build_open_findings_block`].
+/// Fetches `GET /v1/local/works/{work_id}/findings?status=open,triaged`,
+/// filters client-side to overlay §2.1 scope (`chapter == N OR chapter ==
+/// NULL`), re-sorts by severity DESC + `created_at` ASC (the daemon's
+/// generic `list_findings` orders by `created_at` DESC), and feeds the
+/// result through [`nexus_orchestration::findings_block::build_open_findings_block`].
+///
+/// R-V149P0-01 (V1.50): the request now passes the V1.49 actionable set
+/// `{open, triaged}` (per `findings-lifecycle.md` §2.2) by sending
+/// `?status=open,triaged`. The DAO widens to a dynamic `IN (?, ?)` query
+/// when the value contains a comma. The auto-chain production path already
+/// used the widened DAO filter (`list_open_findings_for_chapter`); this
+/// closes the client-side gap so an author who triages a finding (without
+/// resolving it) still sees it on the next produce prompt.
 ///
 /// Returns `Ok(None)` when no qualifying findings exist (AC2: no empty
 /// sentinel noise) so the caller leaves `WorkFields.open_findings_block`
@@ -607,7 +615,12 @@ async fn assemble_open_findings_block(
 ) -> crate::errors::Result<Option<String>> {
     use nexus_orchestration::findings_block::{build_open_findings_block, sort_open_findings};
 
-    let path = format!("/v1/local/works/{work_id}/findings?status=open&limit=200");
+    // R-V149P0-01 (V1.50): widen the client-side request from `?status=open`
+    // to the V1.49 actionable set `{open, triaged}` so a triaged-but-unresolved
+    // finding still reaches the produce prompt. The list_findings DAO branches
+    // on the comma to a dynamic `IN (?, ?)` query.
+    let actionable_statuses = nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES.join(",");
+    let path = format!("/v1/local/works/{work_id}/findings?status={actionable_statuses}&limit=200");
     let resp: Vec<nexus_local_db::findings::Finding> = client.get(&path).await?;
 
     // Overlay §2.1 scope: chapter == N OR chapter IS NULL (Work-level).
