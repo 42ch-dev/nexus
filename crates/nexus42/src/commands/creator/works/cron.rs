@@ -343,11 +343,7 @@ pub fn render_show(work_ref: &str, schedule: &WorkSchedule) -> String {
         } else {
             ("--".to_string(), "disabled".to_string())
         };
-        writeln!(
-            out,
-            "{name:<12}{cron_cell:<21}{local_cell:<21}{next_cell}",
-        )
-        .expect(WRITE_OK);
+        writeln!(out, "{name:<12}{cron_cell:<21}{local_cell:<21}{next_cell}",).expect(WRITE_OK);
     }
     out
 }
@@ -614,6 +610,9 @@ async fn handle_set(
     let work_id = resolve_work_id(pool, creator_id, workspace_slug, work_ref).await?;
 
     // Base = current stored schedule (or defaults if unset).
+    // TODO(V1.50-T-A-P1): see R-V150P0-W5 — get→apply→set is a read-modify-write
+    // with a TOCTOU window. Acceptable for single-user CLI at P0; the T-A P1
+    // daemon writer needs a transactional / CAS variant to avoid lost updates.
     let stored = nexus_local_db::works::get_schedule_json(pool, &work_id).await?;
     let base = resolve_schedule(stored.as_deref());
 
@@ -684,8 +683,7 @@ async fn handle_list(
     json: bool,
 ) -> Result<()> {
     let rows_db =
-        nexus_local_db::works::list_works_schedule(pool, creator_id, workspace_slug, limit)
-            .await?;
+        nexus_local_db::works::list_works_schedule(pool, creator_id, workspace_slug, limit).await?;
     let rows: Vec<ListRow> = rows_db
         .into_iter()
         .map(|r| ListRow {
