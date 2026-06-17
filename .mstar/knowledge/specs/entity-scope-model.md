@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (BlockType + novel_category + canonical_name grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Draft**: §5.5 World KB promotion state machine (T-B P1); promotion row promotion pending until V1.50 P-last. |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (BlockType + novel_category + canonical_name grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Shipped**: §5.5 World KB promotion state machine (T-B P1); promotion row promoted Draft → Normative at V1.50 P-last when the `kb_extract_jobs` migration landed and review-time extraction is verified end-to-end. |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
 | **Last updated** | 2026-06-18 — V1.50 §5.5 World KB promotion state machine drafted (T-B P1 prep) |
@@ -209,11 +209,11 @@ The term `KB` MUST be qualified in architecture/spec text when ambiguity matters
 - Use **User knowledge** or **global knowledge index** for `nexus-knowledge`.
 - Use **CLI local work KB index** for `nexus42 creator kb --scope work`.
 
-### 5.5 World KB promotion state machine (V1.50 draft)
+### 5.5 World KB promotion state machine (V1.50 normative)
 
-> **Status**: Draft (V1.50) — V1.50 T-B P1 extension. To be promoted to normative at V1.50 P-last when the `kb_extract_jobs` migration lands and review-time extraction is verified end-to-end.
-> **Plan**: [2026-06-18-v1.50-kb-auto-promotion.md](../../plans/2026-06-18-v1.50-kb-auto-promotion.md)
-> **Cross-refs**: [auto-chronology.md §4.3](novel-writing/auto-chronology.md) — auto-advance logs auto-promotion status; [quality-loop.md §3](novel-writing/quality-loop.md) — review-time extraction hook.
+> **Status**: Normative (V1.50) — V1.50 T-B P1 shipped on 2026-06-18. Migration `202606180002_kb_extract_jobs.sql` landed; review-time extraction hook verified end-to-end; promotion row promoted Draft → Normative at V1.50 P-last.
+> **Plan**: [2026-06-18-v1.50-kb-auto-promotion.md](../../plans/2026-06-18-v1.50-kb-auto-promotion.md) (Done; archived)
+> **Cross-refs**: [workflow-profile.md §11.5](novel-writing/workflow-profile.md#115-auto-chronology-per-work-opt-in) — auto-advance logs auto-promotion status; [quality-loop.md §3](novel-writing/quality-loop.md) — review-time extraction hook.
 
 World KB rows enter the World through a **promotion state machine** governed by `kb_extract_jobs.status` and the World-scoped `KeyBlocks` (`nexus-kb` storage, see §5.1.1).
 

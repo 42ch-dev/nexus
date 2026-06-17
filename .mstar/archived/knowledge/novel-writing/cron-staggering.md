@@ -1,10 +1,10 @@
-# Novel Cron Staggering — Draft Overlay (V1.50)
+# Novel Cron Staggering — Superseded Overlay (V1.50)
 
-**Status**: Draft (V1.50)
-**Document class**: Draft overlay (Wave-0 of V1.50)
+**Status**: Superseded by [workflow-profile.md §11](../../specs/novel-writing/workflow-profile.md#11-cron-staggering-and-auto-chronology-v150) (V1.50 P-last)
+**Document class**: Draft overlay (Wave-0 of V1.50; archived)
 **Created**: 2026-06-18
 **Last updated**: 2026-06-18
-**Supersession note**: To be folded into [workflow-profile.md](workflow-profile.md) §6 (novel-writing cron/chronology) at V1.50 P-last.
+**Supersession note**: Folded into `workflow-profile.md` §11 (V1.50 P-last on 2026-06-18). Preserved here for historical reference.
 **Scope**: Per-Work cron configuration for `novel-brainstorm` / `novel-write` / `novel-review-master` schedules; three-role staggering defaults; CLI surface for set/show/list.
 **Coordinates with**:
 

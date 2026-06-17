@@ -1,9 +1,9 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37–V1.48 extensions; **V1.49** narrative indexes folded into §4.6 (P-last from [narrative-indexes.md](narrative-indexes.md))  
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37–V1.48 extensions; **V1.49** narrative indexes folded into §4.6 (P-last from [narrative-indexes.md](narrative-indexes.md)); **V1.50** cron staggering + auto-chronology folded into §11 (P-last from [cron-staggering.md](cron-staggering.md) + [auto-chronology.md](auto-chronology.md))  
 **Document class**: Feature line (profile overlay)
 **Created**: 2026-06-07  
-**Last updated**: 2026-06-17 (V1.49 P-last — narrative indexes folded into §4.6)
+**Last updated**: 2026-06-18 (V1.50 P-last — cron + auto-chronology folded into §11)
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
@@ -899,6 +899,115 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
   - §5.5.4 two-layer rules (`AGENTS.md`) promoted Draft → Shipped.
   - §5.5.6 `novel-chapter-review` findings integration promoted Draft → Shipped.
   - Status banner updated to `V1.47 Shipped`.
+- **V1.50 P-last promotion** (recorded 2026-06-18):
+  - §11 cron staggering (V1.50): per-Work cron configuration + three-role defaults promoted Draft → Shipped (folded from [cron-staggering.md](cron-staggering.md)).
+  - §11.5 auto-chronology (V1.50): per-Work opt-in volume auto-advance promoted Draft → Shipped (folded from [auto-chronology.md](auto-chronology.md)).
+  - Status banner updated to `V1.50 Shipped` (pending P-last + PR).
+
+---
+
+## 11. Cron staggering and auto-chronology (V1.50)
+
+### 11.1 Per-Work cron configuration
+
+Every Work that opts in to cron-driven staging has a `works.schedule_json` (TEXT) row and an optional `works.auto_chronology` flag. The schedule JSON shape is normative:
+
+```json
+{
+  "tz": "Asia/Shanghai",
+  "roles": {
+    "brainstorm": { "cron": "0 3,9,15,21 * * *", "enabled": true },
+    "write":      { "cron": "0 4,10,16,22 * * *", "enabled": true },
+    "review":     { "cron": "0,30 * * * *",      "enabled": true }
+  }
+}
+```
+
+Defaults (`crates/nexus42/src/commands/creator/works/cron.rs::DEFAULT_SCHEDULE`):
+
+| Role | Cron expression | Local time (author TZ) |
+| --- | --- | --- |
+| `brainstorm` | `0 3,9,15,21 * * *` | 03:00 / 09:00 / 15:00 / 21:00 |
+| `write` | `0 4,10,16,22 * * *` | 04:00 / 10:00 / 16:00 / 22:00 (offset +1h from brainstorm) |
+| `review` | `0,30 * * * *` | :00 / :30 every hour |
+
+CLI surface (V1.50 T-A P0):
+
+```bash
+creator works cron set my-work --brainstorm "0 3,9,15,21 * * *" --tz Asia/Shanghai
+creator works cron set my-work --no-review          # disable role
+creator works cron show my-work                       # render resolved local + UTC firing times
+creator works cron list                              # list across workspace (--limit N)
+```
+
+Validation rules:
+
+- At least one role must remain `enabled: true` unless `--all-off` is passed (CLI rejects empty schedules; stable code `E_CRON_ALL_ROLES_DISABLED`).
+- TZ must be a valid IANA string (use `chrono-tz::Tz::from_str`).
+- All cron expressions parse via the `cron` crate (5-field crontab, normalized internally to 6-field with seconds=0).
+
+### 11.2 Daemon firing semantics
+
+The daemon `cron_supervisor` (V1.50 T-A P1) runs on the 1-min tick supervisor loop and:
+
+1. Reads all Works with `works.schedule_json` non-empty (partial index `works(schedule_json) WHERE schedule_json IS NOT NULL AND schedule_json != ''` covers the query; verified via EXPLAIN QUERY PLAN in the `partial_index_used_in_schedule_json_scan` hermetic test).
+2. For each role `enabled: true`, evaluates whether the cron fires in the current minute using the `cron` crate's `Schedule::after(now).next()` (memoised per-Work; content-drift invalidation on `set_schedule_json` writes).
+3. Skips if `intake_status != "complete"`, `runtime_lock_holder != NULL`, or `completion_locked != false` (log at `DEBUG`).
+4. Skips if a prior same-role same-work schedule is still active (idempotency guard; log at `DEBUG`).
+5. Enqueues a `Schedule` with `preset_id = <role-preset>` and `work_ref` from the source Work. The `enqueue_cron_schedule` path is uniform across all three roles (no role-specific branch). The `CRON` prefix + `cron:<role>:<work_id>` label preserves provenance vs V1.39 SLA-launched schedules.
+
+### 11.3 Out-of-band fire (does not touch `driver_schedule_id`)
+
+Cron-fired schedules are out-of-band: they do NOT touch the FL-E `driver_schedule_id`. This mirrors `enqueue_review_master_schedule` (V1.39). The existing supervisor `tick()` admits; the existing terminal pipeline handles completion. This avoids disrupting an in-progress FL-E chain.
+
+### 11.4 Review-time KB extraction hook (T-B P1 integration)
+
+When `novel-review-master` cron fires, the schedule reaches the supervisor's terminal pipeline. The T-B P1 hook `quality_loop::extract_kb_candidates_for_review` fires on completion (keyed on `preset_id == NOVEL_REVIEW_MASTER_PRESET_ID`, regardless of trigger origin). The hook writes candidate entities to `kb_extract_jobs` with `promotion_status='pending'`, which the author confirms via `creator world kb adopt`.
+
+### 11.5 Auto-chronology (per-Work opt-in)
+
+Per-Work `auto_chronology: bool` flag (default `false`). When `true`, the daemon `auto_chronology_tick` task (5-min interval; env override `NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN`) checks finish detection on every tick:
+
+Finish detection (per spec §3.1): current volume all chapters `status='finalized'` AND `works.intake_status == 'complete'` AND `works.completion_locked == false` AND `works.runtime_lock_holder == NULL` AND volume N+1 outline does not already exist. If eligible, the advance executes (§11.5.1).
+
+#### 11.5.1 Atomic advance procedure
+
+1. Open a `state.db` transaction.
+2. Commit chapter rows for volume N+1 (`INSERT INTO work_chapters (work_id, volume, chapter, status, word_count, world_refs) VALUES (?, ?, ?, 'not_started', 0, '[]')` for each planned chapter).
+3. Bump `works.updated_at`.
+4. Commit the transaction.
+5. Render `Works/<work_ref>/Outlines/volume-<N+1>-outline.md` from `embedded-presets/novel-writing/templates/volume-outline.md.tmpl` (atomic write: temp + fsync + rename).
+6. Append to `Works/<work_ref>/Logs/chronology/<YYYY-MM-DD>-advance-vol<N+1>.md`.
+
+**DB first, FS second**: outline write failures after the tx commits are recoverable on the next tick (manual `creator works chronology advance --force --volume N+1` retries the FS write without re-seeding chapters).
+
+If outline write fails BEFORE the tx commits, the entire advance rolls back and the next tick retries cleanly.
+
+#### 11.5.2 Edge cases
+
+- Volume N is the last planned volume → skip with `INFO` log: "auto_chronology: no further volume planned".
+- Volume N+1 outline already exists → skip with `INFO` log: "auto_chronology: outline already exists" (idempotent guard).
+- `runtime_lock_holder != NULL` → skip with `DEBUG`.
+- Daemon interrupted mid-advance → tx rollback; next tick retries.
+- No `total_planned_volumes` column exists; the completion-lock gate subsumes the "last planned volume" edge per spec §3.1 (R-V150P3AUTOCHRONO-01).
+
+#### 11.5.3 CLI surface (V1.50 T-A P3)
+
+```bash
+creator works chronology set my-work --auto true
+creator works chronology set my-work --auto false
+creator works chronology show my-work
+creator works chronology advance my-work --volume 3   # manual override
+creator works chronology advance my-work --volume 3 --force  # retry after outline-write failure
+```
+
+### 11.6 Cross-references
+
+- `entity-scope-model.md` §5.5 — World KB promotion state machine (T-B P1 review-time extraction)
+- `embedded-presets/novel-writing/prompts/` — preset prompt templates (consumed by auto-chain; novel-write preset authoring deferred to T-A P2 carry-over per R-V150P1CRONBW-01)
+- `nexus-orchestration::auto_chronology` — advance implementation (V1.50 T-A P3)
+- `nexus-orchestration::cron_supervisor` — fire evaluator (V1.50 T-A P1)
+- `nexus-local-db::works.schedule_json` column — storage (V1.50 T-A P0)
 
 ---
 

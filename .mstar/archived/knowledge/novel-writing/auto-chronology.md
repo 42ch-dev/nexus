@@ -1,10 +1,10 @@
-# Novel Auto-Chronology — Draft Overlay (V1.50)
+# Novel Auto-Chronology — Superseded Overlay (V1.50)
 
-**Status**: Draft (V1.50)
-**Document class**: Draft overlay (Wave-0 of V1.50)
+**Status**: Superseded by [workflow-profile.md §11.5](../../specs/novel-writing/workflow-profile.md#115-auto-chronology-per-work-opt-in) (V1.50 P-last)
+**Document class**: Draft overlay (Wave-0 of V1.50; archived)
 **Created**: 2026-06-18
 **Last updated**: 2026-06-18
-**Supersession note**: To be folded into [workflow-profile.md](workflow-profile.md) §6.5 (auto-chronology subsection) at V1.50 P-last.
+**Supersession note**: Folded into `workflow-profile.md` §11.5 (V1.50 P-last on 2026-06-18). Preserved here for historical reference.
 **Scope**: Per-Work opt-in volume auto-advance on finish; daemon task that creates next volume outline + seed when current volume all chapters finalized and intake complete.
 **Coordinates with**:
 
