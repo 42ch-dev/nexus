@@ -39,7 +39,7 @@
       "id": "2026-06-18-v1.50-cron-brainstorm-write",
       "title": "T-A P1 — Brainstorm + write cron wiring into auto-chain",
       "file": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-cron-brainstorm-write",
@@ -49,7 +49,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-cron-foundation"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T10:00:00+08:00"
+      "updated_at": "2026-06-18T13:00:00+08:00",
+      "qc_status": "Ready for QC tri-review (developement complete; 18 cron_supervisor + 2 daemon cron_supervisor_task + 5 cron_trigger tests pass; R-V150P0-W5 resolved)"
     },
     {
       "id": "2026-06-18-v1.50-cron-review-staggering",
@@ -105,7 +106,7 @@
       "id": "2026-06-18-v1.50-kb-auto-promotion",
       "title": "T-B P1 — Review-time candidate extraction → pending → confirm",
       "file": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-kb-auto-promotion",
@@ -115,7 +116,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-kb-editor-cli"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T10:00:00+08:00"
+      "updated_at": "2026-06-18T13:00:00+08:00",
+      "qc_status": "Ready for QC tri-review (development complete; 7+5+6+8 = 26 hermetic tests pass; 2 new low residuals filed by implementer)"
     },
     {
       "id": "2026-06-18-v1.50-kb-refreshable-scan",
@@ -657,7 +659,39 @@
         "target": "V1.50 T-A P1 (daemon writer race window)",
         "target_date": "V1.50 T-A P1",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-004",
-        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. P0 fix-wave adds in-code TODO marker at cron.rs:613. Plan-level residual carried to T-A P1."
+        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. P0 fix-wave adds in-code TODO marker at cron.rs:613. Plan-level residual carried to T-A P1.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P1: `set_schedule_json_tx` transactional CAS implemented; `handle_set` (and the cron evaluator) use the atomic variant. 4 hermetic tests cover rejection on stale preimage, concurrent-writer serialisation, successful apply on matching preimage, and missing-work error. In-code TODO marker removed.",
+        "closure_evidence": "iteration/v1.50 (commit 67db009b on feature/v1.50-cron-brainstorm-write)"
+      }
+    ],
+    "2026-06-18-v1.50-cron-brainstorm-write": [
+      {
+        "id": "R-V150P1CRONBW-01",
+        "title": "novel-write embedded preset not yet authored (defer to T-A P2)",
+        "severity": "medium",
+        "source": "P1 implementer (spec gap surfaced honestly)",
+        "scope": "embedded-presets/novel-writing/ (novel-write preset absent); cron evaluator enqueues the correct preset_id per spec but executor needs the preset authored",
+        "decision": "defer",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.50 T-A P2",
+        "target_date": "V1.50 T-A P2",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
+        "note": "Evaluator contract is complete and tested (18 cron_supervisor tests). novel-brainstorm works end-to-end. novel-write schedule persists + admits normally but the executor body is missing — author the embedded-presets/novel-writing/<write-stage>.yaml in T-A P2. This is a preset-authoring workstream, not an evaluator defect."
+      },
+      {
+        "id": "R-V150P1CRONBW-02",
+        "title": "Full-workspace `cargo clippy --all` deferred to CI per `target/` hygiene policy",
+        "severity": "low",
+        "source": "P1 implementer (process)",
+        "scope": "CI gate on PR",
+        "decision": "accept",
+        "owner": "@qa-engineer",
+        "target": "V1.50 PR (CI)",
+        "target_date": "V1.50 PR (CI)",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
+        "note": "Touched crates (nexus-orchestration, nexus-local-db, nexus42, nexus-daemon-runtime) verified clean locally; full-workspace clippy is the authoritative CI gate per .mstar/AGENTS.md `target/` hygiene rule. Accept (CI verifies)."
       }
     ],
     "2026-06-18-v1.50-kb-editor-cli": [
@@ -686,6 +720,34 @@
         "target_date": "V1.51+",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
         "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode."
+      }
+    ],
+    "2026-06-18-v1.50-kb-auto-promotion": [
+      {
+        "id": "R-V150KBED-01",
+        "title": "Heuristic extraction defaults all candidates to block_type_guess='character' (LLM extraction deferred)",
+        "severity": "low",
+        "source": "P1 implementer (heuristic limitation)",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs (review_time_extraction)",
+        "decision": "defer",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.51+ (LLM-driven extraction)",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
+        "note": "Heuristic (capitalized noun phrases) cannot distinguish character/location/organization. Authors correct on adopt via `creator world kb adopt`. LLM extraction is compass §0.1 OUT (defer V1.51+). Accept at P1; not blocking."
+      },
+      {
+        "id": "R-V150KBED-02",
+        "title": "resolve_workspace_id reads narrative_gateway.workspace_id which may be stale; column is informational only (defer to T-B P2)",
+        "severity": "low",
+        "source": "P1 implementer (cross-plan dependency)",
+        "scope": "T-B P1 / T-B P2 boundary",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P2",
+        "target_date": "V1.50 T-B P2",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
+        "note": "T-B P2 refreshable scan will use the freshest workspace_id from the chapter frontmatter; resolve_workspace_id staleness self-corrects in T-B P2."
       }
     ]
   },
