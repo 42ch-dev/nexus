@@ -6,8 +6,8 @@ plan_id: "2026-06-18-v1.50-cron-foundation"
 working_branch: "feature/v1.50-cron-foundation"
 review_cwd: "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-cron-foundation"
 review_range: "merge-base c38fbe1f264b9574b25355d872d20138c1c04e77..a7ea8349260fa7c8cc5be0f586fa9f84d13549ee"
-verdict: "Request Changes"
-generated_at: "2026-06-18"
+verdict: "Approve"
+generated_at: "2026-06-18T18:30:00Z"
 ---
 
 # Code Review Report — V1.50 T-A P0 cron-foundation (Reviewer #3)
@@ -239,3 +239,155 @@ Pending PM assignment — these are the items that will remain open after W-001 
 - `Cargo.toml` and `crates/nexus42/Cargo.toml` (diff inspected)
 - `.mstar/knowledge/specs/novel-writing/cron-staggering.md` (lines 1–200, full read)
 - `.mstar/plans/2026-06-18-v1.50-cron-foundation.md` (full read)
+
+---
+
+## Revalidation
+
+```yaml
+report_kind: qc-revalidation
+reviewer: qc-specialist-3
+reviewer_index: 3
+plan_id: 2026-06-18-v1.50-cron-foundation
+working_branch: feature/v1.50-cron-foundation
+review_cwd: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-cron-foundation
+review_range: a7ea8349..f5f58edd
+fix_wave_commits:
+  - 87ea2ef6 (R-V150P0-W4)
+  - 000d63fd (R-V150P0-W1)
+  - e478079c (R-V150P0-W2)
+  - a364f31a (R-V150P0-W3)
+  - 5dc8eaa3 (R-V150P0-W5 TODO marker)
+  - f5f58edd (plan completion report)
+verdict: Approve
+generated_at: 2026-06-18T18:30:00Z
+```
+
+### Scope (Revalidation)
+
+- **plan_id**: `2026-06-18-v1.50-cron-foundation`
+- **Review range / Diff basis**: `a7ea8349..f5f58edd` (6 fix-wave commits)
+- **Working branch (verified)**: `feature/v1.50-cron-foundation`
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-cron-foundation`
+- **Diff stat**: 8 files changed, 929 insertions(+), 47 deletions(-)
+- **Tools run**:
+  - `git rev-parse --show-toplevel` / `git branch --show-current` / `git log a7ea8349..f5f58edd --oneline` (context gate)
+  - `git diff a7ea8349..f5f58edd --stat` (scope)
+  - `git diff a7ea8349..f5f58edd` (per-file inspection)
+  - `cargo build -p nexus-local-db -p nexus42` — Finished (12.50s, no errors)
+  - `cargo clippy -p nexus-local-db -p nexus42 -- -D warnings` — clean
+  - `cargo +nightly fmt --all --check` — clean
+  - `cargo test -p nexus-local-db --test works_schedule_migration` — **8/8 passed** (was 7/7; +1: `list_works_schedule_applies_limit`)
+  - `cargo test -p nexus42 --test cron_cli` — **9/9 passed** (was 8/8; +1: `cron_list_help_documents_limit_flag`)
+  - `cargo test -p nexus42 --lib commands::creator::works::cron` — **29/29 passed** (was 21/21; +8 covering W-001/W-002/W-001 and TZ preservation)
+
+### Per-W Disposition
+
+#### W-001 (qc3 initial — R-V150P0-W2): all-off rule not enforced — **RESOLVED**
+
+**Evidence (commit `e478079c`)**:
+
+- Stable error code constant added (`cron.rs` top): `const ERR_ALL_DISABLED: &str = "E_CRON_ALL_ROLES_DISABLED";`
+- `CronSetArgs` gained `pub all_off: bool` (justified `#[allow(clippy::struct_excessive_bools)]` for the 1:1 clap mirror).
+- `CronCommand::Set` clap definition gained `--all-off` (`#[arg(long, default_value_t = false)] all_off: bool`).
+- `apply_set_args` now performs the all-enabled check at the end of the function and returns `CliError::Config(format!("[{ERR_ALL_DISABLED}] disabling all three roles …"))` when no role remains enabled and `--all-off` was not passed. The check uses a single boolean fold over the three `RoleSchedule::enabled` flags.
+- Hermetic regression tests in `cron.rs` mod `tests`:
+  - `apply_set_args_all_off_without_flag_rejects` — sets `no_brainstorm/no_write/no_review = true, all_off = false`; asserts the error message contains `E_CRON_ALL_ROLES_DISABLED`. **PASSES**.
+  - `apply_set_args_all_off_with_flag_succeeds` — same flags with `all_off = true`; asserts all three roles end up `enabled = false` and `apply_set_args` returns `Ok`. **PASSES**.
+
+This was a normative spec §3.1 deviation. The fix is a 1-line validation (count enabled roles) + a 1-line clap flag + 2 tests, exactly as the initial report prescribed.
+
+#### W-002 (qc3 initial — R-V150P0-W3): show output missing Local time + Next fire (UTC) — **RESOLVED**
+
+**Evidence (commit `a364f31a`)**:
+
+- `render_show` was reworked into a 4-column table: header line `"Role        Cron                 Local time          Next fire (UTC)\n"` and three role rows printed in a single `for` loop over `[("brainstorm", ...), ("write", ...), ("review", ...)]` — only **one** `next_fire_utc` call per role inside that loop, satisfying the per-role `.next()` performance contract.
+- `next_fire_utc(cron_expr)` — `Schedule::from_str(&normalize_cron_fields(cron_expr)).ok()?.upcoming(chrono::Utc).next()?` formatted as `"%Y-%m-%d %H:%M UTC"`. This is **O(1)** per role (the `cron` crate precomputes field ranges; the initial review's worst-case "iterates per-second for years" concern is avoided by the single `.next()`). TZ interpretation is UTC at P0; the doc-comment explicitly defers full author-TZ → UTC conversion to T-A P1 (consistent with the deferred partial index / tracing residuals).
+- `local_time_display(cron_expr)` — parses minute and hour fields; if hour is `*`, renders `"{minutes} every hour"`; otherwise renders up to 3 `HH:MM` slots and truncates with `…` past 3. Falls back to the raw expression on parse failure (rendering never panics).
+- Disabled roles: the `if role.enabled { … } else { ("--", "disabled") }` branch shows `--` for Local time and `disabled` for Next fire.
+- The old `maybe_disabled` helper is removed (no dead code, in line with `mstar-coding-behavior` Simplicity First).
+- Hermetic regression tests:
+  - `render_show_includes_local_and_next_fire_columns` — asserts header `Local time` / `Next fire (UTC)` and a concrete `03:00` slot + `UTC` substring for the brainstorm row. **PASSES**.
+  - `render_show_disabled_renders_disabled_for_next_fire` — asserts `--` and `disabled` for a disabled brainstorm. **PASSES**.
+
+Spec §3.2 example output is now faithfully represented.
+
+#### W-003 (qc3 initial — R-V150P0-W4): list_works_schedule unbounded — **RESOLVED**
+
+**Evidence (commit `87ea2ef6`)**:
+
+- `list_works_schedule(pool, creator_id, workspace_slug, limit: Option<u32>)` — new `limit` parameter; default applied at the DAO boundary: `let limit = i64::from(limit.unwrap_or(100));` (matches `WorkListFilters::limit`'s default of 100). The SQL now ends with `LIMIT ?` and the limit is bound as a parameter (no string interpolation, no SQL injection).
+- `CronCommand::List` clap definition gained `--limit: Option<u32>` (`#[arg(long)] limit: Option<u32>`), and `handle_list` threads it through to the DAO call.
+- Hermetic regression tests:
+  - `list_works_schedule_applies_limit` in `works_schedule_migration.rs` — seeds 5 Works, queries with `Some(2)`, asserts `rows.len() == 2`. Then queries with `None` and asserts all 5 are returned (default cap of 100). **PASSES**.
+  - `cron_list_help_documents_limit_flag` in `cron_cli.rs` — spawns the `nexus42` binary, asserts `creator works cron list --help` output contains `--limit`. **PASSES**.
+
+The DAO contract is now bounded; the CLI surface is consistent with `list_works`. `cron_list_across_workspace` and `list_works_schedule_returns_all_works` were updated to pass the new `None` argument (existing test surface preserved).
+
+#### W-004 (qc3 initial — R-V150P0-W5): TOCTOU between read and write — **DEFERRAL CONFIRMED**
+
+**Evidence (commit `5dc8eaa3`)**:
+
+- TODO marker present at `crates/nexus42/src/commands/creator/works/cron.rs:613` (verified via `grep -n "TODO(V1.50-T-A-P1)"`):
+  ```rust
+  // TODO(V1.50-T-A-P1): see R-V150P0-W5 — get→apply→set is a read-modify-write
+  // with a TOCTOU window. Acceptable for single-user CLI at P0; the T-A P1
+  // daemon writer needs a transactional / CAS variant to avoid lost updates.
+  ```
+- The marker sits directly above the `get_schedule_json → apply_set_args → set_schedule_json` sequence, in the position a future P1 implementer will see it first.
+- The plan document (`.mstar/plans/2026-06-18-v1.50-cron-foundation.md` Fix Wave section) explicitly carries `R-V150P0-W5 | low | 5dc8eaa3 | TODO marker for T-A P1 (deferred; see residual above)` and the residual-findings section calls out: *"R-V150P0-W5 … deferred to T-A P1. Acceptable at P0 (single-user CLI, microsecond race window); the T-A P1 daemon-side cron writer is the racing party that needs a transactional / CAS set_schedule_json variant. Tracked in-code via a TODO(V1.50-T-A-P1) marker in handle_set."*
+
+This is the correct deferral pattern from the initial report: in-code marker + plan-level residual entry + durable roadmap call-out.
+
+### Verifier Evidence (Revalidation)
+
+```text
+$ cargo +nightly fmt --all --check
+# exit 0 (clean)
+
+$ cargo build -p nexus-local-db -p nexus42
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.50s
+
+$ cargo clippy -p nexus-local-db -p nexus42 -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+
+$ cargo test -p nexus-local-db --test works_schedule_migration
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured
+
+$ cargo test -p nexus42 --test cron_cli
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured
+
+$ cargo test -p nexus42 --lib commands::creator::works::cron
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 724 filtered out
+```
+
+**46/46 tests pass** (8 + 9 + 29) — net gain of **+10** tests from the initial wave (36 → 46). Clippy and `cargo +nightly fmt --check` both clean for the plan surface.
+
+### Summary of New Findings in the Fix Wave
+
+No new findings in the fix-wave diff. The 6 commits are surgical: each `R#` introduces a single, scoped change (a clap flag + validation + test, or a new SQL `LIMIT` + test, or a marker comment) without piggybacking unrelated refactors. The unused `maybe_disabled` helper was correctly removed as a consequence of the `render_show` rework (clean-up, not a refactor).
+
+### Residual Findings Status (Revalidation)
+
+| ID | Title | Severity | Disposition |
+| --- | --- | --- | --- |
+| R-V150P0-W1 | TZ preservation on role-only patch | high | **RESOLVED** by `000d63fd` (qc1 W1; cross-corroborated here) |
+| R-V150P0-W2 | spec §3.1 all-off rule not enforced | high | **RESOLVED** by `e478079c` (qc3 W-001) |
+| R-V150P0-W3 | show output missing Local time + Next fire (UTC) | medium | **RESOLVED** by `a364f31a` (qc3 W-002) |
+| R-V150P0-W4 | list_works_schedule unbounded | medium | **RESOLVED** by `87ea2ef6` (qc3 W-003) |
+| R-V150P0-W5 | handle_set read-modify-write TOCTOU | low (deferred) | **DEFERRED** — TODO marker present at `cron.rs:613` (commit `5dc8eaa3`) |
+
+Initial-wave Suggestions S-001..S-004 (partial index, tracing, `NEXUS_TZ` docs, flag conflict detection) remain non-blocking backlog, consistent with the initial report.
+
+### Revalidation Verdict
+
+**Verdict**: **Approve**
+
+**Rationale**:
+- All 3 blocking Warnings from the initial wave (W-001 / W-002 / W-003) are resolved with hermetic regression tests that pass.
+- The 4th Warning (W-004 TOCTOU) is correctly deferred to T-A P1 with an in-code `// TODO(V1.50-T-A-P1): see R-V150P0-W5` marker at the exact read-modify-write site, plus a plan-level residual entry — exactly the deferral pattern the initial report prescribed.
+- Diff stat (8 files, +929/-47) is concentrated on the 4 concerns; no piggyback refactors.
+- `cargo +nightly fmt --check` and `cargo clippy -p nexus-local-db -p nexus42 -- -D warnings` both clean; the plan's three test suites gain 10 new tests (36 → 46) and all pass.
+- The single `.next()` per role in `next_fire_utc` preserves the O(1) performance contract; the wildcard-hour rendering in `local_time_display` matches the spec §3.2 example output.
+
+The initial verdict (`Request Changes`) is updated to **`Approve`** for the fix-wave.
