@@ -315,45 +315,98 @@ const WRITE_OK: &str = "write to String is infallible";
 
 /// Render the `show` output (spec §3.2): local + UTC firing display.
 ///
-/// Pure over `(work_ref, schedule)`. Disabled roles render as `disabled`.
+/// Four columns match the spec §3.2 example: `Role / Cron / Local time /
+/// Next fire (UTC)`. Disabled roles render `--` for Local time and `disabled`
+/// for Next fire (R-V150P0-W3). Pure over `(work_ref, schedule)`.
 #[must_use]
 pub fn render_show(work_ref: &str, schedule: &WorkSchedule) -> String {
     let tz_display = tz_offset_display(&schedule.tz);
     let mut out = String::new();
     writeln!(out, "Work: {work_ref}").expect(WRITE_OK);
     write!(out, "TZ:   {} ({tz_display})\n\n", schedule.tz).expect(WRITE_OK);
-    out.push_str("Role        Cron                 Enabled\n");
-    writeln!(
-        out,
-        "brainstorm  {}  {}",
-        maybe_disabled(&schedule.roles.brainstorm),
-        schedule.roles.brainstorm.enabled
-    )
-    .expect(WRITE_OK);
-    writeln!(
-        out,
-        "write       {}  {}",
-        maybe_disabled(&schedule.roles.write),
-        schedule.roles.write.enabled
-    )
-    .expect(WRITE_OK);
-    write!(
-        out,
-        "review      {}  {}",
-        maybe_disabled(&schedule.roles.review),
-        schedule.roles.review.enabled
-    )
-    .expect(WRITE_OK);
+    out.push_str("Role        Cron                 Local time          Next fire (UTC)\n");
+    for (name, role) in [
+        ("brainstorm", &schedule.roles.brainstorm),
+        ("write", &schedule.roles.write),
+        ("review", &schedule.roles.review),
+    ] {
+        let cron_cell = if role.enabled {
+            role.cron.clone()
+        } else {
+            "disabled".to_string()
+        };
+        let (local_cell, next_cell) = if role.enabled {
+            (
+                local_time_display(&role.cron),
+                next_fire_utc(&role.cron).unwrap_or_else(|| "unknown".to_string()),
+            )
+        } else {
+            ("--".to_string(), "disabled".to_string())
+        };
+        writeln!(
+            out,
+            "{name:<12}{cron_cell:<21}{local_cell:<21}{next_cell}",
+        )
+        .expect(WRITE_OK);
+    }
     out
 }
 
-/// Render `disabled` in place of the cron when a role is disabled, else the cron.
-fn maybe_disabled(role: &RoleSchedule) -> String {
-    if role.enabled {
-        role.cron.clone()
-    } else {
-        "disabled".to_string()
+/// Render the local-time firing pattern for a cron expression (spec §3.2).
+///
+/// Parses the minute/hour fields and renders up to three `HH:MM` slots. When
+/// the hour field is `*`, renders the minute pattern followed by
+/// ` every hour` (matches the spec review-row example). Falls back to the raw
+/// expression when the fields do not parse, so rendering never panics. Pure
+/// over the expression string.
+fn local_time_display(cron_expr: &str) -> String {
+    let mut fields = cron_expr.split_whitespace();
+    let (Some(min_field), Some(hour_field)) = (fields.next(), fields.next()) else {
+        return cron_expr.to_string();
+    };
+    let minutes: Vec<&str> = min_field.split(',').collect();
+    if hour_field == "*" {
+        let mins = minutes
+            .iter()
+            .map(|m| format!(":{m}"))
+            .collect::<Vec<_>>()
+            .join(" / ");
+        return format!("{mins} every hour");
     }
+    let mut times: Vec<String> = Vec::new();
+    for h in hour_field.split(',') {
+        let Ok(hh) = h.parse::<u32>() else {
+            continue;
+        };
+        for m in &minutes {
+            let Ok(mm) = m.parse::<u32>() else {
+                continue;
+            };
+            times.push(format!("{hh:02}:{mm:02}"));
+        }
+    }
+    if times.is_empty() {
+        return cron_expr.to_string();
+    }
+    if times.len() > 3 {
+        format!("{} / …", times[..3].join(" / "))
+    } else {
+        times.join(" / ")
+    }
+}
+
+/// Compute the next UTC fire time for a cron expression (spec §3.2,
+/// R-V150P0-W3).
+///
+/// Interprets the expression in UTC (P0 approximation; the spec's full
+/// author-TZ → UTC conversion lands with the daemon evaluator in T-A P1).
+/// Returns `None` only when the expression cannot be parsed or has no upcoming
+/// fire, which should not happen for a previously-validated 5-field expression.
+fn next_fire_utc(cron_expr: &str) -> Option<String> {
+    let normalized = normalize_cron_fields(cron_expr);
+    let schedule = cron::Schedule::from_str(&normalized).ok()?;
+    let next = schedule.upcoming(chrono::Utc).next()?;
+    Some(format!("{}", next.format("%Y-%m-%d %H:%M UTC")))
 }
 
 /// Render the `list` output (spec §3.3) across workspace Works.
@@ -942,6 +995,44 @@ mod tests {
         assert!(!out.roles.brainstorm.enabled);
         assert!(!out.roles.write.enabled);
         assert!(!out.roles.review.enabled);
+    }
+
+    // ── R-V150P0-W3: show columns (Local time + Next fire UTC) ───────────
+
+    #[test]
+    fn render_show_includes_local_and_next_fire_columns() {
+        let s = WorkSchedule::defaults(); // brainstorm = 0 3,9,15,21 * * *, tz=UTC
+        let out = render_show("my-work", &s);
+        assert!(
+            out.contains("Local time"),
+            "missing Local time header: {out}"
+        );
+        assert!(
+            out.contains("Next fire (UTC)"),
+            "missing Next fire (UTC) header: {out}"
+        );
+        // brainstorm row has a concrete local-time slot (03:00) and a UTC fire.
+        assert!(
+            out.contains("03:00"),
+            "brainstorm local time slot missing: {out}"
+        );
+        assert!(out.contains("UTC"), "next-fire UTC cell missing: {out}");
+    }
+
+    #[test]
+    fn render_show_disabled_renders_disabled_for_next_fire() {
+        let mut s = WorkSchedule::defaults();
+        s.roles.brainstorm.enabled = false;
+        let out = render_show("d-work", &s);
+        // The disabled brainstorm row: Local time cell = "--", Next fire = "disabled".
+        assert!(
+            out.contains("--"),
+            "disabled local-time cell '--' missing: {out}"
+        );
+        assert!(
+            out.contains("disabled"),
+            "disabled next-fire cell missing: {out}"
+        );
     }
 
     fn error_message(err: &CliError) -> String {
