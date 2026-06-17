@@ -152,10 +152,7 @@ impl ResearchScheduleFixture {
         .bind(self.creator_id)
         .bind(RESEARCH_PRESET_VERSION)
         .bind(self.status)
-        .bind(format!(
-            "FL-E stage: research (work: {})",
-            self.work_id
-        ))
+        .bind(format!("FL-E stage: research (work: {})", self.work_id))
         .bind(now)
         .bind(now)
         .bind(self.work_id)
@@ -181,9 +178,7 @@ async fn schedule_status(pool: &SqlitePool, schedule_id: &str) -> String {
             .bind(schedule_id)
             .fetch_optional(pool)
             .await
-            .unwrap_or_else(|e| {
-                panic!("schedule_status({schedule_id}): DB read failed: {e}")
-            });
+            .unwrap_or_else(|e| panic!("schedule_status({schedule_id}): DB read failed: {e}"));
     match row {
         Some((status,)) => status,
         None => panic!(

@@ -238,23 +238,26 @@ async fn findings_list_filter_by_comma_separated_status() {
         2,
         "actionable set must contain both open + triaged; got {actionable:?}"
     );
-    let mut actionable_ids: Vec<String> =
-        actionable.iter().map(|f| f.finding_id.clone()).collect();
+    let mut actionable_ids: Vec<String> = actionable.iter().map(|f| f.finding_id.clone()).collect();
     actionable_ids.sort();
-    let mut expected: Vec<String> =
-        vec![open.finding_id.clone(), triaged.finding_id.clone()];
+    let mut expected: Vec<String> = vec![open.finding_id.clone(), triaged.finding_id.clone()];
     expected.sort();
-    assert_eq!(actionable_ids, expected, "actionable set membership mismatch");
+    assert_eq!(
+        actionable_ids, expected,
+        "actionable set membership mismatch"
+    );
 
     // `in_review`, `resolved` must be excluded.
     for f in &actionable {
         assert!(
-            !matches!(f.status.as_str(), "in_review" | "resolved" | "wont_fix" | "duplicate"),
+            !matches!(
+                f.status.as_str(),
+                "in_review" | "resolved" | "wont_fix" | "duplicate"
+            ),
             "actionable filter leaked a non-actionable status: {}",
             f.status
         );
     }
-
     // Comma + whitespace tolerance (`"open, triaged"`).
     let result = list_findings_handler(
         State(state.clone()),

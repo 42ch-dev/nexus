@@ -777,8 +777,7 @@ async fn handle_list(
     if json {
         // R-V150-WLA-05: `list_row_to_json` carries `work_id` alongside
         // `work_ref` so machine consumers can always identify the row.
-        let json_rows: Vec<serde_json::Value> =
-            rows.iter().map(list_row_to_json).collect();
+        let json_rows: Vec<serde_json::Value> = rows.iter().map(list_row_to_json).collect();
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({ "works": json_rows }))?
