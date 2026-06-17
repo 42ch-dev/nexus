@@ -28,16 +28,23 @@
 //! `advance_manual` bypasses the finish-detection gates (intake / lock /
 //! finalization) and creates the requested volume immediately. It still honors
 //! the idempotent guard (`AlreadyAdvanced`) so it never clobbers an existing
-//! outline — a future `--force` flag could override that (out of scope).
+//! outline — pass `force = true` to override that (recovery path for a
+//! post-commit outline-write failure or an orphaned crash-state outline).
 //!
 //! ## Advance execution (spec §4)
 //!
-//! 1. Render `Outlines/volume-<N>-outline.md` from the embedded template.
-//! 2. Atomic write: temp file + `sync_all` + rename (spec §4.1).
-//! 3. Open `state.db` transaction → (optionally) seed chapter rows for the new
-//!    volume → bump `works.updated_at` → commit. Crash mid-tx rolls back; the
-//!    next tick sees the existing outline and skips (idempotent).
-//! 4. Append the chronology log entry (spec §4.3; best-effort, non-fatal).
+//! 1. Open `state.db` transaction → (optionally) seed chapter rows for the new
+//!    volume → bump `works.updated_at` → **commit**. The DB is the source of
+//!    truth and commits first (V1.36 "DB first, FS second" atomicity pattern).
+//! 2. Render `Outlines/volume-<N>-outline.md` from the embedded template +
+//!    atomic write (temp + `sync_all` + rename, spec §4.1).
+//! 3. Append the chronology log entry (spec §4.3; best-effort, non-fatal).
+//!
+//! Because the DB tx commits before the outline write, a post-commit outline
+//! failure leaves the DB state correct and the Work is **not stuck**: the next
+//! tick (auto path) sees no outline and re-advances cleanly; the manual path
+//! re-runs `advance` (idempotent re-seed via `INSERT OR IGNORE`) or uses
+//! `--force` to retry the outline write.
 //!
 //! The auto path seeds **zero** chapters because the outline is a placeholder
 //! (spec §4.2 last paragraph); the author fills the outline and runs the seed
@@ -261,13 +268,23 @@ async fn load_row_for_manual(
     Ok(row)
 }
 
-/// The shared advance: idempotent guard → outline render+write → tx → log.
+/// The shared advance: idempotent guard → tx commit → outline render+write → log.
 ///
 /// `chapter_count` seeds that many `not_started` rows for `next_volume` inside
 /// the transaction (0 → no rows; placeholder-outline path). `trigger` is
 /// recorded in the log. `title`/`total_planned_chapters` feed the template.
+/// `force` bypasses the idempotent guard so the caller can overwrite an
+/// existing outline (recovery path for a post-commit outline-write failure or
+/// an orphaned crash-state outline).
+///
+/// ## Atomicity ordering (V1.36 "DB first, FS second")
+///
+/// The DB transaction commits **before** the outline file is written. If the
+/// outline write fails post-commit, the DB state is already correct and the
+/// Work is not stuck: the next tick (auto path) re-advances and writes the
+/// outline; the manual path re-runs `advance` or uses `--force`.
 //
-// rationale: the 8 Work-specific inputs are read together from one row; packing
+// rationale: the 9 Work-specific inputs are read together from one row; packing
 // them into a struct would duplicate the WorkAutoChronologyRow shape without
 // clarifying the call sites (auto vs manual differ only in how the row is
 // resolved, not in what the advance needs).
@@ -282,13 +299,15 @@ async fn perform_advance(
     prev_volume: i32,
     next_volume: i32,
     chapter_count: i32,
+    force: bool,
     trigger: &str,
 ) -> Result<AdvanceOutcome, AutoChronologyError> {
     let now = now_utc();
 
     // Gate (shared): idempotent guard — do not clobber an existing outline.
+    // `force` bypasses the guard (recovery path).
     let outline = outline_path(workspace_dir, work_ref, next_volume);
-    if outline.exists() {
+    if !force && outline.exists() {
         tracing::info!(
             work_id,
             next_volume,
@@ -300,22 +319,8 @@ async fn perform_advance(
         });
     }
 
-    // Step 1+2 (spec §4.1): render + atomic outline write.
-    let rendered = render_volume_outline(
-        work_id,
-        work_ref,
-        title,
-        prev_volume,
-        next_volume,
-        total_planned_chapters,
-        &now,
-    );
-    if let Some(parent) = outline.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    write_outline_atomic(&outline, &rendered)?;
-
-    // Step 3 (spec §4.2): transactional chapter seed + updated_at bump.
+    // Step 1 (spec §4.2): transactional chapter seed + updated_at bump.
+    // The DB tx commits FIRST (source of truth), before the outline file write.
     let seeded = chapter_count.max(0);
     let mut tx = pool
         .begin()
@@ -345,7 +350,24 @@ async fn perform_advance(
         .await
         .map_err(nexus_local_db::LocalDbError::from)?;
 
-    // Step 4 (spec §4.3): best-effort log entry.
+    // Step 2 (spec §4.1): render + atomic outline write (post-commit).
+    // If this fails, the DB tx is already committed; the outline is recoverable
+    // (next tick for the auto path; `--force` for the manual path).
+    let rendered = render_volume_outline(
+        work_id,
+        work_ref,
+        title,
+        prev_volume,
+        next_volume,
+        total_planned_chapters,
+        &now,
+    );
+    if let Some(parent) = outline.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_outline_atomic(&outline, &rendered)?;
+
+    // Step 3 (spec §4.3): best-effort log entry.
     if let Err(e) = write_advance_log(
         workspace_dir,
         work_ref,
@@ -430,7 +452,7 @@ async fn advance_auto(
 
     // The auto path seeds zero chapters (placeholder outline, spec §4.2).
     // Substitute the Work's stored title / total_planned_chapters into the
-    // outline render (spec §4.1 step 3).
+    // outline render (spec §4.1 step 3). The daemon never forces (no --force).
     perform_advance(
         pool,
         workspace_dir,
@@ -441,14 +463,18 @@ async fn advance_auto(
         prev_volume,
         next_volume,
         0,
+        false,
         "daemon auto_chronology_tick",
     )
     .await
 }
 
-/// Manual override: create the requested volume regardless of finish detection
-/// (spec §2.2). Still honors the idempotent guard so it never clobbers an
-/// existing outline.
+/// Manual override: create the requested volume regardless of finish detection.
+///
+/// Bypasses the intake / lock / finalization gates (spec §2.2). Still honors
+/// the idempotent guard so it never clobbers an existing outline — pass
+/// `force = true` to bypass that (recovery path for a post-commit outline-write
+/// failure or an orphaned crash-state outline).
 ///
 /// `next_volume` is the explicit target (e.g. CLI `--volume 3`). `chapter_count`
 /// seeds that many rows for the new volume inside the transaction (`None` → 0).
@@ -457,12 +483,16 @@ async fn advance_auto(
 ///
 /// Returns [`AutoChronologyError`] on database or IO failure. A missing Work
 /// returns `Ok(Skipped { VolumeNotFinalized })` so the caller surfaces it.
+/// An IO error post-commit (outline write failure) is returned as `Err(Io)`;
+/// the DB transaction has already committed, so re-running is idempotent and
+/// safe (`INSERT OR IGNORE` + outline guard).
 pub async fn advance_manual(
     pool: &SqlitePool,
     workspace_dir: &Path,
     work_id: &str,
     next_volume: i32,
     chapter_count: Option<i32>,
+    force: bool,
 ) -> Result<AdvanceOutcome, AutoChronologyError> {
     let Some(row) = load_row_for_manual(pool, work_id).await? else {
         return Ok(AdvanceOutcome::Skipped {
@@ -485,6 +515,7 @@ pub async fn advance_manual(
         prev_volume,
         next_volume,
         chapter_count.unwrap_or(0),
+        force,
         "manual cli advance",
     )
     .await

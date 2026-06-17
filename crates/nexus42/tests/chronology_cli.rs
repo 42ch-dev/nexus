@@ -71,7 +71,7 @@ async fn chronology_advance_round_trip() {
         "advance target is not opted in"
     );
 
-    let outcome = advance_manual(&pool, ws.path(), "wrk_seed", 2, Some(3))
+    let outcome = advance_manual(&pool, ws.path(), "wrk_seed", 2, Some(3), false)
         .await
         .unwrap();
     match outcome {
@@ -109,10 +109,10 @@ async fn chronology_advance_round_trip() {
 async fn chronology_advance_idempotent_on_repeat() {
     let pool = fresh_seeded_pool().await;
     let ws = tempfile::tempdir().unwrap();
-    advance_manual(&pool, ws.path(), "wrk_seed", 2, None)
+    advance_manual(&pool, ws.path(), "wrk_seed", 2, None, false)
         .await
         .unwrap();
-    let outcome = advance_manual(&pool, ws.path(), "wrk_seed", 2, None)
+    let outcome = advance_manual(&pool, ws.path(), "wrk_seed", 2, None, false)
         .await
         .unwrap();
     assert!(matches!(
@@ -207,6 +207,25 @@ fn chronology_advance_help_documents_flags() {
     assert!(
         help.contains("--chapters"),
         "chronology advance --help must document --chapters: {help}"
+    );
+}
+
+/// `creator works chronology advance --help` documents `--force` (R-V150P3AUTOCHRONO-04).
+#[test]
+fn chronology_advance_help_documents_force_flag() {
+    use assert_cmd::Command;
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "chronology", "advance", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let help = String::from_utf8(output).unwrap();
+    assert!(
+        help.contains("--force"),
+        "chronology advance --help must document --force: {help}"
     );
 }
 

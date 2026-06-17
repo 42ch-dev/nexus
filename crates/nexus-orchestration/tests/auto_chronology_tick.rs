@@ -338,6 +338,119 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
     // idempotent guard above (outline exists → no second write path).
 }
 
+// ── R-V150P3AUTOCHRONO-04 regression: DB tx commits BEFORE outline write ──
+
+/// The advance must commit the DB transaction BEFORE writing the outline file
+/// (V1.36 "DB first, FS second"). When the outline write fails post-commit,
+/// the DB state is already correct (chapters seeded, updated_at bumped) and the
+/// Work is NOT stuck — proving the ordering inversion fixes the "outline
+/// written before tx commits → Work stuck" reliability gap (qc3 W-1).
+#[tokio::test]
+async fn perform_advance_writes_outline_after_tx_commit() {
+    let pool = fresh_pool().await;
+    let ws = tempfile::tempdir().unwrap();
+    let work = base_work("wrk_order", "order-novel");
+    works::create_work(&pool, &work).await.unwrap();
+
+    // Pre-create a regular FILE at the `Outlines` directory path so
+    // `create_dir_all(outline.parent())` fails post-commit (NotADirectory).
+    let outlines_as_file = ws.path().join("Works").join("order-novel").join("Outlines");
+    std::fs::create_dir_all(outlines_as_file.parent().unwrap()).unwrap();
+    std::fs::write(&outlines_as_file, "blocker").unwrap();
+
+    // Manual advance with 3 chapters → perform_advance must commit the tx
+    // (chapter seed + updated_at) FIRST, then try the outline write → fails.
+    let result = advance_manual(&pool, ws.path(), "wrk_order", 2, Some(3), false).await;
+    assert!(
+        result.is_err(),
+        "outline write failure must surface as Err (observable); got: {result:?}"
+    );
+
+    // The DB tx committed BEFORE the outline write (Design A): the 3 chapter
+    // rows persist despite the outline failure. This is the key invariant —
+    // the Work is not stuck because the DB is the source of truth.
+    let vol2_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM work_chapters WHERE work_id = 'wrk_order' AND volume = 2",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        vol2_count, 3,
+        "tx must commit BEFORE outline write: chapters persist despite outline failure"
+    );
+
+    // No partial outline file (the write never succeeded; atomic cleanup holds).
+    let outline = outline_path(ws.path(), "order-novel", 2);
+    assert!(
+        !outline.exists(),
+        "no partial outline file after failed write"
+    );
+
+    // Recovery: remove the blocker, re-run advance. The idempotent guard
+    // passes (no outline), seed is idempotent (INSERT OR IGNORE), and the
+    // outline write succeeds on retry.
+    std::fs::remove_file(&outlines_as_file).unwrap();
+    let outcome = advance_manual(&pool, ws.path(), "wrk_order", 2, Some(3), false)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, AdvanceOutcome::Advanced { next_volume, .. } if next_volume == 2),
+        "recovery re-run must succeed; got: {outcome:?}"
+    );
+    assert!(
+        outline.exists(),
+        "recovery: outline must be written after blocker removed"
+    );
+}
+
+// ── R-V150P3AUTOCHRONO-04 regression: --force bypasses idempotent guard ───
+
+/// `force = true` bypasses the idempotent guard so the caller can overwrite an
+/// existing outline (recovery path for an orphaned crash-state outline).
+#[tokio::test]
+async fn manual_advance_force_overwrites_existing_outline() {
+    let pool = fresh_pool().await;
+    let ws = tempfile::tempdir().unwrap();
+    let work = base_work("wrk_force", "force-novel");
+    works::create_work(&pool, &work).await.unwrap();
+
+    // First advance creates the outline.
+    let outcome = advance_manual(&pool, ws.path(), "wrk_force", 2, None, false)
+        .await
+        .unwrap();
+    assert!(matches!(outcome, AdvanceOutcome::Advanced { .. }));
+    let outline = outline_path(ws.path(), "force-novel", 2);
+    let original = std::fs::read_to_string(&outline).unwrap();
+    assert!(original.contains("force-novel"));
+
+    // Without force: second advance is idempotent (AlreadyAdvanced).
+    let skipped = advance_manual(&pool, ws.path(), "wrk_force", 2, None, false)
+        .await
+        .unwrap();
+    assert!(matches!(
+        skipped,
+        AdvanceOutcome::Skipped {
+            reason: SkipReason::AlreadyAdvanced,
+            ..
+        }
+    ));
+
+    // With force: bypasses the guard and rewrites the outline.
+    let forced = advance_manual(&pool, ws.path(), "wrk_force", 2, None, true)
+        .await
+        .unwrap();
+    assert!(
+        matches!(forced, AdvanceOutcome::Advanced { .. }),
+        "force must bypass idempotent guard and re-advance; got: {forced:?}"
+    );
+    let rewritten = std::fs::read_to_string(&outline).unwrap();
+    assert!(
+        rewritten.contains("force-novel"),
+        "force must rewrite the outline (still valid content)"
+    );
+}
+
 // ── Manual override (spec §2.2 / AC §4.4) ─────────────────────────────────
 
 /// Manual advance bypasses finish detection and seeds the requested chapter
@@ -358,7 +471,7 @@ async fn manual_advance_bypasses_gates_and_seeds_chapters() {
         "manual work is not opted in"
     );
 
-    let outcome = advance_manual(&pool, ws.path(), "wrk_manual", 2, Some(4))
+    let outcome = advance_manual(&pool, ws.path(), "wrk_manual", 2, Some(4), false)
         .await
         .unwrap();
     match outcome {
@@ -395,7 +508,7 @@ async fn manual_advance_respects_idempotent_guard() {
     std::fs::create_dir_all(outline.parent().unwrap()).unwrap();
     std::fs::write(&outline, "kept").unwrap();
 
-    let outcome = advance_manual(&pool, ws.path(), "wrk_manual2", 2, None)
+    let outcome = advance_manual(&pool, ws.path(), "wrk_manual2", 2, None, false)
         .await
         .unwrap();
     match outcome {
