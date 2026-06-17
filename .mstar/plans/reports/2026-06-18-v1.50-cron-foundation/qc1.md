@@ -145,3 +145,110 @@ Two unresolved Warning findings block approval:
 Six Suggestions (S1–S6) are non-blocking improvements (naming coherence, render fidelity, JSON completeness, lint-policy adherence, lint hygiene, query determinism). None block merge after W1/W2 are addressed.
 
 The foundation's architecture is otherwise sound: clean DAO/CLI/validation layering, correct use of established codebase conventions (`MissingVersionKey`, migration naming, direct-DB CLI access with precedent), surgical change set, no duplicate DTOs, and solid hermetic test coverage at the pure-function and migration layers. The gaps are concentrated in the `handle_set` merge semantics (W1) and one missing normative validation rule (W2) — both fixable without re-architecting the slice.
+
+---
+
+## Revalidation
+
+```yaml
+report_kind: qc-revalidation
+reviewer: qc-specialist
+reviewer_index: 1
+plan_id: 2026-06-18-v1.50-cron-foundation
+working_branch: feature/v1.50-cron-foundation
+review_cwd: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-cron-foundation
+review_range: a7ea8349..f5f58edd
+fix_wave_commits:
+  - 87ea2ef6 (R-V150P0-W4 list_works_schedule bounded)
+  - 000d63fd (R-V150P0-W1 TZ preservation)
+  - e478079c (R-V150P0-W2 all-off flag + check)
+  - a364f31a (R-V150P0-W3 show columns)
+  - 5dc8eaa3 (R-V150P0-W5 TODO marker)
+  - f5f58edd (plan completion report)
+verdict: Approve
+generated_at: 2026-06-17T07:09:21Z
+```
+
+### Re-review scope
+
+- **Reviewer**: @qc-specialist (Reviewer #1 — architecture coherence + maintainability)
+- **Re-review kind**: targeted (qc1 only; qc2 was Approve in the initial wave; qc3 is reviewing the fix-wave in parallel under a separate Assignment)
+- **Revalidation focus**: the two blocking Warnings raised by qc1 in the initial wave — **W1** (TZ silently clobbered on role-only patch) and **W2** (all-off rule not enforced). W3/W4/W5 were Suggestion-tier and are not blocking; they are in the fix-wave diff and were spot-checked for regressions only.
+- **Diff basis (fix-wave)**: `a7ea8349..f5f58edd` (6 commits, verified via `git log --oneline a7ea8349..f5f58edd`)
+- **Working branch (verified)**: `feature/v1.50-cron-foundation`
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-cron-foundation` (`git rev-parse --show-toplevel`)
+
+### Per-finding disposition
+
+#### W1 — TZ silently clobbered on role-only patch → **Resolved**
+
+Commit `000d63fd` (`fix(nexus42): R-V150P0-W1 TZ preservation on role-only patch + regression test`).
+
+**Required fix elements — all present:**
+
+1. **`resolve_tz(args_tz, env) -> Option<String>` pure helper** — extracted at `cron.rs` (diff hunks `@@ -254,11 +254,36` and `@@ -510,17 +535,29`). Pure merge semantic: `args_tz` wins; else `env`; else `None`. Doc comment explicitly states "Pure merge semantic, unit-tested independently of `handle_set`". This directly closes the **testability gap** flagged in the initial W1 ("`NEXUS_TZ` resolution lives at `cron.rs:511` inside `handle_set`, which is not covered by any test") — the env-resolution is now a pure, unit-tested function.
+2. **`handle_set` only folds env/default TZ on reset/pass** — `is_reset` is computed from all patch flags being absent; `env_for_resolve` is `NEXUS_TZ` only on the reset path, else `None`; `effective_args.tz` is `Some(tz)` when there is intent, `Some(DEFAULT_TZ)` on reset-with-no-tz, and **`None` on patch-without-`--tz`** (preserving `base.tz`).
+3. **`apply_set_args` honors the merge** — patch branch (unchanged) only overwrites `schedule.tz` when `args.tz.is_some()`; reset branch now explicitly folds `effective_args.tz` when present (`if let Some(tz) = &args.tz { schedule.tz.clone_from(tz); }`) so `NEXUS_TZ`/`UTC` still land on a reset. The original W1 trace (4-step reproduction) is broken at step 3: `effective_args.tz` is now `None`, not `Some("UTC")`.
+4. **Regression test `set_no_review_preserves_custom_tz`** — pre-stores `base.tz = "Asia/Shanghai"`, patches with `--no-review` and no `--tz`, asserts `out.tz == "Asia/Shanghai"` and `!out.roles.review.enabled`. **Passes** (see Verification Evidence below).
+
+**Test evidence (run this session):**
+- `cargo test -p nexus42 --lib commands::creator::works::cron::tests::set_no_review_preserves_custom_tz` → **1 passed; 0 failed**.
+- `cargo test -p nexus42 --lib commands::creator::works::cron::tests::resolve_tz` → **3 passed; 0 failed** (`resolve_tz_explicit_arg_wins`, `resolve_tz_env_used_when_no_arg`, `resolve_tz_none_when_no_intent`).
+
+**Architecture/maintainability assessment:** the fix is the cleanest available shape — pure helper extracted, documented, and unit-tested; the `handle_set` `is_reset`/`effective_args.tz` match is readable and comments cite R-V150P0-W1 and the spec §3.1 reset-vs-patch intent. Layer separation (pure merge fn vs env-glue) is preserved. No regression.
+
+#### W2 — Missing "at least one role enabled" validation + missing `--all-off` flag → **Resolved**
+
+Commit `e478079c` (`fix(nexus42): R-V150P0-W2 all-off flag + all-disabled check + tests`).
+
+**Required fix elements — all present:**
+
+1. **`--all-off` flag in `CronCommand::Set`** — added with `#[arg(long, default_value_t = false)]` and doc comment "Permit disabling all three roles at once (spec §3.1 \"all-off\" rule)" (`@@ -437,6 +461,9` hunk). Wired through `handle_cron` → `CronSetArgs.all_off` → `handle_set` (`@@ -491,6 +518` and `@@ -506,6 +534` hunks).
+2. **`all_off: bool` on `CronSetArgs`** with `#[allow(clippy::struct_excessive_bools)]` **and an adjacent justification comment** ("The bool fields are a 1:1 mirror of clap's `--no-<role>` / `--all-off` flags; restructuring into enums would diverge from the CLI surface"). This satisfies the repo `AGENTS.md` Clippy rule that was the subject of initial-wave S4 — the allow is justified here.
+3. **Post-mutation enabled-role count + stable code** — check placed **after** all role mutations at the tail of `apply_set_args` (`@@ -263,6 +274,19`): `any_enabled = brainstorm || write || review`; if `!any_enabled && !args.all_off` → `Err(CliError::Config("[E_CRON_ALL_ROLES_DISABLED] ..."))`. Stable code `E_CRON_ALL_ROLES_DISABLED` is a named `const ERR_ALL_DISABLED`.
+4. **Both regression tests**:
+   - `apply_set_args_all_off_without_flag_rejects` — `no_brainstorm/no_write/no_review` + `all_off: false`, asserts `unwrap_err()` and message contains `E_CRON_ALL_ROLES_DISABLED`. **Passes.**
+   - `apply_set_args_all_off_with_flag_succeeds` — same flags + `all_off: true`, asserts all three roles disabled and `apply_set_args` returns `Ok`. **Passes.**
+5. **Help coverage** — `crates/nexus42/tests/cron_cli.rs::cron_set_help_documents_flags` extended to assert `--all-off` appears in `set --help` (`@@ -239,6 +239` hunk). **Passes** (part of the 9/9 cron_cli suite).
+
+**Test evidence (run this session):**
+- `cargo test -p nexus42 --lib commands::creator::works::cron::tests::apply_set_args_all_off` → **2 passed; 0 failed** (both `_with_flag_succeeds` and `_without_flag_rejects`).
+
+**Architecture/maintainability assessment:** the validation sits in the correct layer (`apply_set_args`, the pure validation+mutation fn) and fires after all mutations complete, so it sees the final schedule state regardless of patch vs reset path. The stable error code is consistent with the existing `E_CRON_INVALID_EXPR` / `E_CRON_INVALID_TZ` convention. No regression.
+
+### New findings introduced by the fix-wave
+
+**None (Critical = 0, Warning = 0).**
+
+One **non-blocking observation** recorded for traceability (not a finding, does not affect verdict):
+
+- **O-1 (maintainability, defer/accept)**: the "is this a reset?" predicate now exists in two places — `handle_set` computes `is_reset` to decide the env-fold (cron.rs ~line 540), and `apply_set_args` re-derives the same condition via its `else` branch (cron.rs ~line 254-257) to decide the default-reset. They are **consistent today** and serve different layers (env-glue vs pure mutation), so the duplication is acceptable and arguably correct given the layer separation. A shared `CronSetArgs::is_reset()` helper would be a future Suggestion-tier cleanup if a third caller appears; not worth refactoring in this fix-wave.
+
+### Verification evidence (re-review)
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Worktree/branch | `git rev-parse --show-toplevel` + `git branch --show-current` | `.worktrees/v150-cron-foundation`, `feature/v1.50-cron-foundation` ✓ |
+| Fix-wave commits | `git log --oneline a7ea8349..f5f58edd` | 6 commits (`87ea2ef6`, `000d63fd`, `e478079c`, `a364f31a`, `5dc8eaa3`, `f5f58edd`) ✓ (matches Assignment) |
+| Diff stat | `git diff a7ea8349..f5f58edd --stat` | 8 files, +929/-47 (3 QC reports + plan + 4 source/test/config) ✓ |
+| Build | `cargo build -p nexus-local-db -p nexus42` | Finished clean ✓ |
+| Clippy (CI shape) | `cargo clippy -p nexus-local-db -p nexus42 -- -D warnings` | Finished, no warnings ✓ |
+| Nightly fmt | `cargo +nightly fmt --all --check` | exit 0 ✓ |
+| W1 regression | `cargo test -p nexus42 --lib ...::set_no_review_preserves_custom_tz` | 1 passed; 0 failed ✓ |
+| W1 pure helper | `cargo test -p nexus42 --lib ...::resolve_tz` | 3 passed; 0 failed ✓ |
+| W2 regression | `cargo test -p nexus42 --lib ...::apply_set_args_all_off` | 2 passed; 0 failed ✓ |
+| Full CLI suite (regression) | `cargo test -p nexus42 --test cron_cli` | 9 passed; 0 failed (was 8 in initial wave; +1 for `cron_list_help_documents_limit_flag` from W4) ✓ |
+| Migration suite (regression) | `cargo test -p nexus-local-db --test works_schedule_migration` | 8 passed; 0 failed (was 7 in initial wave; +1 for `list_works_schedule_applies_limit` from W4) ✓ |
+
+### Revalidation verdict
+
+**Approve.**
+
+Both blocking Warnings from the initial wave are **Resolved** with the exact fix shapes requested in the Assignment:
+
+- **W1 Resolved** — `resolve_tz(args_tz, env) -> Option<String>` pure helper extracted and unit-tested; `handle_set` only folds env/default TZ on reset/pass, preserving `base.tz` on role-only patches; `apply_set_args` reset branch honors the folded TZ. Regression test `set_no_review_preserves_custom_tz` + 3 `resolve_tz_*` unit tests pass. The original 4-step clobber trace is broken. Commit `000d63fd`.
+- **W2 Resolved** — `--all-off` flag added to `CronCommand::Set` and wired through `handle_cron` → `CronSetArgs.all_off`; post-mutation all-disabled check in `apply_set_args` rejects with stable code `E_CRON_ALL_ROLES_DISABLED` unless `--all-off` is passed; both `apply_set_args_all_off_without_flag_rejects` and `..._with_flag_succeeds` pass; `cron set --help` documents `--all-off`. Commit `e478079c`.
+
+No new Critical or Warning findings introduced by the fix-wave (one non-blocking maintainability observation O-1 noted for traceability). Full build, CI-shape clippy (`-D warnings`), nightly fmt, and the complete cron/migration test suites are green — no regressions from W3/W4/W5 or the W1/W2 fixes themselves. The initial-wave Suggestions S1–S6 remain non-blocking and outside this targeted re-review's scope.
+
+**Final verdict (qc1, after fix-wave `a7ea8349..f5f58edd`): Approve.**
