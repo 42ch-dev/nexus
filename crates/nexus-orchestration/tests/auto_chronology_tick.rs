@@ -149,6 +149,49 @@ async fn tick_advances_when_volume_finalized() {
         .is_ok());
 }
 
+// ── R-V150P3AUTOCHRONO-03 regression: title / total_planned_chapters ──────
+
+/// The auto-chronology advance must substitute the Work's stored `title` and
+/// `total_planned_chapters` into the rendered outline (spec §4.1 step 3),
+/// not the hardcoded `"(untitled)"` / `(unset)` placeholders.
+#[tokio::test]
+async fn render_substitutes_work_title_and_total_chapters() {
+    let pool = fresh_pool().await;
+    let ws = tempfile::tempdir().unwrap();
+    let mut work = base_work("wrk_title", "title-novel");
+    work.title = "The Hobbit".to_string();
+    work.total_planned_chapters = Some(20);
+    works::create_work(&pool, &work).await.unwrap();
+    seed_and_finalize(&pool, "wrk_title", 1, 2, true).await;
+    opt_in(&pool, "wrk_title").await;
+
+    run_one_tick(&pool, ws.path()).await;
+
+    let outline = outline_path(ws.path(), "title-novel", 2);
+    assert!(
+        outline.exists(),
+        "outline should be created for eligible work"
+    );
+    let body = std::fs::read_to_string(&outline).unwrap();
+    assert!(
+        body.contains("The Hobbit"),
+        "rendered outline must contain the Work's real title; got:\n{body}"
+    );
+    assert!(
+        body.contains("20"),
+        "rendered outline must contain total_planned_chapters=20; got:\n{body}"
+    );
+    // Negative: the hardcoded placeholder must NOT appear.
+    assert!(
+        !body.contains("(untitled)"),
+        "rendered outline must not contain the hardcoded placeholder"
+    );
+    assert!(
+        !body.contains("(unset)"),
+        "rendered outline must not contain the unset placeholder when a value is stored"
+    );
+}
+
 // ── Negative 1: volume not finalized (AC §4.2) ───────────────────────────
 
 #[tokio::test]

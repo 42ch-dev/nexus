@@ -250,7 +250,8 @@ async fn load_row_for_manual(
     // added in the same migration cycle). All inputs are bound parameters.
     let row: Option<WorkAutoChronologyRow> = sqlx::query_as(
         "SELECT work_id, creator_id, work_ref, intake_status, \
-                runtime_lock_holder, completion_locked_at \
+                runtime_lock_holder, completion_locked_at, title, \
+                total_planned_chapters \
          FROM works WHERE work_id = ?",
     )
     .bind(work_id)
@@ -428,13 +429,15 @@ async fn advance_auto(
     let work_ref = row.work_ref.clone().unwrap_or_else(|| work_id.clone());
 
     // The auto path seeds zero chapters (placeholder outline, spec §4.2).
+    // Substitute the Work's stored title / total_planned_chapters into the
+    // outline render (spec §4.1 step 3).
     perform_advance(
         pool,
         workspace_dir,
         work_id,
         &work_ref,
-        "(untitled)",
-        None,
+        &row.title,
+        row.total_planned_chapters,
         prev_volume,
         next_volume,
         0,
@@ -477,8 +480,8 @@ pub async fn advance_manual(
         workspace_dir,
         work_id,
         &work_ref,
-        "(untitled)",
-        None,
+        &row.title,
+        row.total_planned_chapters,
         prev_volume,
         next_volume,
         chapter_count.unwrap_or(0),
