@@ -1303,6 +1303,155 @@ pub async fn advance_work_stage_atomic(
         })
 }
 
+// ── V1.50 T-A P0 (T1): per-Work cron schedule_json DAO ────────────────────
+
+/// Row for the cron `list` surface — (`work_ref`, `work_id`, `schedule_json`).
+///
+/// `work_ref` is `None` when the Work has no human slug set (V1.36 §2.1);
+/// callers fall back to `work_id` for display. `schedule_json` is `None`
+/// when the column is NULL or empty (= use defaults; spec §2.3).
+#[derive(Debug, Clone)]
+pub struct WorkScheduleRow {
+    /// Human slug for the Work (`Works/<work_ref>/`).
+    pub work_ref: Option<String>,
+    /// Primary key (`wrk_...`).
+    pub work_id: String,
+    /// Raw `schedule_json` text (NULL or empty = use defaults).
+    pub schedule_json: Option<String>,
+}
+
+/// Persist the per-Work cron configuration JSON (V1.50 §2.1).
+///
+/// Writes the full `schedule_json` blob for a Work. Pass an empty string to
+/// reset to defaults (spec §2.3). Keys by `work_id` (primary key) so callers
+/// must resolve `work_ref` → `work_id` first via
+/// [`resolve_work_id_by_ref_or_id`].
+///
+/// # Errors
+///
+/// Returns `LocalDbError::MissingVersionKey` if the Work does not exist, or
+/// `LocalDbError::Sqlx` if the UPDATE fails.
+pub async fn set_schedule_json(
+    pool: &SqlitePool,
+    work_id: &str,
+    json: &str,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    // SAFETY: UPDATE against works table — runtime query (column added in the
+    // same migration cycle; sqlx prepare cache hasn't run for this statement).
+    let result = sqlx::query(
+        "UPDATE works SET schedule_json = ?, updated_at = ? WHERE work_id = ?",
+    )
+    .bind(json)
+    .bind(now)
+    .bind(work_id)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
+        });
+    }
+    Ok(())
+}
+
+/// Read the per-Work cron configuration JSON (V1.50 §2.1).
+///
+/// Returns `None` when the Work does not exist OR the column is NULL/empty
+/// (both mean "use defaults"; spec §2.3). Returns `Some(json)` only when a
+/// non-empty configuration blob is stored.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn get_schedule_json(
+    pool: &SqlitePool,
+    work_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (column added in the
+    // same migration cycle; sqlx prepare cache hasn't run for this statement).
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT schedule_json FROM works WHERE work_id = ?")
+            .bind(work_id)
+            .fetch_optional(pool)
+            .await?;
+
+    // None → work missing OR column NULL/empty → use defaults.
+    Ok(row
+        .and_then(|(opt,)| opt)
+        .filter(|s| !s.is_empty()))
+}
+
+/// Resolve a `<work_ref>` OR `<work_id>` positional to a concrete `work_id`.
+///
+/// The cron CLI surface accepts either the human slug (`work_ref`) or the
+/// primary key (`wrk_...`). This helper matches `work_ref` first, then
+/// `work_id`, scoped to `(creator_id, workspace_slug)`.
+///
+/// Returns `None` if no Work matches in the active workspace.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn resolve_work_id_by_ref_or_id(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_slug: &str,
+    ref_or_id: &str,
+) -> Result<Option<String>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (dynamic match on
+    // work_ref / work_id). All inputs are bound parameters.
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT work_id FROM works \
+         WHERE creator_id = ? AND workspace_slug = ? \
+         AND (work_ref = ? OR work_id = ?) \
+         LIMIT 1",
+    )
+    .bind(creator_id)
+    .bind(workspace_slug)
+    .bind(ref_or_id)
+    .bind(ref_or_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(wid,)| wid))
+}
+
+/// List all Works in the active workspace with their cron config (V1.50 §3.3).
+///
+/// Used by `creator works cron list`. Returns one [`WorkScheduleRow`] per Work,
+/// ordered by `updated_at` descending (consistent with [`list_works`]).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn list_works_schedule(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_slug: &str,
+) -> Result<Vec<WorkScheduleRow>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (schedule_json column
+    // added in the same migration cycle).
+    let rows: Vec<(Option<String>, String, Option<String>)> = sqlx::query_as(
+        "SELECT work_ref, work_id, schedule_json FROM works \
+         WHERE creator_id = ? AND workspace_slug = ? \
+         ORDER BY updated_at DESC",
+    )
+    .bind(creator_id)
+    .bind(workspace_slug)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(work_ref, work_id, schedule_json)| WorkScheduleRow {
+            work_ref,
+            work_id,
+            schedule_json: schedule_json.filter(|s| !s.is_empty()),
+        })
+        .collect())
+}
+
 /// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
 pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 
