@@ -84,7 +84,13 @@ pub struct FindingListFilters {
     pub work_id: Option<String>,
     /// Filter by `chapter`.
     pub chapter: Option<i64>,
-    /// Filter by `status`.
+    /// Filter by `status`. Accepts either a single status (e.g. `"open"`)
+    /// or a comma-separated list (e.g. `"open,triaged"`) — V1.50
+    /// (R-V149P0-01): the produce-prompt consumer asks for the V1.49
+    /// **actionable set** `{ open, triaged }`; the Local API surfaces this
+    /// via `?status=open,triaged`. Each comma-separated token MUST be a
+    /// member of [`VALID_STATUSES`]; unknown tokens surface as
+    /// [`LocalDbError::InvalidEnum`].
     pub status: Option<String>,
     /// Filter by `severity`.
     pub severity: Option<String>,
@@ -445,9 +451,18 @@ pub async fn create_finding(pool: &SqlitePool, f: &Finding) -> Result<(), LocalD
 ///   The composite index `idx_findings_work_chapter_status` covers chapter lookups.
 ///   All three indexes are utilized; no full-table scan on realistic data.
 ///
+/// R-V149P0-01 (V1.50): `filters.status` now accepts a comma-separated
+/// list (e.g. `"open,triaged"`) so the produce-prompt consumer can fetch
+/// the V1.49 actionable set in one round trip. When the value contains a
+/// comma, the function validates every token against [`VALID_STATUSES`]
+/// and dispatches to a dynamic `IN (?, ?, …)` query; otherwise the
+/// original compile-time-checked macro path is used (single status).
+///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails.
+/// Returns `LocalDbError` if the database query fails or a comma-separated
+/// `status` token is not a member of [`VALID_STATUSES`] (mapped to
+/// [`LocalDbError::InvalidEnum`] so the API surfaces `INVALID_INPUT`).
 pub async fn list_findings(
     pool: &SqlitePool,
     creator_id: &str,
@@ -455,6 +470,16 @@ pub async fn list_findings(
 ) -> Result<Vec<Finding>, LocalDbError> {
     let limit = filters.limit.unwrap_or(100);
     let offset = filters.offset.unwrap_or(0);
+
+    // R-V149P0-01: dispatch on the comma-separated status shape. Use a
+    // match-guard rather than `if let … && …` so we hand the matched
+    // status string straight to the helper without a follow-up `.expect`.
+    match filters.status.as_ref() {
+        Some(s) if s.contains(',') => {
+            return list_findings_with_status_set(pool, creator_id, filters, s).await;
+        }
+        _ => {}
+    }
 
     let rows = sqlx::query!(
         "SELECT finding_id as \"finding_id!\", work_id as \"work_id!\", chapter,
@@ -505,6 +530,177 @@ pub async fn list_findings(
             updated_at: r.updated_at,
         })
         .collect())
+}
+
+/// R-V149P0-01 companion: list findings filtered by a comma-separated set
+/// of statuses (e.g. `"open,triaged"`).
+///
+/// Each token is validated against [`VALID_STATUSES`]; an unknown token
+/// surfaces as [`LocalDbError::InvalidEnum`]. Uses a runtime-built `IN`
+/// clause with one bound `?` per token — bound parameters (not string
+/// interpolation) so there is no injection surface even if a future caller
+/// passes untrusted input.
+async fn list_findings_with_status_set(
+    pool: &SqlitePool,
+    creator_id: &str,
+    filters: &FindingListFilters,
+    comma_statuses: &str,
+) -> Result<Vec<Finding>, LocalDbError> {
+    let mut statuses: Vec<String> = Vec::new();
+    for raw in comma_statuses.split(',') {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !is_valid_status(trimmed) {
+            return Err(LocalDbError::InvalidEnum {
+                field: "status",
+                value: trimmed.to_string(),
+                allowed: VALID_STATUSES,
+            });
+        }
+        statuses.push(trimmed.to_string());
+    }
+    if statuses.is_empty() {
+        // Edge case: `?status=,` or `?status=,,` — treat as no filter so
+        // the caller gets the unfiltered list rather than a confusing
+        // empty page. The other filters (work_id / chapter / severity)
+        // still apply via the no-status branch below.
+        return list_findings_unfiltered(pool, creator_id, filters).await;
+    }
+
+    // SAFETY: dynamic SQL — compile-time macro not applicable to a
+    // variable-length `IN (?, …)` clause. Tokens are validated above
+    // (`is_valid_status` whitelist) and bound as parameters, never
+    // interpolated, so there is no injection surface.
+    let placeholders = std::iter::repeat_n("?", statuses.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT finding_id, work_id, chapter,
+                severity, status,
+                title, description,
+                target_executor,
+                creator_id,
+                kind, rule_suggestion,
+                created_at, updated_at
+         FROM findings
+         WHERE creator_id = ?
+           AND (? IS NULL OR work_id = ?)
+           AND (? IS NULL OR chapter = ?)
+           AND status IN ({placeholders})
+           AND (? IS NULL OR severity = ?)
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?"
+    );
+    let mut q = sqlx::query_as::<_, FindingRow>(&sql)
+        .bind(creator_id)
+        .bind(filters.work_id.clone())
+        .bind(filters.work_id.clone())
+        .bind(filters.chapter)
+        .bind(filters.chapter);
+    for s in &statuses {
+        q = q.bind(s);
+    }
+    let rows = q
+        .bind(filters.severity.clone())
+        .bind(filters.severity.clone())
+        .bind(i64::from(limit_u32(filters.limit)))
+        .bind(i64::from(offset_u32(filters.offset)))
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(Finding::from).collect())
+}
+
+/// R-V149P0-01 helper: unfiltered-by-status fallback for the
+/// `?status=,` edge case (no usable tokens after trim). Mirrors the
+/// single-status branch minus the status predicate.
+async fn list_findings_unfiltered(
+    pool: &SqlitePool,
+    creator_id: &str,
+    filters: &FindingListFilters,
+) -> Result<Vec<Finding>, LocalDbError> {
+    // SAFETY: dynamic SQL — the query shape mirrors `list_findings` minus
+    // the `status` predicate. All user-controlled values are bound.
+    let rows = sqlx::query_as::<_, FindingRow>(
+        "SELECT finding_id, work_id, chapter,
+                severity, status,
+                title, description,
+                target_executor,
+                creator_id,
+                kind, rule_suggestion,
+                created_at, updated_at
+         FROM findings
+         WHERE creator_id = ?
+           AND (? IS NULL OR work_id = ?)
+           AND (? IS NULL OR chapter = ?)
+           AND (? IS NULL OR severity = ?)
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?",
+    )
+    .bind(creator_id)
+    .bind(filters.work_id.clone())
+    .bind(filters.work_id.clone())
+    .bind(filters.chapter)
+    .bind(filters.chapter)
+    .bind(filters.severity.clone())
+    .bind(filters.severity.clone())
+    .bind(i64::from(limit_u32(filters.limit)))
+    .bind(i64::from(offset_u32(filters.offset)))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Finding::from).collect())
+}
+
+#[inline]
+fn limit_u32(v: Option<u32>) -> u32 {
+    v.unwrap_or(100)
+}
+
+#[inline]
+fn offset_u32(v: Option<u32>) -> u32 {
+    v.unwrap_or(0)
+}
+
+/// Internal row shape mirroring the `findings` SELECT projection; used by
+/// the runtime-SQL paths (`list_findings_with_status_set`,
+/// `list_findings_unfiltered`) so the `From` impl below stays the single
+/// mapping site.
+#[derive(sqlx::FromRow)]
+struct FindingRow {
+    finding_id: String,
+    work_id: String,
+    chapter: Option<i64>,
+    severity: String,
+    status: String,
+    title: String,
+    description: String,
+    target_executor: String,
+    creator_id: String,
+    kind: String,
+    rule_suggestion: Option<String>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+impl From<FindingRow> for Finding {
+    fn from(r: FindingRow) -> Self {
+        Self {
+            finding_id: r.finding_id,
+            work_id: r.work_id,
+            chapter: r.chapter,
+            severity: r.severity,
+            status: r.status,
+            title: r.title,
+            description: r.description,
+            target_executor: r.target_executor,
+            creator_id: r.creator_id,
+            kind: r.kind,
+            rule_suggestion: r.rule_suggestion,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+        }
+    }
 }
 
 /// V1.48 P1 — chapter-scoped **actionable** findings query for
