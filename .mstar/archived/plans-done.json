@@ -209,7 +209,8 @@
     "2026-06-18-v1.50-auto-chronology",
     "2026-06-18-v1.50-kb-editor-cli",
     "2026-06-18-v1.50-kb-auto-promotion",
-    "2026-06-18-v1.50-kb-refreshable-scan"
+    "2026-06-18-v1.50-kb-refreshable-scan",
+    "2026-06-18-v1.50-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -311,13 +312,13 @@
       "merged_at": null,
       "plans_total": 9,
       "plans_implemented": 9,
-      "residual_findings_open": null,
-      "residual_findings_closed": 6,
+      "residual_findings_open": 0,
+      "residual_findings_closed": 16,
       "decisions_locked": 18,
       "carry_forwards_v151": 8,
       "qc_tri_review_pass_rate": "3/3 per plan (24/24 total)",
       "highlight": "A+B mixed primary axis: novel-writing cron staggering (T-A 0-3) + World KB complete loop (T-B 0-2). 8 migrations landed (202606180001..202606180005 + 3 schema/TS) + 6 V1.49 carry-forwards. cron out-of-band, do not touch driver_schedule_id. review-time KB extraction via preset_id hook. auto-chronology atomicity reorder: DB tx first, FS outline write after.",
-      "note": "P-last (T1-T7) executing: T1-T2 (carry-forwards + WL-A) Done; T3 (overlay promotion) Done; T4 (Profile B) Done; T5-T7 pending."
+      "note": "P-last T1-T7 Done: T1-T2 (carry-forwards + WL-A) Done; T3 (overlay promotion) Done; T4 (Profile B) Done; T5 (tech_debt rollup) Done; T6 (PR) pending; T7 (PM signoff) Done."
     }
   },
   "metadata": {
