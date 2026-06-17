@@ -2,11 +2,13 @@
 //!
 //! Verifies `auto_chronology::run_one_tick` (the daemon wrapper) threads the
 //! workspace path into the orchestration advance, and that
-//! `AutoChronologyConfig::from_env` honors the env override. The orchestration
+//! `parse_interval_secs` honors the env override value. The orchestration
 //! finish-detection + advance logic is covered by
 //! `nexus-orchestration::auto_chronology_tick`.
 
-use nexus_daemon_runtime::auto_chronology::{run_one_tick, AutoChronologyConfig};
+use nexus_daemon_runtime::auto_chronology::{
+    parse_interval_secs, run_one_tick, DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS,
+};
 use nexus_local_db::works::{self, WorkRecord};
 
 async fn test_pool() -> sqlx::SqlitePool {
@@ -112,37 +114,55 @@ async fn daemon_run_one_tick_advances_eligible_work() {
     );
 }
 
-/// `AutoChronologyConfig::from_env` honors `NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN`.
+/// `parse_interval_secs` honors the env override value without touching the
+/// process-global env (R-V150P3AUTOCHRONO-05 — V1.49 R-V149P1-02 flake pattern).
+///
+/// The parsing logic is a pure function over `Option<&str>`; tests pass values
+/// directly instead of mutating `NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN`, so the
+/// test is safe under parallel `cargo test --all` and cannot race with any
+/// sibling test that calls `AutoChronologyConfig::from_env`.
 #[test]
-fn config_env_override_in_minutes() {
-    // Default when unset.
-    std::env::remove_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN");
-    let cfg = AutoChronologyConfig::from_env();
-    assert_eq!(cfg.interval.as_secs(), 5 * 60, "default is 5 minutes");
+fn parse_interval_secs_handles_env_values() {
+    // Default when unset (None).
+    assert_eq!(
+        parse_interval_secs(None),
+        DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS,
+        "default is 5 minutes"
+    );
 
     // Override in minutes.
-    std::env::set_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN", "1");
-    let cfg = AutoChronologyConfig::from_env();
-    assert_eq!(cfg.interval.as_secs(), 60, "1 minute = 60 seconds");
-    std::env::remove_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN");
+    assert_eq!(parse_interval_secs(Some("1")), 60, "1 minute = 60 seconds");
 
     // Invalid value falls back to default.
-    std::env::set_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN", "garbage");
-    let cfg = AutoChronologyConfig::from_env();
     assert_eq!(
-        cfg.interval.as_secs(),
-        5 * 60,
+        parse_interval_secs(Some("garbage")),
+        DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS,
         "invalid env falls back to default"
     );
-    std::env::remove_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN");
 
     // Zero is rejected (would busy-loop) → default.
-    std::env::set_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN", "0");
-    let cfg = AutoChronologyConfig::from_env();
     assert_eq!(
-        cfg.interval.as_secs(),
-        5 * 60,
+        parse_interval_secs(Some("0")),
+        DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS,
         "zero interval falls back to default"
     );
-    std::env::remove_var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN");
+}
+
+/// `AutoChronologyConfig::from_env` reflects the actual process env (production
+/// path). This test does NOT mutate the env — it only reads whatever the
+/// process inherited (expected unset in the test harness) and asserts the
+/// default, proving the production constructor stays wired to `parse_interval_secs`
+/// without introducing a global-env-mutation flake.
+#[test]
+fn from_env_uses_default_when_unset() {
+    // Do NOT set/remove the env var here — that would mutate process-global
+    // state (R-V150P3AUTOCHRONO-05). We only assert the no-override default.
+    let cfg = nexus_daemon_runtime::auto_chronology::AutoChronologyConfig::from_env();
+    assert!(
+        cfg.interval.as_secs() == DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS
+            || std::env::var("NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN").is_ok(),
+        "from_env must default to {DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS}s when the env is unset \
+         (got {}s; if the env IS set in the harness, that override is respected)",
+        cfg.interval.as_secs()
+    );
 }

@@ -55,17 +55,36 @@ impl AutoChronologyConfig {
     #[must_use]
     pub fn from_env() -> Self {
         // Spec §3 names the env in minutes (`NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN`).
-        let interval_secs = std::env::var(ENV_AUTO_CHRONOLOGY_INTERVAL_MIN)
+        let env_value = std::env::var(ENV_AUTO_CHRONOLOGY_INTERVAL_MIN)
             .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|n| *n > 0)
-            .map_or(DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, |minutes| {
-                minutes * 60
-            });
+            .map(|s| s.as_str().to_string());
+        let interval_secs = parse_interval_secs(env_value.as_deref());
         Self {
             interval: Duration::from_secs(interval_secs),
         }
     }
+}
+
+/// Pure parsing of the `NEXUS_AUTO_CHRONOLOGY_INTERVAL_MIN` env override into
+/// an interval in seconds (V1.50 §3).
+///
+/// Extracted from [`AutoChronologyConfig::from_env`] so tests can exercise the
+/// parsing logic hermetically — passing the env value as a parameter instead of
+/// mutating the process-global env var (which is unsafe under parallel test
+/// execution; V1.49 R-V149P1-02 flake pattern).
+///
+/// Rules (match `from_env`'s historical behaviour):
+/// - `None` → default (5 min).
+/// - `Some(s)` where `s` parses to a positive `u64` → `s * 60` seconds.
+/// - Unparseable / non-positive → default (5 min).
+#[must_use]
+pub fn parse_interval_secs(env_value: Option<&str>) -> u64 {
+    env_value
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .map_or(DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, |minutes| {
+            minutes * 60
+        })
 }
 
 /// Spawn the auto-chronology background task.
