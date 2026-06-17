@@ -58,6 +58,11 @@ pub enum ChronologyCommand {
         /// (optional; default 0 = placeholder outline, author seeds manually).
         #[arg(long)]
         chapters: Option<i32>,
+        /// Bypass the idempotent guard and overwrite an existing outline
+        /// (recovery path for a post-commit outline-write failure or an
+        /// orphaned crash-state outline).
+        #[arg(long, default_value_t = false)]
+        force: bool,
         /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -99,6 +104,7 @@ pub async fn handle_chronology(cmd: ChronologyCommand, config: &CliConfig) -> Re
             work_ref,
             volume,
             chapters,
+            force,
             json,
         } => {
             handle_advance(
@@ -108,6 +114,7 @@ pub async fn handle_chronology(cmd: ChronologyCommand, config: &CliConfig) -> Re
                 &work_ref,
                 volume,
                 chapters,
+                force,
                 json,
             )
             .await
@@ -175,6 +182,7 @@ async fn handle_show(
 }
 
 /// `creator works chronology advance` — manual override (spec §2.2).
+#[allow(clippy::too_many_arguments)]
 async fn handle_advance(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
@@ -182,6 +190,7 @@ async fn handle_advance(
     work_ref: &str,
     volume: i32,
     chapters: Option<i32>,
+    force: bool,
     json: bool,
 ) -> Result<()> {
     let work_id = resolve_work_id(pool, creator_id, workspace_slug, work_ref).await?;
@@ -200,6 +209,7 @@ async fn handle_advance(
         &work_id,
         volume,
         chapters,
+        force,
     )
     .await
     .map_err(|e| CliError::Other(format!("auto-chronology advance failed: {e}")))?;
