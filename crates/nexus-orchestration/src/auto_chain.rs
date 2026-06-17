@@ -33,6 +33,12 @@ static ACH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32:
 /// Mirrors the `ACH_COUNTER` fix (R-V139P0-W-B) for the same class of bug.
 static RVM_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// V1.50 T-A P1: per-process monotonic counter for cron-triggered schedule ID
+/// collision resistance. Two cron roles can fire in the same millisecond
+/// (e.g. brainstorm + write both matching the same minute), so the bare
+/// `CRON<ts_ms>` prefix would collide. Mirrors `ACH_COUNTER` / `RVM_COUNTER`.
+static CRON_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 use crate::stage_gates::{self, WorkFields};
 
 /// Result of an `on_schedule_complete` evaluation.
@@ -1442,6 +1448,15 @@ pub async fn enqueue_auto_chain_schedule(
 /// template modifications that alter the output contract). Non-breaking changes
 /// (comments, optional fields) may keep the same version. The version is stored
 /// in `creator_schedules` at enqueue time and used by the loader for compat checks.
+//
+// `match_same_arms`: the `novel-brainstorm | novel-write` arm intentionally
+// shares its body (`1`) with the `_` catch-all. The explicit arms exist for
+// discoverability (R-V150P1CRONBW-05 / qc3 W-003): a maintainer scanning this
+// map sees the cron-triggered presets and knows to bump them in lockstep with
+// their `preset.yaml` on a breaking change. The
+// `preset_version_mapping_matches_yaml_includes_cron_presets` test enforces
+// the sync, so the named arms are documentation, not a behavioural fork.
+#[allow(clippy::match_same_arms)]
 fn preset_version_for_id(preset_id: &str) -> i64 {
     match preset_id {
         // V1.48 P1: bumped 7 → 8 — added `open_findings_block` template var
@@ -1451,6 +1466,18 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         "novel-writing" => 8,
         "research" | "novel-review-master" => 2,
         "kb-extract" => 3,
+        // V1.50 T-A P1 (R-V150P1CRONBW-05 / qc3 W-003): explicit arms for the
+        // cron-triggered presets so the evaluator never silently stamps a
+        // stale `preset_version` through the `_` fallback. `novel-brainstorm`
+        // ships at v1 (embedded-presets/novel-brainstorm/preset.yaml).
+        // `novel-write` is deferred (R-V150P1CRONBW-01 — preset YAML not yet
+        // authored) and resolves to v1 until its first release. Bump in
+        // lockstep with the preset's `version:` field on any breaking change
+        // (R-V139P5-W-4 version policy); the
+        // `preset_version_mapping_matches_yaml_includes_cron_presets` test
+        // guards the novel-brainstorm sync and asserts novel-write's pending
+        // value while its YAML is absent.
+        "novel-brainstorm" | "novel-write" => 1,
         // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
         // per compass §0.1 #6). Bumped to version 1 (was already 1 as
         // `reflection-loop`); the state-machine contract is intentionally new
@@ -1524,6 +1551,80 @@ pub async fn enqueue_review_master_schedule(
         work_id,
         schedule_id = %schedule_id,
         "stale-findings: enqueued novel-review-master (opt-in)"
+    );
+
+    Ok(schedule_id)
+}
+
+/// Enqueue a cron-triggered schedule (V1.50 T-A P1).
+///
+/// Called by [`crate::schedule::cron_supervisor::evaluate_cron_fires`] when a
+/// per-Work role cron (`brainstorm` / `write`) matches the current minute and
+/// passes gating + idempotency. Inserts a pending `Schedule` linked to
+/// `work_id` with the given `preset_id`.
+///
+/// **Out-of-band**: like [`enqueue_review_master_schedule`], this does NOT
+/// touch the Work's `driver_schedule_id` — a cron fire is an independent
+/// production nudge, not an FL-E stage step. The existing supervisor `tick()`
+/// admits the schedule; the existing executor runs the preset; the existing
+/// terminal pipeline handles completion. A cron fire therefore never disrupts
+/// an in-progress FL-E chain (spec `cron-staggering.md` §5: "Cron firing does
+/// not bypass `creator run`").
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the schedule INSERT fails.
+pub async fn enqueue_cron_schedule(
+    pool: &SqlitePool,
+    creator_id: &str,
+    work_id: &str,
+    preset_id: &str,
+    role: &str,
+) -> Result<String, AutoChainError> {
+    // CRON prefix + timestamp + per-process counter (collision-resistant,
+    // mirrors `ACH_COUNTER` / `RVM_COUNTER`). Two roles firing in the same
+    // millisecond must produce distinct PKs.
+    let counter = CRON_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let schedule_id = format!(
+        "CRON{}{:06x}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S%3f"),
+        counter & 0x00FF_FFFF
+    );
+    let now_ts = chrono::Utc::now().timestamp();
+    let label = format!("cron:{role}:{work_id}");
+    let preset_version = preset_version_for_id(preset_id);
+
+    // SAFETY: dynamic SQL — cron-triggered schedule insert with derived params.
+    // Matches the `enqueue_review_master_schedule` pattern (runtime sqlx is the
+    // established convention in this crate; see auto_chain.rs:354-355).
+    sqlx::query(
+        "INSERT INTO creator_schedules
+           (schedule_id, creator_id, preset_id, preset_version, status,
+            concurrency_kind, current_core_context_version, label,
+            created_at, updated_at, work_id)
+           VALUES (?, ?, ?, ?, 'pending', 'serial', 0, ?, ?, ?, ?)",
+    )
+    .bind(&schedule_id)
+    .bind(creator_id)
+    .bind(preset_id)
+    .bind(preset_version)
+    .bind(&label)
+    .bind(now_ts)
+    .bind(now_ts)
+    .bind(work_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, work_id, preset_id, "cron-supervisor: failed to insert cron-triggered schedule");
+        AutoChainError::Database(nexus_local_db::LocalDbError::from(e))
+    })?;
+
+    tracing::info!(
+        work_id,
+        preset_id,
+        role,
+        schedule_id = %schedule_id,
+        "cron-supervisor: enqueued cron-triggered schedule"
     );
 
     Ok(schedule_id)
@@ -2041,17 +2142,25 @@ mod tests {
         );
     }
 
-    /// QC1 W-2: assert `preset_version_for_id` stays in sync with
-    /// embedded preset.yaml version fields.
+    /// QC1 W-2 / R-V150P1CRONBW-05: assert `preset_version_for_id` stays in
+    /// sync with embedded preset.yaml version fields, extended to cover the
+    /// cron-triggered presets (`novel-brainstorm`, `novel-write`).
     #[test]
-    fn preset_version_mapping_matches_yaml() {
+    fn preset_version_mapping_matches_yaml_includes_cron_presets() {
         use crate::preset::EMBEDDED_PRESETS;
 
+        // R-V150P1CRONBW-05 (qc3 W-003): both cron-triggered preset ids are
+        // iterated here so a future `version:` bump cannot drift silently.
+        // `novel-write`'s YAML is deferred (R-V150P1CRONBW-01, T-A P2); until
+        // it ships the mapping must return 1, and the strict YAML-sync branch
+        // below enforces the comparison the moment the preset is authored.
         let known_ids = [
             "novel-writing",
             "research",
             "novel-review-master",
             "kb-extract",
+            "novel-brainstorm",
+            "novel-write",
         ];
 
         for preset_id in &known_ids {
@@ -2059,10 +2168,21 @@ mod tests {
 
             // Find the embedded preset
             let yaml_path = format!("{preset_id}/preset.yaml");
-            let yaml_bytes = EMBEDDED_PRESETS.get_file(&yaml_path).unwrap_or_else(|| {
-                panic!("preset.yaml missing for '{preset_id}' at '{yaml_path}'")
-            });
-            let yaml_str = std::str::from_utf8(yaml_bytes.contents())
+            let Some(yaml_file) = EMBEDDED_PRESETS.get_file(&yaml_path) else {
+                // Only `novel-write` is expected to be deferred. Any OTHER
+                // missing YAML is a real drift → panic.
+                assert_eq!(
+                    *preset_id, "novel-write",
+                    "preset.yaml missing for '{preset_id}' at '{yaml_path}'"
+                );
+                assert_eq!(
+                    mapping_version, 1,
+                    "novel-write preset.yaml is deferred (R-V150P1CRONBW-01); \
+                     preset_version_for_id must return 1 until authored"
+                );
+                continue;
+            };
+            let yaml_str = std::str::from_utf8(yaml_file.contents())
                 .unwrap_or_else(|e| panic!("preset.yaml for '{preset_id}' is not UTF-8: {e}"));
 
             // Extract version: field from YAML
@@ -2091,6 +2211,44 @@ mod tests {
                  Update the match arm in preset_version_for_id() to match."
             );
         }
+    }
+
+    /// R-V150P1CRONBW-05: focused regression — the shipped `novel-brainstorm`
+    /// cron preset resolves to its embedded preset.yaml `version:` field.
+    /// Guards against silent drift even if someone later prunes the
+    /// `known_ids` array in the sync test above.
+    #[test]
+    fn preset_version_for_id_novel_brainstorm_resolves() {
+        use crate::preset::EMBEDDED_PRESETS;
+
+        let mapping_version = preset_version_for_id("novel-brainstorm");
+
+        let yaml_bytes = EMBEDDED_PRESETS
+            .get_file("novel-brainstorm/preset.yaml")
+            .expect("novel-brainstorm preset.yaml must ship in T-A P1");
+        let yaml_str = std::str::from_utf8(yaml_bytes.contents())
+            .expect("novel-brainstorm preset.yaml must be UTF-8");
+        let yaml_version = yaml_str
+            .lines()
+            .find_map(|line| {
+                line.trim().strip_prefix("version:").map(|v| {
+                    v.split_whitespace()
+                        .next()
+                        .unwrap()
+                        .trim()
+                        .parse::<i64>()
+                        .unwrap_or_else(|_| {
+                            panic!("non-integer version in novel-brainstorm preset.yaml: '{v}'")
+                        })
+                })
+            })
+            .expect("novel-brainstorm preset.yaml must declare a version: field");
+
+        assert_eq!(
+            mapping_version, yaml_version,
+            "preset_version_for_id('novel-brainstorm') = {mapping_version} but embedded YAML version = {yaml_version}; \
+             update the match arm in preset_version_for_id() to match."
+        );
     }
 
     // V1.49 P3 (R-V148P0-W1) ────────────────────────────────────────────────

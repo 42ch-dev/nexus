@@ -432,6 +432,47 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         );
     }
 
+    // --- Section 4c: Cron supervisor (V1.50 T-A P1) ---
+    //
+    // Periodically (default 1-min) evaluates per-Work cron configs
+    // (`works.schedule_json`) for the novel-writing three-role staggering and
+    // enqueues pending `Schedule`s for any matching role (brainstorm + write
+    // in T-A P1), then admits due schedules. Non-blocking: errors are logged
+    // and the loop continues. See
+    // `crates/nexus-daemon-runtime/src/cron_supervisor.rs`.
+    {
+        let cron_pool = state.pool().clone();
+        let cron_supervisor = schedule_supervisor.clone();
+        let cron_shutdown = state.shutdown_notify();
+        let cron_config = crate::cron_supervisor::CronSupervisorConfig::from_env();
+        let _cron_handle = crate::cron_supervisor::spawn_cron_supervisor(
+            cron_pool,
+            cron_supervisor,
+            cron_shutdown,
+            cron_config,
+        );
+    }
+
+    // --- Section 4d: Auto-chronology task (V1.50 T-A P3) ---
+    //
+    // Periodically (default 5-min) scans Works with `auto_chronology = true`
+    // and, when the current volume is complete (all chapters finalized + intake
+    // complete + not locked), auto-creates the next volume outline + seeds +
+    // chronology log (spec §3 / §4). Non-blocking: errors are logged and the
+    // loop continues. See `crates/nexus-daemon-runtime/src/auto_chronology.rs`.
+    {
+        let chron_pool = state.pool().clone();
+        let chron_workspace = state.workspace_path().map(std::path::PathBuf::from);
+        let chron_shutdown = state.shutdown_notify();
+        let chron_config = crate::auto_chronology::AutoChronologyConfig::from_env();
+        let _chron_handle = crate::auto_chronology::spawn_auto_chronology_tick(
+            chron_pool,
+            chron_workspace,
+            chron_shutdown,
+            chron_config,
+        );
+    }
+
     // --- Section 5: Agent Host subsystem ---
     let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
         let manager = nexus_agent_host::core::manager::HostManager::new();

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE works SET auto_chronology = ?, updated_at = ? WHERE work_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "bbc43845fc65fa831d40fcdb04c4357795631e31c6ab89e0222b289cb0a773e6"
+}

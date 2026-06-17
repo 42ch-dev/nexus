@@ -497,6 +497,458 @@ pub async fn mark_failed(
     Ok(())
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// V1.50 T-B P2 — Refreshable scan: idempotent upsert of pending candidates
+// (entity-scope-model.md §5.5; compass §0.1 decision 7)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Outcome of an idempotent upsert of a pending promotion candidate.
+///
+/// Returned by [`upsert_pending_candidate`]. The composite identity of a
+/// candidate is `(source_chapter_id, canonical_name_guess)` scoped to the
+/// rescanned chapter (per plan §5 T1). Because the V1.50 P1 migration reuses
+/// `work_entry_id = canonical_name_guess`, the underlying DB uniqueness is
+/// `(creator_id, work_entry_id, world_id) WHERE status NOT IN ('failed')` —
+/// i.e. at most one non-failed row per `(creator, world, canonical_name)`.
+/// The upsert therefore reuses any existing pending/confirmed row for that
+/// key and refreshes its `source_chapter_id` to the rescanned chapter, so a
+/// candidate never duplicates across rescans of the same or different
+/// chapters (entity-scope-model §5.5.2: `pending → confirmed | rejected`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpsertOutcome {
+    /// A new `pending` row was inserted.
+    Inserted(String),
+    /// An existing `pending` row had its `proposed_payload` / `block_type_guess`
+    /// / `source_chapter_id` refreshed.
+    Updated(String),
+    /// The existing row was already `confirmed` (terminal per §5.5.2) or its
+    /// payload was identical to the new extraction — nothing was changed.
+    Unchanged(String),
+}
+
+/// List promotion candidates (any `promotion_status`) sourced from a specific
+/// chapter of a work. Used by `creator kb rescan` to compute the diff baseline
+/// against the freshly-extracted candidate set.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn list_for_chapter(
+    pool: &SqlitePool,
+    work_id: &str,
+    source_chapter_id: i64,
+) -> Result<Vec<KbExtractPromotion>, sqlx::Error> {
+    // SAFETY: static SELECT with bind params; reads the V1.50 P1 promotion
+    // columns added by 202606180002_kb_extract_jobs_extend.sql.
+    sqlx::query_as::<_, KbExtractPromotion>(
+        "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
+                promotion_status, proposed_payload, source_chapter_id, \
+                block_type_guess, canonical_name_guess, created_at \
+         FROM kb_extract_jobs \
+         WHERE work_id = ? AND source_chapter_id = ? \
+         ORDER BY canonical_name_guess ASC",
+    )
+    .bind(work_id)
+    .bind(source_chapter_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// Idempotent upsert of a pending promotion candidate (V1.50 T-B P2).
+///
+/// Reuses any existing non-failed row keyed on
+/// `(creator_id, canonical_name_guess, world_id)` — the DB uniqueness enforced
+/// by the V1.50 P1 migration (which sets `work_entry_id = canonical_name_guess`).
+/// The logical candidate identity for a chapter rescan is
+/// `(source_chapter_id, canonical_name_guess)`; because the DB only allows one
+/// row per `(creator, world, canonical_name)`, reusing that row and refreshing
+/// its `source_chapter_id` is what prevents duplication across rescans.
+///
+/// Behavior:
+/// - Existing **confirmed** row → [`UpsertOutcome::Unchanged`] (terminal per
+///   §5.5.2; rescan never mutates a promoted `KeyBlock`'s origin candidate).
+/// - Existing **pending** row with identical payload + chapter → `Unchanged`.
+/// - Existing **pending** row with a changed payload/chapter → UPDATE +
+///   [`UpsertOutcome::Updated`].
+/// - No existing row → INSERT a new `pending` row → [`UpsertOutcome::Inserted`].
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+#[allow(clippy::too_many_arguments)]
+pub async fn upsert_pending_candidate(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_id: &str,
+    world_id: &str,
+    work_id: Option<&str>,
+    source_chapter_id: Option<i64>,
+    block_type_guess: &str,
+    canonical_name_guess: &str,
+    proposed_payload: &str,
+) -> Result<UpsertOutcome, sqlx::Error> {
+    // Lookup by the DB uniqueness key (creator, work_entry_id=name, world).
+    // SAFETY: static SELECT with bind params.
+    let existing: Option<KbExtractPromotion> = sqlx::query_as::<_, KbExtractPromotion>(
+        "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
+                promotion_status, proposed_payload, source_chapter_id, \
+                block_type_guess, canonical_name_guess, created_at \
+         FROM kb_extract_jobs \
+         WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? \
+         AND promotion_status IN ('pending', 'confirmed')",
+    )
+    .bind(creator_id)
+    .bind(canonical_name_guess)
+    .bind(world_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = existing else {
+        // No existing candidate — insert a new pending row.
+        let job = insert_pending(
+            pool,
+            creator_id,
+            workspace_id,
+            world_id,
+            work_id,
+            source_chapter_id,
+            block_type_guess,
+            canonical_name_guess,
+            proposed_payload,
+        )
+        .await?;
+        return Ok(UpsertOutcome::Inserted(job.job_id));
+    };
+
+    if row.promotion_status == "confirmed" {
+        // Terminal per §5.5.2 — never mutate a promoted candidate.
+        return Ok(UpsertOutcome::Unchanged(row.job_id));
+    }
+
+    // Pending row: refresh only if something material changed.
+    let same_payload = row.proposed_payload.as_deref() == Some(proposed_payload);
+    let same_chapter = row.source_chapter_id == source_chapter_id;
+    let same_type = row.block_type_guess.as_deref() == Some(block_type_guess);
+    if same_payload && same_chapter && same_type {
+        return Ok(UpsertOutcome::Unchanged(row.job_id));
+    }
+
+    // SAFETY: static UPDATE with bind params; only touches pending rows.
+    sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET proposed_payload = ?, block_type_guess = ?, source_chapter_id = ? \
+         WHERE job_id = ? AND promotion_status = 'pending'",
+    )
+    .bind(proposed_payload)
+    .bind(block_type_guess)
+    .bind(source_chapter_id)
+    .bind(&row.job_id)
+    .execute(pool)
+    .await?;
+
+    Ok(UpsertOutcome::Updated(row.job_id))
+}
+
+/// Delete a stale `pending` candidate sourced from a specific chapter.
+///
+/// Used by `creator kb rescan` to remove candidates that were previously
+/// extracted from the rescanned chapter but no longer appear in its current
+/// text. Only `pending` rows are deleted — `confirmed`/`rejected` rows are
+/// terminal (§5.5.2) and are never removed by a rescan.
+///
+/// Returns `true` if a row was deleted.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn delete_pending_for_chapter(
+    pool: &SqlitePool,
+    work_id: &str,
+    source_chapter_id: i64,
+    canonical_name_guess: &str,
+) -> Result<bool, sqlx::Error> {
+    // SAFETY: static DELETE with bind params; scoped to pending rows only.
+    let result = sqlx::query(
+        "DELETE FROM kb_extract_jobs \
+         WHERE work_id = ? AND source_chapter_id = ? AND canonical_name_guess = ? \
+         AND promotion_status = 'pending'",
+    )
+    .bind(work_id)
+    .bind(source_chapter_id)
+    .bind(canonical_name_guess)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// V1.50 T-B P1 — World KB promotion lifecycle (entity-scope-model.md §5.5)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// The promotion lifecycle is *orthogonal* to the V1.29/V1.40 extraction queue
+// (`KbExtractJob` + `status` = queued/running/done/failed). Review-time
+// heuristic extraction produces candidate rows whose promotion state
+// (`promotion_status` = pending/confirmed/rejected) is governed by author
+// confirm/dismiss.
+//
+// All queries below use runtime `sqlx::query_as::<_, T>()` (dynamic SQL) so
+// they do NOT require regeneration of the shared `.sqlx` offline cache. This
+// mirrors the existing `list_by_creator` precedent in this file.
+
+/// Row from `kb_extract_jobs` carrying the V1.50 promotion-lifecycle columns.
+///
+/// Separate from [`KbExtractJob`] (the V1.29 extraction-queue row) so the two
+/// lifecycles do not share a struct or its `query_as!` macros.
+#[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
+pub struct KbExtractPromotion {
+    /// Unique job ID (`xj_` prefix).
+    pub job_id: String,
+    /// Owning creator ID.
+    pub creator_id: String,
+    /// Workspace ID.
+    pub workspace_id: String,
+    /// Target world ID for the candidate.
+    pub world_id: String,
+    /// Source work ID (V1.40 P3 column; reused for promotion candidates).
+    pub work_id: Option<String>,
+    /// Promotion state: `pending`, `confirmed`, `rejected` (§5.5.1).
+    pub promotion_status: String,
+    /// Proposed `KeyBlock` body as JSON.
+    pub proposed_payload: Option<String>,
+    /// Source chapter number (NULL for work-level candidates).
+    pub source_chapter_id: Option<i64>,
+    /// Heuristic's `block_type` guess (`snake_case` wire value).
+    pub block_type_guess: Option<String>,
+    /// Heuristic's `canonical_name` guess.
+    pub canonical_name_guess: Option<String>,
+    /// Row creation timestamp.
+    pub created_at: String,
+}
+
+/// Default limit for `list_pending_for_world` when caller passes `None`.
+const DEFAULT_PENDING_LIMIT: i64 = 100;
+
+/// Insert a new promotion candidate with `promotion_status='pending'`.
+///
+/// Used by the review-time extraction hook
+/// (`nexus_orchestration::quality_loop`). The caller is expected to have
+/// already called [`is_idempotent`] to avoid duplicates; this function does
+/// not re-check.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_pending(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_id: &str,
+    world_id: &str,
+    work_id: Option<&str>,
+    source_chapter_id: Option<i64>,
+    block_type_guess: &str,
+    canonical_name_guess: &str,
+    proposed_payload: &str,
+) -> Result<KbExtractPromotion, sqlx::Error> {
+    let job_id = generate_job_id();
+    // `work_entry_id` reuses the V1.29 idempotency unique index
+    // `(creator_id, work_entry_id, world_id) WHERE status NOT IN ('failed')`
+    // as an additional DB-level guard: a pending candidate for the same
+    // `(creator, world, canonical_name)` is unique. Promotion rows set
+    // extraction `status='done'` (the heuristic runs inline, no queue), so the
+    // unique index applies (it excludes only 'failed').
+    // SAFETY: static INSERT with bind params; no user-controlled identifiers.
+    sqlx::query(
+        "INSERT INTO kb_extract_jobs \
+         (job_id, creator_id, workspace_id, work_entry_id, world_id, status, \
+          work_id, promotion_status, proposed_payload, source_chapter_id, \
+          block_type_guess, canonical_name_guess) \
+         VALUES (?, ?, ?, ?, ?, 'done', ?, 'pending', ?, ?, ?, ?)",
+    )
+    .bind(&job_id)
+    .bind(creator_id)
+    .bind(workspace_id)
+    .bind(canonical_name_guess)
+    .bind(world_id)
+    .bind(work_id)
+    .bind(proposed_payload)
+    .bind(source_chapter_id)
+    .bind(block_type_guess)
+    .bind(canonical_name_guess)
+    .execute(pool)
+    .await?;
+
+    fetch_promotion_by_id(pool, &job_id).await
+}
+
+/// Fetch a single promotion row by ID.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn get_promotion(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<Option<KbExtractPromotion>, sqlx::Error> {
+    fetch_promotion_optional_by_id(pool, job_id).await
+}
+
+/// List promotion candidates in the `pending` state for a world.
+///
+/// Ordered by creation date (oldest first) so the author sees candidates in
+/// extraction order. Bounded by `limit` (default [`DEFAULT_PENDING_LIMIT`]).
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn list_pending_for_world(
+    pool: &SqlitePool,
+    world_id: &str,
+    limit: Option<i64>,
+) -> Result<Vec<KbExtractPromotion>, sqlx::Error> {
+    let limit = limit.unwrap_or(DEFAULT_PENDING_LIMIT).clamp(1, 500);
+    // SAFETY: LIMIT interpolated from a clamped i64 (not user-controlled);
+    // column names are static; world_id is a bind param.
+    let query = format!(
+        "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
+                promotion_status, proposed_payload, source_chapter_id, \
+                block_type_guess, canonical_name_guess, created_at \
+         FROM kb_extract_jobs \
+         WHERE world_id = ? AND promotion_status = 'pending' \
+         ORDER BY created_at ASC LIMIT {limit}"
+    );
+    sqlx::query_as::<_, KbExtractPromotion>(&query)
+        .bind(world_id)
+        .fetch_all(pool)
+        .await
+}
+
+/// Idempotency pre-check: returns `true` if a `pending` or `confirmed` row
+/// already exists for the same `work_id` + `canonical_name_guess`.
+///
+/// Prevents the review-time extraction hook from duplicating candidates when
+/// `novel-review-master` re-runs over the same chapter (acceptance criterion
+/// §6). `rejected` rows do not block re-extraction (the author may change
+/// their mind on a later review pass).
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn is_idempotent(
+    pool: &SqlitePool,
+    work_id: &str,
+    canonical_name_guess: &str,
+) -> Result<bool, sqlx::Error> {
+    // SAFETY: static SELECT with bind params.
+    let existing: Option<(i64,)> = sqlx::query_as(
+        "SELECT COUNT(*) FROM kb_extract_jobs \
+         WHERE work_id = ? AND canonical_name_guess = ? \
+         AND promotion_status IN ('pending', 'confirmed')",
+    )
+    .bind(work_id)
+    .bind(canonical_name_guess)
+    .fetch_optional(pool)
+    .await?;
+    Ok(existing.is_some_and(|(c,)| c > 0))
+}
+
+/// Flip a promotion candidate to `confirmed`.
+///
+/// Only transitions from `pending`. Returns `Ok(true)` when the row was
+/// flipped, `Ok(false)` when the row was not in `pending` state (already
+/// confirmed/rejected or missing) — the caller surfaces a clean error.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn mark_confirmed(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed' \
+         WHERE job_id = ? AND promotion_status = 'pending'",
+    )
+    .bind(job_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Transaction-aware variant of [`mark_confirmed`] (R-V150KBED-03).
+///
+/// Same conditional `UPDATE` but issued against a caller-managed transaction
+/// so the `creator world kb adopt` path can wrap the `KeyBlock` insert + this
+/// flip atomically. A return of `Ok(false)` (race: row was already confirmed/
+/// rejected) MUST be paired with `tx.rollback()` by the caller so no orphan
+/// `KeyBlock` is persisted.
+///
+/// **Keep in sync with [`mark_confirmed`]**: the UPDATE statement and the
+/// `Ok(false)` semantics must stay identical.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn mark_confirmed_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed' \
+         WHERE job_id = ? AND promotion_status = 'pending'",
+    )
+    .bind(job_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Flip a promotion candidate to `rejected`.
+///
+/// Only transitions from `pending`. Returns `Ok(true)` when the row was
+/// flipped, `Ok(false)` otherwise.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn mark_rejected(pool: &SqlitePool, job_id: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'rejected' \
+         WHERE job_id = ? AND promotion_status = 'pending'",
+    )
+    .bind(job_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+// ── internal fetchers ─────────────────────────────────────────────────
+
+async fn fetch_promotion_by_id(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<KbExtractPromotion, sqlx::Error> {
+    fetch_promotion_optional_by_id(pool, job_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)
+}
+
+async fn fetch_promotion_optional_by_id(
+    pool: &SqlitePool,
+    job_id: &str,
+) -> Result<Option<KbExtractPromotion>, sqlx::Error> {
+    // SAFETY: static SELECT by PK with bind param.
+    sqlx::query_as::<_, KbExtractPromotion>(
+        "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
+                promotion_status, proposed_payload, source_chapter_id, \
+                block_type_guess, canonical_name_guess, created_at \
+         FROM kb_extract_jobs WHERE job_id = ?",
+    )
+    .bind(job_id)
+    .fetch_optional(pool)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
