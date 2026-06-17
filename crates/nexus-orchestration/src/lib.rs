@@ -2,6 +2,7 @@
 //! Authoritative design: `.mstar/knowledge/specs/orchestration-engine.md`.
 
 pub mod auto_chain;
+pub mod auto_chronology;
 pub mod capability;
 pub mod completion_lock;
 pub mod embedded_rules;
