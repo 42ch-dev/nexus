@@ -57,7 +57,7 @@
       "id": "2026-06-18-v1.50-cron-review-staggering",
       "title": "T-A P2 — Review cron + quality-loop interplay",
       "file": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-cron-review-staggering",
@@ -67,7 +67,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-cron-brainstorm-write"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T10:00:00+08:00"
+      "updated_at": "2026-06-18T15:00:00+08:00",
+      "qc_status": "Ready for QC tri-review (development complete; 22 cron_supervisor + 2 review_cron_e2e + 5 review_time_extraction tests pass; 2 R-V150P2CRONRV-01/02 cross-plan migration collision fixes)"
     },
     {
       "id": "2026-06-18-v1.50-auto-chronology",
@@ -125,7 +126,7 @@
       "id": "2026-06-18-v1.50-kb-refreshable-scan",
       "title": "T-B P2 — creator kb rescan + extract sync",
       "file": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-kb-refreshable-scan",
@@ -135,7 +136,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-kb-auto-promotion"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T10:00:00+08:00"
+      "updated_at": "2026-06-18T15:00:00+08:00",
+      "qc_status": "Ready for QC tri-review (development complete; 6 kb_extract_jobs_upsert + 8 kb_rescan_cli + 19 regression tests pass; R-V150KBED-06 cross-plan migration collision fix)"
     },
     {
       "id": "2026-06-18-v1.50-hygiene-and-closeout",
