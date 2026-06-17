@@ -182,3 +182,104 @@ The code is largely sound for the V1.50 expected scale. The two Warnings are rec
 - `cargo +nightly fmt --all --check` → clean
 
 All 26 hermetic tests in the plan's scope pass; the Warnings above are not test failures but architectural/structural concerns.
+
+---
+
+## Revalidation
+
+```yaml
+---
+report_kind: qc-revalidation
+reviewer: qc-specialist-3
+reviewer_index: 3
+plan_id: 2026-06-18-v1.50-kb-auto-promotion
+working_branch: feature/v1.50-kb-auto-promotion
+review_cwd: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-kb-auto-promotion
+review_range: 8eec12e5..bab531a1
+fix_wave_commits:
+  - 2cfbd49e (R-V150KBED-03)
+  - 02cc52d5 (R-V150KBED-04)
+  - 125533a8 (R-V150KBED-05)
+  - bab531a1 (plan completion report)
+verdict: Approve
+generated_at: 2026-06-18
+---
+```
+
+### Revalidation scope
+- **Type**: Targeted re-review of fix-wave (per `mstar-review-qc` SKILL.md "After Request Changes (default)").
+- **Targeted scope**: My two blocking Warnings from the initial wave only — **W-001 (R-V150KBED-03)** and **W-002 (R-V150KBED-04)**. R-V150KBED-05 belongs to qc1 (architecture coherence: reject log path uses work_ref not work_id) and is not in qc3's scope; the docs commit (`bab531a1`) is the plan Completion Report v2 addendum and not subject to code review.
+- **Diff basis verified**: `git diff 8eec12e5..bab531a1 --stat` shows 10 files changed, 1094 insertions, 29 deletions. The 4 substantive fix-wave commits are present in the order listed.
+- **Head SHA (post-fix)**: `bab531a1` (verified via `git log --oneline 8eec12e5..bab531a1`).
+- **Original sections preserved**: Scope, Findings (incl. W-001/W-002 evidence and S-001..S-005), Source Trace, Positive observations, Summary, and Test evidence above are immutable per Assignment. This Revalidation section is the only addition.
+
+### Per-finding disposition
+
+#### R-V150KBED-03 (W-001 — `kb_adopt` transaction wrap) — **RESOLVED**
+- **Fix commit**: `2cfbd49e` (250 insertions, 13 deletions across 4 files).
+- **Implementation** (verified in `crates/nexus42/src/commands/creator/world/kb.rs` lines 477–509):
+  - `pool.begin()` is now called before the insert; `tx.rollback()` (explicit) and `tx.commit()` (success) replace the previous no-transaction flow.
+  - Two new tx-aware sibling functions were added to keep the trait contract intact:
+    - `SqliteKbStore::insert_key_block_in_tx` (`crates/nexus-local-db/src/kb_store.rs`) — executes the same `validate_canonical_name` + `validate_body` + INSERT as the trait impl, but against `&mut **tx`. The function is explicitly documented with a "**Keep in sync with `KbStore::insert_key_block`**" guard so future drift between the two paths is detectable at review time. The SQLite UNIQUE-constraint (`code == "2067"`) → `KbStoreError::Duplicate` mapping is preserved.
+    - `mark_confirmed_in_tx` (`crates/nexus-local-db/src/kb_extract_job.rs`) — same conditional UPDATE `WHERE job_id = ? AND promotion_status = 'pending'` as `mark_confirmed`, but against `&mut **tx`. Same "Keep in sync" guard.
+  - **Error-path coverage** is correct and matches the assignment's required fix:
+    - On `insert_key_block_in_tx` `Err` → `tx` is dropped via `?` → sqlx auto-rolls back. Inline comment documents this.
+    - On `mark_confirmed_in_tx` `Err` → same auto-rollback path. Inline comment documents this.
+    - On `mark_confirmed_in_tx` `Ok(false)` (race) → explicit `tx.rollback().await` is called and best-effort logged via `tracing::error!`. The orphan KeyBlock insert is undone before the error surfaces.
+  - The misleading "KeyBlock was not duplicated" message has been replaced with "The transaction was rolled back; no orphan row created." — directly addresses S-004 from the original wave as a beneficial side-effect.
+- **Regression test** (verified in `crates/nexus42/tests/world_kb_promotion_cli.rs`, new test `kb_adopt_failure_rolls_back_insert`):
+  - Pre-flips the candidate via `mark_confirmed(&pool, ...)` to simulate a race winner.
+  - Replicates the `kb_adopt` tx boundary verbatim (`begin → insert_key_block_in_tx → mark_confirmed_in_tx → rollback`) because `kb_adopt` itself would reject the pre-flipped row at `load_pending_candidate` (the first-failure path is already covered by the pre-existing `double_adopt_is_rejected` test).
+  - Asserts the core invariant: after rollback, **no orphan `KeyBlock` is persisted** (uses `SqliteKbStore::list_by_world` to scan `kb_key_blocks` and asserts `canonical_name != "Race Candidate"` for all rows).
+  - Also asserts the race winner's `confirmed` state on the candidate is preserved (no over-rotation).
+- **Test evidence (re-run in this re-review)**:
+  - `cargo test -p nexus42 --test world_kb_promotion_cli` → **11 passed, 0 failed** (was 8 in wave-1; +1 new test, +2 R-05 regression tests landed in the same file from the qc1 fix-wave).
+  - The new `kb_adopt_failure_rolls_back_insert` test passes.
+- **Verdict on R-03**: The fix is complete, the test is well-designed (real tx boundary replication, not a mock), and the implementation preserves the trait contract. The duplication of validation+INSERT logic between `insert_key_block` and `insert_key_block_in_tx` is explicitly documented as a "keep in sync" contract — a future refactor could extract the common path, but that is out of scope for this targeted fix-wave and is correctly flagged as Suggestion-level in the original report (S-005 is partially addressed by the new test). **No remaining qc3 concerns.**
+
+#### R-V150KBED-04 (W-002 — index column rename) — **RESOLVED**
+- **Fix commit**: `02cc52d5` (84 insertions, 5 deletions across 2 files).
+- **Implementation** (verified in `crates/nexus-local-db/migrations/202606180002_kb_extract_jobs_extend.sql` lines 42–64):
+  - Old unused index `idx_kb_extract_jobs_promotion_status_work` on `(promotion_status, work_id)` is dropped via `DROP INDEX IF EXISTS`.
+  - New index `idx_kb_extract_jobs_promotion_status_world` on `(promotion_status, world_id, created_at)` is created via `CREATE INDEX IF NOT EXISTS`.
+  - Column choice matches `list_pending_for_world`'s actual filter (`WHERE world_id = ? AND promotion_status = 'pending' ORDER BY created_at ASC LIMIT N`). The leading `(promotion_status, world_id)` covers the equality filters, and `created_at` is the trailing order column for an index-ordered scan with no filesort — the original wave-1 W-002 fix recommendation is faithfully implemented.
+  - Migration comment is **fully rewritten** to reflect the actual query path (verbatim SQL, function reference, spec section §5.5.2) and to document the R-V150KBED-04 rationale (old index unused for the documented path, drop+replace with world_id-covering index).
+  - The comment also notes that `is_idempotent` (keyed on `work_id + canonical_name_guess`) still benefits from the leading `promotion_status` column, and that a dedicated `(promotion_status, work_id, canonical_name_guess)` index can be added later if the table grows beyond ~100k rows — this is a thoughtful, future-proofing note.
+- **Regression test** (verified in `crates/nexus-local-db/tests/kb_extract_jobs_migration.rs`, new test `pending_list_uses_world_id_covering_index`):
+  - Uses `EXPLAIN QUERY PLAN` to assert the planner picks the new `idx_kb_extract_jobs_promotion_status_world` index and **does NOT** reference the legacy `idx_kb_extract_jobs_promotion_status_work` index.
+  - Mirrors the `list_pending_for_world` query shape verbatim.
+  - Hermetic: uses `fresh_pool()` and seeds one pending row for planner stats.
+  - SAFETY comment on the static `EXPLAIN QUERY PLAN` SQL mirror — appropriate per `nexus-local-db` AGENTS.md compile-time-query rule.
+- **Test evidence (re-run in this re-review)**:
+  - `cargo test -p nexus-local-db --test kb_extract_jobs_migration` → **8 passed, 0 failed** (was 7 in wave-1; +1 new test).
+  - The new `pending_list_uses_world_id_covering_index` test passes.
+- **Verdict on R-04**: The fix is complete, the column choice is correct, the comment is now self-documenting, and the EXPLAIN-based test is deterministic on SQLite's planner. **No remaining qc3 concerns.**
+
+#### R-V150KBED-05 (qc1's finding — reject log path) — **OUT OF SCOPE**
+- This finding belongs to qc1's initial-wave review (reject log path uses work_ref not work_id). The fix is in the same fix-wave range (`125533a8`) but is not a qc3 concern (not performance + reliability). Flagged for completeness only.
+
+### Static analysis & format check (re-run in this re-review)
+- `cargo clippy --all -- -D warnings` → **clean** (CI-equivalent command; full workspace, not just the touched crates).
+- `cargo +nightly fmt --all --check` → **clean** (nightly required per `AGENTS.md` to honor the `.rustfmt.toml` `ignore` field for `crates/nexus-contracts/src/generated/`).
+- No new warnings introduced by the fix-wave; no `#[allow(...)]` suppressions added without justification.
+
+### Open Suggestions from wave 1 (still open, non-blocking)
+The original wave 1 raised 5 Suggestions (S-001 through S-005) that were explicitly **non-blocking** in the wave-1 verdict. The fix-wave scope was limited to R-03 + R-04 (the two Warnings). For traceability, the open Suggestions are:
+- **S-001** — `existing_canonical_names` silent-zero on read failure (operator visibility).
+- **S-002** — Rejected log directory `Logs/kb/rejected/` unbounded retention.
+- **S-003** — `KbStoreError::Duplicate` from adopt surfaces generic message (409 mapping).
+- **S-004** — Misleading "KeyBlock was not duplicated" message (effectively addressed as a side-effect of R-03 — message is now "The transaction was rolled back; no orphan row created.").
+- **S-005** — Test coverage gap for transaction-boundary race (addressed by R-03's new `kb_adopt_failure_rolls_back_insert` test).
+
+These are **Suggestion-level** (non-blocking) and remain in the qc3 open-issues set for future planning. Per `mstar-review-qc` gate rules, unresolved Suggestions alone do **not** block an `Approve` verdict.
+
+### Summary
+
+| Wave | Critical | Warning | Suggestion | Verdict |
+|------|----------|---------|------------|---------|
+| Wave 1 (initial) | 0 | 2 (W-001, W-002) | 5 | Request Changes |
+| Wave 2 (this re-review) | 0 | 0 (R-03 + R-04 RESOLVED) | 5 (unchanged, non-blocking) | **Approve** |
+
+**Verdict (this re-review)**: **Approve**
+
+Per `mstar-review-qc` gate: "无 `Critical` / `Warning` (未解决项) 时，方可 `Approve`." Both blocking Warnings from the initial wave are resolved with surgical, well-tested fixes. The fix-wave introduces no new findings in qc3's scope (performance + reliability). The two remaining concerns — function-level duplication of the INSERT/validation logic between `insert_key_block` and `insert_key_block_in_tx` — are explicitly guarded by "Keep in sync" documentation and are out of scope for this targeted re-review; they remain Suggestion-level and should be tracked in `residual_findings` if PM/QA elect to keep the open Suggestions on the books.
