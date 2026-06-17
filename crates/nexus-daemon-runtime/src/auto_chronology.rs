@@ -59,8 +59,9 @@ impl AutoChronologyConfig {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|n| *n > 0)
-            .map(|minutes| minutes * 60)
-            .unwrap_or(DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS);
+            .map_or(DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, |minutes| {
+                minutes * 60
+            });
         Self {
             interval: Duration::from_secs(interval_secs),
         }
@@ -117,8 +118,9 @@ pub async fn run_one_tick(pool: &SqlitePool, workspace_dir: Option<&std::path::P
     // DB-only tests). The orchestration advance will fail its outline write
     // per-Work and log the error non-fatally; production always passes a real
     // workspace path.
-    let ws: std::path::PathBuf = workspace_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("/__nexus_no_workspace__"));
+    let ws: std::path::PathBuf = workspace_dir.map_or_else(
+        || std::path::PathBuf::from("/__nexus_no_workspace__"),
+        std::path::PathBuf::from,
+    );
     nexus_orchestration::auto_chronology::run_one_tick(pool, &ws).await;
 }

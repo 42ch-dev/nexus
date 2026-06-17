@@ -1604,14 +1604,13 @@ pub async fn set_auto_chronology(
 ) -> Result<(), LocalDbError> {
     // SAFETY: UPDATE against works table — runtime query (column added in the
     // same migration cycle; sqlx prepare cache hasn't run for this statement).
-    let result = sqlx::query(
-        "UPDATE works SET auto_chronology = ?, updated_at = ? WHERE work_id = ?",
-    )
-    .bind(enabled)
-    .bind(now)
-    .bind(work_id)
-    .execute(pool)
-    .await?;
+    let result =
+        sqlx::query("UPDATE works SET auto_chronology = ?, updated_at = ? WHERE work_id = ?")
+            .bind(enabled)
+            .bind(now)
+            .bind(work_id)
+            .execute(pool)
+            .await?;
 
     if result.rows_affected() == 0 {
         return Err(LocalDbError::MissingVersionKey {
@@ -1637,7 +1636,7 @@ pub async fn get_auto_chronology(pool: &SqlitePool, work_id: &str) -> Result<boo
             .bind(work_id)
             .fetch_optional(pool)
             .await?;
-    Ok(row.map_or(false, |(v,)| v))
+    Ok(row.is_some_and(|(v,)| v))
 }
 
 /// Row for the daemon auto-chronology scan

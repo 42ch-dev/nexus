@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use nexus_local_db::works::{self, WorkRecord};
-use nexus_local_db::{work_chapters, run_migrations};
+use nexus_local_db::{run_migrations, work_chapters};
 use nexus_orchestration::auto_chronology::{
     advance_manual, outline_path, run_one_tick, AdvanceOutcome, SkipReason,
 };
@@ -285,7 +285,10 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(vol2_count, 0, "recovery: crashed tx must leave no v2 chapters");
+    assert_eq!(
+        vol2_count, 0,
+        "recovery: crashed tx must leave no v2 chapters"
+    );
 
     // Transactional rollback invariant: a fresh explicit advance that injects
     // a tx failure must not leave orphan rows. Verified structurally by the
@@ -306,7 +309,9 @@ async fn manual_advance_bypasses_gates_and_seeds_chapters() {
     work.intake_status = "pending".to_string();
     works::create_work(&pool, &work).await.unwrap();
     assert!(
-        !works::get_auto_chronology(&pool, "wrk_manual").await.unwrap(),
+        !works::get_auto_chronology(&pool, "wrk_manual")
+            .await
+            .unwrap(),
         "manual work is not opted in"
     );
 
