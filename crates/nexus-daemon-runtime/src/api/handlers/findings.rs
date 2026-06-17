@@ -143,6 +143,10 @@ pub struct UpdateFindingRequest {
 }
 
 /// List findings query parameters.
+///
+/// R-V149P0-01 (V1.50): `status` accepts either a single status or a
+/// comma-separated list (e.g. `?status=open,triaged`). Unknown tokens
+/// surface as `INVALID_INPUT` (422).
 #[derive(Debug, Deserialize)]
 pub struct ListFindingsQuery {
     pub chapter: Option<i64>,
@@ -232,6 +236,12 @@ pub async fn create_finding_handler(
 }
 
 /// `GET /v1/local/works/{work_id}/findings` — list findings.
+///
+/// R-V149P0-01 (V1.50): the `status` query parameter now accepts a
+/// comma-separated list (e.g. `?status=open,triaged`) so the produce-prompt
+/// consumer can fetch the V1.49 actionable set in one round trip. Unknown
+/// status tokens surface as `INVALID_INPUT` (422), mirroring the
+/// `update_finding_handler` enum-error mapping.
 pub async fn list_findings_handler(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -247,7 +257,31 @@ pub async fn list_findings_handler(
         limit: query.limit,
         offset: query.offset,
     };
-    let rows = findings::list_findings(state.pool(), &creator_id, &filters).await?;
+    let rows = findings::list_findings(state.pool(), &creator_id, &filters)
+        .await
+        .map_err(|err| match err {
+            nexus_local_db::LocalDbError::InvalidEnum {
+                field,
+                value,
+                allowed,
+            } => {
+                tracing::warn!(
+                    creator_id = %creator_id,
+                    work_id = %filters.work_id.as_deref().unwrap_or(""),
+                    field = %field,
+                    value = %value,
+                    "findings LIST: invalid enum value in query filter"
+                );
+                NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: format!(
+                        "invalid {field} value '{value}'; allowed: {}",
+                        allowed.join(", ")
+                    ),
+                }
+            }
+            other => other.into(),
+        })?;
     Ok(Json(rows.into_iter().map(FindingApiDto::from).collect()))
 }
 

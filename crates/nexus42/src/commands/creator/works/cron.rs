@@ -104,8 +104,14 @@ impl WorkSchedule {
 /// Stable error codes for cron config validation (AC #5).
 const ERR_INVALID_CRON: &str = "E_CRON_INVALID_EXPR";
 const ERR_INVALID_TZ: &str = "E_CRON_INVALID_TZ";
-/// Stable error code for the spec §3.1 "all-off" rule (R-V150P0-W2).
+
 const ERR_ALL_DISABLED: &str = "E_CRON_ALL_ROLES_DISABLED";
+/// R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): stable
+/// error code for the `--<role> EXPR --no-<role>` self-contradiction.
+/// Without this guard `apply_set_args` silently last-write-wins, leaving
+/// the role disabled while a cron expression is stored — confusing for
+/// authors reading the schedule back.
+const ERR_CONFLICTING_FLAGS: &str = "E_CRON_CONFLICTING_FLAGS";
 
 /// Validate a 5-field cron expression via the `cron` crate.
 ///
@@ -229,6 +235,25 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
     }
     if let Some(ref tz) = args.tz {
         validate_tz(tz)?;
+    }
+
+    // R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): reject
+    // `--<role> EXPR --no-<role>` self-contradictions before mutating. The
+    // pre-fix path silently last-write-wins (cron expression stored but
+    // role disabled), which is confusing to read back via `cron show`.
+    // The error names both flags so the author can spot the typo.
+    for (role, has_expr, disabled) in [
+        ("brainstorm", args.brainstorm.is_some(), args.no_brainstorm),
+        ("write", args.write.is_some(), args.no_write),
+        ("review", args.review.is_some(), args.no_review),
+    ] {
+        if has_expr && disabled {
+            return Err(CliError::Config(format!(
+                "[{ERR_CONFLICTING_FLAGS}] role '{role}' was given both --{role} \
+                 EXPR and --no-{role}; pick one (set a cron expression OR disable \
+                 the role)"
+            )));
+        }
     }
 
     let mut schedule = base;
@@ -443,6 +468,21 @@ pub struct ListRow {
     pub work_id: String,
     /// Effective resolved schedule (defaults merged in).
     pub schedule: WorkSchedule,
+}
+
+/// R-V150-WLA-05 (V1.50 P-last WL-A / cron-foundation qc1 S3): build the
+/// JSON object for one `list --json` row. Includes both `work_ref` (the
+/// human slug, `null` when unset) and `work_id` (the canonical `wrk_...`
+/// primary key) so machine consumers can always identify the row even
+/// when the Work has no `work_ref` set. Extracted from `handle_list` so
+/// the contract is unit-testable without a daemon connection.
+#[must_use]
+fn list_row_to_json(row: &ListRow) -> serde_json::Value {
+    serde_json::json!({
+        "work_ref": row.work_ref,
+        "work_id": row.work_id,
+        "schedule": row.schedule,
+    })
 }
 
 /// Label for a role cell: disabled → `disabled`; enabled → the cron expression.
@@ -735,15 +775,9 @@ async fn handle_list(
         .collect();
 
     if json {
-        let json_rows: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "work_ref": r.work_ref,
-                    "schedule": r.schedule,
-                })
-            })
-            .collect();
+        // R-V150-WLA-05: `list_row_to_json` carries `work_id` alongside
+        // `work_ref` so machine consumers can always identify the row.
+        let json_rows: Vec<serde_json::Value> = rows.iter().map(list_row_to_json).collect();
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({ "works": json_rows }))?
@@ -773,6 +807,8 @@ async fn resolve_work_id(
 }
 
 #[cfg(test)]
+// R-V150-WLA-01 (V1.50 P-last WL-A / cron-foundation qc1 S4): test-only —
+// `.unwrap()` keeps assertion intent readable; panics surface test names.
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
@@ -898,6 +934,49 @@ mod tests {
         assert!(apply_set_args(base, &args).is_err());
     }
 
+    /// R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004):
+    /// `--brainstorm EXPR --no-brainstorm` (and the write / review
+    /// siblings) must be rejected with the `E_CRON_CONFLICTING_FLAGS`
+    /// stable code rather than silently storing a disabled role with an
+    /// attached cron expression.
+    #[test]
+    fn apply_set_args_conflicting_role_flags_rejected_with_stable_code() {
+        for (role_expr_field, role_no_field, role_name) in [
+            ("brainstorm", "no_brainstorm", "brainstorm"),
+            ("write", "no_write", "write"),
+            ("review", "no_review", "review"),
+        ] {
+            let base = WorkSchedule::defaults();
+            let mut args = CronSetArgs::default();
+            // Build the conflicting pair via field mutation by parsing the
+            // role names (cheaper than three near-identical literals).
+            match role_expr_field {
+                "brainstorm" => args.brainstorm = Some(DEFAULT_BRAINSTORM_CRON.to_string()),
+                "write" => args.write = Some(DEFAULT_WRITE_CRON.to_string()),
+                "review" => args.review = Some(DEFAULT_REVIEW_CRON.to_string()),
+                _ => unreachable!(),
+            }
+            match role_no_field {
+                "no_brainstorm" => args.no_brainstorm = true,
+                "no_write" => args.no_write = true,
+                "no_review" => args.no_review = true,
+                _ => unreachable!(),
+            }
+            let err = apply_set_args(base, &args)
+                .expect_err(&format!("--{role_name} + --no-{role_name} must reject"));
+            let msg = format!("{err}");
+            assert!(
+                msg.contains(ERR_CONFLICTING_FLAGS),
+                "conflict on role '{role_name}' must carry stable code \
+                 {ERR_CONFLICTING_FLAGS}: {msg}"
+            );
+            assert!(
+                msg.contains(role_name),
+                "conflict error must name the role '{role_name}': {msg}"
+            );
+        }
+    }
+
     #[test]
     fn apply_set_args_no_flags_disable_roles() {
         let base = WorkSchedule::defaults();
@@ -944,6 +1023,45 @@ mod tests {
         }];
         let out = render_list(&rows);
         assert!(out.contains("disabled"));
+    }
+
+    /// R-V150-WLA-05: `list --json` row must carry both `work_ref` (the
+    /// human slug, `null` when unset) and `work_id` (the canonical
+    /// `wrk_...` primary key). Machine consumers should be able to
+    /// identify the row even when the Work has no `work_ref` set.
+    #[test]
+    fn list_row_to_json_includes_work_id_and_work_ref() {
+        // Case 1: Work with a human work_ref slug.
+        let row_with_ref = ListRow {
+            work_ref: Some("my-novel".to_string()),
+            work_id: "wrk_001".to_string(),
+            schedule: WorkSchedule::defaults(),
+        };
+        let json = list_row_to_json(&row_with_ref);
+        assert_eq!(json["work_ref"], "my-novel");
+        assert_eq!(json["work_id"], "wrk_001");
+        assert!(
+            json.get("schedule").is_some(),
+            "schedule object must be present"
+        );
+
+        // Case 2: Work with no work_ref (regression guard for the qc1 S3
+        // gap — `work_ref: null` must not leave the consumer without any
+        // identifier).
+        let row_no_ref = ListRow {
+            work_ref: None,
+            work_id: "wrk_999".to_string(),
+            schedule: WorkSchedule::defaults(),
+        };
+        let json = list_row_to_json(&row_no_ref);
+        assert!(
+            json["work_ref"].is_null(),
+            "work_ref must serialise as null when unset"
+        );
+        assert_eq!(
+            json["work_id"], "wrk_999",
+            "work_id must always be present so the row is identifiable"
+        );
     }
 
     #[test]
