@@ -1448,6 +1448,15 @@ pub async fn enqueue_auto_chain_schedule(
 /// template modifications that alter the output contract). Non-breaking changes
 /// (comments, optional fields) may keep the same version. The version is stored
 /// in `creator_schedules` at enqueue time and used by the loader for compat checks.
+//
+// `match_same_arms`: the `novel-brainstorm | novel-write` arm intentionally
+// shares its body (`1`) with the `_` catch-all. The explicit arms exist for
+// discoverability (R-V150P1CRONBW-05 / qc3 W-003): a maintainer scanning this
+// map sees the cron-triggered presets and knows to bump them in lockstep with
+// their `preset.yaml` on a breaking change. The
+// `preset_version_mapping_matches_yaml_includes_cron_presets` test enforces
+// the sync, so the named arms are documentation, not a behavioural fork.
+#[allow(clippy::match_same_arms)]
 fn preset_version_for_id(preset_id: &str) -> i64 {
     match preset_id {
         // V1.48 P1: bumped 7 → 8 — added `open_findings_block` template var
@@ -1457,6 +1466,18 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         "novel-writing" => 8,
         "research" | "novel-review-master" => 2,
         "kb-extract" => 3,
+        // V1.50 T-A P1 (R-V150P1CRONBW-05 / qc3 W-003): explicit arms for the
+        // cron-triggered presets so the evaluator never silently stamps a
+        // stale `preset_version` through the `_` fallback. `novel-brainstorm`
+        // ships at v1 (embedded-presets/novel-brainstorm/preset.yaml).
+        // `novel-write` is deferred (R-V150P1CRONBW-01 — preset YAML not yet
+        // authored) and resolves to v1 until its first release. Bump in
+        // lockstep with the preset's `version:` field on any breaking change
+        // (R-V139P5-W-4 version policy); the
+        // `preset_version_mapping_matches_yaml_includes_cron_presets` test
+        // guards the novel-brainstorm sync and asserts novel-write's pending
+        // value while its YAML is absent.
+        "novel-brainstorm" | "novel-write" => 1,
         // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
         // per compass §0.1 #6). Bumped to version 1 (was already 1 as
         // `reflection-loop`); the state-machine contract is intentionally new
@@ -2121,17 +2142,25 @@ mod tests {
         );
     }
 
-    /// QC1 W-2: assert `preset_version_for_id` stays in sync with
-    /// embedded preset.yaml version fields.
+    /// QC1 W-2 / R-V150P1CRONBW-05: assert `preset_version_for_id` stays in
+    /// sync with embedded preset.yaml version fields, extended to cover the
+    /// cron-triggered presets (`novel-brainstorm`, `novel-write`).
     #[test]
-    fn preset_version_mapping_matches_yaml() {
+    fn preset_version_mapping_matches_yaml_includes_cron_presets() {
         use crate::preset::EMBEDDED_PRESETS;
 
+        // R-V150P1CRONBW-05 (qc3 W-003): both cron-triggered preset ids are
+        // iterated here so a future `version:` bump cannot drift silently.
+        // `novel-write`'s YAML is deferred (R-V150P1CRONBW-01, T-A P2); until
+        // it ships the mapping must return 1, and the strict YAML-sync branch
+        // below enforces the comparison the moment the preset is authored.
         let known_ids = [
             "novel-writing",
             "research",
             "novel-review-master",
             "kb-extract",
+            "novel-brainstorm",
+            "novel-write",
         ];
 
         for preset_id in &known_ids {
@@ -2139,10 +2168,21 @@ mod tests {
 
             // Find the embedded preset
             let yaml_path = format!("{preset_id}/preset.yaml");
-            let yaml_bytes = EMBEDDED_PRESETS.get_file(&yaml_path).unwrap_or_else(|| {
-                panic!("preset.yaml missing for '{preset_id}' at '{yaml_path}'")
-            });
-            let yaml_str = std::str::from_utf8(yaml_bytes.contents())
+            let Some(yaml_file) = EMBEDDED_PRESETS.get_file(&yaml_path) else {
+                // Only `novel-write` is expected to be deferred. Any OTHER
+                // missing YAML is a real drift → panic.
+                assert_eq!(
+                    *preset_id, "novel-write",
+                    "preset.yaml missing for '{preset_id}' at '{yaml_path}'"
+                );
+                assert_eq!(
+                    mapping_version, 1,
+                    "novel-write preset.yaml is deferred (R-V150P1CRONBW-01); \
+                     preset_version_for_id must return 1 until authored"
+                );
+                continue;
+            };
+            let yaml_str = std::str::from_utf8(yaml_file.contents())
                 .unwrap_or_else(|e| panic!("preset.yaml for '{preset_id}' is not UTF-8: {e}"));
 
             // Extract version: field from YAML
@@ -2171,6 +2211,44 @@ mod tests {
                  Update the match arm in preset_version_for_id() to match."
             );
         }
+    }
+
+    /// R-V150P1CRONBW-05: focused regression — the shipped `novel-brainstorm`
+    /// cron preset resolves to its embedded preset.yaml `version:` field.
+    /// Guards against silent drift even if someone later prunes the
+    /// `known_ids` array in the sync test above.
+    #[test]
+    fn preset_version_for_id_novel_brainstorm_resolves() {
+        use crate::preset::EMBEDDED_PRESETS;
+
+        let mapping_version = preset_version_for_id("novel-brainstorm");
+
+        let yaml_bytes = EMBEDDED_PRESETS
+            .get_file("novel-brainstorm/preset.yaml")
+            .expect("novel-brainstorm preset.yaml must ship in T-A P1");
+        let yaml_str = std::str::from_utf8(yaml_bytes.contents())
+            .expect("novel-brainstorm preset.yaml must be UTF-8");
+        let yaml_version = yaml_str
+            .lines()
+            .find_map(|line| {
+                line.trim().strip_prefix("version:").map(|v| {
+                    v.split_whitespace()
+                        .next()
+                        .unwrap()
+                        .trim()
+                        .parse::<i64>()
+                        .unwrap_or_else(|_| {
+                            panic!("non-integer version in novel-brainstorm preset.yaml: '{v}'")
+                        })
+                })
+            })
+            .expect("novel-brainstorm preset.yaml must declare a version: field");
+
+        assert_eq!(
+            mapping_version, yaml_version,
+            "preset_version_for_id('novel-brainstorm') = {mapping_version} but embedded YAML version = {yaml_version}; \
+             update the match arm in preset_version_for_id() to match."
+        );
     }
 
     // V1.49 P3 (R-V148P0-W1) ────────────────────────────────────────────────
