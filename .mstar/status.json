@@ -21,7 +21,8 @@
       "id": "2026-06-18-v1.50-cron-foundation",
       "title": "T-A P0 — Per-Work cron config layer (DB + CLI + defaults)",
       "file": ".mstar/plans/2026-06-18-v1.50-cron-foundation.md",
-      "status": "InReview",
+      "status": "Done",
+      "done_at": "2026-06-18",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-cron-foundation",
@@ -31,8 +32,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-harness-docs-prepare"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:30:00+08:00",
-      "qc_status": "qc1 Request Changes / qc2 Approve / qc3 Request Changes — 5 blocking Warnings (R-V150P0-W1..W5); fix-wave dispatched"
+      "updated_at": "2026-06-18T12:00:00+08:00",
+      "qc_status": "Initial wave: qc1+qc3 Request Changes (5 Warnings R-V150P0-W1..W5). Fix-wave (a7ea8349..f5f58edd): W1..W4 Resolved; W5 deferred to T-A P1 with in-code TODO marker. Targeted re-review qc1+qc3 → both Approve. Merged into iteration/v1.50 at afe812c8."
     },
     {
       "id": "2026-06-18-v1.50-cron-brainstorm-write",
@@ -588,7 +589,11 @@
         "target": "V1.50 T-A P0 fix-wave",
         "target_date": "V1.50 T-A P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §W1",
-        "note": "Trigger: `set my-work --no-review` (or any patch omitting --tz) on a Work with custom TZ stored. handle_set folds env/default TZ into effective_args.tz unconditionally, then apply_set_args patches schedule.tz = resolved_tz, clobbering the previously-configured author TZ. Suggested fix: only fold env/default TZ when user explicitly resets (no-flags → defaults branch) or passes --tz; for patch operations without --tz leave base.tz unchanged. Recommend extracting TZ resolution into a pure helper (resolve_tz) for testability. Add regression test set_no_review_preserves_custom_tz."
+        "note": "Trigger: `set my-work --no-review` (or any patch omitting --tz) on a Work with custom TZ stored. handle_set folds env/default TZ into effective_args.tz unconditionally, then apply_set_args patches schedule.tz = resolved_tz, clobbering the previously-configured author TZ. Suggested fix: only fold env/default TZ when user explicitly resets (no-flags → defaults branch) or passes --tz; for patch operations without --tz leave base.tz unchanged. Recommend extracting TZ resolution into a pure helper (resolve_tz) for testability. Add regression test set_no_review_preserves_custom_tz.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: `resolve_tz(args_tz, env) -> Option<String>` pure helper extracted; `handle_set` only folds env/default TZ on explicit reset or --tz; for role-only patch operations, base.tz is preserved. Regression test `set_no_review_preserves_custom_tz` passes; 3 unit tests cover the pure helper.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit 000d63fd; feature/v1.50-cron-foundation)"
       },
       {
         "id": "R-V150P0-W2",
@@ -601,7 +606,11 @@
         "target": "V1.50 T-A P0 fix-wave",
         "target_date": "V1.50 T-A P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §W2 + qc3.md §W-001",
-        "note": "Spec §3.1 verbatim: 'At least one role must remain enabled: true unless --all-off is passed (CLI rejects empty schedules).' Both --all-off flag and post-mutation check missing. `set my-work --no-brainstorm --no-write --no-review` succeeds silently. T-A P1 cron evaluator will then skip all fires indefinitely. Fix: add --all-off flag in CronCommand::Set clap; post-mutation count of enabled roles; if 0 and !all_off return CliError::Config with stable code (e.g. E_CRON_ALL_ROLES_DISABLED). Hermetic test apply_set_args_all_off_without_flag_rejects."
+        "note": "Spec §3.1 verbatim: 'At least one role must remain enabled: true unless --all-off is passed (CLI rejects empty schedules).' Both --all-off flag and post-mutation check missing. `set my-work --no-brainstorm --no-write --no-review` succeeds silently. T-A P1 cron evaluator will then skip all fires indefinitely. Fix: add --all-off flag in CronCommand::Set clap; post-mutation count of enabled roles; if 0 and !all_off return CliError::Config with stable code (e.g. E_CRON_ALL_ROLES_DISABLED). Hermetic test apply_set_args_all_off_without_flag_rejects.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: `--all-off` flag added to `CronCommand::Set` clap definition; `apply_set_args` post-mutation check rejects all-disabled with stable code `E_CRON_ALL_ROLES_DISABLED`. `apply_set_args_all_off_without_flag_rejects` and `..._with_flag_succeeds` tests pass. `cron set --help` documents --all-off. Cross-corroborated by qc1 (W2) and qc3 (W-001) re-review.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit e478079c; feature/v1.50-cron-foundation)"
       },
       {
         "id": "R-V150P0-W3",
@@ -614,7 +623,11 @@
         "target": "V1.50 T-A P0 fix-wave",
         "target_date": "V1.50 T-A P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-002",
-        "note": "Spec example mandates 4 columns: Role / Cron / Local time / Next fire (UTC). Implementation renders only Role / Cron / Enabled. The whole point of per-Work cron config is 'let authors set the work on autopilot' — show is the primary verification surface. Fix: Local time = parse hour/minute fields of cron expression + render in TZ + cap at 3 entries with …; Next fire (UTC) = cron::Schedule::from_str(&normalize_cron_fields(expr)).upcoming(Utc).next() (single .next() per role, O(1)). render disabled when !enabled. Hermetic test asserts the two new columns."
+        "note": "Spec example mandates 4 columns: Role / Cron / Local time / Next fire (UTC). Implementation renders only Role / Cron / Enabled. The whole point of per-Work cron config is 'let authors set the work on autopilot' — show is the primary verification surface. Fix: Local time = parse hour/minute fields of cron expression + render in TZ + cap at 3 entries with …; Next fire (UTC) = cron::Schedule::from_str(&normalize_cron_fields(expr)).upcoming(Utc).next() (single .next() per role, O(1)). render disabled when !enabled. Hermetic test asserts the two new columns.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: 4-column `render_show` with Role / Cron / Local time / Next fire (UTC) columns. Single `.next()` per role (O(1)) for next-fire UTC; `local_time_display` parses min/hour fields; disabled state renders `--` / `disabled`. `render_show_includes_local_and_next_fire_columns` and `render_show_disabled_renders_disabled_for_next_fire` tests pass.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit a364f31a; feature/v1.50-cron-foundation)"
       },
       {
         "id": "R-V150P0-W4",
@@ -627,7 +640,11 @@
         "target": "V1.50 T-A P0 fix-wave",
         "target_date": "V1.50 T-A P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-003",
-        "note": "SELECT work_ref, work_id, schedule_json FROM works WHERE creator_id = ? AND workspace_slug = ? ORDER BY updated_at DESC has no LIMIT. For N ~ 5000 Works (multi-author workspace) latency grows linearly and CLI output becomes unreadable. Existing list_works precedent uses WorkListFilters::limit/offset (default 100). Fix: add optional limit param on list_works_schedule (default 100), pass through handle_list via --limit <N> flag. Update unit test to assert the cap."
+        "note": "SELECT work_ref, work_id, schedule_json FROM works WHERE creator_id = ? AND workspace_slug = ? ORDER BY updated_at DESC has no LIMIT. For N ~ 5000 Works (multi-author workspace) latency grows linearly and CLI output becomes unreadable. Existing list_works precedent uses WorkListFilters::limit/offset (default 100). Fix: add optional limit param on list_works_schedule (default 100), pass through handle_list via --limit <N> flag. Update unit test to assert the cap.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.50 T-A P0 fix-wave: `limit: Option<u32>` parameter (default 100) added to `list_works_schedule` DAO; `LIMIT ?` SQL bound; `--limit <N>` clap flag in `CronCommand::List`. `list_works_schedule_applies_limit` (DAO) + `cron_list_help_documents_limit_flag` (CLI) tests pass.",
+        "closure_evidence": "iteration/v1.50 @ afe812c8 (commit 87ea2ef6; feature/v1.50-cron-foundation)"
       },
       {
         "id": "R-V150P0-W5",
@@ -640,7 +657,7 @@
         "target": "V1.50 T-A P1 (daemon writer race window)",
         "target_date": "V1.50 T-A P1",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-004",
-        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. PM dispatches W1-W4 to P0 fix-wave; W5 → T-A P1 plan-level residual."
+        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. P0 fix-wave adds in-code TODO marker at cron.rs:613. Plan-level residual carried to T-A P1."
       }
     ],
     "2026-06-18-v1.50-kb-editor-cli": [
