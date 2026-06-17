@@ -239,6 +239,7 @@ fn cron_set_help_documents_flags() {
         "--review",
         "--tz",
         "--no-brainstorm",
+        "--all-off",
     ] {
         assert!(
             help.contains(flag),

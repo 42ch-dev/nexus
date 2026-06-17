@@ -104,6 +104,8 @@ impl WorkSchedule {
 /// Stable error codes for cron config validation (AC #5).
 const ERR_INVALID_CRON: &str = "E_CRON_INVALID_EXPR";
 const ERR_INVALID_TZ: &str = "E_CRON_INVALID_TZ";
+/// Stable error code for the spec §3.1 "all-off" rule (R-V150P0-W2).
+const ERR_ALL_DISABLED: &str = "E_CRON_ALL_ROLES_DISABLED";
 
 /// Validate a 5-field cron expression via the `cron` crate.
 ///
@@ -179,6 +181,11 @@ pub fn resolve_schedule(stored: Option<&str>) -> WorkSchedule {
 // ── CLI set-args application ─────────────────────────────────────────────
 
 /// Inputs from `creator works cron set` flags (spec §3.1).
+//
+// The bool fields are a 1:1 mirror of clap's `--no-<role>` / `--all-off`
+// flags; restructuring into enums would diverge from the CLI surface, so we
+// accept the bool count here.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default)]
 pub struct CronSetArgs {
     /// `--brainstorm <cron>` (None = leave unchanged from current schedule).
@@ -195,6 +202,8 @@ pub struct CronSetArgs {
     pub no_write: bool,
     /// `--no-review`.
     pub no_review: bool,
+    /// `--all-off` (spec §3.1): escape hatch permitting all roles disabled.
+    pub all_off: bool,
 }
 
 /// Apply `set` flags onto a base schedule, validating every cron/TZ value.
@@ -204,7 +213,9 @@ pub struct CronSetArgs {
 ///
 /// # Errors
 ///
-/// Returns [`CliError::Config`] (stable code) on invalid cron/TZ (AC #5).
+/// Returns [`CliError::Config`] (stable code) on invalid cron/TZ (AC #5), or
+/// stable code `E_CRON_ALL_ROLES_DISABLED` when every role ends up disabled
+/// and `--all-off` was not passed (spec §3.1, R-V150P0-W2).
 pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSchedule> {
     // Validate every provided value before mutating (fail-fast, no partial write).
     if let Some(ref expr) = args.brainstorm {
@@ -261,6 +272,19 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
         if let Some(tz) = &args.tz {
             schedule.tz.clone_from(tz);
         }
+    }
+
+    // R-V150P0-W2: spec §3.1 — at least one role must remain enabled unless the
+    // author explicitly passes `--all-off`. Reject empty schedules with a
+    // stable error code so the foundation contract is enforced at config time.
+    let any_enabled = schedule.roles.brainstorm.enabled
+        || schedule.roles.write.enabled
+        || schedule.roles.review.enabled;
+    if !any_enabled && !args.all_off {
+        return Err(CliError::Config(format!(
+            "[{ERR_ALL_DISABLED}] disabling all three roles leaves an empty schedule; \
+             pass --all-off to allow pausing every role"
+        )));
     }
 
     Ok(schedule)
@@ -437,6 +461,9 @@ pub enum CronCommand {
         /// Disable the review role.
         #[arg(long, default_value_t = false)]
         no_review: bool,
+        /// Permit disabling all three roles at once (spec §3.1 "all-off" rule).
+        #[arg(long, default_value_t = false)]
+        all_off: bool,
         /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
@@ -491,6 +518,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
             no_brainstorm,
             no_write,
             no_review,
+            all_off,
             json,
         } => {
             handle_set(
@@ -506,6 +534,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
                     no_brainstorm,
                     no_write,
                     no_review,
+                    all_off,
                 },
                 json,
             )
@@ -876,6 +905,42 @@ mod tests {
             out.tz, "Asia/Shanghai",
             "role-only patch without --tz must preserve base.tz"
         );
+        assert!(!out.roles.review.enabled);
+    }
+
+    // ── R-V150P0-W2: spec §3.1 "all-off" rule ─────────────────────────────
+
+    #[test]
+    fn apply_set_args_all_off_without_flag_rejects() {
+        let base = WorkSchedule::defaults();
+        let args = CronSetArgs {
+            no_brainstorm: true,
+            no_write: true,
+            no_review: true,
+            all_off: false,
+            ..Default::default()
+        };
+        let err = apply_set_args(base, &args).unwrap_err();
+        let msg = error_message(&err);
+        assert!(
+            msg.contains(ERR_ALL_DISABLED),
+            "all-disabled without --all-off must carry stable code {ERR_ALL_DISABLED}: {msg}"
+        );
+    }
+
+    #[test]
+    fn apply_set_args_all_off_with_flag_succeeds() {
+        let base = WorkSchedule::defaults();
+        let args = CronSetArgs {
+            no_brainstorm: true,
+            no_write: true,
+            no_review: true,
+            all_off: true,
+            ..Default::default()
+        };
+        let out = apply_set_args(base, &args).expect("--all-off must permit all disabled");
+        assert!(!out.roles.brainstorm.enabled);
+        assert!(!out.roles.write.enabled);
         assert!(!out.roles.review.enabled);
     }
 
