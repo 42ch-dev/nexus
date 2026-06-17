@@ -65,6 +65,13 @@ pub struct CronFireSummary {
     /// Role entries skipped because the cron did not match the current minute
     /// or the role was disabled. (Common case — logged at debug.)
     pub skipped_no_match: usize,
+    /// R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1 S-001):
+    /// role entries whose idempotency-check DB read returned an error.
+    /// Surfaced as its own bucket (rather than folded into
+    /// `skipped_idempotent`) so `total_evaluated()` reflects the work the
+    /// sweep actually performed and operators can spot a flaky reads path
+    /// in the sweep summary log line.
+    pub skipped_idempotency_check_error: usize,
 }
 
 impl CronFireSummary {
@@ -76,6 +83,7 @@ impl CronFireSummary {
             + self.skipped_idempotent
             + self.skipped_parse_error
             + self.skipped_no_match
+            + self.skipped_idempotency_check_error
     }
 }
 
@@ -162,6 +170,7 @@ pub async fn evaluate_cron_fires(pool: &SqlitePool, now: DateTime<Utc>) -> CronF
         skipped_idempotent = summary.skipped_idempotent,
         skipped_parse_error = summary.skipped_parse_error,
         skipped_no_match = summary.skipped_no_match,
+        skipped_idempotency_check_error = summary.skipped_idempotency_check_error,
         "cron-supervisor: sweep complete"
     );
     summary
@@ -307,6 +316,12 @@ async fn try_fire_role(
             }
         },
         Err(e) => {
+            // R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1
+            // S-001): previously this arm only logged at warn! and did NOT
+            // touch the summary, so a Work whose idempotency check errored
+            // was silently absent from CronFireSummary::total_evaluated().
+            // Increment the dedicated bucket so the metric is honest.
+            summary.skipped_idempotency_check_error += 1;
             warn!(
                 work_id = %row.work_id,
                 role = role_name,
@@ -532,6 +547,38 @@ mod tests {
     fn utc(year: i32, month: u32, day: u32, hour: u32, min: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(year, month, day, hour, min, 0)
             .unwrap()
+    }
+
+    // ── CronFireSummary contract (R-V150-WLA-07) ──────────────────────────
+
+    /// R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1 S-001):
+    /// `skipped_idempotency_check_error` must be a separate bucket so
+    /// `total_evaluated()` reflects the work the sweep actually performed.
+    /// The pre-fix `Err` arm of the `has_active_role_schedule` call only
+    /// logged at warn! and did not touch the summary, so a Work whose
+    /// idempotency check errored was silently absent from the metric.
+    /// Behavioural coverage (injecting a DB read error) is out of scope
+    /// for this contract test — the integration tests in
+    /// `tests/cron_supervisor.rs` cover the happy and idempotent paths,
+    /// and the new bucket is surfaced in the `sweep complete` log line so
+    /// operators can spot a flaky reads path in production.
+    #[test]
+    fn summary_total_evaluated_includes_idempotency_check_error_bucket() {
+        let s = CronFireSummary {
+            fired: 2,
+            skipped_gated: 1,
+            skipped_idempotent: 3,
+            skipped_parse_error: 0,
+            skipped_no_match: 10,
+            skipped_idempotency_check_error: 4,
+        };
+        // 2 + 1 + 3 + 0 + 10 + 4 = 20 — the new bucket is counted.
+        assert_eq!(s.total_evaluated(), 20);
+
+        // Default summary has zero everywhere, including the new field.
+        let default = CronFireSummary::default();
+        assert_eq!(default.skipped_idempotency_check_error, 0);
+        assert_eq!(default.total_evaluated(), 0);
     }
 
     // ── cron_fires_at_minute ───────────────────────────────────────────────
