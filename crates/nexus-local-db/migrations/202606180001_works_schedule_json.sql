@@ -1,0 +1,29 @@
+-- V1.50 T-A P0 (T1) — per-Work cron configuration column.
+-- Spec: .mstar/knowledge/specs/novel-writing/cron-staggering.md §2.1 (Draft V1.50).
+--
+-- Adds `works.schedule_json TEXT NULL` for per-Work cron configuration of
+-- the novel-writing three-role staggering (`brainstorm` / `write` / `review`).
+--
+-- ## Storage shape (spec §2.1)
+--
+--   {
+--     "tz": "Asia/Shanghai",
+--     "roles": {
+--       "brainstorm": { "cron": "0 3,9,15,21 * * *", "enabled": true },
+--       "write":      { "cron": "0 4,10,16,22 * * *", "enabled": true },
+--       "review":     { "cron": "0,30 * * * *",      "enabled": true }
+--     }
+--   }
+--
+-- ## Backward compatibility (spec §2.3)
+--
+-- Existing Works get NULL (= use defaults from the code-level default table).
+-- No retroactive override. New Works also get NULL on creation (the INSERT
+-- column list in `works.rs` does not name `schedule_json`, so the column
+-- defaults to NULL).
+--
+-- Empty string and NULL are both treated as "use defaults" by
+-- `nexus-local-db::works::get_schedule_json` and the CLI resolve layer
+-- (`nexus42::commands::creator::works::cron::resolve_schedule`).
+
+ALTER TABLE works ADD COLUMN schedule_json TEXT;
