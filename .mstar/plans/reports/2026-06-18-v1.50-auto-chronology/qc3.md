@@ -139,3 +139,150 @@ Rationale: three Warning-level findings must be addressed before approval:
 The 4 Suggestion findings are non-blocking. The implementation is functionally correct on the happy path, the spec is well-implemented (modulo the `CompletionLocked` log message conflation), tests cover the spec's positive + 4 negative + crash recovery + manual override + idempotency matrix, and the 5-min tick budget is comfortable.
 
 Recommend: open the 3 Warnings as a targeted re-review. After fix, qc-specialist-3 re-validates by editing this same `qc3.md` per `mstar-review-qc` `## Revalidation` rules and re-emitting Completion Report v2.
+
+---
+
+## Revalidation
+
+```yaml
+---
+report_kind: qc-revalidation
+reviewer: qc-specialist-3
+reviewer_index: 3
+plan_id: 2026-06-18-v1.50-auto-chronology
+working_branch: feature/v1.50-auto-chronology
+review_cwd: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-auto-chronology
+review_range: 44b03171..75e6a426
+fix_wave_commits:
+  - d0770397 (R-V150P3AUTOCHRONO-03)
+  - 1abd5a57 (R-V150P3AUTOCHRONO-04)
+  - d310a13b (R-V150P3AUTOCHRONO-05)
+  - 42ce8bfa (R-V150P3AUTOCHRONO-06)
+  - 75e6a426 (plan completion report)
+verdict: Approve
+generated_at: 2026-06-17T16:24:50Z
+---
+```
+
+### Scope (Revalidation)
+
+- plan_id: 2026-06-18-v1.50-auto-chronology (unchanged)
+- Review range / Diff basis: `44b03171..75e6a426` (5 commits; 4 fix commits + 1 plan report)
+- Working branch (re-verified): `feature/v1.50-auto-chronology`
+- Review cwd (re-verified): `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-auto-chronology` (`git rev-parse --show-toplevel` returns the worktree path; `git branch --show-current` → `feature/v1.50-auto-chronology`)
+- Files reviewed: 7 (3 source DAOs + 2 test files + 1 CLI subcommand + 6 new `.sqlx/query-*.json` cache entries)
+- Diff stats: 19 files changed, 1012 insertions(+), 122 deletions(-)
+- Target: the 3 blocking Warnings (W-1, W-2, W-3) raised by qc-specialist-3 in the initial wave. Suggestion items (S-1..S-4) were non-blocking and remain open per the initial report (they are not in scope for this targeted re-review).
+
+### Disposition
+
+#### W-1 (outline-write-before-tx → Work stuck) — **Resolved** ✅
+
+**Required fix:** invert ordering — DB tx first, FS write after commit; add `--force` flag on `chronology advance` for recovery.
+
+**Evidence:**
+
+1. **Atomicity reorder implemented** — `crates/nexus-orchestration/src/auto_chronology.rs:322-368` shows `perform_advance` now performs the DB tx (chapter seed + `updated_at` bump) **before** `write_outline_atomic`:
+   - `Step 1 (spec §4.2)`: `pool.begin()` → seed chapters → `UPDATE works SET updated_at = ?` → `tx.commit().await` (lines 322-351).
+   - `Step 2 (spec §4.1)`: render template + `write_outline_atomic(&outline, &rendered)?` (lines 353-368).
+   - Module doc comment (§ Advance execution) updated to reflect the DB-first ordering and the recovery semantics ("a post-commit outline failure leaves the DB state correct and the Work is **not stuck**").
+2. **`--force` flag added** — `crates/nexus42/src/commands/creator/works/chronology.rs` adds the flag; verified in CLI help output (`nexus42 creator works chronology advance --help`): `--force  Bypass the idempotent guard and overwrite an existing outline (recovery path for a post-commit outline-write failure or an orphaned crash-state outline)`.
+3. **`perform_advance` signature extended** with `force: bool` (line 302); `advance_auto` passes `false` (daemon never forces); `advance_manual` accepts `force` from CLI (line 463+).
+4. **Regression tests pass** — `cargo test -p nexus-orchestration --test auto_chronology_tick` → **12 passed, 0 failed**. New tests:
+   - `perform_advance_writes_outline_after_tx_commit`: pre-creates a `FILE` at the `Outlines` dir path to force outline-write failure post-commit; asserts the 3 chapter rows persist in the DB despite the outline failure, no partial outline file exists, and a recovery re-run after removing the blocker succeeds with `Advanced { next_volume: 2 }`.
+   - `manual_advance_force_overwrites_existing_outline`: creates an outline, then re-runs `advance` (asserts `Skipped { AlreadyAdvanced }`), then re-runs with `force=true` (asserts `Advanced { .. }` + rewritten outline).
+   - `chronology_advance_help_documents_force_flag`: passes (in `nexus42/tests/chronology_cli.rs`).
+
+**Note on test interpretation** (per commit 1abd5a57 message body): the fix-wave assignment's regression-test description said "assert tx rolled back" for the outline-failure case, but the Fix paragraph explicitly mandates Design A ("DB first, FS second"). Under Design A the tx commits BEFORE the outline write, so an outline failure cannot roll back the already-committed tx. The regression test correctly asserts the Design A invariant — "tx committed (chapters persist) + no partial outline" — which is precisely the behaviour that fixes W-1 (the Work is no longer stuck because the DB is the source of truth, not the filesystem outline). I concur with the implementer's interpretation: Design A is the correct fix, and asserting "tx rolled back" would contradict the fix paragraph's own design choice. No follow-up needed.
+
+#### W-2 (env-var mutation in tests, V1.49 R-V149P1-02 pattern) — **Resolved** ✅
+
+**Required fix:** pure `parse_interval_secs(Option<&str>)`; tests exercise it directly.
+
+**Evidence:**
+
+1. **Pure parse function extracted** — `crates/nexus-daemon-runtime/src/auto_chronology.rs:80-88`:
+   ```rust
+   #[must_use]
+   pub fn parse_interval_secs(env_value: Option<&str>) -> u64 {
+       env_value
+           .and_then(|s| s.parse::<u64>().ok())
+           .filter(|n| *n > 0)
+           .map_or(DEFAULT_AUTO_CHRONOLOGY_INTERVAL_SECS, |minutes| {
+               minutes * 60
+           })
+   }
+   ```
+   Doc comment explains the V1.49 R-V149P1-02 flake pattern and why the parameter-passing design eliminates the race.
+2. **`from_env()` delegates** (lines 56-66): reads the env var into a local `String`, calls `parse_interval_secs(env_value.as_deref())`. No mutation; the only env access is a single read of the inherited process env.
+3. **Tests exercise the pure function directly** — `crates/nexus-daemon-runtime/tests/auto_chronology_task.rs`:
+   - `parse_interval_secs_handles_env_values`: `None`, `Some("1")`, `Some("garbage")`, `Some("0")` — all passed via parameter; no `set_var` / `remove_var` calls anywhere in the test body. Eliminates the V1.49 R-V149P1-02 flake window entirely.
+   - `from_env_uses_default_when_unset`: asserts `from_env()` returns the default when the env is unset (or respects a harness-set override) — does NOT mutate the env.
+4. **`cargo test -p nexus-daemon-runtime --test auto_chronology_task`** → **3 passed, 0 failed** (the 1 pre-existing `daemon_run_one_tick_advances_eligible_work` + 2 new). The deleted `config_env_override_in_minutes` test (with 4 `set_var`/`remove_var` cycles) is gone.
+
+#### W-3 (DAOs use runtime `sqlx::query`, AGENTS.md violation) — **Resolved** ✅
+
+**Required fix:** convert to `sqlx::query!` macros; `cargo sqlx prepare`; commit `.sqlx` cache.
+
+**Evidence:**
+
+1. **All 6 new DAOs converted to compile-time macros** (`crates/nexus-local-db/src/works.rs` + `crates/nexus-local-db/src/work_chapters.rs`):
+   - `works::set_auto_chronology`: `sqlx::query!` (UPDATE, 3 binds).
+   - `works::get_auto_chronology`: `sqlx::query_scalar!` (`SELECT auto_chronology as "auto_chronology!" FROM works WHERE work_id = ?`).
+   - `works::list_works_with_auto_chronology`: `sqlx::query_as!` (WorkAutoChronologyRow; `work_id!`, `creator_id!`, `intake_status!`, `title!`, `total_planned_chapters: i32`, nullable `work_ref` / `runtime_lock_holder` / `completion_locked_at` correctly left non-annotated).
+   - `work_chapters::current_volume`: `sqlx::query_scalar!` (`SELECT MAX(volume) as "volume: i32" FROM work_chapters WHERE work_id = ?`).
+   - `work_chapters::is_volume_fully_finalized`: `sqlx::query!` (`COUNT(*) as "total_rows!"`, `COALESCE(SUM(...), 0) as "finalized_rows!"`).
+   - `work_chapters::seed_volume_chapters_tx`: `sqlx::query!` (INSERT OR IGNORE inside tx; 8 binds).
+2. **`.sqlx/query-*.json` cache populated** — 6 new query metadata files committed (matching the 6 macros); `.sqlx/state.db` is gitignored.
+3. **`SQLX_OFFLINE=true` build works** (the macros expand at compile time and use the offline cache):
+   - `SQLX_OFFLINE=true cargo test -p nexus-orchestration --test auto_chronology_tick` → 12 passed.
+   - `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test auto_chronology_task` → 3 passed.
+   - `SQLX_OFFLINE=true cargo test -p nexus-local-db --lib` → **227 passed, 0 failed**.
+   - `cargo build --workspace` → clean (Finished `dev` profile in 18.57s, no errors).
+4. **Type annotations** — SQLite `INTEGER` → `i64` overrides (`total_planned_chapters: i32`, `volume: i32`) match the `Option<i32>` / `Option<i32>` return types on the DAOs; `field!` annotations are correctly applied to all NOT NULL columns.
+
+**Scope note from commit 42ce8bfa**: the implementer explicitly carved out the `nexus-orchestration`-side runtime queries (`perform_advance`'s `UPDATE works SET updated_at`, `load_row_for_manual`'s SELECT) as out of scope. Those queries live in `nexus-orchestration`, which is not bound by `nexus-local-db/AGENTS.md`'s compile-time macro rule (the W-3 fix targeted the 6 new DAOs explicitly listed). Pre-existing technical debt of the same class in `nexus-orchestration` is properly deferred to avoid piggyback scope creep. **No follow-up needed** for V1.50 T-A P3; a residual entry or future V1.50 P-last sweep may revisit.
+
+### CI Gates (re-run)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Orchestration tests | `cargo test -p nexus-orchestration --test auto_chronology_tick` | **12 passed, 0 failed** (12 ✓ required) |
+| Daemon tests | `cargo test -p nexus-daemon-runtime --test auto_chronology_task` | **3 passed, 0 failed** (3 ✓ required) |
+| Local-DB tests | `SQLX_OFFLINE=true cargo test -p nexus-local-db --lib` | **227 passed, 0 failed** |
+| Workspace build | `cargo build --workspace` | **clean** (Finished `dev` profile in 18.57s) |
+| SQLX offline build | `SQLX_OFFLINE=true cargo test` (per affected target) | **clean** (proves the new `sqlx::query!` macros compile and the `.sqlx` cache is correct) |
+| Clippy | `cargo clippy --all -- -D warnings` | **clean** (Finished `dev` profile; no warnings or errors) |
+| Nightly fmt | `cargo +nightly fmt --all --check` | **exit 0** |
+| CLI integration | `cargo test -p nexus42 --test chronology_cli` | **10 passed, 0 failed** (incl. `chronology_advance_help_documents_force_flag`) |
+| CLI help sanity | `cargo run --bin nexus42 -- creator works chronology advance --help` | shows `--force` with correct doc string |
+
+### New Findings (this re-review wave)
+
+None. The 3 blocking Warnings are resolved with structural fixes + regression tests + CI-clean evidence. The 4 Suggestion items from the initial wave (S-1 index, S-2 spec wording, S-3 clippy `--all-targets`, S-4 temp-file suffix) remain non-blocking and are not in scope for this targeted re-review per Assignment.
+
+### Residual Items (unchanged from initial wave)
+
+- S-1 (index on `works.auto_chronology`): non-blocking; recommend V1.50 P-last hygiene sweep.
+- S-2 (CompletionLocked log message conflation): non-blocking; spec/code alignment tracked in completion report's R-V150P3AUTOCHRONO-01.
+- S-3 (clippy `--all-targets` doc lint L75 + wildcard L330 in `auto_chronology_tick.rs`): non-blocking; the CI gate is `cargo clippy --all -- -D warnings` (lib + bin only), which is clean. Stricter `--all-targets` would surface these. Auto-fixable; recommend before merge or P-last hygiene.
+- S-4 (atomic write temp-file suffix via `.with_extension("md.tmp")`): non-blocking; functionally safe due to per-Work-id serialization at the gate.
+
+### Summary (Revalidation)
+
+| Severity | Count (this wave) | Status |
+|----------|-------------------|--------|
+| 🔴 Critical | 0 | — |
+| 🟡 Warning | 0 (all 3 resolved) | W-1 ✅, W-2 ✅, W-3 ✅ |
+| 🟢 Suggestion | 0 new | S-1..S-4 unchanged (non-blocking) |
+
+**Verdict (Revalidation):** **Approve**
+
+Rationale: all 3 blocking Warning findings from the initial wave are resolved with structural fixes that match the original required-fix descriptions:
+- W-1: DB tx now commits before outline write (Design A "DB first, FS second"); `--force` CLI flag added for recovery; 2 regression tests cover both branches.
+- W-2: pure `parse_interval_secs(Option<&str>)` extracted; tests pass values directly without mutating process-global env — eliminates the V1.49 R-V149P1-02 flake pattern entirely.
+- W-3: all 6 new DAOs converted to `sqlx::query!` / `sqlx::query_as!` / `sqlx::query_scalar!` compile-time macros; `.sqlx` cache committed; `SQLX_OFFLINE=true` build proves compile-time correctness.
+
+CI gates all green (clippy, nightly fmt, workspace build, targeted tests, CLI integration). The CLI `--force` flag is wired through the CLI → orchestration → DAO chain end-to-end. The implementation is structurally sound for V1.50 T-A P3 ship.
+
+Recommend: PM consolidate, archive the 3 R-V150P3AUTOCHRONO-0[4,5,6] residual_findings to `archived/residuals/`, advance `2026-06-18-v1.50-auto-chronology` to `Done` (after QA verifies).
