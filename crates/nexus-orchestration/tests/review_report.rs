@@ -178,6 +178,7 @@ impl Layer<Registry> for FieldNamesCapture {
 
 /// AC1 (parsed path): a well-formed `review-report.md` with three Issues
 /// bullets yields three finding rows carrying the parsed kind/severity/body.
+#[serial_test::serial]
 #[tokio::test]
 async fn parsed_report_persists_findings_with_parsed_fields() {
     let pool = test_pool().await;
@@ -245,6 +246,7 @@ Solid chapter with a few craft issues.
 
 /// AC1 (parsed path, optional field): a finding with `rule_suggestion:` tag
 /// round-trips the suggestion into the persisted row.
+#[serial_test::serial]
 #[tokio::test]
 async fn parsed_report_with_rule_suggestion_round_trips() {
     let pool = test_pool().await;
@@ -278,6 +280,7 @@ rule_suggestion: Pin dialect per region in AGENTS.md
 /// AC1 (executor routing): when the report omits an executor tag, the
 /// persisted row uses the spec §1.2 kind-based default (write for
 /// craft/continuity, brainstorm otherwise).
+#[serial_test::serial]
 #[tokio::test]
 async fn parsed_report_applies_executor_default_when_omitted() {
     let pool = test_pool().await;
@@ -322,6 +325,7 @@ async fn parsed_report_applies_executor_default_when_omitted() {
 
 /// AC2 (fallback, missing file): when `review-report.md` does not exist,
 /// exactly one placeholder finding is persisted and the call succeeds.
+#[serial_test::serial]
 #[tokio::test]
 async fn missing_report_falls_back_to_placeholder_finding() {
     let pool = test_pool().await;
@@ -365,6 +369,7 @@ async fn missing_report_falls_back_to_placeholder_finding() {
 /// AC2 (fallback, parse error / zero findings): when the file exists but
 /// contains no parseable `## Issues` bullets, exactly one placeholder
 /// finding is persisted.
+#[serial_test::serial]
 #[tokio::test]
 async fn empty_issues_section_falls_back_to_placeholder_finding() {
     let pool = test_pool().await;
@@ -407,6 +412,7 @@ Adequate; no actionable issues this pass.
 /// The fixture uses a valid `## Issues` body padded past the cap so that ONLY
 /// the size guard (not the parser) is what rejects the read — proving the cap
 /// fires before `read_to_string` is ever called.
+#[serial_test::serial]
 #[tokio::test]
 async fn large_report_falls_back_to_placeholder() {
     let pool = test_pool().await;
@@ -469,6 +475,7 @@ async fn large_report_falls_back_to_placeholder() {
 /// The transaction itself is documented in code via a `tracing::debug!`
 /// marker emitted at the `BEGIN` boundary in `persist_parsed_findings`; this
 /// test exercises the behavior that marker promises.
+#[serial_test::serial]
 #[tokio::test]
 async fn parsed_findings_transaction_commits_and_is_idempotent_on_retry() {
     let pool = test_pool().await;
@@ -518,6 +525,7 @@ async fn parsed_findings_transaction_commits_and_is_idempotent_on_retry() {
 /// AC3 (hermetic / supervisor contract): when `workspace_dir` is `None`
 /// (the V1.47 hermetic DB-only mode), the producer always uses the
 /// placeholder synthesis — never tries to touch the filesystem.
+#[serial_test::serial]
 #[tokio::test]
 async fn workspace_none_uses_placeholder_path_without_filesystem() {
     let pool = test_pool().await;
@@ -543,6 +551,7 @@ async fn workspace_none_uses_placeholder_path_without_filesystem() {
 
 /// AC4 (non-review preset no-op): a `novel-writing` schedule must never
 /// enter the parsing path, even with a workspace_dir provided.
+#[serial_test::serial]
 #[tokio::test]
 async fn non_review_preset_is_noop_with_workspace_dir() {
     let pool = test_pool().await;
@@ -592,9 +601,27 @@ async fn non_review_preset_is_noop_with_workspace_dir() {
 /// Exercises the missing-report fallback with `chapter = Some(2)` and asserts
 /// the captured warn event carries `chapter` in its structured fields. The
 /// `set_default` guard scopes the capturing subscriber to this thread; the
-/// current-thread `#[tokio::test]` runtime resumes `.await` on the same
-/// thread, so the guard stays active across the await.
-#[tokio::test]
+/// `current_thread` tokio runtime resumes `.await` on the same thread, so
+/// the guard stays active across the await.
+///
+/// R-V149P1-02 (V1.50): under heavy parallel test execution this test
+/// failed ~15-20% of the time at `--test-threads=8` (QC3 measured 2/10 on
+/// origin/main @ be27111b). Root cause: tracing's thread-local
+/// `set_default` interacted with tokio's per-runtime blocking-thread pool
+/// (used by sqlx for `SQLite` I/O) such that the first tracing event after
+/// install was intermittently dropped — but ONLY when sibling tests in the
+/// same binary were running concurrently and competing for the same pool.
+/// With `--test-threads=1` the test passed 30/30; with default threading
+/// it failed ~3/30.
+///
+/// Fix: mark every test in `tests/review_report.rs` with
+/// `#[serial_test::serial]`. All serial tests share the same group lock,
+/// so the whole binary runs mutually exclusively — equivalent to
+/// `--test-threads=1` for this one binary (other test binaries still
+/// parallelise normally). Verified clean on 30× repeat at
+/// `--test-threads=8`.
+#[serial_test::serial]
+#[tokio::test(flavor = "current_thread")]
 async fn fallback_warn_includes_chapter_field() {
     let pool = test_pool().await;
     let work = novel_work("wrk_chapter_field", "chapter-field-novel", 2, 4);
@@ -608,7 +635,7 @@ async fn fallback_warn_includes_chapter_field() {
     let subscriber = Registry::default().with(capture.clone());
     let guard = tracing::subscriber::set_default(subscriber);
 
-    let _ = auto_chain::persist_review_findings_for_schedule(
+    let persisted_count = auto_chain::persist_review_findings_for_schedule(
         &pool,
         "sch_chapter_field",
         Some(&ws_root),
@@ -621,7 +648,8 @@ async fn fallback_warn_includes_chapter_field() {
     let events = capture.0.lock().unwrap().clone();
     assert!(
         !events.is_empty(),
-        "expected ≥1 tracing event from the fallback path; got none"
+        "expected ≥1 tracing event from the fallback path; \
+         (persisted_count = {persisted_count}); got none"
     );
 
     // Filter to WARN-level events (the fallback `warn!` calls). The success
