@@ -1,6 +1,14 @@
 -- V1.50 T-A P1 (S-001) — partial index on `works.schedule_json`.
 -- Spec: .mstar/knowledge/specs/novel-writing/cron-staggering.md §4.1.
 --
+-- NOTE: this migration was originally numbered `202606180002` (R-V150KBED-06),
+-- colliding with `202606180002_kb_extract_jobs_extend.sql` (V1.50 T-B P1).
+-- `sqlx::migrate!` requires unique versions and rejected the workspace DB
+-- init with `UNIQUE constraint failed: _sqlx_migrations.version`, breaking
+-- every `run_migrations`/`Schema::init` path. Renumbered to `202606180003`
+-- (content unchanged; `CREATE INDEX IF NOT EXISTS` is idempotent, and the
+-- cron_supervisor EXPLAIN test keys on the index name, not the version).
+--
 -- The daemon-side cron evaluator runs on a 1-min tick and scans every Work
 -- whose `schedule_json` is non-empty (the per-Work cron config blob added in
 -- 202606180001). Without an index this is a full-table scan on every tick,
