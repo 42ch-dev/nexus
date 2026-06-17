@@ -470,6 +470,21 @@ pub struct ListRow {
     pub schedule: WorkSchedule,
 }
 
+/// R-V150-WLA-05 (V1.50 P-last WL-A / cron-foundation qc1 S3): build the
+/// JSON object for one `list --json` row. Includes both `work_ref` (the
+/// human slug, `null` when unset) and `work_id` (the canonical `wrk_...`
+/// primary key) so machine consumers can always identify the row even
+/// when the Work has no `work_ref` set. Extracted from `handle_list` so
+/// the contract is unit-testable without a daemon connection.
+#[must_use]
+fn list_row_to_json(row: &ListRow) -> serde_json::Value {
+    serde_json::json!({
+        "work_ref": row.work_ref,
+        "work_id": row.work_id,
+        "schedule": row.schedule,
+    })
+}
+
 /// Label for a role cell: disabled → `disabled`; enabled → the cron expression.
 /// `resolve_schedule` already folds defaults in, so an unset Work shows the
 /// canonical default cron here (spec §3.3 last line).
@@ -760,15 +775,10 @@ async fn handle_list(
         .collect();
 
     if json {
-        let json_rows: Vec<serde_json::Value> = rows
-            .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "work_ref": r.work_ref,
-                    "schedule": r.schedule,
-                })
-            })
-            .collect();
+        // R-V150-WLA-05: `list_row_to_json` carries `work_id` alongside
+        // `work_ref` so machine consumers can always identify the row.
+        let json_rows: Vec<serde_json::Value> =
+            rows.iter().map(list_row_to_json).collect();
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({ "works": json_rows }))?
@@ -1014,6 +1024,45 @@ mod tests {
         }];
         let out = render_list(&rows);
         assert!(out.contains("disabled"));
+    }
+
+    /// R-V150-WLA-05: `list --json` row must carry both `work_ref` (the
+    /// human slug, `null` when unset) and `work_id` (the canonical
+    /// `wrk_...` primary key). Machine consumers should be able to
+    /// identify the row even when the Work has no `work_ref` set.
+    #[test]
+    fn list_row_to_json_includes_work_id_and_work_ref() {
+        // Case 1: Work with a human work_ref slug.
+        let row_with_ref = ListRow {
+            work_ref: Some("my-novel".to_string()),
+            work_id: "wrk_001".to_string(),
+            schedule: WorkSchedule::defaults(),
+        };
+        let json = list_row_to_json(&row_with_ref);
+        assert_eq!(json["work_ref"], "my-novel");
+        assert_eq!(json["work_id"], "wrk_001");
+        assert!(
+            json.get("schedule").is_some(),
+            "schedule object must be present"
+        );
+
+        // Case 2: Work with no work_ref (regression guard for the qc1 S3
+        // gap — `work_ref: null` must not leave the consumer without any
+        // identifier).
+        let row_no_ref = ListRow {
+            work_ref: None,
+            work_id: "wrk_999".to_string(),
+            schedule: WorkSchedule::defaults(),
+        };
+        let json = list_row_to_json(&row_no_ref);
+        assert!(
+            json["work_ref"].is_null(),
+            "work_ref must serialise as null when unset"
+        );
+        assert_eq!(
+            json["work_id"], "wrk_999",
+            "work_id must always be present so the row is identifiable"
+        );
     }
 
     #[test]
