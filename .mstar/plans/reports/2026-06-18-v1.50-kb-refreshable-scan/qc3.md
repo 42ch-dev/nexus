@@ -6,8 +6,8 @@ plan_id: "2026-06-18-v1.50-kb-refreshable-scan"
 working_branch: "feature/v1.50-kb-refreshable-scan"
 review_cwd: "/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-kb-refreshable-scan"
 review_range: "merge-base c2831fa25ae7732bac1fe1a11a318e5a7b1626b2..e24574ae5f5f6e8186ee87fa1bc3d3acdc5f885c"
-verdict: "Request Changes"
-generated_at: "2026-06-17T14:35:00Z"
+verdict: "Approve"
+generated_at: "2026-06-17T14:32:48Z"
 ---
 
 # Code Review Report
@@ -137,3 +137,115 @@ to ≥ Warning and blocks `Approve`. The fix is a 1–2 line change in the
 test (drop index first); targeted re-review of just W-QC3-01 is requested.
 W-QC3-02 (partial R-V150KBED-02 self-correction) is recommended for residual
 tracking but does not block this PR.
+
+---
+
+## Revalidation
+
+```yaml
+---
+report_kind: qc-revalidation
+reviewer: qc-specialist-3
+reviewer_index: 3
+plan_id: 2026-06-18-v1.50-kb-refreshable-scan
+working_branch: feature/v1.50-kb-refreshable-scan
+review_cwd: /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v150-kb-refreshable-scan
+review_range: e24574ae..7daf2fdf
+fix_wave_commits:
+  - 7daf2fdf (R-V150KBED-FIX-WQC301 drop partial index before DROP COLUMN)
+  - f1ffd8d3 (plan completion report)
+verdict: Approve
+generated_at: 2026-06-17T14:32:48Z
+---
+```
+
+### Reviewer Metadata (revalidation)
+- Reviewer: @qc-specialist-3
+- Runtime Agent ID: qc-specialist-3
+- Runtime Model: zhipuai-coding-plan/glm-5.2
+- Review Perspective: performance + reliability (revalidation of W-QC3-01 only)
+- Report Timestamp: 2026-06-17T14:32:48Z
+- Targeted re-review scope: `e24574ae..7daf2fdf` (fix-wave delta)
+  - 7daf2fdf — `test(nexus-local-db): R-V150KBED-FIX-WQC301 drop partial index before DROP COLUMN in schedule_json rollback test`
+  - f1ffd8d3 — `docs(plan): W-QC3-01 fix-wave addendum + residual closure (R-V150KBED-FIX-WQC301)`
+  - Note: the `..` range `e24574ae..7daf2fdf` also includes the three initial-wave
+    QC report commits (`56a80786` qc2, `af4c4497` qc1, `2c001f12` qc3) on the
+    way to `7daf2fdf`; the `git diff --stat` shows the only **non-report**
+    change is `crates/nexus-local-db/tests/works_schedule_migration.rs` (+7 lines).
+
+### Re-review verification
+
+**Per-finding disposition**
+
+- **W-QC3-01 (R-V150KBED-FIX-WQC301): Resolved.**
+  - Diff hunk (`2c001f12..7daf2fdf`, `crates/nexus-local-db/tests/works_schedule_migration.rs`):
+    the fix adds a `DROP INDEX IF EXISTS idx_works_schedule_json_nonempty` DDL
+    immediately before the simulated `ALTER TABLE works DROP COLUMN schedule_json`,
+    exactly as the original Warning recommended. Index name matches
+    `migrations/202606180003_works_schedule_json_partial_idx.sql:32` and the
+    inline doc-comment cross-references W-QC3-01. Surgical, 7 lines, no source
+    change.
+  - Targeted test: `cargo test -p nexus-local-db --test works_schedule_migration` →
+    **8 passed; 0 failed** (was 7/8 with `rollback_drops_schedule_json_column`
+    panicking in the initial wave). The previously failing assertion now passes.
+  - CI gate: closed.
+
+- **W-QC3-02 (workspace_id not refreshed on UPDATE): Unchanged, defer V1.51+.**
+  - `git diff e24574ae..7daf2fdf -- crates/nexus-local-db/src/kb_extract_job.rs crates/nexus42/src/commands/creator/kb/rescan.rs crates/nexus-kb/src/extract_sync.rs`
+    → empty. The fix-wave touched only the rollback test file; the DAO/CLI/extraction
+    surfaces flagged in W-QC3-02 are byte-identical to the initial wave. No regression
+    introduced.
+  - Per initial-wave decision this is "recommend-only"; tracked as
+    `R-V150KBED-FIX-WQC301` residual under `decision: defer`, `target: V1.51+`
+    (per `f1ffd8d3` plan addendum). No QC action this round.
+
+### Full re-run (regression + lint)
+
+- `cargo test -p nexus-local-db --test works_schedule_migration` → **8 passed; 0 failed**.
+- `cargo test --workspace` → **all suites pass; no `FAILED` lines, no compile errors**.
+  Scanned `test result: ok. … 0 failed` across every suite in the workspace
+  (no failures detected; 50+ result lines, all `ok`).
+- `cargo clippy --all -- -D warnings` → **clean** (no warnings, no errors).
+- `cargo +nightly fmt --all --check` → **clean** (no diff).
+
+### Performance / Reliability checks (revalidation)
+
+- The fix-wave is a test-only DDL change; no source-code hot path was touched.
+  The performance and reliability posture of the implementation (covered in the
+  initial-wave report, "Performance / Reliability Checks" section) is **unchanged**.
+- The DROP INDEX IF EXISTS + ALTER TABLE DROP COLUMN pair executes once per
+  `rollback_drops_schedule_json_column` test invocation; both operations are
+  sub-millisecond on a fresh in-memory SQLite DB. No measurable impact on
+  CI wall time.
+
+### Source Trace (revalidation)
+
+- Finding W-QC3-01 disposition:
+  - Source Type: test execution + git diff
+  - Source Reference: `git diff 2c001f12..7daf2fdf -- crates/nexus-local-db/tests/works_schedule_migration.rs`
+    (DROP INDEX IF EXISTS block, 7 added lines); `cargo test -p nexus-local-db --test works_schedule_migration`
+    → 8 passed
+  - Confidence: High
+- Finding W-QC3-02 no-regression check:
+  - Source Type: git diff (empty)
+  - Source Reference: `git diff e24574ae..7daf2fdf -- crates/nexus-local-db/src/kb_extract_job.rs crates/nexus42/src/commands/creator/kb/rescan.rs crates/nexus-kb/src/extract_sync.rs`
+    → empty
+  - Confidence: High
+
+### Summary (revalidation)
+
+| Severity | Open | Resolved | Notes |
+|----------|------|----------|-------|
+| 🔴 Critical | 0 | 0 | — |
+| 🟡 Warning | 0 | 1 | W-QC3-01 resolved by 7daf2fdf |
+| 🟡 Warning (residual) | 1 | — | W-QC3-02 deferred to V1.51+ per `R-V150KBED-FIX-WQC301` residual entry |
+| 🟢 Suggestion | 5 | 0 | Open as before; not blocking |
+
+**Verdict**: Approve
+
+W-QC3-01 (the only blocking Warning from the initial wave) is resolved:
+the fix is surgical, exactly matches the recommended approach, and the
+targeted test now passes 8/8; full workspace regression is green; clippy
+and nightly fmt are clean. W-QC3-02 is unchanged and tracked as a deferred
+residual for V1.51+, not blocking this PR. The branch is ready for QA
+verification and the integration-branch merge.
