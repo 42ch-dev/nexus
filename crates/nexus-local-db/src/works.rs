@@ -1602,15 +1602,14 @@ pub async fn set_auto_chronology(
     enabled: bool,
     now: &str,
 ) -> Result<(), LocalDbError> {
-    // SAFETY: UPDATE against works table — runtime query (column added in the
-    // same migration cycle; sqlx prepare cache hasn't run for this statement).
-    let result =
-        sqlx::query("UPDATE works SET auto_chronology = ?, updated_at = ? WHERE work_id = ?")
-            .bind(enabled)
-            .bind(now)
-            .bind(work_id)
-            .execute(pool)
-            .await?;
+    let result = sqlx::query!(
+        "UPDATE works SET auto_chronology = ?, updated_at = ? WHERE work_id = ?",
+        enabled,
+        now,
+        work_id,
+    )
+    .execute(pool)
+    .await?;
 
     if result.rows_affected() == 0 {
         return Err(LocalDbError::MissingVersionKey {
@@ -1629,14 +1628,13 @@ pub async fn set_auto_chronology(
 ///
 /// Returns `LocalDbError::Sqlx` if the SELECT fails.
 pub async fn get_auto_chronology(pool: &SqlitePool, work_id: &str) -> Result<bool, LocalDbError> {
-    // SAFETY: SELECT against works table — runtime query (column added in the
-    // same migration cycle; sqlx prepare cache hasn't run for this statement).
-    let row: Option<(bool,)> =
-        sqlx::query_as("SELECT auto_chronology FROM works WHERE work_id = ?")
-            .bind(work_id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(row.is_some_and(|(v,)| v))
+    let row = sqlx::query_scalar!(
+        r#"SELECT auto_chronology as "auto_chronology!" FROM works WHERE work_id = ?"#,
+        work_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.unwrap_or(false))
 }
 
 /// Row for the daemon auto-chronology scan
@@ -1685,15 +1683,19 @@ pub struct WorkAutoChronologyRow {
 pub async fn list_works_with_auto_chronology(
     pool: &SqlitePool,
 ) -> Result<Vec<WorkAutoChronologyRow>, LocalDbError> {
-    // SAFETY: SELECT against works table — runtime query (auto_chronology column
-    // added in the same migration cycle). The WHERE predicate matches opted-in
-    // Works only.
-    let rows: Vec<WorkAutoChronologyRow> = sqlx::query_as(
-        "SELECT work_id, creator_id, work_ref, intake_status, \
-                runtime_lock_holder, completion_locked_at, title, \
-                total_planned_chapters \
-         FROM works \
-         WHERE auto_chronology = 1",
+    let rows = sqlx::query_as!(
+        WorkAutoChronologyRow,
+        r#"SELECT
+            work_id as "work_id!",
+            creator_id as "creator_id!",
+            work_ref,
+            intake_status as "intake_status!",
+            runtime_lock_holder,
+            completion_locked_at,
+            title as "title!",
+            total_planned_chapters as "total_planned_chapters: i32"
+        FROM works
+        WHERE auto_chronology = 1"#,
     )
     .fetch_all(pool)
     .await?;

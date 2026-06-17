@@ -942,12 +942,13 @@ pub async fn next_chapter_volume_aware(
 ///
 /// Returns `LocalDbError` if the database query fails.
 pub async fn current_volume(pool: &SqlitePool, work_id: &str) -> Result<Option<i32>, LocalDbError> {
-    // SAFETY: SELECT against work_chapters — runtime query.
-    let row = sqlx::query("SELECT MAX(volume) AS volume FROM work_chapters WHERE work_id = ?")
-        .bind(work_id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(row.and_then(|r| r.get::<Option<i32>, _>("volume")))
+    let row = sqlx::query_scalar!(
+        r#"SELECT MAX(volume) as "volume: i32" FROM work_chapters WHERE work_id = ?"#,
+        work_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.flatten())
 }
 
 /// Check whether every chapter in a given volume is `finalized` (V1.50 §3
@@ -965,20 +966,19 @@ pub async fn is_volume_fully_finalized(
     work_id: &str,
     volume: i32,
 ) -> Result<bool, LocalDbError> {
-    // SAFETY: SELECT COUNT against work_chapters — runtime query.
-    let row = sqlx::query(
-        "SELECT \
-              COUNT(*) AS total_rows, \
-              SUM(CASE WHEN status = 'finalized' THEN 1 ELSE 0 END) AS finalized_rows \
-          FROM work_chapters WHERE work_id = ? AND volume = ?",
+    let row = sqlx::query!(
+        r#"SELECT
+            COUNT(*) as "total_rows!",
+            COALESCE(SUM(CASE WHEN status = 'finalized' THEN 1 ELSE 0 END), 0) as "finalized_rows!"
+        FROM work_chapters WHERE work_id = ? AND volume = ?"#,
+        work_id,
+        volume,
     )
-    .bind(work_id)
-    .bind(volume)
     .fetch_one(pool)
     .await?;
 
-    let total: i64 = row.get("total_rows");
-    let finalized: i64 = row.get("finalized_rows");
+    let total: i64 = row.total_rows;
+    let finalized: i64 = row.finalized_rows;
     Ok(total > 0 && total == finalized)
 }
 
@@ -1010,21 +1010,22 @@ pub async fn seed_volume_chapters_tx(
         let slug = format!("v{volume:02}-{ch_nn}");
         let body_path = format!("Works/{work_ref}/Stories/v{volume:02}-{ch_nn}-{slug}.md");
 
-        // SAFETY: INSERT OR IGNORE — idempotent seeding on PK conflict.
-        sqlx::query(
+        // INSERT OR IGNORE — idempotent seeding on PK conflict (work_id, chapter).
+        // Note: (work_id, chapter) is the PK; volume+chapter uniquely place the row.
+        sqlx::query!(
             "INSERT OR IGNORE INTO work_chapters
              (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
               status, outline_path, body_path, created_at, updated_at)
              VALUES (?, ?, ?, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+            work_id,
+            ch,
+            volume,
+            slug,
+            outline_path,
+            body_path,
+            now,
+            now,
         )
-        .bind(work_id)
-        .bind(ch)
-        .bind(volume)
-        .bind(&slug)
-        .bind(&outline_path)
-        .bind(&body_path)
-        .bind(now)
-        .bind(now)
         .execute(&mut **tx)
         .await?;
     }
