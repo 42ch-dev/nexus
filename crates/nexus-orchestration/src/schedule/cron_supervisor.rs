@@ -255,7 +255,12 @@ async fn try_fire_role(
     match has_active_role_schedule(pool, &row.work_id, preset_id).await {
         Ok(true) => {
             summary.skipped_idempotent += 1;
-            info!(
+            // R-V150P1CRONBW-04 (qc3 W-002): the per-skip line is redundant
+            // with the `sweep complete` summary above and grows linearly with
+            // active Works (e.g. ~12k info lines/hour at 100 Works on a 4×/day
+            // brainstorm+write cadence). Drop to debug so it stays available
+            // for diagnosis without flooding default-level logs.
+            debug!(
                 work_id = %row.work_id,
                 role = role_name,
                 preset_id,
