@@ -25,7 +25,10 @@
 //! Only `brainstorm` + `write` roles are evaluated. `review` cron firing is
 //! T-A P2 (non-goal per plan §3).
 
+use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
@@ -227,7 +230,7 @@ async fn try_fire_role(
         );
         return;
     }
-    if !cron_fires_at_minute(&role.cron, tz, now) {
+    if !cron_fires_at_minute_for_work(&row.work_id, role_name, &role.cron, tz, now) {
         summary.skipped_no_match += 1;
         return;
     }
@@ -314,7 +317,64 @@ fn gate_reason(row: &nexus_local_db::works::WorkCronRow) -> Option<&'static str>
     None
 }
 
-/// Does `cron_expr` fire at the minute containing `now` (in the author's TZ)?
+// ── Per-Work cron `Schedule` memoisation (R-V150P1CRONBW-03 / qc3 W-001) ────
+//
+// `cron::Schedule::from_str` is the hot-path cost flagged by qc3: parsing a
+// 5/6-field expression runs Cuckoo-filter + bitmap construction (~10–50 µs).
+// For 1 000 Works × 3 roles per minute the per-tick re-parse dominated the
+// scan. The cache below keys on `(work_id, role)` and stores the raw cron
+// string alongside the parsed `Schedule`, so:
+//   - a repeat tick with the same raw string is an O(1) lookup (no re-parse);
+//   - a content change (user re-ran `creator works cron set`) is detected by
+//     raw-string drift on the next lookup → re-parse + update (content-based
+//     invalidation);
+//   - explicit [`invalidate_cron_schedule_cache`] clears stale entries after
+//     a CLI `schedule_json` write (e.g. when a role is removed entirely).
+
+/// In-process memoisation cache for parsed cron `Schedule`s. See the section
+/// doc above for the invalidation contract. Process-global because the daemon
+/// calls `evaluate_cron_fires` once per tick with no per-daemon state threaded
+/// in; a `OnceLock<Mutex<..>>` is the idiomatic shape for such a memoisation.
+type CronScheduleCache = HashMap<(String, String), (String, cron::Schedule)>;
+
+static CRON_SCHEDULE_CACHE: OnceLock<Mutex<CronScheduleCache>> = OnceLock::new();
+
+/// Counts `cron::Schedule::from_str` invocations (cache misses). Used by the
+/// `cron_fires_at_minute_uses_memoised_schedule` regression test to assert the
+/// cache prevents re-parses. Relaxed atomic → negligible cost in production
+/// (one increment per cache miss, which is rare after warm-up).
+static CRON_PARSE_COUNT: AtomicU64 = AtomicU64::new(0);
+
+fn cron_schedule_cache() -> &'static Mutex<CronScheduleCache> {
+    CRON_SCHEDULE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Drop every cached `(work_id, role)` entry.
+///
+/// Called by the CLI after a successful `set_schedule_json_tx` write so stale
+/// entries do not linger after a role config is removed or rewritten. The
+/// cache also self-heals on raw-string drift, so this is a memory-hygiene
+/// invalidation, not a correctness requirement.
+///
+/// # Panics
+///
+/// Propagates a poisoned mutex (same discipline as `std::sync::Mutex`).
+pub fn invalidate_cron_schedule_cache() {
+    if let Some(mutex) = CRON_SCHEDULE_CACHE.get() {
+        mutex
+            .lock()
+            .expect("cron schedule cache mutex poisoned")
+            .clear();
+    }
+}
+
+/// Does the cron fire at the minute containing `now` (in the author's TZ)?
+///
+/// Pure building block: parses `cron_expr` on every call. The daemon hot path
+/// uses the cached [`cron_fires_at_minute_for_work`] wrapper instead (qc3
+/// W-001 / R-V150P1CRONBW-03); this pure form is retained as a test-only
+/// fixture that exercises [`schedule_fires_at_minute`] semantics without
+/// going through the in-process cache.
 ///
 /// The cron is evaluated in `tz` (spec §2.1: "Daemon converts to UTC for cron
 /// firing" — the expression is authored in local time). The match is
@@ -325,11 +385,19 @@ fn gate_reason(row: &nexus_local_db::works::WorkCronRow) -> Option<&'static str>
 /// Returns `false` on any parse failure (the validator at config time should
 /// have caught malformed expressions; a corrupt stored blob is skipped at the
 /// Work level).
+#[cfg(test)]
 fn cron_fires_at_minute(cron_expr: &str, tz: Tz, now: DateTime<Utc>) -> bool {
     let normalized = normalize_cron_fields(cron_expr);
     let Ok(schedule) = cron::Schedule::from_str(&normalized) else {
         return false;
     };
+    schedule_fires_at_minute(&schedule, tz, now)
+}
+
+/// Minute-match check over an already-parsed `Schedule` (no allocation, no
+/// parse). Extracted from `cron_fires_at_minute` so the cached path can reuse
+/// the identical semantics without re-parsing.
+fn schedule_fires_at_minute(schedule: &cron::Schedule, tz: Tz, now: DateTime<Utc>) -> bool {
     // Truncate `now` to the start of the minute in the author's TZ.
     let now_local = match tz.from_utc_datetime(&now.naive_utc()) {
         dt if dt.year() > 0 => dt,
@@ -347,6 +415,56 @@ fn cron_fires_at_minute(cron_expr: &str, tz: Tz, now: DateTime<Utc>) -> bool {
     // would be > minute_start.
     let just_before = minute_start - chrono::Duration::minutes(1);
     schedule.after(&just_before).next() == Some(minute_start)
+}
+
+/// Cached cron-fire check for a `(work_id, role)` pair (R-V150P1CRONBW-03).
+///
+/// Parses `cron_expr` once per `(work_id, role)` and reuses the `Schedule`
+/// across ticks until the raw expression changes (content-drift re-parse) or
+/// [`invalidate_cron_schedule_cache`] clears the entry. The actual minute
+/// match is delegated to [`schedule_fires_at_minute`]. Returns `false` on a
+/// parse failure (and stores nothing).
+fn cron_fires_at_minute_for_work(
+    work_id: &str,
+    role: &str,
+    cron_expr: &str,
+    tz: Tz,
+    now: DateTime<Utc>,
+) -> bool {
+    let normalized = normalize_cron_fields(cron_expr);
+    let key = (work_id.to_string(), role.to_string());
+
+    // Resolve the parsed Schedule under the lock and clone it out so the guard
+    // is released before the (µs-scale) minute match — keeps the critical
+    // section tight and avoids borrowing across the matcher. The clone is far
+    // cheaper than the parse it replaces (qc3 W-001 / R-V150P1CRONBW-03):
+    // cache hits stay O(1) per Work per tick.
+    let schedule = {
+        let mut cache = cron_schedule_cache()
+            .lock()
+            .expect("cron schedule cache mutex poisoned");
+        // (Re)parse only on a miss or when the raw cron string has drifted
+        // since the last observation (content-based invalidation).
+        let needs_parse = cache
+            .get(&key)
+            .is_none_or(|(stored_raw, _)| stored_raw != cron_expr);
+        if needs_parse {
+            CRON_PARSE_COUNT.fetch_add(1, Ordering::Relaxed);
+            if let Ok(parsed) = cron::Schedule::from_str(&normalized) {
+                cache.insert(key.clone(), (cron_expr.to_string(), parsed));
+            } else {
+                // Drop any stale entry so a later valid rewrite re-parses cleanly.
+                cache.remove(&key);
+                return false;
+            }
+        }
+        cache
+            .get(&key)
+            .expect("entry present immediately after insert/get")
+            .1
+            .clone()
+    };
+    schedule_fires_at_minute(&schedule, tz, now)
 }
 
 /// Normalize a cron expression to the `cron` crate's ≥6-field format.
@@ -501,6 +619,105 @@ mod tests {
             utc(2026, 6, 19, 3, 0)
         ));
         assert!(!cron_fires_at_minute("", Tz::UTC, utc(2026, 6, 19, 3, 0)));
+    }
+
+    // ── cron_fires_at_minute_for_work (R-V150P1CRONBW-03 memoisation) ───────
+
+    /// R-V150P1CRONBW-03 (qc3 W-001): the cached path must parse the cron
+    /// expression exactly once per `(work_id, role, cron_string)` triple; a
+    /// content change on the same key, or a brand-new key, must trigger a
+    /// fresh parse. Asserts via the `CRON_PARSE_COUNT` instrumented counter.
+    #[test]
+    fn cron_fires_at_minute_uses_memoised_schedule() {
+        // Start from a known-empty cache + zeroed counter so the assertions
+        // are independent of test-execution order within the lib binary.
+        invalidate_cron_schedule_cache();
+        CRON_PARSE_COUNT.store(0, Ordering::Relaxed);
+
+        let now = utc(2026, 6, 19, 9, 0);
+
+        // 100 calls for the same (work, role, cron) → exactly one parse.
+        for _ in 0..100 {
+            assert!(cron_fires_at_minute_for_work(
+                "wrk_memo_a",
+                "brainstorm",
+                "0 9 * * *",
+                Tz::UTC,
+                now,
+            ));
+        }
+        assert_eq!(
+            CRON_PARSE_COUNT.load(Ordering::Relaxed),
+            1,
+            "100 calls for the same (work, role, cron) must parse exactly once"
+        );
+
+        // Repeat calls still hit the cache (counter unchanged).
+        for _ in 0..10 {
+            assert!(cron_fires_at_minute_for_work(
+                "wrk_memo_a",
+                "brainstorm",
+                "0 9 * * *",
+                Tz::UTC,
+                now,
+            ));
+        }
+        assert_eq!(CRON_PARSE_COUNT.load(Ordering::Relaxed), 1);
+
+        // Content drift on the same (work, role) → re-parse + cache update.
+        assert!(cron_fires_at_minute_for_work(
+            "wrk_memo_a",
+            "brainstorm",
+            "0 10 * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 10, 0),
+        ));
+        assert_eq!(CRON_PARSE_COUNT.load(Ordering::Relaxed), 2);
+
+        // Different (work, role) → separate parse.
+        assert!(cron_fires_at_minute_for_work(
+            "wrk_memo_b",
+            "write",
+            "0 9 * * *",
+            Tz::UTC,
+            now,
+        ));
+        assert_eq!(CRON_PARSE_COUNT.load(Ordering::Relaxed), 3);
+
+        // Cached matcher still respects the minute granularity: a non-match
+        // minute for the SAME (work, role, cron) must not re-parse. The entry
+        // for ("wrk_memo_a", "brainstorm") currently caches "0 10 * * *"
+        // (post-drift above), so 09:00 UTC is a non-match (hour 9 ≠ 10).
+        assert!(!cron_fires_at_minute_for_work(
+            "wrk_memo_a",
+            "brainstorm",
+            "0 10 * * *",
+            Tz::UTC,
+            utc(2026, 6, 19, 9, 0),
+        ));
+        assert_eq!(
+            CRON_PARSE_COUNT.load(Ordering::Relaxed),
+            3,
+            "non-match must not re-parse the cached entry"
+        );
+
+        // Explicit invalidation clears the cache → next call re-parses.
+        invalidate_cron_schedule_cache();
+        assert!(cron_fires_at_minute_for_work(
+            "wrk_memo_a",
+            "brainstorm",
+            "0 9 * * *",
+            Tz::UTC,
+            now,
+        ));
+        assert_eq!(
+            CRON_PARSE_COUNT.load(Ordering::Relaxed),
+            4,
+            "invalidate_cron_schedule_cache must force a re-parse on next call"
+        );
+
+        // Cleanup so no entry leaks into sibling tests in the same process.
+        invalidate_cron_schedule_cache();
     }
 
     #[test]

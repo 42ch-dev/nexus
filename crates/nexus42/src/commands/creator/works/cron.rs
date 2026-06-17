@@ -677,6 +677,15 @@ async fn handle_set(
         .await
         .map_err(|e| CliError::Other(format!("schedule_json transaction commit failed: {e}")))?;
 
+    // R-V150P1CRONBW-03 (qc3 W-001): the daemon-side cron evaluator memoises
+    // parsed `cron::Schedule`s per `(work_id, role)` keyed on the raw cron
+    // string. The cache self-heals on content drift, but a successful
+    // `schedule_json` write is the authoritative moment to drop every stale
+    // entry (e.g. a role config removed entirely) so no cached parse lingers
+    // across the user-visible config change. The daemon is read-only on
+    // `schedule_json`, so this CLI write site is the only invalidation hook.
+    nexus_orchestration::schedule::cron_supervisor::invalidate_cron_schedule_cache();
+
     if json {
         println!("{}", serde_json::to_string_pretty(&schedule)?);
     } else {
