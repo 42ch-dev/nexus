@@ -677,7 +677,7 @@
         "owner": "@fullstack-dev or @product-manager",
         "target": "V1.50 T-A P2",
         "target_date": "V1.50 T-A P2",
-        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
         "note": "Evaluator contract is complete and tested (18 cron_supervisor tests). novel-brainstorm works end-to-end. novel-write schedule persists + admits normally but the executor body is missing — author the embedded-presets/novel-writing/<write-stage>.yaml in T-A P2. This is a preset-authoring workstream, not an evaluator defect."
       },
       {
@@ -690,8 +690,47 @@
         "owner": "@qa-engineer",
         "target": "V1.50 PR (CI)",
         "target_date": "V1.50 PR (CI)",
-        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
         "note": "Touched crates (nexus-orchestration, nexus-local-db, nexus42, nexus-daemon-runtime) verified clean locally; full-workspace clippy is the authoritative CI gate per .mstar/AGENTS.md `target/` hygiene rule. Accept (CI verifies)."
+      },
+      {
+        "id": "R-V150P1CRONBW-03",
+        "title": "cron_fires_at_minute re-parses the cron expression per (Work, role) per tick (perf hot path)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-001",
+        "scope": "crates/nexus-orchestration/src/schedule/cron_supervisor.rs:330 (cron::Schedule::from_str re-invoked per (Work, role) per tick)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 fix-wave",
+        "target_date": "V1.50 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-001",
+        "note": "At 1000 Works × 3 roles/min this is ~30ms/tick of avoidable CPU. Suggested fix: parse once on set_schedule_json write (store normalized form) OR memoise per-Work using a small in-process HashMap<(work_id, role), Schedule> cache. Acceptable for V1.50 scale (60s tick budget absorbs); fix in this fix-wave for low-risk surgical change."
+      },
+      {
+        "id": "R-V150P1CRONBW-04",
+        "title": "idempotency-skip log line at info-level → too noisy at scale (tracing volume)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus-orchestration/src/schedule/cron_supervisor.rs:255 (info! on prior-schedule-still-active path)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 fix-wave",
+        "target_date": "V1.50 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-002",
+        "note": "100 Works on * * * * * = 12k info lines/hour. One-line fix: downgrade to debug!. Aggregated sweep summary line at line 146 already covers observability."
+      },
+      {
+        "id": "R-V150P1CRONBW-05",
+        "title": "novel-brainstorm / novel-write fall through to _ => 1 in preset_version_for_id; no test guard (preset-version drift surface)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-003",
+        "scope": "crates/nexus-orchestration/src/auto_chain.rs:1451-1468 (preset_version_for_id fallback); :2127-2174 (sync test array omits new cron preset ids)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 fix-wave",
+        "target_date": "V1.50 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-brainstorm-write/qc3.md §W-003",
+        "note": "When T-A P2 authors novel-write (R-V150P1CRONBW-01) and bumps version, cron-fired schedules will be silently stamped preset_version=1 and treated as stale. Fix: add match arms for novel-brainstorm + novel-write in preset_version_for_id; extend preset_version_mapping_matches_yaml sync test array. Failure mode is silent but cheap to fix now."
       }
     ],
     "2026-06-18-v1.50-kb-editor-cli": [
@@ -748,6 +787,45 @@
         "target_date": "V1.50 T-B P2",
         "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
         "note": "T-B P2 refreshable scan will use the freshest workspace_id from the chapter frontmatter; resolve_workspace_id staleness self-corrects in T-B P2."
+      },
+      {
+        "id": "R-V150KBED-03",
+        "title": "kb_adopt not wrapped in a single SQLite transaction (data integrity gap; recoverable orphan)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-001 + qc2 (security/correctness) Warning (cross-reviewer corroborated)",
+        "scope": "crates/nexus42/src/commands/creator/world/kb.rs:472-488 (kb_adopt: insert_key_block + mark_confirmed as two non-atomic operations)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P1 fix-wave",
+        "target_date": "V1.50 T-B P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc3.md §W-001 + qc2.md",
+        "note": "Failure modes: (1) insert succeeds, mark_confirmed returns Err → orphan KeyBlock + still-pending promotion row; (2) insert succeeds, mark_confirmed returns Ok(false) → misleading error message + orphan. Fix: wrap both calls in pool.begin() transaction; if either fails, ROLLBACK. The current hermetic test double_adopt_is_rejected does NOT cover the race between insert_key_block and mark_confirmed — add a regression test that mocks mark_confirmed failure to assert the orphan is not created."
+      },
+      {
+        "id": "R-V150KBED-04",
+        "title": "idx_kb_extract_jobs_promotion_status_work covers (status, work_id) but list_pending_for_world query filters on (status, world_id) — index unused for documented purpose",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus-local-db/migrations/202606180002_kb_extract_jobs_extend.sql:45-46 (index) vs crates/nexus-local-db/src/kb_extract_job.rs:620-640 (list_pending_for_world query)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P1 fix-wave",
+        "target_date": "V1.50 T-B P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc3.md §W-002",
+        "note": "Index does not cover the dominant list path (which filters on world_id). For V1.50 scale (10-100 pending rows per world) this is sub-millisecond and not a hot path, but the index is functionally unused. Fix: add idx_kb_extract_jobs_promotion_status_world (promotion_status, world_id, created_at); remove or rename the unused index. Migration comment also needs correction."
+      },
+      {
+        "id": "R-V150KBED-05",
+        "title": "reject audit log path uses internal work_id under Works/<work_id>/... instead of documented work_ref (path convention drift)",
+        "severity": "low",
+        "source": "qc2 (security/correctness) Warning",
+        "scope": "crates/nexus42/src/commands/creator/world/kb.rs (reject path; reject log file write)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-B P1 fix-wave",
+        "target_date": "V1.50 T-B P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-auto-promotion/qc2.md",
+        "note": "Spec §5.5.4 mandates retention in Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md. Current code resolves work_id (numeric internal PK) and writes to Works/<work_id>/...; should resolve work_ref (user-facing identifier) and write to Works/<work_ref>/Logs/kb/rejected/. Fix: use work_ref not work_id for the filesystem path; validate work_ref exists before write."
       }
     ]
   },
