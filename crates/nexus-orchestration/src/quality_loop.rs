@@ -485,6 +485,15 @@ async fn persist_candidates(
 ///
 /// Used to filter heuristic candidates that already exist as `KeyBlock`s
 /// (avoids offering the author a duplicate they will reject).
+///
+/// R-V150-WLA-10 (V1.50 P-last WL-A / kb-auto-promotion qc3 S-001): errors
+/// ARE propagated (the `?` below), but the caller's hook
+/// (`extract_kb_candidates_for_review` → supervisor terminal) treats
+/// extraction as best-effort and does **not** fail the terminal transition
+/// on a returned `Err`. A flaky `kb_key_blocks` read therefore silently
+/// produces zero candidates — the user sees no candidates and no error
+/// surfaced at info! level. Log at `warn!` here before propagating so the
+/// failure mode is visible to operators running with `RUST_LOG=warn`.
 async fn existing_canonical_names(
     pool: &SqlitePool,
     world_id: &str,
@@ -497,8 +506,19 @@ async fn existing_canonical_names(
     .bind(world_id)
     .fetch_all(pool)
     .await;
-    let rows = rows.map_err(nexus_local_db::LocalDbError::from)?;
-    Ok(rows.into_iter().map(|(n,)| n).collect())
+    match rows {
+        Ok(rows) => Ok(rows.into_iter().map(|(n,)| n).collect()),
+        Err(e) => {
+            tracing::warn!(
+                world_id,
+                error = %e,
+                "kb-auto-promotion: existing_canonical_names read failed; \
+                 review-time extraction will produce zero candidates for this pass \
+                 (best-effort — terminal transition still completes)"
+            );
+            Err(nexus_local_db::LocalDbError::from(e).into())
+        }
+    }
 }
 
 /// Best-effort `workspace_id` resolution for the `kb_extract_jobs` row.
