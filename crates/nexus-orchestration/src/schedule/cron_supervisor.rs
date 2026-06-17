@@ -8,7 +8,7 @@
 //! On each daemon tick (1-min interval), the runtime calls
 //! [`evaluate_cron_fires`] with the current UTC time. The evaluator reads every
 //! Work with a non-empty `works.schedule_json`, and for each enabled role
-//! (`brainstorm` / `write` in T-A P1) checks whether the per-Work cron fires
+//! (`brainstorm` / `write` / `review`) checks whether the per-Work cron fires
 //! at the current minute (in the author's configured TZ). Fires that pass the
 //! per-Work gating (§4.3) and the idempotency guard (§4.2) enqueue a pending
 //! [`Schedule`](nexus_contracts::local::schedule::Schedule) via
@@ -20,10 +20,13 @@
 //! `driver_schedule_id` (mirrors `enqueue_review_master_schedule`), so a cron
 //! fire never disrupts an in-progress FL-E chain.
 //!
-//! ## Scope (T-A P1)
+//! ## Scope
 //!
-//! Only `brainstorm` + `write` roles are evaluated. `review` cron firing is
-//! T-A P2 (non-goal per plan §3).
+//! All three roles are evaluated: `brainstorm`, `write`, and `review`. The
+//! `review` role (V1.50 T-A P2) enqueues a `novel-review-master` schedule;
+//! the existing supervisor terminal pipeline then fires the T-B P1
+//! review-time KB-extraction hook (`quality_loop::extract_kb_candidates_for_review`)
+//! on completion.
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -36,11 +39,14 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tracing::{debug, info, warn};
 
-use crate::preset_ids::{NOVEL_BRAINSTORM_PRESET_ID, NOVEL_WRITE_PRESET_ID};
+use crate::preset_ids::{
+    NOVEL_BRAINSTORM_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID,
+};
 
-/// Canonical role names (spec §2.1) in scope for T-A P1.
+/// Canonical role names (spec §2.1).
 const ROLE_BRAINSTORM: &str = "brainstorm";
 const ROLE_WRITE: &str = "write";
+const ROLE_REVIEW: &str = "review";
 
 /// Active schedule statuses that block a re-fire (spec §4.2 idempotency).
 const ACTIVE_STATUS_LIST: &str = "'pending', 'running', 'paused'";
@@ -93,7 +99,8 @@ struct CronRoles {
     brainstorm: Option<CronRole>,
     #[serde(default)]
     write: Option<CronRole>,
-    // `review` is intentionally absent — T-A P2 (plan §3 non-goal).
+    #[serde(default)]
+    review: Option<CronRole>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -110,11 +117,13 @@ const fn default_enabled() -> bool {
 
 /// Map a role name to its trigger preset id (spec §2.1 table).
 ///
-/// Returns `None` for roles out of scope for T-A P1 (e.g. `review`).
+/// Returns `None` for unknown role names (defensive — the evaluator only
+/// iterates the three canonical roles above).
 fn role_preset(role: &str) -> Option<&'static str> {
     match role {
         ROLE_BRAINSTORM => Some(NOVEL_BRAINSTORM_PRESET_ID),
         ROLE_WRITE => Some(NOVEL_WRITE_PRESET_ID),
+        ROLE_REVIEW => Some(NOVEL_REVIEW_MASTER_PRESET_ID),
         _ => None,
     }
 }
@@ -194,6 +203,7 @@ async fn evaluate_work(
     for (role_name, role_opt) in [
         (ROLE_BRAINSTORM, config.roles.brainstorm.as_ref()),
         (ROLE_WRITE, config.roles.write.as_ref()),
+        (ROLE_REVIEW, config.roles.review.as_ref()),
     ] {
         try_fire_role(pool, row, role_name, role_opt, tz, now, gate, summary).await;
     }
@@ -783,10 +793,11 @@ mod tests {
     // ── role_preset ─────────────────────────────────────────────────────────
 
     #[test]
-    fn role_preset_maps_brainstorm_and_write() {
+    fn role_preset_maps_all_three_roles() {
         assert_eq!(role_preset("brainstorm"), Some(NOVEL_BRAINSTORM_PRESET_ID));
         assert_eq!(role_preset("write"), Some(NOVEL_WRITE_PRESET_ID));
-        // review is out of scope for T-A P1.
-        assert_eq!(role_preset("review"), None);
+        assert_eq!(role_preset("review"), Some(NOVEL_REVIEW_MASTER_PRESET_ID));
+        // Unknown role names are a defensive `None`.
+        assert_eq!(role_preset("unknown"), None);
     }
 }

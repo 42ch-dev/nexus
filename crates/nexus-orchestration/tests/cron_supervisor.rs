@@ -231,7 +231,11 @@ async fn cron_skips_disabled_role() {
         summary.fired, 0,
         "disabled roles must not fire: {summary:?}"
     );
-    assert_eq!(summary.skipped_no_match, 2);
+    // Three roles evaluated (V1.50 T-A P2 adds `review`): brainstorm + write
+    // are disabled above, and `review` is absent from this two-role blob so it
+    // deserialises to `None`. All three are clean no-match skips — the test's
+    // intent ("disabled roles don't fire") still holds via `fired == 0`.
+    assert_eq!(summary.skipped_no_match, 3);
 }
 
 // ── AC1 + AC4: per-Work gating (3 negative cases) ──────────────────────────
@@ -641,5 +645,227 @@ async fn cron_fire_then_tick_admits_schedule() {
     assert_eq!(
         status, "running",
         "cron-fired schedule should be admitted to running by the supervisor tick"
+    );
+}
+
+// ── Review role (V1.50 T-A P2) ──────────────────────────────────────────────
+//
+// Spec: `cron-staggering.md` §2.1 / §4.1 / §4.3. The `review` role enqueues a
+// `novel-review-master` schedule (spec §2.1 table). These four tests extend
+// the T-A P1 suite with review-specific fire / gating / idempotency / graceful
+// skip coverage. The review cron reuses the *same* uniform `enqueue_cron_schedule`
+// path as brainstorm/write, so the enqueued schedule carries a `CRON` prefix
+// and a `cron:review:<work>` label — keeping cron-fired reviews distinguishable
+// from the V1.39 stale-findings `auto-review-master` (`RVM`) path.
+
+/// Build a per-Work schedule blob that includes the `review` role (spec §2.1).
+/// Mirrors [`schedule_blob`] but adds the third role so the 18 existing T-A P1
+/// tests keep their two-role helper unchanged.
+fn schedule_blob_review(
+    brainstorm_cron: &str,
+    write_cron: &str,
+    review_cron: &str,
+    brainstorm_on: bool,
+    write_on: bool,
+    review_on: bool,
+) -> String {
+    serde_json::json!({
+        "tz": "UTC",
+        "roles": {
+            "brainstorm": {"cron": brainstorm_cron, "enabled": brainstorm_on},
+            "write": {"cron": write_cron, "enabled": write_on},
+            "review": {"cron": review_cron, "enabled": review_on}
+        }
+    })
+    .to_string()
+}
+
+/// AC1 (T-A P2): the `review` role fires on its spec default `0,30 * * * *`
+/// (matches `:00` and `:30`), enqueues a `novel-review-master` schedule, and
+/// carries the cron-origin label/prefix so it stays distinguishable from the
+/// V1.39 stale-findings `auto-review-master` path. A non-matching minute (`:15`)
+/// does not fire.
+#[tokio::test]
+async fn cron_fires_review_role_enqueues_review_master() {
+    let pool = test_pool().await;
+    let work = test_work("wrk_fire_review");
+    // Only review enabled; brainstorm/write crons set to a non-matching slot
+    // and disabled so the single fire is unambiguously the review role.
+    seed_work(
+        &pool,
+        &work,
+        &schedule_blob_review("0 3 * * *", "0 4 * * *", "0,30 * * * *", false, false, true),
+    )
+    .await;
+
+    // 14:00 UTC matches the `:00` slot of `0,30 * * * *`.
+    let now = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 14, 0, 0).unwrap();
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+
+    assert_eq!(summary.fired, 1, "review should fire at :00: {summary:?}");
+    assert_eq!(
+        count_schedules(&pool, "wrk_fire_review", "novel-review-master").await,
+        1,
+        "one novel-review-master schedule should be enqueued"
+    );
+
+    // Provenance: the cron-fired review-master schedule carries the `CRON`
+    // prefix and `cron:review:<work>` label (NOT the stale-findings `RVM` /
+    // `auto-review-master:` shape). This is the Option A contract: one uniform
+    // enqueue path preserves the trigger origin in the schedule row.
+    let (schedule_id, label): (String, String) = sqlx::query_as(
+        "SELECT schedule_id, label FROM creator_schedules \
+         WHERE work_id = 'wrk_fire_review' AND preset_id = 'novel-review-master'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        schedule_id.starts_with("CRON"),
+        "cron-fired review schedule must use the CRON prefix (got {schedule_id})"
+    );
+    assert_eq!(
+        label, "cron:review:wrk_fire_review",
+        "cron-fired review must carry the cron:review label"
+    );
+
+    // Non-matching minute (:15) does not enqueue a second review schedule.
+    let now_off = chrono::Utc
+        .with_ymd_and_hms(2026, 6, 19, 14, 15, 0)
+        .unwrap();
+    let summary_off = cron_supervisor::evaluate_cron_fires(&pool, now_off).await;
+    assert_eq!(
+        summary_off.fired, 0,
+        "review must not fire at :15: {summary_off:?}"
+    );
+    assert_eq!(
+        count_schedules(&pool, "wrk_fire_review", "novel-review-master").await,
+        1,
+    );
+}
+
+/// AC (T-A P2): the review role respects the same per-Work gating as
+/// brainstorm/write (spec §4.3). A completion-locked Work skips the review
+/// fire (counted as `skipped_gated`).
+#[tokio::test]
+async fn cron_review_respects_per_work_gating() {
+    let pool = test_pool().await;
+    let work = test_work("wrk_review_gated");
+    // Only review enabled with an always-matching cron.
+    seed_work(
+        &pool,
+        &work,
+        &schedule_blob_review("0 3 * * *", "0 4 * * *", "* * * * *", false, false, true),
+    )
+    .await;
+    // create_work hardcodes completion_locked_at = NULL; set it via a direct
+    // UPDATE to simulate a finalized Work (mirrors `cron_skips_completion_locked`).
+    sqlx::query("UPDATE works SET completion_locked_at = ? WHERE work_id = ?")
+        .bind("2026-06-18T12:00:00Z")
+        .bind("wrk_review_gated")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let now = chrono::Utc::now();
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+
+    assert_eq!(
+        summary.fired, 0,
+        "completion-locked Work must not fire review"
+    );
+    assert_eq!(
+        summary.skipped_gated, 1,
+        "review should be gated: {summary:?}"
+    );
+    assert_eq!(
+        count_schedules(&pool, "wrk_review_gated", "novel-review-master").await,
+        0,
+    );
+}
+
+/// AC (T-A P2): the review role honors the spec §4.2 idempotency guard. When a
+/// prior `novel-review-master` schedule for the same Work is still active, the
+/// review cron fire is skipped (counted as `skipped_idempotent`).
+#[tokio::test]
+async fn cron_review_respects_idempotency() {
+    let pool = test_pool().await;
+    let work = test_work("wrk_review_idem");
+    seed_work(
+        &pool,
+        &work,
+        &schedule_blob_review("0 3 * * *", "0 4 * * *", "* * * * *", false, false, true),
+    )
+    .await;
+    // Pre-insert an ACTIVE novel-review-master schedule for this Work so the
+    // idempotency guard (`has_active_role_schedule`) sees it.
+    let now_ts = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "INSERT INTO creator_schedules \
+         (schedule_id, creator_id, preset_id, preset_version, status, \
+          concurrency_kind, current_core_context_version, label, \
+          created_at, updated_at, work_id) \
+         VALUES ('RVM-PREEXISTING', 'ctr_test', 'novel-review-master', 1, \
+                 'pending', 'serial', 0, 'preexisting', ?, ?, 'wrk_review_idem')",
+    )
+    .bind(now_ts)
+    .bind(now_ts)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let now = chrono::Utc::now();
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+
+    assert_eq!(
+        summary.fired, 0,
+        "review must not fire while a prior review-master is active"
+    );
+    assert_eq!(
+        summary.skipped_idempotent, 1,
+        "review should be skipped by idempotency: {summary:?}"
+    );
+    // Exactly one review-master schedule (the pre-existing one); no duplicate.
+    assert_eq!(
+        count_schedules(&pool, "wrk_review_idem", "novel-review-master").await,
+        1,
+    );
+}
+
+/// AC4 (T-A P2): a Work whose `schedule_json` configures brainstorm/write but
+/// NOT the `review` role skips review gracefully — no review-master schedule is
+/// enqueued, and the absent role is a clean `skipped_no_match` (not an error).
+/// This is the "no review work = no review schedule" graceful-skip case.
+#[tokio::test]
+async fn cron_review_graceful_when_no_review_role_configured() {
+    let pool = test_pool().await;
+    let work = test_work("wrk_no_review");
+    // Two-role blob (no `review` key) — the `review` field deserialises to
+    // `None` via `#[serde(default)]`, so the evaluator no-ops it cleanly.
+    seed_work(
+        &pool,
+        &work,
+        &schedule_blob("* * * * *", "0 4 * * *", true, false),
+    )
+    .await;
+
+    let now = chrono::Utc::now();
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+
+    // Brainstorm fires (its cron matches every minute); review is absent →
+    // one fire (brainstorm) and one graceful review skip (skipped_no_match).
+    assert_eq!(summary.fired, 1, "brainstorm should fire: {summary:?}");
+    assert_eq!(
+        summary.skipped_parse_error, 0,
+        "absent review role must not be a parse error"
+    );
+    assert_eq!(
+        count_schedules(&pool, "wrk_no_review", "novel-review-master").await,
+        0,
+        "no review-master schedule when review role is absent"
+    );
+    assert_eq!(
+        count_schedules(&pool, "wrk_no_review", "novel-brainstorm").await,
+        1,
     );
 }
