@@ -1388,6 +1388,15 @@ pub async fn get_schedule_json(
 ///
 /// Returns `None` if no Work matches in the active workspace.
 ///
+/// R-V150-WLA-06 (V1.50 P-last WL-A / cron-foundation qc1 S6): the query
+/// uses `ORDER BY work_ref IS NULL, work_id` so the row choice is
+/// deterministic in the theoretical case where a `work_ref` slug collides
+/// with another row's `work_id` (slugs vs `wrk_...` IDs live in different
+/// namespaces in practice, so this is a clarity/determinism guard, not a
+/// live bug fix). `work_ref IS NULL` evaluates to 0 for non-null and 1
+/// for null, so non-null work_refs sort first — matches the "ref wins
+/// over id" precedence the doc comment promises.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError::Sqlx` if the SELECT fails.
@@ -1403,6 +1412,7 @@ pub async fn resolve_work_id_by_ref_or_id(
         "SELECT work_id FROM works \
          WHERE creator_id = ? AND workspace_slug = ? \
          AND (work_ref = ? OR work_id = ?) \
+         ORDER BY work_ref IS NULL, work_id \
          LIMIT 1",
     )
     .bind(creator_id)
