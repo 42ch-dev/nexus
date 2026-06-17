@@ -104,8 +104,14 @@ impl WorkSchedule {
 /// Stable error codes for cron config validation (AC #5).
 const ERR_INVALID_CRON: &str = "E_CRON_INVALID_EXPR";
 const ERR_INVALID_TZ: &str = "E_CRON_INVALID_TZ";
-/// Stable error code for the spec §3.1 "all-off" rule (R-V150P0-W2).
+
 const ERR_ALL_DISABLED: &str = "E_CRON_ALL_ROLES_DISABLED";
+/// R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): stable
+/// error code for the `--<role> EXPR --no-<role>` self-contradiction.
+/// Without this guard `apply_set_args` silently last-write-wins, leaving
+/// the role disabled while a cron expression is stored — confusing for
+/// authors reading the schedule back.
+const ERR_CONFLICTING_FLAGS: &str = "E_CRON_CONFLICTING_FLAGS";
 
 /// Validate a 5-field cron expression via the `cron` crate.
 ///
@@ -229,6 +235,25 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
     }
     if let Some(ref tz) = args.tz {
         validate_tz(tz)?;
+    }
+
+    // R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004): reject
+    // `--<role> EXPR --no-<role>` self-contradictions before mutating. The
+    // pre-fix path silently last-write-wins (cron expression stored but
+    // role disabled), which is confusing to read back via `cron show`.
+    // The error names both flags so the author can spot the typo.
+    for (role, has_expr, disabled) in [
+        ("brainstorm", args.brainstorm.is_some(), args.no_brainstorm),
+        ("write", args.write.is_some(), args.no_write),
+        ("review", args.review.is_some(), args.no_review),
+    ] {
+        if has_expr && disabled {
+            return Err(CliError::Config(format!(
+                "[{ERR_CONFLICTING_FLAGS}] role '{role}' was given both --{role} \
+                 EXPR and --no-{role}; pick one (set a cron expression OR disable \
+                 the role)"
+            )));
+        }
     }
 
     let mut schedule = base;
@@ -898,6 +923,49 @@ mod tests {
             ..Default::default()
         };
         assert!(apply_set_args(base, &args).is_err());
+    }
+
+    /// R-V150-WLA-04 (V1.50 P-last WL-A / cron-foundation qc3 S-004):
+    /// `--brainstorm EXPR --no-brainstorm` (and the write / review
+    /// siblings) must be rejected with the `E_CRON_CONFLICTING_FLAGS`
+    /// stable code rather than silently storing a disabled role with an
+    /// attached cron expression.
+    #[test]
+    fn apply_set_args_conflicting_role_flags_rejected_with_stable_code() {
+        for (role_expr_field, role_no_field, role_name) in [
+            ("brainstorm", "no_brainstorm", "brainstorm"),
+            ("write", "no_write", "write"),
+            ("review", "no_review", "review"),
+        ] {
+            let base = WorkSchedule::defaults();
+            let mut args = CronSetArgs::default();
+            // Build the conflicting pair via field mutation by parsing the
+            // role names (cheaper than three near-identical literals).
+            match role_expr_field {
+                "brainstorm" => args.brainstorm = Some(DEFAULT_BRAINSTORM_CRON.to_string()),
+                "write" => args.write = Some(DEFAULT_WRITE_CRON.to_string()),
+                "review" => args.review = Some(DEFAULT_REVIEW_CRON.to_string()),
+                _ => unreachable!(),
+            }
+            match role_no_field {
+                "no_brainstorm" => args.no_brainstorm = true,
+                "no_write" => args.no_write = true,
+                "no_review" => args.no_review = true,
+                _ => unreachable!(),
+            }
+            let err = apply_set_args(base, &args)
+                .expect_err(&format!("--{role_name} + --no-{role_name} must reject"));
+            let msg = format!("{err}");
+            assert!(
+                msg.contains(ERR_CONFLICTING_FLAGS),
+                "conflict on role '{role_name}' must carry stable code \
+                 {ERR_CONFLICTING_FLAGS}: {msg}"
+            );
+            assert!(
+                msg.contains(role_name),
+                "conflict error must name the role '{role_name}': {msg}"
+            );
+        }
     }
 
     #[test]
