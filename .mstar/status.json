@@ -657,7 +657,14 @@
         "target": "V1.50 T-A P1 (daemon writer race window)",
         "target_date": "V1.50 T-A P1",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-004",
-        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. P0 fix-wave adds in-code TODO marker at cron.rs:613. Plan-level residual carried to T-A P1."
+        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. P0 fix-wave adds in-code TODO marker at cron.rs:613. Plan-level residual carried to T-A P1.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-17",
+        "closure_note": "V1.50 T-A P1: handle_set now uses nexus_local_db::works::set_schedule_json_tx (transactional CAS with the read pre-image as the guard) inside a BEGIN/COMMIT. A CAS mismatch surfaces a retry error instead of a lost update. TODO marker removed. Hermetic tests: set_schedule_json_tx_rejects_stale_preimage / _concurrent_writers_serialise in crates/nexus-orchestration/tests/cron_supervisor.rs.",
+        "resolution": {
+          "commit": "67db009b",
+          "plan_id": "2026-06-18-v1.50-cron-brainstorm-write"
+        }
       }
     ],
     "2026-06-18-v1.50-kb-editor-cli": [
@@ -686,6 +693,34 @@
         "target_date": "V1.51+",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
         "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode."
+      }
+    ],
+    "2026-06-18-v1.50-cron-brainstorm-write": [
+      {
+        "id": "R-V150P1CRONBW-01",
+        "title": "novel-write embedded preset not yet authored; cron write role enqueues preset_id=novel-write which the executor cannot load",
+        "severity": "medium",
+        "source": "implementer (spec gap surfaced during T-A P1)",
+        "scope": "crates/nexus-orchestration/embedded-presets/ — novel-write/ directory absent",
+        "decision": "defer",
+        "owner": "@fullstack-dev or preset-authoring plan",
+        "target": "V1.50 T-A P2 or dedicated preset-authoring plan",
+        "target_date": "V1.50 T-A P2",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md ## Completion Report v2 § New residuals",
+        "note": "The cron evaluator enqueues the correct preset_id per spec cron-staggering.md §2.1 (write → novel-write). The schedule is persisted + admitted normally. novel-brainstorm exists and works; only novel-write is missing (the FL-E produce stage uses novel-writing, a different preset). novel-write is a standalone cron-triggered write-chapter preset whose authoring is out of T-A P1 scope. Evaluator contract is complete and tested; this is a preset-authoring gap, not an evaluator defect."
+      },
+      {
+        "id": "R-V150P1CRONBW-02",
+        "title": "cargo clippy --all -- -D warnings not run locally (scope-limited per repo target/ hygiene policy)",
+        "severity": "low",
+        "source": "implementer (Completion Report v2)",
+        "scope": "CI gate",
+        "decision": "accept",
+        "owner": "CI",
+        "target": "CI on PR",
+        "target_date": "PR CI",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md ## Completion Report v2 § Verification",
+        "note": "Per repo AGENTS.md, local iteration avoids cargo * --all to prevent target/ bloat. The four touched crates pass cargo clippy -p <crate> -- -D warnings. The authoritative --all gate runs in CI on the PR."
       }
     ]
   },
