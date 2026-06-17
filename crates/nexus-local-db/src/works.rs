@@ -1583,6 +1583,115 @@ pub async fn set_schedule_json_tx(
     Ok(true)
 }
 
+// ── V1.50 T-A P3 (T1): per-Work auto-chronology opt-in DAOs ──────────────
+
+/// Persist the per-Work auto-chronology opt-in flag (V1.50 §2.1).
+///
+/// Keys by `work_id` (primary key) so callers must resolve `work_ref` →
+/// `work_id` first via [`resolve_work_id_by_ref_or_id`]. When `enabled` is
+/// `false` (the column default), the daemon `auto_chronology_tick` task skips
+/// this Work entirely.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::MissingVersionKey` if the Work does not exist, or
+/// `LocalDbError::Sqlx` if the UPDATE fails.
+pub async fn set_auto_chronology(
+    pool: &SqlitePool,
+    work_id: &str,
+    enabled: bool,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    // SAFETY: UPDATE against works table — runtime query (column added in the
+    // same migration cycle; sqlx prepare cache hasn't run for this statement).
+    let result = sqlx::query(
+        "UPDATE works SET auto_chronology = ?, updated_at = ? WHERE work_id = ?",
+    )
+    .bind(enabled)
+    .bind(now)
+    .bind(work_id)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(LocalDbError::MissingVersionKey {
+            key: format!("works/{work_id}"),
+        });
+    }
+    Ok(())
+}
+
+/// Read the per-Work auto-chronology opt-in flag (V1.50 §2.1).
+///
+/// Returns `false` when the Work does not exist OR the column is unset (both
+/// mean "not opted in"; the column default is `0`/false).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn get_auto_chronology(pool: &SqlitePool, work_id: &str) -> Result<bool, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (column added in the
+    // same migration cycle; sqlx prepare cache hasn't run for this statement).
+    let row: Option<(bool,)> =
+        sqlx::query_as("SELECT auto_chronology FROM works WHERE work_id = ?")
+            .bind(work_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map_or(false, |(v,)| v))
+}
+
+/// Row for the daemon auto-chronology scan
+/// ([`list_works_with_auto_chronology`]).
+///
+/// Minimal column set needed to run finish detection (spec §3) and locate the
+/// Work's on-disk directory (`work_ref`). Mirrors the lean-scan precedent of
+/// [`WorkCronRow`] (V1.50 T-A P1).
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct WorkAutoChronologyRow {
+    /// Primary key (`wrk_...`).
+    pub work_id: String,
+    /// Owning creator — informational; the advance operates per `work_id`.
+    pub creator_id: String,
+    /// Human slug (`Works/<work_ref>/`); `None` when unset.
+    pub work_ref: Option<String>,
+    /// `works.intake_status` — gate: advance only when `== "complete"`.
+    pub intake_status: String,
+    /// `works.runtime_lock_holder` — gate: skip when `Some`.
+    pub runtime_lock_holder: Option<String>,
+    /// `works.completion_locked_at` — gate: skip when `Some` (Work fully
+    /// complete). This also serves as the "last planned volume" terminal guard
+    /// (spec §3.1): there is no `total_planned_volumes` column, so a Work with
+    /// no further volumes is expected to be completion-locked by the author.
+    pub completion_locked_at: Option<String>,
+}
+
+/// Scan all Works with `auto_chronology = true` (V1.50 §4.1).
+///
+/// This is the daemon auto-chronology tick's read path. Returns only the
+/// gating + locator columns the evaluator needs — not the full
+/// [`WorkRecord`] — to keep the scan lean (precedent:
+/// [`list_works_with_schedule_json`]).
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Sqlx` if the SELECT fails.
+pub async fn list_works_with_auto_chronology(
+    pool: &SqlitePool,
+) -> Result<Vec<WorkAutoChronologyRow>, LocalDbError> {
+    // SAFETY: SELECT against works table — runtime query (auto_chronology column
+    // added in the same migration cycle). The WHERE predicate matches opted-in
+    // Works only.
+    let rows: Vec<WorkAutoChronologyRow> = sqlx::query_as(
+        "SELECT work_id, creator_id, work_ref, intake_status, \
+                runtime_lock_holder, completion_locked_at \
+         FROM works \
+         WHERE auto_chronology = 1",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Ordered list of FL-E stages — re-exported from `nexus_contracts` (single source of truth).
 pub use nexus_contracts::local::orchestration::FL_E_STAGES;
 

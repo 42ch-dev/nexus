@@ -929,6 +929,108 @@ pub async fn next_chapter_volume_aware(
     )
 }
 
+// ── V1.50 T-A P3: auto-chronology finish-detection DAOs ──────────────────
+
+/// The highest volume number currently seeded for a Work (V1.50 §3 step 1).
+///
+/// Auto-chronology treats `max(volume)` over `work_chapters` as the "current
+/// volume" (there is no `current_volume` column on `works`). Returns `Ok(None)`
+/// when the Work has no chapter rows — the caller treats that as not-yet-
+/// eligible (no volume to advance from).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn current_volume(pool: &SqlitePool, work_id: &str) -> Result<Option<i32>, LocalDbError> {
+    // SAFETY: SELECT against work_chapters — runtime query.
+    let row = sqlx::query("SELECT MAX(volume) AS volume FROM work_chapters WHERE work_id = ?")
+        .bind(work_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.and_then(|r| r.get::<Option<i32>, _>("volume")))
+}
+
+/// Check whether every chapter in a given volume is `finalized` (V1.50 §3
+/// step 2 — finish detection).
+///
+/// Returns `false` if the volume has no chapter rows or any row is not in
+/// `finalized` status. Returns `true` only when the volume has ≥1 row and all
+/// are `finalized`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn is_volume_fully_finalized(
+    pool: &SqlitePool,
+    work_id: &str,
+    volume: i32,
+) -> Result<bool, LocalDbError> {
+    // SAFETY: SELECT COUNT against work_chapters — runtime query.
+    let row = sqlx::query(
+        "SELECT \
+              COUNT(*) AS total_rows, \
+              SUM(CASE WHEN status = 'finalized' THEN 1 ELSE 0 END) AS finalized_rows \
+          FROM work_chapters WHERE work_id = ? AND volume = ?",
+    )
+    .bind(work_id)
+    .bind(volume)
+    .fetch_one(pool)
+    .await?;
+
+    let total: i64 = row.get("total_rows");
+    let finalized: i64 = row.get("finalized_rows");
+    Ok(total > 0 && total == finalized)
+}
+
+/// Seed chapter rows for a single volume inside an existing transaction
+/// (V1.50 §4.2 — auto-chronology advance).
+///
+/// Inserts one `work_chapters` row per chapter (`1..=chapter_count`) for the
+/// given `volume`, mirroring the path convention of
+/// [`seed_chapters_multi_volume_tx`]. `INSERT OR IGNORE` keeps the seed
+/// idempotent on PK conflict `(work_id, volume, chapter)`. The caller decides
+/// whether to commit or roll back the transaction (atomic with the outline
+/// creation per spec §4).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if any insert fails.
+pub async fn seed_volume_chapters_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    work_id: &str,
+    work_ref: &str,
+    volume: i32,
+    chapter_count: i32,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    for ch in 1..=chapter_count {
+        let ch_nn = format!("ch{ch:02}");
+        let outline_path =
+            format!("Works/{work_ref}/Outlines/chapters/v{volume:02}-{ch_nn}-outline.md");
+        let slug = format!("v{volume:02}-{ch_nn}");
+        let body_path = format!("Works/{work_ref}/Stories/v{volume:02}-{ch_nn}-{slug}.md");
+
+        // SAFETY: INSERT OR IGNORE — idempotent seeding on PK conflict.
+        sqlx::query(
+            "INSERT OR IGNORE INTO work_chapters
+             (work_id, chapter, volume, slug, planned_word_count, actual_word_count,
+              status, outline_path, body_path, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 4000, NULL, 'not_started', ?, ?, ?, ?)",
+        )
+        .bind(work_id)
+        .bind(ch)
+        .bind(volume)
+        .bind(&slug)
+        .bind(&outline_path)
+        .bind(&body_path)
+        .bind(now)
+        .bind(now)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Seed chapter rows for a multi-volume Work (V1.42 §4.5.4).
 ///
 /// For each volume in `volumes`, inserts `chapters_per_volume` rows. On PK
