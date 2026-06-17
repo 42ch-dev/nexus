@@ -107,7 +107,7 @@ async fn cron_list_across_workspace() {
         .await
         .unwrap();
 
-    let rows_db = nexus_local_db::works::list_works_schedule(&pool, "ctr_test", "default")
+    let rows_db = nexus_local_db::works::list_works_schedule(&pool, "ctr_test", "default", None)
         .await
         .unwrap();
     let rows: Vec<ListRow> = rows_db
@@ -245,6 +245,25 @@ fn cron_set_help_documents_flags() {
             "cron set --help must document {flag}: {help}"
         );
     }
+}
+
+/// R-V150P0-W4: `creator works cron list` accepts a `--limit <N>` flag.
+#[test]
+fn cron_list_help_documents_limit_flag() {
+    use assert_cmd::Command;
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "cron", "list", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let help = String::from_utf8(output).unwrap();
+    assert!(
+        help.contains("--limit"),
+        "cron list --help must document --limit: {help}"
+    );
 }
 
 // =============================================================================

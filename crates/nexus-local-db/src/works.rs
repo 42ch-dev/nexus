@@ -1419,6 +1419,10 @@ pub async fn resolve_work_id_by_ref_or_id(
 /// Used by `creator works cron list`. Returns one [`WorkScheduleRow`] per Work,
 /// ordered by `updated_at` descending (consistent with [`list_works`]).
 ///
+/// `limit` caps the result count (R-V150P0-W4). When `None`, defaults to 100
+/// (matching [`WorkListFilters::limit`]'s default) so the surface stays bounded
+/// for large workspaces.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError::Sqlx` if the SELECT fails.
@@ -1426,16 +1430,20 @@ pub async fn list_works_schedule(
     pool: &SqlitePool,
     creator_id: &str,
     workspace_slug: &str,
+    limit: Option<u32>,
 ) -> Result<Vec<WorkScheduleRow>, LocalDbError> {
+    let limit = i64::from(limit.unwrap_or(100));
     // SAFETY: SELECT against works table — runtime query (schedule_json column
-    // added in the same migration cycle).
+    // added in the same migration cycle). `limit` is a bound parameter.
     let rows: Vec<(Option<String>, String, Option<String>)> = sqlx::query_as(
         "SELECT work_ref, work_id, schedule_json FROM works \
          WHERE creator_id = ? AND workspace_slug = ? \
-         ORDER BY updated_at DESC",
+         ORDER BY updated_at DESC \
+         LIMIT ?",
     )
     .bind(creator_id)
     .bind(workspace_slug)
+    .bind(limit)
     .fetch_all(pool)
     .await?;
 
