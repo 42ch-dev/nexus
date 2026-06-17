@@ -115,34 +115,54 @@ async fn seed_work(pool: &SqlitePool, work: &WorkRecord) {
 /// Mirrors `insert_driver_schedule` in `tests/auto_chain.rs`, pinned to the
 /// research preset (`preset_version = RESEARCH_PRESET_VERSION`, matching the
 /// embedded manifest).
-async fn insert_research_schedule(
-    pool: &SqlitePool,
-    schedule_id: &str,
-    creator_id: &str,
-    status: &str,
-    work_id: &str,
-) {
-    let now = chrono::Utc::now().timestamp();
-    // SAFETY: test-only — DML helper inserting a research schedule row with
-    // the preset_version that matches embedded-presets/research/preset.yaml.
-    sqlx::query(
-        r"INSERT INTO creator_schedules
-           (schedule_id, creator_id, preset_id, preset_version, status,
-            concurrency_kind, current_core_context_version,
-            label, created_at, updated_at, work_id)
-           VALUES (?, ?, 'research', ?, ?, 'serial', 0, ?, ?, ?, ?)",
-    )
-    .bind(schedule_id)
-    .bind(creator_id)
-    .bind(RESEARCH_PRESET_VERSION)
-    .bind(status)
-    .bind(format!("FL-E stage: research (work: {work_id})"))
-    .bind(now)
-    .bind(now)
-    .bind(work_id)
-    .execute(pool)
-    .await
-    .unwrap();
+///
+/// R-V146P3-QC3-S1: extracted from a positional-arg helper into a typed
+/// `ResearchScheduleFixture` so the `creator_schedules` column list +
+/// preset_version constant live in **one** place within this test file. The
+/// raw INSERT is intentional (we bypass `insert_pending` validation to
+/// control `work_id` + `status` precisely); the trade-off is documented
+/// here. Schema source of truth:
+///   - `crates/nexus-local-db/migrations/20260419_creator_schedules.sql`
+///     (initial: `preset_id`, `preset_version`, `concurrency_kind`, ...)
+///   - `crates/nexus-local-db/migrations/202606080002_creator_schedules_work_id.sql`
+///     (`work_id` column). Keep this fixture's column list in sync with the
+///     migrations if a column is renamed.
+struct ResearchScheduleFixture {
+    schedule_id: &'static str,
+    creator_id: &'static str,
+    status: &'static str,
+    work_id: &'static str,
+}
+
+impl ResearchScheduleFixture {
+    async fn insert(self, pool: &SqlitePool) {
+        let now = chrono::Utc::now().timestamp();
+        // SAFETY: test-only — DML helper inserting a research schedule row
+        // with the preset_version that matches
+        // embedded-presets/research/preset.yaml. Schema reference: see the
+        // struct doc comment above.
+        sqlx::query(
+            r"INSERT INTO creator_schedules
+               (schedule_id, creator_id, preset_id, preset_version, status,
+                concurrency_kind, current_core_context_version,
+                label, created_at, updated_at, work_id)
+               VALUES (?, ?, 'research', ?, ?, 'serial', 0, ?, ?, ?, ?)",
+        )
+        .bind(self.schedule_id)
+        .bind(self.creator_id)
+        .bind(RESEARCH_PRESET_VERSION)
+        .bind(self.status)
+        .bind(format!(
+            "FL-E stage: research (work: {})",
+            self.work_id
+        ))
+        .bind(now)
+        .bind(now)
+        .bind(self.work_id)
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| panic!("ResearchScheduleFixture::insert failed: {e}"));
+    }
 }
 
 /// Read a schedule row's status straight from the DB.
@@ -368,13 +388,13 @@ async fn research_supervisor_tick_admits_pending_schedule() {
     seed_work(&pool, &work).await;
 
     // Pending research schedule wired to the work via work_id.
-    insert_research_schedule(
-        &pool,
-        "sch_research_boot_001",
-        "ctr_research_e2e",
-        "pending",
-        "wrk_boot",
-    )
+    ResearchScheduleFixture {
+        schedule_id: "sch_research_boot_001",
+        creator_id: "ctr_research_e2e",
+        status: "pending",
+        work_id: "wrk_boot",
+    }
+    .insert(&pool)
     .await;
     assert_eq!(
         schedule_status(&pool, "sch_research_boot_001").await,
@@ -429,13 +449,13 @@ async fn research_supervisor_tick_drives_boot_to_terminal_done() {
     work.stage_status = "active".to_string();
     seed_work(&pool, &work).await;
 
-    insert_research_schedule(
-        &pool,
-        "sch_research_e2e_001",
-        "ctr_research_e2e",
-        "pending",
-        "wrk_e2e",
-    )
+    ResearchScheduleFixture {
+        schedule_id: "sch_research_e2e_001",
+        creator_id: "ctr_research_e2e",
+        status: "pending",
+        work_id: "wrk_e2e",
+    }
+    .insert(&pool)
     .await;
     auto_chain::set_driver(
         &pool,
@@ -504,13 +524,13 @@ async fn research_schedule_boot_resume_running_to_paused_to_resumed() {
     seed_work(&pool, &work).await;
 
     // Simulate a pre-crash state: the research schedule was mid-flight.
-    insert_research_schedule(
-        &pool,
-        "sch_research_resume_001",
-        "ctr_research_e2e",
-        "running",
-        "wrk_resume",
-    )
+    ResearchScheduleFixture {
+        schedule_id: "sch_research_resume_001",
+        creator_id: "ctr_research_e2e",
+        status: "running",
+        work_id: "wrk_resume",
+    }
+    .insert(&pool)
     .await;
     assert_eq!(
         schedule_status(&pool, "sch_research_resume_001").await,
