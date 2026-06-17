@@ -39,7 +39,8 @@
       "id": "2026-06-18-v1.50-cron-brainstorm-write",
       "title": "T-A P1 — Brainstorm + write cron wiring into auto-chain",
       "file": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md",
-      "status": "InReview",
+      "status": "Done",
+      "done_at": "2026-06-18",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-cron-brainstorm-write",
@@ -49,8 +50,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-cron-foundation"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T13:00:00+08:00",
-      "qc_status": "Ready for QC tri-review (developement complete; 18 cron_supervisor + 2 daemon cron_supervisor_task + 5 cron_trigger tests pass; R-V150P0-W5 resolved)"
+      "updated_at": "2026-06-18T14:00:00+08:00",
+      "qc_status": "Initial wave: qc3 Request Changes (3 Ws R-V150P1CRONBW-03/04/05). Fix-wave resolved all 3; qc3 targeted re-review Approve. R-V150P0-W5 (T-A P0 carry-forward TOCTOU) also resolved. Merged into iteration/v1.50."
     },
     {
       "id": "2026-06-18-v1.50-cron-review-staggering",
@@ -106,7 +107,8 @@
       "id": "2026-06-18-v1.50-kb-auto-promotion",
       "title": "T-B P1 — Review-time candidate extraction → pending → confirm",
       "file": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md",
-      "status": "InReview",
+      "status": "Done",
+      "done_at": "2026-06-18",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-kb-auto-promotion",
@@ -116,8 +118,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-kb-editor-cli"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T13:00:00+08:00",
-      "qc_status": "Ready for QC tri-review (development complete; 7+5+6+8 = 26 hermetic tests pass; 2 new low residuals filed by implementer)"
+      "updated_at": "2026-06-18T14:00:00+08:00",
+      "qc_status": "Initial wave: qc2 (2 Ws) + qc3 (2 Ws) Request Changes. Fix-wave resolved R-V150KBED-03/04/05; qc2 + qc3 targeted re-review both Approve. R-V150KBED-01/02 unchanged. Merged into iteration/v1.50."
     },
     {
       "id": "2026-06-18-v1.50-kb-refreshable-scan",
