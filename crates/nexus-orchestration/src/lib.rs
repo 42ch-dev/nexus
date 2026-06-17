@@ -12,6 +12,7 @@ pub mod narrative_index;
 pub mod preset;
 pub mod preset_gates;
 pub mod preset_ids;
+pub mod quality_loop;
 pub mod review_report;
 pub mod rules_history;
 pub mod rules_layers;

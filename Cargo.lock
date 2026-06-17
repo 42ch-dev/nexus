@@ -2375,6 +2375,7 @@ dependencies = [
  "nexus-kb",
  "nexus-local-db",
  "nix 0.29.0",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",
