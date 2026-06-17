@@ -21,6 +21,8 @@ use nexus_home_layout;
 // V1.49 P2 (R-V147P1-01): intake re-trigger schedules via AddScheduleRequest.
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
+pub mod cron;
+
 /// Work management subcommands (DF-60 §6.2H).
 #[derive(Debug, Subcommand)]
 pub enum WorksCommand {
@@ -178,6 +180,14 @@ pub enum WorksCommand {
     Rules {
         #[command(subcommand)]
         command: RulesCommand,
+    },
+
+    // ── V1.50 T-A P0: per-Work cron configuration ──────────────────────
+    /// Manage per-Work cron configuration for novel-writing staggering
+    /// (V1.50 §3). Foundation: set/show/list the `schedule_json` column.
+    Cron {
+        #[command(subcommand)]
+        command: cron::CronCommand,
     },
 
     // ── Rejected subcommands (Grill #10/#11) ──────────────────────────
@@ -415,6 +425,7 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         WorksCommand::Rules { command } => {
             super::rules_runtime::handle_rules(&client, command).await
         }
+        WorksCommand::Cron { command } => cron::handle_cron(command, config).await,
         WorksCommand::Start { .. } => Err(crate::errors::CliError::Other(
             "`creator works start` is not available. \
              To create a new Work, use `nexus42 creator bootstrap`."
