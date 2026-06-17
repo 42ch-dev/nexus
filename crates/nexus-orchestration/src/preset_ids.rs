@@ -57,11 +57,29 @@ pub const NOVEL_BRAINSTORM_PRESET_ID: &str = "novel-brainstorm";
 /// plan. This is a preset-authoring gap, not an evaluator gap.
 pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
 
+/// Out-of-band review-master preset id — `novel-review-master`.
+///
+/// V1.39 introduced this preset for stale-findings escalation
+/// (`auto_review_master_on_timeout`); V1.50 T-A P2 will wire the per-Work
+/// `review` cron role to fire it on a schedule. V1.50 T-B P1 consumes it as
+/// the trigger for review-time KB candidate extraction
+/// ([`crate::quality_loop::extract_kb_candidates_for_review`]).
+///
+/// Consumed by:
+/// - [`crate::auto_chain::enqueue_review_master_schedule`] (schedule insert)
+/// - [`crate::quality_loop::extract_kb_candidates_for_review`] (T-B P1 hook)
+/// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
+///   (terminal guard for the T-B P1 extraction hook)
+///
+/// See `.mstar/knowledge/specs/novel-writing/cron-staggering.md` §2.1 for the
+/// role→preset mapping.
+pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
+
 #[cfg(test)]
 mod tests {
     use super::{
-        NOVEL_BRAINSTORM_PRESET_ID, NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_WRITE_PRESET_ID,
-        NOVEL_WRITING_PRESET_ID,
+        NOVEL_BRAINSTORM_PRESET_ID, NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID,
+        NOVEL_WRITE_PRESET_ID, NOVEL_WRITING_PRESET_ID,
     };
 
     /// Guard against accidental rename: the wire value is part of the
@@ -86,5 +104,10 @@ mod tests {
     #[test]
     fn novel_write_preset_id_value_is_frozen() {
         assert_eq!(NOVEL_WRITE_PRESET_ID, "novel-write");
+    }
+
+    #[test]
+    fn novel_review_master_preset_id_value_is_frozen() {
+        assert_eq!(NOVEL_REVIEW_MASTER_PRESET_ID, "novel-review-master");
     }
 }

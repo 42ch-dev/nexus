@@ -38,6 +38,8 @@ nexus-creator-memory = { path = "../nexus-creator-memory" }
 # `nexus42` (T-A P0 cron CLI validation).
 cron = { workspace = true }
 chrono-tz = { workspace = true }
+# V1.50 T-B P1: review-time KB candidate extraction heuristic (quality_loop).
+regex = { workspace = true }
 blake3 = { workspace = true }
 sha2 = "0.10"
 include_dir = "0.7"
