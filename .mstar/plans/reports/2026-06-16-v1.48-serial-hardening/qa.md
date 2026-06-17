@@ -33,7 +33,7 @@ generated_at: "2026-06-15T23:35:27Z"
 
 **Inputs read**:
 - Plan: `.mstar/plans/2026-06-16-v1.48-serial-hardening.md` (full, esp. §4 ACs + §8 + §9 P4-fix1)
-- Specs: `.mstar/knowledge/specs/novel-workflow-profile.md` (§4.5.3, §4.5.7 #4/#5); `.mstar/knowledge/specs/novel-findings-maturity.md` (§6)
+- Specs: `.mstar/knowledge/specs/novel-writing/workflow-profile.md` (§4.5.3, §4.5.7 #4/#5); `.mstar/archived/knowledge/novel-findings-maturity.md` (§6)
 - QC artifacts: `.mstar/plans/reports/2026-06-16-v1.48-serial-hardening/` (qc1.md, qc2.md, qc3.md, qc-consolidated.md)
 - `mstar-*` skills (harness-core, coding-behavior, dispatch-gates, branch-worktree, plan-conventions, review-qc) + `mstar-roles` → `references/qa-engineer.md`
 
@@ -66,7 +66,7 @@ test result: ok. 2 passed; 0 failed; ...
 ```
 (Executed 3+ times across sessions; hermetic `nexus-local-db` only; no flakiness observed for these two.)
 
-**Spec alignment**: Matches `novel-workflow-profile.md` §4.5.7 #4 (resume draft row without duplicate) and #5 (reconcile rebuilds missing rows with DB-as-SSOT per §4.5.3). Tests live in `crates/nexus-local-db/tests/v148_serial_hardening.rs`.
+**Spec alignment**: Matches `novel-writing/workflow-profile.md` §4.5.7 #4 (resume draft row without duplicate) and #5 (reconcile rebuilds missing rows with DB-as-SSOT per §4.5.3). Tests live in `crates/nexus-local-db/tests/v148_serial_hardening.rs`.
 
 **Verdict for AC1**: **PASS**
 
@@ -86,7 +86,7 @@ test result: ok. 2 passed; 0 failed; ...
 **Additional P4-fix1 hardening test**:
 - `cargo test -p nexus-local-db --lib test_sync_frontmatter_status_writes_via_temp_file ... ok` (atomic write via temp + rename).
 
-**Verdict for AC2**: **PASS** (implementation + test + fix-wave hardening all align with `novel-workflow-profile.md` §4.5.3).
+**Verdict for AC2**: **PASS** (implementation + test + fix-wave hardening all align with `novel-writing/workflow-profile.md` §4.5.3).
 
 ### AC3: R-V147P1-01 closed or explicitly deferred to V1.49 in plan completion report
 **Plan evidence** (`.mstar/plans/2026-06-16-v1.48-serial-hardening.md`):

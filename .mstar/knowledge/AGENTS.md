@@ -23,7 +23,7 @@ End-user docs stay in repo-root `docs/`.
 
 ## Specs subtree
 
-All normative OSS specs are **flat** under `specs/`. Rules for creating, merging, and retiring specs: [`specs/AGENTS.md`](specs/AGENTS.md).
+All normative OSS specs live under `specs/` — **flat by default**, with the **`novel-writing/`** subtree for `work_profile: novel` (see [specs/novel-writing/README.md](specs/novel-writing/README.md)). Rules for creating, merging, and retiring specs: [`specs/AGENTS.md`](specs/AGENTS.md).
 
 When implementing runtime behavior, read the active iteration compass (or `metadata.latest_ship.compass` between iterations), [specs/README.md](specs/README.md), then the cited spec bodies. Platform ADRs live in **`nexus-platform`** when this repo points outward.
 

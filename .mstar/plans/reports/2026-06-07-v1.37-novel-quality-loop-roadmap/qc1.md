@@ -30,7 +30,7 @@ generated_at: "2026-06-08"
   - `git merge-base iteration/v1.37 HEAD`
   - `git diff --stat c6c44315cee190ff210d8829767039bd27634bc2..HEAD`
   - `git diff --name-status c6c44315cee190ff210d8829767039bd27634bc2..HEAD`
-  - Targeted reads/greps of `novel-workflow-profile.md`, the P3 plan, the deferred tracker, and `.mstar/status.json`
+  - Targeted reads/greps of `novel-writing/workflow-profile.md`, the P3 plan, the deferred tracker, and `.mstar/status.json`
 
 ## Acceptance Criteria Review
 
@@ -58,7 +58,7 @@ generated_at: "2026-06-08"
 - Finding ID: N/A
 - Source Type: git-diff, doc-rule, manual-reasoning
 - Source Reference:
-  - `.mstar/knowledge/specs/novel-workflow-profile.md` §5.5.1–§5.5.7
+  - `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §5.5.1–§5.5.7
   - `.mstar/plans/2026-06-07-v1.37-novel-quality-loop-roadmap.md` §4.1, §5, §8
   - `.mstar/knowledge/deferred-features-cross-version-tracker.md` header and rows DF-64..DF-67
   - `.mstar/status.json` plan row for `2026-06-07-v1.37-novel-quality-loop-roadmap`
@@ -69,7 +69,7 @@ generated_at: "2026-06-08"
 `git diff --name-status c6c44315cee190ff210d8829767039bd27634bc2..HEAD` shows only harness/spec documentation state files changed:
 
 - `.mstar/knowledge/deferred-features-cross-version-tracker.md`
-- `.mstar/knowledge/specs/novel-workflow-profile.md`
+- `.mstar/knowledge/specs/novel-writing/workflow-profile.md`
 - `.mstar/plans/2026-06-07-v1.37-novel-quality-loop-roadmap.md`
 - `.mstar/status.json`
 

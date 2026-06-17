@@ -1,12 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-16T12:14:57+08:00",
+  "updated_at": "2026-06-18T02:00:00+08:00",
   "plans": [],
-  "v1_43_iteration_complete": true,
-  "v1_44_iteration_complete": true,
-  "v1_45_iteration_complete": true,
-  "v1_46_iteration_complete": true,
-  "v1_47_iteration_complete": true,
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -14,54 +9,42 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": "iteration/v1.48",
-    "last_integration_branch": "iteration/v1.47",
+    "integration_branch": "iteration/v1.49",
+    "last_integration_branch": "iteration/v1.48",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
-    "integration_branch_retired": "(pending PR to main)",
-    "latest_shipped_iteration": "v1.47",
-    "latest_shipped_at": "2026-06-15 (PR #60 @ 8f4f9f2b)",
-    "latest_active_iteration": "v1.48 (DONE — all 7 plans complete)",
-    "latest_active_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
+    "integration_branch_retired": null,
+    "latest_shipped_iteration": "v1.48",
+    "latest_shipped_at": "2026-06-16 (PR #61 @ 8fcf2d68)",
+    "latest_active_iteration": "v1.49 (prepare GO)",
+    "latest_active_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO — V1.48 P-1 Done 2026-06-16",
+    "pre_implement_gate": "GO — V1.49 P-1 Done 2026-06-17",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
-    "wave_0_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
-    "pre_iteration_hotfix": {
-      "id": "R-V147P0-05",
-      "recommended_branch": "fix/master-decision-timeout-pk-collision",
-      "policy": "H-1 — merge to main before or at iteration/v1.48 cut"
-    },
+    "wave_0_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md, .mstar/knowledge/specs/novel-writing/narrative-indexes.md",
+    "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "v1.48",
-      "merge_commit": "(pending PR)",
-      "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
-      "shipped_at": "2026-06-16"
+      "iteration": "v1.49",
+      "merge_commit": "TBD — PR iteration/v1.49 → main to be opened by PM",
+      "compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+      "shipped_at": "TBD"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-06-16",
-      "total_open": 31,
+      "updated_at": "2026-06-18",
+      "total_open": 0,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 30,
+        "medium": 0,
+        "low": 0,
         "nit": 0
       },
       "by_target": {
-        "V1.48": 31
+        "shipped": 0,
+        "V1.50": 0
       },
-      "by_plan": {
-        "2026-06-13-v1.45-hygiene-and-closeout": 1,
-        "2026-06-14-v1.46-author-desk-status-ux": 4,
-        "2026-06-14-v1.46-novel-runtime-ux-edges": 5,
-        "2026-06-14-v1.46-pool-observability": 4,
-        "2026-06-14-v1.46-research-auto-chain-e2e": 3,
-        "2026-06-14-v1.46-spec-cli-hygiene": 7,
-        "2026-06-15-v1.47-gate-remediation-audit": 1,
-        "2026-06-15-v1.47-reflection-loop-findings": 6
-      },
-      "notes": "31 open carry-forward; 7× R-V147P* targeted for closure in V1.48 P0–P4; WL-A 10 lows in P-last; remainder defer V1.49 at P-last."
+      "by_plan": {},
+      "notes": "V1.49 P-last T1 closed all 10 WL-A residuals + R-V149P0-03. V1.49 P-last T3 deferred 4 V1.50 lows (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2) — see residual_findings[2026-06-14-v1.46-pool-observability] and residual_findings[2026-06-14-v1.46-research-auto-chain-e2e] for the V1.50 carry-forward. V1.50 carry-forward totals: 4 (3 from V1.46 lows + 1 from R-V149P1-02 flake). R-V149P0-01 (CLI ?status=open gap) and R-V149P1-01 (overlay schema reconciliation) were also deferred to V1.50 in earlier waves; total V1.50 carry-forward = 6."
     }
   },
   "residual_findings": {
@@ -83,32 +66,6 @@
     ],
     "2026-06-14-v1.46-author-desk-status-ux": [
       {
-        "id": "R-V146P0-QC1-S2",
-        "title": "capture_findings_output test helper duplicates print_findings_summary formatting logic",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-2",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs (production lines 1264-1313; test helper lines 1485-1529)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A; defer V1.49 at P-last unless swept early. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
-        "id": "R-V146P0-QC2-S1",
-        "title": "enrich_status_json tests use minimal finding_json helper; full element shape fidelity not asserted",
-        "severity": "low",
-        "source": "qc2 (security/correctness) S-1",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs:1638-1752 (enrich_* tests) + helper at 1411",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
         "id": "R-V146P0-QC3-S2",
         "title": "JSON-path findings/stale degradation paths lack tracing observability",
         "severity": "low",
@@ -124,19 +81,6 @@
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: tracing::warn! added at the two silent degradation sites in works/mod.rs (fetch_open_findings Unavailable path + fetch_stale_findings via map_err).",
         "closure_evidence": "iteration/v1.48 @ 397ee075 (commit da8f8a69)"
-      },
-      {
-        "id": "R-V146P0-QC3-S3",
-        "title": "Consider skipping stale fetch when findings fetch already failed",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-003",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs:379-389",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-author-desk-status-ux]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
       }
     ],
     "2026-06-14-v1.46-novel-runtime-ux-edges": [
@@ -156,74 +100,9 @@
         "closed_at": "2026-06-16",
         "closure_note": "V1.48 P-last T1: sanitize_for_terminal made pub(crate); applied to Manifest.description in format_preset_run_help; regression test added.",
         "closure_evidence": "iteration/v1.48 @ 397ee075 (commit 83140200)"
-      },
-      {
-        "id": "R-V146P2-QC1-S1",
-        "title": "std::process::exit(0) in library module (maybe_print_preset_run_help_and_exit)",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-1",
-        "scope": "crates/nexus42/src/commands/creator/run.rs:231-235",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
-        "id": "R-V146P2-QC1-S2",
-        "title": "Config-resolution dedup opportunity (operational_workspace_dir_from_config helper extracted but callers still ad-hoc)",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-2",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs (pre-existing duplication)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
-        "id": "R-V146P2-QC3-S1",
-        "title": "T2 help-intercept exit path should flush stdout before std::process::exit(0)",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-001",
-        "scope": "crates/nexus42/src/commands/creator/run.rs:231-235 (maybe_print_preset_run_help_and_exit)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
-        "id": "R-V146P2-QC3-S2",
-        "title": "CapabilityRegistry::with_builtins() rebuilt on every help intercept",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-002",
-        "scope": "crates/nexus42/src/commands/creator/run.rs:214",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-novel-runtime-ux-edges]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
       }
     ],
     "2026-06-14-v1.46-pool-observability": [
-      {
-        "id": "R-V146P4-QC1-S1",
-        "title": "Only promote_to_active has tracing assertion in T3 capture test (other 8 paths untested)",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-1",
-        "scope": "crates/nexus-local-db/src/novel_pool_entries.rs (test_promote_to_active_emits_trace)",
-        "decision": "defer",
-        "owner": "@fullstack-dev-2",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
       {
         "id": "R-V146P4-QC1-S2",
         "title": "Verbose UFCS subscriber construction in T3 capture test",
@@ -232,23 +111,10 @@
         "scope": "crates/nexus-local-db/src/novel_pool_entries.rs:550-554",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target_date": "V1.49",
+        "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
-        "id": "R-V146P4-QC3-S1",
-        "title": "Expand trace coverage beyond promote_to_active (only 1 of 9 mutation paths has capture test)",
-        "severity": "low",
-        "source": "qc3 (performance/reliability) S-1",
-        "scope": "crates/nexus-local-db/src/novel_pool_entries.rs + inspiration_items.rs",
-        "decision": "defer",
-        "owner": "@fullstack-dev-2",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
+        "target": "V1.50"
       },
       {
         "id": "R-V146P4-QC3-S2",
@@ -258,26 +124,13 @@
         "scope": "crates/nexus-local-db/src/novel_pool_entries.rs + inspiration_items.rs (module-level docs)",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target_date": "V1.49",
+        "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-pool-observability]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
+        "target": "V1.50"
       }
     ],
     "2026-06-14-v1.46-research-auto-chain-e2e": [
-      {
-        "id": "R-V146P3-QC1-S1",
-        "title": "preset_version = 2 magic number duplicated across test assertion and seed SQL",
-        "severity": "low",
-        "source": "qc1 (architecture/maintainability) S-1",
-        "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:184 (assertion) + :123 (seed SQL)",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
       {
         "id": "R-V146P3-QC3-S1",
         "title": "Raw SQL fixture duplicates schema knowledge (insert_research_schedule)",
@@ -286,10 +139,10 @@
         "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:108-135",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.49",
+        "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
+        "target": "V1.50"
       },
       {
         "id": "R-V146P3-QC3-S2",
@@ -299,10 +152,10 @@
         "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:138-145",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.49",
+        "target_date": "V1.50",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
-        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
+        "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass §1.4.]",
+        "target": "V1.50"
       }
     ],
     "2026-06-14-v1.46-spec-cli-hygiene": [
@@ -426,21 +279,7 @@
         "closure_evidence": "iteration/v1.48 @ 397ee075 (commit d17c3182)"
       }
     ],
-    "2026-06-15-v1.47-gate-remediation-audit": [
-      {
-        "id": "R-V147P1-01",
-        "title": "Future UX gap — intake re-trigger on existing Work (creator bootstrap creates a new Work; no daemon schedule add --work-id path)",
-        "severity": "low",
-        "source": "P1 dev follow-up",
-        "scope": "nexus42 CLI / daemon schedule add surface",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.49",
-        "tracking_link": ".mstar/status.json residual_findings[2026-06-15-v1.47-gate-remediation-audit][R-V147P1-01]",
-        "note": "P4 attach if capacity. [P-last T3: bulk-deferred to V1.49.]",
-        "target_date": "V1.49"
-      }
-    ],
+    "2026-06-15-v1.47-gate-remediation-audit": [],
     "2026-06-15-v1.47-reflection-loop-findings": [
       {
         "id": "R-V147P0-01",
@@ -539,48 +378,52 @@
         "closure_evidence": "iteration/v1.48 @ e2e51823 (commit cdae5c5f)"
       }
     ],
-    "2026-06-16-v1.48-serial-hardening": [
+    "2026-06-16-v1.48-serial-hardening": [],
+    "2026-06-16-v1.48-findings-producer": [],
+    "2026-06-17-v1.49-author-desk-ux": [],
+    "2026-06-17-v1.49-findings-lifecycle": [
       {
-        "id": "R-V148P4-W2",
-        "title": "creator works reconcile-chapters has no confirmation or dry-run surface before mass filesystem frontmatter mutation",
-        "severity": "low",
-        "source": "qc2 W-2 (P4 tri-review)",
-        "scope": "crates/nexus42/src/commands/creator/works/mod.rs::handle_reconcile_chapters + daemon POST handler",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-serial-hardening/qc-consolidated.md",
-        "note": "Deferred to V1.49 UX plan. P4-fix1 scope covers atomic write + resynced counter + lock release only. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
-      },
-      {
-        "id": "R-V148P4-W3",
-        "title": "reconcile-chapters holds Work runtime lock for full filesystem walk + DB + file I/O duration",
+        "id": "R-V149P0-01",
+        "title": "CLI `creator run` client-side findings fetch still uses `?status=open`, missing V1.49 `triaged` actionable set",
         "severity": "medium",
-        "source": "qc3 W-3 (P4 tri-review)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs::reconcile_chapters + reconcile_from_filesystem",
+        "source": "P0 implementer (out-of-scope finding)",
+        "scope": "crates/nexus42/src/commands/creator/run.rs::assemble_open_findings_block (line ~586 builds `/v1/local/works/{work_id}/findings?status=open&limit=200`)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-serial-hardening/qc-consolidated.md",
-        "note": "Deferred to V1.49. Consider batching / chunked async processing or not holding runtime lock during best-effort file rewrites. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
+        "target": "V1.50",
+        "target_date": "V1.50",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md §Residual additions",
+        "note": "V1.49 P0 widened DAO SQL + auto_chain consumer; CLI client-side fetch at run.rs::assemble_open_findings_block still hard-codes `?status=open`. Suggested fix at V1.50: extend Local API ListFindingsQuery.status to accept comma-separated list (or add `:actionable` endpoint) + update CLI to pass `open,triaged` + CLI integration test. Auto-chain path (production) is unaffected — already uses widened DAO filter."
       }
     ],
-    "2026-06-16-v1.48-findings-producer": [
+    "2026-06-17-v1.49-narrative-indexes": [
       {
-        "id": "R-V148P0-W1",
-        "title": "load_and_parse_review_report path resolution is app-controlled; recommend safe-resolve guard or invariant test before P1/P2 prompt injection surfaces",
+        "id": "R-V149P1-01",
+        "title": "Draft overlay narrative-indexes.md §3 lists a 4-column F### table (id|description|status|chapters) while claiming alignment with the 5-column scaffolded template (ID|Description|Planted|Paid off|Status); overlay table to be reconciled at the P5 fold into workflow-profile.md §4.6.",
         "severity": "low",
-        "source": "qc2 W-1 (P0 tri-review)",
-        "scope": "crates/nexus-orchestration/src/auto_chain.rs::load_and_parse_review_report",
+        "source": "P1 implementer (spec/code reconciliation)",
+        "scope": ".mstar/knowledge/specs/novel-writing/narrative-indexes.md §3; runtime uses the scaffolded template 5-column shape (crates/nexus-orchestration/src/narrative_index.rs)",
         "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target_date": "V1.49",
-        "tracking_link": ".mstar/plans/reports/2026-06-16-v1.48-findings-producer/qc-consolidated.md",
-        "note": "Deferred. P0 work_ref is app-controlled today; P1+ prompt injection surfaces `rule_suggestion` and `body` to LLMs, so a small safe-resolve guard or invariant test should be added before that touch point. [P-last T3: bulk-deferred to V1.49.]",
-        "target": "V1.49"
+        "owner": "@writing-specialist or @architect",
+        "target": "V1.49 P5",
+        "target_date": "V1.49 P5",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision",
+        "note": "No runtime behavior gap — the runtime implements the template's 5-column shape (ground truth for round-trip), and the overlay §3 4-column summary maps onto it (Planted+Paid off realize `chapters`; Status honours planned|buried|paid_off). Documentation-only reconciliation when the overlay folds into workflow-profile.md §4.6 at P-last. Also tracks the deferred promotion-concurrency advisory-lock decision (single-writer daemon model + atomic temp+rename is the V1.49 choice; a hard advisory lock is a V1.50 follow-up if multi-writer arrives)."
+      },
+      {
+        "id": "R-V149P1-02",
+        "title": "Intermittent flaky test `fallback_warn_includes_chapter_field` (review_report) fails under full parallel `cargo test -p nexus-orchestration`; passes in isolation. Pre-existing on iteration/v1.49 base.",
+        "severity": "low",
+        "source": "P1 implementer (pre-existing flake, verified against base per .mstar/AGENTS.md protocol); QC3 also verified on origin/main @ be27111b",
+        "scope": "crates/nexus-orchestration/tests/review_report.rs::fallback_warn_includes_chapter_field (self-contained tracing_subscriber capture layer)",
+        "decision": "defer",
+        "owner": "@qa-engineer or @fullstack-dev",
+        "target": "V1.50",
+        "target_date": "V1.50",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Residual additions + qc3.md",
+        "note": "Verified pre-existing per the repo's 'Pre-existing claim verification protocol': reproduces on iteration/v1.49 @ 3630a4e5 (base) with `cargo test -p nexus-orchestration` (full parallel suite — 9 passed, 1 failed in review_report); passes with `cargo test -p nexus-orchestration --test review_report` (in isolation, parallel and serial). QC3 also verified on origin/main @ be27111b with 2/10 failure rate. Cause: global tracing registry contention when many test binaries install/inspect the subscriber concurrently. Not caused by V1.49 P1 — review_report.rs and its capture layer are untouched. Suggested fix: scoped subscriber guard or serializing that single test."
       }
     ]
-  }
+  },
+  "v1_49_iteration_complete": true
 }

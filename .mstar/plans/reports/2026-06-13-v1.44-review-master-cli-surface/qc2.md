@@ -65,7 +65,7 @@ None.
 ### 🟢 Suggestion
 
 - **S1**: Hermetic tests (5) are strictly surface-only (`assert_cmd` on `--help` text). They correctly assert flag presence, subcommand listing, quickstart reference, distinction from `reflection-loop`/`FL-E`, and non-mention of auto-chain (per plan AC and "must not fork FL-E driver" invariant). True daemon integration (route + enqueue body) is explicitly out-of-scope for this test file (comment points to `nexus-daemon-runtime/tests/`). Good P1 discipline.
-- **S2**: Distinction from `stage advance --stage review` is correctly and consistently stamped in help text, quickstart §5 (now primary path + explanatory note), `novel-quality-loop.md` §3.4, `novel-workflow-profile.md` §5.5.2–5.5.3, and `cli-spec.md`. This directly resolves the root cause of R-V143P0-002 (workaround documented the wrong preset).
+- **S2**: Distinction from `stage advance --stage review` is correctly and consistently stamped in help text, quickstart §5 (now primary path + explanatory note), `novel-writing/quality-loop.md` §3.4, `novel-writing/workflow-profile.md` §5.5.2–5.5.3, and `cli-spec.md`. This directly resolves the root cause of R-V143P0-002 (workaround documented the wrong preset).
 - **S3**: Status.json residual for R-V143P0-002 is correctly transitioned to `lifecycle: resolved` with `resolution.commit`, `resolution.plan_id`, and note. Quickstart/spec copy updated to "Shipped V1.44". Audit trail is complete for P-last hygiene.
 - **S4**: All three enqueue paths (`--finding-id`, `--auto-schedule`, and the implicit "list only" path) guard with `CreatorNotSelected` before calling `/schedules`. Creator context flows through the authenticated `DaemonClient`. No new privileged operations.
 

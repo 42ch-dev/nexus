@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.36",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.36-novel-writing-ux-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "depends_on": [
         "2026-06-07-v1.36-novel-chapter-drafting-pipeline"
       ],
@@ -40,8 +40,8 @@
         "v1.36-pending-delivery-compass.md renamed to v1.36-novel-writing-ux-delivery-compass-v1.md (per naming convention)",
         "deferred-features-cross-version-tracker.md: quick status V1.36 Active → Shipped; DF-47/DF-53/DF-59 row updates; DF-57/DF-58 removed from open table (cross-referenced to shipped archive)",
         "shipped-features-tracker.md: 2 new rows (DF-57 V1.36 P2, DF-58 V1.36 P1); V1.36 delivery snapshot section added",
-        "novel-workflow-profile.md Status: Draft (V1.36) → Shipped (V1.36)",
-        "specs/README.md: novel-workflow-profile.md row Draft (V1.36) → Shipped (V1.36)"
+        "novel-writing/workflow-profile.md Status: Draft (V1.36) → Shipped (V1.36)",
+        "specs/README.md: novel-writing/workflow-profile.md row Draft (V1.36) → Shipped (V1.36)"
       ],
       "open_residuals": 1,
       "closed_residuals": 3,

@@ -9,7 +9,7 @@
 //! - Non-blocking: the watcher is a detached `tokio::spawn` task. All
 //!   database errors are logged at `error!` level and never bubbled out.
 //! - Default cadence is 24h (one sweep per day) and the default threshold
-//!   is 96h, matching `.mstar/specs/novel-quality-loop.md`. Both are
+//!   is 96h, matching `.mstar/specs/novel-writing/quality-loop.md`. Both are
 //!   overridable via env vars so the hermetic integration test in
 //!   `crates/nexus-daemon-runtime/tests/master_decision_timeout.rs` can
 //!   drive a sub-second cadence with a tiny threshold.

@@ -146,7 +146,7 @@ This satisfies spec §4 row 3.
 
 ## Spec Stamp Accuracy
 
-The stamps in `.mstar/knowledge/specs/novel-author-experience.md` §4 are:
+The stamps in `.mstar/knowledge/specs/novel-writing/author-experience.md` §4 are:
 
 - Row 1: `Shipped (V1.43 P2)` — accurate; `current_chapter` + chapter table are added/modified in this change.
 - Row 2: `Shipped (V1.43 P2)` — accurate; completed banner is introduced in this change.

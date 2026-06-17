@@ -1,7 +1,7 @@
 # World KB Runtime Architecture
 
 **Status**: Active (V1.40 grill-me locked)  
-**Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](specs/entity-scope-model.md) or [novel-workflow-profile.md](specs/novel-workflow-profile.md).  
+**Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](specs/entity-scope-model.md) or [novel-writing/workflow-profile.md](specs/novel-writing/workflow-profile.md).  
 **Iteration**: [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md)
 
 ---

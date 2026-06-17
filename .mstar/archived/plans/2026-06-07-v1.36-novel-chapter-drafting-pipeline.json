@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.36",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "depends_on": [
         "2026-06-07-v1.36-novel-artifact-layout-and-templates"
       ],

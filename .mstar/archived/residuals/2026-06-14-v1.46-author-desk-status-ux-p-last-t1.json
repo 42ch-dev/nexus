@@ -1,0 +1,58 @@
+{
+  "plan_id": "2026-06-14-v1.46-author-desk-status-ux",
+  "archived_at": "2026-06-18T01:15:00+08:00",
+  "archived_by": "PM (V1.49 P-last T1 WL-A hygiene fix wave)",
+  "residual_findings": [
+    {
+      "id": "R-V146P0-QC1-S2",
+      "title": "capture_findings_output test helper duplicates print_findings_summary formatting logic",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 (architecture/maintainability) S-2",
+      "scope": "crates/nexus42/src/commands/creator/works/mod.rs (production lines 1264-1313; test helper lines 1485-1529)",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit 435973b5, merged at 60311a9b): share findings-summary formatter between prod and test. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + 435973b5 (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "435973b5"
+      ],
+      "re_review_commits": []
+    },
+    {
+      "id": "R-V146P0-QC2-S1",
+      "title": "enrich_status_json tests use minimal finding_json helper; full element shape fidelity not asserted",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc2 (security/correctness) S-1",
+      "scope": "crates/nexus42/src/commands/creator/works/mod.rs:1638-1752 (enrich_* tests) + helper at 1411",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit 7b92f317, merged at 60311a9b): assert full finding element-shape fidelity in enrich. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + 7b92f317 (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "7b92f317"
+      ],
+      "re_review_commits": []
+    },
+    {
+      "id": "R-V146P0-QC3-S3",
+      "title": "Consider skipping stale fetch when findings fetch already failed",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc3 (performance/reliability) S-002",
+      "scope": "crates/nexus42/src/commands/creator/works/mod.rs:380-388 (silent .ok() swallowing on fetch failures)",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit 940efdc0, merged at 60311a9b): route human stale banner through short-timeout fetch (parity with JSON path). Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + 940efdc0 (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "940efdc0"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}

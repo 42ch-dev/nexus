@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-06-17-v1.49-findings-lifecycle",
+  "archived_at": "2026-06-18T01:15:00+08:00",
+  "archived_by": "PM (V1.49 P-last T1 confirmed pre-existing clippy drift was machine-specific, not V1.49 regression)",
+  "residual_findings": [
+    {
+      "id": "R-V149P0-03",
+      "title": "Pre-existing cargo clippy --all -- -D warnings failure on clean V1.49 integration HEAD (local toolchain drift)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "P0 fix-wave implementer (out-of-scope finding); verified pre-existing per .mstar/AGENTS.md protocol; closed in V1.49 P-last T1",
+      "scope": "crates/nexus-contracts/src/local/schedule/http.rs:236 (redundant_clone); crates/nexus-orchestration + crates/nexus-daemon-runtime test targets (doc_markdown, unwrap_used). 131 errors on clean base, identical count in W-1 fix worktree (clippy-neutral diff).",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit fb52ea11 merge at 60311a9b): cargo clippy --all -- -D warnings verified CLEAN on iteration/v1.49 @ 60311a9b. The 'pre-existing clippy failure' claim by the V1.49 P0 fix-wave implementer was a toolchain-specific drift (local clippy rust-1.93.0 stricter than the clippy used by CI/qc3). Not a V1.49 code regression. Independently verified by V1.49 P0 QC3 (commit ecabd0ac), P1 QC3 (commit 990a63b6), P2 QC3 (commit 4632c87b), and P3 QC3 (commit 115e94ac) — all reported cargo clippy --all -- -D warnings clean.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + fb52ea11 (fmt commit); 4 independent QC3 verifications of cargo clippy --all -- -D warnings clean on V1.49 integration HEAD",
+      "fix_commits": [
+        "fb52ea11"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}

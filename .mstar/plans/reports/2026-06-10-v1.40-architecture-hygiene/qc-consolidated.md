@@ -11,7 +11,7 @@ generated_at: 2026-06-10
 - **Working branch**: `feature/v1.40-architecture-hygiene` (HEAD `60d95a05`)
 - **Review range / Diff basis**: `iteration/v1.40..feature/v1.40-architecture-hygiene`
 - **Iteration compass**: `.mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md`
-- **Primary spec**: `.mstar/knowledge/specs/novel-workflow-profile.md` §5.5.4
+- **Primary spec**: `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §5.5.4
 
 ## Reviewer verdicts
 | Reviewer | Lens | Verdict | Critical | Warning | Suggestion |

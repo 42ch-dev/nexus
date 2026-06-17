@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.36",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.36-pending-delivery-compass.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "depends_on": [
         "2026-06-07-v1.36-harness-docs-prepare"
       ],
@@ -29,10 +29,10 @@
       "qc": "skipped — docs/spec lock only (no code); per mstar-harness-core §Non-Bypass Constraints (Product-docs-only and tech-spec-only can skip QC tri-review only with explicit `QC: skipped — <reason>`)",
       "qa": "PM-validated (all 16 acceptance items PASS per architect verification; cross-spec consistency confirmed across novel-workflow-profile / cli-spec §13.1 / novel-writing-sync-contract / work-experience-model / orchestration-engine §7.9; architect sign-off recorded in plan file at lines 94-120)",
       "shipped": [
-        "novel-workflow-profile.md §3.1/§3.5/§4.1/§4.1.1/§4.3/§5/§5.3/§5.4 (full spec lock)",
+        "novel-writing/workflow-profile.md §3.1/§3.5/§4.1/§4.1.1/§4.3/§5/§5.3/§5.4 (full spec lock)",
         "orchestration-engine.md §7.9 Master preset gates mechanism (first V1.36 Master change)",
         "cli-spec.md §13.1 Works/<work_ref>/ layout + work_chapters SSOT + World KB cross-link",
-        "novel-writing-sync-contract.md Works/<work_ref>/Stories/ scan rules",
+        "novel-writing/sync-contract.md Works/<work_ref>/Stories/ scan rules",
         "work-experience-model.md work_profile + work_ref extension",
         "creator-workflow.md produce stage novel profile paths + DF-53 note",
         "specs/README.md novel-workflow-profile Draft (V1.36) index entry (confirmed correct; status flips to Shipped on P4 closeout)",
@@ -46,7 +46,7 @@
         "new_tasks": [
           "T15"
         ],
-        "new_task_summary": "T15: Add gates: field to orchestration-engine.md §7.9 Master (work_field/filesystem/previous_preset kinds + enqueue-time evaluation + --force-gates override). Add novel-specific gate values in novel-workflow-profile.md §5.3 (Draft overlay) + world_binding toggle in §5.3.4 + scaffold protocol in §5.4 (file enumeration + template sources + work_chapters row seeding + atomicity + idempotency). This is the first V1.36 Master spec change (orchestration-engine.md).",
+        "new_task_summary": "T15: Add gates: field to orchestration-engine.md §7.9 Master (work_field/filesystem/previous_preset kinds + enqueue-time evaluation + --force-gates override). Add novel-specific gate values in novel-writing/workflow-profile.md §5.3 (Draft overlay) + world_binding toggle in §5.3.4 + scaffold protocol in §5.4 (file enumeration + template sources + work_chapters row seeding + atomicity + idempotency). This is the first V1.36 Master spec change (orchestration-engine.md).",
         "downstream_plan_changes": {
           "2026-06-07-v1.36-novel-project-init-preset": "Plan rewritten: T1 preset YAML + prompts (incl. World binding); T2 scaffold capability sub-tasks T2a-T2i (file enumeration per spec §5.4.1); T3 work_chapters row seeding per spec §5.4.3; T4 works PATCH per spec §5.4.4; T5 CLI wiring --init-preset + --force-gates; T6 idempotency; T7 hermetic tests T7a-T7e (incl. gate-pass verification T7e); T8 cli-spec update"
         },

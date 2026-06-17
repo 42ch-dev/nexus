@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.37",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "description": "Prepare — V1.37 compass, plan stubs, tracker/status sync",
       "done_at": "2026-06-07T23:45:00+08:00",
       "qc": "skipped — PM-domain harness docs/status/tracker preparation only; no product code or runtime behavior changed",

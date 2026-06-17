@@ -34,7 +34,7 @@ Two of three reviewers raised Request Changes; qc-specialist-2 marked Approve bu
 | Finding | Reviewer | Title | Severity (JSON) | Source |
 | --- | --- | --- | --- | --- |
 | F-QC1-W1 | qc-specialist | `cli-command-ia.md` not updated despite plan T5 listing it | `medium` | qc1.md §Warning W-1 |
-| F-QC1-W2 | qc-specialist | `novel-author-experience.md` not updated despite being a plan primary spec | `medium` | qc1.md §Warning W-2 |
+| F-QC1-W2 | qc-specialist | `novel-writing/author-experience.md` not updated despite being a plan primary spec | `medium` | qc1.md §Warning W-2 |
 | F-QC1-W3 | qc-specialist | Duplicate Work fetch when both `--finding-id` and `--auto-schedule` are used | `low` | qc1.md §Warning W-3 |
 | F-QC1-W4 | qc-specialist | `--auto-schedule` uses global stale count but work-scoped `master_findings` (semantic gap) | `medium` | qc1.md §Warning W-4 |
 | F-QC2-W1 | qc-specialist-2 | `--finding-id` path doesn't re-assert `target_executor == "master"` before serializing | `medium` | qc2.md W1 |
@@ -48,7 +48,7 @@ Two of three reviewers raised Request Changes; qc-specialist-2 marked Approve bu
 | ID | Title | Severity | Decision | Owner | Target | Tracking |
 | --- | --- | --- | --- | --- | --- | --- |
 | R-V144P1-001 | `cli-command-ia.md` not updated for review-master / audit-chapter | `medium` | fix (this wave) | @fullstack-dev-2 | V1.44 P1 ship | qc1.md W-1 |
-| R-V144P1-002 | `novel-author-experience.md` not updated for review-master | `medium` | fix (this wave) | @fullstack-dev-2 | V1.44 P1 ship | qc1.md W-2 |
+| R-V144P1-002 | `novel-writing/author-experience.md` not updated for review-master | `medium` | fix (this wave) | @fullstack-dev-2 | V1.44 P1 ship | qc1.md W-2 |
 | R-V144P1-003 | `--auto-schedule` semantic gap: global stale check vs work-scoped action | `medium` | fix (this wave) | @fullstack-dev-2 | V1.44 P1 ship | qc1.md W-4 / qc2.md W2 / qc3.md W-2 |
 | R-V144P1-004 | `--finding-id` doesn't re-assert `target_executor == "master"` before serialize | `medium` | fix (this wave) | @fullstack-dev-2 | V1.44 P1 ship | qc2.md W1 |
 | R-V144P1-005 | Duplicate Work fetch when both `--finding-id` and `--auto-schedule` | `low` | fix (this wave) | @fullstack-dev-2 | V1.44 P1 ship | qc1.md W-3 |

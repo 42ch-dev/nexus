@@ -287,6 +287,20 @@ pub async fn get_finding_creator_scoped_handler(
 }
 /// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
 ///
+/// V1.49 F6 (`findings-lifecycle.md` §2.1): when the patch moves `status`,
+/// the DAO validates the lifecycle transition. Illegal transitions surface
+/// as HTTP `422` with the stable error code `INVALID_TRANSITION`; invalid
+/// PATCH enum values (`severity` / `status` membership / `target_executor`)
+/// surface as `422 INVALID_INPUT`. The DAO emits **typed** variants
+/// (`IllegalTransition` / `InvalidEnum`) for these, so the mapping below
+/// carries no string-prefix sniffing (see [`NexusApiError::BadRequest`] in
+/// `errors.rs`).
+///
+/// V1.49 P0 W-1 (qc1 S-1): a self-loop — `status: "<current>"` on a finding
+/// already in that state — is **rejected** as `INVALID_TRANSITION`. Callers
+/// that only want to refresh `updated_at` (without changing status) must
+/// omit `status` from the patch body entirely.
+///
 /// # Panics
 /// Panics if the finding row disappears between successful update and re-fetch
 /// (database invariant violation — should never happen).
@@ -310,8 +324,50 @@ pub async fn update_finding_handler(
         rule_suggestion: body.rule_suggestion,
     };
     let now = chrono::Utc::now().timestamp();
-    let updated =
-        findings::update_finding(state.pool(), &creator_id, &finding_id, &patch, now).await?;
+    let updated = findings::update_finding(state.pool(), &creator_id, &finding_id, &patch, now)
+        .await
+        .map_err(|err| match err {
+            // V1.49 P0 W-1: the DAO now emits typed variants for the PATCH
+            // surface. `IllegalTransition` → INVALID_TRANSITION (422);
+            // `InvalidEnum` → INVALID_INPUT (422). Both are observed with a
+            // structured `tracing::warn!` (qc3 S-2) so repeated illegal PATCH
+            // attempts leave a daemon-side trail. No string-sniffing: each
+            // variant carries its own structured payload.
+            nexus_local_db::LocalDbError::IllegalTransition { from, to } => {
+                tracing::warn!(
+                    creator_id = %creator_id,
+                    finding_id = %finding_id,
+                    from = %from,
+                    to = %to,
+                    "findings PATCH: illegal lifecycle transition"
+                );
+                NexusApiError::BadRequest {
+                    code: "INVALID_TRANSITION".to_string(),
+                    message: format!("invalid status transition '{from}' → '{to}'"),
+                }
+            }
+            nexus_local_db::LocalDbError::InvalidEnum {
+                field,
+                value,
+                allowed,
+            } => {
+                tracing::warn!(
+                    creator_id = %creator_id,
+                    finding_id = %finding_id,
+                    field = %field,
+                    value = %value,
+                    "findings PATCH: invalid enum value"
+                );
+                NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: format!(
+                        "invalid {field} value '{value}'; allowed: {}",
+                        allowed.join(", ")
+                    ),
+                }
+            }
+            other => other.into(),
+        })?;
     if !updated {
         return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
     }
@@ -470,5 +526,88 @@ pub async fn list_stale_findings_handler(
         threshold_seconds,
         now_epoch,
         findings,
+    }))
+}
+
+// ─── Retention prune (V1.49 P3, quality-loop §9.4) ──────────────────────────
+
+/// Query parameters for `POST /v1/local/findings/prune`.
+#[derive(Debug, Default, Deserialize)]
+pub struct PruneFindingsQuery {
+    /// Retention window in days; defaults to [`findings::RETENTION_DEFAULT_DAYS`]
+    /// (90). `resolved` findings whose `updated_at` is older than
+    /// `now - older_than_days` are eligible.
+    #[serde(default)]
+    pub older_than_days: Option<i64>,
+    /// When `true`, return the count of rows that WOULD be deleted without
+    /// deleting them.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
+}
+
+/// Response for `POST /v1/local/findings/prune`.
+#[derive(Debug, Serialize)]
+pub struct PruneFindingsResponse {
+    /// Number of `resolved` rows deleted (or, in dry-run, that WOULD be deleted).
+    pub count: u64,
+    /// Retention window (days) used for the cutoff.
+    pub older_than_days: i64,
+    /// Whether this was a dry-run (no rows deleted).
+    pub dry_run: bool,
+    /// Server-side epoch used as `now` for the cutoff calculation.
+    pub now_epoch: i64,
+}
+
+/// `POST /v1/local/findings/prune` — prune (or preview) `resolved` findings
+/// older than the retention window (V1.49 P3, `novel-writing/quality-loop.md`
+/// §9.4).
+///
+/// Wraps [`findings::prune_resolved_findings_older_than`] (or the read-only
+/// [`findings::count_resolved_findings_older_than`] when `dry_run=true`). The
+/// DAO is global across creators, which matches the local-first single-creator
+/// daemon model (one active creator per workspace). Requires an active creator
+/// for auth consistency with the other Local API endpoints.
+///
+/// # Errors
+///
+/// Returns [`NexusApiError::AuthRequired`] when no active creator is set, or
+/// [`NexusApiError::Internal`] on database failure.
+pub async fn prune_findings_handler(
+    State(state): State<WorkspaceState>,
+    Query(query): Query<PruneFindingsQuery>,
+) -> Result<Json<PruneFindingsResponse>, NexusApiError> {
+    let _creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+    let older_than_days = query
+        .older_than_days
+        .unwrap_or(findings::RETENTION_DEFAULT_DAYS);
+    let dry_run = query.dry_run.unwrap_or(false);
+    let retention_seconds = older_than_days.saturating_mul(86_400);
+    let now_epoch = chrono::Utc::now().timestamp();
+
+    let count: u64 = if dry_run {
+        let n = findings::count_resolved_findings_older_than(
+            state.pool(),
+            now_epoch,
+            retention_seconds,
+        )
+        .await?;
+        u64::try_from(n).unwrap_or(0)
+    } else {
+        u64::from(
+            findings::prune_resolved_findings_older_than(
+                state.pool(),
+                now_epoch,
+                retention_seconds,
+            )
+            .await?,
+        )
+    };
+
+    Ok(Json(PruneFindingsResponse {
+        count,
+        older_than_days,
+        dry_run,
+        now_epoch,
     }))
 }

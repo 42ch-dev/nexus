@@ -386,7 +386,7 @@ Rules:
 
 - Only presets declaring `run_intents` including `work_init` may be used as the **first** run on a new Work (see [orchestration-engine.md](./orchestration-engine.md) §7.7).
 - `creator run` creates/updates schedules via daemon Local API; it does **not** replace `daemon schedule` for power users.
-- When `work_id` is omitted, resolve [novel-work-pool.md](./novel-work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
+- When `work_id` is omitted, resolve [novel-writing/work-pool.md](./novel-writing/work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
 - FL-E presets are identified via `stage_for_preset()` reverse mapping; the runner calls `stage_advance` with `force: false` (stage ordering enforced).
 
 **V1.45 shipped:** Generic `RunCommand` struct replaces enum; `creator/mod.rs` uses `#[command(flatten)]` instead of `#[command(subcommand)]`. Legacy handler code preserved as `#[allow(dead_code)]` for P1/P2 migration. Old `start`/`continue`/`stage`/`resume`/`audit-chapter`/`review-master` subcommands are no longer exposed.
@@ -399,7 +399,7 @@ Rules:
 
 ### 6.2G `nexus42 creator world` (V1.40 — DF-63 P0)
 
-Normative World binding: [novel-workflow-profile.md §3.5](./novel-workflow-profile.md).
+Normative World binding: [novel-writing/workflow-profile.md §3.5](./novel-writing/workflow-profile.md).
 
 | Command | Purpose |
 | --- | --- |
@@ -419,7 +419,7 @@ Rules:
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
-Normative: [novel-multi-work-lifecycle.md](./novel-multi-work-lifecycle.md), [novel-work-pool.md](./novel-work-pool.md).
+Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-lifecycle.md), [novel-writing/work-pool.md](./novel-writing/work-pool.md).
 
 **Tier:** Primary for multi-book operators; complements **`creator run`** (single-Work actions).
 
@@ -562,7 +562,7 @@ V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = pau
 - 错误提示优先给行动建议，而不是只给报错文本
 - 如果检测到可用 ACP Registry agent，应优先引导用户选择默认 agent
 
-> **V1.43 Implemented (P1):** §7.1 UX principles are now enforced by CLI copy: daemon-not-reachable, `preset_gates_failed`, missing scaffold, work-completed, and open-findings errors all produce actionable one-line next steps citing `docs/novel-writing-quickstart.md` §1–§6 per `novel-author-experience.md` §3 remediation table. Help-text for `creator run` / `creator works` uses quickstart vocabulary per §7.1.
+> **V1.43 Implemented (P1):** §7.1 UX principles are now enforced by CLI copy: daemon-not-reachable, `preset_gates_failed`, missing scaffold, work-completed, and open-findings errors all produce actionable one-line next steps citing `docs/novel-writing-quickstart.md` §1–§6 per `novel-writing/author-experience.md` §3 remediation table. Help-text for `creator run` / `creator works` uses quickstart vocabulary per §7.1.
 
 ---
 
@@ -748,7 +748,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 约束：
 
-- 只允许操作工作区白名单路径；**默认**正文树根为 **`Works/<work_ref>/Stories/`**（章节文件如 **`ch<nn>-<slug>.md`**）；**`work_ref`** 与 **`work_id`** 的映射以 **preset + 本地 DB `works` 表** 为准，不得仅靠目录名推断（见 [novel-workflow-profile.md](./novel-workflow-profile.md)）
+- 只允许操作工作区白名单路径；**默认**正文树根为 **`Works/<work_ref>/Stories/`**（章节文件如 **`ch<nn>-<slug>.md`**）；**`work_ref`** 与 **`work_id`** 的映射以 **preset + 本地 DB `works` 表** 为准，不得仅靠目录名推断（见 [novel-writing/workflow-profile.md](./novel-writing/workflow-profile.md)）
 - **研究型产出**默认在 **`{$workspace_dir}/.nexus42/references/<run-id>/`**（见 §6.6B）；历史布局 **`References/<creator_ref>/`** 仅作为兼容叙述，**不再**由 `init` 默认创建
 - **`research.*`**（若暴露为 ACP 工具名）与 **`ReferenceSource`** 索引合同仍与 `manuscript.*` 分离，防止越权读写任意文件
 - 当 `output_manuscript=false` 时，`manuscript.write` 不作为默认创作路径，但能力本身仍存在；平台托管与本地 Agent 的能力面保持一致
@@ -811,7 +811,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 `<workspace>` **默认不**包含固定业务子树；首次 `init` 只登记创作根与配置，**不**默认创建 `Stories/`、`References/`。用户可见目录由 **preset 产物策略** 在运行中创建。
 
-**`novel-writing` 预设（V1.36 normative）** — 小说正文布局见 [novel-workflow-profile.md](./novel-workflow-profile.md)：
+**`novel-writing` 预设（V1.36 normative）** — 小说正文布局见 [novel-writing/workflow-profile.md](./novel-writing/workflow-profile.md)：
 
 ```text
 <workspace>/
@@ -838,7 +838,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 - **`Works/<work_ref>/Stories/`**
   - 小说章节**正文**主存（sync 扫描根）；**`work_ref`** 与 **`work_id`** 以 **本地 DB `works` 表 + preset** 为准，**不得**仅靠目录名推断。
-- **章节状态真源**在本地 DB `state.db` 的 **`work_chapters` 表**（见 [novel-workflow-profile.md §4.1](./novel-workflow-profile.md)）。`work-status.md` 文件在 V1.36 **已移除**。
+- **章节状态真源**在本地 DB `state.db` 的 **`work_chapters` 表**（见 [novel-writing/workflow-profile.md §4.1](./novel-writing/workflow-profile.md)）。`work-status.md` 文件在 V1.36 **已移除**。
 - **`Works/<work_ref>/Outlines/`**、**`README.md`**
   - 规划与人类概要元数据；**不得**被 sync 模块当作章节正文。
 - **世界设定内容**跨作品（Work）共享，归 **World KB**（见 [entity-scope-model.md §5.4](./entity-scope-model.md)）。`Works/<work_ref>/Worldbuilding/` 子树在 V1.36 **已移除**；通过 `work.world_id` 绑定到 World。
@@ -857,7 +857,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 **Accepted inputs**：
 
 - Preset metadata：`preset_id=novel-writing`、版本、`workspace_slug`、`world_id`、`creator_id`、`work_id`、`work_ref`、`work_profile: novel`（来自本地 DB `works` 表，而非仅目录名）。
-- 正文产物：`Works/<work_ref>/Stories/<chapter-id>.md` 及 manifest / phase metadata（映射到 existing bundle fields such as `manuscript_phase`, source anchors, canonical hashes）。详见 [novel-writing-sync-contract.md](./novel-writing-sync-contract.md)。
+- 正文产物：`Works/<work_ref>/Stories/<chapter-id>.md` 及 manifest / phase metadata（映射到 existing bundle fields such as `manuscript_phase`, source anchors, canonical hashes）。详见 [novel-writing/sync-contract.md](./novel-writing/sync-contract.md)。
 - 研究产物：`.nexus42/references/<run-id>/report.md` 与可选 `artifacts/`，只把合同允许的摘要、引用锚点、`ReferenceSource` / `MemoryItem` 摘录纳入结构化 sync。
 - Session hints：ACP `recommended_skills[]` 解析结果与 agent session metadata（仅作为审计 / 可复现上下文，不作为全文上传许可）。
 

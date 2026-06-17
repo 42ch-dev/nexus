@@ -37,8 +37,8 @@ review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
 
 **Changed files (P3 only):**
 - docs/novel-writing-quickstart.md
-- .mstar/knowledge/specs/novel-author-experience.md
-- .mstar/knowledge/specs/novel-quality-loop.md
+- .mstar/knowledge/specs/novel-writing/author-experience.md
+- .mstar/knowledge/specs/novel-writing/quality-loop.md
 
 ## Docs-Specific Security & Correctness Review
 
@@ -83,7 +83,7 @@ This QC2 review is scoped exclusively to the three changed documentation files f
 - Quickstart §5 now correctly distinguishes:
   - `creator run reflection-loop` → generates findings (FL-E review stage)
   - `creator run novel-review-master` → decides on existing findings (master-decision surface)
-- Spec documents (novel-author-experience.md and novel-quality-loop.md) were updated in lockstep with the quickstart; no drift between user guide and normative supplement.
+- Spec documents (novel-writing/author-experience.md and novel-writing/quality-loop.md) were updated in lockstep with the quickstart; no drift between user guide and normative supplement.
 
 **6. Three-plane IA narrative consistency**
 - "bootstrap = composite", "run <preset_id> = strategy", "works * = atomic subcommands" message is uniform across the quickstart and both specs.

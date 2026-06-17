@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.37",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "depends_on": [
         "2026-06-07-v1.37-harness-docs-prepare"
       ],

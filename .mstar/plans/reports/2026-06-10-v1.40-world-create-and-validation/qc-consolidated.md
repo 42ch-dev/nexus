@@ -11,7 +11,7 @@ generated_at: 2026-06-10
 - **Working branch**: `feature/v1.40-world-create-and-validation` (HEAD `ec726e3a`)
 - **Review range / Diff basis**: `iteration/v1.40..feature/v1.40-world-create-and-validation`
 - **Iteration compass**: `.mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md` (decision #4 = `required` after spec amendment `464d0fba`)
-- **Primary spec**: `.mstar/knowledge/specs/novel-workflow-profile.md` (mandatory binding amendment)
+- **Primary spec**: `.mstar/knowledge/specs/novel-writing/workflow-profile.md` (mandatory binding amendment)
 
 ## Reviewer verdicts
 | Reviewer | Lens | Verdict (initial) | Verdict (re-validation) |

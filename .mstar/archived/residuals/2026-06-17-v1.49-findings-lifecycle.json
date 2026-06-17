@@ -1,0 +1,29 @@
+{
+  "plan_id": "2026-06-17-v1.49-findings-lifecycle",
+  "archived_at": "2026-06-17T19:30:00+08:00",
+  "archived_by": "PM (qc-consolidated verdict: Approve after W-1 targeted re-review)",
+  "residual_findings": [
+    {
+      "id": "R-V149P0-02",
+      "title": "LocalDbError::ConstraintViolation overloading leaks DAO internals + collapses distinct failure classes on the PATCH public surface",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 W-1 + qc2 W-1 (converging); qc3 S-1 cross-reference; raised in wave-1 (2026-06-17) qc-consolidated.md",
+      "scope": "crates/nexus-local-db/src/findings.rs (DAO ConstraintViolation emission sites); crates/nexus-daemon-runtime/src/api/handlers/findings.rs::update_finding_handler; crates/nexus-daemon-runtime/src/api/errors.rs",
+      "decision": "closed",
+      "owner": "V1.49 P0 W-1 fix wave (fullstack-dev)",
+      "closed_at": "2026-06-17T19:30:00+08:00",
+      "closure_note": "V1.49 P0 W-1 fix wave (commit 7da35dd5, merged at c4b4500f): DAO-level split — IllegalTransition { from, to } + InvalidEnum { field, value, allowed } added alongside retained ConstraintViolation (other callers in works.rs / inspiration_items.rs / create-path validators / handlers/works.rs). Handler remaps: IllegalTransition→INVALID_TRANSITION (422), InvalidEnum→INVALID_INPUT (422), with structured messages (no 'findings' table-name leak) and tracing::warn! on both arms. Renamed test findings_lifecycle_rejects_unknown_status_value→findings_lifecycle_rejects_unknown_status_with_invalid_input. Added 2 new tests: findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum (4 cases) + findings_lifecycle_rejects_sql_injection_style_status (qc2 S-2 rolled). 50 hermetic tests pass. Targeted re-review: qc-specialist Approve @ 1a3a3646; qc-specialist-2 Approve @ fcf6cf95.",
+      "closure_evidence": "iteration/v1.49 @ c4b4500f (merge) + 7da35dd5 (fix commit) + 1a3a3646 (qc1 re-review) + fcf6cf95 (qc2 re-review); qc-consolidated.md re-review Approve verdict",
+      "fix_commits": [
+        "7da35dd5",
+        "c9f10af6",
+        "c4b4500f"
+      ],
+      "re_review_commits": [
+        "1a3a3646",
+        "fcf6cf95"
+      ]
+    }
+  ]
+}

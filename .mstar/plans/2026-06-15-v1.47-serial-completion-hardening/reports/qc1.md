@@ -55,7 +55,7 @@ generated_at: "2026-06-15"
   -> Recommend either (a) tightening the docstring to state that the
   volume-aware implementation uses row-count as the proxy for the
   `current_chapter >= total` clause, or (b) raising a spec-reconciliation
-  residual so §6.1 of `novel-workflow-profile.md` documents the V1.44 P2
+  residual so §6.1 of `novel-writing/workflow-profile.md` documents the V1.44 P2
   divergence (spec text still literally says `current_chapter >=
   total_planned_chapters`). This is a pre-existing spec↔implementation seam
   surfaced — not introduced — by P2; low impact.
@@ -84,7 +84,7 @@ generated_at: "2026-06-15"
   - Source Reference: `crates/nexus-local-db/src/work_chapters.rs` (new test
     `spec_4_5_7_completion_requires_all_section_6_1_conditions`, docstring vs
     test body); `is_work_completed` @ `work_chapters.rs:767–823`; spec
-    `.mstar/knowledge/specs/novel-workflow-profile.md` §6.1 (line 807+) and
+    `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §6.1 (line 807+) and
     §4.5.2
   - Confidence: High
 

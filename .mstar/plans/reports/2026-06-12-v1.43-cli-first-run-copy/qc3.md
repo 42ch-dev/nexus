@@ -39,7 +39,7 @@ generated_at: 2026-06-12T19:52:11+08:00
 
 ### 🟡 Warning
 - **F-W01 — Daemon-not-reachable quickstart citation is not wired to user-visible output.**
-  `CliError::daemon_not_reachable_quickstart()` (`crates/nexus42/src/errors.rs:247`) was added and tested, but all production call sites in `crates/nexus42/src/api/daemon_client.rs:585,622,659,695` still use the generic `daemon_not_reachable("Start the daemon with `nexus42 daemon start` and retry.")` constructor. A user whose daemon is down therefore receives a suggestion that **does not** cite `docs/novel-writing-quickstart.md §1`, contradicting the `novel-author-experience.md` §3 remediation table (row 1 marked "Shipped") and the `cli-spec.md` §7.1 V1.43 stamp.
+  `CliError::daemon_not_reachable_quickstart()` (`crates/nexus42/src/errors.rs:247`) was added and tested, but all production call sites in `crates/nexus42/src/api/daemon_client.rs:585,622,659,695` still use the generic `daemon_not_reachable("Start the daemon with `nexus42 daemon start` and retry.")` constructor. A user whose daemon is down therefore receives a suggestion that **does not** cite `docs/novel-writing-quickstart.md §1`, contradicting the `novel-writing/author-experience.md` §3 remediation table (row 1 marked "Shipped") and the `cli-spec.md` §7.1 V1.43 stamp.
   -> Replace the four `daemon_client.rs` call sites with `CliError::daemon_not_reachable_quickstart()` (or make the generic constructor default to the quickstart citation and remove the dead helper).
 
 ### 🟢 Suggestion
@@ -63,7 +63,7 @@ generated_at: 2026-06-12T19:52:11+08:00
 
 - **Finding ID:** F-W01
   - Source Type: git-diff + spec-audit + manual-reasoning
-  - Source Reference: `crates/nexus42/src/errors.rs:247-255`; `crates/nexus42/src/api/daemon_client.rs:585,622,659,695`; `.mstar/knowledge/specs/novel-author-experience.md:52`; `.mstar/knowledge/specs/cli-spec.md:583`
+  - Source Reference: `crates/nexus42/src/errors.rs:247-255`; `crates/nexus42/src/api/daemon_client.rs:585,622,659,695`; `.mstar/knowledge/specs/novel-writing/author-experience.md:52`; `.mstar/knowledge/specs/cli-spec.md:583`
   - Confidence: High
 
 - **Finding ID:** F-S01
@@ -165,7 +165,7 @@ No eager construction in hot loops. No perf overhead concern.
 ## Spec Stamp Accuracy
 
 - `cli-spec.md` §7.1 V1.43 stamp claims daemon-not-reachable and all remediation classes produce "actionable one-line next steps citing `docs/novel-writing-quickstart.md` §1–§6". This is **partially inaccurate**: the daemon-not-reachable path does not cite the quickstart, and the run.rs work-completed message is two-line.
-- `novel-author-experience.md` §3 row 1 checkbox is marked `- [x] Shipped (V1.43 P1)` for "Daemon not reachable". Because the production error does not include the quickstart citation, this checkbox should remain unchecked or be qualified until F-W01 is fixed.
+- `novel-writing/author-experience.md` §3 row 1 checkbox is marked `- [x] Shipped (V1.43 P1)` for "Daemon not reachable". Because the production error does not include the quickstart citation, this checkbox should remain unchecked or be qualified until F-W01 is fixed.
 
 ## Help-Text Style Consistency
 
@@ -173,7 +173,7 @@ New `creator run` and `creator works` doc comments in `crates/nexus42/src/comman
 
 ## Risks / Open Questions for PM
 
-1. **F-W01 scope**: Should the fix for the unwired daemon-not-reachable citation be done in this P1 review cycle, or deferred to a follow-up hotfix? If deferred, the `novel-author-experience.md` §3 checkbox and `cli-spec.md` §7.1 stamp should be reverted to avoid claiming shipped behavior.
+1. **F-W01 scope**: Should the fix for the unwired daemon-not-reachable citation be done in this P1 review cycle, or deferred to a follow-up hotfix? If deferred, the `novel-writing/author-experience.md` §3 checkbox and `cli-spec.md` §7.1 stamp should be reverted to avoid claiming shipped behavior.
 2. **Downstream message parsers**: Are there any out-of-repo consumers (e.g. platform E2E tests, user scripts) that grep for `NOVEL_COMPLETE` or the old schedule.rs completion message? If so, the message changes need a migration note.
 3. **Test strategy**: Two of the seven new/updated tests are literal-string snapshots (#1, #7). Does the team want a follow-up plan slice to convert these into path-covering assertions?
 

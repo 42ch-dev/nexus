@@ -41,8 +41,8 @@ review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
 
 **Changed files (P3 only):**
 - `docs/novel-writing-quickstart.md`
-- `.mstar/knowledge/specs/novel-author-experience.md`
-- `.mstar/knowledge/specs/novel-quality-loop.md`
+- `.mstar/knowledge/specs/novel-writing/author-experience.md`
+- `.mstar/knowledge/specs/novel-writing/quality-loop.md`
 
 ## Architecture & Maintainability Review
 
@@ -68,7 +68,7 @@ All 13 old→new mappings from the compass migration appendix were checked again
 
 ### Spec consistency
 
-Both spec files (`novel-author-experience.md`, `novel-quality-loop.md`) show the same CLI surface as the quickstart for all overlapping commands. The three-plane IA (bootstrap / works / run) is consistently applied. No drift between user guide and normative supplements was found for the command names themselves.
+Both spec files (`novel-writing/author-experience.md`, `novel-writing/quality-loop.md`) show the same CLI surface as the quickstart for all overlapping commands. The three-plane IA (bootstrap / works / run) is consistently applied. No drift between user guide and normative supplements was found for the command names themselves.
 
 ### Surgical changes
 
@@ -114,7 +114,7 @@ The comment "List master findings (default)" describes the V1.44 `review-master`
 
 **W-2: Stale `creator run status` reference in quality-loop spec §6**
 
-`.mstar/knowledge/specs/novel-quality-loop.md` line 108:
+`.mstar/knowledge/specs/novel-writing/quality-loop.md` line 108:
 
 ```
 2. `creator run status` banner lists stale count + `novel-review-master` hint.
@@ -132,7 +132,7 @@ The P3 commit `2c1f2e76` ("T5 — update novel-quality-loop §3.4/§6 to preset-
 
 **S-1: Quality-loop spec §3.4 "Presentation" section has an orphaned empty-findings requirement**
 
-`.mstar/knowledge/specs/novel-quality-loop.md` lines 83–87:
+`.mstar/knowledge/specs/novel-writing/quality-loop.md` lines 83–87:
 
 ```
 **Presentation** (minimum):
@@ -146,9 +146,9 @@ The third bullet ("On empty findings: single line 'No master findings'") was car
 
 ## Source Trace
 
-- **W-1**: Source Type: git-diff + manual-reasoning. Source Reference: `docs/novel-writing-quickstart.md` line 172 vs `.mstar/knowledge/specs/novel-quality-loop.md` §3.4 behavior table (lines 77–81, no Default row). Confidence: High.
-- **W-2**: Source Type: git-diff + code-verification. Source Reference: `.mstar/knowledge/specs/novel-quality-loop.md` line 108 vs `crates/nexus42/src/commands/creator/works/mod.rs:39` migration comment. Confidence: High.
-- **S-1**: Source Type: manual-reasoning + spec-analysis. Source Reference: `.mstar/knowledge/specs/novel-quality-loop.md` lines 83–87. Confidence: Medium.
+- **W-1**: Source Type: git-diff + manual-reasoning. Source Reference: `docs/novel-writing-quickstart.md` line 172 vs `.mstar/knowledge/specs/novel-writing/quality-loop.md` §3.4 behavior table (lines 77–81, no Default row). Confidence: High.
+- **W-2**: Source Type: git-diff + code-verification. Source Reference: `.mstar/knowledge/specs/novel-writing/quality-loop.md` line 108 vs `crates/nexus42/src/commands/creator/works/mod.rs:39` migration comment. Confidence: High.
+- **S-1**: Source Type: manual-reasoning + spec-analysis. Source Reference: `.mstar/knowledge/specs/novel-writing/quality-loop.md` lines 83–87. Confidence: Medium.
 
 ## Summary
 
@@ -169,7 +169,7 @@ Two unresolved Warning findings remain. Both are one-line fixes in documentation
 ### Re-review scope
 - Review range: `54d80e07..HEAD` (= `03baf31e` on `iteration/v1.45`); equivalent `git diff 54d80e07...HEAD` (fix commits only)
 - Fix commits reviewed: 5 (`fa438f95`, `076b431e`, `8bd86369`, `e8f2f5e1`, `1fc2c2d6`) + 1 merge (`03baf31e`)
-- Files changed: 3 (`docs/novel-writing-quickstart.md`, `.mstar/knowledge/specs/novel-quality-loop.md`, `crates/nexus42/src/commands/creator/run.rs`); +27 / -6
+- Files changed: 3 (`docs/novel-writing-quickstart.md`, `.mstar/knowledge/specs/novel-writing/quality-loop.md`, `crates/nexus42/src/commands/creator/run.rs`); +27 / -6
 - Working branch (verified): `iteration/v1.45`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
 
@@ -178,8 +178,8 @@ Two unresolved Warning findings remain. Both are one-line fixes in documentation
 | ID | Original | Status | Evidence |
 |----|----------|--------|----------|
 | W-1 | "List master findings (default)" misleading inline comment | **FIXED** | `076b431e`: comment rewritten to "Enqueue a master-decision review schedule" / "Enqueue master-decision review scoped to a specific finding"; added explicit `> **novel-review-master is enqueue-only**` blockquote with cross-link to `creator works status` for listing |
-| W-2 | stale `creator run status` in `novel-quality-loop.md` §6 | **FIXED** | `e8f2f5e1`: `novel-quality-loop.md:108` now reads `creator works status` banner |
-| S-1 | orphaned "On empty findings" presentation requirement | **FIXED** | `1fc2c2d6`: `novel-quality-loop.md:87` clarified — `creator works status [<work_id>]` surfaces a clear "no findings yet" message and suggests `creator run novel-review-master` |
+| W-2 | stale `creator run status` in `novel-writing/quality-loop.md` §6 | **FIXED** | `e8f2f5e1`: `novel-writing/quality-loop.md:108` now reads `creator works status` banner |
+| S-1 | orphaned "On empty findings" presentation requirement | **FIXED** | `1fc2c2d6`: `novel-writing/quality-loop.md:87` clarified — `creator works status [<work_id>]` surfaces a clear "no findings yet" message and suggests `creator run novel-review-master` |
 | Cross-ref hint | `run.rs:334` stale hint string | **FIXED** | `fa438f95`: hint now `creator works status` + `creator bootstrap`; added V1.45 migration parenthetical |
 | QC3 W-1 | (cross-cite, same as W-2) | **FIXED** | covered by `e8f2f5e1` (T2) |
 | QC3 W-2 | missing migration section in quickstart | **FIXED** | `8bd86369`: added `## Migrating from V1.44` section at top of `docs/novel-writing-quickstart.md` with 9-row table mapping all deleted `creator run` subcommands to V1.45 equivalents |
@@ -199,4 +199,4 @@ Two unresolved Warning findings remain. Both are one-line fixes in documentation
 
 **Verdict**: Approve
 
-P3 docs are now clean. All 4 original QC1 findings (W-1, W-2, S-1, cross-ref hint) and both cross-cited QC3 findings (W-1, W-2) are verified fixed across the 5 fix commits. The migration table in the quickstart top section provides a complete 9-row V1.44→V1.45 command mapping. The broader spec-tree migration gaps (other specs like `novel-workflow-profile.md`, `creator-workflow.md`, `cli-spec.md` body) are out of P3 scope — track in `residual_findings[2026-06-13-v1.45-quickstart-and-author-spec]` for the V1.45 P-last hygiene pass.
+P3 docs are now clean. All 4 original QC1 findings (W-1, W-2, S-1, cross-ref hint) and both cross-cited QC3 findings (W-1, W-2) are verified fixed across the 5 fix commits. The migration table in the quickstart top section provides a complete 9-row V1.44→V1.45 command mapping. The broader spec-tree migration gaps (other specs like `novel-writing/workflow-profile.md`, `creator-workflow.md`, `cli-spec.md` body) are out of P3 scope — track in `residual_findings[2026-06-13-v1.45-quickstart-and-author-spec]` for the V1.45 P-last hygiene pass.

@@ -114,7 +114,7 @@ pub async fn find_work_for_driver(
 ///    each row is persisted via [`findings::create_finding_from_review_tx`]
 ///    inside a single transaction with the parsed `kind` / `severity` /
 ///    `body` / optional `rule_suggestion`
-///    (per `.mstar/knowledge/specs/novel-findings-maturity.md` §1.2).
+///    (per `.mstar/archived/knowledge/novel-findings-maturity.md` §1.2).
 /// 5. **Fallback** (V1.47 placeholder shape): when the report is missing,
 ///    unparsable, or yields zero findings — OR when `workspace_dir` is
 ///    `None` (e.g. hermetic DB-only tests) — synthesizes ≥1 finding with
@@ -209,7 +209,7 @@ pub async fn persist_review_findings_for_schedule(
 
     // V1.48 P0 T2: parse `Works/<work_ref>/Logs/review/review-report.md`
     // when a workspace_dir is available. Spec
-    // (`.mstar/knowledge/specs/novel-findings-maturity.md` §1.2) — parsed
+    // (`.mstar/archived/knowledge/novel-findings-maturity.md` §1.2) — parsed
     // findings persist with their `kind` / `severity` / `body` / optional
     // `rule_suggestion`. Any failure (missing file, read error, parse error,
     // zero parsed findings) falls through to the V1.47 placeholder synthesis
@@ -332,6 +332,13 @@ async fn persist_placeholder_finding(
 /// schedule/work context so operators can see the degrade. V1.48 P0-fix1
 /// (qc3 W-3): every fallback `warn!` includes `chapter` per spec §1.3
 /// (operator-debugging field for chapter-scoped review passes).
+//
+// `too_many_lines`: this is a single match dispatching one documented fallback
+// `warn!` arm per `ReportLoadError` variant (spec §1.3 mandates each branch).
+// Splitting the arms into helpers would hide the linear fallback contract
+// without reducing real complexity. Mirrors the `work_chapters` reconcile and
+// `rules_runtime::handle_rules_reset` precedent.
+#[allow(clippy::too_many_lines)]
 async fn try_persist_parsed_findings(
     pool: &SqlitePool,
     workspace_dir: &std::path::Path,
@@ -430,13 +437,30 @@ async fn try_persist_parsed_findings(
             );
             Ok(None)
         }
+        // V1.49 P3 (R-V148P0-W1): resolved path escaped Works/<work_ref>/.
+        // qc3 W-3: `chapter` included on every fallback arm.
+        Err(ReportLoadError::PathEscape {
+            work_ref: ref escaped,
+        }) => {
+            tracing::warn!(
+                schedule_id,
+                work_id,
+                work_ref,
+                escaped_work_ref = %escaped,
+                chapter = ?chapter,
+                "review-findings: review-report.md path escapes Works/<work_ref>/ \
+                 (traversal or symlink); rejecting before read; falling back to \
+                 V1.47 placeholder synthesis"
+            );
+            Ok(None)
+        }
     }
 }
 
 /// Failures that can occur while loading + parsing `review-report.md`.
 ///
 /// Used by [`persist_review_findings_for_schedule`] to emit the right
-/// `tracing::warn!` shape per `.mstar/knowledge/specs/novel-findings-maturity.md`
+/// `tracing::warn!` shape per `.mstar/archived/knowledge/novel-findings-maturity.md`
 /// §1.3 (each branch is a documented fallback trigger).
 #[derive(Debug)]
 enum ReportLoadError {
@@ -449,6 +473,10 @@ enum ReportLoadError {
     /// V1.48 P0-fix1 (qc3 W-1): file size exceeds the bounded-read cap.
     /// Falling back to placeholder synthesis is the documented safe degrade.
     TooLarge { size_bytes: u64, cap_bytes: u64 },
+    /// V1.49 P3 (R-V148P0-W1): the resolved report path escapes the
+    /// `Works/<work_ref>/` subtree (path traversal in `work_ref` or symlink
+    /// escape). Rejecting before the read is the documented safe degrade.
+    PathEscape { work_ref: String },
 }
 
 /// Upper bound on how many bytes of `review-report.md` the supervisor will
@@ -480,6 +508,22 @@ fn load_and_parse_review_report(
     workspace_dir: &std::path::Path,
     work_ref: &str,
 ) -> Result<crate::review_report::ParsedReviewReport, ReportLoadError> {
+    // V1.49 P3 (R-V148P0-W1): defense-in-depth path guard. Reject traversal
+    // segments in `work_ref` BEFORE constructing the path, then verify (after
+    // confirming the file exists) that the resolved report stays under the
+    // canonicalized `Works/<work_ref>/` subtree. This blocks path traversal
+    // and symlink escape before P1/P2 prompt-injection surfaces grow.
+    if work_ref.is_empty()
+        || work_ref.contains("..")
+        || work_ref.contains('/')
+        || work_ref.contains('\\')
+        || work_ref.contains('\0')
+    {
+        return Err(ReportLoadError::PathEscape {
+            work_ref: work_ref.to_string(),
+        });
+    }
+
     let review_dir = nexus_home_layout::work_logs_subdir(workspace_dir, work_ref, "review");
     let report_path = review_dir.join("review-report.md");
     let metadata = match std::fs::metadata(&report_path) {
@@ -489,6 +533,25 @@ fn load_and_parse_review_report(
         }
         Err(e) => return Err(ReportLoadError::Read(report_path, e)),
     };
+
+    // Canonical guard: the resolved report must live under the canonicalized
+    // `Works/<work_ref>/` subtree. Catches symlink escape (e.g. `Works/<work_ref>`
+    // itself being a symlink pointing outside the workspace). `canonicalize`
+    // succeeds here because `metadata` already confirmed the file exists.
+    let canonical_work_root = workspace_dir
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_dir.to_path_buf())
+        .join("Works")
+        .join(work_ref);
+    if !report_path
+        .canonicalize()
+        .is_ok_and(|canonical_report| canonical_report.starts_with(&canonical_work_root))
+    {
+        return Err(ReportLoadError::PathEscape {
+            work_ref: work_ref.to_string(),
+        });
+    }
+
     let size_bytes = metadata.len();
     if size_bytes > MAX_REVIEW_REPORT_BYTES {
         return Err(ReportLoadError::TooLarge {
@@ -1016,9 +1079,16 @@ pub async fn set_driver(
 
 // V1.48 P1 (overlay §2 Consumer): render the open-findings prompt block
 // for the produce stage with a selected chapter. Returns `None` when the
-// stage is not `produce`, no chapter is selected, no open findings exist,
-// or the DAO errors (best-effort: logs and proceeds without the block so
-// the auto-chain step is not blocked by a findings-fetch failure).
+// stage is not `produce`, no chapter is selected, no actionable findings
+// exist, or the DAO errors (best-effort: logs and proceeds without the
+// block so the auto-chain step is not blocked by a findings-fetch failure).
+//
+// V1.49 F6: the DAO (`list_open_findings_for_chapter`) now returns rows
+// with `status IN ('open', 'triaged')` per `findings-lifecycle.md` §2.2.
+// The canonical actionable set lives in
+// `nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES` (mirrored by
+// `crate::findings_block::ACTIONABLE_FINDING_STATUSES`); this call site
+// does not re-filter — the DAO is the source of truth.
 async fn compute_open_findings_block_for_produce(
     pool: &SqlitePool,
     creator_id: &str,
@@ -1057,6 +1127,184 @@ async fn compute_open_findings_block_for_produce(
     } else {
         Some(block)
     }
+}
+
+/// V1.49 P1 — Foreshadowing promotion hook (narrative-indexes overlay §4).
+///
+/// Called from the supervisor's `on_schedule_terminal(Completed)` for
+/// `novel-writing` schedules. After a produce run writes one or more chapter
+/// outlines under `Works/<work_ref>/Outlines/chapters/`, this hook extracts
+/// every `## Foreshadowing Touched (F###)` section and promotes the inline
+/// `F###` declarations into `Works/<work_ref>/Outlines/foreshadowing.md` via
+/// [`crate::narrative_index::promote_outline_to_index`].
+///
+/// # Behavior
+///
+/// 1. Loads the schedule row to read `preset_id`, `work_id`, `creator_id`.
+/// 2. Returns `Ok(0)` early when the preset is not `novel-writing`.
+/// 3. Loads the Work record for `work_ref`.
+/// 4. When `workspace_dir` is `Some`, scans every `Outlines/chapters/*.md`
+///    outline, extracts its foreshadowing section, and promotes it. Promotion
+///    is idempotent, so re-scanning all outlines on every produce run is safe.
+/// 5. When `workspace_dir` is `None` (hermetic DB-only tests) or no outlines
+///    declare foreshadowing, this is a no-op (`Ok(0)`).
+///
+/// Best-effort + non-blocking by contract: the caller logs any `Err` and does
+/// NOT fail the terminal transition (mirrors `persist_review_findings_for_schedule`).
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the schedule/Work lookup fails.
+/// Promotion-internal errors (e.g. conflicting-description duplicate) are
+/// logged at `warn!` and counted as zero for that outline so one bad outline
+/// does not abort the rest.
+pub async fn promote_foreshadowing_for_schedule(
+    pool: &SqlitePool,
+    schedule_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<usize, AutoChainError> {
+    use crate::preset_ids::NOVEL_WRITING_PRESET_ID;
+
+    // SAFETY: dynamic SQL — single-row schedule lookup by PK (nullable work_id).
+    let row = sqlx::query(
+        "SELECT preset_id, work_id, creator_id
+         FROM creator_schedules WHERE schedule_id = ?",
+    )
+    .bind(schedule_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(nexus_local_db::LocalDbError::from)?;
+
+    let Some(row) = row else {
+        tracing::debug!(
+            schedule_id,
+            "foreshadowing-promote: schedule row not found; skipping"
+        );
+        return Ok(0);
+    };
+
+    let preset_id: String = sqlx::Row::try_get(&row, "preset_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode preset_id: {e}")))?;
+    let work_id: Option<String> = sqlx::Row::try_get(&row, "work_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode work_id: {e}")))?;
+    let creator_id: String = sqlx::Row::try_get(&row, "creator_id")
+        .map_err(|e| AutoChainError::InvalidState(format!("decode creator_id: {e}")))?;
+
+    if preset_id != NOVEL_WRITING_PRESET_ID {
+        return Ok(0);
+    }
+    let Some(work_id) = work_id else {
+        tracing::warn!(
+            schedule_id,
+            "foreshadowing-promote: schedule has NULL work_id; skipping"
+        );
+        return Ok(0);
+    };
+    let Some(ws_dir) = workspace_dir else {
+        // Hermetic DB-only tests / no workspace bound — nothing to promote.
+        tracing::debug!(
+            schedule_id,
+            "foreshadowing-promote: no workspace_dir; skipping"
+        );
+        return Ok(0);
+    };
+
+    let work = match works::get_work(pool, &creator_id, &work_id).await {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            tracing::warn!(
+                schedule_id,
+                work_id = %work_id,
+                "foreshadowing-promote: work not found; skipping"
+            );
+            return Ok(0);
+        }
+        Err(e) => return Err(AutoChainError::from(e)),
+    };
+    let Some(work_ref) = work.work_ref.as_deref() else {
+        tracing::warn!(
+            schedule_id,
+            work_id = %work_id,
+            "foreshadowing-promote: work has no work_ref; skipping"
+        );
+        return Ok(0);
+    };
+
+    let work_dir = ws_dir.join("Works").join(work_ref);
+    let outlines_chapters = work_dir.join("Outlines").join("chapters");
+    if !outlines_chapters.is_dir() {
+        tracing::debug!(
+            schedule_id,
+            work_ref,
+            "foreshadowing-promote: no Outlines/chapters/ dir; skipping"
+        );
+        return Ok(0);
+    }
+
+    promote_outlines_in(&work_dir, &outlines_chapters, schedule_id, work_ref)
+}
+
+/// Scan every `*-outline.md` in `outlines_dir`, extract its foreshadowing
+/// section, and promote it into `work_dir/Outlines/foreshadowing.md`.
+///
+/// Returns the total count of newly-allocated `F###` ids across all outlines.
+/// Per-outline promotion errors (e.g. conflicting-description duplicate) are
+/// logged at `warn!` and counted as zero so one bad outline does not abort the
+/// rest. Outline filenames are sorted for reproducible promotion order.
+fn promote_outlines_in(
+    work_dir: &std::path::Path,
+    outlines_dir: &std::path::Path,
+    schedule_id: &str,
+    work_ref: &str,
+) -> Result<usize, AutoChainError> {
+    let mut entries: Vec<String> = std::fs::read_dir(outlines_dir)
+        .map_err(|e| AutoChainError::InvalidState(format!("read {}: {e}", outlines_dir.display())))?
+        .flatten()
+        .filter_map(|e| {
+            let p = e.path();
+            let name = p.file_name()?.to_string_lossy().to_string();
+            (p.is_file() && name.ends_with("-outline.md")).then_some(name)
+        })
+        .collect();
+    entries.sort();
+
+    let mut total = 0usize;
+    for name in &entries {
+        let path = outlines_dir.join(name);
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(section) = crate::narrative_index::extract_foreshadowing_section(&content) else {
+            continue;
+        };
+        match crate::narrative_index::promote_outline_to_index(work_dir, &section) {
+            Ok(allocated) => {
+                total += allocated.len();
+                if !allocated.is_empty() {
+                    tracing::info!(
+                        schedule_id,
+                        work_ref,
+                        outline = %name,
+                        allocated = ?allocated,
+                        "foreshadowing-promote: promoted inline F### declarations"
+                    );
+                }
+            }
+            Err(e) => {
+                // Conflicting-description duplicate etc. — surface to the
+                // operator without aborting the remaining outlines or the
+                // terminal transition.
+                tracing::warn!(
+                    schedule_id,
+                    work_ref,
+                    outline = %name,
+                    error = %e,
+                    "foreshadowing-promote: promotion failed for one outline (non-fatal)"
+                );
+            }
+        }
+    }
+    Ok(total)
 }
 
 /// Enqueue a new auto-chain schedule and update the Work checkpoint.
@@ -1843,5 +2091,38 @@ mod tests {
                  Update the match arm in preset_version_for_id() to match."
             );
         }
+    }
+
+    // V1.49 P3 (R-V148P0-W1) ────────────────────────────────────────────────
+
+    /// `load_and_parse_review_report` must reject a `work_ref` that would
+    /// escape `Works/<work_ref>/` (path traversal / separators) BEFORE any
+    /// filesystem access, returning `ReportLoadError::PathEscape`.
+    #[test]
+    fn load_and_parse_review_report_rejects_path_outside_work_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        // Traversal segments in work_ref — the canonical "Works/<work_ref>/../../../etc/passwd"
+        // shape from the plan, expressed via the work_ref parameter.
+        let traversal = load_and_parse_review_report(tmp.path(), "../../../etc/passwd");
+        assert!(
+            matches!(traversal, Err(ReportLoadError::PathEscape { .. })),
+            "traversal work_ref must be rejected before FS access, got {traversal:?}"
+        );
+
+        // A path separator in work_ref must also be rejected.
+        let with_sep = load_and_parse_review_report(tmp.path(), "foo/bar");
+        assert!(
+            matches!(with_sep, Err(ReportLoadError::PathEscape { .. })),
+            "work_ref containing '/' must be rejected, got {with_sep:?}"
+        );
+
+        // A clean work_ref whose report is simply absent returns Missing, NOT
+        // PathEscape — proving the guard does not over-reject legitimate refs.
+        let missing = load_and_parse_review_report(tmp.path(), "clean-novel");
+        assert!(
+            matches!(missing, Err(ReportLoadError::Missing)),
+            "clean work_ref with no report must be Missing, not PathEscape; got {missing:?}"
+        );
     }
 }

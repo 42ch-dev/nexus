@@ -36,6 +36,24 @@ pub enum LocalDbError {
     Migrate(sqlx::migrate::MigrateError),
     /// A database constraint was violated (e.g., TOCTOU race detected)
     ConstraintViolation { table: String, constraint: String },
+    /// V1.49 P0 W-1 (findings-lifecycle): an illegal lifecycle transition
+    /// was attempted (e.g. `resolved → open`). Emitted by findings
+    /// [`enforce_status_transition`](crate::findings::enforce_status_transition)
+    /// so the API layer can map it to a precise public code
+    /// (`INVALID_TRANSITION`) without string-prefix sniffing. Other callers
+    /// continue to use [`ConstraintViolation`](Self::ConstraintViolation).
+    IllegalTransition { from: String, to: String },
+    /// V1.49 P0 W-1 (findings-lifecycle): a field value is not a member of
+    /// its allowed enum (invalid `severity` / `status` / `target_executor`
+    /// on the findings PATCH path). Emitted instead of
+    /// [`ConstraintViolation`](Self::ConstraintViolation) on the PATCH
+    /// surface so the API can map it to a distinct code (`INVALID_INPUT`).
+    /// The create path and shared validators still use `ConstraintViolation`.
+    InvalidEnum {
+        field: &'static str,
+        value: String,
+        allowed: &'static [&'static str],
+    },
     /// Path escapes its expected parent directory (defense-in-depth)
     PathEscape { path: String, prefix: String },
 }
@@ -93,6 +111,20 @@ impl fmt::Display for LocalDbError {
             }
             Self::ConstraintViolation { table, constraint } => {
                 write!(f, "constraint violation on '{table}': {constraint}")
+            }
+            Self::IllegalTransition { from, to } => {
+                write!(f, "invalid status transition '{from}' → '{to}'")
+            }
+            Self::InvalidEnum {
+                field,
+                value,
+                allowed,
+            } => {
+                write!(
+                    f,
+                    "invalid {field} value '{value}'; allowed: {}",
+                    allowed.join(", ")
+                )
             }
             Self::PathEscape { path, prefix } => {
                 write!(

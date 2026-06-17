@@ -46,7 +46,7 @@ generated_at: "2026-06-09"
 ## Source Trace
 - Finding ID: W-1
 - Source Type: manual-reasoning (spec vs implementation diff)
-- Source Reference: novel-quality-loop.md §2.1 vs migration 202606090002_findings.sql
+- Source Reference: novel-writing/quality-loop.md §2.1 vs migration 202606090002_findings.sql
 - Confidence: High
 
 - Finding ID: W-2

@@ -90,7 +90,7 @@ None.
 
 - Finding ID: S-001 (test coverage quality)
   - Source Type: test inspection + spec cross-check
-  - Source Reference: `tests/v148_serial_hardening.rs:104-231` + plan T3 + novel-workflow-profile.md §4.5.3 + §4.5.7 #5
+  - Source Reference: `tests/v148_serial_hardening.rs:104-231` + plan T3 + novel-writing/workflow-profile.md §4.5.3 + §4.5.7 #5
   - Confidence: High
 
 ## Summary

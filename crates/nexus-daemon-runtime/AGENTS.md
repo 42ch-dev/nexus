@@ -36,7 +36,7 @@ All new sqlx queries **MUST** use compile-time checked macros (`sqlx::query!`, `
 
 ## Runtime Lock Acquire / Release Order (Mandatory — V1.42.1 hotfix rule)
 
-> **Spec:** `.mstar/knowledge/specs/novel-multi-work-lifecycle.md` §4.2 — single-writer contract
+> **Spec:** `.mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md` §4.2 — single-writer contract
 > for the per-Work `runtime_lock_holder` column.
 
 The `RuntimeLockGuard` (in `src/api/handlers/works.rs`) is an RAII guard that

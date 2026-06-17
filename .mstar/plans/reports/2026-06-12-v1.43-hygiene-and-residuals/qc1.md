@@ -79,8 +79,8 @@ generated_at: 2026-06-12T22:15:00+08:00
 | Spec | Claim | Verification | Result |
 | --- | --- | --- | --- |
 | `preset-conditional-routing.md` | Shipped V1.42 P2 | `llm_judge` GO/NOGO is implemented in `embedded-presets/novel-writing/preset.yaml` (lines 127–129). DF-56 minimal slice shipped in V1.42 P2. Spec stamp is accurate. | **PASS** |
-| `novel-workflow-profile.md` | V1.42 Shipped stamps | Multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) all shipped via plan `2026-06-11-v1.42-multi-volume`. Spec stamp is accurate. | **PASS** |
-| `novel-author-experience.md` | Shipped V1.43 | P0 (BL-10), P1 (CLI copy), P2 (author visibility) all Done. §6 disposition: kept as Feature line supplement (not archived). Correct — the document maps quickstart sections to CLI surfaces and serves ongoing reference value. Promotion to Shipped Feature line is appropriate. | **PASS** |
+| `novel-writing/workflow-profile.md` | V1.42 Shipped stamps | Multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) all shipped via plan `2026-06-11-v1.42-multi-volume`. Spec stamp is accurate. | **PASS** |
+| `novel-writing/author-experience.md` | Shipped V1.43 | P0 (BL-10), P1 (CLI copy), P2 (author visibility) all Done. §6 disposition: kept as Feature line supplement (not archived). Correct — the document maps quickstart sections to CLI surfaces and serves ongoing reference value. Promotion to Shipped Feature line is appropriate. | **PASS** |
 
 ## Iteration Closeout Completeness
 

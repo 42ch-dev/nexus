@@ -51,7 +51,7 @@ All three reviewers marked **Approve** with zero Critical and zero Warning findi
 
 | Original ID | Title | Status |
 | --- | --- | --- |
-| R-V142P1-QC1-F-002 | `is_work_completed` flat chapter comparison fragile for multi-volume | **Resolved** — predicate now volume-aware with atomic COUNT query (matches novel-workflow-profile.md §6.1) |
+| R-V142P1-QC1-F-002 | `is_work_completed` flat chapter comparison fragile for multi-volume | **Resolved** — predicate now volume-aware with atomic COUNT query (matches novel-writing/workflow-profile.md §6.1) |
 | R-V142P1-QC1-F-004 | Supervisor `NextChapter` ignores `next_volume` at enqueue | **Resolved** — `enqueue_auto_chain_step` signature extended; `WorkFields.volume` carries through; preset input now includes `volume` (or absent for single-volume) |
 
 (Formal `lifecycle: resolved` in `status.json` is P-last scope per P-last plan §5.)

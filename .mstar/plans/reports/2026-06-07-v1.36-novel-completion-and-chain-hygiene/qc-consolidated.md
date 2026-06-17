@@ -29,7 +29,7 @@ verdict: Approve w/ residuals (PM-override; no QC tri-review)
    - T4: deferred-features-cross-version-tracker.md updated (DF-57/58 closed; DF-47/53/59 notes refreshed); shipped-features-tracker.md appended (DF-57 + DF-58 rows + V1.36 delivery snapshot section).
    - T5: status.json ship metadata (latest_shipped_iteration v1.35 → v1.36; latest_shipped_at updated; latest_active_iteration/compass/iteration_compass set to null for V1.37 next); tech_debt_summary updated to 35 open (was 28; +7 V1.36 residuals).
    - T6: iterations/README V1.36 row Active → Shipped with full scope summary; v1.36-pending-delivery-compass.md renamed to v1.36-novel-writing-ux-delivery-compass-v1.md per naming convention.
-   - T7: novel-workflow-profile.md Status Draft (V1.36) → Shipped (V1.36); specs/README.md row updated.
+   - T7: novel-writing/workflow-profile.md Status Draft (V1.36) → Shipped (V1.36); specs/README.md row updated.
 
 4. **Acceptance (plan §5)**:
    - §1 completion banner: PASS — T1 + T3 wired completion banner in `creator run status` + clap doc-comment mentions it.

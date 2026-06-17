@@ -28,7 +28,7 @@
   },
   "working_branch": "feature/v1.48-findings-consumer",
   "merge_target": "iteration/v1.48",
-  "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+  "primary_spec": ".mstar/archived/knowledge/novel-findings-maturity.md",
   "iteration_compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
   "notes": [
     {

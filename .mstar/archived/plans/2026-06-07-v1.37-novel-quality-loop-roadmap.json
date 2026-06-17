@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.37",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "depends_on": [
         "2026-06-07-v1.37-novel-foundation-first"
       ],
@@ -32,7 +32,7 @@
       "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
       "status_transition": "Todo → InProgress → InReview → Done on 2026-06-08 after T1–T8 spec/tracker amendments + single QC review",
       "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, embedded preset, prompt template, daemon scheduled task, CLI subcommand, rules writer, or platform behavior in P3",
-      "spec_amendment": ".mstar/knowledge/specs/novel-workflow-profile.md §5.5",
+      "spec_amendment": ".mstar/knowledge/specs/novel-writing/workflow-profile.md §5.5",
       "shipped": [
         "Findings lifecycle + severity mapping + future local DB schema sketch documented (DF-64)",
         "Reference executor mapping documented: write→novel-writing, brainstorm→future novel-brainstorm, none→manual/no preset, master→future novel-review-master",

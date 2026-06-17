@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.37",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-workflow-profile.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
       "depends_on": [
         "2026-06-07-v1.37-novel-foundation-first"
       ],
@@ -29,7 +29,7 @@
       "qa": "skipped — docs/spec/roadmap-only; no runtime behavior to verify",
       "scope_decision": "roadmap-only; implementation deferred to V1.37+ (PK migration, prompt parameterization, status UX wiring)",
       "shipped": [
-        "novel-workflow-profile.md: new 'Multi-chapter and multi-volume semantics (V1.37 extension)' section with next_chapter(work_id) algorithm, current_chapter update rules, PK migration decision (defer to V1.37+), volume semantics + Outlines/volume-outline.md minimum structure, status UX example",
+        "novel-writing/workflow-profile.md: new 'Multi-chapter and multi-volume semantics (V1.37 extension)' section with next_chapter(work_id) algorithm, current_chapter update rules, PK migration decision (defer to V1.37+), volume semantics + Outlines/volume-outline.md minimum structure, status UX example",
         "Deferred tracker: DF-62 disposition updated to 'V1.37 P1 spec-only; implementation deferred to V1.37+' with cross-reference to spec section",
         "Plan markdown: status updated to Done with roadmap-only scope decision recorded"
       ],

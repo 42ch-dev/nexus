@@ -20,7 +20,7 @@
     "merge_target": "iteration/v1.48",
     "depends_on": "2026-06-16-v1.48-rules-runtime",
     "compass": ".mstar/iterations/v1.48-novel-quality-loop-completion-delivery-compass-v1.md",
-    "primary_spec": ".mstar/knowledge/specs/novel-findings-maturity.md",
+    "primary_spec": ".mstar/archived/knowledge/novel-findings-maturity.md",
     "track": "A",
     "target_residuals": [
       "R-V147P0-02",

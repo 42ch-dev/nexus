@@ -6,12 +6,12 @@
 **Scope**: Creator-scoped **multi-novel Work completion**, **runtime/concurrency locks**, and **CLI default Work** — DF-60 Medium ceremony  
 **Coordinates with**:
 
-- [novel-workflow-profile.md](novel-workflow-profile.md) — §6 completion criteria
-- [novel-work-pool.md](novel-work-pool.md) — default Work pointer (`novel_pool_entries.status = active`)
-- [creator-workflow.md](creator-workflow.md) — auto-chain pause during completion-lock; runtime lock on mutating paths
-- [cli-spec.md](cli-spec.md) — `creator works`, `creator bootstrap --from-work`, resume reopen
-- [work-experience-model.md](work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
-- [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
+- [workflow-profile.md](workflow-profile.md) — §6 completion criteria
+- [work-pool.md](work-pool.md) — default Work pointer (`novel_pool_entries.status = active`)
+- [creator-workflow.md](../creator-workflow.md) — auto-chain pause during completion-lock; runtime lock on mutating paths
+- [cli-spec.md](../cli-spec.md) — `creator works`, `creator bootstrap --from-work`, resume reopen
+- [work-experience-model.md](../work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
+- [agent-nexus-tool-bridge.md](../agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
 
 **Iteration compass**: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) (Shipped)  
 **V1.42 amend**: §4.2 production acquire gap — [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) P0
@@ -39,7 +39,7 @@ A prolific author may run **multiple** `work_profile: novel` Works over time —
 
 ## 2. Completion ceremony (2-step)
 
-When [novel-workflow-profile.md](novel-workflow-profile.md) §6 completion criteria are met:
+When [workflow-profile.md](workflow-profile.md) §6 completion criteria are met:
 
 1. Set `works.status = completed` (and `novel_completion_status = completed` when column present).
 2. Ensure all `work_chapters` rows for the Work are `finalized` (DB SSOT).
@@ -145,7 +145,7 @@ Daemon Local API and `nexus.work.patch` **must** use the same acquire/release pa
 
 ## 5. CLI surfaces (summary)
 
-Full flags in [cli-spec.md](cli-spec.md) §6.2D / §6.2H.
+Full flags in [cli-spec.md](../cli-spec.md) §6.2D / §6.2H.
 
 ### 5.1 `creator run <preset_id>` — strategy execution
 

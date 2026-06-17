@@ -34,7 +34,7 @@ generated_at: 2026-06-12T20:00:00+08:00
   - **Fix**: Wire `daemon_not_reachable_quickstart()` into the 4 call sites in `daemon_client.rs` (or into the shared `send_request`/error-handling helper those sites delegate to), replacing the old suggestion string. If the old constructor `daemon_not_reachable(suggestion)` is no longer needed after wiring, remove it (and its `#[allow(dead_code)]`). If it is still needed for non-creator paths, keep it but wire the quickstart variant for creator-facing paths.
   - **Confidence**: High
 
-- **W-2 (spec stamp over-claiming)**: The `novel-author-experience.md` §3 table marks "Daemon not reachable" as `- [x] Shipped (V1.43 P1)`, and the `cli-spec.md` §7.1 V1.43 Implemented stamp (line 585) claims "daemon-not-reachable...errors all produce actionable one-line next steps citing docs/novel-writing-quickstart.md §1–§6." Both stamps are inaccurate for the daemon-not-reachable path, which does **not** cite the quickstart in production (see W-1).
+- **W-2 (spec stamp over-claiming)**: The `novel-writing/author-experience.md` §3 table marks "Daemon not reachable" as `- [x] Shipped (V1.43 P1)`, and the `cli-spec.md` §7.1 V1.43 Implemented stamp (line 585) claims "daemon-not-reachable...errors all produce actionable one-line next steps citing docs/novel-writing-quickstart.md §1–§6." Both stamps are inaccurate for the daemon-not-reachable path, which does **not** cite the quickstart in production (see W-1).
   - **Fix**: Either wire the constructor (fix W-1) to make the stamps accurate, or downgrade the daemon-not-reachable checkbox to `- [ ]` (unshipped) and amend the cli-spec stamp to note the daemon path is deferred.
   - **Confidence**: High
 
@@ -50,7 +50,7 @@ generated_at: 2026-06-12T20:00:00+08:00
 
 - Finding ID: W-2
 - Source Type: spec-audit (cross-reference spec stamps against production code paths)
-- Source Reference: .mstar/knowledge/specs/novel-author-experience.md:52 (checkbox) + .mstar/knowledge/specs/cli-spec.md:585 (stamp text) vs crates/nexus42/src/api/daemon_client.rs:585-587 (actual production error string)
+- Source Reference: .mstar/knowledge/specs/novel-writing/author-experience.md:52 (checkbox) + .mstar/knowledge/specs/cli-spec.md:585 (stamp text) vs crates/nexus42/src/api/daemon_client.rs:585-587 (actual production error string)
 - Confidence: High
 
 - Finding ID: S-1
@@ -124,14 +124,14 @@ All cited quickstart § anchors verified present in `docs/novel-writing-quicksta
 
 ### cli-spec.md §7.1 (line 585)
 
-> **V1.43 Implemented (P1):** §7.1 UX principles are now enforced by CLI copy: daemon-not-reachable, `preset_gates_failed`, missing scaffold, work-completed, and open-findings errors all produce actionable one-line next steps citing `docs/novel-writing-quickstart.md` §1–§6 per `novel-author-experience.md` §3 remediation table. Help-text for `creator run` / `creator works` uses quickstart vocabulary per §7.1.
+> **V1.43 Implemented (P1):** §7.1 UX principles are now enforced by CLI copy: daemon-not-reachable, `preset_gates_failed`, missing scaffold, work-completed, and open-findings errors all produce actionable one-line next steps citing `docs/novel-writing-quickstart.md` §1–§6 per `novel-writing/author-experience.md` §3 remediation table. Help-text for `creator run` / `creator works` uses quickstart vocabulary per §7.1.
 
 - **Location**: Correct — §7.1 is the UX principles section of the CLI spec Master.
 - **Document class**: `cli-spec.md` is a Master spec; V1.43 Implemented stamps are appropriate for Master sections.
 - **Accuracy**: The stamp claims daemon-not-reachable produces quickstart-citing next steps. This is **inaccurate** (see W-1, W-2). The other 4 conditions are accurate.
 - **Annotation style**: Consistent with existing stamp conventions in the repo (blockquote `>` style, version-tagged).
 
-### novel-author-experience.md §3 (5 checkboxes)
+### novel-writing/author-experience.md §3 (5 checkboxes)
 
 | Row | Checkbox | Accurate? |
 |-----|----------|-----------|
@@ -141,7 +141,7 @@ All cited quickstart § anchors verified present in `docs/novel-writing-quicksta
 | Work completed | `- [x] Shipped (V1.43 P1)` | ✅ |
 | Open findings blocking progress | `- [x] Shipped (V1.43 P1)` | ✅ |
 
-- **Document class**: `novel-author-experience.md` is a Draft overlay (V1.43); checkboxes are appropriate for tracking implementation status.
+- **Document class**: `novel-writing/author-experience.md` is a Draft overlay (V1.43); checkboxes are appropriate for tracking implementation status.
 - **Annotation style**: Consistent with the spec's existing structure.
 
 ## Static Checks
@@ -177,7 +177,7 @@ All cited quickstart § anchors verified present in `docs/novel-writing-quicksta
 | Finding ID | Summary | Status | Evidence |
 |------------|---------|--------|----------|
 | qc1-W-1 | `daemon_not_reachable_quickstart()` dead code | PASS | 4 production call sites wired in `daemon_client.rs:586,622,658,693`; `#[allow(dead_code)]` removed from `daemon_not_reachable_quickstart()` at `errors.rs:242`; old `daemon_not_reachable(suggestion)` constructor has 0 hits in `daemon_client.rs` (retained with `#[allow(dead_code)]` for non-creator paths — acceptable). |
-| qc1-W-2 | Spec stamp over-claim daemon-not-reachable | PASS | No spec file edits in fix wave (`git diff 078d74eb..6f99ae87 -- .mstar/knowledge/specs/` returns empty). The spec stamps in `cli-spec.md` §7.1 and `novel-author-experience.md` §3 are now factually accurate because the code fix (W-1) wires the quickstart constructor to all 4 production call sites. |
+| qc1-W-2 | Spec stamp over-claim daemon-not-reachable | PASS | No spec file edits in fix wave (`git diff 078d74eb..6f99ae87 -- .mstar/knowledge/specs/` returns empty). The spec stamps in `cli-spec.md` §7.1 and `novel-writing/author-experience.md` §3 are now factually accurate because the code fix (W-1) wires the quickstart constructor to all 4 production call sites. |
 
 ### Static checks (re-run on full P1 feature scope cfdd71d3..6f99ae87)
 - `cargo +nightly fmt --all --check`: PASS (clean)

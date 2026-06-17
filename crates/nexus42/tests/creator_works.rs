@@ -159,3 +159,115 @@ fn works_help_lists_all_expected_subcommands() {
         );
     }
 }
+
+// =============================================================================
+// `creator works intake` — CLI surface (V1.49 P2, R-V147P1-01)
+// =============================================================================
+
+/// `creator works intake --help` documents the subcommand and flags.
+#[test]
+fn works_intake_help_shows_expected_text() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "intake", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    assert!(
+        help_text.contains("[<WORK_ID>]") || help_text.contains("WORK_ID"),
+        "works intake --help must show the optional WORK_ID argument: {help_text}"
+    );
+    assert!(
+        help_text.contains("--json"),
+        "works intake --help must list --json flag: {help_text}"
+    );
+    assert!(
+        help_text.contains("creative-brief-intake"),
+        "works intake --help must mention the creative-brief-intake preset: {help_text}"
+    );
+}
+
+/// `creator works --help` lists the `intake` subcommand.
+#[test]
+fn works_help_lists_intake_subcommand() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    assert!(
+        help_text.contains("intake"),
+        "creator works --help must list 'intake' subcommand: {help_text}"
+    );
+}
+
+// =============================================================================
+// `creator works reconcile-chapters` — dry-run / --yes flags (V1.49 P2, R-V148P4-W2)
+// =============================================================================
+
+/// `creator works reconcile-chapters --help` documents the new safety flags.
+#[test]
+fn works_reconcile_chapters_help_lists_dry_run_and_yes() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "reconcile-chapters", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    assert!(
+        help_text.contains("--dry-run"),
+        "reconcile-chapters --help must list --dry-run: {help_text}"
+    );
+    assert!(
+        help_text.contains("--yes"),
+        "reconcile-chapters --help must list --yes: {help_text}"
+    );
+    assert!(
+        help_text.contains("-y"),
+        "reconcile-chapters --help must list the -y short form: {help_text}"
+    );
+}
+
+/// `--yes` help text must not over-promise an inline preview (V1.49 P2 fix,
+/// R-V149P2-01 / qc1 W-1). `confirm_reconcile_interactive` only prompts; the
+/// preview lives behind `--dry-run`, which the help text must point to.
+#[test]
+fn works_reconcile_chapters_help_yes_does_not_promise_inline_preview() {
+    let output = Command::cargo_bin("nexus42")
+        .unwrap()
+        .args(["creator", "works", "reconcile-chapters", "--help"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let help_text = String::from_utf8(output).unwrap();
+
+    // The over-promising phrase from qc1 W-1 must be gone.
+    assert!(
+        !help_text.contains("prints a preview"),
+        "reconcile-chapters --help for --yes must not promise an inline preview: {help_text}"
+    );
+    // The preview is accurately routed to --dry-run.
+    assert!(
+        help_text.contains("--dry-run") && help_text.contains("preview"),
+        "reconcile-chapters --help must point to --dry-run for the preview: {help_text}"
+    );
+}

@@ -1,0 +1,23 @@
+## Completion Report v2 — P-last T4 (tracker + shipped-features-tracker)
+
+- **Agent**: writing-specialist
+- **Task**: T4 — Tracker + shipped-features-tracker V1.49 snapshot
+- **Status**: Done
+- **Scope Delivered**: 
+  - T4.1: `iterations/README.md` — V1.49 entry promoted from Active to Shipped with plan summaries, residual count, wire contract note
+  - T4.2: `shipped-features-tracker.md` §2 — V1.49 delivery snapshot appended (5 plans, highlights, residuals, carry-forward)
+  - T4.3: `specs/README.md` — **skipped** — novel-writing/README.md already accurate (overlays marked Superseded at T2 merge; master index delegates to subtree)
+- **Artifacts**:
+  - `.mstar/iterations/README.md` (1 line updated)
+  - `.mstar/archived/shipped-features-tracker.md` (header timestamp + 19-line snapshot appended)
+- **Validation**:
+  - `iterations/README.md`: V1.49 entry matches V1.48 format (date, plans, highlights, residuals, PR placeholder)
+  - `shipped-features-tracker.md`: V1.49 snapshot follows V1.48 pattern (Aspect/Detail table, theme, compass, specs, plans, closed, residuals, QC)
+  - `specs/README.md`: novel-writing/README.md already shows overlays as Superseded; authority matrix delegates to novel subtree
+- **Issues/Risks**:
+  - PR and merge commit are placeholders ("pending") — PM fills in after `iteration/v1.49` → `main` PR
+  - R-V149P1-01 (overlay reconciliation) is still open in `status.json` but substantively resolved by T2 overlay promotion; T3 deferred it to V1.50 per metadata notes
+  - Exact residual count (7) differs from plan's rough estimate (23) — verified against `status.json` `residual_findings`; 10 WL-A plus 6 earlier closures account for the delta
+- **Plan Update**: T4 checkbox remains unchecked in plan file (PM marks Done)
+- **Handoff**: PM runs T5 (Profile B compaction) and opens `iteration/v1.49` → `main` PR
+- **Git**: commit `035c97ca` on branch `docs/v1.49-tracker-snapshot` from `iteration/v1.49` @ `7e5df16f`

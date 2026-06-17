@@ -1,7 +1,7 @@
 //! Sync module contract tests for `Works/<work_ref>/Stories/` layout (V1.36 P2).
 //!
 //! Verifies the sync module scans only the correct directories and
-//! excludes non-chapter artifacts per novel-writing-sync-contract.md.
+//! excludes non-chapter artifacts per novel-writing/sync-contract.md.
 
 use std::fs;
 use std::path::{Path, PathBuf};

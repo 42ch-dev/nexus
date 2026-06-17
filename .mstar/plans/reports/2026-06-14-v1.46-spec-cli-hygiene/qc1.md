@@ -170,7 +170,7 @@ The column header promises the V1.33 model, but `creator works inspire` did not 
 
 **Atomic-delivery discipline (Grill #14):** Verified — all 6 tasks (T1–T6), W-1/W-2 reconcile (folded into T3), and BL-10 supersede (T5) are present in the single atomic block `1f92016f..acabca53` with one `--no-ff` merge (`acabca53`). No partial merges, no scope leakage outside the plan.
 
-**W-1/W-2 (P0 folded) reconciliation:** Verified in `.mstar/knowledge/specs/novel-author-experience.md` §4.1 table (commit `499a713d`):
+**W-1/W-2 (P0 folded) reconciliation:** Verified in `.mstar/knowledge/specs/novel-writing/author-experience.md` §4.1 table (commit `499a713d`):
 - P0 W-1 (`findings` Required `yes`→`conditional` with three-state note) — reconciled; matches code behavior in `works/mod.rs`.
 - P0 W-2 (`findings_stale` creator-global scope clarification) — reconciled; note now states "Creator-global scope (not work-scoped)".
 

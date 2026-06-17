@@ -83,7 +83,7 @@ a5a9bd7e fix(v1.44): R-V144P1-003/004/005/006 review-master correctness and hygi
 fc9f2f6d fix(v1.44): R-V144P0-006,009 plan verification fix + CLI integration tests
 3297d925 fix(v1.44): R-V144P0-002..005,007,008 CLI handler hardening
 d6b9400e fix(v1.44): R-V144P0-001 split preset into review + extract, fix CLI dispatch
-9e953abd fix(v1.44): R-V144P1-001/002 update cli-command-ia.md and novel-author-experience.md for review-master
+9e953abd fix(v1.44): R-V144P1-001/002 update cli-command-ia.md and novel-writing/author-experience.md for review-master
 1ecd8358 qa(v1.44 P2): qa-engineer acceptance verification
 226731d9 qc(v1.44 Wave 1): consolidate tri-review reports (P0 RC, P1 RC, P2 Approve)
 9d59b895 qc(v1.44 P1): qc-specialist architecture review

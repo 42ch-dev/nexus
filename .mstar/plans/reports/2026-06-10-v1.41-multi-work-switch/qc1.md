@@ -171,12 +171,12 @@ The 8 hermetic tests (3 in `nexus-orchestration/tests/multi_work_switch.rs`, 3 i
 
 - Finding ID: F-004
 - Source Type: manual-reasoning (spec §4.1 vs implementation — no TTL logic found)
-- Source Reference: `.mstar/knowledge/specs/novel-multi-work-lifecycle.md:109-114`, `crates/nexus-daemon-runtime/src/api/handlers/works.rs:809-816`
+- Source Reference: `.mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md:109-114`, `crates/nexus-daemon-runtime/src/api/handlers/works.rs:809-816`
 - Confidence: Medium
 
 - Finding ID: F-005
 - Source Type: manual-reasoning (spec §3 vs implementation — dual SSOT analysis)
-- Source Reference: `.mstar/knowledge/specs/novel-multi-work-lifecycle.md:56-75`, `crates/nexus-orchestration/src/completion_lock.rs`, `crates/nexus-local-db/migrations/202606100002_v141_multi_work_locks.sql:6`
+- Source Reference: `.mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md:56-75`, `crates/nexus-orchestration/src/completion_lock.rs`, `crates/nexus-local-db/migrations/202606100002_v141_multi_work_locks.sql:6`
 - Confidence: Medium
 
 ## Summary
@@ -213,7 +213,7 @@ Once F-001, F-002, and F-003 are fixed, the architecture is coherent and maintai
 | F-002 (--from-work / --set-default dropped) | critical | resolved | Wired in Fix 2 (commit `7c738164`) | `CreateWorkRequest` extended with `lineage_from_work_id: Option<String>` (line 92) and `set_pool_active: Option<bool>` (line 158); `create_work` handler populates `WorkRecord.lineage_from_work_id` from request (line 344); `set_pool_active` promotion logic after creation (lines 367–380); all existing tests updated with new fields |
 | F-003 (lockfile never written) | critical | resolved | Wired in Fix 1 (commit `7c738164`) | Supervisor `WorkComplete` path calls `write_completion_lock_if_available` at `supervisor.rs:486` → `write_completion_lock_for_work` at line 513; boot recovery `WorkComplete` path calls `write_completion_lock_for_work` at `boot.rs:331`; both paths are best-effort with warn logs; DB is SSOT |
 | F-004 (runtime_lock TTL) | warning | defer | Optional Fix 6 skipped; residual R-V141P0-01 covers it | `status.json` residual `R-V141P0-01`: severity `high`, decision `defer`, target `V1.41 P-last or V1.42`; consistent with implementer report |
-| F-005 (dual SSOT) | warning | resolved | Spec amendment §3.2 declares DB SSOT (commit `59f41dfd`) | `.mstar/knowledge/specs/novel-multi-work-lifecycle.md` §3.2: "DB column `works.completion_locked_at` is the authoritative lock state. The `.completion-lock.json` file is a derived artifact for cross-tool observation."; `completion_lock.rs` module doc and `release_completion_lock` doc both repeat SSOT declaration; `release_completion_lock_handler` clears DB first, then deletes file (best-effort) |
+| F-005 (dual SSOT) | warning | resolved | Spec amendment §3.2 declares DB SSOT (commit `59f41dfd`) | `.mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md` §3.2: "DB column `works.completion_locked_at` is the authoritative lock state. The `.completion-lock.json` file is a derived artifact for cross-tool observation."; `completion_lock.rs` module doc and `release_completion_lock` doc both repeat SSOT declaration; `release_completion_lock_handler` clears DB first, then deletes file (best-effort) |
 
 ### New findings
 

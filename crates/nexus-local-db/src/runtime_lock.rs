@@ -1,6 +1,6 @@
 //! Runtime lock acquire/release for per-Work concurrency control.
 //!
-//! Spec: `novel-multi-work-lifecycle.md` §4 (V1.42 P0 production wiring).
+//! Spec: `novel-writing/multi-work-lifecycle.md` §4 (V1.42 P0 production wiring).
 //!
 //! Two holder formats:
 //! - `cli:<caller_info>:<uuid>` — synchronous CLI mutating commands

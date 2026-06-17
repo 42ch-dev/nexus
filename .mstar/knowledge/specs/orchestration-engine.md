@@ -799,7 +799,7 @@ Gates are **additive** to `run_intents` and `stage` gates; they do not replace e
 
 #### 7.9.4 Worked example: novel-writing
 
-Full gate set for `novel-writing` is documented in [novel-workflow-profile.md §5.3](./novel-workflow-profile.md). The Master here defines the mechanism; the Draft overlay defines the values.
+Full gate set for `novel-writing` is documented in [novel-writing/workflow-profile.md §5.3](./novel-writing/workflow-profile.md). The Master here defines the mechanism; the Draft overlay defines the values.
 
 ---
 

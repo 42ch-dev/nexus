@@ -39,7 +39,7 @@ generated_at: "2026-06-15"
 This is a **targeted re-review** (QC re-review: targeted) after the fix round. Only the two prior warnings raised by qc-specialist-2 in the initial wave are in scope. Pre-existing baseline issues (e.g. `master_decision_timeout::repeated_sweeps_remain_stable` flake, baseline clippy items) are explicitly out of scope and not re-flagged. No new findings were introduced by the fix-round commits in the security/correctness surface under review.
 
 ### W-01: Idempotency / duplicate-finding risk
-- **Prior finding (initial wave)**: The review terminal hook path (`auto_chain::persist_review_findings_for_schedule` → `create_finding_from_review`) had no idempotency guard. Repeated terminal transitions for the same chapter + schedule could insert duplicate rows. `novel-quality-loop.md §8.3` had asked the plan to lock in a decision on this; it was not implemented in the initial delivery.
+- **Prior finding (initial wave)**: The review terminal hook path (`auto_chain::persist_review_findings_for_schedule` → `create_finding_from_review`) had no idempotency guard. Repeated terminal transitions for the same chapter + schedule could insert duplicate rows. `novel-writing/quality-loop.md §8.3` had asked the plan to lock in a decision on this; it was not implemented in the initial delivery.
 - **Fix commit**: `6fcfa322` ("fix(v1.47-P0): idempotency for review→finding via source_schedule_id")
 - **Evidence from diff inspection**:
   - New migration `202606150002_findings_source_schedule_unique.sql`:

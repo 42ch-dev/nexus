@@ -1,18 +1,18 @@
 # Novel Author Experience — Normative Supplement v1
 
-**Status**: **Shipped (V1.46)** — overlay merged into Master; baseline **Shipped (V1.43)** + V1.45 CLI IA amendments  
+**Status**: **Shipped (V1.49 P2 — author desk UX integrated)** — baseline Shipped (V1.43) + V1.45 CLI IA amendments + V1.46 Shipped; §8 intake re-trigger + reconcile preview merged from V1.49 P2 overlay  
 **Document class**: Feature line (author experience supplement)  
 **Created**: 2026-06-12  
-**Last updated**: 2026-06-15 (V1.46 P-last — promoted from Draft (V1.46) to Shipped; P0 author desk delta + P1 spec sweep + P2 chapter hints shipped)  
+**Last updated**: 2026-06-17 (V1.49 P-last — §8 overlay merged; cross-refs added)  
 **Scope**: End-user **ongoing serial** happy path — normative CLI surfaces, remediation chains, and author visibility (spec-only SSOT; **no** `docs/novel-writing-quickstart.md` after P1)  
 **Coordinates with**:
 
-- [creator-run-preset-entry.md](creator-run-preset-entry.md) — **Shipped Master V1.45** — CLI IA, preset ids, flags (remediation target for runtime copy)
-- [creator-centric-entry-model.md](creator-centric-entry-model.md) — §3.1 local bootstrap (≤7 steps)
-- [cli-spec.md](cli-spec.md) — §7 first-run UX principles
-- [novel-workflow-profile.md](novel-workflow-profile.md) — artifact layout + completion §6
-- [novel-quality-loop.md](novel-quality-loop.md) — findings + review visibility
-- [creator-workflow.md](creator-workflow.md) — FL-E stage names in narrative
+- [creator-run-preset-entry.md](../creator-run-preset-entry.md) — **Shipped Master V1.45** — CLI IA, preset ids, flags (remediation target for runtime copy)
+- [creator-centric-entry-model.md](../creator-centric-entry-model.md) — §3.1 local bootstrap (≤7 steps)
+- [cli-spec.md](../cli-spec.md) — §7 first-run UX principles
+- [workflow-profile.md](workflow-profile.md) — artifact layout + completion §6
+- [quality-loop.md](quality-loop.md) — findings + review visibility
+- [creator-workflow.md](../creator-workflow.md) — FL-E stage names in narrative
 
 **Iteration compass**: [v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md](../../iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md)
 
@@ -39,13 +39,13 @@ V1.36–V1.45 implemented novel-writing **capabilities** across crates. V1.46 do
 | §4.1 `--json` contract | `findings[]` + optional `findings_stale` | P0 |
 | §5 Residual pointer | `status.json` SSOT | P-last |
 
-**Invariant**: Every command in §3 must exist in [creator-run-preset-entry.md](creator-run-preset-entry.md) or [cli-spec.md](cli-spec.md) at ship time.
+**Invariant**: Every command in §3 must exist in [creator-run-preset-entry.md](../creator-run-preset-entry.md) or [cli-spec.md](../cli-spec.md) at ship time.
 
 ---
 
 ## 3. Author path — ongoing serial (Part I)
 
-> **CLI detail**: [creator-run-preset-entry.md](creator-run-preset-entry.md). This section is the **narrative** happy path only.
+> **CLI detail**: [creator-run-preset-entry.md](../creator-run-preset-entry.md). This section is the **narrative** happy path only.
 
 ### 3.1 Prerequisites and bootstrap
 
@@ -65,7 +65,7 @@ nexus42 creator bootstrap --idea "A solpac noir detective story in a floating ca
 # → Work created, init preset, intake → produce chain
 ```
 
-Gate/scaffold failures: remediation cites this spec §3.2 or [creator-run-preset-entry.md](creator-run-preset-entry.md) bootstrap section — **not** a quickstart file.
+Gate/scaffold failures: remediation cites this spec §3.2 or [creator-run-preset-entry.md](../creator-run-preset-entry.md) bootstrap section — **not** a quickstart file.
 
 ### 3.3 First chapter and serial production
 
@@ -81,11 +81,11 @@ Serial chapter 2+: daemon auto-chain; inject direction:
 nexus42 creator works inspire <work_id> --note "the partner is the informant"
 ```
 
-On-disk chapter files: see [novel-workflow-profile.md](novel-workflow-profile.md); missing paths surfaced in status (P2 on-disk hints).
+On-disk chapter files: see [workflow-profile.md](workflow-profile.md); missing paths surfaced in status (P2 on-disk hints).
 
 ### 3.4 Quality loop — dual preset table (Grill #19)
 
-> **V1.47 shipped**: Review preset produces findings per [novel-quality-loop.md §8](novel-quality-loop.md#8-reflection-loop-output-contract-v147-draft) (P0). The preset is named `novel-chapter-review` (replaces the former generic `reflection-loop` demo).
+> **V1.47 shipped**: Review preset produces findings per [quality-loop.md §8](quality-loop.md#8-reflection-loop-output-contract-v147-shipped) (P0). The preset is named `novel-chapter-review` (replaces the former generic `reflection-loop` demo).
 
 | Intent | Preset id | When |
 | --- | --- | --- |
@@ -118,9 +118,9 @@ Auto-chain stops on completion (`reject_produce_when_novel_complete` — V1.39+)
 
 | Topic | Surface | Spec |
 | --- | --- | --- |
-| Multi-work desk | `creator works list/use/status` | [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) |
-| Multi-volume | `volume` in status tables | [novel-workflow-profile.md](novel-workflow-profile.md) §multi-volume |
-| Inspiration pool | `creator works pool …` | [novel-work-pool.md](novel-work-pool.md) |
+| Multi-work desk | `creator works list/use/status` | [multi-work-lifecycle.md](multi-work-lifecycle.md) |
+| Multi-volume | `volume` in status tables | [workflow-profile.md](workflow-profile.md) §multi-volume |
+| Inspiration pool | `creator works pool …` | [work-pool.md](work-pool.md) |
 
 ---
 
@@ -136,7 +136,7 @@ Authors must answer without reading raw JSON APIs (human path). **Novel profile 
 | 96h master-review banner? | Stale banner on status path | Shipped V1.39 P4 |
 | Run master review? | `creator run novel-review-master [<work_id>] …` | Shipped V1.45 |
 
-Normative finding semantics: [novel-quality-loop.md](novel-quality-loop.md) §3.4.
+Normative finding semantics: [quality-loop.md](quality-loop.md) §3.4.
 
 ### 4.1 Machine-readable status (`--json`, V1.46 P0)
 
@@ -167,7 +167,7 @@ JSON-path fetch by the slower of the two rather than their sum.
 
 When error/remediation conditions occur, user-visible output must include a **single-line next action** referencing:
 
-- **CLI commands / preset ids** → [creator-run-preset-entry.md](creator-run-preset-entry.md)
+- **CLI commands / preset ids** → [creator-run-preset-entry.md](../creator-run-preset-entry.md)
 - **Author narrative** → this document §3
 
 | Condition | Minimum remediation |
@@ -195,3 +195,48 @@ At V1.46 P-last:
 - [ ] Draft → **Shipped (V1.46)** header
 - [ ] BL-10 archive supersede note in shipped tracker (Grill #15)
 - [ ] Confirm zero runtime quickstart references
+
+---
+
+## 8. Author desk deltas (Shipped V1.49 P2)
+
+> **Status**: Shipped (V1.49 P2) — P2 overlay merged into Master.  
+> **Plan**: [2026-06-17-v1.49-author-desk-ux.md](../../plans/2026-06-17-v1.49-author-desk-ux.md)
+> **Cross-refs**: findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (6-state V1.49 P0); narrative indexes → [workflow-profile.md §4.6](workflow-profile.md#46-narrative-indexes--f-e-runtime-v149-p1) (V1.49 P1)
+
+### 8.1 Intake re-trigger on existing Work (R-V147P1-01)
+
+**Problem**: `creator bootstrap` creates a new Work and schedules `creative-brief-intake`. Existing Works have no equivalent.
+
+**Shipped CLI** (V1.49 P2):
+
+```bash
+nexus42 creator works intake [<work_id>] [--json]
+```
+
+| Behavior | Requirement | Implementation (V1.49 P2) |
+| --- | --- | --- |
+| Default work | Resolves active/default Work when `work_id` omitted | `resolve_active_work_id` (`work_utils.rs`); errors when `None` and no active Work |
+| Schedule | Enqueues `creative-brief-intake` for the resolved Work without creating a new Work row | POST `/v1/local/orchestration/schedules` with `preset_id="creative-brief-intake"` and `input.work_id=<resolved>`; the preset declares no gates, so the existing schedule-add handler accepts it on any existing Work |
+| Driver interaction | Must not cancel active FL-E auto-chain driver | Schedule is enqueued independently; no PATCH to `driver_schedule_id` |
+| Remediation | On failure, cite this §8.1 + `creator bootstrap` for new-Work path | Missing/failed Work GET surfaces an error citing §8.1 + `creator bootstrap` |
+
+### 8.2 Reconcile preview (R-V148P4-W2)
+
+**Problem**: `creator works reconcile-chapters` mutates filesystem frontmatter and `work_chapters` without preview.
+
+**Shipped CLI** (mirror `works rules reset` safety flags; V1.49 P2):
+
+```bash
+nexus42 creator works reconcile-chapters [<work_id>] [--dry-run] [--yes|-y] [--json]
+```
+
+| Flag | Requirement | Implementation (V1.49 P2) |
+| --- | --- | --- |
+| `--dry-run` | Compute `ReconcileReport` only; **no** filesystem or DB writes; **no** runtime lock acquire | Threads `?dry_run=true` query param; daemon skips `RuntimeLockGuard::acquire` and calls `reconcile_from_filesystem(..., dry_run=true)` which gates all writes behind `if !dry_run` while keeping counter increments accurate |
+| `--yes` (or `-y`) | Skip interactive confirmation when not dry-run | CLI skips `confirm_reconcile_interactive`; daemon mutating path unchanged |
+| default | Prompt before mutating when stdin is a TTY (same policy family as rules reset) | `confirm_reconcile_interactive` errors when stdin is non-TTY (scripted use must pass `--yes`); `--dry-run` takes precedence over `--yes` |
+
+The daemon handler signature is now `POST /v1/local/works/{work_id}/reconcile-chapters?dry_run=true|false` (query param optional, defaults to the mutating path).
+
+**Remediation copy** in `creator works status` must cite `reconcile-chapters --dry-run` when filesystem/DB drift detected.

@@ -43,7 +43,7 @@ iteration/v1.41
 | AC2 | inspiration add atomic + path Pool/Ideas/ | PASS | `cargo test -p nexus-daemon-runtime --test selection_pool test_inspiration_add` → `test_inspiration_add_creates_md_and_db_row_atomically ... ok`, `test_inspiration_add_rejects_existing_path ... ok`; code/doc grep confirms `rel_path = "Pool/Ideas/{slug}.md"` in `crates/nexus-local-db/src/inspiration_items.rs:179`. |
 | AC3 | promote --set-default | PASS (behavior), GAP (direct test) | `test_pool_promote_demotes_prior_active` verifies promote sets the pool active and demotes prior active. CLI help/code expose `--set-default`; no dedicated `test_pool_promote_set_default` was found, but current behavior makes promote active by default and does not introduce a global pause path. |
 | AC4 | list matches DB | PASS | `cargo test -p nexus-daemon-runtime --test selection_pool test_pool_list_returns_all_statuses` → `test_pool_list_returns_all_statuses ... ok`; list handler returns DB rows/statuses without reading markdown. |
-| AC5 | distinct from per-work inspiration_log | FAIL | Spec documents distinctness (`novel-work-pool.md:74` says not per-Work `works.inspiration_log`), and code grep shows separate `inspiration_items` vs `works.inspiration_log`; however CLI help smokes for `creator works pool inspiration add --help` and `creator run continue --help` do **not** document that the pool is distinct from per-Work `inspiration_log`, as required by AC5. |
+| AC5 | distinct from per-work inspiration_log | FAIL | Spec documents distinctness (`novel-writing/work-pool.md:74` says not per-Work `works.inspiration_log`), and code grep shows separate `inspiration_items` vs `works.inspiration_log`; however CLI help smokes for `creator works pool inspiration add --help` and `creator run continue --help` do **not** document that the pool is distinct from per-Work `inspiration_log`, as required by AC5. |
 | AC6 | hermetic API + CLI tests | PASS | `cargo test -p nexus-daemon-runtime --test selection_pool` → `13 passed`; `cargo test -p nexus42 --test command_surface_contract v141_` → `5 passed`. |
 
 ## CI / static analysis
@@ -97,7 +97,7 @@ bad_decision none
 
 ## Spec amendment verification
 
-- File 1: `.mstar/knowledge/specs/novel-work-pool.md` §3.1/§3.3/§5
+- File 1: `.mstar/knowledge/specs/novel-writing/work-pool.md` §3.1/§3.3/§5
   - Pool/Ideas/ path present: yes (`{workspace_root}/Pool/Ideas/<slug>.md`)
   - --idea semantics documented: yes (§5.1)
 - File 2: `.mstar/knowledge/specs/cli-spec.md` §6.2H
@@ -112,7 +112,7 @@ Spec grep evidence:
 
 ```text
 .mstar/knowledge/specs/local-db-schema.md:286: Path to `{workspace}/Pool/Ideas/<slug>.md`
-.mstar/knowledge/specs/novel-work-pool.md:72: `{workspace_root}/Pool/Ideas/<slug>.md`
+.mstar/knowledge/specs/novel-writing/work-pool.md:72: `{workspace_root}/Pool/Ideas/<slug>.md`
 .mstar/knowledge/specs/cli-spec.md:455: Create `{workspace}/Pool/Ideas/<slug>.md` + DB row
 .mstar/knowledge/deferred-features-cross-version-tracker.md:88: inspiration files under `Pool/Ideas/`
 .mstar/knowledge/deferred-features-cross-version-tracker.md:208: DB SSOT; `Works/_pool/灵感池/*.md` for inspiration files

@@ -39,8 +39,8 @@ review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
 
 **Changed files (P3 only):**
 - docs/novel-writing-quickstart.md
-- .mstar/knowledge/specs/novel-author-experience.md
-- .mstar/knowledge/specs/novel-quality-loop.md
+- .mstar/knowledge/specs/novel-writing/author-experience.md
+- .mstar/knowledge/specs/novel-writing/quality-loop.md
 
 ## Docs-Specific Performance & Reliability Review
 
@@ -51,7 +51,7 @@ This QC3 review is scoped exclusively to the three changed documentation files f
 **1. Cross-link integrity**
 - All internal Markdown links in the three changed files resolve to existing repo paths.
 - No `[../../` relative links were found in `docs/novel-writing-quickstart.md`.
-- Anchor links in `novel-quality-loop.md` (`novel-workflow-profile.md#554-three-layer-rules-architecture`, `novel-workflow-profile.md#555-logs-structure-and-write-discipline`) resolve to existing headers.
+- Anchor links in `novel-writing/quality-loop.md` (`novel-writing/workflow-profile.md#554-three-layer-rules-architecture`, `novel-writing/workflow-profile.md#555-logs-structure-and-write-discipline`) resolve to existing headers.
 
 **2. Section size / bloat**
 - `docs/novel-writing-quickstart.md` is 302 lines, split into focused Part I (§1–§6) and Part II (A/B/C optional) sections. No section is oversized.
@@ -63,7 +63,7 @@ This QC3 review is scoped exclusively to the three changed documentation files f
 - Quoted strings in examples are simple narrative text without shell metacharacters.
 
 **4. Spec / quickstart consistency**
-- `novel-author-experience.md` and `novel-quality-loop.md` agree on the V1.45 master-decision surface: `creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]`.
+- `novel-writing/author-experience.md` and `novel-writing/quality-loop.md` agree on the V1.45 master-decision surface: `creator run novel-review-master [<work_id>] [--finding-id <id>] [--auto-schedule]`.
 - The quickstart uses the concrete form `nexus42 creator run novel-review-master <work_id>` with optional flags, which is consistent with the normative spec.
 - Three-plane IA (`creator bootstrap` = composite, `creator run <preset_id>` = strategy, `creator works *` = atomic) is uniform across all three files.
 
@@ -83,7 +83,7 @@ None.
 
 ### 🟡 Warning
 
-**W-1: Stale command path left in `novel-quality-loop.md` §6.**
+**W-1: Stale command path left in `novel-writing/quality-loop.md` §6.**
 
 The P3 diff updated the preset name on line 108 but left the enclosing command as `creator run status`:
 
@@ -93,8 +93,8 @@ The P3 diff updated the preset name on line 108 but left the enclosing command a
 
 `creator run status` was migrated to `creator works status` in V1.41 and no longer exists as a subcommand under `creator run` (verified by `nexus42 creator run --help` and `nexus42 creator works status --help`). This creates spec/implementation drift and will mislead users or implementers following the 96h timeout remediation path.
 
-- **Fix**: Change `creator run status` to `creator works status` in `.mstar/knowledge/specs/novel-quality-loop.md` line 108.
-- **Source**: `git diff 997ebd8a...HEAD` hunk in `.mstar/knowledge/specs/novel-quality-loop.md`; CLI help verification.
+- **Fix**: Change `creator run status` to `creator works status` in `.mstar/knowledge/specs/novel-writing/quality-loop.md` line 108.
+- **Source**: `git diff 997ebd8a...HEAD` hunk in `.mstar/knowledge/specs/novel-writing/quality-loop.md`; CLI help verification.
 - **Confidence**: High.
 
 **W-2: Quickstart rewrite does not point readers to migration notes for hard-deleted V1.44 commands.**
@@ -118,7 +118,7 @@ None.
 ## Source Trace
 - Primary source: `git diff 997ebd8a...HEAD` on the three .md files (full content + per-hunk review).
 - Link verification: custom Python script extracted all `[label](target)` pairs from the three files and resolved them relative to each file's directory; all internal paths exist.
-- Anchor verification: `novel-workflow-profile.md` headers `#5.5.4` and `#5.5.5` exist and match the anchor IDs used in `novel-quality-loop.md`.
+- Anchor verification: `novel-writing/workflow-profile.md` headers `#5.5.4` and `#5.5.5` exist and match the anchor IDs used in `novel-writing/quality-loop.md`.
 - CLI surface verification: `cargo test -p nexus42 --test command_surface_contract` (37 passed) plus manual help checks.
 - Alignment: Assignment scope (plan_id, review_range, working_branch, review_cwd) matched exactly; no scope drift.
 
@@ -142,7 +142,7 @@ The P3 documentation changes are internally consistent, copy-paste safe, and acc
 
 | ID | Original | Status | Evidence |
 |----|----------|--------|----------|
-| W-1 | `creator run status` stale reference | **FIXED** | novel-quality-loop.md:108 now `creator works status` |
+| W-1 | `creator run status` stale reference | **FIXED** | novel-writing/quality-loop.md:108 now `creator works status` |
 | W-2 | missing migration section | **FIXED** | quickstart §"Migrating from V1.44" with 9-row table at top of file |
 
 ### Re-validation gates

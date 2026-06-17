@@ -33,7 +33,7 @@ review_range: "merge-base: ab3312e2 → tip: 008e6bd8 (7 commits on iteration/v1
 
 | ID | Source | File | Action |
 |---|---|---|---|
-| **W-001** | qc3 | `crates/nexus42/src/commands/creator/works/mod.rs:1386-1415, 1443-1459` (per-chapter `exists()` loop in `print_chapter_table`) | Add perf mitigation. Pick one (or a small combination) of qc3's 4 options: (1) add `tracing::debug!` / `tracing::info!` span around the hint loop recording chapter count + elapsed_ms, (2) cap hint rendering at a reasonable threshold (e.g. first 50 chapters + summary line "+ N more"), (3) concurrent via `tokio::task::spawn_blocking` (the caller is async), (4) document in `novel-author-experience.md` or crate AGENTS. **Recommended: option (1) + (2)** — observability for the common case + cap to prevent tail latency. Add a test for the cap behavior. |
+| **W-001** | qc3 | `crates/nexus42/src/commands/creator/works/mod.rs:1386-1415, 1443-1459` (per-chapter `exists()` loop in `print_chapter_table`) | Add perf mitigation. Pick one (or a small combination) of qc3's 4 options: (1) add `tracing::debug!` / `tracing::info!` span around the hint loop recording chapter count + elapsed_ms, (2) cap hint rendering at a reasonable threshold (e.g. first 50 chapters + summary line "+ N more"), (3) concurrent via `tokio::task::spawn_blocking` (the caller is async), (4) document in `novel-writing/author-experience.md` or crate AGENTS. **Recommended: option (1) + (2)** — observability for the common case + cap to prevent tail latency. Add a test for the cap behavior. |
 
 ### Defer to low-severity open residuals (5 items — registered in `.mstar/status.json` `residual_findings["2026-06-14-v1.46-novel-runtime-ux-edges"]`)
 

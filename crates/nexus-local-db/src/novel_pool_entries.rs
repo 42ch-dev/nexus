@@ -3,7 +3,7 @@
 //! Manages the `novel_pool_entries` table — creator-scoped selection pool
 //! tracking active/queued/completed Work references.
 //!
-//! Spec: novel-work-pool.md §2, local-db-schema.md §4.1.5.
+//! Spec: novel-writing/work-pool.md §2, local-db-schema.md §4.1.5.
 //!
 //! # Instrumented mutation paths (V1.46 P4 audit)
 //!
@@ -511,47 +511,8 @@ mod tests {
     // V1.46 P4 (R-V141P1-15): verify pool mutation emits structured tracing.
     #[tokio::test]
     async fn test_promote_to_active_emits_trace() {
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Clone)]
-        struct CaptureLayer {
-            messages: Arc<Mutex<Vec<String>>>,
-        }
-        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {
-            fn on_event(
-                &self,
-                event: &tracing::Event<'_>,
-                _ctx: tracing_subscriber::layer::Context<'_, S>,
-            ) {
-                if event.metadata().level() == &tracing::Level::INFO {
-                    let mut visitor = CaptureVisitor(String::new());
-                    event.record(&mut visitor);
-                    let mut msgs = self.messages.lock().unwrap();
-                    msgs.push(visitor.0);
-                }
-            }
-        }
-        struct CaptureVisitor(String);
-        impl tracing::field::Visit for CaptureVisitor {
-            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-                use std::fmt::Write;
-                let _ = write!(&mut self.0, "{}={:?} ", field.name(), value);
-            }
-            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-                use std::fmt::Write;
-                let _ = write!(&mut self.0, "{}={} ", field.name(), value);
-            }
-        }
-
-        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let layer = CaptureLayer {
-            messages: captured.clone(),
-        };
-        let subscriber =
-            <tracing_subscriber::Registry as tracing_subscriber::layer::SubscriberExt>::with(
-                tracing_subscriber::registry::Registry::default(),
-                layer,
-            );
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
 
         let (pool, _dir) = fresh_pool().await;
         seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
@@ -561,19 +522,102 @@ mod tests {
             promote_to_active(&pool, "ctr_test", "wrk_001")
                 .await
                 .unwrap();
-        } // _guard dropped here
+        }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=pool_promote_to_active",
+                "creator_id=ctr_test",
+                "work_id=wrk_001",
+            ],
+        );
+    }
+
+    // ── R-V146P4-QC1-S1: trace coverage for the remaining 3 pool mutation
+    //    paths (archive / mark_completed / mark_completed_for_work). Previously
+    //    only `promote_to_active` had a capture test (1 of 4 paths).
+
+    #[tokio::test]
+    async fn test_archive_pool_entry_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
+        let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
+            .await
+            .unwrap();
 
         {
-            let messages = captured.lock().unwrap();
-            assert!(
-                messages.iter().any(|m| {
-                    m.contains("operation=pool_promote_to_active")
-                        && m.contains("creator_id=ctr_test")
-                        && m.contains("work_id=wrk_001")
-                }),
-                "expected structured info trace for pool_promote_to_active, got: {messages:?}"
-            );
-            drop(messages);
+            let _guard = tracing::subscriber::set_default(subscriber);
+            archive_pool_entry(&pool, &entry.entry_id, "ctr_test")
+                .await
+                .unwrap();
         }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=pool_archive",
+                &format!("entry_id={}", entry.entry_id),
+                "creator_id=ctr_test",
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mark_pool_entry_completed_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
+        let entry = promote_to_active(&pool, "ctr_test", "wrk_001")
+            .await
+            .unwrap();
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            mark_pool_entry_completed(&pool, &entry.entry_id)
+                .await
+                .unwrap();
+        }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=pool_mark_completed",
+                &format!("entry_id={}", entry.entry_id),
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mark_pool_entry_completed_for_work_emits_trace() {
+        let (layer, captured) = crate::test_tracing::capture_layer();
+        let subscriber = crate::test_tracing::subscriber_with(layer);
+
+        let (pool, _dir) = fresh_pool().await;
+        seed_work(&pool, "wrk_001", "ctr_test").await.unwrap();
+        promote_to_active(&pool, "ctr_test", "wrk_001")
+            .await
+            .unwrap();
+
+        {
+            let _guard = tracing::subscriber::set_default(subscriber);
+            mark_pool_entry_completed_for_work(&pool, "ctr_test", "wrk_001")
+                .await
+                .unwrap();
+        }
+
+        crate::test_tracing::assert_info_emitted(
+            &captured,
+            &[
+                "operation=pool_mark_completed_for_work",
+                "creator_id=ctr_test",
+                "work_id=wrk_001",
+            ],
+        );
     }
 }

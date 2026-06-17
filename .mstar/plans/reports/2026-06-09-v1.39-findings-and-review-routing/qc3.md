@@ -29,7 +29,7 @@ generated_at: "2026-06-09"
 
 ### 🔴 Critical
 - **C-1: Missing `(work_id, chapter, status)` index per normative spec**  
-  The migration `202606090002_findings.sql` creates only two indexes: `(work_id, status)` and `(creator_id, status)`. However, the normative spec `novel-quality-loop.md` §2.1 explicitly requires three indexes: `(work_id, status)`, `(work_id, chapter, status)`. The missing `(work_id, chapter, status)` composite index means the supervisor's `create_finding_from_review` hook (which binds findings to chapters) and any future chapter-scoped listing will perform full table scans at scale.  
+  The migration `202606090002_findings.sql` creates only two indexes: `(work_id, status)` and `(creator_id, status)`. However, the normative spec `novel-writing/quality-loop.md` §2.1 explicitly requires three indexes: `(work_id, status)`, `(work_id, chapter, status)`. The missing `(work_id, chapter, status)` composite index means the supervisor's `create_finding_from_review` hook (which binds findings to chapters) and any future chapter-scoped listing will perform full table scans at scale.  
   → Fix: Add `CREATE INDEX IF NOT EXISTS idx_findings_work_chapter_status ON findings(work_id, chapter, status);` to the migration.
 
 ### 🟡 Warning
@@ -61,7 +61,7 @@ generated_at: "2026-06-09"
 ## Source Trace
 
 - **C-1**: Source: manual-reasoning / doc-rule  
-  Reference: `crates/nexus-local-db/migrations/202606090002_findings.sql` vs `novel-quality-loop.md` §2.1  
+  Reference: `crates/nexus-local-db/migrations/202606090002_findings.sql` vs `novel-writing/quality-loop.md` §2.1  
   Confidence: High
 
 - **W-1**: Source: manual-reasoning  
@@ -99,7 +99,7 @@ generated_at: "2026-06-09"
 **Verdict**: Request Changes
 
 ### Rationale
-The missing `(work_id, chapter, status)` index (C-1) is a **normative spec violation** (`novel-quality-loop.md` §2.1 explicitly lists this index) and will cause full-table scans for chapter-scoped finding queries, which are central to the review-stage hook. This is a performance regression at scale and must be fixed before merge.
+The missing `(work_id, chapter, status)` index (C-1) is a **normative spec violation** (`novel-writing/quality-loop.md` §2.1 explicitly lists this index) and will cause full-table scans for chapter-scoped finding queries, which are central to the review-stage hook. This is a performance regression at scale and must be fixed before merge.
 
 The warnings (W-1 through W-4) are addressable without architectural changes:
 - W-1: Add HTTP timeout or document latency ceiling.

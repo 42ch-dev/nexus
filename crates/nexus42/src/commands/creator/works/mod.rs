@@ -18,6 +18,8 @@ use crate::api::DaemonClient;
 use crate::config::CliConfig;
 // V1.42 P-last (R-V141P0-06): completion-lock file path check
 use nexus_home_layout;
+// V1.49 P2 (R-V147P1-01): intake re-trigger schedules via AddScheduleRequest.
+use nexus_contracts::local::schedule::http::AddScheduleRequest;
 
 /// Work management subcommands (DF-60 §6.2H).
 #[derive(Debug, Subcommand)]
@@ -116,7 +118,42 @@ pub enum WorksCommand {
     /// Scans the Work's `Stories/` directory and creates or updates
     /// `work_chapters` rows to match the files on disk.
     /// Migrated from `creator run reconcile-chapters`.
+    ///
+    /// V1.49 P2 (R-V148P4-W2): `--dry-run` previews the `ReconcileReport`
+    /// without filesystem/DB writes; `--yes` skips the confirmation prompt
+    /// on the mutating path (mirrors `works rules reset` safety flags).
     ReconcileChapters {
+        /// Work ID (wrk_...). Omit to use pool active Work.
+        work_id: Option<String>,
+        /// Preview the reconcile as a `ReconcileReport` without writing.
+        ///
+        /// No filesystem or DB rows are modified, no runtime lock is acquired,
+        /// and no confirmation prompt is shown. Takes precedence over `--yes`.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Skip the confirmation prompt and mutate immediately.
+        ///
+        /// By default (when stderr/stdin is a TTY) the reconcile asks for
+        /// confirmation before mutating `work_chapters` and chapter
+        /// frontmatter. Pass `--yes` (or `-y`) to proceed non-interactively;
+        /// use `--dry-run` to preview the changes without writing. Mirrors
+        /// `apt-get -y` / `pacman --noconfirm`.
+        #[arg(long = "yes", short = 'y', default_value_t = false)]
+        yes: bool,
+        /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    // ── V1.49 P2: intake re-trigger on existing Work (R-V147P1-01) ──────
+    /// Re-trigger the `creative-brief-intake` preset on an existing Work
+    /// (V1.49 P2).
+    ///
+    /// Schedules `creative-brief-intake` for the resolved Work **without**
+    /// creating a new Work row (unlike `creator bootstrap`, which is the sole
+    /// composite entry for new Works). Use this to re-run intake when a Work's
+    /// creative brief needs revision.
+    Intake {
         /// Work ID (wrk_...). Omit to use pool active Work.
         work_id: Option<String>,
         /// Emit machine-readable JSON instead of human text
@@ -191,6 +228,23 @@ pub enum FindingsCommand {
         /// Finding ID (fnd_...) to accept.
         finding_id: String,
         /// Emit machine-readable JSON instead of human text
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+    /// Prune `resolved` findings older than the retention window (V1.49 P3,
+    /// `novel-writing/quality-loop.md` §9.4).
+    ///
+    /// Deletes `resolved` findings whose `updated_at` is older than the
+    /// retention window (default 90 days). `open` and `wont_fix` findings are
+    /// never touched. Pass `--dry-run` to preview the count without deleting.
+    Prune {
+        /// Retention window in days (default 90 = `RETENTION_DEFAULT_DAYS`).
+        #[arg(long, default_value_t = nexus_local_db::RETENTION_DEFAULT_DAYS)]
+        older_than_days: i64,
+        /// Preview the count that WOULD be pruned without deleting.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        /// Emit machine-readable JSON instead of human text.
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -346,8 +400,14 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
         WorksCommand::ResumeChain { work_id, json } => {
             handle_resume_chain(&client, work_id, json).await
         }
-        WorksCommand::ReconcileChapters { work_id, json } => {
-            handle_reconcile_chapters(&client, work_id, json).await
+        WorksCommand::ReconcileChapters {
+            work_id,
+            dry_run,
+            yes,
+            json,
+        } => handle_reconcile_chapters(&client, work_id, dry_run, yes, json).await,
+        WorksCommand::Intake { work_id, json } => {
+            handle_intake(&client, config, work_id, json).await
         }
         WorksCommand::Findings { command } => {
             super::rules_runtime::handle_findings(&client, command).await
@@ -475,10 +535,15 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
         // fails the status command.
-        if let Ok(stale) = client
-            .get::<serde_json::Value>("/v1/local/findings/stale")
-            .await
-        {
+        //
+        // R-V146P0-QC3-S3: route through `fetch_stale_findings` (the shared
+        // short-timeout helper, STALE_FETCH_TIMEOUT = 5s) instead of the raw
+        // `client.get(...)` which inherited the default 30s request timeout.
+        // This restores parity with the JSON status path (qc3 F-002) and
+        // bounds the stale-fetch latency on the human status hot path — the
+        // original qc3 S-003 concern that a degraded stale endpoint could
+        // stall the status command for the full default timeout.
+        if let Some(stale) = fetch_stale_findings(client).await {
             let stale_count = stale
                 .get("stale_count")
                 .and_then(serde_json::Value::as_u64)
@@ -487,15 +552,8 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
                 .get("threshold_seconds")
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(96 * 60 * 60);
-            if stale_count > 0 {
-                let threshold_hours = threshold_secs / 3600;
-                // V1.47 P1: normalize user-facing copy — spec name, not repo path.
-                // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
-                println!(
-                    "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
-                     address open findings or run a review pass; \
-                     see novel-author-experience §4"
-                );
+            if let Some(banner) = format_stale_banner(stale_count, threshold_secs) {
+                println!("{banner}");
                 println!();
             }
         }
@@ -823,16 +881,74 @@ async fn handle_resume_chain(
     Ok(())
 }
 
-/// Handle `creator works reconcile-chapters` — rebuild `work_chapters` (V1.45 P2).
+/// Handle `creator works reconcile-chapters` — rebuild `work_chapters`
+/// (V1.45 P2; V1.49 P2 adds `--dry-run` / `--yes`).
 ///
-/// Scans the Work's Stories/ directory and syncs `work_chapters` rows.
+/// Scans the Work's `Stories/` directory and syncs `work_chapters` rows.
 /// Migrated from `creator run reconcile-chapters`.
+///
+/// # Flag policy (V1.49 P2, R-V148P4-W2; overlay §8.2)
+///
+/// Mirrors `works rules reset` safety flags:
+/// - `--dry-run`: compute the `ReconcileReport` only; **no** filesystem/DB
+///   writes; **no** confirmation prompt; takes precedence over `--yes`.
+/// - `--yes` (or `-y`): skip the confirmation prompt and mutate immediately.
+/// - Default (neither flag): when stdin is a TTY, prompt before mutating;
+///   when stdin is not a TTY, require `--yes` (error otherwise) so scripted
+///   use cannot accidentally mutate without consent.
+///
+/// The daemon handler threads `dry_run` as a query parameter; the mutating
+/// path is unchanged when `--dry-run` is absent.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] on daemon API failure, work
+/// resolution failure, or non-interactive use without `--yes`.
 async fn handle_reconcile_chapters(
     client: &DaemonClient,
     work_id: Option<String>,
+    dry_run: bool,
+    yes: bool,
     json: bool,
 ) -> Result<()> {
     let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
+
+    // `--dry-run`: preview only, never write, never prompt.
+    if dry_run {
+        // Thread dry_run as a query param; the daemon skips the runtime lock
+        // and all filesystem/DB writes (overlay §8.2).
+        let path = format!("/v1/local/works/{resolved_id}/reconcile-chapters?dry_run=true");
+        let report: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print_reconcile_report(&resolved_id, &report, true);
+        }
+        return Ok(());
+    }
+
+    // Mutating path: confirm unless `--yes` (mirror `works rules reset`).
+    if !yes {
+        if json {
+            // Machine-readable mode cannot host an interactive prompt; report
+            // that confirmation is required and exit without writing.
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "work_id": resolved_id,
+                    "reconciled": false,
+                    "confirmation_required": true,
+                    "hint": "pass --yes to proceed non-interactively, or --dry-run to preview",
+                }))
+                .unwrap_or_default()
+            );
+            return Ok(());
+        }
+        if !confirm_reconcile_interactive(&resolved_id)? {
+            println!("• Reconcile declined; work_chapters left unchanged.");
+            return Ok(());
+        }
+    }
 
     let report: serde_json::Value = client
         .post(
@@ -844,27 +960,147 @@ async fn handle_reconcile_chapters(
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        let created = report
-            .get("created")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let updated = report
-            .get("updated")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let resynced = report
-            .get("resynced")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let preserved = report
-            .get("preserved")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        println!("Reconcile complete for Work {resolved_id}:");
-        println!("  Created:   {created}");
-        println!("  Updated:   {updated}");
-        println!("  Resynced:  {resynced}");
-        println!("  Preserved: {preserved}");
+        print_reconcile_report(&resolved_id, &report, false);
+    }
+
+    Ok(())
+}
+
+/// Render a `ReconcileReport` (created / updated / resynced / preserved) for
+/// the human path. `is_dry_run` toggles the leading label.
+fn print_reconcile_report(resolved_id: &str, report: &serde_json::Value, is_dry_run: bool) {
+    let created = report
+        .get("created")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let updated = report
+        .get("updated")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let resynced = report
+        .get("resynced")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let preserved = report
+        .get("preserved")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let label = if is_dry_run {
+        "Dry run — no files modified. Reconcile preview"
+    } else {
+        "Reconcile complete"
+    };
+    println!("{label} for Work {resolved_id}:");
+    println!("  Created:   {created}");
+    println!("  Updated:   {updated}");
+    println!("  Resynced:  {resynced}");
+    println!("  Preserved: {preserved}");
+}
+
+/// Human-mode confirmation before a mutating reconcile (V1.49 P2).
+///
+/// Mirrors `rules_runtime::confirm_reset_interactive`. Returns `Ok(true)` when
+/// the user confirms, `Ok(false)` when they decline. Errors when stdin is not a
+/// terminal — callers should pass `--yes` for non-interactive use.
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] when stdin is non-interactive.
+fn confirm_reconcile_interactive(resolved_id: &str) -> Result<bool> {
+    use std::io::IsTerminal;
+
+    if !std::io::stdin().is_terminal() {
+        return Err(crate::errors::CliError::Config(format!(
+            "Reconciling work_chapters for Work {resolved_id} requires confirmation \
+             but stdin is not a terminal. Pass --yes to proceed, or --dry-run to preview."
+        )));
+    }
+    let confirmed = dialoguer::Confirm::new()
+        .with_prompt(format!(
+            "Reconcile work_chapters from filesystem for Work {resolved_id}? \
+             This may create/update chapter rows and rewrite chapter frontmatter."
+        ))
+        .default(false)
+        .show_default(true)
+        .interact_opt()
+        .map_err(|e| crate::errors::CliError::Other(format!("confirmation prompt failed: {e}")))?;
+    Ok(confirmed == Some(true))
+}
+
+/// Handle `creator works intake [<work_id>]` — re-trigger creative-brief-intake
+/// on an existing Work (V1.49 P2, R-V147P1-01; overlay §8.1).
+///
+/// Schedules the `creative-brief-intake` preset for the resolved Work via the
+/// daemon schedule endpoint, **without** creating a new Work row. This is the
+/// first-class re-trigger path that `creator bootstrap` cannot serve (bootstrap
+/// is the sole composite entry for new Works).
+///
+/// The `creative-brief-intake` preset declares no gates, so the existing
+/// schedule-add handler accepts it on any existing Work bound via
+/// `input.work_id`. Must not cancel an active FL-E auto-chain driver (the
+/// schedule is enqueued independently).
+///
+/// # Errors
+///
+/// Returns [`crate::errors::CliError`] when no active creator is selected, the
+/// Work cannot be resolved, or the daemon schedule-add call fails.
+async fn handle_intake(
+    client: &DaemonClient,
+    config: &CliConfig,
+    work_id: Option<String>,
+    json: bool,
+) -> Result<()> {
+    let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
+
+    // resolve_active_work_id passes an explicit id through without an existence
+    // check; GET the Work so a nonexistent work_id surfaces a clear error
+    // (overlay §8.1 remediation: cite this command + `creator bootstrap`).
+    let _work: serde_json::Value = client
+        .get::<serde_json::Value>(&format!("/v1/local/works/{resolved_id}"))
+        .await
+        .map_err(|e| {
+            crate::errors::CliError::Config(format!(
+                "Work '{resolved_id}' could not be loaded: {e}.\n  \
+             ↳ Verify the work_id, or for a brand-new Work use \
+             `nexus42 creator bootstrap --idea \"...\"` (see author-experience §8.1)."
+            ))
+        })?;
+
+    let creator_id = config
+        .active_creator_id
+        .clone()
+        .ok_or(crate::errors::CliError::CreatorNotSelected)?;
+
+    // Bind the schedule to the existing Work via input.work_id. The
+    // creative-brief-intake preset reads work_id from preset.input.work_id.
+    let request = AddScheduleRequest {
+        creator_id,
+        preset_id: "creative-brief-intake".to_string(),
+        seed: None,
+        label: None,
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: Some(serde_json::json!({ "work_id": resolved_id })),
+        force_gates: false,
+        reason: None,
+    };
+
+    let resp: serde_json::Value = client
+        .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
+        .await?;
+
+    let schedule_id = resp
+        .get("schedule_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else {
+        println!("Intake scheduled for Work {resolved_id}");
+        println!("  preset:   creative-brief-intake");
+        println!("  schedule: {schedule_id}");
     }
 
     Ok(())
@@ -1248,6 +1484,30 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
         .ok()
 }
 
+/// Format the human-path stale-findings banner line (R-V146P0-QC3-S3).
+///
+/// Pure over `(stale_count, threshold_seconds)`. Returns `Some(banner)` only
+/// when `stale_count > 0` (no banner noise when nothing is stale); `None`
+/// otherwise so the caller skips printing. Extracted from the inline banner
+/// block so the rendering + zero-suppression is hermetically unit-testable,
+/// and so both the threshold math and the spec citation live in one place.
+///
+/// `threshold_seconds` defaults to 96h (96 * 60 * 60) at the call site when
+/// the daemon omits it.
+fn format_stale_banner(stale_count: u64, threshold_seconds: i64) -> Option<String> {
+    if stale_count == 0 {
+        return None;
+    }
+    let threshold_hours = threshold_seconds / 3600;
+    // V1.47 P1: normalize user-facing copy — spec name, not repo path.
+    // V1.46 P1 (spec hygiene): cite spec, not deleted quickstart.
+    Some(format!(
+        "⏰ {stale_count} finding(s) stale (>{threshold_hours}h) — \
+         address open findings or run a review pass; \
+         see novel-author-experience §4"
+    ))
+}
+
 /// Fetch both the work-scoped open findings and the creator-global stale
 /// summary for a novel work's JSON status, running the two independent daemon
 /// subcalls **concurrently** via `tokio::join!` (qc3 F-001).
@@ -1436,10 +1696,28 @@ impl FindingsSummary {
 ///   + suggests `creator run novel-review-master` (V1.46 P0, Grill #7)
 /// - `FindingsResult::Unavailable` → "findings: unavailable (daemon error)"
 fn print_findings_summary(result: &FindingsResult, work_id: &str) {
+    // R-V146P0-QC1-S2: formatting lives in the pure `format_findings_summary_lines`
+    // helper so the test helper `capture_findings_output` cannot drift from
+    // production. This wrapper only prints each rendered line.
+    for line in format_findings_summary_lines(result, work_id) {
+        println!("{line}");
+    }
+}
+
+/// Render the open-findings summary as a vector of display lines (pure).
+///
+/// Extracted from `print_findings_summary` (R-V146P0-QC1-S2) as the single
+/// formatting path shared by the production printer and the test helper
+/// `capture_findings_output` (previously the helper mirrored the production
+/// logic, risking silent drift).
+///
+/// - `FindingsResult::Unavailable` → one-line `["findings: unavailable (daemon error)"]`
+/// - `FindingsResult::Fetched([])` → two lines: "none open" + review-master hint
+/// - `FindingsResult::Fetched([...])` → summary line + top findings (sanitized)
+fn format_findings_summary_lines(result: &FindingsResult, work_id: &str) -> Vec<String> {
     let findings = match result {
         FindingsResult::Unavailable => {
-            println!("findings: unavailable (daemon error)");
-            return;
+            return vec!["findings: unavailable (daemon error)".to_string()];
         }
         FindingsResult::Fetched(vec) => vec,
     };
@@ -1449,9 +1727,10 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
     if summary.open_count == 0 {
         // V1.46 P0 (Grill #7): empty findings → suggest a master-decision pass.
         let safe_work_id = sanitize_for_terminal(work_id);
-        println!("findings: none open");
-        println!("  Run: nexus42 creator run novel-review-master {safe_work_id}");
-        return;
+        return vec![
+            "findings: none open".to_string(),
+            format!("  Run: nexus42 creator run novel-review-master {safe_work_id}"),
+        ];
     }
 
     // Summary line: "findings: 3 open (1 blocker, 1 major, 1 info)"
@@ -1471,15 +1750,22 @@ fn print_findings_summary(result: &FindingsResult, work_id: &str) {
         .highest_severity
         .as_ref()
         .map_or(String::new(), |h| format!(" — highest: {h}"));
-    println!("findings: {count_display} open ({sev_summary}){highest_tag}");
+
+    let mut lines = vec![format!(
+        "findings: {count_display} open ({sev_summary}){highest_tag}"
+    )];
 
     // Top findings with routing hints (sanitized).
     for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
         let safe_title = sanitize_for_terminal(title);
         let safe_hint = sanitize_for_terminal(hint);
         let display_title = truncate_with_ellipsis(&safe_title, 48);
-        println!("  #{} [{sev}] \"{display_title}\" {safe_hint}", i + 1);
+        lines.push(format!(
+            "  #{} [{sev}] \"{display_title}\" {safe_hint}",
+            i + 1
+        ));
     }
+    lines
 }
 
 /// V1.46 P2 QC fix W-001: maximum number of chapters that receive
@@ -1651,23 +1937,22 @@ fn print_completion_lock_hint(work_ref: &str, work_id: &str) {
     if work_ref.starts_with('(') {
         return;
     }
-    if let Ok(cfg) = crate::config::CliConfig::load() {
-        if let Some(creator_id) = &cfg.active_creator_id {
-            if let Some(ws_slug) = cfg.active_workspace_slug_by_creator.get(creator_id) {
-                let home = dirs::home_dir().unwrap_or_default();
-                let ws_dir =
-                    nexus_home_layout::operational_workspace_dir(&home, creator_id, ws_slug);
-                let lock_path = ws_dir
-                    .join("Works")
-                    .join(work_ref)
-                    .join(".completion-lock.json");
-                if !lock_path.exists() {
-                    println!("⚠ completion-lock file missing (DB says locked but file not found)");
-                    // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
-                    println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
-                }
-            }
-        }
+    // R-V146P2-QC1-S2: route through the shared `operational_workspace_dir_from_config`
+    // helper instead of re-implementing the config → creator_id → workspace_slug →
+    // home → operational_workspace_dir lookup inline. The helper has identical
+    // best-effort semantics (None on any resolution failure); the prior ad-hoc
+    // block was a verbatim duplicate of that resolution chain.
+    let Some(ws_dir) = operational_workspace_dir_from_config() else {
+        return;
+    };
+    let lock_path = ws_dir
+        .join("Works")
+        .join(work_ref)
+        .join(".completion-lock.json");
+    if !lock_path.exists() {
+        println!("⚠ completion-lock file missing (DB says locked but file not found)");
+        // V1.45 P2: hint updated from `run reconcile-chapters` to `works reconcile-chapters`.
+        println!("  Run: nexus42 creator works reconcile-chapters {work_id}");
     }
 }
 
@@ -1726,6 +2011,29 @@ mod tests {
             "title": title,
             "routing_hint": routing_hint,
             "status": "open",
+        })
+    }
+
+    /// R-V146P0-QC2-S1: build a finding element with the FULL list-API shape
+    /// (every field the findings list endpoint returns), not the minimal
+    /// `finding_json` subset. Used to assert `enrich_status_json` preserves
+    /// the element verbatim (full shape fidelity, not just a few fields).
+    fn full_finding_json() -> serde_json::Value {
+        serde_json::json!({
+            "finding_id": "fnd_01H8XK9Q2VTestFidelityFullShape",
+            "work_id": "wrk_full_shape",
+            "chapter": 7,
+            "severity": "blocker",
+            "status": "open",
+            "title": "Continuity error in chapter 7",
+            "description": "Character name changes between paragraphs 3 and 9.",
+            "routing_hint": "→ write",
+            "target_executor": "write",
+            "creator_id": "ctr_full_shape",
+            "kind": "continuity",
+            "rule_suggestion": "Track character names per chapter.",
+            "created_at": 1_718_000_000,
+            "updated_at": 1_718_000_123,
         })
     }
 
@@ -1794,49 +2102,12 @@ mod tests {
     // ── print_findings_summary display tests ─────────────────────────────
 
     fn capture_findings_output(findings: &[serde_json::Value], work_id: &str) -> String {
-        // Test the summary struct formatting (mirrors print_findings_summary logic).
-        let is_truncated = findings.len() == FINDINGS_FETCH_LIMIT;
-        let summary = FindingsSummary::from_findings_json(findings, is_truncated);
-        let mut lines = Vec::new();
-
-        if summary.open_count == 0 {
-            // V1.46 P0 (Grill #7): empty → suggest review-master.
-            let safe_work_id = sanitize_for_terminal(work_id);
-            lines.push("findings: none open".to_string());
-            lines.push(format!(
-                "  Run: nexus42 creator run novel-review-master {safe_work_id}"
-            ));
-        } else {
-            let count_display = if summary.is_truncated {
-                format!("{}+", summary.open_count)
-            } else {
-                format!("{}", summary.open_count)
-            };
-            let sev_parts: Vec<String> = summary
-                .severity_counts
-                .iter()
-                .map(|(sev, count)| format!("{count} {sev}"))
-                .collect();
-            let sev_summary = sev_parts.join(", ");
-            let highest_tag = summary
-                .highest_severity
-                .as_ref()
-                .map_or(String::new(), |h| format!(" — highest: {h}"));
-            lines.push(format!(
-                "findings: {count_display} open ({sev_summary}){highest_tag}"
-            ));
-            for (i, (title, sev, hint)) in summary.top_findings.iter().enumerate() {
-                let safe_title = sanitize_for_terminal(title);
-                let safe_hint = sanitize_for_terminal(hint);
-                let display_title = truncate_with_ellipsis(&safe_title, 48);
-                lines.push(format!(
-                    "  #{} [{sev}] \"{display_title}\" {safe_hint}",
-                    i + 1
-                ));
-            }
-        }
-
-        lines.join("\n")
+        // R-V146P0-QC1-S2: delegate to the shared production formatter so the
+        // test helper cannot drift from `print_findings_summary`. The slice is
+        // wrapped into `FindingsResult::Fetched`; the `Unavailable` branch is
+        // covered directly by `format_findings_summary_lines` unit tests.
+        let result = FindingsResult::Fetched(findings.to_vec());
+        format_findings_summary_lines(&result, work_id).join("\n")
     }
 
     #[test]
@@ -1847,6 +2118,45 @@ mod tests {
         assert!(output.contains("novel-review-master"));
         assert!(output.contains("wrk_test"));
         assert!(!output.contains("highest"));
+    }
+
+    // -----------------------------------------------------------------------
+    // R-V146P0-QC1-S2: shared formatter covers the Unavailable branch + parity
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_findings_summary_lines_unavailable_branch() {
+        // R-V146P0-QC1-S2: the shared `format_findings_summary_lines` owns the
+        // Unavailable branch (previously only reachable via the production
+        // `print_findings_summary`, never via the test helper). Pins the
+        // one-line degradation output.
+        let lines = format_findings_summary_lines(&FindingsResult::Unavailable, "wrk_x");
+        assert_eq!(lines.len(), 1, "Unavailable renders exactly one line");
+        assert_eq!(lines[0], "findings: unavailable (daemon error)");
+    }
+
+    #[test]
+    fn format_findings_summary_lines_parity_with_capture_helper() {
+        // R-V146P0-QC1-S2: the test helper `capture_findings_output` now
+        // delegates to the shared formatter, so its output must equal
+        // `format_findings_summary_lines(...).join("\n")` byte-for-byte.
+        // A representative populated case proves no formatting drifted.
+        let findings = vec![
+            finding_json("blocker", "Continuity error", "→ write"),
+            finding_json("major", "Plot hole", "→ brainstorm"),
+            finding_json("minor", "Typo", "→ none"),
+        ];
+        let via_helper = capture_findings_output(&findings, "wrk_parity");
+        let result = FindingsResult::Fetched(findings.clone());
+        let via_shared = format_findings_summary_lines(&result, "wrk_parity").join("\n");
+        assert_eq!(
+            via_helper, via_shared,
+            "helper must delegate to shared formatter"
+        );
+        // Sanity: the populated summary surfaces the count + a top finding.
+        assert!(via_shared.contains("findings: 3 open"));
+        assert!(via_shared.contains("1 blocker"));
+        assert!(via_shared.contains("Continuity error"));
     }
 
     #[test]
@@ -2006,6 +2316,49 @@ mod tests {
             Some("Test Novel")
         );
         assert_eq!(out.get("current_chapter").and_then(|v| v.as_i64()), Some(3));
+    }
+
+    #[test]
+    fn enrich_novel_preserves_full_finding_element_shape_verbatim() {
+        // R-V146P0-QC2-S1: the existing enrich tests used the minimal
+        // `finding_json` helper and only spot-checked `severity` /
+        // `routing_hint`. Assert full element-shape fidelity: a finding
+        // carrying every list-API field must survive `enrich_status_json`
+        // byte-for-byte (verbatim round-trip), proving no field is dropped,
+        // renamed, or coerced. Guards against a future enrich impl that
+        // re-serializes a subset of fields.
+        let full = full_finding_json();
+        let findings = vec![full.clone()];
+        let out = enrich_status_json(novel_work_resp(), Some(findings.as_slice()), None);
+        let arr = out
+            .get("findings")
+            .and_then(|v| v.as_array())
+            .expect("findings[] present");
+        assert_eq!(arr.len(), 1, "exactly the one full-shape finding");
+        // Verbatim equality: the enriched element equals the input element.
+        assert_eq!(
+            arr[0], full,
+            "enrich must preserve the full finding element verbatim (no field drop/rename/coerce)"
+        );
+        // Pin a handful of the previously-unasserted fields explicitly so a
+        // regression message points at the right field.
+        assert_eq!(arr[0].get("chapter").and_then(|v| v.as_i64()), Some(7));
+        assert_eq!(
+            arr[0].get("description").and_then(|v| v.as_str()),
+            Some("Character name changes between paragraphs 3 and 9.")
+        );
+        assert_eq!(
+            arr[0].get("kind").and_then(|v| v.as_str()),
+            Some("continuity")
+        );
+        assert_eq!(
+            arr[0].get("rule_suggestion").and_then(|v| v.as_str()),
+            Some("Track character names per chapter.")
+        );
+        assert_eq!(
+            arr[0].get("created_at").and_then(|v| v.as_i64()),
+            Some(1_718_000_000)
+        );
     }
 
     #[test]
@@ -2294,6 +2647,43 @@ mod tests {
         );
     }
 
+    // ── R-V146P0-QC3-S3: human-path stale banner rendering ──────────────
+
+    #[test]
+    fn format_stale_banner_none_when_zero() {
+        // R-V146P0-QC3-S3: zero stale findings must NOT emit a banner
+        // (no empty sentinel noise). The human status path now routes through
+        // `format_stale_banner`, so the zero-suppression is unit-testable.
+        assert_eq!(format_stale_banner(0, 96 * 60 * 60), None);
+    }
+
+    #[test]
+    fn format_stale_banner_some_when_stale_count_positive() {
+        // R-V146P0-QC3-S3: a positive stale count renders the banner with the
+        // computed whole-hour threshold and the spec citation.
+        let banner = format_stale_banner(7, 96 * 60 * 60).expect("banner for stale_count>0");
+        assert!(
+            banner.contains("7 finding(s) stale"),
+            "count rendered: {banner}"
+        );
+        assert!(
+            banner.contains(">96h"),
+            "threshold hours rendered: {banner}"
+        );
+        assert!(
+            banner.contains("novel-author-experience §4"),
+            "spec citation preserved: {banner}"
+        );
+    }
+
+    #[test]
+    fn format_stale_banner_computes_hours_from_seconds() {
+        // R-V146P0-QC3-S3: threshold_seconds is converted to whole hours
+        // (integer division). 345600s = 96h; 7200s = 2h.
+        assert!(format_stale_banner(1, 345_600).unwrap().contains(">96h"));
+        assert!(format_stale_banner(1, 7_200).unwrap().contains(">2h"));
+    }
+
     // ── sanitize_for_terminal tests ──────────────────────────────────────
 
     #[test]
@@ -2338,6 +2728,27 @@ mod tests {
         let input = "good\x1b[2Jbad";
         let sanitized = sanitize_for_terminal(input);
         assert_eq!(sanitized, "goodbad");
+    }
+
+    // ── R-V146P2-QC1-S2: workspace-dir resolution dedup ─────────────────
+
+    #[test]
+    fn print_completion_lock_hint_no_ops_when_work_ref_is_placeholder() {
+        // R-V146P2-QC1-S2: a placeholder work_ref (starting with "(") must
+        // short-circuit before any workspace-dir resolution. Asserts the
+        // early-return branch is preserved after routing through the shared
+        // `operational_workspace_dir_from_config` helper.
+        // Best-effort: cannot panic regardless of config state.
+        print_completion_lock_hint("(no ref)", "wrk_test");
+    }
+
+    #[test]
+    fn print_completion_lock_hint_no_ops_when_workspace_unresolvable() {
+        // R-V146P2-QC1-S2: with a real-looking work_ref but no resolvable
+        // active creator/workspace (the default test-env state), the shared
+        // helper returns None and the hint is skipped without panicking.
+        // Pins that the deduplicated resolution path degrades gracefully.
+        print_completion_lock_hint("MYNOVEL", "wrk_test");
     }
 
     // ── FindingsResult unavailable display test ──────────────────────────
@@ -2505,8 +2916,15 @@ mod tests {
         let cli = WorksCli::try_parse_from(["nexus42", "reconcile-chapters"])
             .expect("works reconcile-chapters should parse");
         match cli.command {
-            WorksCommand::ReconcileChapters { work_id, json: _ } => {
+            WorksCommand::ReconcileChapters {
+                work_id,
+                dry_run,
+                yes,
+                json: _,
+            } => {
                 assert!(work_id.is_none(), "work_id should be optional");
+                assert!(!dry_run, "dry_run should default to false");
+                assert!(!yes, "yes should default to false");
             }
             _ => panic!("expected ReconcileChapters variant"),
         }
@@ -2517,11 +2935,135 @@ mod tests {
         let cli = WorksCli::try_parse_from(["nexus42", "reconcile-chapters", "wrk_abc"])
             .expect("works reconcile-chapters <work_id> should parse");
         match cli.command {
-            WorksCommand::ReconcileChapters { work_id, json: _ } => {
+            WorksCommand::ReconcileChapters {
+                work_id,
+                dry_run: _,
+                yes: _,
+                json: _,
+            } => {
                 assert_eq!(work_id.as_deref(), Some("wrk_abc"));
             }
             _ => panic!("expected ReconcileChapters variant"),
         }
+    }
+
+    /// V1.49 P2 (R-V148P4-W2): `--dry-run` and `--yes` flags parse correctly.
+    #[test]
+    fn works_reconcile_chapters_parses_dry_run_and_yes_flags() {
+        let cli =
+            WorksCli::try_parse_from(["nexus42", "reconcile-chapters", "wrk_abc", "--dry-run"])
+                .expect("works reconcile-chapters --dry-run should parse");
+        match cli.command {
+            WorksCommand::ReconcileChapters {
+                work_id,
+                dry_run,
+                yes: _,
+                json: _,
+            } => {
+                assert_eq!(work_id.as_deref(), Some("wrk_abc"));
+                assert!(dry_run, "dry_run flag must be true");
+            }
+            _ => panic!("expected ReconcileChapters variant"),
+        }
+
+        let cli = WorksCli::try_parse_from(["nexus42", "reconcile-chapters", "-y"])
+            .expect("works reconcile-chapters -y (short form) should parse");
+        match cli.command {
+            WorksCommand::ReconcileChapters {
+                dry_run: _, yes, ..
+            } => {
+                assert!(yes, "yes flag must be true via the -y short form");
+            }
+            _ => panic!("expected ReconcileChapters variant"),
+        }
+    }
+
+    // ── V1.49 P2 (R-V147P1-01): intake re-trigger request shape ──────────
+
+    /// `handle_intake` schedules `creative-brief-intake` bound to the existing
+    /// Work via `input.work_id`, without creating a new Work row. Verifies the
+    /// full request contract against a wiremock daemon (overlay §8.1).
+    #[tokio::test]
+    async fn handle_intake_schedules_creative_brief_intake_on_existing_work() {
+        use wiremock::matchers::{body_string_contains, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let work_id = "wrk_intake_test";
+
+        // GET the Work to verify existence → 200.
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/local/works/{work_id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "work_id": work_id,
+                "title": "Intake Test",
+                "intake_status": "complete",
+            })))
+            .mount(&mock_server)
+            .await;
+
+        // POST schedule — assert the body binds preset_id + work_id.
+        Mock::given(method("POST"))
+            .and(path("/v1/local/orchestration/schedules"))
+            .and(body_string_contains("\"creative-brief-intake\""))
+            .and(body_string_contains(work_id))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "schedule_id": "SCH_intake_001",
+                "status": "pending",
+                "core_context_version": 0,
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let config = CliConfig {
+            active_creator_id: Some("creator_test".to_string()),
+            daemon_url: mock_server.uri(),
+            ..Default::default()
+        };
+
+        let result = handle_intake(&client, &config, Some(work_id.to_string()), false).await;
+        assert!(
+            result.is_ok(),
+            "intake scheduling should succeed: {result:?}"
+        );
+    }
+
+    /// `handle_intake` surfaces a clear error when the Work does not exist
+    /// (overlay §8.1 remediation: cite §8.1 + `creator bootstrap`).
+    #[tokio::test]
+    async fn handle_intake_errors_clearly_when_work_missing() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let work_id = "wrk_does_not_exist";
+
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/local/works/{work_id}")))
+            .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
+            .mount(&mock_server)
+            .await;
+
+        let client = DaemonClient::new(&mock_server.uri());
+        let config = CliConfig {
+            active_creator_id: Some("creator_test".to_string()),
+            daemon_url: mock_server.uri(),
+            ..Default::default()
+        };
+
+        let err = handle_intake(&client, &config, Some(work_id.to_string()), false)
+            .await
+            .expect_err("missing work should error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(work_id),
+            "error should name the missing work_id: {msg}"
+        );
+        assert!(
+            msg.contains("creator bootstrap"),
+            "error should cite the bootstrap remediation path: {msg}"
+        );
     }
 
     // ── Rejected subcommand tests (Grill #10/#11) ───────────────────────

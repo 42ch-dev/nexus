@@ -23,7 +23,7 @@ generated_at: "2026-06-09"
 - Review cwd (verified): .worktrees/v1.39-p05 (read-only — do NOT modify; do NOT push; do NOT open PR)
 - Files reviewed: 4
 - Commit range: ea129914 (single commit on the review branch)
-- Tools run: git rev-parse / branch / log / diff --stat; cargo clippy --all -- -D warnings (lock contention observed, reached Finished dev profile with no new diagnostics in captured tail); cargo test -p nexus-orchestration --lib -- research (14 passed); cargo test -p nexus-orchestration --test auto_chain (21 passed); cargo test -p nexus-local-db (all packages ok); cargo test -p nexus-daemon-runtime (6 passed, 4 failed in fl_e_schedule_api.rs); cargo +nightly fmt --all -- --check (EXIT_CODE=0, clean); full context reads of plan, iteration compass §0.1/§1.1, creator-workflow.md, orchestration-engine.md, novel-workflow-profile.md, research preset.yaml, auto_chain.rs, supervisor.rs (P0 context), and the exact 1-commit diff.
+- Tools run: git rev-parse / branch / log / diff --stat; cargo clippy --all -- -D warnings (lock contention observed, reached Finished dev profile with no new diagnostics in captured tail); cargo test -p nexus-orchestration --lib -- research (14 passed); cargo test -p nexus-orchestration --test auto_chain (21 passed); cargo test -p nexus-local-db (all packages ok); cargo test -p nexus-daemon-runtime (6 passed, 4 failed in fl_e_schedule_api.rs); cargo +nightly fmt --all -- --check (EXIT_CODE=0, clean); full context reads of plan, iteration compass §0.1/§1.1, creator-workflow.md, orchestration-engine.md, novel-writing/workflow-profile.md, research preset.yaml, auto_chain.rs, supervisor.rs (P0 context), and the exact 1-commit diff.
 
 ## Findings
 

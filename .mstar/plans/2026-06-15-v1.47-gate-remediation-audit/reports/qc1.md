@@ -42,7 +42,7 @@ Verified against normative sources:
 |---|---|---|
 | "intake is triggered only via `creator bootstrap`" | `creator-run-preset-entry.md` §3.2 line 78: *"intake is triggered only via `creator bootstrap`, not manual `creator run`."* | ✅ Aligned |
 | `--preset creative-brief-intake` is wrong (`--preset` overrides PRODUCTION) | `bootstrap.rs` code: `--preset` sets production preset; intake hardcoded `creative-brief-intake` at line 303 | ✅ Accurate |
-| intake remediation cites "novel-author-experience §3.2" | `novel-author-experience.md` §5 SSOT table: *"Missing scaffold / intake incomplete → Cite §3.2"* | ✅ Compliant |
+| intake remediation cites "novel-author-experience §3.2" | `novel-writing/author-experience.md` §5 SSOT table: *"Missing scaffold / intake incomplete → Cite §3.2"* | ✅ Compliant |
 | `creator bootstrap` creates a NEW Work (not fixing existing) | `bootstrap.rs` module doc line 4: *"Creates a new Work, optionally schedules an init preset, schedules intake"* | ✅ Acknowledged in code comment |
 
 The developer's inline comment in `preset_gates.rs` (`R-V146P1-QC3-S1: ...`) correctly explains the architectural reasoning — this is exemplary traceability and prevents regression.

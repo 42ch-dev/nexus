@@ -1,7 +1,7 @@
 -- V1.47 P0 fix (qc1 W-2 / qc2 W-1 / qc3 W-2): idempotency guard for
 -- review→finding.
 --
--- novel-quality-loop.md §8.3 asked the plan to lock in a decision on
+-- novel-writing/quality-loop.md §8.3 asked the plan to lock in a decision on
 -- idempotency: calling the review terminal hook twice on the same chapter
 -- must NOT create duplicate findings.
 --

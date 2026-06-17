@@ -14,7 +14,7 @@ This document separates **Cargo dependency wiring** (what compiles and links) fr
 | CLI + libraries | `crates/*` | Rust workspace (see below) |
 | Codegen / validation | `tooling/` | `pnpm run codegen`, schema checks |
 | Normative OSS specs | `.mstar/knowledge/specs/` | CLI, daemon, orchestration, sync contracts |
-| End-user docs | `docs/` | Install, contributing, this file. Author happy path: [`novel-author-experience.md`](../.mstar/knowledge/specs/novel-author-experience.md) §3; CLI workflows: [`creator-run-preset-entry.md`](../.mstar/knowledge/specs/creator-run-preset-entry.md) |
+| End-user docs | `docs/` | Install, contributing, this file. Author happy path: [`novel-writing/author-experience.md`](../.mstar/knowledge/specs/novel-writing/author-experience.md) §3; CLI workflows: [`creator-run-preset-entry.md`](../.mstar/knowledge/specs/creator-run-preset-entry.md) |
 
 ## Truth source: JSON Schema
 

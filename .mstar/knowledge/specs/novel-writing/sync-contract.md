@@ -3,7 +3,7 @@
 **Status**: Normative (module contract) — **V1.36 layout migration pending** (P2 implement)  
 **Document class**: Companion  
 **Scope**: Workspace scan rules for novel-writing sync module  
-**Primary layout SSOT**: [novel-workflow-profile.md](novel-workflow-profile.md) §3, §7  
+**Primary layout SSOT**: [workflow-profile.md](workflow-profile.md) §3, §7  
 **Supersedes**: workspace-root `Stories/<story_ref>/` scan rules (pre-1.0; no compatibility shims)
 
 ## 1. Artifact Discovery
@@ -19,8 +19,8 @@ The sync module scans the workspace for novel-writing artifacts when `work_profi
 
 - Only `.md` files **directly under** `Works/<work_ref>/Stories/` are sync chapter candidates
 - Hidden files (starting with `.`) are skipped
-- `README.md`, `Outlines/**`, `Logs/**` are **never** chapter candidates. Per-chapter metadata is derived from the **`work_chapters` table** in `state.db` (per [novel-workflow-profile.md §4.1](./novel-workflow-profile.md)); the legacy `work-status.md` file is removed in V1.36.
-- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](./entity-scope-model.md) + [novel-workflow-profile.md §3.5](./novel-workflow-profile.md))
+- `README.md`, `Outlines/**`, `Logs/**` are **never** chapter candidates. Per-chapter metadata is derived from the **`work_chapters` table** in `state.db` (per [novel-writing/workflow-profile.md §4.1](./novel-writing/workflow-profile.md)); the legacy `work-status.md` file is removed in V1.36.
+- `Works/<work_ref>/Worldbuilding/` subtree is **not present** in V1.36 (world content lives in World KB per [entity-scope-model.md §5.4](./entity-scope-model.md) + [novel-writing/workflow-profile.md §3.5](./novel-writing/workflow-profile.md))
 - Workspace-root `Stories/<story_ref>/` is **not** scanned (legacy; removed pre-1.0)
 - Each `work_ref` directory under `Works/` represents one novel Work's artifact tree
 

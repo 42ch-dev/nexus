@@ -12,7 +12,7 @@
 - [orchestration-engine.md](orchestration-engine.md) — presets, gates, `run_intents`
 - [work-experience-model.md](work-experience-model.md) — Work lifecycle
 - [creator-workflow.md](creator-workflow.md) — FL-E stage ↔ preset mapping
-- [novel-work-pool.md](novel-work-pool.md) — pool `active` default
+- [novel-writing/work-pool.md](novel-writing/work-pool.md) — pool `active` default
 
 **Iteration compass**: [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md)  
 **Tracker**: BL-12
@@ -149,8 +149,8 @@ Hard delete legacy subcommands — **no deprecated aliases** (pre-release).
 This Master **supersedes** the V1.44 cli-spec §6.2D/E bespoke subcommand tables and the V1.45 Draft overlay sections in the following specs:
 
 - [creator-workflow.md](creator-workflow.md) (FL-E CLI overlay)
-- [novel-quality-loop.md](novel-quality-loop.md) (preset-id commands overlay; applied P3)
-- [novel-manuscript-audit.md](novel-manuscript-audit.md) (CLI entry overlay; split presets)
+- [novel-writing/quality-loop.md](novel-writing/quality-loop.md) (preset-id commands overlay; applied P3)
+- [novel-writing/manuscript-audit.md](novel-writing/manuscript-audit.md) (CLI entry overlay; split presets)
 - [work-experience-model.md](work-experience-model.md) (side-input + run_intents overlay)
 - [orchestration-engine.md](orchestration-engine.md) (`run_intents` dispatch overlay)
 - [cli-spec.md](cli-spec.md) (creator run preset entry overlay)

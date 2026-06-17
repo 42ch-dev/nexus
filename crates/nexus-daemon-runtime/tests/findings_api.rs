@@ -13,11 +13,12 @@
 
 #![allow(clippy::unwrap_used)]
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use nexus_daemon_runtime::api::handlers::findings::{
     create_finding_handler, create_from_review_handler, delete_finding_handler,
-    get_finding_handler, list_findings_handler, update_finding_handler, CreateFindingRequest,
-    FindingApiDto, ListFindingsQuery, UpdateFindingRequest,
+    get_finding_handler, list_findings_handler, prune_findings_handler, update_finding_handler,
+    CreateFindingRequest, FindingApiDto, ListFindingsQuery, PruneFindingsQuery,
+    UpdateFindingRequest,
 };
 use nexus_daemon_runtime::api::handlers::works::CreateWorkRequest;
 use nexus_daemon_runtime::test_utils;
@@ -401,4 +402,428 @@ async fn findings_routing_hints_all_executors() {
             "routing hint mismatch for executor={executor}"
         );
     }
+}
+
+// ─── V1.49 F6: extended lifecycle transitions (findings-lifecycle.md §2) ───
+
+/// Helper: PATCH a finding's status and return either the updated DTO or
+/// the resulting `NexusApiError`. Used by the V1.49 lifecycle tests so they
+/// can assert both happy paths (Ok) and rejection paths (Err).
+async fn patch_status(
+    state: &WorkspaceState,
+    work_id: &str,
+    finding_id: &str,
+    new_status: &str,
+) -> Result<FindingApiDto, nexus_daemon_runtime::api::errors::NexusApiError> {
+    update_finding_handler(
+        State(state.clone()),
+        Path((work_id.to_string(), finding_id.to_string())),
+        axum::Json(UpdateFindingRequest {
+            status: Some(new_status.to_string()),
+            severity: None,
+            title: None,
+            description: None,
+            target_executor: None,
+            kind: None,
+            rule_suggestion: None,
+        }),
+    )
+    .await
+    .map(|ok| ok.0)
+}
+
+/// V1.49 F6 — happy path: `open → triaged → in_review → resolved`.
+/// Each PATCH returns 200 with the new status reflected verbatim.
+#[tokio::test]
+async fn findings_lifecycle_open_to_resolved_via_triage_and_review() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let created = create_finding(&state, &work_id, "major", "lifecycle happy path").await;
+    let finding_id = created.finding_id.clone();
+
+    let triaged = patch_status(&state, &work_id, &finding_id, "triaged")
+        .await
+        .expect("open → triaged should succeed");
+    assert_eq!(triaged.status, "triaged");
+
+    let in_review = patch_status(&state, &work_id, &finding_id, "in_review")
+        .await
+        .expect("triaged → in_review should succeed");
+    assert_eq!(in_review.status, "in_review");
+
+    let resolved = patch_status(&state, &work_id, &finding_id, "resolved")
+        .await
+        .expect("in_review → resolved should succeed");
+    assert_eq!(resolved.status, "resolved");
+}
+
+/// V1.49 F6 — direct terminal transitions from `open`: `open → wont_fix`
+/// and `open → duplicate` succeed without an intermediate triage step.
+#[tokio::test]
+async fn findings_lifecycle_open_direct_to_terminal_states() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    let wont_fix_seed = create_finding(&state, &work_id, "minor", "waive me").await;
+    let wont_fix = patch_status(&state, &work_id, &wont_fix_seed.finding_id, "wont_fix")
+        .await
+        .expect("open → wont_fix should succeed");
+    assert_eq!(wont_fix.status, "wont_fix");
+
+    let dup_seed = create_finding(&state, &work_id, "minor", "dup me").await;
+    let duplicate = patch_status(&state, &work_id, &dup_seed.finding_id, "duplicate")
+        .await
+        .expect("open → duplicate should succeed");
+    assert_eq!(duplicate.status, "duplicate");
+}
+
+/// V1.49 F6 — illegal transitions return HTTP 422 with the stable
+/// `INVALID_TRANSITION` error code. Three representative rejections cover
+/// the terminal-locked, reverse-edge, and self-loop classes.
+#[tokio::test]
+async fn findings_lifecycle_rejects_illegal_transitions_with_422() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    // (a) Seed a finding and walk it to `resolved` (terminal).
+    let resolved_seed = create_finding(&state, &work_id, "major", "now resolved").await;
+    let resolved_id = resolved_seed.finding_id.clone();
+    patch_status(&state, &work_id, &resolved_id, "triaged")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "in_review")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "resolved")
+        .await
+        .unwrap();
+
+    // resolved → open: rejected with 422 INVALID_TRANSITION.
+    let err = patch_status(&state, &work_id, &resolved_id, "open")
+        .await
+        .expect_err("resolved → open must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        err.error_code(),
+        "INVALID_TRANSITION",
+        "illegal transition must surface the stable INVALID_TRANSITION code"
+    );
+
+    // (b) Seed an `in_review` finding and attempt a reverse-edge back to
+    // `open` (in_review may only advance to terminal states per §2.1).
+    let review_seed = create_finding(&state, &work_id, "major", "now in review").await;
+    let review_id = review_seed.finding_id.clone();
+    patch_status(&state, &work_id, &review_id, "triaged")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &review_id, "in_review")
+        .await
+        .unwrap();
+    let err = patch_status(&state, &work_id, &review_id, "open")
+        .await
+        .expect_err("in_review → open must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+
+    // (c) Self-loop on a fresh `open` finding: rejected (callers must omit
+    // the patch field to refresh).
+    let fresh = create_finding(&state, &work_id, "minor", "self loop").await;
+    let err = patch_status(&state, &work_id, &fresh.finding_id, "open")
+        .await
+        .expect_err("open → open self-loop must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+
+    // The rejected transitions must leave the rows unchanged.
+    assert_eq!(
+        get_finding_handler(
+            State(state.clone()),
+            Path((work_id.clone(), resolved_id.clone())),
+        )
+        .await
+        .unwrap()
+        .0
+        .status,
+        "resolved",
+        "rejected transition must not mutate the row"
+    );
+}
+
+/// V1.49 F6 / P0 W-1 — unknown status values are rejected at the API layer.
+/// `closed` is not a member of the V1.49 enum; the PATCH fails with
+/// `422 INVALID_INPUT` (distinct from `INVALID_TRANSITION`). The DAO emits
+/// the typed `InvalidEnum { field: "status", ... }` variant, which the
+/// handler maps to `INVALID_INPUT` without string-prefix sniffing.
+#[tokio::test]
+async fn findings_lifecycle_rejects_unknown_status_with_invalid_input() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let created = create_finding(&state, &work_id, "minor", "unknown status").await;
+
+    let err = patch_status(&state, &work_id, &created.finding_id, "closed")
+        .await
+        .expect_err("unknown status 'closed' must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        err.error_code(),
+        "INVALID_INPUT",
+        "unknown status membership must surface INVALID_INPUT, not INVALID_TRANSITION"
+    );
+    // The public message is structured from the typed variant: it names the
+    // field, echoes the rejected value, and lists the allowed members.
+    let message = err.to_string();
+    assert!(
+        message.contains("status"),
+        "message should name the field: {message}"
+    );
+    assert!(
+        message.contains("closed"),
+        "message should echo the bad value: {message}"
+    );
+    assert!(
+        message.contains("open") && message.contains("resolved"),
+        "message should list allowed members: {message}"
+    );
+}
+
+// ─── V1.49 P0 W-1: error-classification coverage (qc1/qc2 W-1) ────────────
+
+/// Helper: build an all-`None` patch request, ready for a single field
+/// override. Keeps the W-1 distinction test readable.
+fn empty_patch() -> UpdateFindingRequest {
+    UpdateFindingRequest {
+        severity: None,
+        status: None,
+        title: None,
+        description: None,
+        target_executor: None,
+        kind: None,
+        rule_suggestion: None,
+    }
+}
+
+/// Helper: PATCH a finding with an arbitrary request body, returning either
+/// the updated DTO or the resulting `NexusApiError`.
+async fn patch_req(
+    state: &WorkspaceState,
+    work_id: &str,
+    finding_id: &str,
+    req: UpdateFindingRequest,
+) -> Result<FindingApiDto, nexus_daemon_runtime::api::errors::NexusApiError> {
+    update_finding_handler(
+        State(state.clone()),
+        Path((work_id.to_string(), finding_id.to_string())),
+        axum::Json(req),
+    )
+    .await
+    .map(|ok| ok.0)
+}
+
+/// V1.49 P0 W-1 — invalid enum values surface as `422 INVALID_INPUT`,
+/// distinct from illegal transitions (`422 INVALID_TRANSITION`). Covers bad
+/// `severity`, bad `target_executor`, unknown `status` word, and — for
+/// contrast — an illegal transition that must remain `INVALID_TRANSITION`.
+#[tokio::test]
+async fn findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    // (1) Bad severity → 422 INVALID_INPUT; message names `severity`.
+    let f1 = create_finding(&state, &work_id, "major", "bad severity").await;
+    let mut req = empty_patch();
+    req.severity = Some("extreme".to_string());
+    let err = patch_req(&state, &work_id, &f1.finding_id, req)
+        .await
+        .expect_err("invalid severity must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("severity"),
+        "message should name the field: {msg}"
+    );
+    assert!(
+        msg.contains("extreme"),
+        "message should echo the bad value: {msg}"
+    );
+
+    // (2) Bad target_executor → 422 INVALID_INPUT.
+    let f2 = create_finding(&state, &work_id, "minor", "bad executor").await;
+    let mut req = empty_patch();
+    req.target_executor = Some("foo".to_string());
+    let err = patch_req(&state, &work_id, &f2.finding_id, req)
+        .await
+        .expect_err("invalid target_executor must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("target_executor"),
+        "message should name the field: {msg}"
+    );
+
+    // (3) Unknown status word → 422 INVALID_INPUT (membership, not transition).
+    let f3 = create_finding(&state, &work_id, "minor", "unknown status").await;
+    let err = patch_status(&state, &work_id, &f3.finding_id, "closed")
+        .await
+        .expect_err("unknown status 'closed' must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert!(
+        err.to_string().contains("status"),
+        "message should name the field: {}",
+        err
+    );
+
+    // (4) Illegal transition (resolved → open) → 422 INVALID_TRANSITION;
+    // message carries the `from`/`to` pair.
+    let resolved_seed = create_finding(&state, &work_id, "major", "now resolved").await;
+    let resolved_id = resolved_seed.finding_id.clone();
+    patch_status(&state, &work_id, &resolved_id, "triaged")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "in_review")
+        .await
+        .unwrap();
+    patch_status(&state, &work_id, &resolved_id, "resolved")
+        .await
+        .unwrap();
+    let err = patch_status(&state, &work_id, &resolved_id, "open")
+        .await
+        .expect_err("resolved → open must be rejected");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("resolved") && msg.contains("open"),
+        "transition message should carry from/to: {msg}"
+    );
+}
+
+/// V1.49 P0 W-1 (qc2 S-2) — a SQL-meta status string is rejected as
+/// `422 INVALID_INPUT` by the membership check **before** any SQL is built,
+/// and the findings table is left intact (no `DROP` executed). Documents
+/// the "no injection surface" claim for auditors.
+#[tokio::test]
+async fn findings_lifecycle_rejects_sql_injection_style_status() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let created = create_finding(&state, &work_id, "minor", "injection attempt").await;
+
+    let injection = "'; DROP TABLE findings; --";
+    let err = patch_status(&state, &work_id, &created.finding_id, injection)
+        .await
+        .expect_err("SQL-meta status must be rejected before any SQL runs");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+
+    // The table must still exist and the seeded row still queryable —
+    // proving the membership check ran before any SQL reached the DB.
+    let still_there = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), created.finding_id.clone())),
+    )
+    .await
+    .expect("findings table must still be queryable after the injection attempt")
+    .0;
+    assert_eq!(
+        still_there.status, "open",
+        "seeded row must be unchanged after the rejected PATCH"
+    );
+}
+
+// ─── V1.49 P3: retention prune endpoint (§9.4) ──────────────────────────────
+
+/// `POST /v1/local/findings/prune` previews (`dry_run=true`) and performs
+/// (`dry_run=false`) the retention prune of old `resolved` findings.
+///
+/// Seeds two findings: one marked `resolved` + old (past the 90-day window)
+/// and one left `open` + recent. The dry-run reports 1 and deletes nothing;
+/// the real prune deletes 1 and leaves the open finding intact.
+#[tokio::test]
+async fn findings_prune_endpoint_dry_run_and_delete() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let f1 = create_finding(&state, &work_id, "major", "old resolved").await;
+    let f2 = create_finding(&state, &work_id, "minor", "recent open").await;
+
+    // Seed: mark f1 resolved + old (past 90d). f2 stays open + recent.
+    let now = chrono::Utc::now().timestamp();
+    let old_ts = now - 91 * 24 * 3_600;
+    sqlx::query("UPDATE findings SET status = 'resolved', updated_at = ? WHERE finding_id = ?")
+        .bind(old_ts)
+        .bind(&f1.finding_id)
+        .execute(state.pool())
+        .await
+        .unwrap();
+
+    // Dry-run: reports 1 eligible, deletes nothing.
+    let axum::Json(dry) = prune_findings_handler(
+        State(state.clone()),
+        Query(PruneFindingsQuery {
+            older_than_days: None,
+            dry_run: Some(true),
+        }),
+    )
+    .await
+    .expect("dry-run prune must succeed");
+    assert!(dry.dry_run, "dry_run flag must round-trip");
+    assert_eq!(dry.count, 1, "exactly one old resolved row is eligible");
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+        .bind(&work_id)
+        .fetch_one(state.pool())
+        .await
+        .unwrap();
+    assert_eq!(total, 2, "dry-run must not delete any rows");
+
+    // Real prune: deletes 1.
+    let axum::Json(real) = prune_findings_handler(
+        State(state.clone()),
+        Query(PruneFindingsQuery {
+            older_than_days: None,
+            dry_run: None,
+        }),
+    )
+    .await
+    .expect("prune must succeed");
+    assert!(!real.dry_run);
+    assert_eq!(real.count, 1, "exactly one row deleted");
+    let remaining: Vec<String> =
+        sqlx::query_scalar("SELECT finding_id FROM findings WHERE work_id = ? ORDER BY finding_id")
+            .bind(&work_id)
+            .fetch_all(state.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        remaining,
+        vec![f2.finding_id],
+        "only the old resolved row is pruned; the open finding survives"
+    );
 }

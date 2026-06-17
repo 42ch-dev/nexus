@@ -1,18 +1,18 @@
 # Novel Workflow Profile — Normative Specification v1
 
-**Status**: Shipped (V1.36 — 2026-06-07); V1.37 extensions; V1.39 shipped — auto-chain + quality loop; **V1.40 Shipped** — World KB implement contract (§3.5.1); **V1.41 Shipped** — multi-work completion + switch cross-refs (§6.4) via [novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md); **V1.42 Shipped** — multi-volume PK migration (§4.5.4), volume outline scaffold (§4.5.5), migration tests (§4.5.7) via plan [2026-06-11-v1.42-multi-volume](../../plans/2026-06-11-v1.42-multi-volume.md). **V1.47 Shipped** — §5.5.4 two-layer rules (`AGENTS.md`); §5.5.6 normative reflection→findings. **V1.48 Shipped** — §5.5.4 AGENTS.md Layer 2 runtime + accept `rule_suggestion` + `rules reset`; §5.5.2 open-findings prompt injection.
-**Document class**: Feature line (profile overlay)  
+**Status**: Shipped (V1.36 — 2026-06-07); V1.37–V1.48 extensions; **V1.49** narrative indexes folded into §4.6 (P-last from [narrative-indexes.md](narrative-indexes.md))  
+**Document class**: Feature line (profile overlay)
 **Created**: 2026-06-07  
-**Last updated**: 2026-06-15 (V1.47 P-last — spec promotion Draft → Shipped)
+**Last updated**: 2026-06-17 (V1.49 P-last — narrative indexes folded into §4.6)
 **Scope**: `work_profile: novel` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, chapter status, completion semantics, sync boundaries  
 **Coordinates with**:
 
-- [work-experience-model.md](work-experience-model.md) — generic Work entity
-- [creator-workflow.md](creator-workflow.md) — FL-E `produce` stage
-- [cli-spec.md](cli-spec.md) — workspace layout §13.1
-- [novel-writing-sync-contract.md](novel-writing-sync-contract.md) — chapter discovery
-- [orchestration-engine.md](orchestration-engine.md) — `novel-writing` preset
-- [entity-scope-model.md](entity-scope-model.md) — World entity + World KB (`work_profile: novel` binds Work to World; world content is cross-Work, lives in World KB, NOT in per-Work `Worldbuilding/` subtree)
+- [work-experience-model.md](../work-experience-model.md) — generic Work entity
+- [creator-workflow.md](../creator-workflow.md) — FL-E `produce` stage
+- [cli-spec.md](../cli-spec.md) — workspace layout §13.1
+- [sync-contract.md](sync-contract.md) — chapter discovery
+- [orchestration-engine.md](../orchestration-engine.md) — `novel-writing` preset
+- [entity-scope-model.md](../entity-scope-model.md) — World entity + World KB (`work_profile: novel` binds Work to World; world content is cross-Work, lives in World KB, NOT in per-Work `Worldbuilding/` subtree)
 
 **Iteration compass**: [v1.37-novel-writing-foundation-delivery-compass-v1.md](../../iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md) extends the shipped V1.36 baseline without changing the single-chapter behavior.
 
@@ -49,7 +49,7 @@ On `works` table / Work API (additive):
 | `work_ref` | string | yes | Filesystem directory name: `Works/<work_ref>/` |
 | `total_planned_chapters` | integer | no | Target chapter count for completion (default TBD in init preset) |
 | `current_chapter` | integer | no | Latest chapter number in progress |
-| `world_id` | string (FK) | yes for new V1.40 novel Works | Bind to a World (per [entity-scope-model.md](entity-scope-model.md) §5.4). Required for V1.40 Work creation/init; legacy `NULL` is allowed only when reading V1.39-and-earlier worldless Works. `novel-project-init` grill-me asks whether to create a new World or bind an existing one (see §3.5). |
+| `world_id` | string (FK) | yes for new V1.40 novel Works | Bind to a World (per [entity-scope-model.md](../entity-scope-model.md) §5.4). Required for V1.40 Work creation/init; legacy `NULL` is allowed only when reading V1.39-and-earlier worldless Works. `novel-project-init` grill-me asks whether to create a new World or bind an existing one (see §3.5). |
 | `novel_completion_status` | enum | no | `in_progress` \| `completed` (mirrors Work.status when terminal) |
 
 **Invariant**: `work_ref` is stable for the life of the Work; renaming directory without DB update is unsupported pre-1.0.
@@ -73,7 +73,7 @@ On `works` table / Work API (additive):
         event-index.md          # empty stub V1.36 (E### rows; future V1.37+ scaffold)
       Stories/                  # novel正文 ONLY — sync chapter scan root
         ch<nn>-<slug>.md
-      Logs/                     # optional process logs (single-role V1.36; V1.37+ roadmap structure §5.5.5)
+      Logs/                     # optional process logs (see quality-loop.md §5)
 ```
 
 ### 3.2 Directory rules
@@ -86,7 +86,7 @@ On `works` table / Work API (additive):
 | `Works/<work_ref>/Outlines/event-index.md` | **No** | Cross-chapter event index (E### rows) |
 | `Works/<work_ref>/Outlines/volume-outline.md` | **No** | Volume-level outline (optional V1.36) |
 | `Works/<work_ref>/Stories/*.md` | **Yes** | Chapter正文 (frontmatter `chapter`, `status`) |
-| `Works/<work_ref>/Logs/**` | **No** | Brainstorm/write/review/publish process logs (V1.37+ roadmap §5.5.5); excluded from chapter sync |
+| `Works/<work_ref>/Logs/**` | **No** | Process logs ([quality-loop.md](quality-loop.md) §5); excluded from chapter sync |
 
 ### 3.3 Legacy prohibition
 
@@ -104,7 +104,7 @@ Non-novel `work_profile` values may use different subtrees under `Works/<work_re
 
 ### 3.5 World integration (cross-Work worldbuilding)
 
-**Key principle**: worldbuilding content is **cross-Work**, not per-Work. A `Works/<work_ref>/` directory is **one event in a World's timeline**, not the canonical home of characters, locations, society, or rules. The canonical home is **World KB** (per [entity-scope-model.md](entity-scope-model.md) §5.4 World entity + `nexus-kb` crate).
+**Key principle**: worldbuilding content is **cross-Work**, not per-Work. A `Works/<work_ref>/` directory is **one event in a World's timeline**, not the canonical home of characters, locations, society, or rules. The canonical home is **World KB** (per [entity-scope-model.md](../entity-scope-model.md) §5.4 World entity + `nexus-kb` crate).
 
 Therefore:
 
@@ -113,7 +113,7 @@ Therefore:
   - **World-bound Work** (`world_id != NULL`): characters, locations, society, rules, events, timelines come from World KB. Chapter body may reference World KB items by id via `world_refs: [char_xxx, loc_yyy]` frontmatter; V1.40 validates per §3.5.1.4.
   - **Legacy worldless Work** (`world_id == NULL`, V1.39 and earlier only): no cross-Work continuity. Existing data remains readable/operable; V1.40 creation/init must not produce this state.
 - **`novel-project-init` asks the binding question** (grill-me). Two valid V1.40 options: bind to existing `world_id` (user picks from `nexus42 creator world list`) / create new World (calls `creator world create --title "..."`, narrative kind implicit). There is no V1.40 "stay worldless" creation option.
-- **Work → World KB promotion** is the **long-term** path: as chapters finalize, `kb-extract` preset (existing, per [creator-workflow.md](creator-workflow.md) `persist` stage) can extract entities / events / rules from chapter body into World KB items. V1.36 documents this path; enforcement is V1.37+.
+- **Work → World KB promotion** is the **long-term** path: as chapters finalize, `kb-extract` preset (existing, per [creator-workflow.md](../creator-workflow.md) `persist` stage) can extract entities / events / rules from chapter body into World KB items. V1.36 documents this path; enforcement is V1.37+.
 
 ### 3.5.1 World KB continuity implement contract (V1.37 P2 roadmap → V1.40 implement)
 
@@ -128,7 +128,7 @@ nexus42 creator world create --title "Neon River" --description "Solarpunk noir 
 → world_id: wld_<uuid>
 ```
 
-Note: `--kind narrative` is implicit (deferred to P1 taxonomy). `--title` is canonical; `--name` is an alias (see [cli-spec.md §6.2G](cli-spec.md)).
+Note: `--kind narrative` is implicit (deferred to P1 taxonomy). `--title` is canonical; `--name` is an alias (see [cli-spec.md §6.2G](../cli-spec.md)).
 
 The init grill-me has exactly two valid V1.40 binding paths:
 
@@ -347,7 +347,7 @@ Missing filesystem hints are still surfaced to the user (see §8.1), but a missi
 **V1.42 P1 (implement — grill-me locked):**
 
 1. Backfill **implicit `volume = 1`** for all existing `work_chapters` rows (single-volume behavior unchanged).
-2. Migrate PK to **`(work_id, volume, chapter)`** (see [local-db-schema.md](local-db-schema.md) V1.42 amendment).
+2. Migrate PK to **`(work_id, volume, chapter)`** (see [local-db-schema.md](../local-db-schema.md) V1.42 amendment).
 3. Preserve row data (`status`, `outline_path`, `body_path`, `actual_word_count`, timestamps) through an idempotent migration.
 4. New multi-volume Works declare volume count at init; chapter numbers may repeat across volumes.
 
@@ -372,7 +372,7 @@ volumes:
 ---
 ```
 
-The sync module (per [novel-writing-sync-contract.md](novel-writing-sync-contract.md)) does **not** validate `volume-outline.md` cross-references in V1.37. A post-roadmap V1.37+ implementation may enforce that every non-NULL `work_chapters.volume` row falls inside exactly one declared volume range.
+The sync module (per [sync-contract.md](sync-contract.md)) does **not** validate `volume-outline.md` cross-references in V1.37. A post-roadmap V1.37+ implementation may enforce that every non-NULL `work_chapters.volume` row falls inside exactly one declared volume range.
 
 World continuity remains World-scoped: when `world_id != NULL` and a chapter references a World KB item, the reference lives in the chapter frontmatter `world_refs` field (§4.3), not in `Outlines/volume-outline.md`. `volume-outline.md` organizes chronology; it is not a World KB index.
 
@@ -395,6 +395,72 @@ A future implementation plan for this roadmap must include at least these tests:
 5. **Reconciliation**: `creator run reconcile-chapters <work_id>` rebuilds missing `work_chapters` rows/files from `Works/<work_ref>/Stories/` while preserving DB-as-status-SSOT conflict resolution (§4.5.3).
 6. **Future multi-volume migration**: the `(work_id, chapter)` → `(work_id, volume, chapter)` migration is idempotent and preserves row data.
 
+### 4.6 Narrative indexes — F### / E### runtime (V1.49 P1)
+
+V1.36 scaffolded `Outlines/foreshadowing.md` and `Outlines/event-index.md` as empty table stubs. V1.49 P1 implements the **minimum viable index runtime** — file-first SSOT (see [narrative-indexes.md](narrative-indexes.md) overlay, folded here at P-last).
+
+#### 4.6.1 SSOT and boundaries
+
+| Path | SSOT | Notes |
+| --- | --- | --- |
+| `Works/<work_ref>/Outlines/foreshadowing.md` | **File** | F### rows; not scanned as chapter by sync module |
+| `Works/<work_ref>/Outlines/event-index.md` | **File** | E### rows; P1 read-only + stub writer |
+| `work_chapters` table | DB | Unchanged; no index mirror table in V1.49 |
+
+`sync_module.rs` `SKIP_FILES` must continue to exclude index files from chapter discovery.
+
+#### 4.6.2 F### row schema (5-column — ground truth)
+
+Markdown table columns (aligned with embedded template; per R-V149P1-01 reconciliation):
+
+| Column | Required | Description |
+| --- | --- | --- |
+| `ID` | yes | `F` + three-digit zero-padded integer (`F001`) |
+| `Description` | yes | Short human label |
+| `Planted` | yes | Chapter number(s) where first introduced / buried |
+| `Paid off` | no | Chapter number(s) where resolved |
+| `Status` | yes | `planned` \| `buried` \| `paid_off` |
+
+> **Note**: The 4-column summary in the Draft overlay (`id` / `description` / `status` / `chapters`) is deprecated. The 5-column schema above is ground truth per P1 runtime.
+
+#### 4.6.3 Id allocation
+
+- Next id = `max(existing numeric suffix) + 1` for the Work.
+- Inline outline declaration `F###: description` creates row if id absent.
+- Duplicate id with conflicting description → fail outline step with remediation citing reconcile or manual edit.
+
+#### 4.6.4 Inline F### declaration format
+
+Canonical format in chapter outline (§4.2 "Foreshadowing Touched" section):
+
+```text
+F001: description of the foreshadowing item
+```
+
+This is parsed by the outline section parser during `novel-writing`. New F### ids are allocated sequentially when no number is specified.
+
+#### 4.6.5 Promotion path (outline → index)
+
+After `outline_chapter` writes `Outlines/chapters/ch<nn>-outline.md`:
+
+1. Parse "Foreshadowing Touched" section for F### references and inline new items.
+2. Upsert rows into `foreshadowing.md` (atomic temp + rename).
+3. Inject `foreshadowing_summary` block into subsequent draft prompt via `preset.yaml` → `foreshadowing_summary` template variable.
+
+#### 4.6.6 Read-for-prompt path
+
+The orchestration engine reads `Outlines/foreshadowing.md` before each draft prompt and injects a compact `foreshadowing_summary` block listing active (non-`paid_off`) F### rows with their status and chapter context.
+
+#### 4.6.7 E### read stub
+
+Event-index (`Outlines/event-index.md`): **P1 minimum** — preserve scaffold; read existing rows for prompt if present. Full E### promotion (write + upsert) deferred to V1.50.
+
+#### 4.6.8 World KB boundary
+
+Explicit promotion from index rows to World KB remains **manual/opt-in** per §3.5.1.5. V1.49 does not auto-sync index → World KB.
+
+---
+
 ---
 
 ## 5. Preset responsibilities
@@ -416,7 +482,7 @@ A future implementation plan for this roadmap must include at least these tests:
 - **NOGO** → `WaitForInput`; user may `creator run continue <work_id> --note "..."` with additional context, then re-run. `work_chapters.status` and frontmatter `status` both stay `draft`.
 - **GO override on NOGO** → user explicit `creator run novel-writing <work_id> --force-gates --reason "<text>"` with audit-logged reason; both rows flip to `finalized` regardless.
 
-The 五问 template file lives at `embedded-presets/novel-writing/prompts/finalize-exit.md` (P3 deliverable). It references [writing-craft-rules.md §2 五问质量检验](writing-craft-rules.md) when present; otherwise the template embeds the five questions inline.
+The 五问 template file lives at `embedded-presets/novel-writing/prompts/finalize-exit.md` (P3 deliverable). It references [writing-craft-rules.md §2 五问质量检验](../writing-craft-rules.md) when present; otherwise the template embeds the five questions inline.
 
 ### 5.2 World-bound Work behavior (in `novel-writing` prompts)
 
@@ -574,7 +640,7 @@ Works/
 All template files live under `crates/nexus-orchestration/embedded-presets/novel-project-init/templates/` (P1 deliverable). The init preset's scaffold capability:
 
 1. Reads each template from the embedded asset.
-2. Substitutes preset input vars (`work_ref`, `title`, `world_id`, etc.) using `handlebars-rust` (per [orchestration-engine.md](orchestration-engine.md) §7.3).
+2. Substitutes preset input vars (`work_ref`, `title`, `world_id`, etc.) using `handlebars-rust` (per [orchestration-engine.md](../orchestration-engine.md) §7.3).
 3. Writes to `Works/<work_ref>/...` at the path listed above.
 
 For V1.40 Works, `README.md` is rendered with a one-line `world_id: <uuid>` header and links to the World KB items the Work will reference most. Legacy worldless Works from V1.39 and earlier may retain README inline world setting notes, but V1.40 scaffold rendering does not create new worldless README variants.
@@ -624,181 +690,22 @@ Re-running `novel-project-init` on a Work that already has the scaffold is **saf
 
 The grill-me offers an "overwrite templates" option for users who want to re-render the README/Outlines/ from latest embedded templates (useful after a toolchain update). V1.36 default is **preserve**; "overwrite" is the explicit user opt-in.
 
-### 5.5 Quality loop roadmap (V1.37 P3 extension)
+### 5.5 Quality loop (SSOT: quality-loop.md)
 
-**Scope of this extension**: V1.37 P3 is **roadmap-only**. It records future contracts for findings, target executor mapping, master-decision escalation, rules, logs, and `reflection-loop` integration. It does **not** add a `findings` migration, new presets, daemon scheduled task, CLI subcommands, prompt templates, or file writers in V1.37 P3. The V1.36 `novel-writing` path and its `llm_judge` 五问 finalize gate (§5.1) remain the active quality gate.
+**Implement authority** for findings lifecycle, review presets (`novel-chapter-review`, `novel-brainstorm`, `novel-review-master`), rules runtime, `Logs/` discipline, 96h escalation, and producer/consumer behavior: **[quality-loop.md](quality-loop.md)**.
 
-#### 5.5.1 Findings lifecycle and local DB sketch
+**V1.49 shipped**: 6-state findings lifecycle → [quality-loop.md §2](quality-loop.md#2-findings-lifecycle) (Shipped V1.49 P0; §5.5.1 three-state `open` / `resolved` / `wont_fix` paragraph superseded).
 
-Future quality-loop implementation should store review outcomes in local `state.db`, not Redis. The initial lifecycle is intentionally small:
+**Profile-local gate (this file)**: §5.1 `llm_judge` 五问 finalize on `novel-writing` remains the per-chapter craft gate.
 
-```text
-open → resolved | wont_fix
-```
+**Preset gates only** (quality-loop cross-ref):
 
-The richer workflow `open → triaged → in_review → resolved | wont_fix | duplicate` remains a possible later extension, but V1.37 P3 selects the three-state model to keep the first migration and CLI surface narrow.
+| Preset | Gates |
+| --- | --- |
+| `novel-chapter-review` | §5.3.3 |
+| Producer/consumer contract | [quality-loop.md §8–§9](quality-loop.md#8-reflection-loop-output-contract-v147-shipped) |
 
-Finding severities are author-facing and map to Morning Star machine residual severities as follows:
-
-| Finding severity | Meaning | `status.json` residual severity mapping |
-| --- | --- | --- |
-| `info` | Context, note, or non-actionable observation | `low` (or omit from residual tracking if no follow-up is needed) |
-| `minor` | Small craft/continuity issue; not blocking drafting | `medium` |
-| `major` | High-impact narrative, continuity, or user-visible quality problem | `high` |
-| `blocker` | Must resolve or explicitly waive before approval/publish | `critical` |
-
-Schema sketch for a future `nexus-local-db` migration:
-
-```sql
-CREATE TABLE findings (
-  finding_id TEXT PRIMARY KEY,
-  work_id TEXT,
-  chapter INTEGER,
-  kind TEXT NOT NULL,            -- e.g. 'continuity', 'craft', 'plot_hole', 'world_inconsistency'
-  severity TEXT NOT NULL,        -- 'info' | 'minor' | 'major' | 'blocker'
-  status TEXT NOT NULL,          -- 'open' | 'resolved' | 'wont_fix'
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (work_id) REFERENCES works(work_id) ON DELETE CASCADE
-);
-CREATE INDEX findings_by_work ON findings(work_id, status);
-CREATE INDEX findings_by_chapter ON findings(work_id, chapter, status);
-```
-
-`kind` is open vocabulary at the first roadmap level. Suggested minimum values are `continuity`, `craft`, `plot_hole`, and `world_inconsistency`. World-related findings reference World KB ids through the body or a future structured column, but the canonical world content remains World KB (§3.5; entity-scope-model.md §5.1).
-
-#### 5.5.2 Target executor mapping to Nexus presets and CLI surfaces
-
-The reference-system executor concepts map to Nexus presets and surfaces as follows:
-
-| Reference executor concept | Nexus preset / stage | CLI status surface | V1.37 P3 disposition |
-| --- | --- | --- | --- |
-| `write` | Existing `novel-writing` (`produce` stage) | `creator run status <work_id>` chapter progress and active schedule summary | Existing path remains; findings may later enrich prompt context, but no behavior change in P3 |
-| `brainstorm` | `novel-brainstorm` preset (Shipped V1.39) | `creator run novel-brainstorm <work_id>`; status shows open findings driving brainstorm prompts | Shipped V1.39 |
-| `none` | No preset; user or reviewer acknowledges, resolves, or marks `wont_fix` | `creator run status <work_id>` lists the finding with `next_action: none` / manual decision | Shipped V1.39 |
-| `master` | `novel-review-master` preset (Shipped V1.39); CLI `creator run review-master <work_id>` (Shipped V1.44) | `creator run review-master <work_id>`; status shows master-decision banner and open findings requiring approval | Shipped V1.39 (preset) / V1.44 (CLI) |
-
-`novel-brainstorm` should turn open findings into ideation prompts without writing chapter正文 directly. `novel-review-master` should surface findings, relevant rules, and proposed actions to the user for final approval. Neither preset replaces `novel-writing`; they are auxiliary quality-loop surfaces layered around the single-role V1.36 path.
-
-#### 5.5.3 Master-decision timeout (96h) in local-first OSS terms
-
-The reference-system pattern escalates a finding if it remains `open` for 96 hours. Nexus OSS maps this to local persistence and daemon lifecycle instead of Redis, cron, or platform workers:
-
-1. A `nexus-daemon-runtime` lifecycle/scheduler task runs every 24 hours while the daemon is healthy.
-2. It queries `findings` for rows where `status = 'open'` and `created_at < now - 96h`.
-3. It emits a structured log entry with `work_id`, `chapter`, `finding_id`, `age_hours`, and suggested command.
-4. `creator run status <work_id>` shows a banner such as:
-
-   ```text
-   Findings: 2 open, 1 older than 96h
-   Next action: run `nexus42 creator run review-master <work_id>` to make a master decision.
-   ```
-
-5. Automatic escalation is **user opt-in** through `--auto-schedule` CLI flag or Work-level `auto_review_master_on_timeout` setting. By default, the daemon performs no auto-action; the user explicitly runs `creator run review-master <work_id>`.
-
-**Shipped V1.39** (daemon watcher + preset); **Shipped V1.44** (CLI `review-master` subcommand).
-
-This keeps the OSS path local-first: local DB + daemon scheduled task + CLI status banner. It explicitly does not reintroduce Redis, external cron, platform queues, or platform workers.
-
-#### 5.5.4 Two-layer rules architecture (V1.47 normative)
-
-**V1.47 Shipped (normative)** supersedes the three-layer model (Layer 3 history removed). **Shipped runtime** (through V1.46) still reads `Works/<work_ref>/Rules/novel-rules.md` — path migration is a follow-up implement slice; this section is normative for new Work layout.
-
-| Layer | Location | Mutability | Purpose |
-| --- | --- | --- | --- |
-| Layer 1 — Shared writing craft rules | User override: `~/.nexus42/rules/writing-craft.md`; in-repo default: `crates/nexus-orchestration/embedded-rules/writing-craft.md` | Immutable per version; user override may pin/replace a version | Cross-Work craft guidance read by all `novel-writing` runs; includes prose quality, pacing, scene craft, and the 五问 gate rationale |
-| Layer 2 — Per-work rules (agent-facing) | `Works/<work_ref>/AGENTS.md` | User-editable; future reset/replace via dedicated CLI (deferred) | Per-Work style and craft constraints for agents and presets: POV, tense, chapter length, tone, banned motifs, audience — formatted as **AGENTS.md** at Work root (not `Rules/novel-rules.md`) |
-
-**Deprecated (no migration)**: `Works/<work_ref>/Rules/novel-rules.md`, `novel-rules-history.md`. Existing Works may retain old files; new scaffolds SHOULD use `AGENTS.md` once runtime migration ships.
-
-Rules responsibilities are distinct from adjacent knowledge surfaces:
-
-- **SOUL**: creator identity, voice, experience, and memory. SOUL is not a rule file and should not receive per-Work style churn.
-- **World KB**: characters, locations, society, magic/physics/technology rules, timeline facts, and source anchors (§3.5; entity-scope-model.md §5.1). World KB describes fictional reality, not prose craft instructions.
-- **Shared writing craft rules**: how to write prose across Works (scene quality, pacing, clarity, consistency, 五问).
-- **Per-work AGENTS.md**: how this Work should be written (POV, tense, chapter size, style preferences) for coding agents and orchestration presets.
-
-If no Layer 1 user override exists, `novel-writing` continues to use embedded `writing-craft.md` (§5.1).
-
-#### 5.5.4 (archived) Three-layer rules architecture
-
-<details>
-<summary>Pre-V1.47 three-layer model (superseded in normative text; retained for history)</summary>
-
-| Layer | Location | Mutability | Purpose |
-| --- | --- | --- | --- |
-| Layer 2 — Per-work novel rules | `Works/<work_ref>/Rules/novel-rules.md` | User-editable | Per-Work style preferences |
-| Layer 3 — Append-only rules history | `Works/<work_ref>/Rules/novel-rules-history.md` | Append-only | Audit trail |
-
-</details>
-
-#### 5.5.5 `Logs/` structure and write discipline
-
-V1.36 creates `Works/<work_ref>/Logs/` as an empty optional root (§5.4.1). V1.37+ quality-loop work may add the following subdirectories:
-
-```text
-Works/<work_ref>/Logs/
-  brainstorm/    # brainstorm session outputs: chats, sketches, alternatives
-  write/         # chapter drafting process logs and prompt/response summaries
-  review/        # review outputs, findings notes, master-decision context
-  publish/       # future publish process notes; out until platform publish ships
-```
-
-Write discipline:
-
-1. Logs are process evidence, not canonical chapter正文, not World KB, and not SOUL.
-2. Logs may be summarized into findings, rules, or KB items, but the summary/promotion must be explicit.
-3. `Logs/publish/` remains reserved until platform publish (DF-59) ships.
-4. Per §3.2 and §7, `Works/<work_ref>/Logs/**` is **not** scanned by the chapter sync module. Chapter sync remains scoped to `Works/<work_ref>/Stories/*.md` only.
-
-#### 5.5.6 `novel-chapter-review` feeding findings (V1.47 normative)
-
-**Status**: **V1.47 shipped (P0)** (plan `2026-06-15-v1.47-reflection-loop-findings`). Supersedes “future implementation” wording below.
-
-The FL-E `review` stage preset (`novel-chapter-review`) MUST:
-
-1. Run after `novel-writing` has produced chapter content (draft or finalized) for the selected chapter.
-2. Inspect chapter body, outline context, `llm_judge` output where applicable, World KB context for World-bound Works, and rules layers (Layer 1 + Layer 2 per §5.5.4).
-3. On terminal success, write **≥1** row to `findings` via the daemon `from-review` path with supported `kind` values (`craft`, `continuity`, `plot_hole`, `world_inconsistency`, …).
-4. Surface findings on `creator works status` (human + `--json` per V1.46).
-5. Optionally attach `rule_suggestion` text on the finding row **only** (V1.47 P0 does not write `AGENTS.md`).
-
-**Trigger paths** (both required):
-
-- Auto-chain FL-E `review` stage after `produce`.
-- On-demand `creator run <review_preset_id> <work_id>`.
-
-**Out of V1.47 P0**: accepting a rule suggestion and mutating `Works/<work_ref>/AGENTS.md` (deferred).
-
-<details>
-<summary>Pre-V1.47 roadmap text (historical)</summary>
-
-`reflection-loop` is already the FL-E `review` stage preset and remains optional in V1.36 (§5.3.3; creator-workflow.md §3.1 and §4). Future integration should work as follows:
-
-1. The user runs `reflection-loop` on a draft or finalized chapter after `novel-writing` has produced content.
-2. The preset inspects chapter body, outline context, `llm_judge` output, relevant World KB context for World-bound Works, and active rules layers.
-3. It writes one or more rows to `findings` with `kind = 'craft'`, `kind = 'continuity'`, or another supported kind.
-4. `creator run status <work_id>` surfaces a **Findings** section summarizing open findings by severity and chapter.
-5. The user can resolve, mark `wont_fix`, or flag a finding as a **rule suggestion**.
-6. If accepted as a rule suggestion, the daemon updates `Works/<work_ref>/Rules/novel-rules.md` and appends an audit entry to `novel-rules-history.md` with timestamp + reason.
-
-This integration depends on the `findings` table and rules files existing, so it is future implementation scope.
-
-</details>
-
-#### 5.5.7 V1.37 P3 scope decision (superseded for implement by V1.39)
-
-V1.37 P3 was roadmap-only. **V1.39** reopens implementation via [novel-quality-loop.md](novel-quality-loop.md) and plans P1–P4. The five coupled work items are now in scope:
-
-1. `findings` table migration and DAO/API surface (`nexus-local-db`, daemon handlers, CLI status rendering).
-2. Net-new `novel-brainstorm` and `novel-review-master` presets plus prompt templates.
-3. 96h master-decision daemon scheduled task and opt-in setting.
-4. Rules file readers/writers plus append-only history discipline.
-5. `Logs/` subdirectory write discipline and `reflection-loop` integration that depends on findings.
-
-Implement authority: V1.39 compass [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md). Must preserve local-first path; no Redis, external cron, platform workers, or platform publish.
+Historical V1.37 P3 §5.5 roadmap text was folded into `quality-loop.md` at V1.39–V1.48. Do not duplicate normative findings detail here.
 
 ---
 
@@ -841,14 +748,14 @@ The V1.36 single-chapter case (`total_planned_chapters == 1`) is a strict subset
 
 ### 6.4 Multi-work completion extension (Shipped V1.41)
 
-[novel-multi-work-lifecycle.md](novel-multi-work-lifecycle.md) shipped V1.41 (PR #53):
+[multi-work-lifecycle.md](multi-work-lifecycle.md) shipped V1.41 (PR #53):
 
 1. §6.1–§6.2 completion criteria unchanged.
 2. Extend `auto_chain::mark_work_completed`: write `Works/<work_ref>/.completion-lock.json`; stop auto-chain on **that** Work only (lifecycle spec §3).
 3. Clear pool `active` when bound pool row completes; no automatic next Work.
 4. Next Work via `creator works use`, `creator works pool promote`, or `creator bootstrap --from-work` — not implicit scaffold.
 5. **Reopen** same Work: `completion-lock release` then `creator run resume --reopen --reason` (grill-me B); distinct from `--from-work` new Work.
-6. Pool integration: [novel-work-pool.md](novel-work-pool.md). **OUT:** `creator work switch`.
+6. Pool integration: [work-pool.md](work-pool.md). **OUT:** `creator work switch`.
 
 **V1.42 P1**: multi-volume PK (§4.5.4) — [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md).
 
@@ -856,7 +763,7 @@ The V1.36 single-chapter case (`total_planned_chapters == 1`) is a strict subset
 
 ## 7. Sync contract overlay
 
-Extends [novel-writing-sync-contract.md](novel-writing-sync-contract.md):
+Extends [sync-contract.md](sync-contract.md):
 
 - **Scan root**: `Works/<work_ref>/Stories/` only
 - **Exclude**: `outline.md` at Stories root (removed); outlines live under `Outlines/`
@@ -874,7 +781,7 @@ Sync **must not** upload full正文 by default (cli-spec §5.3 unchanged).
 | `creator bootstrap --idea "..."` | Default `work_profile: novel` when `--preset novel-writing` or default produce path; V1.40 creation/init must obtain a `world_id` via create-new or bind-existing before scaffold completes |
 | `creator bootstrap --idea "..." --world-id <world_id>` | Bind the new Work to an existing World (per §3.5); World KB is injected as context in `novel-writing` prompts |
 | `creator bootstrap --idea "..." --init-preset novel-project-init` | Run the `novel-project-init` grill-me (scaffold dirs + mandatory World binding question + `work_chapters` seed rows) before intake |
-| `creator works status [<work_id>]` | **V1.41** — migrated from `creator run status`; reads `work_chapters`; shows `work_ref`, chapter list, completion; **V1.39** fields + completion/runtime lock per [cli-spec.md](cli-spec.md) §6.2H |
+| `creator works status [<work_id>]` | **V1.41** — migrated from `creator run status`; reads `work_chapters`; shows `work_ref`, chapter list, completion; **V1.39** fields + completion/runtime lock per [cli-spec.md](../cli-spec.md) §6.2H |
 | `creator works list` | **V1.41** — migrated from `creator run list` |
 | `creator run resume <work_id>` | **V1.39** — resume checkpointed auto-chain after daemon restart |
 | `creator run continue <work_id> --note "..."` | Appends inspiration; does not advance chapter index |

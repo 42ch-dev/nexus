@@ -52,7 +52,7 @@ reports:
 
 ### 🔴 Critical (machine: critical / high)
 
-- **C-1** (qc3) — *high*: **Missing composite index on `(work_id, chapter, status)`** — `novel-quality-loop.md` §2.1 explicitly requires `Indexes: (work_id, status), (work_id, chapter, status).` P1's migration `202606090002_findings.sql` added only `(work_id, status)` and `(creator_id, status)`. The spec-required `(work_id, chapter, status)` is missing. At scale, chapter-scoped finding lookups (the review-stage hook's hot path) will full-table scan. → **Fix**: add `CREATE INDEX IF NOT EXISTS findings_work_chapter_status ON findings(work_id, chapter, status);` to the same migration.
+- **C-1** (qc3) — *high*: **Missing composite index on `(work_id, chapter, status)`** — `novel-writing/quality-loop.md` §2.1 explicitly requires `Indexes: (work_id, status), (work_id, chapter, status).` P1's migration `202606090002_findings.sql` added only `(work_id, status)` and `(creator_id, status)`. The spec-required `(work_id, chapter, status)` is missing. At scale, chapter-scoped finding lookups (the review-stage hook's hot path) will full-table scan. → **Fix**: add `CREATE INDEX IF NOT EXISTS findings_work_chapter_status ON findings(work_id, chapter, status);` to the same migration.
 
 ### 🟡 Warning (6 deduped, 3 distinct)
 
@@ -98,7 +98,7 @@ After targeted re-review Approve, PM merges `feature/v1.39-findings-and-review-r
 | 🟡 Warning (low) | 5 |
 | 🟢 Suggestion | 8 |
 
-**Verdict**: **Request Changes** — C-1 is a spec violation (novel-quality-loop.md §2.1); must be fixed before merge.
+**Verdict**: **Request Changes** — C-1 is a spec violation (novel-writing/quality-loop.md §2.1); must be fixed before merge.
 
 ---
 

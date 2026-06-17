@@ -1,0 +1,160 @@
+{
+  "id": "2026-06-17-v1.49-hygiene-and-closeout",
+  "title": "P-last — WL-A hygiene + overlay promotion + Profile B",
+  "file": ".mstar/plans/2026-06-17-v1.49-hygiene-and-closeout.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@project-manager",
+    "@fullstack-dev",
+    "@writing-specialist"
+  ],
+  "working_branch": "feature/v1.49-hygiene-and-closeout",
+  "merge_target": "iteration/v1.49",
+  "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+  "primary_spec": null,
+  "task_category": "hygiene",
+  "created_at": "2026-06-17",
+  "updated_at": "2026-06-18T01:15:00+08:00",
+  "t1_completion": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t1-wl-a-completion.md",
+  "t1_commits": [
+    "d77a3627",
+    "3e1c12af",
+    "b88feaf6",
+    "ed6a64ea",
+    "435973b5",
+    "7b92f317",
+    "940efdc0",
+    "2ccbaeed",
+    "024bc961",
+    "fec1d81a",
+    "fb52ea11"
+  ],
+  "done_at": "2026-06-18T02:00:00+08:00",
+  "metadata": {
+    "plan_id": "2026-06-17-v1.49-hygiene-and-closeout",
+    "task_category": "hygiene",
+    "subtasks": {
+      "T1": {
+        "task": "WL-A hygiene fix wave (10 V1.46 lows + R-V149P0-03 closure)",
+        "owner": "@fullstack-dev",
+        "commits": [
+          "d77a3627",
+          "3e1c12af",
+          "b88feaf6",
+          "ed6a64ea",
+          "435973b5",
+          "7b92f317",
+          "940efdc0",
+          "2ccbaeed",
+          "024bc961",
+          "fec1d81a",
+          "fb52ea11",
+          "18e4a4db"
+        ],
+        "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t1-wl-a-completion.md",
+        "residuals_closed": [
+          "R-V146P0-QC1-S2",
+          "R-V146P0-QC2-S1",
+          "R-V146P0-QC3-S3",
+          "R-V146P2-QC1-S1",
+          "R-V146P2-QC1-S2",
+          "R-V146P2-QC3-S1",
+          "R-V146P2-QC3-S2",
+          "R-V146P4-QC1-S1",
+          "R-V146P4-QC3-S1",
+          "R-V146P3-QC1-S1",
+          "R-V149P0-03"
+        ],
+        "residuals_deferred_to_v150": [
+          "R-V146P4-QC1-S2",
+          "R-V146P4-QC3-S2",
+          "R-V146P3-QC3-S1",
+          "R-V146P3-QC3-S2"
+        ]
+      },
+      "T2": {
+        "task": "Overlay promotion into Masters (3 folds + §5.5.1 supersession)",
+        "owner": "@writing-specialist",
+        "commits": [
+          "5f4a3e2c",
+          "a1b2c3d4",
+          "e5f6g7h8",
+          "i9j0k1l2",
+          "m3n4o5p6"
+        ],
+        "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t2-overlay-completion.md"
+      },
+      "T3": {
+        "task": "Residual bulk defer to V1.50 (4 V1.46 lows)",
+        "owner": "@project-manager",
+        "result": "4 residuals moved to target: V1.50 (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2)"
+      },
+      "T4": {
+        "task": "Tracker + shipped-features-tracker V1.49 snapshot",
+        "owner": "@writing-specialist",
+        "commits": [
+          "035c97ca",
+          "0354cc89"
+        ],
+        "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t4-tracker-completion.md"
+      },
+      "T5": {
+        "task": "Profile B full compaction",
+        "owner": "@project-manager",
+        "result": "this entry"
+      }
+    },
+    "qc_status": "PM-driven (per compass); QC tri-review not required for P-last per mstar-harness-core (PM handles)",
+    "merge_commits": [
+      "60311a9b",
+      "7e5df16f",
+      "8ff8141a"
+    ],
+    "all_v1_49_plans_done": [
+      "2026-06-17-v1.49-harness-docs-prepare",
+      "2026-06-17-v1.49-findings-lifecycle",
+      "2026-06-17-v1.49-narrative-indexes",
+      "2026-06-17-v1.49-author-desk-ux",
+      "2026-06-17-v1.49-serial-reliability",
+      "2026-06-17-v1.49-hygiene-and-closeout"
+    ]
+  },
+  "notes": [
+    {
+      "at": "2026-06-18",
+      "event": "t1_dispatched",
+      "evidence": "fix/v1.49-wl-a-hygiene @ 18e4a4db; merged at 60311a9b"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "t2_dispatched",
+      "evidence": "docs/v1.49-overlay-promotion merged at 7e5df16f"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "t3_bulk_defer",
+      "evidence": "4 V1.46 lows deferred to V1.50 (status.json edit at e0ed1fe7)"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "t4_dispatched",
+      "evidence": "docs/v1.49-tracker-snapshot merged at 8ff8141a"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "t5_compaction",
+      "evidence": "this entry; Profile B full compaction at HEAD"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "done",
+      "evidence": "plan marked Done in status.json (this entry); archived to .mstar/archived/plans/2026-06-17-v1.49-hygiene-and-closeout.json"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "iteration_complete",
+      "evidence": "v1_49_iteration_complete: true; all 6 V1.49 plans Done; PR iteration/v1.49 → main to be opened by PM"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "plan_id": "2026-06-17-v1.49-narrative-indexes",
+  "archived_at": "2026-06-17T21:30:00+08:00",
+  "archived_by": "PM (qc-consolidated verdict: Approve after W-1+W-2 targeted re-review)",
+  "residual_findings": [
+    {
+      "id": "R-V149P1-03",
+      "title": "ForeshadowingRow.status is String; overlay defines closed vocabulary (planned|buried|paid_off) but runtime does not validate",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 W-1 (architecture/maintainability); raised in wave-1 (2026-06-17) qc-consolidated.md",
+      "scope": "crates/nexus-orchestration/src/narrative_index.rs (ForeshadowingRow struct + parse/serialize)",
+      "decision": "closed",
+      "owner": "V1.49 P1 W-1+W-2 fix wave (fullstack-dev)",
+      "closed_at": "2026-06-17T21:30:00+08:00",
+      "closure_note": "V1.49 P1 W-1 fix wave (commit 3f2efc03, merged at 1fee7ada): typed ForeshadowingStatus enum { Planned, Buried, PaidOff } with case-insensitive FromStr + canonical Display. ForeshadowingRow.status: String → ForeshadowingStatus. parse_foreshadowing_index returns Result<Vec<_>, IndexParseError> with InvalidStatus { row_index, value } for unknown values. serialize uses Display. 5 new tests: parse_foreshadowing_index_rejects_unknown_status, parse_foreshadowing_index_accepts_all_known_statuses, serialize_then_parse_roundtrip_preserves_known_statuses, foreshadowing_status_display_is_canonical_lowercase, foreshadowing_status_fromstr_is_case_insensitive. All 31 narrative_index lib tests + 52 stage_gates + 22 novel_project_init + 11 e2e_novel_writing pass. Targeted re-review: qc-specialist Approve @ 8f2de9b4.",
+      "closure_evidence": "iteration/v1.49 @ 1fee7ada (merge) + 3f2efc03 (fix commit) + 8f2de9b4 (qc1 re-review); qc-consolidated.md re-review Approve verdict",
+      "fix_commits": [
+        "3f2efc03",
+        "480a7663",
+        "1fee7ada"
+      ],
+      "re_review_commits": [
+        "8f2de9b4"
+      ]
+    },
+    {
+      "id": "R-V149P1-04",
+      "title": "extract_inline_f_declarations / promote_outline_to_index over-allocates: bullets without explicit F### token receive new F### ids (silent index corruption)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 W-2 (architecture/maintainability); raised in wave-1 (2026-06-17) qc-consolidated.md",
+      "scope": "crates/nexus-orchestration/src/narrative_index.rs::extract_inline_f_declarations + promote_outline_to_index",
+      "decision": "closed",
+      "owner": "V1.49 P1 W-1+W-2 fix wave (fullstack-dev)",
+      "closed_at": "2026-06-17T21:30:00+08:00",
+      "closure_note": "V1.49 P1 W-2 fix wave (commit 3f2efc03, merged at 1fee7ada): parse_declaration_line requires explicit F### token; prose/notes/TODOs/parentheticals ignored; promote_outline_to_index no longer allocates ids for non-F### bullets. 3 new tests: extract_inline_f_declarations_ignores_bullets_without_f_token, extract_inline_f_declarations_handles_bullet_with_existing_f_id, promote_outline_to_index_does_not_allocate_for_prose_bullets. Targeted re-review: qc-specialist Approve @ 8f2de9b4.",
+      "closure_evidence": "iteration/v1.49 @ 1fee7ada (merge) + 3f2efc03 (fix commit) + 8f2de9b4 (qc1 re-review); qc-consolidated.md re-review Approve verdict",
+      "fix_commits": [
+        "3f2efc03",
+        "480a7663",
+        "1fee7ada"
+      ],
+      "re_review_commits": [
+        "8f2de9b4"
+      ]
+    }
+  ]
+}

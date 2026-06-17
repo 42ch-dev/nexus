@@ -107,6 +107,11 @@ pub struct WorkFields {
 ///
 /// All stages receive the same base set; individual presets select the
 /// fields they need from the preset input namespace.
+//
+// Flat field-by-field projection: each block inserts one template var. The
+// linear shape is the idiom of this function; splitting into sub-helpers
+// would add indirection without reducing complexity.
+#[allow(clippy::too_many_lines)]
 #[must_use]
 pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
     let mut map = serde_json::json!({
@@ -183,6 +188,29 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
         }
     }
 
+    // V1.49 P1 (narrative-indexes overlay §4): inject a compact foreshadowing
+    // summary read from `Works/<work_ref>/Outlines/foreshadowing.md` when the
+    // index is non-empty, so outline/draft prompts can surface active F###.
+    // Mirrors the `rules_content` workspace read above. When the file is
+    // missing/empty (or workspace_dir/work_ref absent, e.g. the auto-chain
+    // enqueue path which sets workspace_dir=None), default to empty string so
+    // strict-mode template rendering does not fail on
+    // `{{preset.input.foreshadowing_summary}}`; the preset's
+    // `{{#if foreshadowing_summary}}` guard then omits the section.
+    let fsummary = match (&fields.workspace_dir, &fields.work_ref) {
+        (Some(ws_dir), Some(wref)) => {
+            let work_dir = std::path::Path::new(ws_dir).join("Works").join(wref);
+            crate::narrative_index::read_foreshadowing_summary(&work_dir).unwrap_or_default()
+        }
+        _ => String::new(),
+    };
+    map.as_object_mut().map(|o| {
+        o.insert(
+            "foreshadowing_summary".to_string(),
+            serde_json::Value::String(fsummary),
+        )
+    });
+
     // V1.40 P2 (QC3 C-1 fix): inject the pre-assembled World KB block.
     // The caller (CLI/daemon) is responsible for building the block via
     // `build_chapter_kb_block` and passing it here. When `None` (worldless
@@ -257,7 +285,7 @@ pub fn build_preset_input(fields: &WorkFields) -> serde_json::Value {
 ///   (compiled into the binary via `include_str!`). User override at
 ///   `~/.nexus42/rules/writing-craft.md` takes precedence when it exists.
 /// - **Layer 2 (preferred)**: `Works/<work_ref>/AGENTS.md` — V1.47 normative
-///   per [novel-workflow-profile.md §5.5.4]. New scaffolds write this path.
+///   per [novel-writing/workflow-profile.md §5.5.4]. New scaffolds write this path.
 /// - **Layer 2 (legacy fallback, read-only)**: `Works/<work_ref>/Rules/novel-rules.md`
 ///   — used only when `AGENTS.md` is absent, for Works scaffolded before the
 ///   V1.48 migration. No bulk migration is performed (compass §0.1 #9).
@@ -1188,5 +1216,72 @@ mod tests {
         // When world_kb_block is None (worldless), the key is still present
         // as empty string so strict-mode templates don't fail.
         assert_eq!(input["world_kb_block"], "");
+    }
+
+    // ── V1.49 P1: foreshadowing_summary preset input tests ──────────────────
+
+    #[test]
+    fn build_preset_input_includes_foreshadowing_summary_when_index_populated() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+        let work = ws.join("Works").join("novel-fs");
+        let outlines = work.join("Outlines");
+        std::fs::create_dir_all(&outlines).expect("mkdir");
+        // Populate the index with two rows.
+        std::fs::write(
+            outlines.join("foreshadowing.md"),
+            crate::narrative_index::serialize_foreshadowing_index(&[
+                crate::narrative_index::ForeshadowingRow {
+                    id: "F001".to_string(),
+                    description: "the locket".to_string(),
+                    planted: "1".to_string(),
+                    paid_off: String::new(),
+                    status: crate::narrative_index::ForeshadowingStatus::Planned,
+                },
+                crate::narrative_index::ForeshadowingRow {
+                    id: "F002".to_string(),
+                    description: "the prophecy".to_string(),
+                    planted: "2".to_string(),
+                    paid_off: String::new(),
+                    status: crate::narrative_index::ForeshadowingStatus::Buried,
+                },
+            ]),
+        )
+        .expect("write");
+
+        let mut fields = demo_work_fields("produce");
+        fields.work_ref = Some("novel-fs".to_string());
+        fields.workspace_dir = Some(ws.to_string_lossy().to_string());
+
+        let input = build_preset_input(&fields);
+        let summary = input["foreshadowing_summary"]
+            .as_str()
+            .expect("foreshadowing_summary must be present");
+        assert!(summary.contains("- F001 | the locket | planned"));
+        assert!(summary.contains("- F002 | the prophecy | buried"));
+    }
+
+    #[test]
+    fn build_preset_input_foreshadowing_summary_empty_when_index_absent() {
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let ws = tmp.path();
+        // No Works/ tree at all.
+        let mut fields = demo_work_fields("produce");
+        fields.work_ref = Some("no-such-novel".to_string());
+        fields.workspace_dir = Some(ws.to_string_lossy().to_string());
+
+        let input = build_preset_input(&fields);
+        // Key present as empty string (strict-mode safe); the {{#if}} guard
+        // in the prompt template omits the section.
+        assert_eq!(input["foreshadowing_summary"], "");
+    }
+
+    #[test]
+    fn build_preset_input_foreshadowing_summary_empty_when_no_workspace_dir() {
+        // Auto-chain enqueue path sets workspace_dir=None → summary stays empty
+        // (no workspace read attempted).
+        let fields = demo_work_fields("produce");
+        let input = build_preset_input(&fields);
+        assert_eq!(input["foreshadowing_summary"], "");
     }
 }

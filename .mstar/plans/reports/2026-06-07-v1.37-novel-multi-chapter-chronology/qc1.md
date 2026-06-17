@@ -23,7 +23,7 @@ generated_at: "2026-06-08T02:58:11+08:00"
 - Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus
 - Commit range: `a4f7ad7d5cfc63a434c5462d50346292e80676bd..04236afa1f4d97f69d62ab2369f67ac5a4ac040a`
 - Files reviewed: 4 changed files
-- Tools run: `git rev-parse --show-toplevel`, `git rev-parse --abbrev-ref HEAD`, `git log -1 --format='%H %s'`, `git merge-base iteration/v1.37 HEAD`, `git diff --stat <merge-base>..HEAD`, targeted reads/greps of `novel-workflow-profile.md`, `deferred-features-cross-version-tracker.md`, plan markdown, and `.mstar/status.json`.
+- Tools run: `git rev-parse --show-toplevel`, `git rev-parse --abbrev-ref HEAD`, `git log -1 --format='%H %s'`, `git merge-base iteration/v1.37 HEAD`, `git diff --stat <merge-base>..HEAD`, targeted reads/greps of `novel-writing/workflow-profile.md`, `deferred-features-cross-version-tracker.md`, plan markdown, and `.mstar/status.json`.
 
 ## Acceptance Criteria Review
 
@@ -63,7 +63,7 @@ generated_at: "2026-06-08T02:58:11+08:00"
 
 - Finding ID: QC1-EVIDENCE-002
 - Source Type: doc-rule
-- Source Reference: `.mstar/knowledge/specs/novel-workflow-profile.md` §§4.1, 4.5, 5.3.2, 6.1, 8.1; `.mstar/knowledge/deferred-features-cross-version-tracker.md` §3.3 DF-62; `.mstar/status.json` plan row
+- Source Reference: `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §§4.1, 4.5, 5.3.2, 6.1, 8.1; `.mstar/knowledge/deferred-features-cross-version-tracker.md` §3.3 DF-62; `.mstar/status.json` plan row
 - Confidence: High
 
 ## Summary

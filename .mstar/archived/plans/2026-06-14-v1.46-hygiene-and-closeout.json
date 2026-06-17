@@ -13,7 +13,7 @@
     "depends_on": "2026-06-14-v1.46-author-desk-status-ux,2026-06-14-v1.46-spec-cli-hygiene,2026-06-14-v1.46-novel-runtime-ux-edges,2026-06-14-v1.46-research-auto-chain-e2e,2026-06-14-v1.46-pool-observability",
     "qc_reports": "n/a (P-last is PM-owned; no QC per spec; PM signoff in commit + PR)",
     "closeout_actions": [
-      "Promoted novel-author-experience.md Draft (V1.46) -> Shipped (V1.46)",
+      "Promoted novel-writing/author-experience.md Draft (V1.46) -> Shipped (V1.46)",
       "Profile B compaction: 6 V1.46 plan rows + 1 P-last row archived to .mstar/archived/plans/",
       "5 lifecycle residual closure notes appended to .mstar/archived/residuals/",
       "status.json metadata: v1_46_iteration_complete=true, v1_46_ship populated, latest_active_iteration=v1.47 (placeholder)",

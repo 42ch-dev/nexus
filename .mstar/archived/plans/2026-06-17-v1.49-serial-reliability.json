@@ -1,0 +1,102 @@
+{
+  "id": "2026-06-17-v1.49-serial-reliability",
+  "title": "P3 — Reconcile lock optimization + findings prune CLI + path guard",
+  "file": ".mstar/plans/2026-06-17-v1.49-serial-reliability.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.49-serial-reliability",
+  "merge_target": "iteration/v1.49",
+  "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/quality-loop.md",
+  "task_category": "feature",
+  "created_at": "2026-06-17",
+  "updated_at": "2026-06-18T00:15:00+08:00",
+  "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-serial-reliability/completion.md",
+  "completion_commits": [
+    "aeb95397",
+    "f868961c",
+    "c10e4337",
+    "34c90305"
+  ],
+  "head_sha": "34c90305",
+  "done_at": "2026-06-18T01:00:00+08:00",
+  "metadata": {
+    "commits": [
+      "aeb95397",
+      "f868961c",
+      "c10e4337",
+      "34c90305"
+    ],
+    "merge_commits": [
+      "17414d6"
+    ],
+    "qc_reports": {
+      "qc1": {
+        "verdict": "Approve",
+        "commit": "710da274"
+      },
+      "qc2": {
+        "verdict": "Approve",
+        "commit": "67269bdf"
+      },
+      "qc3": {
+        "verdict": "Approve",
+        "commit": "115e94ac"
+      }
+    },
+    "qc_consolidated": {
+      "commit": "21317656",
+      "final_verdict": "Approve"
+    },
+    "qa_report": {
+      "commit": "df793aae",
+      "verdict": "PASS"
+    },
+    "residual_lifecycle": {
+      "archived": [
+        "R-V148P4-W3",
+        "R-V148P0-W1"
+      ],
+      "open": []
+    },
+    "residuals_closed_for_other_plans": [
+      "R-V148P4-W3 (originally 2026-06-16-v1.48-serial-hardening)",
+      "R-V148P0-W1 (originally 2026-06-16-v1.48-findings-producer)"
+    ]
+  },
+  "notes": [
+    {
+      "at": "2026-06-18",
+      "event": "implement_dispatched",
+      "evidence": "feature/v1.49-serial-reliability @ 34c90305 (4 commits T1-T4)"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "merged_to_integration",
+      "evidence": "iteration/v1.49 @ 17414d6 (P3 merge)"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "in_review",
+      "evidence": "QC tri-review dispatched"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "qc_tri_review_approved",
+      "evidence": "qc1 Approve @ 710da274; qc2 Approve @ 67269bdf; qc3 Approve @ 115e94ac → consolidated Approve @ 21317656"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "qa_passed",
+      "evidence": "qa.md @ df793aae; verdict PASS"
+    },
+    {
+      "at": "2026-06-18",
+      "event": "done",
+      "evidence": "plan marked Done in status.json; archived to .mstar/archived/plans/"
+    }
+  ]
+}

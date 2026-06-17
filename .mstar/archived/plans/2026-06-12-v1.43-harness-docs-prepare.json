@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.43",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.43-novel-author-experience-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-author-experience.md",
+      "primary_spec": ".mstar/knowledge/specs/novel-writing/author-experience.md",
       "depends_on": [],
       "description": "P-1 — V1.43 harness docs prepare (grill-me closure; BL-10 → Active P0)",
       "targets_deferred": ["BL-10"],
@@ -29,7 +29,7 @@
         "P1 plan: .mstar/plans/2026-06-12-v1.43-cli-first-run-copy.md",
         "P2 plan: .mstar/plans/2026-06-12-v1.43-author-visibility.md",
         "P-last plan: .mstar/plans/2026-06-12-v1.43-hygiene-and-residuals.md",
-        "Draft spec: .mstar/knowledge/specs/novel-author-experience.md",
+        "Draft spec: .mstar/knowledge/specs/novel-writing/author-experience.md",
         "status.json activated for V1.43; V1.42 Done plans compacted Profile B",
         "Deferred tracker: BL-10 → V1.43 P0 Active; V1.43 active iteration",
         "iterations/README.md + knowledge/specs/README.md sync"

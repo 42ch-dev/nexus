@@ -29,7 +29,7 @@ mode: report-only
 | AC | Summary | Result | Evidence |
 |----|---------|--------|----------|
 | AC1 | Each §2 row has fix/waive/defer closure in status.json | PASS | `jq` residual audit: R-V137P0-01 resolved; R-V142P1-QC1-F-003 resolved; R-V142P0-QC-W-01 waived; R-V142P0-QC-W-001 waived. `metadata.tech_debt_summary.notes` records R-V143P0-001 fixed, R-V143P0-002 deferred, R-V138 already fixed, and spec/closeout hygiene. Archived quickstart residuals provide structured closure details for R-V143P0-001/002. |
-| AC2 | V1.42 normative specs show Shipped stamps | PASS | `rg` found `preset-conditional-routing.md:3` Shipped V1.42 P2, `novel-workflow-profile.md:3` V1.42 Shipped, specs README lines 94/102/103, and `agent-nexus-tool-bridge.md:224` Shipped V1.42 P3. |
+| AC2 | V1.42 normative specs show Shipped stamps | PASS | `rg` found `preset-conditional-routing.md:3` Shipped V1.42 P2, `novel-writing/workflow-profile.md:3` V1.42 Shipped, specs README lines 94/102/103, and `agent-nexus-tool-bridge.md:224` Shipped V1.42 P3. |
 | AC3 | Iteration closeout (compass + tracker + shipped archive) | PASS | `iterations/README.md:57` marks V1.43 Shipped; deferred tracker quick-status/status lines 3/5/10 updated; shipped archive line 69 has V1.43 snapshot. |
 | AC4 | cargo test green on integration HEAD | PASS | `cargo test -p nexus-orchestration --lib`: 560 passed, 0 failed, 1 ignored; `cargo test -p nexus-local-db --lib`: 187 passed, 0 failed, 0 ignored. Ignored test is `registry_refresh_network` (network-only). |
 
@@ -42,9 +42,9 @@ mode: report-only
 | R-V138 | already-fixed | PASS | `crates/nexus42/src/commands/creator/run.rs` has `reject_produce_when_novel_complete` guard at rg lines 817/822; tests assert quickstart §6 citation. |
 | R-V142P0-QC-W-01 | waived | PASS | `status.json` residual lifecycle `waived`; closure_note cites V1.42.1 hotfix 279ec7b3 + TTL sufficient for local-only model. |
 | R-V142P0-QC-W-001 | waived | PASS | `status.json` residual lifecycle `waived`; closure_note cites local-only single-writer invariant and multi-terminal race out of scope. |
-| R-V143P0-001 | resolved (fix) | PASS | `novel-author-experience.md:89` records §2 row 4 amendment from `creator run status` to `creator works status`; archived residual has lifecycle `resolved` and closure_note. |
-| R-V143P0-002 | deferred to V1.44+ | PASS | `novel-author-experience.md:90`, quickstart line 174, deferred tracker lines 10/93/323, and archived residual target `V1.44+` document review-master deferral. |
-| Hygiene: V1.42 spec promotions | done | PASS | `rg` output confirms V1.42 Shipped stamps in specs README, `preset-conditional-routing.md`, and `novel-workflow-profile.md`. |
+| R-V143P0-001 | resolved (fix) | PASS | `novel-writing/author-experience.md:89` records §2 row 4 amendment from `creator run status` to `creator works status`; archived residual has lifecycle `resolved` and closure_note. |
+| R-V143P0-002 | deferred to V1.44+ | PASS | `novel-writing/author-experience.md:90`, quickstart line 174, deferred tracker lines 10/93/323, and archived residual target `V1.44+` document review-master deferral. |
+| Hygiene: V1.42 spec promotions | done | PASS | `rg` output confirms V1.42 Shipped stamps in specs README, `preset-conditional-routing.md`, and `novel-writing/workflow-profile.md`. |
 | Hygiene: iteration closeout | done | PASS | `iterations/README.md`, deferred tracker, and shipped archive all updated for V1.43 Shipped. |
 
 ## Fix wave re-verification (3 blockers)

@@ -51,7 +51,7 @@ generated_at: "2026-06-15"
   1. Add a `tracing::debug!` / `tracing::info!` span around the hint loop that records chapter count and elapsed milliseconds, so operators can observe the cost.
   2. Cap or skip the hint when the chapter list exceeds a reasonable threshold (e.g., warn once at the bottom instead of per-row).
   3. Perform the existence checks concurrently via `tokio::task::spawn_blocking` (the function is currently synchronous display code, but the caller is async) if preserving the per-row UX is required.
-  4. Document the performance characteristic in `novel-author-experience.md` or the crate `AGENTS.md` so users/authors know the cost scales with chapter count.
+  4. Document the performance characteristic in `novel-writing/author-experience.md` or the crate `AGENTS.md` so users/authors know the cost scales with chapter count.
 
 ### 🟢 Suggestion
 

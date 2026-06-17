@@ -7,7 +7,7 @@
 //! optional `rule_suggestion`, and a routing hint (`target_executor`)
 //! indicating which preset should address it.
 
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::error::LocalDbError;
 
@@ -97,8 +97,90 @@ pub struct FindingListFilters {
 /// Valid severity values (R-V139P1-W-1).
 pub const VALID_SEVERITIES: &[&str] = &["info", "minor", "major", "blocker"];
 
-/// Valid status values (R-V139P1-W-1).
-pub const VALID_STATUSES: &[&str] = &["open", "resolved", "wont_fix"];
+/// Valid status values.
+///
+/// V1.39 (R-V139P1-W-1): original three-state minimum (`open`, `resolved`,
+/// `wont_fix`).
+///
+/// V1.49 (F6 — `findings-lifecycle.md` §2): extended to six states by adding
+/// `triaged`, `in_review`, `duplicate`. Existing rows keep their original
+/// status values; the runtime set is the sole enforcement (`SQLite` `ALTER`
+/// `TABLE` cannot add `CHECK` constraints to existing tables — see
+/// [`validate_finding_enums`] and migration `202606170001_extend_findings_status.sql`).
+pub const VALID_STATUSES: &[&str] = &[
+    "open",
+    "resolved",
+    "wont_fix",
+    "triaged",
+    "in_review",
+    "duplicate",
+];
+
+/// V1.49 F6 — status strings considered **actionable** for the prompt
+/// consumer ([`list_open_findings_for_chapter`] / `open_findings_block`).
+///
+/// Implements `findings-lifecycle.md` §2.2: findings with status in
+/// `{ open, triaged }` are included in produce prompts; `in_review` is
+/// **excluded** by default (the master-review preset owns that surface),
+/// as are the terminal statuses (`resolved`, `wont_fix`, `duplicate`).
+pub const ACTIONABLE_FINDING_STATUSES: &[&str] = &["open", "triaged"];
+
+/// V1.49 F6 — returns `true` when `status` is a member of [`VALID_STATUSES`].
+///
+/// Originally specified as `const fn` in the plan; the stable Rust toolchain
+/// (1.93) does not yet allow `matches!` on `&str` in `const` contexts
+/// (issue `rust-lang/rust#143874`). The runtime signature is identical —
+/// no current caller requires const evaluation. Promote to `const fn` once
+/// `PartialEq` for `str` stabilises in const.
+#[must_use]
+pub fn is_valid_status(status: &str) -> bool {
+    VALID_STATUSES.contains(&status)
+}
+
+/// V1.49 F6 — Returns `true` when transitioning `from` → `to` is permitted
+/// by the lifecycle diagram in `findings-lifecycle.md` §2.1.
+///
+/// ```text
+/// open → triaged | in_review | resolved | wont_fix | duplicate
+/// triaged → in_review | resolved | wont_fix | duplicate
+/// in_review → resolved | wont_fix | duplicate
+/// resolved → (terminal)
+/// wont_fix → (terminal)
+/// duplicate → (terminal)
+/// ```
+///
+/// `from == to` is **not** a transition and is rejected: callers that want
+/// to refresh `updated_at` without changing status must omit `status` from
+/// the patch. Both endpoints must already be valid members of
+/// [`VALID_STATUSES`]; unknown endpoints return `false`.
+///
+/// V1.49 P0 W-1 (qc2 S-3): `duplicate` and `in_review` are owner-controlled
+/// "hide from prompt" levers. `duplicate` is a **terminal sink** (no
+/// outbound edges) — it is not a "parked for later" state. `in_review` is
+/// the intended holding pen for master review: it is reachable from
+/// `open`/`triaged` and can only advance to a terminal state. Moving a
+/// finding into either state excludes it from the actionable set
+/// (`open` | `triaged`) and from the produce-prompt consumer; this is by
+/// design and creator-scoped (no cross-creator abuse is possible).
+#[must_use]
+pub fn is_valid_transition(from: &str, to: &str) -> bool {
+    if from == to || !is_valid_status(from) || !is_valid_status(to) {
+        return false;
+    }
+    match from {
+        "open" => matches!(
+            to,
+            "triaged" | "in_review" | "resolved" | "wont_fix" | "duplicate"
+        ),
+        "triaged" => matches!(to, "in_review" | "resolved" | "wont_fix" | "duplicate"),
+        "in_review" => matches!(to, "resolved" | "wont_fix" | "duplicate"),
+        // Terminal states and (unreachable) unknowns both reject every
+        // outbound transition. `is_valid_status` already filtered the
+        // unknown `from` case above, so this arm is only reached for the
+        // three terminal statuses.
+        _ => false,
+    }
+}
 
 /// Valid `target_executor` values (R-V139P1-W-1).
 pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "master"];
@@ -115,7 +197,7 @@ pub const VALID_TARGET_EXECUTORS: &[&str] = &["write", "brainstorm", "none", "ma
 /// function is the single hook both a future CLI subcommand and a potential
 /// daemon task would call.
 ///
-/// **Spec note**: `novel-findings-maturity.md` §5.1 lists both `resolved` and
+/// **Spec note**: `archived/knowledge/novel-findings-maturity.md` §5.1 lists both `resolved` and
 /// `wont_fix` as purge-eligible. The V1.48 P3 Assignment (T2) explicitly
 /// restricts pruning to `resolved` only and skips `wont_fix`. This deviation
 /// is intentional for this delivery slice; PM reconciles with the overlay at
@@ -139,7 +221,7 @@ pub const SUGGESTED_FINDING_KINDS: &[&str] =
 /// are rejected with [`LocalDbError::ConstraintViolation`].
 ///
 /// V1.48 P0 T4: expanded to include `plot_hole` and `world_inconsistency`
-/// per `.mstar/knowledge/specs/novel-quality-loop.md` §2.1 (the V1.47 P0
+/// per `.mstar/knowledge/specs/novel-writing/quality-loop.md` §2.1 (the V1.47 P0
 /// quick-closure missed these spec-listed kinds; the producer's
 /// `review-report.md` parser emits them and the DB layer must accept).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,10 +237,10 @@ pub enum FindingKind {
     /// Catch-all for review findings that don't fit the above.
     Other,
     /// Plot-level issue (introduced-then-dropped thread, contradiction).
-    /// V1.48 P0: added per `novel-quality-loop.md` §2.1.
+    /// V1.48 P0: added per `novel-writing/quality-loop.md` §2.1.
     PlotHole,
     /// World-building inconsistency (timeline, geography, lore).
-    /// V1.48 P0: added per `novel-quality-loop.md` §2.1.
+    /// V1.48 P0: added per `novel-writing/quality-loop.md` §2.1.
     WorldInconsistency,
 }
 
@@ -281,6 +363,12 @@ pub const RULE_SUGGESTION_MAX_BYTES: usize = 4096;
 /// both create and patch paths, providing the only guard against invalid enum
 /// values. Any non-`Rust` caller (future API, direct SQL) must be validated
 /// before reaching the DB.
+///
+/// V1.49 F6: the status set expanded to six states (see [`VALID_STATUSES`]).
+/// Transition legality (open → triaged, etc.) is **not** checked here — it is
+/// enforced by [`update_finding`] which fetches the row's current status
+/// before applying the patch. Create paths always seed `status = "open"`, so
+/// there is no transition to validate at create time.
 ///
 /// # Errors
 ///
@@ -419,13 +507,18 @@ pub async fn list_findings(
         .collect())
 }
 
-/// V1.48 P1 — chapter-scoped open findings query for `novel-writing` prompt
-/// injection (`novel-findings-maturity.md` §2 Consumer).
+/// V1.48 P1 — chapter-scoped **actionable** findings query for
+/// `novel-writing` prompt injection (`findings-lifecycle.md` §2 Consumer).
 ///
-/// Returns all **open** findings for a Work that should influence the
+/// V1.49 F6: the actionable set expanded from `status = 'open'` to
+/// `status IN ('open', 'triaged')` per overlay §2.2. `triaged` findings
+/// (reviewed but not yet addressed) must reach the produce prompt;
+/// `in_review` and the terminal statuses are excluded by default.
+///
+/// Returns all actionable findings for a Work that should influence the
 /// `novel-writing` outline/draft prompt for chapter `N`:
 ///
-/// - rows where `work_id` matches AND `status = 'open'`
+/// - rows where `work_id` matches AND `status IN ('open', 'triaged')`
 ///   AND (`chapter = N` OR `chapter IS NULL`)
 ///
 /// Work-level findings (`chapter IS NULL`) are included so a Work-wide
@@ -440,6 +533,10 @@ pub async fn list_findings(
 ///
 /// The function is creator-scoped for the same isolation reasons as
 /// [`list_findings`] and [`list_stale_open_findings`].
+///
+/// **Actionable set source**: [`ACTIONABLE_FINDING_STATUSES`] is the
+/// canonical constant; callers that need to mirror the filter (e.g. an
+/// HTTP query builder) should read that constant rather than re-hardcoding.
 ///
 /// # Errors
 ///
@@ -461,7 +558,7 @@ pub async fn list_open_findings_for_chapter(
          FROM findings
          WHERE creator_id = ?
            AND work_id = ?
-           AND status = 'open'
+           AND status IN ('open', 'triaged')
            AND (chapter = ? OR chapter IS NULL)
          ORDER BY
            CASE severity
@@ -541,6 +638,66 @@ pub async fn get_finding(
     }))
 }
 
+/// V1.49 F6 — read the current status and reject illegal transitions
+/// before the caller writes the new value.
+///
+/// Returns:
+/// - `Ok(())` when the row is missing (the UPDATE will surface `NotFound`
+///   via `rows_affected = 0`), or when `current → new_status` is a legal edge.
+/// - `Err(IllegalTransition)` when the transition violates
+///   [`is_valid_transition`].
+///
+/// V1.49 P0 W-1: the typed [`LocalDbError::IllegalTransition`] variant
+/// carries the structured `from`/`to` pair so the PATCH handler can map it
+/// to the stable `INVALID_TRANSITION` code without inspecting constraint
+/// text (qc1 W-1 / qc2 W-1).
+///
+/// V1.49 P0 W-1 (qc1 S-3 / qc3 S-3): this read-before-write is best-effort
+/// single-statement under `SQLite`'s serialized writer. A stronger
+/// atomicity guarantee is achievable by folding the guard into the UPDATE
+/// as a compare-and-swap, e.g.
+/// `UPDATE findings SET status = ?, updated_at = ? WHERE creator_id = ? AND finding_id = ? AND status = ?`
+/// and detecting a lost race via `rows_affected()`. The current two-statement
+/// form is retained for V1.49; the CAS form is the documented upgrade path.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::IllegalTransition`] on illegal transition and
+/// [`LocalDbError::Sqlx`] on database failure.
+async fn enforce_status_transition(
+    pool: &SqlitePool,
+    creator_id: &str,
+    finding_id: &str,
+    new_status: &str,
+) -> Result<(), LocalDbError> {
+    // SAFETY: runtime query_scalar — only the `status` column is read, and
+    // the WHERE clause is creator-scoped. Equivalent to `get_finding` but
+    // cheaper (single column, no FromRow mapping).
+    let current_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM findings WHERE creator_id = ? AND finding_id = ?")
+            .bind(creator_id)
+            .bind(finding_id)
+            .fetch_optional(pool)
+            .await?;
+
+    let Some(from) = current_status else {
+        // Row not found — fall through to the UPDATE, which will report
+        // `rows_affected = 0` and the caller surfaces NotFound.
+        return Ok(());
+    };
+
+    if is_valid_transition(&from, new_status) {
+        Ok(())
+    } else {
+        // V1.49 P0 W-1: typed variant so the PATCH handler maps this to
+        // `INVALID_TRANSITION` without string-prefix sniffing.
+        Err(LocalDbError::IllegalTransition {
+            from,
+            to: new_status.to_string(),
+        })
+    }
+}
+
 /// Update (patch) a finding, scoped to a creator.
 ///
 /// Only non-`None` fields in `patch` are applied. `updated_at` is always
@@ -552,9 +709,25 @@ pub async fn get_finding(
 /// `COALESCE` UPDATE (which treated SQL NULL as "keep existing") to a dynamic
 /// SET-clause builder (mirrors [`works::patch_work`]).
 ///
+/// **V1.49 F6** (`findings-lifecycle.md` §2.1): when `patch.status` is
+/// `Some(new_status)`, the DAO fetches the row's current status and rejects
+/// the transition via [`is_valid_transition`]. Invalid transitions return
+/// [`LocalDbError::IllegalTransition`] and invalid enum values
+/// (`severity` / `status` membership / `target_executor`) return
+/// [`LocalDbError::InvalidEnum`] — both of which the daemon API maps to
+/// HTTP 422 with distinct stable codes (`INVALID_TRANSITION` vs
+/// `INVALID_INPUT` — see
+/// `nexus-daemon-runtime::api::handlers::findings::update_finding_handler`).
+/// This read-before-write is best-effort single-statement: under concurrent
+/// writes a TOCTOU race is possible, but `SQLite` serialises writes and the
+/// WHERE clause scopes the UPDATE to `(creator_id, finding_id)`.
+///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails or the finding is not found.
+/// Returns `LocalDbError` if the database query fails, the finding is not
+/// found, `patch.status` proposes an illegal lifecycle transition
+/// ([`LocalDbError::IllegalTransition`]), or a patched enum field is not a
+/// member of its allowed set ([`LocalDbError::InvalidEnum`]).
 pub async fn update_finding(
     pool: &SqlitePool,
     creator_id: &str,
@@ -562,39 +735,48 @@ pub async fn update_finding(
     patch: &FindingPatch,
     now_epoch: i64,
 ) -> Result<bool, LocalDbError> {
-    // R-V139P1-W-1: validate patch enum fields if provided
+    // R-V139P1-W-1: validate patch enum fields if provided.
+    // V1.49 P0 W-1: PATCH-path enum failures emit the typed `InvalidEnum`
+    // variant (mapped to `INVALID_INPUT` by the handler) so they are
+    // distinguishable from illegal transitions (`INVALID_TRANSITION`). The
+    // create path continues to use the shared `validate_finding_enums`
+    // helper, which still emits `ConstraintViolation`.
     if let Some(ref sev) = patch.severity {
         if !VALID_SEVERITIES.contains(&sev.as_str()) {
-            return Err(LocalDbError::ConstraintViolation {
-                table: "findings".to_string(),
-                constraint: format!(
-                    "invalid severity '{sev}'; expected one of: {}",
-                    VALID_SEVERITIES.join(", ")
-                ),
+            return Err(LocalDbError::InvalidEnum {
+                field: "severity",
+                value: sev.clone(),
+                allowed: VALID_SEVERITIES,
             });
         }
     }
     if let Some(ref st) = patch.status {
         if !VALID_STATUSES.contains(&st.as_str()) {
-            return Err(LocalDbError::ConstraintViolation {
-                table: "findings".to_string(),
-                constraint: format!(
-                    "invalid status '{st}'; expected one of: {}",
-                    VALID_STATUSES.join(", ")
-                ),
+            return Err(LocalDbError::InvalidEnum {
+                field: "status",
+                value: st.clone(),
+                allowed: VALID_STATUSES,
             });
         }
     }
     if let Some(ref te) = patch.target_executor {
         if !VALID_TARGET_EXECUTORS.contains(&te.as_str()) {
-            return Err(LocalDbError::ConstraintViolation {
-                table: "findings".to_string(),
-                constraint: format!(
-                    "invalid target_executor '{te}'; expected one of: {}",
-                    VALID_TARGET_EXECUTORS.join(", ")
-                ),
+            return Err(LocalDbError::InvalidEnum {
+                field: "target_executor",
+                value: te.clone(),
+                allowed: VALID_TARGET_EXECUTORS,
             });
         }
+    }
+
+    // V1.49 F6: enforce the lifecycle transition table. When the caller
+    // patches `status`, fetch the row's current status and reject illegal
+    // transitions (e.g. resolved → open, terminal → anything) before any
+    // write. The DAO already validates that the target string is a known
+    // status (above), so `is_valid_transition` only needs to evaluate the
+    // state-machine edges.
+    if let Some(ref new_status) = patch.status {
+        enforce_status_transition(pool, creator_id, finding_id, new_status).await?;
     }
 
     // Build the SET clause dynamically so `rule_suggestion = ?` is only
@@ -728,6 +910,40 @@ pub async fn prune_resolved_findings_older_than(
     Ok(u32::try_from(result.rows_affected()).unwrap_or(u32::MAX))
 }
 
+/// Count `resolved` findings older than `retention_seconds` without deleting.
+///
+/// The read-only counterpart of [`prune_resolved_findings_older_than`], used
+/// by the `creator works findings prune --dry-run` preview (V1.49 P3,
+/// `novel-writing/quality-loop.md` §9.4).
+///
+/// Same cutoff semantics: `status = 'resolved'` AND `updated_at < now_epoch -
+/// retention_seconds`. `open` and `wont_fix` rows are never counted (per the
+/// retention scope documented on [`prune_resolved_findings_older_than`]).
+///
+/// Uses a runtime query (rather than `sqlx::query_scalar!`) so this additive
+/// seam does not churn the shared `.sqlx/` offline cache, matching the
+/// runtime-query precedent in `work_chapters` (waiver R-V140P0-S3).
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn count_resolved_findings_older_than(
+    pool: &SqlitePool,
+    now_epoch: i64,
+    retention_seconds: i64,
+) -> Result<i64, LocalDbError> {
+    let cutoff = now_epoch.saturating_sub(retention_seconds);
+    // SAFETY: SELECT COUNT against findings — runtime query (R-V140P0-S3).
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS cnt FROM findings WHERE status = 'resolved' AND updated_at < ?",
+    )
+    .bind(cutoff)
+    .fetch_one(pool)
+    .await?;
+    let count: i64 = row.get("cnt");
+    Ok(count)
+}
+
 /// Severity count row — used by `count_open_findings_by_severity`.
 #[derive(Debug, Clone)]
 pub struct SeverityCount {
@@ -777,6 +993,12 @@ pub struct StaleFindingSummary {
 /// The function takes `now_epoch` as a parameter so the master-decision
 /// timeout daemon task can be exercised hermetically with a mocked clock
 /// (V1.39 P4 T5).
+///
+/// V1.49 P0 W-1 (qc1 S-2): this intentionally queries `status = 'open'`
+/// only — **not** the actionable set (`open` | `triaged`). Stale detection
+/// is about unactioned *open* findings; the V1.49 actionable-set widening
+/// applies solely to the produce-prompt consumer
+/// ([`list_open_findings_for_chapter`]).
 ///
 /// # Errors
 ///
@@ -858,6 +1080,12 @@ pub async fn list_all_stale_open_findings(
 /// Count open findings for a Work, grouped by severity.
 ///
 /// Returns a list of (severity, count) pairs for all open findings.
+///
+/// V1.49 P0 W-1 (qc1 S-2): this intentionally queries `status = 'open'`
+/// only — **not** the actionable set (`open` | `triaged`). The severity
+/// summary is the "open" bucket specifically; the V1.49 actionable-set
+/// widening applies solely to the produce-prompt consumer
+/// ([`list_open_findings_for_chapter`]).
 ///
 /// R-V139P1-W-5: investigated compile-time `query_as!` conversion; `SQLite`'s
 /// `COUNT(*)` return type is not reliably inferred by `sqlx` offline macros.
@@ -962,7 +1190,7 @@ pub struct ReviewVerdictFinding {
 /// (a finding already exists for this `(work_id, chapter, source_schedule_id)`
 /// triple), the existing finding id is returned — the call is a no-op. This
 /// guarantees that calling the review terminal hook twice on the same chapter
-/// does not create duplicate findings (novel-quality-loop.md §8.3 decision).
+/// does not create duplicate findings (novel-writing/quality-loop.md §8.3 decision).
 ///
 /// When `verdict.source_schedule_id` is `None` (manual CRUD / API path), the
 /// standard insert is used with no idempotency guard.
@@ -1114,9 +1342,10 @@ pub async fn create_finding_from_review_tx(
 #[cfg(test)]
 mod tests {
     use super::{
-        list_open_findings_for_chapter, normalize_rule_suggestion,
-        prune_resolved_findings_older_than, update_finding, Finding, FindingKind, FindingPatch,
-        RULE_SUGGESTION_MAX_BYTES,
+        is_valid_status, is_valid_transition, list_open_findings_for_chapter,
+        normalize_rule_suggestion, prune_resolved_findings_older_than, update_finding, Finding,
+        FindingKind, FindingPatch, ACTIONABLE_FINDING_STATUSES, RULE_SUGGESTION_MAX_BYTES,
+        VALID_STATUSES,
     };
     use crate::error::LocalDbError;
     use sqlx::SqlitePool;
@@ -1142,7 +1371,7 @@ mod tests {
         }
         // sanity: the enum variant count matches the const ALL_STRS slice
         // length. V1.48 P0 T4: expanded from 5 → 7 to include `plot_hole`
-        // and `world_inconsistency` per `novel-quality-loop.md` §2.1.
+        // and `world_inconsistency` per `novel-writing/quality-loop.md` §2.1.
         assert_eq!(
             FindingKind::ALL_STRS.len(),
             7,
@@ -1231,7 +1460,7 @@ mod tests {
 
     /// C-1 fix: Verify the spec-required composite index on
     /// (work_id, chapter, status) exists after migration.
-    /// Per novel-quality-loop.md §2.1: chapter-scoped finding lookups
+    /// Per novel-writing/quality-loop.md §2.1: chapter-scoped finding lookups
     /// (the review-stage hook's hot path) must use this index.
     #[tokio::test]
     async fn test_findings_work_chapter_status_index_exists() {
@@ -1526,6 +1755,93 @@ mod tests {
         );
     }
 
+    /// V1.49 P3 — `count_resolved_findings_older_than` previews the prune
+    /// count without deleting, and the count matches what
+    /// [`prune_resolved_findings_older_than`] actually deletes (§9.4).
+    #[tokio::test]
+    async fn findings_retention_count_preview_matches_prune() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_count";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        let now: i64 = 20_000_000;
+        let retention_seconds: i64 = 90 * 24 * 3_600;
+        let old_ts = now - retention_seconds - 100_000;
+
+        // cp1: old resolved (eligible). cp2: old open (skipped).
+        // cp3: old wont_fix (skipped). cp4: recent resolved (skipped).
+        super::create_finding(
+            &pool,
+            &row(
+                "cp1",
+                WORK,
+                Some(1),
+                "major",
+                "old_resolved",
+                old_ts,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row("cp2", WORK, Some(1), "major", "old_open", old_ts, "open"),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "cp3",
+                WORK,
+                Some(1),
+                "major",
+                "old_wont_fix",
+                old_ts,
+                "wont_fix",
+            ),
+        )
+        .await
+        .unwrap();
+        super::create_finding(
+            &pool,
+            &row(
+                "cp4",
+                WORK,
+                Some(1),
+                "major",
+                "recent_resolved",
+                now,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+
+        // Preview must report exactly the old resolved count (1)...
+        let preview = super::count_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(preview, 1, "count preview should report 1 old resolved row");
+
+        // ...and nothing was deleted yet.
+        let total_before: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
+                .bind(WORK)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(total_before, 4, "count preview must not delete any rows");
+
+        // The actual prune deletes the same count the preview reported.
+        let deleted = prune_resolved_findings_older_than(&pool, now, retention_seconds)
+            .await
+            .unwrap();
+        assert_eq!(deleted, 1);
+    }
+
     /// V1.48 P3 T2 — `open` rows are never purged even when their
     /// `updated_at` is far past the retention window.
     #[tokio::test]
@@ -1768,6 +2084,493 @@ mod tests {
             Some("keep me"),
             "rule_suggestion must be unchanged when omitted from the patch"
         );
+    }
+
+    // ── V1.49 F6: status enum + lifecycle transitions ───────────────────────
+
+    /// V1.49 F6 — `VALID_STATUSES` carries the six-state lifecycle enum
+    /// per `findings-lifecycle.md` §2.
+    #[test]
+    fn valid_statuses_carries_six_state_lifecycle() {
+        assert_eq!(
+            VALID_STATUSES,
+            &[
+                "open",
+                "resolved",
+                "wont_fix",
+                "triaged",
+                "in_review",
+                "duplicate"
+            ],
+            "VALID_STATUSES must match findings-lifecycle.md §2 enum"
+        );
+        assert_eq!(
+            ACTIONABLE_FINDING_STATUSES,
+            &["open", "triaged"],
+            "ACTIONABLE_FINDING_STATUSES must match §2.2 actionable set"
+        );
+    }
+
+    /// V1.49 F6 — `is_valid_status` accepts every lifecycle member and
+    /// rejects unknown strings (including plausible-but-wrong variants
+    /// like `closed`, `pending`, `triage`).
+    #[test]
+    fn is_valid_status_accepts_lifecycle_members_only() {
+        for &known in VALID_STATUSES {
+            assert!(
+                is_valid_status(known),
+                "is_valid_status should accept '{known}'"
+            );
+        }
+        for &unknown in &[
+            "",
+            "closed",
+            "pending",
+            "triage",
+            "in-review",
+            "RESOLVED",
+            "open ",
+        ] {
+            assert!(
+                !is_valid_status(unknown),
+                "is_valid_status should reject '{unknown}'"
+            );
+        }
+    }
+
+    /// V1.49 F6 — `is_valid_transition` implements the lifecycle diagram
+    /// in `findings-lifecycle.md` §2.1. Every documented edge accepts; the
+    /// three terminal states reject every outbound transition; `from == to`
+    /// is rejected (no-op refresh must omit the patch field).
+    #[test]
+    fn is_valid_transition_matches_lifecycle_diagram() {
+        // open → triaged | in_review | resolved | wont_fix | duplicate
+        for to in ["triaged", "in_review", "resolved", "wont_fix", "duplicate"] {
+            assert!(
+                is_valid_transition("open", to),
+                "open → {to} should be a valid transition"
+            );
+        }
+        // triaged → in_review | resolved | wont_fix | duplicate
+        for to in ["in_review", "resolved", "wont_fix", "duplicate"] {
+            assert!(
+                is_valid_transition("triaged", to),
+                "triaged → {to} should be a valid transition"
+            );
+        }
+        // in_review → resolved | wont_fix | duplicate
+        for to in ["resolved", "wont_fix", "duplicate"] {
+            assert!(
+                is_valid_transition("in_review", to),
+                "in_review → {to} should be a valid transition"
+            );
+        }
+        // Forbidden regressions: open/triaged are not reachable from in_review.
+        assert!(
+            !is_valid_transition("in_review", "open"),
+            "in_review → open should be rejected"
+        );
+        assert!(
+            !is_valid_transition("in_review", "triaged"),
+            "in_review → triaged should be rejected"
+        );
+        // Terminal states: no outbound transitions.
+        for terminal in ["resolved", "wont_fix", "duplicate"] {
+            for target in [
+                "open",
+                "triaged",
+                "in_review",
+                "resolved",
+                "wont_fix",
+                "duplicate",
+            ] {
+                assert!(
+                    !is_valid_transition(terminal, target),
+                    "{terminal} → {target} should be rejected (terminal state)"
+                );
+            }
+        }
+        // `from == to` is rejected (callers omit the patch field to refresh).
+        for &s in VALID_STATUSES {
+            assert!(
+                !is_valid_transition(s, s),
+                "self-transition {s} → {s} should be rejected; omit the patch field to refresh"
+            );
+        }
+        // Unknown endpoints are rejected even on the otherwise-permissive
+        // `open` source.
+        assert!(
+            !is_valid_transition("open", "closed"),
+            "unknown target 'closed' should be rejected"
+        );
+        assert!(
+            !is_valid_transition("closed", "open"),
+            "unknown source 'closed' should be rejected"
+        );
+    }
+
+    /// V1.49 F6 — `update_finding` accepts the canonical happy path
+    /// `open → triaged → in_review → resolved` and stamps `updated_at`.
+    #[tokio::test]
+    async fn update_finding_accepts_canonical_lifecycle_path() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_lifecycle";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        super::create_finding(
+            &pool,
+            &row(
+                "lc1",
+                WORK,
+                Some(1),
+                "major",
+                "lifecycle-test",
+                1_000,
+                "open",
+            ),
+        )
+        .await
+        .unwrap();
+
+        let advance = |status: &str| {
+            let status = status.to_string();
+            let pool = pool.clone();
+            async move {
+                let patch = FindingPatch {
+                    status: Some(status.clone()),
+                    ..Default::default()
+                };
+                update_finding(&pool, CREATOR, "lc1", &patch, 2_000)
+                    .await
+                    .expect("transition should succeed");
+                super::get_finding(&pool, CREATOR, "lc1")
+                    .await
+                    .unwrap()
+                    .unwrap()
+            }
+        };
+
+        let after_triage = advance("triaged").await;
+        assert_eq!(after_triage.status, "triaged");
+        assert_eq!(after_triage.updated_at, 2_000);
+
+        let after_review = advance("in_review").await;
+        assert_eq!(after_review.status, "in_review");
+
+        let after_resolved = advance("resolved").await;
+        assert_eq!(after_resolved.status, "resolved");
+    }
+
+    /// V1.49 F6 — `update_finding` accepts the direct terminal transitions
+    /// `open → wont_fix` and `open → duplicate` (no intermediate triage).
+    #[tokio::test]
+    async fn update_finding_accepts_open_to_terminal_transitions() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_open_terminal";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        super::create_finding(
+            &pool,
+            &row("ot1", WORK, Some(1), "minor", "to-wont-fix", 1_000, "open"),
+        )
+        .await
+        .unwrap();
+        let patch = FindingPatch {
+            status: Some("wont_fix".to_string()),
+            ..Default::default()
+        };
+        update_finding(&pool, CREATOR, "ot1", &patch, 2_000)
+            .await
+            .expect("open → wont_fix should succeed");
+        assert_eq!(
+            super::get_finding(&pool, CREATOR, "ot1")
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "wont_fix"
+        );
+
+        super::create_finding(
+            &pool,
+            &row("ot2", WORK, Some(1), "minor", "to-duplicate", 1_000, "open"),
+        )
+        .await
+        .unwrap();
+        let patch = FindingPatch {
+            status: Some("duplicate".to_string()),
+            ..Default::default()
+        };
+        update_finding(&pool, CREATOR, "ot2", &patch, 2_000)
+            .await
+            .expect("open → duplicate should succeed");
+        assert_eq!(
+            super::get_finding(&pool, CREATOR, "ot2")
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "duplicate"
+        );
+    }
+
+    /// V1.49 F6 — `update_finding` rejects illegal transitions with
+    /// `IllegalTransition`. Three representative rejections cover the
+    /// terminal-locked, self-loop, and reverse-edge classes.
+    #[tokio::test]
+    async fn update_finding_rejects_illegal_transitions() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_reject";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed a resolved row (terminal — no outbound transitions).
+        super::create_finding(
+            &pool,
+            &row(
+                "rj1",
+                WORK,
+                Some(1),
+                "major",
+                "resolved-row",
+                1_000,
+                "resolved",
+            ),
+        )
+        .await
+        .unwrap();
+
+        // (a) resolved → open: rejected (terminal state).
+        let err = update_finding(
+            &pool,
+            CREATOR,
+            "rj1",
+            &FindingPatch {
+                status: Some("open".to_string()),
+                ..Default::default()
+            },
+            2_000,
+        )
+        .await
+        .expect_err("resolved → open must be rejected");
+        match err {
+            LocalDbError::IllegalTransition { from, to } => {
+                assert_eq!(from.as_str(), "resolved");
+                assert_eq!(to.as_str(), "open");
+            }
+            other => panic!("expected IllegalTransition, got {other:?}"),
+        }
+
+        // (b) self-loop resolved → resolved: rejected (callers must omit
+        // the patch field to refresh `updated_at`).
+        let err = update_finding(
+            &pool,
+            CREATOR,
+            "rj1",
+            &FindingPatch {
+                status: Some("resolved".to_string()),
+                ..Default::default()
+            },
+            2_000,
+        )
+        .await
+        .expect_err("self-loop resolved → resolved must be rejected");
+        assert!(
+            matches!(err, LocalDbError::IllegalTransition { .. }),
+            "self-loop should surface as IllegalTransition, got {err:?}"
+        );
+
+        // (c) reverse-edge in_review → open: rejected (in_review may only
+        // advance to terminal states per §2.1).
+        super::create_finding(
+            &pool,
+            &row(
+                "rj2",
+                WORK,
+                Some(1),
+                "major",
+                "in-review-row",
+                1_000,
+                "in_review",
+            ),
+        )
+        .await
+        .unwrap();
+        let err = update_finding(
+            &pool,
+            CREATOR,
+            "rj2",
+            &FindingPatch {
+                status: Some("open".to_string()),
+                ..Default::default()
+            },
+            2_000,
+        )
+        .await
+        .expect_err("in_review → open must be rejected");
+        assert!(
+            matches!(err, LocalDbError::IllegalTransition { .. }),
+            "reverse-edge should surface as IllegalTransition, got {err:?}"
+        );
+
+        // The rejected rows must be unchanged.
+        assert_eq!(
+            super::get_finding(&pool, CREATOR, "rj1")
+                .await
+                .unwrap()
+                .unwrap()
+                .status,
+            "resolved",
+            "rejected transition must not mutate the row"
+        );
+    }
+
+    /// V1.49 F6 — `update_finding` still rejects unknown status values
+    /// (the membership check precedes the transition check).
+    ///
+    /// V1.49 P0 W-1: the PATCH-path membership failure now surfaces as the
+    /// typed `InvalidEnum` variant (field=`status`) rather than the generic
+    /// `ConstraintViolation`, so the handler can map it to `INVALID_INPUT`.
+    #[tokio::test]
+    async fn update_finding_rejects_unknown_status_value() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_unknown_status";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+        super::create_finding(
+            &pool,
+            &row("uk1", WORK, Some(1), "minor", "uk", 1_000, "open"),
+        )
+        .await
+        .unwrap();
+
+        let err = update_finding(
+            &pool,
+            CREATOR,
+            "uk1",
+            &FindingPatch {
+                status: Some("closed".to_string()),
+                ..Default::default()
+            },
+            2_000,
+        )
+        .await
+        .expect_err("unknown status value 'closed' must be rejected");
+        assert!(
+            matches!(
+                err,
+                LocalDbError::InvalidEnum {
+                    field: "status",
+                    ..
+                }
+            ),
+            "unknown status should surface as InvalidEnum(field=status), got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("closed"),
+            "InvalidEnum message should echo the rejected value: {err}"
+        );
+    }
+
+    /// V1.49 F6 — `list_open_findings_for_chapter` includes `open` AND
+    /// `triaged` rows (actionable set per §2.2) and excludes `in_review`
+    /// and the terminal statuses by default.
+    #[tokio::test]
+    async fn list_open_findings_for_chapter_matches_v149_actionable_set() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_actionable";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Seed one finding per status, all on chapter 1, all the same
+        // severity so the ordering is by created_at ASC within the bucket.
+        // Insert in lifecycle-enum order so created_at is monotonic.
+        let statuses = [
+            ("open", 1_000),
+            ("triaged", 2_000),
+            ("in_review", 3_000),
+            ("resolved", 4_000),
+            ("wont_fix", 5_000),
+            ("duplicate", 6_000),
+        ];
+        for (idx, (status, ts)) in statuses.iter().enumerate() {
+            let id = format!("ac{}", idx);
+            // Bypass create_finding's create-time validator by writing
+            // directly so non-`open` seed rows exist for the SELECT.
+            // SAFETY: test-only — direct INSERT to seed lifecycle states
+            // that the create path (which forces status = 'open') cannot
+            // produce. The runtime validation is the sole gate per
+            // R-V139P1-W-1; the values are all members of VALID_STATUSES.
+            sqlx::query(
+                "INSERT INTO findings
+                   (finding_id, work_id, chapter, severity, status, title,
+                    description, target_executor, creator_id, kind,
+                    created_at, updated_at)
+                 VALUES (?, ?, 1, 'major', ?, ?, 'desc', 'write', ?, 'craft', ?, ?)",
+            )
+            .bind(&id)
+            .bind(WORK)
+            .bind(status)
+            .bind(format!("{status}-seed"))
+            .bind(CREATOR)
+            .bind(ts)
+            .bind(ts)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let got = list_open_findings_for_chapter(&pool, CREATOR, WORK, 1)
+            .await
+            .unwrap();
+        let returned_statuses: Vec<String> = got.iter().map(|f| f.status.clone()).collect();
+        assert_eq!(
+            returned_statuses,
+            vec!["open".to_string(), "triaged".to_string()],
+            "actionable set must include only open + triaged; got {returned_statuses:?}"
+        );
+
+        // Severity ordering within the actionable bucket is preserved
+        // (severity DESC, then created_at ASC) — both seeds share `major`,
+        // so created_at ASC wins; open (ts=1000) precedes triaged (ts=2000).
+        let ids: Vec<&str> = got.iter().map(|f| f.finding_id.as_str()).collect();
+        assert_eq!(ids, vec!["ac0", "ac1"], "expected created_at ASC ordering");
+    }
+
+    /// V1.49 F6 — `list_open_findings_for_chapter` keeps the work-level
+    /// (`chapter IS NULL`) inclusion for the new `triaged` status: a
+    /// work-level triaged finding must reach every chapter's prompt.
+    #[tokio::test]
+    async fn list_open_findings_for_chapter_includes_work_level_triaged() {
+        let (pool, _dir) = fresh_pool().await;
+        const CREATOR: &str = "ctr_test";
+        const WORK: &str = "wrk_work_triaged";
+        seed_minimal_work(&pool, WORK, CREATOR).await;
+
+        // Work-level triaged finding.
+        // SAFETY: test-only direct INSERT — see previous test for rationale.
+        sqlx::query(
+            "INSERT INTO findings
+               (finding_id, work_id, chapter, severity, status, title,
+                description, target_executor, creator_id, kind,
+                created_at, updated_at)
+             VALUES ('wt1', ?, NULL, 'blocker', 'triaged', 'work-triaged',
+                     'desc', 'write', ?, 'craft', 500, 500)",
+        )
+        .bind(WORK)
+        .bind(CREATOR)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let got = list_open_findings_for_chapter(&pool, CREATOR, WORK, 7)
+            .await
+            .unwrap();
+        assert_eq!(got.len(), 1, "work-level triaged finding should reach ch7");
+        assert_eq!(got[0].finding_id, "wt1");
+        assert_eq!(got[0].status, "triaged");
     }
 
     /// Insert a minimal works row to satisfy the `findings.work_id` FK.

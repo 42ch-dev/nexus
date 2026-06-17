@@ -71,7 +71,7 @@ Then `novel-writing` drives the chapter pipeline:
 2. **`draft_chapter`** — writes `Works/<work_ref>/Stories/ch01-<slug>.md` (frontmatter `status: draft`); advances `current_chapter`
 3. **`finalize`** — `llm_judge` 五问 quality gate; GO flips `status: finalized` in both DB and frontmatter; NOGO → WaitForInput
 
-See `.mstar/knowledge/specs/novel-workflow-profile.md` §3 (layout), §4.1 (work_chapters), §5.1 (五问 gate).
+See `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §3 (layout), §4.1 (work_chapters), §5.1 (五问 gate).
 
 ## Quality Loop Presets (V1.39 P2)
 

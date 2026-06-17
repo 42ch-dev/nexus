@@ -83,9 +83,9 @@ All gates clean. No new warnings or failures introduced by the fix-round delta.
 ## Step 6 — Spec↔code Alignment (qc1 revalidation)
 Ran the exact sweep:
 ```bash
-rg -n 'novel-chapter-review' .mstar/knowledge/specs/novel-workflow-profile.md .mstar/knowledge/specs/novel-quality-loop.md .mstar/knowledge/specs/cli-spec.md .mstar/knowledge/specs/creator-run-preset-entry.md .mstar/knowledge/specs/orchestration-engine.md .mstar/knowledge/specs/work-experience-model.md .mstar/knowledge/specs/novel-manuscript-audit.md .mstar/knowledge/specs/novel-author-experience.md
+rg -n 'novel-chapter-review' .mstar/knowledge/specs/novel-writing/workflow-profile.md .mstar/knowledge/specs/novel-writing/quality-loop.md .mstar/knowledge/specs/cli-spec.md .mstar/knowledge/specs/creator-run-preset-entry.md .mstar/knowledge/specs/orchestration-engine.md .mstar/knowledge/specs/work-experience-model.md .mstar/knowledge/specs/novel-writing/manuscript-audit.md .mstar/knowledge/specs/novel-writing/author-experience.md
 ```
-Result: `novel-chapter-review` appears as the active preset id in all 8 files (runtime + normative sections). Residual `reflection-loop` matches are exclusively historical/rename-prose inside `<details>` blocks, supersession notes, or the immutable `plan_id` literal — consistent with qc1's "Not drift" carve-out and the surgical spec sweep in `d4ab3a3b`. Active sections (e.g. `novel-workflow-profile.md:407`, `novel-quality-loop.md:63`, `cli-spec.md:363`) correctly document the V1.47 shipped name.
+Result: `novel-chapter-review` appears as the active preset id in all 8 files (runtime + normative sections). Residual `reflection-loop` matches are exclusively historical/rename-prose inside `<details>` blocks, supersession notes, or the immutable `plan_id` literal — consistent with qc1's "Not drift" carve-out and the surgical spec sweep in `d4ab3a3b`. Active sections (e.g. `novel-writing/workflow-profile.md:407`, `novel-writing/quality-loop.md:63`, `cli-spec.md:363`) correctly document the V1.47 shipped name.
 
 ## Step 7 — DAO Surface Hardening (qc2 W-02)
 - `FindingKind::ALL_STRS` is a closed set (`&["craft", "continuity", "pacing", "consistency", "other"]`) in `crates/nexus-local-db/src/findings.rs:124`.

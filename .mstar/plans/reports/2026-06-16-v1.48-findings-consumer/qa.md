@@ -39,7 +39,7 @@ generated_at: "2026-06-16T10:15:00+08:00"
 - **Files changed in scope (git diff --stat summary)**: 48 files, +6083/-190 (includes P0/P4 prior work + this P1; P1 slice touches: `nexus-local-db/src/findings.rs`, `nexus-orchestration/src/{findings_block.rs,auto_chain.rs,stage_gates.rs,preset/*,lib.rs}`, `nexus-orchestration/tests/findings_consumer.rs`, `nexus-orchestration/embedded-presets/novel-writing/{preset.yaml,prompts/*.md}`, `nexus42/src/commands/creator/run.rs`, plus plan/spec/docs updates).
 - **No schemas/ or codegen-impacting changes** in this diff range → `pnpm run codegen` not required.
 - **QC context**: qc1 (Request Changes on W-1) → P1-fix1 (W-1 regression test + harness note) → qc1 re-review (Approve). qc2 (Approve). qc3 degraded (model failure). qc-consolidated records degraded tri-review + W-1 fix path. R-V148P0-W1 (qc2) deferred as existing residual.
-- **Primary specs read**: `.mstar/knowledge/specs/novel-findings-maturity.md` §2 (Consumer) + `.mstar/knowledge/specs/novel-workflow-profile.md` §5.5.2.
+- **Primary specs read**: `.mstar/archived/knowledge/novel-findings-maturity.md` §2 (Consumer) + `.mstar/knowledge/specs/novel-writing/workflow-profile.md` §5.5.2.
 - **Plan read**: `.mstar/plans/2026-06-16-v1.48-findings-consumer.md` (esp. §4 ACs, §6 Verification).
 - **QC reports read**: qc1.md (W-1 + re-review Approve), qc2.md (Approve), qc-consolidated.md (degraded note + fix dispatch).
 
@@ -83,7 +83,7 @@ generated_at: "2026-06-16T10:15:00+08:00"
 
   test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
   ```
-- **Evidence cross-check**: `cargo test -p nexus-local-db -- findings` (chapter-scoped DAO + prior rule_suggestion caps) also green in prior QC runs. Builder (`findings_block.rs`): `MAX_FINDINGS=8`, `MAX_BODY_CHARS=400`, `MAX_TOTAL_BLOCK_CHARS=3200`; early total-cap exit + empty-input → empty-string. Matches `novel-findings-maturity.md` §2.2 table (overlay wins for delivery batching).
+- **Evidence cross-check**: `cargo test -p nexus-local-db -- findings` (chapter-scoped DAO + prior rule_suggestion caps) also green in prior QC runs. Builder (`findings_block.rs`): `MAX_FINDINGS=8`, `MAX_BODY_CHARS=400`, `MAX_TOTAL_BLOCK_CHARS=3200`; early total-cap exit + empty-input → empty-string. Matches `archived/knowledge/novel-findings-maturity.md` §2.2 table (overlay wins for delivery batching).
 
 ### AC4: Auto-chain produce stage behavior unchanged aside from enriched prompts.
 - **Verification**:
