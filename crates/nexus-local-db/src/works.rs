@@ -1394,7 +1394,7 @@ pub async fn get_schedule_json(
 /// with another row's `work_id` (slugs vs `wrk_...` IDs live in different
 /// namespaces in practice, so this is a clarity/determinism guard, not a
 /// live bug fix). `work_ref IS NULL` evaluates to 0 for non-null and 1
-/// for null, so non-null work_refs sort first — matches the "ref wins
+/// for null, so non-null `work_refs` sort first — matches the "ref wins
 /// over id" precedence the doc comment promises.
 ///
 /// # Errors
