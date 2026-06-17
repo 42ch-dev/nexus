@@ -365,6 +365,27 @@ fn gate_reason(row: &nexus_local_db::works::WorkCronRow) -> Option<&'static str>
 /// doc above for the invalidation contract. Process-global because the daemon
 /// calls `evaluate_cron_fires` once per tick with no per-daemon state threaded
 /// in; a `OnceLock<Mutex<..>>` is the idiomatic shape for such a memoisation.
+///
+/// R-V150-WLA-09 (V1.50 P-last WL-A / cron-review-staggering qc3 S-002):
+/// **test-isolation contract** — this static is shared across every test in
+/// the same binary (lib + `tests/cron_supervisor` + `tests/review_cron_e2e`
+/// all see the same instance after the `OnceLock` initialises). The current
+/// mitigations hold:
+/// 1. Each test binary is its own process → its own static.
+/// 2. The lib-test binary (`mod tests`) has only one test
+///    (`cron_fires_at_minute_uses_memoised_schedule`) that touches
+///    `CRON_PARSE_COUNT`; it explicitly calls
+///    `invalidate_cron_schedule_cache()` + `CRON_PARSE_COUNT.store(0)` at
+///    the start and uses unique `(work_id, role)` keys.
+/// 3. The integration tests (`tests/cron_supervisor.rs`,
+///    `tests/review_cron_e2e.rs`) use unique `work_id`s per test
+///    (`wrk_fire_review`, `wrk_review_gated`, …) so cache-key collisions
+///    are zero.
+/// **Do not** add a test that asserts on `CRON_PARSE_COUNT` from `tests/`
+/// (use the `mod tests` only) or that reuses an existing test's `work_id`
+/// — the design is fragile to future test additions, and a regression
+/// here would surface as an order-dependent flake similar to the
+/// V1.49 `R-V149P1-02` tracing-registry flake.
 type CronScheduleCache = HashMap<(String, String), (String, cron::Schedule)>;
 
 static CRON_SCHEDULE_CACHE: OnceLock<Mutex<CronScheduleCache>> = OnceLock::new();
@@ -373,6 +394,9 @@ static CRON_SCHEDULE_CACHE: OnceLock<Mutex<CronScheduleCache>> = OnceLock::new()
 /// `cron_fires_at_minute_uses_memoised_schedule` regression test to assert the
 /// cache prevents re-parses. Relaxed atomic → negligible cost in production
 /// (one increment per cache miss, which is rare after warm-up).
+///
+/// R-V150-WLA-09: process-global; see the test-isolation contract on
+/// [`CRON_SCHEDULE_CACHE`] above before adding tests that read this counter.
 static CRON_PARSE_COUNT: AtomicU64 = AtomicU64::new(0);
 
 fn cron_schedule_cache() -> &'static Mutex<CronScheduleCache> {
