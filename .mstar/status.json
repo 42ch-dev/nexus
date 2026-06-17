@@ -31,7 +31,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-harness-docs-prepare"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:00:00+08:00"
+      "updated_at": "2026-06-18T11:30:00+08:00",
+      "qc_status": "qc1 Request Changes / qc2 Approve / qc3 Request Changes — 5 blocking Warnings (R-V150P0-W1..W5); fix-wave dispatched"
     },
     {
       "id": "2026-06-18-v1.50-cron-brainstorm-write",
@@ -85,7 +86,8 @@
       "id": "2026-06-18-v1.50-kb-editor-cli",
       "title": "T-B P0 — creator world kb list/show/edit/delete",
       "file": ".mstar/plans/2026-06-18-v1.50-kb-editor-cli.md",
-      "status": "InReview",
+      "status": "Done",
+      "done_at": "2026-06-18",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev"],
       "working_branch": "feature/v1.50-kb-editor-cli",
@@ -95,7 +97,8 @@
       "task_category": "feature",
       "depends_on": ["2026-06-18-v1.50-harness-docs-prepare"],
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:00:00+08:00"
+      "updated_at": "2026-06-18T11:30:00+08:00",
+      "qc_status": "qc1+2+3 Approve — 2 accept-low residuals (R-V150KBED-01/02) registered. Merged into iteration/v1.50 at 9754f9f3."
     },
     {
       "id": "2026-06-18-v1.50-kb-auto-promotion",
@@ -571,6 +574,101 @@
         "target_date": "V1.50",
         "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Residual additions + qc3.md",
         "note": "Verified pre-existing per the repo's 'Pre-existing claim verification protocol': reproduces on iteration/v1.49 @ 3630a4e5 (base) with `cargo test -p nexus-orchestration` (full parallel suite — 9 passed, 1 failed in review_report); passes with `cargo test -p nexus-orchestration --test review_report` (in isolation, parallel and serial). QC3 also verified on origin/main @ be27111b with 2/10 failure rate. Cause: global tracing registry contention when many test binaries install/inspect the subscriber concurrently. Not caused by V1.49 P1 — review_report.rs and its capture layer are untouched. Suggested fix: scoped subscriber guard or serializing that single test."
+      }
+    ],
+    "2026-06-18-v1.50-cron-foundation": [
+      {
+        "id": "R-V150P0-W1",
+        "title": "TZ silently clobbered on role-only patch operations (data consistency)",
+        "severity": "high",
+        "source": "qc1 (architecture/maintainability) W1; corroborated by qc2/qc3 (no disagreement on the data-loss path)",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs:494-532 (handle_set) interacting with apply_set_args at cron.rs:208-260",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §W1",
+        "note": "Trigger: `set my-work --no-review` (or any patch omitting --tz) on a Work with custom TZ stored. handle_set folds env/default TZ into effective_args.tz unconditionally, then apply_set_args patches schedule.tz = resolved_tz, clobbering the previously-configured author TZ. Suggested fix: only fold env/default TZ when user explicitly resets (no-flags → defaults branch) or passes --tz; for patch operations without --tz leave base.tz unchanged. Recommend extracting TZ resolution into a pure helper (resolve_tz) for testability. Add regression test set_no_review_preserves_custom_tz."
+      },
+      {
+        "id": "R-V150P0-W2",
+        "title": "Spec §3.1 'all-off' rule not enforced (spec compliance)",
+        "severity": "high",
+        "source": "qc1 (architecture/maintainability) W2 + qc3 (performance/reliability) W-001 (cross-reviewer corroborated)",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs :: CronCommand::Set (no --all-off flag) and apply_set_args (no all-disabled check)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc1.md §W2 + qc3.md §W-001",
+        "note": "Spec §3.1 verbatim: 'At least one role must remain enabled: true unless --all-off is passed (CLI rejects empty schedules).' Both --all-off flag and post-mutation check missing. `set my-work --no-brainstorm --no-write --no-review` succeeds silently. T-A P1 cron evaluator will then skip all fires indefinitely. Fix: add --all-off flag in CronCommand::Set clap; post-mutation count of enabled roles; if 0 and !all_off return CliError::Config with stable code (e.g. E_CRON_ALL_ROLES_DISABLED). Hermetic test apply_set_args_all_off_without_flag_rejects."
+      },
+      {
+        "id": "R-V150P0-W3",
+        "title": "Spec §3.2 show output missing Local time + Next fire (UTC) columns (spec completeness)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs :: render_show (lines 271-299)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-002",
+        "note": "Spec example mandates 4 columns: Role / Cron / Local time / Next fire (UTC). Implementation renders only Role / Cron / Enabled. The whole point of per-Work cron config is 'let authors set the work on autopilot' — show is the primary verification surface. Fix: Local time = parse hour/minute fields of cron expression + render in TZ + cap at 3 entries with …; Next fire (UTC) = cron::Schedule::from_str(&normalize_cron_fields(expr)).upcoming(Utc).next() (single .next() per role, O(1)). render disabled when !enabled. Hermetic test asserts the two new columns."
+      },
+      {
+        "id": "R-V150P0-W4",
+        "title": "list_works_schedule unbounded — workspace-scale performance risk",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-003",
+        "scope": "crates/nexus-local-db/src/works.rs :: list_works_schedule (lines 1425-1450)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P0 fix-wave",
+        "target_date": "V1.50 T-A P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-003",
+        "note": "SELECT work_ref, work_id, schedule_json FROM works WHERE creator_id = ? AND workspace_slug = ? ORDER BY updated_at DESC has no LIMIT. For N ~ 5000 Works (multi-author workspace) latency grows linearly and CLI output becomes unreadable. Existing list_works precedent uses WorkListFilters::limit/offset (default 100). Fix: add optional limit param on list_works_schedule (default 100), pass through handle_list via --limit <N> flag. Update unit test to assert the cap."
+      },
+      {
+        "id": "R-V150P0-W5",
+        "title": "handle_set read-modify-write TOCTOU window (reliability, P0 single-user small risk; P1 daemon-writer introduces real race)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-004",
+        "scope": "crates/nexus42/src/commands/creator/works/cron.rs :: handle_set (lines 494-532)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.50 T-A P1 (daemon writer race window)",
+        "target_date": "V1.50 T-A P1",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-foundation/qc3.md §W-004",
+        "note": "handle_set: get_schedule_json → apply_set_args → set_schedule_json. No transaction. T-A P1 will introduce a daemon-side cron writer (spec §4) — that writer will be the racing party. P0 single-user CLI risk is microsecond window. Fix at P1: extract set_schedule_json_tx (atomic SELECT-then-UPDATE-with-version) OR CAS via UPDATE ... WHERE schedule_json = ? retry on mismatch. PM dispatches W1-W4 to P0 fix-wave; W5 → T-A P1 plan-level residual."
+      }
+    ],
+    "2026-06-18-v1.50-kb-editor-cli": [
+      {
+        "id": "R-V150KBED-01",
+        "title": "creator world kb surface coexists with legacy creator kb --scope world (defer consolidation)",
+        "severity": "low",
+        "source": "implementer (Completion Report v2)",
+        "scope": "nexus42/CLI: creator world kb list/show/edit/delete vs creator kb --scope world",
+        "decision": "accept",
+        "owner": "@fullstack-dev or @product-manager",
+        "target": "V1.51+ docs sweep",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
+        "note": "Future hygiene may consolidate; out of T-B P0 scope. PM tracked for V1.51+ backlog."
+      },
+      {
+        "id": "R-V150KBED-02",
+        "title": "Author identity uses world ownership (narrative_worlds.owner_creator_id) rather than works.creator_id; revisit if Work→KeyBlock provenance linkage is introduced",
+        "severity": "low",
+        "source": "implementer (Completion Report v2)",
+        "scope": "nexus42/CLI: author gate for edit/delete resolves via world ownership not works ownership",
+        "decision": "accept",
+        "owner": "@architect or @fullstack-dev",
+        "target": "V1.51+",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
+        "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode."
       }
     ]
   },
