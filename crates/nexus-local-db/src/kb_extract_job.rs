@@ -689,6 +689,35 @@ pub async fn mark_confirmed(pool: &SqlitePool, job_id: &str) -> Result<bool, sql
     Ok(result.rows_affected() > 0)
 }
 
+/// Transaction-aware variant of [`mark_confirmed`] (R-V150KBED-03).
+///
+/// Same conditional `UPDATE` but issued against a caller-managed transaction
+/// so the `creator world kb adopt` path can wrap the `KeyBlock` insert + this
+/// flip atomically. A return of `Ok(false)` (race: row was already confirmed/
+/// rejected) MUST be paired with `tx.rollback()` by the caller so no orphan
+/// `KeyBlock` is persisted.
+///
+/// **Keep in sync with [`mark_confirmed`]**: the UPDATE statement and the
+/// `Ok(false)` semantics must stay identical.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn mark_confirmed_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed' \
+         WHERE job_id = ? AND promotion_status = 'pending'",
+    )
+    .bind(job_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Flip a promotion candidate to `rejected`.
 ///
 /// Only transitions from `pending`. Returns `Ok(true)` when the row was

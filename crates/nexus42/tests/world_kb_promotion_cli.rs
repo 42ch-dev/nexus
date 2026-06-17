@@ -22,8 +22,12 @@ use nexus42::commands::creator::world::kb::{
 };
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
+use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
+use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
-use nexus_local_db::kb_extract_job::{get_promotion, insert_pending};
+use nexus_local_db::kb_extract_job::{
+    get_promotion, insert_pending, mark_confirmed, mark_confirmed_in_tx,
+};
 use nexus_local_db::kb_store::SqliteKbStore;
 
 const OWNER: &str = "ctr_owner";
@@ -261,4 +265,90 @@ async fn double_adopt_is_rejected() {
         }
         other => panic!("expected Other error, got: {other:?}"),
     }
+}
+
+// ── R-V150KBED-03: adopt transaction rollback on mark_confirmed race ────────
+
+/// Regression for R-V150KBED-03 (qc3 W-001 + qc2 Warning).
+///
+/// Asserts that when `mark_confirmed` returns `Ok(false)` after the `KeyBlock`
+/// insert succeeds (the promotion row was confirmed/rejected by a concurrent
+/// writer between `load_pending_candidate` and the flip), the adopt transaction
+/// rolls back so **no orphan `KeyBlock` is persisted**.
+///
+/// We simulate the race winner by pre-flipping the candidate to `confirmed`,
+/// then exercise the same `begin → insert_key_block_in_tx → mark_confirmed_in_tx
+/// → rollback` boundary that `kb_adopt` composes. We bypass `kb_adopt` /
+/// `load_pending_candidate` here because those gate on `pending` state and
+/// would reject the pre-flipped row before reaching the tx boundary (the
+/// first-failure path is already covered by `double_adopt_is_rejected`). The
+/// orphan-prevention invariant under test is the tx rollback, not the
+/// pre-flip guard.
+#[tokio::test]
+async fn kb_adopt_failure_rolls_back_insert() {
+    let (pool, _dir) = fresh_pool().await;
+    let candidate = seed_pending(&pool, "Race Candidate").await;
+
+    // Simulate the race winner: a concurrent writer confirms the row before
+    // our adopt tx reaches mark_confirmed.
+    mark_confirmed(&pool, &candidate.job_id).await.unwrap();
+
+    // Replicate the kb_adopt tx boundary (entity-scope-model §5.5.3).
+    let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
+    let mut kb = KeyBlock::new(
+        WORLD,
+        nexus_contracts::BlockType::Character,
+        "Race Candidate",
+    );
+    kb.body = Some(KeyBlockBody {
+        summary: Some("Race candidate".to_string()),
+        attributes: Some(serde_json::json!({
+            "novel_category": "character",
+            "aliases": ["Race Candidate"],
+        })),
+        tags: Some(vec!["novel".to_string()]),
+    });
+    kb.status = "confirmed".to_string();
+    kb.created_at = chrono::Utc::now().to_rfc3339();
+
+    let mut tx = pool.begin().await.unwrap();
+
+    // Insert succeeds inside the tx (visible only to this tx).
+    let _inserted = store
+        .insert_key_block_in_tx(&mut tx, kb)
+        .await
+        .expect("insert_key_block_in_tx should succeed against the tx");
+
+    // mark_confirmed_in_tx must return false (row already confirmed by the race).
+    let flipped = mark_confirmed_in_tx(&mut tx, &candidate.job_id)
+        .await
+        .expect("mark_confirmed_in_tx query should not error");
+    assert!(
+        !flipped,
+        "race simulation: mark_confirmed_in_tx must return Ok(false) \
+         (row was pre-flipped to confirmed)"
+    );
+
+    // kb_adopt rolls back on !flipped — replicate.
+    tx.rollback().await.expect("rollback must succeed");
+
+    // Core invariant: NO orphan KeyBlock in kb_key_blocks.
+    let verifier = SqliteKbStore::new(pool.clone());
+    let blocks = verifier.list_by_world(WORLD).await.unwrap();
+    assert!(
+        blocks.iter().all(|b| b.canonical_name != "Race Candidate"),
+        "R-V150KBED-03 regression: orphan KeyBlock 'Race Candidate' MUST NOT \
+         persist after rollback, got: {blocks:?}"
+    );
+
+    // Candidate state preserved — the race winner's confirmation is intact,
+    // and our failed adopt did not duplicate or corrupt the promotion row.
+    let row = get_promotion(&pool, &candidate.job_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        row.promotion_status, "confirmed",
+        "candidate should retain the race winner's confirmed state"
+    );
 }

@@ -33,7 +33,7 @@ use nexus_kb::store::KbStoreError;
 use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
-    get_promotion, list_pending_for_world, mark_confirmed, mark_rejected, KbExtractPromotion,
+    get_promotion, list_pending_for_world, mark_confirmed_in_tx, mark_rejected, KbExtractPromotion,
 };
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -422,16 +422,21 @@ pub async fn kb_pending(
 /// 2. Author identity gate: the active creator must own the candidate's world.
 /// 3. Parse `proposed_payload` into a `KeyBlockBody`; parse `block_type_guess`
 ///    into a wire `BlockType`.
-/// 4. Build a `KeyBlock` with `status="confirmed"` and insert via
-///    `SqliteKbStore::with_validation_mode(Novel)` so V1.40 P1 validation
-///    re-runs (entity-scope-model §5.5.5).
-/// 5. Flip `promotion_status` to `confirmed`.
+/// 4. Build a `KeyBlock` with `status="confirmed"`.
+/// 5. **Atomic promotion (R-V150KBED-03)**: wrap `insert_key_block` +
+///    `mark_confirmed` in a single `SQLite` transaction. If the validation,
+///    insert, or promotion flip fails (or the flip returns `Ok(false)` because
+///    a concurrent writer raced us), the transaction rolls back and **no orphan
+///    `KeyBlock` is persisted**. The candidate row is left in its pre-adopt
+///    state.
+/// 6. Validation uses `SqliteKbStore::with_validation_mode(Novel)` so V1.40 P1
+///    validation re-runs (entity-scope-model §5.5.5).
 ///
 /// # Errors
 ///
 /// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access.
 /// Returns `CliError::Other` on missing/non-pending rows, validation failure,
-/// or store errors.
+/// transaction begin/commit failure, or store errors.
 pub async fn kb_adopt(
     pool: &SqlitePool,
     creator_id: &str,
@@ -469,23 +474,47 @@ pub async fn kb_adopt(
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
 
+    // R-V150KBED-03: atomic promotion. The KeyBlock insert and the promotion
+    // row flip share a single transaction; any failure (validation, insert,
+    // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
+    // KeyBlock is persisted.
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to begin adopt transaction: {e}")))?;
+
     let insert_result = store
-        .insert_key_block(kb)
+        .insert_key_block_in_tx(&mut tx, kb)
         .await
         .map_err(|e| map_kb_store_error("adopt", extract_job_id, world_id, e))?;
+    // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
 
-    // Flip the promotion row. Only transitions from `pending`; if the row
-    // was already confirmed/rejected (race), the KeyBlock insert above is
-    // still valid but we surface the state mismatch.
-    let flipped = mark_confirmed(pool, extract_job_id)
+    let flipped = mark_confirmed_in_tx(&mut tx, extract_job_id)
         .await
         .map_err(|e| CliError::Other(format!("Failed to mark candidate confirmed: {e}")))?;
+    // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
+
     if !flipped {
+        // Race: the row was confirmed/rejected between `load_pending_candidate`
+        // and this flip. Explicit rollback so the orphan KeyBlock insert is
+        // undone before we surface the error. Best-effort: a rollback failure
+        // is logged but the row was never committed so no orphan persists.
+        if let Err(e) = tx.rollback().await {
+            tracing::error!(
+                extract_job_id,
+                error = %e,
+                "kb-adopt: transaction rollback failed after mark_confirmed race"
+            );
+        }
         return Err(CliError::Other(format!(
             "Candidate '{extract_job_id}' was no longer pending (already confirmed/rejected). \
-             KeyBlock was not duplicated."
+             The transaction was rolled back; no orphan row created."
         )));
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| CliError::Other(format!("Failed to commit adopt transaction: {e}")))?;
 
     if json {
         println!(
