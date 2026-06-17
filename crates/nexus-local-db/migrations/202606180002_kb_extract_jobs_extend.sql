@@ -39,8 +39,26 @@ ALTER TABLE kb_extract_jobs ADD COLUMN block_type_guess TEXT;
 -- Heuristic's canonical_name guess (validated on adopt).
 ALTER TABLE kb_extract_jobs ADD COLUMN canonical_name_guess TEXT;
 
--- Index for the `creator world kb pending <world_ref>` list query and the
--- idempotency pre-check (`is_idempotent` scans pending|confirmed rows for the
--- same work_id + canonical_name_guess).
-CREATE INDEX IF NOT EXISTS idx_kb_extract_jobs_promotion_status_work
-    ON kb_extract_jobs (promotion_status, work_id);
+-- Index for the `creator world kb pending <world_ref>` list query, which is
+-- the dominant CLI path:
+--   SELECT ... FROM kb_extract_jobs
+--    WHERE world_id = ? AND promotion_status = 'pending'
+--    ORDER BY created_at ASC LIMIT N
+-- (entity-scope-model §5.5.2; `list_pending_for_world` in kb_extract_job.rs).
+-- The leading (promotion_status, world_id) pair covers the equality filters;
+-- created_at gives an index-ordered scan so no filesort is needed for the
+-- oldest-first ordering.
+--
+-- R-V150KBED-04 (qc3 W-002): the original draft of this migration created
+-- `idx_kb_extract_jobs_promotion_status_work` on (promotion_status, work_id).
+-- That index did not cover the list query (which filters on world_id, not
+-- work_id) and was functionally unused for the path it documented. It is
+-- dropped here and replaced by the world_id-covering index below. The
+-- idempotency pre-check (`is_idempotent`, keyed on work_id +
+-- canonical_name_guess) is a low-cardinality COUNT(*) that still benefits from
+-- the leading promotion_status column of this index; a dedicated
+-- (promotion_status, work_id, canonical_name_guess) index can be added later
+-- if/when the table grows beyond ~100k rows.
+DROP INDEX IF EXISTS idx_kb_extract_jobs_promotion_status_work;
+CREATE INDEX IF NOT EXISTS idx_kb_extract_jobs_promotion_status_world
+    ON kb_extract_jobs (promotion_status, world_id, created_at);
