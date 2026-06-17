@@ -266,3 +266,64 @@ async fn pending_index_supports_filtered_list() {
         .unwrap();
     assert_eq!(limited.len(), 2);
 }
+
+/// Regression for R-V150KBED-04 (qc3 W-002).
+///
+/// Asserts the `creator world kb pending <world_ref>` list query
+/// (`list_pending_for_world`) is served by the
+/// `idx_kb_extract_jobs_promotion_status_world` index covering
+/// `(promotion_status, world_id, created_at)` — not by the old
+/// `idx_kb_extract_jobs_promotion_status_work` index (which covered the wrong
+/// column and was functionally unused for this path).
+///
+/// Uses `EXPLAIN QUERY PLAN` (hermetic, deterministic on SQLite's planner).
+#[tokio::test]
+async fn pending_list_uses_world_id_covering_index() {
+    let (pool, _dir) = fresh_pool().await;
+
+    // Seed one pending row so the planner has stats (not strictly required for
+    // EXPLAIN QUERY PLAN, but mirrors a realistic state).
+    use nexus_local_db::kb_extract_job::insert_pending;
+    insert_pending(
+        &pool,
+        "ctr_1",
+        "wrk_1",
+        "wld_explain",
+        Some("wrk_1"),
+        Some(1),
+        "character",
+        "Explain Hero",
+        "{}",
+    )
+    .await
+    .unwrap();
+
+    // Mirror the list_pending_for_world query shape verbatim.
+    // SAFETY: test-only EXPLAIN QUERY PLAN inspection; static SQL mirror.
+    // EXPLAIN QUERY PLAN columns: (id INTEGER, parent INTEGER, notused INTEGER, detail TEXT).
+    let plan: Vec<(Option<i64>, Option<i64>, Option<i64>, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN \
+         SELECT job_id FROM kb_extract_jobs \
+         WHERE world_id = 'wld_explain' AND promotion_status = 'pending' \
+         ORDER BY created_at ASC LIMIT 100",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    let plan_text: String = plan
+        .iter()
+        .map(|(_, _, _, detail)| detail.clone())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    assert!(
+        plan_text.contains("idx_kb_extract_jobs_promotion_status_world"),
+        "R-V150KBED-04: list query should use \
+         idx_kb_extract_jobs_promotion_status_world, got plan: {plan_text}"
+    );
+    assert!(
+        !plan_text.contains("idx_kb_extract_jobs_promotion_status_work"),
+        "R-V150KBED-04: legacy idx_kb_extract_jobs_promotion_status_work index \
+         must no longer be referenced by the list query, got plan: {plan_text}"
+    );
+}
