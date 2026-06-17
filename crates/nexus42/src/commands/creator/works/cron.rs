@@ -14,6 +14,7 @@
 //! command functional at runtime. The daemon's cron *firing* (T-A P1) will
 //! read the same `works.schedule_json` column.
 
+use std::fmt::Write as _;
 use std::str::FromStr;
 
 use clap::Subcommand;
@@ -230,16 +231,16 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
     {
         // At least one flag → patch the current schedule.
         if let Some(expr) = &args.brainstorm {
-            schedule.roles.brainstorm.cron = expr.clone();
+            schedule.roles.brainstorm.cron.clone_from(expr);
         }
         if let Some(expr) = &args.write {
-            schedule.roles.write.cron = expr.clone();
+            schedule.roles.write.cron.clone_from(expr);
         }
         if let Some(expr) = &args.review {
-            schedule.roles.review.cron = expr.clone();
+            schedule.roles.review.cron.clone_from(expr);
         }
         if let Some(tz) = &args.tz {
-            schedule.tz = tz.clone();
+            schedule.tz.clone_from(tz);
         }
         if args.no_brainstorm {
             schedule.roles.brainstorm.enabled = false;
@@ -260,6 +261,9 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
 
 // ── Rendering (spec §3.2 / §3.3) ─────────────────────────────────────────
 
+/// SAFETY label for infallible `writeln!`/`write!` into a `String` (no IO).
+const WRITE_OK: &str = "write to String is infallible";
+
 /// Render the `show` output (spec §3.2): local + UTC firing display.
 ///
 /// Pure over `(work_ref, schedule)`. Disabled roles render as `disabled`.
@@ -267,24 +271,30 @@ pub fn apply_set_args(base: WorkSchedule, args: &CronSetArgs) -> Result<WorkSche
 pub fn render_show(work_ref: &str, schedule: &WorkSchedule) -> String {
     let tz_display = tz_offset_display(&schedule.tz);
     let mut out = String::new();
-    out.push_str(&format!("Work: {work_ref}\n"));
-    out.push_str(&format!("TZ:   {} ({tz_display})\n\n", schedule.tz));
+    writeln!(out, "Work: {work_ref}").expect(WRITE_OK);
+    write!(out, "TZ:   {} ({tz_display})\n\n", schedule.tz).expect(WRITE_OK);
     out.push_str("Role        Cron                 Enabled\n");
-    out.push_str(&format!(
-        "brainstorm  {}  {}\n",
+    writeln!(
+        out,
+        "brainstorm  {}  {}",
         maybe_disabled(&schedule.roles.brainstorm),
         schedule.roles.brainstorm.enabled
-    ));
-    out.push_str(&format!(
-        "write       {}  {}\n",
+    )
+    .expect(WRITE_OK);
+    writeln!(
+        out,
+        "write       {}  {}",
         maybe_disabled(&schedule.roles.write),
         schedule.roles.write.enabled
-    ));
-    out.push_str(&format!(
+    )
+    .expect(WRITE_OK);
+    write!(
+        out,
         "review      {}  {}",
         maybe_disabled(&schedule.roles.review),
         schedule.roles.review.enabled
-    ));
+    )
+    .expect(WRITE_OK);
     out
 }
 
@@ -303,24 +313,25 @@ fn maybe_disabled(role: &RoleSchedule) -> String {
 #[must_use]
 pub fn render_list(rows: &[ListRow]) -> String {
     let mut out = String::new();
-    out.push_str(&format!(
-        "{:<24} {:<18} {:<18} {:<18} {}\n",
-        "WORK_REF", "TZ", "BRAINSTORM", "WRITE", "REVIEW"
-    ));
+    writeln!(
+        out,
+        "{:<24} {:<18} {:<18} {:<18} REVIEW",
+        "WORK_REF", "TZ", "BRAINSTORM", "WRITE"
+    )
+    .expect(WRITE_OK);
     for row in rows {
-        let ref_display = row
-            .work_ref
-            .clone()
-            .unwrap_or_else(|| row.work_id.clone());
+        let ref_display = row.work_ref.clone().unwrap_or_else(|| row.work_id.clone());
         let s = &row.schedule;
-        out.push_str(&format!(
-            "{:<24} {:<18} {:<18} {:<18} {}\n",
+        writeln!(
+            out,
+            "{:<24} {:<18} {:<18} {:<18} {}",
             truncate(&ref_display, 24),
             truncate(&s.tz, 18),
             truncate(&role_label(&s.roles.brainstorm), 18),
             truncate(&role_label(&s.roles.write), 18),
             role_label(&s.roles.review),
-        ));
+        )
+        .expect(WRITE_OK);
     }
     out
 }
@@ -437,9 +448,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
         .active_creator_id
         .clone()
         .ok_or(CliError::CreatorNotSelected)?;
-    let workspace_slug = config
-        .workspace_slug_for_creator(&creator_id)
-        .to_string();
+    let workspace_slug = config.workspace_slug_for_creator(&creator_id).to_string();
 
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
@@ -477,9 +486,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
         CronCommand::Show { work_ref, json } => {
             handle_show(&pool, &creator_id, &workspace_slug, &work_ref, json).await
         }
-        CronCommand::List { json } => {
-            handle_list(&pool, &creator_id, &workspace_slug, json).await
-        }
+        CronCommand::List { json } => handle_list(&pool, &creator_id, &workspace_slug, json).await,
     }
 }
 
@@ -495,9 +502,7 @@ async fn handle_set(
     let work_id = resolve_work_id(pool, creator_id, workspace_slug, work_ref).await?;
 
     // Base = current stored schedule (or defaults if unset).
-    let stored = nexus_local_db::works::get_schedule_json(pool, &work_id)
-        .await?
-        .map(String::from);
+    let stored = nexus_local_db::works::get_schedule_json(pool, &work_id).await?;
     let base = resolve_schedule(stored.as_deref());
 
     let resolved_tz = args
@@ -535,9 +540,7 @@ async fn handle_show(
     json: bool,
 ) -> Result<()> {
     let work_id = resolve_work_id(pool, creator_id, workspace_slug, work_ref).await?;
-    let stored = nexus_local_db::works::get_schedule_json(pool, &work_id)
-        .await?
-        .map(String::from);
+    let stored = nexus_local_db::works::get_schedule_json(pool, &work_id).await?;
     let schedule = resolve_schedule(stored.as_deref());
 
     if json {
@@ -555,8 +558,8 @@ async fn handle_list(
     workspace_slug: &str,
     json: bool,
 ) -> Result<()> {
-    let rows_db = nexus_local_db::works::list_works_schedule(pool, creator_id, workspace_slug)
-        .await?;
+    let rows_db =
+        nexus_local_db::works::list_works_schedule(pool, creator_id, workspace_slug).await?;
     let rows: Vec<ListRow> = rows_db
         .into_iter()
         .map(|r| ListRow {
@@ -788,10 +791,7 @@ mod tests {
 
     #[test]
     fn normalize_six_field_unchanged() {
-        assert_eq!(
-            normalize_cron_fields("0 0 3 * * *"),
-            "0 0 3 * * *"
-        );
+        assert_eq!(normalize_cron_fields("0 0 3 * * *"), "0 0 3 * * *");
     }
 
     fn error_message(err: &CliError) -> String {

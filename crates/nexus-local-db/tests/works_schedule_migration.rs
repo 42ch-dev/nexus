@@ -88,7 +88,10 @@ async fn forward_migration_adds_schedule_json_column_nullable() {
         let name: String = r.get("name");
         name == "schedule_json"
     });
-    assert!(has_col, "works.schedule_json column must exist after migration");
+    assert!(
+        has_col,
+        "works.schedule_json column must exist after migration"
+    );
 
     // Existing Work gets NULL (= use defaults).
     seed_work(&pool, "wrk_fwd", "fwd-ref").await;
@@ -181,14 +184,10 @@ async fn dao_empty_string_resets_to_defaults() {
 #[tokio::test]
 async fn dao_set_on_missing_work_errors() {
     let (pool, _dir) = fresh_pool().await;
-    let err = nexus_local_db::works::set_schedule_json(
-        &pool,
-        "wrk_ghost",
-        "{}",
-        "2026-06-18T00:00:00Z",
-    )
-    .await
-    .unwrap_err();
+    let err =
+        nexus_local_db::works::set_schedule_json(&pool, "wrk_ghost", "{}", "2026-06-18T00:00:00Z")
+            .await
+            .unwrap_err();
     assert!(
         matches!(err, nexus_local_db::LocalDbError::MissingVersionKey { .. }),
         "set_schedule_json on a missing Work must return MissingVersionKey, got {err:?}"
