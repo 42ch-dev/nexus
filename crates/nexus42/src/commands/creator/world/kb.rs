@@ -437,6 +437,7 @@ pub async fn kb_pending(
 /// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access.
 /// Returns `CliError::Other` on missing/non-pending rows, validation failure,
 /// transaction begin/commit failure, or store errors.
+#[allow(clippy::too_many_lines)] // kb_adopt has 8 sequential concerns (candidate load → author gate → file lock → candidate gate → read+validate → conflict check → adopt transaction → audit log); extracting helper would split the linear flow without readability gain. Surgical hygiene fix for the 18-line T-B P0 file-lock block addition (commit 6dccee36).
 pub async fn kb_adopt(
     pool: &SqlitePool,
     creator_id: &str,
