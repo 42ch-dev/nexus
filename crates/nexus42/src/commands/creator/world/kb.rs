@@ -516,6 +516,11 @@ pub async fn kb_adopt(
         .await
         .map_err(|e| CliError::Other(format!("Failed to commit adopt transaction: {e}")))?;
 
+    // V1.51 T-A P0: surface LLM extraction metadata (cli-spec §6.2G). Read
+    // the dedicated columns first; fall back to the proposed_payload JSON keys
+    // for V1.50 rows where the columns are NULL (llm-extract.md §3.2).
+    let (confidence, source_quote) = extract_llm_metadata(&candidate);
+
     if json {
         println!(
             "{}",
@@ -524,13 +529,38 @@ pub async fn kb_adopt(
                 "key_block_id": insert_result.key_block_id,
                 "world_id": insert_result.world_id,
                 "status": "confirmed",
+                "llm_confidence": confidence,
+                "llm_source_quote": source_quote,
             }))?
         );
     } else {
         println!("✓ KB candidate adopted: {extract_job_id}");
-        println!("  Key block:  {}", insert_result.key_block_id);
-        println!("  World:      {}", insert_result.world_id);
-        println!("  Status:     confirmed");
+        println!("  Key block:   {}", insert_result.key_block_id);
+        println!("  World:       {}", insert_result.world_id);
+        println!("  Status:      confirmed");
+        // Confidence is shown as 2-decimal or '-' for heuristic rows; source
+        // quote is truncated for terminal width (full text in --json).
+        let conf_display = match confidence {
+            Some(c) => format!("{c:.2}"),
+            None => "-".to_string(),
+        };
+        let quote_display = match &source_quote {
+            Some(q) => {
+                let q = q.trim();
+                if q.is_empty() {
+                    "-".to_string()
+                } else if q.chars().count() > 60 {
+                    // char-count truncation keeps multi-byte text correct.
+                    let head: String = q.chars().take(57).collect();
+                    format!("{head}...")
+                } else {
+                    q.to_string()
+                }
+            }
+            None => "-".to_string(),
+        };
+        println!("  Confidence:  {conf_display}");
+        println!("  Source:      {quote_display}");
     }
     Ok(())
 }
@@ -723,6 +753,41 @@ fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
              Valid values: character, ability, scene, organization, item, conflict, info_point, event."
         ))
     })
+}
+
+/// Resolve the LLM extraction metadata for an adopt display (V1.51 T-A P0,
+/// cli-spec §6.2G).
+///
+/// Reads the dedicated `llm_confidence` / `llm_source_quote` columns first;
+/// when they are `NULL` (V1.50 heuristic rows produced before the V1.51
+/// migration), falls back to parsing the same keys from `proposed_payload`
+/// JSON so adopt still surfaces them if the payload carries the LLM keys
+/// (llm-extract.md §3.2). Returns `(None, None)` for pure heuristic rows.
+fn extract_llm_metadata(
+    candidate: &KbExtractPromotion,
+) -> (Option<f64>, Option<String>) {
+    let confidence = candidate.llm_confidence.or_else(|| {
+        candidate
+            .proposed_payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+            .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
+    });
+    let source_quote = candidate
+        .llm_source_quote
+        .clone()
+        .or_else(|| {
+            candidate
+                .proposed_payload
+                .as_deref()
+                .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+                .and_then(|v| {
+                    v.get("source_quote")
+                        .and_then(|q| q.as_str())
+                        .map(|s| s.to_string())
+                })
+        });
+    (confidence, source_quote)
 }
 
 /// Write the rejected-candidate audit log (entity-scope-model §5.5.4).
