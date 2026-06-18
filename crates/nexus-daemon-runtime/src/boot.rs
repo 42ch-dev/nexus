@@ -215,10 +215,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 anyhow::bail!("Failed to open database pool for schedule supervisor: {e}");
             }
         };
-    let schedule_supervisor = Arc::new(ScheduleSupervisor::new_with_workspace(
+    // V1.51 T-A P0: thread the capability registry into the supervisor so the
+    // review-time KB extraction hook can invoke `nexus.llm.extract`. Falls back
+    // to the heuristic when the worker is unavailable (llm-extract.md §5.1).
+    let supervisor_registry = state.capability_registry();
+    let mut schedule_supervisor_builder = ScheduleSupervisor::new_with_workspace(
         Arc::new(schedule_pool),
         state.workspace_path().map(std::path::PathBuf::from),
-    ));
+    );
+    if let Some(reg) = supervisor_registry {
+        schedule_supervisor_builder = schedule_supervisor_builder.with_capability_registry(reg);
+    }
+    let schedule_supervisor = Arc::new(schedule_supervisor_builder);
     state.set_schedule_supervisor(schedule_supervisor.clone());
 
     match schedule_supervisor
