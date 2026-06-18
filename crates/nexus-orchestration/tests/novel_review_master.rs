@@ -228,8 +228,7 @@ async fn review_master_llm_path_writes_llm_payload() {
 
     // proposed_payload JSON carries all four LLM-extracted keys.
     let payload: serde_json::Value =
-        serde_json::from_str(azure.proposed_payload.as_deref().unwrap_or("{}"))
-            .unwrap();
+        serde_json::from_str(azure.proposed_payload.as_deref().unwrap_or("{}")).unwrap();
     assert_eq!(payload["block_type"], "scene", "payload block_type");
     assert_eq!(payload["canonical_name"], "Azure Gate");
     assert_eq!(payload["confidence"], 0.88);
@@ -259,8 +258,7 @@ async fn review_master_no_registry_falls_back_to_heuristic() {
     let work = novel_work("wrk_v151_fb", 1);
     works::create_work(&pool, &work).await.unwrap();
 
-    let (ws_dir, body_rel) =
-        write_workspace_with_chapter("Lin Xia walked into the tavern.");
+    let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia walked into the tavern.");
     seed_chapter_with_body(&pool, "wrk_v151_fb", 1, &body_rel).await;
     insert_review_master_schedule(&pool, "sch_v151_fb", "wrk_v151_fb").await;
 

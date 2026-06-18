@@ -273,10 +273,14 @@ async fn non_review_master_schedule_is_noop() {
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia was here.");
     seed_chapter_with_body(&pool, "wrk_noop", 1, &body_rel).await;
 
-    let count =
-        quality_loop::extract_kb_candidates_for_review(&pool, "sch_noop", Some(ws_dir.path()), None)
-            .await
-            .unwrap();
+    let count = quality_loop::extract_kb_candidates_for_review(
+        &pool,
+        "sch_noop",
+        Some(ws_dir.path()),
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(count, 0, "non-review-master schedule must be a no-op");
 }
 

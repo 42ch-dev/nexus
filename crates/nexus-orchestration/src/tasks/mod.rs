@@ -548,6 +548,13 @@ impl LlmExtractTask {
     ///
     /// Public so the review-time hook and future `exit_when: llm_extract`
     /// preset routing can invoke it directly (`llm-extract.md` §2).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`graph_flow::GraphError::TaskExecutionFailed`] when the
+    /// configured capability is not registered, or when the capability returns
+    /// a non-`WorkerUnavailable` error. `WorkerUnavailable` is mapped to an
+    /// empty `Vec` (safe default), not an error.
     pub async fn evaluate(
         &self,
         context: &graph_flow::Context,
@@ -2115,8 +2122,11 @@ mod tests {
         );
 
         let mut ctx = graph_flow::Context::new();
-        ctx.set("chapter_prose".to_string(), "Lin Xia drew her blade.".to_string())
-            .await;
+        ctx.set(
+            "chapter_prose".to_string(),
+            "Lin Xia drew her blade.".to_string(),
+        )
+        .await;
 
         let candidates = task.evaluate(&ctx).await.unwrap();
         assert_eq!(candidates.len(), 2, "expected 2 candidates");
@@ -2171,7 +2181,10 @@ mod tests {
         );
         let ctx = graph_flow::Context::new();
         let candidates = task.evaluate(&ctx).await.unwrap();
-        assert!(candidates.is_empty(), "malformed LLM JSON → empty candidates");
+        assert!(
+            candidates.is_empty(),
+            "malformed LLM JSON → empty candidates"
+        );
     }
 
     // ── T5: StateCompositeTask integration — llm_judge GO/NOGO ────────

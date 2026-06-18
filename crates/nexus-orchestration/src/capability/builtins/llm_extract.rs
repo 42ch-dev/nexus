@@ -109,9 +109,7 @@ impl Capability for LlmExtract {
         let chapter_prose = input
             .get("chapter_prose")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                CapabilityError::InputInvalid("missing 'chapter_prose' field".into())
-            })?;
+            .ok_or_else(|| CapabilityError::InputInvalid("missing 'chapter_prose' field".into()))?;
 
         // Security: only accept context-injected identity fields (prefixed _).
         // Raw `creator_id`/`session_id` from user/preset input are ignored
@@ -197,10 +195,7 @@ fn strip_code_fences(s: &str) -> &str {
     let s = s.trim();
     if let Some(rest) = s.strip_prefix("```") {
         // Skip an optional language tag on the opening fence line.
-        let after_open = match rest.find('\n') {
-            Some(nl) => &rest[nl + 1..],
-            None => rest,
-        };
+        let after_open = rest.find('\n').map_or(rest, |nl| &rest[nl + 1..]);
         if let Some(body) = after_open.strip_suffix("```") {
             return body.trim();
         }
@@ -356,8 +351,7 @@ mod tests {
     #[test]
     fn parse_normalizes_missing_fields() {
         // Missing block_type/source_quote → defaulted; missing confidence → 0.0.
-        let parsed =
-            parse_extract_response(r#"{"candidates":[{"canonical_name":"A"}]}"#);
+        let parsed = parse_extract_response(r#"{"candidates":[{"canonical_name":"A"}]}"#);
         assert_eq!(parsed[0]["canonical_name"], "A");
         assert_eq!(parsed[0]["block_type"], "character");
         assert_eq!(parsed[0]["source_quote"], "");

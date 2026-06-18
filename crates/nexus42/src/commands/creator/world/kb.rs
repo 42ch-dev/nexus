@@ -540,12 +540,10 @@ pub async fn kb_adopt(
         println!("  Status:      confirmed");
         // Confidence is shown as 2-decimal or '-' for heuristic rows; source
         // quote is truncated for terminal width (full text in --json).
-        let conf_display = match confidence {
-            Some(c) => format!("{c:.2}"),
-            None => "-".to_string(),
-        };
-        let quote_display = match &source_quote {
-            Some(q) => {
+        let conf_display = confidence.map_or_else(|| "-".to_string(), |c| format!("{c:.2}"));
+        let quote_display = source_quote.as_deref().map_or_else(
+            || "-".to_string(),
+            |q| {
                 let q = q.trim();
                 if q.is_empty() {
                     "-".to_string()
@@ -556,9 +554,8 @@ pub async fn kb_adopt(
                 } else {
                     q.to_string()
                 }
-            }
-            None => "-".to_string(),
-        };
+            },
+        );
         println!("  Confidence:  {conf_display}");
         println!("  Source:      {quote_display}");
     }
@@ -763,30 +760,25 @@ fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
 /// migration), falls back to parsing the same keys from `proposed_payload`
 /// JSON so adopt still surfaces them if the payload carries the LLM keys
 /// (llm-extract.md §3.2). Returns `(None, None)` for pure heuristic rows.
-fn extract_llm_metadata(
-    candidate: &KbExtractPromotion,
-) -> (Option<f64>, Option<String>) {
+fn extract_llm_metadata(candidate: &KbExtractPromotion) -> (Option<f64>, Option<String>) {
     let confidence = candidate.llm_confidence.or_else(|| {
         candidate
             .proposed_payload
             .as_deref()
             .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
-            .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
+            .and_then(|v| v.get("confidence").and_then(serde_json::Value::as_f64))
     });
-    let source_quote = candidate
-        .llm_source_quote
-        .clone()
-        .or_else(|| {
-            candidate
-                .proposed_payload
-                .as_deref()
-                .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
-                .and_then(|v| {
-                    v.get("source_quote")
-                        .and_then(|q| q.as_str())
-                        .map(|s| s.to_string())
-                })
-        });
+    let source_quote = candidate.llm_source_quote.clone().or_else(|| {
+        candidate
+            .proposed_payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+            .and_then(|v| {
+                v.get("source_quote")
+                    .and_then(|q| q.as_str())
+                    .map(std::string::ToString::to_string)
+            })
+    });
     (confidence, source_quote)
 }
 

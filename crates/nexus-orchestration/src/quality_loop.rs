@@ -70,7 +70,7 @@ pub struct KbCandidate {
     pub block_type: String,
     /// LLM self-reported confidence in `[0.0, 1.0]`. `None` for heuristic
     /// candidates; `Some(x)` for `nexus.llm.extract` candidates. Stored as
-    /// `f64` to match the SQLite `REAL` column + JSON number representation
+    /// `f64` to match the `SQLite` `REAL` column + JSON number representation
     /// (avoids f32→f64 promotion precision loss in the persisted payload).
     pub confidence: Option<f64>,
     /// Verbatim chapter excerpt justifying the extraction. `None` for
@@ -391,7 +391,7 @@ async fn extract_via_llm(
         .unwrap_or_default();
     let candidates: Vec<KbCandidate> = candidates_json
         .iter()
-        .filter_map(|c| candidate_from_llm_json(c))
+        .filter_map(candidate_from_llm_json)
         .take(MAX_CANDIDATES_PER_PASS)
         .collect();
     LlmExtractOutcome::Candidates(candidates)
@@ -425,13 +425,10 @@ pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandida
         .filter(|s| !s.is_empty())
         .unwrap_or(DEFAULT_BLOCK_TYPE_GUESS)
         .to_string();
-    let summary = c
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let summary = c.get("summary").and_then(|v| v.as_str()).map(String::from);
     let confidence = c
         .get("confidence")
-        .and_then(|v| v.as_f64())
+        .and_then(serde_json::Value::as_f64)
         .map(|x| x.clamp(0.0, 1.0));
     let source_quote = c
         .get("source_quote")
@@ -468,11 +465,11 @@ pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandida
     })
 }
 
-/// Map a wire `block_type` (snake_case) to the novel-profile `novel_category`
+/// Map a wire `block_type` (`snake_case`) to the novel-profile `novel_category`
 /// body attribute (entity-scope-model §5.1.1 recommended default mapping).
 ///
 /// Used when constructing the `proposed_payload` for LLM-extracted candidates
-/// so adopt-time `ValidationMode::Novel` validates. Unknown block_types
+/// so adopt-time `ValidationMode::Novel` validates. Unknown `block_types`
 /// (e.g. `ability`) default to `foundation` — the most generic category — and
 /// emit no warning here (the V1.40 validator emits the advisory mismatch
 /// warning on adopt).
@@ -483,10 +480,9 @@ fn block_type_to_novel_category(block_type: &str) -> &'static str {
         "organization" => "society",
         "item" => "economy",
         "conflict" => "rules",
-        "info_point" => "foundation",
         "event" => "background",
-        // `ability` and any unknown value → foundation (generic; advisory
-        // warning on adopt).
+        // `info_point`, `ability`, and any unknown value → foundation (generic;
+        // the V1.40 validator emits the advisory mismatch warning on adopt).
         _ => "foundation",
     }
 }
@@ -881,12 +877,14 @@ mod tests {
         );
 
         // proposed_payload JSON carries the 4 LLM keys + derived novel_category.
-        let payload: serde_json::Value =
-            serde_json::from_str(&built.proposed_payload).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
         assert_eq!(payload["block_type"], "scene");
         assert_eq!(payload["canonical_name"], "Azure Gate");
         assert_eq!(payload["confidence"], 0.92);
-        assert_eq!(payload["source_quote"], "...the eastern gate groaned open...");
+        assert_eq!(
+            payload["source_quote"],
+            "...the eastern gate groaned open..."
+        );
         assert_eq!(payload["attributes"]["novel_category"], "location");
         assert_eq!(payload["tags"][1], "llm-extracted");
     }

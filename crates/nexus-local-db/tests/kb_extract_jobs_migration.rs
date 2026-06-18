@@ -387,7 +387,10 @@ async fn v151_legacy_rows_default_llm_columns_to_null() {
     .await
     .unwrap();
 
-    assert_eq!(confidence, None, "heuristic row llm_confidence must be NULL");
+    assert_eq!(
+        confidence, None,
+        "heuristic row llm_confidence must be NULL"
+    );
     assert_eq!(quote, None, "heuristic row llm_source_quote must be NULL");
 }
 
@@ -445,7 +448,9 @@ async fn v151_insert_pending_with_llm_round_trips_metadata() {
     );
 
     // list_pending_for_world surfaces the same metadata.
-    let pending = list_pending_for_world(&pool, "wld_v151b", None).await.unwrap();
+    let pending = list_pending_for_world(&pool, "wld_v151b", None)
+        .await
+        .unwrap();
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].llm_confidence, Some(0.92));
     assert_eq!(pending[0].block_type_guess.as_deref(), Some("scene"));
