@@ -5,7 +5,7 @@ reviewer_index: 1
 plan_id: 2026-06-18-v1.51-advisory-lock
 verdict: Approve
 generated_at: 2026-06-18T00:00:00Z
-revalidated_at: 2026-06-18T00:00:00Z
+revalidated_at: 2026-06-18T16:35:00Z
 ---
 
 # Code Review Report
@@ -299,3 +299,25 @@ The two Warnings are localised and fixable without re-architecting: W-001 is a s
 - **Resolved: W-002 (Warning)** — `FileLockError` enum (`Locked(Locked)` | `Io(io::Error)`) added; `try_acquire` propagates I/O errors with `?` (no more `.ok()` swallow). CLI maps `Locked` → exit 75 (`E_LOCK`, temporary contention) and `Io` → exit 78 (`E_LOCK_IO`, persistent config error). New hermetic test: `cli_lock_io_error` (5) + `test_io_error_surfaces_not_locked` (unit).
 - **Evidence:** All 59 tests pass (47 pre-existing + 12 new), clippy clean (`-D warnings`), `cargo +nightly fmt --all` clean. Spec `concurrency.md` §2.3-2.4 updated with `FileLockError` type and dual exit-code contract.
 - **Re-verdict:** **Approve** — both blocking Warnings resolved; architecture coherence preserved.
+
+### Independent corroboration (2026-06-18T16:35:00Z, same qc-specialist seat)
+
+A second pass re-ran every verification command against the current branch `HEAD` (`3a6950d5`) to confirm the Revalidation claims above hold independently of the implementer's self-report.
+
+- **W-001 mechanism re-traced** (`git show 6dccee36`): `handle_run` (`crates/nexus42/src/commands/creator/run.rs:121-132`) resolves `story_ref` from `works` via a separate read, then `try_acquire(&work_dir, "cli:run")` before any mutation; `kb_adopt` (`crates/nexus42/src/commands/creator/world/kb.rs:467-478`) reacquires `workspace_dir` (no longer `_workspace_dir`/ignored) and takes `try_acquire(&work_dir, "cli:kb-adopt")` before the DB transaction. Both map `FileLockError::Locked` → `CliError::Locked` and `FileLockError::Io` → `CliError::LockIo`. The pre-lock `story_ref` read is safe (immutable per work), so no TOCTOU regression. Acceptable degraded no-lock skip when workspace/DB/work_ref/`work_dir` is absent.
+- **W-002 mechanism re-traced** (`git show 3444d046`): `FileLockError` enum (`crates/nexus-local-db/src/file_lock.rs:77`) with `Locked(Locked)` + `Io(io::Error)`; `try_acquire` signature now `Result<FileLockGuard, FileLockError>` (`:191`); `create_dir_all(parent)?` (`:197`, no `.ok()`); `OpenOptions::open(&lock_path)?` (`:204`, no synthetic `Locked` map). CLI dual mapping confirmed at `crates/nexus42/src/main.rs:92-95` — `Locked { .. }` → **75**, `LockIo(_)` → **78** — and `errors.rs` Display emits the `E_LOCK_IO` prefix with a config-environment suggestion. Five rustc warnings remain in `cron_lock_integration` (pre-existing S-002, non-blocking).
+- **Fresh test re-run** (this pass, Review cwd):
+  - `cargo test -p nexus-local-db --test file_lock` → 3/3 pass
+  - `cargo test -p nexus-local-db --lib file_lock` → 13/13 pass (incl. new `test_io_error_surfaces_not_locked`)
+  - `cargo test -p nexus42 --test cli_lock_contention` → 3/3 pass
+  - `cargo test -p nexus42 --test cli_lock_io_error` → 5/5 pass (new)
+  - `cargo test -p nexus42 --test creator_run_lock` → 3/3 pass (new)
+  - `cargo test -p nexus42 --test kb_adopt_lock` → 3/3 pass (new)
+  - `cargo test -p nexus42 --test works_status_lock_holder` → 2/2 pass
+  - `cargo test -p nexus-daemon-runtime --test cron_lock_integration` → 3/3 pass
+  - `cargo test -p nexus-orchestration --test cron_supervisor` → 22/22 pass (regression)
+  - `cargo clippy --all -- -D warnings` → clean
+  - `cargo +nightly fmt --all --check` → clean (exit 0)
+- **Spec check**: `.mstar/knowledge/specs/concurrency.md` §2.3 (`:70-74,90-91,96`) and §4 (`:122,157-158`) document the dual `FileLockError` → exit-code contract (75 = contention/`E_LOCK`; 78 = I/O/`E_LOCK_IO` + `EX_CONFIG`). W-002's spec requirement is satisfied.
+- **Process observation (non-blocking)**: the `concurrency.md` update landed in commit `3a6950d5` (subject `qc(v1.51-t-b-p0): qc1 revalidation …`), bundled with the report edit and authored by the implementer — i.e. a `qc:`-prefixed commit touched a path outside `{PLAN_DIR}/reports/**/*.md`. The spec *content* is correct, so this is a provenance/hygiene note for future rounds (spec changes should ride their own `docs:`/`feat:` commit; QC commits should stay within the report whitelist), **not** a W-002 regression.
+- **Final re-verdict (confirmed):** **Approve** — both blocking Warnings remain concretely resolved; no new Critical/Warning findings; the seven original Suggestions stay non-blocking.
