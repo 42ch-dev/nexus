@@ -132,6 +132,17 @@ pub enum CliError {
         work_id: String,
     },
 
+    /// An advisory file lock is held by another process (V1.51 T-B P0).
+    /// Exit code 75 (EX_TEMPFAIL) — temporary failure, retry later.
+    Locked {
+        /// OS process ID of the lock holder.
+        holder_pid: u32,
+        /// Human-readable holder identity.
+        holder_name: String,
+        /// Whether the lock is stale (>60 s without heartbeat).
+        stale: bool,
+    },
+
     Other(String),
 }
 
@@ -216,6 +227,17 @@ impl fmt::Display for CliError {
                     "422 world_required_for_extract: Work {work_id} is not World-bound.\n\n  \
                      Suggestion: Extract mode requires a Work with an associated World. \
                      Bind the Work to a World first, or use --mode review for worldless Works."
+                )
+            }
+
+            Self::Locked { holder_pid, holder_name, stale } => {
+                let stale_marker = if *stale { " (STALE)" } else { "" };
+                write!(
+                    f,
+                    "E_LOCK: work is held by {holder_name} pid={holder_pid}{stale_marker}\n\n  \
+                     Suggestion: The Work is currently locked by another process. \
+                     Wait for the holder to release the lock and retry. \
+                     If the holder is stale (>60 s), the lock will be auto-released."
                 )
             }
 

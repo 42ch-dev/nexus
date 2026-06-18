@@ -85,7 +85,14 @@ async fn main() {
 
     if let Err(e) = result {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        // V1.51 T-B P0: E_LOCK exits with 75 (EX_TEMPFAIL) for advisory lock contention.
+        // All other errors exit with 1.
+        let code = if matches!(e, nexus42::errors::CliError::Locked { .. }) {
+            75
+        } else {
+            1
+        };
+        std::process::exit(code);
     }
 }
 
