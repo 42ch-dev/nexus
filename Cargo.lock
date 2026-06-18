@@ -2314,6 +2314,7 @@ dependencies = [
  "nexus-kb",
  "nexus-knowledge",
  "nexus-narrative",
+ "nix 0.28.0",
  "serde",
  "serde_json",
  "sqlx",
