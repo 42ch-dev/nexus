@@ -56,7 +56,7 @@ impl Locked {
 /// Releases `flock` and cancels the heartbeat task on drop.
 ///
 /// All fields are `Send` (`std::fs::File` on Unix, `tokio::task::JoinHandle`,
-/// `tokio::sync::watch::Sender`, `PathBuf`), so `FileLockGuard` auto-derives
+/// `tokio::sync::watch::Sender`), so `FileLockGuard` auto-derives
 /// `Send` — no manual `unsafe impl` needed.
 #[derive(Debug)]
 pub struct FileLockGuard {
@@ -66,8 +66,6 @@ pub struct FileLockGuard {
     heartbeat_handle: Option<tokio::task::JoinHandle<()>>,
     /// Cancel signal for the heartbeat task.
     heartbeat_cancel: tokio::sync::watch::Sender<bool>,
-    /// Path of the lock file, used by heartbeat to refresh metadata.
-    lock_path: PathBuf,
 }
 
 /// Build the lock file path for a Work directory.
@@ -217,7 +215,6 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         fd: Some(fd),
         heartbeat_handle: Some(heartbeat_handle),
         heartbeat_cancel: cancel_tx,
-        lock_path,
     })
 }
 

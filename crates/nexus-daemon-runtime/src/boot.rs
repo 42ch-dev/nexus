@@ -442,11 +442,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // `crates/nexus-daemon-runtime/src/cron_supervisor.rs`.
     {
         let cron_pool = state.pool().clone();
+        let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
         let cron_supervisor = schedule_supervisor.clone();
         let cron_shutdown = state.shutdown_notify();
         let cron_config = crate::cron_supervisor::CronSupervisorConfig::from_env();
+        // V1.51 T-B P0: pass workspace_dir for file-lock path construction.
+        // If workspace_path is unset, use an empty path (defensive — a daemon
+        // without a workspace should not have schedule_json-bearing Works).
+        let cron_ws_path = cron_workspace.unwrap_or_default();
         let _cron_handle = crate::cron_supervisor::spawn_cron_supervisor(
             cron_pool,
+            cron_ws_path,
             cron_supervisor,
             cron_shutdown,
             cron_config,

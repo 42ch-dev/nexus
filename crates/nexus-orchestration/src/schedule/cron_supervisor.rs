@@ -29,6 +29,7 @@
 //! on completion.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -142,10 +143,20 @@ fn role_preset(role: &str) -> Option<&'static str> {
 /// errors are logged and the sweep continues. Returns a [`CronFireSummary`]
 /// for observability and hermetic tests.
 ///
+/// `workspace_dir` is the path to the operational workspace directory
+/// (e.g. `~/.nexus42/creators/<id>/workspaces/<slug>`). It is used to construct
+/// `Works/<work_ref>/` paths for file lock acquisition (V1.51 T-B P0).
+/// When `None` (e.g. in tests without a scaffolded workspace), the file lock is
+/// skipped — the DB-level `runtime_lock_holder` gate (§4.3) remains active.
+///
 /// # Panics
 ///
 /// Never — all DB / parse errors are caught and logged.
-pub async fn evaluate_cron_fires(pool: &SqlitePool, now: DateTime<Utc>) -> CronFireSummary {
+pub async fn evaluate_cron_fires(
+    pool: &SqlitePool,
+    workspace_dir: Option<&Path>,
+    now: DateTime<Utc>,
+) -> CronFireSummary {
     let rows = match nexus_local_db::works::list_works_with_schedule_json(pool).await {
         Ok(r) => r,
         Err(e) => {
@@ -160,7 +171,7 @@ pub async fn evaluate_cron_fires(pool: &SqlitePool, now: DateTime<Utc>) -> CronF
     let mut summary = CronFireSummary::default();
     let works_scanned = rows.len();
     for row in &rows {
-        evaluate_work(pool, row, now, &mut summary).await;
+        evaluate_work(pool, workspace_dir, row, now, &mut summary).await;
     }
 
     info!(
@@ -179,6 +190,7 @@ pub async fn evaluate_cron_fires(pool: &SqlitePool, now: DateTime<Utc>) -> CronF
 /// Evaluate all enabled roles for one Work.
 async fn evaluate_work(
     pool: &SqlitePool,
+    workspace_dir: Option<&Path>,
     row: &nexus_local_db::works::WorkCronRow,
     now: DateTime<Utc>,
     summary: &mut CronFireSummary,
@@ -214,7 +226,7 @@ async fn evaluate_work(
         (ROLE_WRITE, config.roles.write.as_ref()),
         (ROLE_REVIEW, config.roles.review.as_ref()),
     ] {
-        try_fire_role(pool, row, role_name, role_opt, tz, now, gate, summary).await;
+        try_fire_role(pool, workspace_dir, row, role_name, role_opt, tz, now, gate, summary).await;
     }
 }
 
@@ -228,6 +240,7 @@ async fn evaluate_work(
 #[allow(clippy::too_many_arguments)]
 async fn try_fire_role(
     pool: &SqlitePool,
+    workspace_dir: Option<&Path>,
     row: &nexus_local_db::works::WorkCronRow,
     role_name: &str,
     role: Option<&CronRole>,
@@ -286,35 +299,71 @@ async fn try_fire_role(
                 "cron-supervisor: prior schedule still active; skipping fire"
             );
         }
-        Ok(false) => match crate::auto_chain::enqueue_cron_schedule(
-            pool,
-            &row.creator_id,
-            &row.work_id,
-            preset_id,
-            role_name,
-        )
-        .await
-        {
-            Ok(schedule_id) => {
-                summary.fired += 1;
-                info!(
-                    work_id = %row.work_id,
-                    role = role_name,
-                    preset_id,
-                    schedule_id = %schedule_id,
-                    "cron-supervisor: enqueued cron-triggered schedule"
-                );
+        Ok(false) => {
+            // V1.51 T-B P0: acquire file lock before enqueuing (spec §3.1).
+            // Only acqire when a workspace_dir is provided (production; skips in
+            // unit/integration tests without scaffolded Works/ dirs). The DB-level
+            // `runtime_lock_holder` (§4.3 gate) remains active in all cases.
+            let _file_lock = if let (Some(ws_dir), Some(ref work_ref)) =
+                (workspace_dir, &row.work_ref)
+            {
+                let work_dir = ws_dir.join("Works").join(work_ref);
+                if work_dir.exists() {
+                    match nexus_local_db::file_lock::try_acquire(
+                        &work_dir,
+                        &format!("daemon:schedule:cron-{role_name}"),
+                    ) {
+                        Ok(guard) => Some(guard),
+                        Err(locked) => {
+                            summary.skipped_gated += 1;
+                            debug!(
+                                work_id = %row.work_id,
+                                role = role_name,
+                                holder_name = %locked.holder_name,
+                                holder_pid = locked.holder_pid,
+                                "cron-supervisor: file-locked; skipping fire"
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            match crate::auto_chain::enqueue_cron_schedule(
+                pool,
+                &row.creator_id,
+                &row.work_id,
+                preset_id,
+                role_name,
+            )
+            .await
+            {
+                Ok(schedule_id) => {
+                    summary.fired += 1;
+                    info!(
+                        work_id = %row.work_id,
+                        role = role_name,
+                        preset_id,
+                        schedule_id = %schedule_id,
+                        "cron-supervisor: enqueued cron-triggered schedule"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        work_id = %row.work_id,
+                        role = role_name,
+                        preset_id,
+                        error = %e,
+                        "cron-supervisor: enqueue failed; skipping fire"
+                    );
+                }
             }
-            Err(e) => {
-                warn!(
-                    work_id = %row.work_id,
-                    role = role_name,
-                    preset_id,
-                    error = %e,
-                    "cron-supervisor: enqueue failed; skipping fire"
-                );
-            }
-        },
+            // FileLockGuard is dropped here, releasing the flock.
+        }
         Err(e) => {
             // R-V150-WLA-07 (V1.50 P-last WL-A / cron-brainstorm-write qc1
             // S-001): previously this arm only logged at warn! and did NOT
