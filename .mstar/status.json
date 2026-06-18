@@ -1,7 +1,106 @@
 {
   "version": 1,
-  "updated_at": "2026-06-18T10:00:00+08:00",
-  "plans": [],
+  "updated_at": "2026-06-18T11:00:00+08:00",
+  "plans": [
+    {
+      "id": "2026-06-18-v1.51-harness-docs-prepare",
+      "title": "P-1 — V1.51 compass, plans, spec overlays, tracker, status (docs-only)",
+      "file": ".mstar/plans/2026-06-18-v1.51-harness-docs-prepare.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@project-manager", "@writing-specialist"],
+      "working_branch": "iteration/v1.51",
+      "merge_target": "iteration/v1.51",
+      "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "task_category": "docs",
+      "created_at": "2026-06-18",
+      "updated_at": "2026-06-18T11:00:00+08:00"
+    },
+    {
+      "id": "2026-06-18-v1.51-llm-extraction",
+      "title": "T-A P0 — nexus.llm.extract capability + heuristic→LLM swap (closes R-V150KBED-01)",
+      "file": ".mstar/plans/2026-06-18-v1.51-llm-extraction.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev", "@architect", "@qa-engineer"],
+      "working_branch": "feature/v1.51-llm-extraction",
+      "merge_target": "iteration/v1.51",
+      "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "task_category": "logic",
+      "created_at": "2026-06-18",
+      "updated_at": "2026-06-18T11:00:00+08:00"
+    },
+    {
+      "id": "2026-06-18-v1.51-cross-chapter-rescan",
+      "title": "T-A P1 — creator kb rescan --work <ref> cross-chapter reconciliation (closes R-V150KBED-08)",
+      "file": ".mstar/plans/2026-06-18-v1.51-cross-chapter-rescan.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev", "@qa-engineer"],
+      "working_branch": "feature/v1.51-cross-chapter-rescan",
+      "merge_target": "iteration/v1.51",
+      "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "task_category": "logic",
+      "created_at": "2026-06-18",
+      "updated_at": "2026-06-18T11:00:00+08:00"
+    },
+    {
+      "id": "2026-06-18-v1.51-missing-kb-detection",
+      "title": "T-A P2 — finalize-time entity reference detection + creator world kb pending --missing-only",
+      "file": ".mstar/plans/2026-06-18-v1.51-missing-kb-detection.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev", "@qa-engineer"],
+      "working_branch": "feature/v1.51-missing-kb-detection",
+      "merge_target": "iteration/v1.51",
+      "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "task_category": "logic",
+      "created_at": "2026-06-18",
+      "updated_at": "2026-06-18T11:00:00+08:00"
+    },
+    {
+      "id": "2026-06-18-v1.51-advisory-lock",
+      "title": "T-B P0 — Works/<work_ref>/.lock + daemon cron-side + CLI integration (closes R-V149P1-01 advisory-lock note)",
+      "file": ".mstar/plans/2026-06-18-v1.51-advisory-lock.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev", "@architect", "@qa-engineer"],
+      "working_branch": "feature/v1.51-advisory-lock",
+      "merge_target": "iteration/v1.51",
+      "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "task_category": "logic",
+      "created_at": "2026-06-18",
+      "updated_at": "2026-06-18T11:00:00+08:00"
+    },
+    {
+      "id": "2026-06-18-v1.51-per-row-occ",
+      "title": "T-B P1 — version columns + CAS generalisation + E_VERSION/E_LOCK codes + retry-on-conflict",
+      "file": ".mstar/plans/2026-06-18-v1.51-per-row-occ.md",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "agents": ["@fullstack-dev", "@qa-engineer"],
+      "working_branch": "feature/v1.51-per-row-occ",
+      "merge_target": "iteration/v1.51",
+      "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "task_category": "logic",
+      "created_at": "2026-06-18",
+      "updated_at": "2026-06-18T11:00:00+08:00"
+    },
+    {
+      "id": "2026-06-18-v1.51-hygiene-and-closeout",
+      "title": "P-last — V1.50/V1.51 carry-forwards + WL-A + overlay promotion + Profile B + PR",
+      "file": ".mstar/plans/2026-06-18-v1.51-hygiene-and-closeout.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@fullstack-dev", "@writing-specialist", "@project-manager"],
+      "working_branch": "feature/v1.51-hygiene-and-closeout",
+      "merge_target": "iteration/v1.51",
+      "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "task_category": "docs",
+      "created_at": "2026-06-18",
+      "updated_at": "2026-06-18T11:00:00+08:00"
+    }
+  ],
   "metadata": {
     "branch_naming": {
       "feature": "feature/{ver}-{name}",
@@ -9,19 +108,19 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
-    "last_integration_branch": "iteration/v1.49",
+    "integration_branch": "iteration/v1.51",
+    "last_integration_branch": "iteration/v1.50",
     "integration_merge_target": "main",
     "integration_branch_role": "active",
-    "integration_branch_retired": true,
+    "integration_branch_retired": false,
     "latest_shipped_iteration": "V1.50 (Shipped 2026-06-17 via PR #63)",
     "latest_shipped_at": "2026-06-17T18:26:46Z",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
-    "platform_integration": "paused — local-only until further notice (V1.50 shipped 2026-06-17 via PR #63 at 4db0a37b; awaiting V1.51 planning)",
-    "pre_implement_gate": null,
+    "latest_active_iteration": "V1.51 (prepare GO 2026-06-18)",
+    "latest_active_compass": "v1.51-kb-closure-and-multi-writer-concurrency",
+    "platform_integration": "paused — local-only until further notice (V1.50 shipped 2026-06-17 via PR #63 at 4db0a37b; V1.51 prepare in progress)",
+    "pre_implement_gate": "Todo — V1.51 P-1 in progress; locked compass + 7 plans + 6 spec overlays registered",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
-    "wave_0_spec": ".mstar/knowledge/specs/novel-writing/cron-staggering.md, .mstar/knowledge/specs/novel-writing/auto-chronology.md, .mstar/knowledge/specs/entity-scope-model.md §5.4",
+    "wave_0_spec": ".mstar/knowledge/specs/concurrency.md (new Master Draft V1.51), .mstar/knowledge/specs/llm-extract.md (new Master Draft V1.51), .mstar/knowledge/specs/novel-writing/quality-loop.md §5 missing-KB extension, .mstar/knowledge/specs/entity-scope-model.md §5.5 LLM pathway, .mstar/knowledge/specs/cli-spec.md §6.2G update, .mstar/knowledge/world-kb-runtime-architecture.md §5.5+§6 extensions",
     "pre_iteration_hotfix": null,
     "latest_ship": {
       "iteration": "V1.50",
@@ -43,7 +142,7 @@
       "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-06-18 (V1.50 P-last closeout)",
+      "updated_at": "2026-06-18 (V1.51 harness prepare)",
       "total_open": 0,
       "total_deferred": 8,
       "total_resolved": 46,
@@ -56,14 +155,16 @@
         "nit": 0
       },
       "by_target_active": {
-        "V1.50": 3,
+        "V1.51": 3,
         "V1.51+": 4
       },
-      "notes": "V1.50 P-last T1-T2 closed 6 V1.49 carry-forwards (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2, R-V149P0-01 medium, R-V149P1-02 flake) + 10 V1.50 WL-A. 11 rows normalized to lifecycle (8 deferred to V1.51+, 3 archived via QC accept). 0 open at iteration close. 8 V1.50 plan rows archived; 9th (P-last hygiene-and-closeout) still in status.json — to be marked Done in T7. Profile B layout invariant verified."
+      "notes": "V1.50 P-last T1-T2 closed 6 V1.49 carry-forwards (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2, R-V149P0-01 medium, R-V149P1-02 flake) + 10 V1.50 WL-A. 11 rows normalized to lifecycle (8 deferred, 3 archived via QC accept). 0 open at V1.50 close. V1.51 prepare: 3 V1.51 carry-forwards re-targeted (R-V150KBED-01 medium → T-A P0, R-V150KBED-08 low → T-A P1, R-V149P1-01 advisory-lock portion → T-B P0). R-V150-WLA-DEFER-V1.51 (30+ low V1.50 QC suggestions) remains; selective fix 8-10 in P-last; remainder defer V1.52+. V1.50 P-last plan row archived post-merge. Profile B layout invariant verified."
     }
   },
-  "v1_50_iteration_complete": false,
-  "v1_50_status": "PREPARE GO 2026-06-18 — compass v1 + 9 plans + 3 spec overlays + status/tracker update",
+  "v1_50_iteration_complete": true,
+  "v1_50_status": "SHIPPED 2026-06-17 — PR #63 merged at 4db0a37b3e6a; all 9 V1.50 plans Done; 16 residuals archived; 8 carry-forward to V1.51",
+  "v1_51_iteration_complete": false,
+  "v1_51_status": "PREPARE GO 2026-06-18 — compass v1 + 7 plans + 6 spec overlays + status/tracker update",
   "residual_findings": {
     "2026-06-13-v1.45-hygiene-and-closeout": [
       {
@@ -463,10 +564,10 @@
         "scope": ".mstar/knowledge/specs/novel-writing/narrative-indexes.md §3; runtime uses the scaffolded template 5-column shape (crates/nexus-orchestration/src/narrative_index.rs)",
         "decision": "defer",
         "owner": "@writing-specialist or @architect",
-        "target": "V1.49 P5",
-        "target_date": "V1.49 P5",
-        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision",
-        "note": "No runtime behavior gap — the runtime implements the template's 5-column shape (ground truth for round-trip), and the overlay §3 4-column summary maps onto it (Planted+Paid off realize `chapters`; Status honours planned|buried|paid_off). Documentation-only reconciliation when the overlay folds into workflow-profile.md §4.6 at P-last. Also tracks the deferred promotion-concurrency advisory-lock decision (single-writer daemon model + atomic temp+rename is the V1.49 choice; a hard advisory lock is a V1.50 follow-up if multi-writer arrives).",
+        "target": "V1.49 P5 (closed 2026-06-17) + V1.51 T-B P0 (advisory-lock portion)",
+        "target_date": "V1.51 T-B P0",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision + .mstar/plans/2026-06-18-v1.51-advisory-lock.md",
+        "note": "Spec-reconciliation portion closed V1.49 P-last (workflow-profile.md §4.6 folded 5-col shape). The deferred promotion-concurrency advisory-lock decision is now in scope at V1.51 T-B P0 per V1.51 compass §0.1 #6. V1.49 chose single-writer daemon model + atomic temp+rename; V1.51 T-B P0 adds hard advisory lock + per-row OCC for cross-process safety.",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-17-v1.49-narrative-indexes"
       },
@@ -806,16 +907,16 @@
       },
       {
         "id": "R-V150KBED-08",
-        "title": "`--dry-run` candidate preview is chapter-scoped; non-dry DB upsert also reconciles cross-chapter reuse. Target V1.51+ for cross-chapter scope",
+        "title": "`--dry-run` candidate preview is chapter-scoped; non-dry DB upsert also reconciles cross-chapter reuse. Target V1.51 for cross-chapter scope",
         "severity": "low",
         "source": "T-B P2 implementer (scope decision)",
         "scope": "creator kb rescan CLI (chapter scope; cross-chapter deferred)",
         "decision": "defer",
         "owner": "@fullstack-dev or @product-manager",
-        "target": "V1.51+",
-        "target_date": "V1.51+",
-        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
-        "note": "Current design: rescan operates on a single chapter. Work-scoped rescan is out of scope; V1.51+ backlog.",
+        "target": "V1.51 T-A P1",
+        "target_date": "V1.51 T-A P1",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.51-cross-chapter-rescan.md",
+        "note": "Current design: rescan operates on a single chapter. Work-scoped rescan is now in scope at V1.51 T-A P1 per V1.51 compass §1.1 #3. New `creator kb rescan --work <ref>` flag aggregates by canonical_name + world_id (depends on T-A P0 LLM-extracted canonical_name).",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan"
       }
@@ -829,10 +930,10 @@
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (review_time_extraction)",
         "decision": "defer",
         "owner": "@fullstack-dev or @product-manager",
-        "target": "V1.51+ (LLM-driven extraction)",
-        "target_date": "V1.51+",
-        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
-        "note": "Heuristic (capitalized noun phrases) cannot distinguish character/location/organization. Authors correct on adopt via `creator world kb adopt`. LLM extraction is compass §0.1 OUT (defer V1.51+). Accept at P1; not blocking.",
+        "target": "V1.51 T-A P0",
+        "target_date": "V1.51 T-A P0",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.51-llm-extraction.md",
+        "note": "Heuristic (capitalized noun phrases) cannot distinguish character/location/organization. Authors correct on adopt via `creator world kb adopt`. LLM extraction deferred from V1.50 OUT-B O13 (write-time) and now in scope at V1.51 T-A P0 (review-time + finalize-time) per V1.51 compass §0.1 #7. New `nexus.llm.extract` capability replaces heuristic.",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
       },

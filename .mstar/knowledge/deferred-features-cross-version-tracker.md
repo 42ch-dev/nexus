@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.50 Active (prepare GO)** · **V1.49 Shipped** (2026-06-17, PR #62 @ `d160379f`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.51 Active (prepare GO 2026-06-18)** · **V1.50 Shipped** (2026-06-17, PR #63 @ `4db0a37b`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.49 Shipped (2026-06-17, P-last closeout, PR #62); V1.50 harness prepare in progress (P-1 GO target 2026-06-18)
+**Status**: V1.50 Shipped (2026-06-17, P-last closeout, PR #63 @ `4db0a37b`); V1.51 harness prepare in progress (P-1 GO target 2026-06-18; S-B dual track: T-A Full KB closure + T-B Multi-writer concurrency; 7 plans + 6 spec overlays + status/tracker registered)
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-18 (V1.50 harness prepare — compass + 9 plans + 3 overlays + status registered)
+**Last updated**: 2026-06-18 (V1.51 harness prepare — compass + 7 plans + 6 spec overlays + status registered; closes R-V150KBED-01/08 + R-V149P1-01 advisory-lock note)
 
 ---
 
@@ -122,14 +122,15 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 **V1.42 P0 defer carry-forward** (from V1.41 P-last hygiene): R-V140P0-S3, R-V140P1-S6, R-V140P2-S2, R-V140P3-S1/S2/S3, R-V140P4-INFRA — see [2026-06-11-v1.42-runtime-lock-and-hygiene.md](../plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md) §2.
 
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-16**; `tech_debt_summary.updated_at` **2026-06-16**; **31 open** carry-forward items after hygiene sweep — V1.46 lows + V1.47 follow-ups only; **117 legacy pre-V1.46 rows archived** to `.mstar/archived/residuals/`). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-18**; `tech_debt_summary.updated_at` **2026-06-18 (V1.51 harness prepare)**; **0 open** at V1.50 ship close; **8 deferred** to V1.51+ / V1.51 plans; legacy V1.30–V1.45 rows **archived** to `.mstar/archived/residuals/`). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.45 hygiene (cli-spec §6.2D/E) | 1 | `2026-06-13-v1.45-hygiene-and-closeout` |
-| V1.46 plan QC deferrals → V1.48 | 23 | `2026-06-14-v1.46-*` (4 plan groups) |
-| V1.47 follow-ups → V1.48+ | 7 | `2026-06-15-v1.47-reflection-loop-findings`, `2026-06-15-v1.47-gate-remediation-audit` |
-| **Total open** | **31** | See `metadata.tech_debt_summary.total_open`; legacy V1.30–V1.45 rows **archived** (not in status.json) |
+| V1.50 carry-forward → V1.51 plans | 3 | `2026-06-18-v1.50-kb-auto-promotion` (R-V150KBED-01 → T-A P0), `2026-06-18-v1.50-kb-refreshable-scan` (R-V150KBED-08 → T-A P1), `2026-06-17-v1.49-narrative-indexes` (R-V149P1-01 advisory-lock portion → T-B P0) |
+| V1.50 P-last T2 WL-A defer bucket → V1.51+ | 1 | `2026-06-18-v1.50-hygiene-and-closeout` (R-V150-WLA-DEFER-V1.51; selective fix 8-10 in P-last; remainder V1.52+) |
+| V1.50 deferred (other) → V1.51+ | 4 | `2026-06-18-v1.50-kb-editor-cli` (R-V150KBED-01 archived CLI surface consolidation), `2026-06-18-v1.50-cron-brainstorm-write` (R-V150P1CRONBW-01 novel-write preset absent; deferred T-A P2 → V1.51+), `2026-06-18-v1.50-cron-review-staggering` (R-V150P2CRONRV-03 plan text drift; P-last) |
+| **Total open at V1.50 close** | **0** | See `metadata.tech_debt_summary.total_open` |
+| **Total deferred to V1.51** | **8** | See `metadata.tech_debt_summary.total_deferred` |
 
 **Closed / historical residuals**
 
@@ -277,11 +278,11 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.50** (Active, prepare GO 2026-06-18) — [v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md](../iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md) — Novel Author Production Loop & World KB Closure: S-B dual track. Track A (T-A P0–P3) per-Work cron staggering (defaults brainstorm 03/09/15/21 / write 04/10/16/22 / review :00/:30) + volume auto-chronology opt-in. Track B (T-B P0–P2) `creator world kb list/show/edit/delete` + review-time auto-promotion (`pending → confirmed | rejected`) + `creator kb rescan` refreshable scan. 9 plans registered (P-1 + 4 cron/chronology + 3 KB + P-last); integration branch `iteration/v1.50`; wave-0 Draft overlays [novel-writing/cron-staggering.md](specs/novel-writing/cron-staggering.md) + [novel-writing/auto-chronology.md](specs/novel-writing/auto-chronology.md) + [entity-scope-model.md](specs/entity-scope-model.md) §5.5 extension.
+- **V1.51** (Active, prepare GO 2026-06-18) — [v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md](../iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md) — KB Closure & Multi-Writer Concurrency: S-B dual track. Track A (T-A P0–P2) Full KB closure — T-A P0 `nexus.llm.extract` capability + heuristic→LLM swap (closes R-V150KBED-01); T-A P1 `creator kb rescan --work <ref>` cross-chapter reconciliation (closes R-V150KBED-08); T-A P2 finalize-time missing-KB detection + `creator world kb pending --missing-only`. Track B (T-B P0–P1) Multi-writer concurrency — T-B P0 `Works/<work_ref>/.lock` file-based advisory lock + daemon cron-side + CLI integration (closes R-V149P1-01 advisory-lock note); T-B P1 per-row OCC generalisation (version columns on `kb_extract_jobs` + `novel_pool_entries`) + `E_VERSION` / `E_LOCK` stable CLI codes + retry-on-conflict. 7 plans registered (P-1 + 3 KB + 2 concurrency + P-last); integration branch `iteration/v1.51`; wave-0 Draft overlays `world-kb-runtime-architecture.md` §5.5+§6 + `entity-scope-model.md` §5.5 + `novel-writing/quality-loop.md` §5 + `cli-spec.md` §6.2G + new `concurrency.md` Master + new `llm-extract.md` Master.
 
 **Latest shipped iteration**
 
-- **V1.49** (Shipped 2026-06-17, P-last closeout): [v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md](../iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md) — Novel Narrative Maturity & Author Desk (F6 extended findings lifecycle + F/E narrative indexes MVP + author desk UX + serial reliability); PR [#62](https://github.com/42ch-dev/nexus/pull/62) MERGED to `main` at `d160379f` (2026-06-17); integration branch `iteration/v1.49` retired. 6 plans all Done (P-1 + P0–P3 + P-last); 7 open residuals deferred to V1.50 (4 V1.46 lows + R-V149P0-01 medium + R-V149P1-02 low flake + R-V149P1-01 low schema); 3 Draft overlays folded into Masters; Profile B compaction complete.
+- **V1.50** (Shipped 2026-06-17, P-last closeout): [v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md](../iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md) — Novel Author Production Loop & World KB Closure: S-B dual track. Track A (T-A P0–P3) per-Work cron staggering (defaults brainstorm 03/09/15/21 / write 04/10/16/22 / review :00/:30) + volume auto-chronology opt-in. Track B (T-B P0–P2) `creator world kb list/show/edit/delete` + review-time auto-promotion (`pending → confirmed | rejected`) + `creator kb rescan` refreshable scan. 9 plans all Done (P-1 + 4 cron/chronology + 3 KB + P-last); integration branch `iteration/v1.50` retired post-PR. PR [#63](https://github.com/42ch-dev/nexus/pull/63) MERGED to `main` at `4db0a37b` (2026-06-17). 0 open / 8 deferred to V1.51+ (4 V1.46 lows + R-V150KBED-01 medium + R-V150KBED-08 low + 2 misc); 2 Draft overlays folded into Masters (`cron-staggering.md` → `workflow-profile.md` §11; `auto-chronology.md` → §11.5); `entity-scope-model.md` §5.5 promoted Draft → Normative; Profile B compaction complete.
 
 **Recent shipped compasses** (detail in archive §2)
 
