@@ -929,13 +929,19 @@
         "severity": "low",
         "source": "P1 implementer (heuristic limitation)",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (review_time_extraction)",
-        "decision": "defer",
-        "owner": "@fullstack-dev or @product-manager",
+        "decision": "fix",
+        "owner": "@fullstack-dev",
         "target": "V1.51 T-A P0",
         "target_date": "V1.51 T-A P0",
         "tracking_link": ".mstar/plans/2026-06-18-v1.51-llm-extraction.md",
         "note": "Heuristic (capitalized noun phrases) cannot distinguish character/location/organization. Authors correct on adopt via `creator world kb adopt`. LLM extraction deferred from V1.50 OUT-B O13 (write-time) and now in scope at V1.51 T-A P0 (review-time + finalize-time) per V1.51 compass §0.1 #7. New `nexus.llm.extract` capability replaces heuristic.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_evidence": "Closed by plan 2026-06-18-v1.51-llm-extraction (branch feature/v1.51-llm-extraction). nexus.llm.extract capability + LlmExtractTask shipped; quality_loop::extract_kb_candidates_for_review now invokes the LLM pathway when a worker is available (heuristic retained as no-worker fallback). kb_extract_jobs gains llm_confidence + llm_source_quote columns (migration 202606180006). adopt surfaces confidence + source_quote (cli-spec §6.2G). Tests: capability::builtins::llm_extract::tests::* (11), tasks::tests::llm_extract_task_* (4), quality_loop::tests::candidate_from_llm_json_* + block_type_mapping_* (5), kb_extract_jobs_migration::v151_* (4), novel_review_master::review_master_llm_path_writes_llm_payload + review_master_llm_path_is_idempotent + review_master_no_registry_falls_back_to_heuristic (3), creator_world_kb_adopt::adopt_succeeds_on_llm_extracted_candidate + adopt_json_output_includes_llm_metadata (2).",
+        "resolution": {
+          "plan_id": "2026-06-18-v1.51-llm-extraction",
+          "commit": "feature/v1.51-llm-extraction HEAD (b56ef238 LlmExtractTask+hook swap; 887bbc07 adopt surfaces LLM metadata)"
+        },
         "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
       },
       {
