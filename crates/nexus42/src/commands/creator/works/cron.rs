@@ -599,8 +599,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
 
     // V1.51 T-B P0: resolve workspace directory for file lock path construction.
     let workspace_dir = {
-        let home = crate::config::nexus_home()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let home = crate::config::nexus_home().unwrap_or_else(|_| std::path::PathBuf::from("."));
         nexus_home_layout::operational_workspace_dir(&home, &creator_id, &workspace_slug)
     };
 

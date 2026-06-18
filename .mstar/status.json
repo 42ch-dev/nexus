@@ -569,7 +569,10 @@
         "target_date": "V1.51 T-B P0",
         "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision + .mstar/plans/2026-06-18-v1.51-advisory-lock.md",
         "note": "Spec-reconciliation portion closed V1.49 P-last (workflow-profile.md §4.6 folded 5-col shape). The deferred promotion-concurrency advisory-lock decision is now in scope at V1.51 T-B P0 per V1.51 compass §0.1 #6. V1.49 chose single-writer daemon model + atomic temp+rename; V1.51 T-B P0 adds hard advisory lock + per-row OCC for cross-process safety.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.51 T-B P0: Works/<work_ref>/.lock advisory lock (flock + heartbeat) implemented. Spec-reconciliation portion already closed V1.49 P-last. Advisory-lock portion: file_lock module (12 unit + 3 integration tests), daemon cron-side acquisition in try_fire_role, CLI-side acquisition in handle_set, E_LOCK exit code 75, lock_holder field in status JSON, zombie detection (>60s heartbeat expiry).",
+        "closure_evidence": "feature/v1.51-advisory-lock commit (pending), test names: file_lock::tests::test_acquire_and_release_via_drop, file_lock::tests::test_second_acquire_fails_with_locked_info, file_lock::tests::test_stale_lock_file_overwritten_on_acquire, file_lock::tests::test_read_lock_holder_info_stale, cron_lock_integration::file_lock_blocks_cron_fire_when_held, cli_lock_contention::locked_error_display_shows_holder_info",
         "_plan_id": "2026-06-17-v1.49-narrative-indexes"
       },
       {

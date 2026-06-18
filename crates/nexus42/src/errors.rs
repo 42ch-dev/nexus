@@ -133,7 +133,7 @@ pub enum CliError {
     },
 
     /// An advisory file lock is held by another process (V1.51 T-B P0).
-    /// Exit code 75 (EX_TEMPFAIL) — temporary failure, retry later.
+    /// Exit code 75 (`EX_TEMPFAIL`) — temporary failure, retry later.
     Locked {
         /// OS process ID of the lock holder.
         holder_pid: u32,

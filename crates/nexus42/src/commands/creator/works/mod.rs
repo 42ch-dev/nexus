@@ -1924,7 +1924,7 @@ pub(crate) fn operational_workspace_dir_from_config_public() -> Option<std::path
 
 /// V1.51 T-B P0: read the lock holder info from the filesystem and return
 /// it as a JSON value for `creator works status --json`. Returns `None` if
-/// the work_ref is missing, the workspace directory cannot be resolved, or
+/// the `work_ref` is missing, the workspace directory cannot be resolved, or
 /// the lock file doesn't exist / is unreadable.
 fn read_lock_holder_json(work_resp: &serde_json::Value) -> Option<serde_json::Value> {
     let work_ref = work_resp.get("work_ref")?.as_str()?;
@@ -1935,7 +1935,10 @@ fn read_lock_holder_json(work_resp: &serde_json::Value) -> Option<serde_json::Va
     {
         let info = nexus_local_db::file_lock::read_lock_holder_info(&work_dir)?;
         let mut obj = serde_json::Map::new();
-        obj.insert("pid".to_string(), serde_json::Value::Number(info.pid.into()));
+        obj.insert(
+            "pid".to_string(),
+            serde_json::Value::Number(info.pid.into()),
+        );
         obj.insert(
             "holder_name".to_string(),
             serde_json::Value::String(info.holder_name),

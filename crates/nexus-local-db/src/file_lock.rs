@@ -76,10 +76,14 @@ fn lock_file_path(work_dir: &Path) -> PathBuf {
 
 /// Current time in Unix epoch milliseconds.
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    #[allow(clippy::cast_possible_truncation)]
+    // as_millis() returns u128 — u64 holds ~584 million years of milliseconds.
+    {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
 }
 
 /// Format the lock file body: `<pid>:<holder_name>:<expires_at_ms>`.
@@ -140,6 +144,10 @@ fn write_lock_metadata_to_path(path: &Path, body: &str) {
 ///
 /// On conflict, reads the existing lock metadata from the file and returns
 /// `Locked` with holder details and staleness.
+///
+/// # Errors
+///
+/// Returns `Locked` if another process holds the lock.
 pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, Locked> {
     let lock_path = lock_file_path(work_dir);
 
@@ -164,14 +172,19 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
 
     // Try non-blocking exclusive lock.
     let raw_fd = fd.as_raw_fd();
-    if let Err(_err) = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+    // nix 0.28 deprecates `flock()` in favor of `Flock` struct, but the struct
+    // API requires ownership of the inner file descriptor. Use the deprecated
+    // function for now since we need to keep the `File` alive for heartbeat.
+    #[allow(deprecated)]
+    let locked = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::LockExclusiveNonblock).is_err();
+    if locked {
         // Lock held by another process — read metadata for conflict info.
         let metadata = read_lock_metadata(work_dir);
         let now = now_ms();
         let (holder_pid, holder_name, expires_at_ms) =
-            metadata.unwrap_or((0, "unknown".to_string(), 0));
-        let stale = expires_at_ms > 0
-            && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000;
+            metadata.unwrap_or_else(|| (0, "unknown".to_string(), 0));
+        let stale =
+            expires_at_ms > 0 && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000;
 
         return Err(Locked {
             holder_pid,
@@ -188,7 +201,6 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
 
     // Spawn heartbeat task.
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
-    let heartbeat_path = lock_path.clone();
     let heartbeat_holder = holder_name.to_string();
 
     let heartbeat_handle = tokio::spawn(async move {
@@ -202,7 +214,7 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
                 _ = interval.tick() => {
                     let expires = now_ms() + STALE_THRESHOLD_SECS * 1000;
                     let body = format_lock_body(&heartbeat_holder, expires);
-                    write_lock_metadata_to_path(&heartbeat_path, &body);
+                    write_lock_metadata_to_path(&lock_path, &body);
                 }
                 _ = cancel_rx.changed() => {
                     break;
@@ -229,11 +241,15 @@ impl Drop for FileLockGuard {
         // Release the flock.
         if let Some(fd) = &self.fd {
             let raw_fd = fd.as_raw_fd();
-            if let Err(e) = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::Unlock) {
-                tracing::error!(
-                    error = %e,
-                    "file_lock: failed to release flock on drop"
-                );
+            #[allow(deprecated)]
+            // nix 0.28 deprecates `flock()` — see acquire block above for rationale.
+            {
+                if let Err(e) = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::Unlock) {
+                    tracing::error!(
+                        error = %e,
+                        "file_lock: failed to release flock on drop"
+                    );
+                }
             }
         }
         // File is closed when `fd` is dropped.

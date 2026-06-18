@@ -226,7 +226,44 @@ async fn evaluate_work(
         (ROLE_WRITE, config.roles.write.as_ref()),
         (ROLE_REVIEW, config.roles.review.as_ref()),
     ] {
-        try_fire_role(pool, workspace_dir, row, role_name, role_opt, tz, now, gate, summary).await;
+        try_fire_role(
+            pool,
+            workspace_dir,
+            row,
+            role_name,
+            role_opt,
+            tz,
+            now,
+            gate,
+            summary,
+        )
+        .await;
+    }
+}
+
+/// V1.51 T-B P0: try to acquire the advisory file lock for a Work.
+///
+/// Returns `Ok(Some(guard))` on successful acquisition, `Ok(None)` when the
+/// workspace directory doesn't exist (test environments — skip file lock),
+/// and `Err(())` when the lock is held by another process.
+fn maybe_acquire_cron_file_lock(
+    workspace_dir: Option<&Path>,
+    work_ref: Option<&String>,
+    role_name: &str,
+) -> Result<Option<nexus_local_db::file_lock::FileLockGuard>, ()> {
+    let (Some(ws_dir), Some(ref_)) = (workspace_dir, work_ref) else {
+        return Ok(None);
+    };
+    let work_dir = ws_dir.join("Works").join(ref_);
+    if !work_dir.exists() {
+        return Ok(None);
+    }
+    match nexus_local_db::file_lock::try_acquire(
+        &work_dir,
+        &format!("daemon:schedule:cron-{role_name}"),
+    ) {
+        Ok(guard) => Ok(Some(guard)),
+        Err(_locked) => Err(()),
     }
 }
 
@@ -301,37 +338,26 @@ async fn try_fire_role(
         }
         Ok(false) => {
             // V1.51 T-B P0: acquire file lock before enqueuing (spec §3.1).
-            // Only acqire when a workspace_dir is provided (production; skips in
-            // unit/integration tests without scaffolded Works/ dirs). The DB-level
-            // `runtime_lock_holder` (§4.3 gate) remains active in all cases.
-            let _file_lock = if let (Some(ws_dir), Some(ref work_ref)) =
-                (workspace_dir, &row.work_ref)
-            {
-                let work_dir = ws_dir.join("Works").join(work_ref);
-                if work_dir.exists() {
-                    match nexus_local_db::file_lock::try_acquire(
-                        &work_dir,
-                        &format!("daemon:schedule:cron-{role_name}"),
-                    ) {
-                        Ok(guard) => Some(guard),
-                        Err(locked) => {
-                            summary.skipped_gated += 1;
-                            debug!(
-                                work_id = %row.work_id,
-                                role = role_name,
-                                holder_name = %locked.holder_name,
-                                holder_pid = locked.holder_pid,
-                                "cron-supervisor: file-locked; skipping fire"
-                            );
-                            return;
-                        }
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            //
+            // Ok(None) → workspace dir missing (test env), skip lock.
+            // Err(())  → lock held, skip fire.
+            // Ok(Some) → acquired, proceed to enqueue.
+            // V1.51 T-B P0: acquire file lock before enqueuing (spec §3.1).
+            // Ok(None) → workspace dir missing (test env), skip lock but proceed.
+            // Err(())  → lock held, skip fire.
+            // Ok(Some) → acquired — guard held through enqueue, released on scope exit.
+            let lock_result =
+                maybe_acquire_cron_file_lock(workspace_dir, row.work_ref.as_ref(), role_name);
+            if lock_result.is_err() {
+                summary.skipped_gated += 1;
+                debug!(
+                    work_id = %row.work_id,
+                    role = role_name,
+                    "cron-supervisor: file-locked; skipping fire"
+                );
+                return;
+            }
+            let _file_lock = lock_result.ok().flatten();
 
             match crate::auto_chain::enqueue_cron_schedule(
                 pool,
