@@ -3,8 +3,9 @@ report_kind: qc_review
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-18-v1.51-llm-extraction
-verdict: Request Changes
+verdict: Approve
 generated_at: 2026-06-18T15:40:00Z
+revalidated_at: 2026-06-18T18:10:00Z
 ---
 
 # Code Review Report
@@ -222,7 +223,7 @@ ALTER TABLE kb_extract_jobs ADD COLUMN llm_source_quote TEXT;
 | 🟡 Warning | 2 |
 | 🟢 Suggestion | 10 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve (post-revalidation — see `## Revalidation` below)
 
 ## Verdict Reasoning
 
@@ -243,3 +244,30 @@ F-001 directly contradicts the explicit residual closure (`R-V150KBED-01 → lif
 **Re-review path:**
 
 After the F-001 fix (either production wiring landed, or residual re-opened with a concrete target), this reviewer is willing to verify the fix in a targeted re-review on the same report path (`reports/2026-06-18-v1.51-llm-extraction/qc3.md`) per `mstar-review-qc` targeted re-review convention. No new report file needed.
+
+## Revalidation (2026-06-18)
+
+- **Resolved: F-001 (Critical)** — production wiring added via `ProductionWorkerProvider` bridging the capability-layer `WorkerHandleProvider` seam to the daemon's shared `WorkerRegistry<WorkerManagerSpawner>`. The daemon boot (`boot::run_daemon`) now constructs the capability registry via `CapabilityRegistry::with_runtime_deps(&deps)` (replacing `CapabilityRegistry::with_builtins()`), with `deps.worker_provider = Some(ProductionWorkerProvider::new(shared_registry))`. The same shared registry is passed to `WorkerMgrSubsystem::with_registry(...)`, so workers spawned by the engine/preset-session path are visible to the capability-layer LLM dispatch path and vice versa.
+
+- **Evidence:**
+  - Mechanism: `crates/nexus-daemon-runtime/src/worker_provider.rs` — `ProductionWorkerProvider` implements `WorkerHandleProvider::call_acp_prompt` by looking up the worker for `creator_id` in the shared `WorkerRegistry` and dispatching `worker/acp_prompt` JSON-RPC via `WorkerHandle::call_json_rpc`. When no worker is registered for the creator, it returns `CapabilityError::WorkerUnavailable` — the correct V1.50-compatible no-worker fallback signal (the review-time hook maps this to the heuristic path).
+  - `crates/nexus-daemon-runtime/src/boot.rs` — constructs the shared registry before the capability registry, wraps it in `ProductionWorkerProvider`, builds `CapabilityRuntimeDeps { pool: None, worker_provider: Some(provider), daemon_tool_dispatch: None }`, and calls `CapabilityRegistry::with_runtime_deps(&runtime_deps)`. `pool: None` preserves the existing pool-less behavior for `kb.extract_work` / `novel.project_scaffold` / `novel.chapter_transition` (they remain in placeholder mode — no behavior change beyond the F-001 scope).
+  - `crates/nexus-daemon-runtime/src/lifecycle/subsystems/worker_mgr.rs` — adds `WorkerMgrSubsystem::with_registry(Arc<Mutex<WorkerRegistry<WorkerManagerSpawner>>>)` so the subsystem shares the same registry instance as the provider. `DEFAULT_MAX_WORKERS` is re-exported via `lifecycle/subsystems/mod.rs` for boot construction.
+
+- **New hermetic tests** (`crates/nexus-daemon-runtime/tests/daemon_boot_llm_wiring.rs`, 4 tests; plus 2 unit tests in `worker_provider.rs`):
+  - `with_runtime_deps_wiring_makes_llm_extract_run` — proves the exact `CapabilityRuntimeDeps` shape used by boot produces a registry where `nexus.llm.extract.run()` returns `Ok(candidates)` (not `WorkerUnavailable`). Uses a mock provider.
+  - `production_provider_dispatches_ipc_to_real_worker` — end-to-end: spawns a real echo-worker fixture into the shared `WorkerRegistry`, dispatches `worker/acp_prompt` via `ProductionWorkerProvider` through actual child-process IPC, the capability parses the response, returns `Ok(candidates)` with `canonical_name="Lin Xia"`. This proves the production wiring chain reaches a worker process.
+  - `production_provider_returns_unavailable_without_worker` — no-worker branch returns `WorkerUnavailable` (the correct V1.50-compatible fallback signal, now scoped to the actual no-worker case instead of firing on every production call).
+  - `with_runtime_deps_registers_all_llm_capabilities` — static contract check: `with_runtime_deps` registers all 21 builtins including `nexus.llm.extract` / `judge.llm` / `context.summarize` / `acp.prompt`.
+
+- **Verification commands (all pass):**
+  - `cargo test -p nexus-daemon-runtime --test daemon_boot_llm_wiring` — 4 passed; 0 failed.
+  - `cargo test -p nexus-daemon-runtime --lib worker_provider` — 2 passed; 0 failed.
+  - `cargo test -p nexus-orchestration -- llm_extract` — 15 passed; 0 failed (11 builtin + 4 `LlmExtractTask`).
+  - `cargo test -p nexus-orchestration --test novel_review_master` — 3 passed; 0 failed.
+  - `cargo test -p nexus-local-db --test kb_extract_jobs_migration` — 12 passed; 0 failed.
+  - `cargo test -p nexus42 --test creator_world_kb_adopt` — 3 passed; 0 failed.
+  - `cargo clippy --all -- -D warnings` — clean (CI gate).
+  - `cargo +nightly fmt --all --check` — clean.
+
+- **Re-verdict: Approve** — F-001 is resolved. The production daemon boot now wires `ProductionWorkerProvider` into the capability registry via `with_runtime_deps`, so `nexus.llm.extract` dispatches to a real worker process when one is registered for the creator. The no-worker branch correctly returns `WorkerUnavailable` (the heuristic fallback signal), preserving V1.50 compatibility. W-001 and W-002 remain non-blocking (no change from initial review).
