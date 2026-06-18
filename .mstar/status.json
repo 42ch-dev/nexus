@@ -21,7 +21,10 @@
       "id": "2026-06-18-v1.51-llm-extraction",
       "title": "T-A P0 — nexus.llm.extract capability + heuristic→LLM swap (closes R-V150KBED-01)",
       "file": ".mstar/plans/2026-06-18-v1.51-llm-extraction.md",
-      "status": "Todo",
+      "status": "Done",
+      "done_at": "2026-06-18",
+      "merged_at": "2026-06-18",
+      "merge_commit": "ae7dfce0",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev", "@architect", "@qa-engineer"],
       "working_branch": "feature/v1.51-llm-extraction",
@@ -29,7 +32,7 @@
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
       "task_category": "logic",
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:00:00+08:00"
+      "updated_at": "2026-06-18T15:00:00+08:00"
     },
     {
       "id": "2026-06-18-v1.51-cross-chapter-rescan",
@@ -63,7 +66,10 @@
       "id": "2026-06-18-v1.51-advisory-lock",
       "title": "T-B P0 — Works/<work_ref>/.lock + daemon cron-side + CLI integration (closes R-V149P1-01 advisory-lock note)",
       "file": ".mstar/plans/2026-06-18-v1.51-advisory-lock.md",
-      "status": "Todo",
+      "status": "Done",
+      "done_at": "2026-06-18",
+      "merged_at": "2026-06-18",
+      "merge_commit": "d22075ef",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev", "@architect", "@qa-engineer"],
       "working_branch": "feature/v1.51-advisory-lock",
@@ -71,7 +77,7 @@
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
       "task_category": "logic",
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:00:00+08:00"
+      "updated_at": "2026-06-18T15:00:00+08:00"
     },
     {
       "id": "2026-06-18-v1.51-per-row-occ",
@@ -142,24 +148,27 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/63",
       "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
     },
-    "tech_debt_summary": {
-      "updated_at": "2026-06-18 (V1.51 harness prepare)",
+"tech_debt_summary": {
+      "updated_at": "2026-06-18 (V1.51 T-A P0 + T-B P0 Done)",
       "total_open": 0,
-      "total_deferred": 8,
-      "total_resolved": 46,
-      "total_archived": 3,
+      "total_deferred": 11,
+      "total_resolved": 48,
+      "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 7,
+        "medium": 0,
+        "low": 11,
         "nit": 0
       },
       "by_target_active": {
-        "V1.51": 3,
+        "V1.51 T-A P1": 1,
+        "V1.51 T-B P1": 0,
+        "V1.51 T-A P2": 0,
+        "V1.51 P-last": 6,
         "V1.51+": 4
       },
-      "notes": "V1.50 P-last T1-T2 closed 6 V1.49 carry-forwards (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2, R-V149P0-01 medium, R-V149P1-02 flake) + 10 V1.50 WL-A. 11 rows normalized to lifecycle (8 deferred, 3 archived via QC accept). 0 open at V1.50 close. V1.51 prepare: 3 V1.51 carry-forwards re-targeted (R-V150KBED-01 medium → T-A P0, R-V150KBED-08 low → T-A P1, R-V149P1-01 advisory-lock portion → T-B P0). R-V150-WLA-DEFER-V1.51 (30+ low V1.50 QC suggestions) remains; selective fix 8-10 in P-last; remainder defer V1.52+. V1.50 P-last plan row archived post-merge. Profile B layout invariant verified."
+      "notes": "V1.51 T-A P0 + T-B P0 closed 2026-06-18. T-A P0: R-V150KBED-01 medium closed via fix-wave dbdd21de (production WorkerHandleProvider wiring + 4 hermetic integration tests + 1 real IPC test). T-B P0: R-V149P1-01 advisory-lock portion low closed via fix-wave 3444d046 + 6dccee36 (FileLockError enum + 3 CLI integration paths + 12 new hermetic tests). Tri-review + QA all Approve on both plans. New low-priority residuals (3 T-A P0 + 3 T-B P0) registered for V1.51 P-last WL-A sweep. R-V150-WLA-DEFER-V1.51 (30+ V1.50 WL-A) still deferred; selective fix 8-10 at P-last; remainder V1.52+. R-V150KBED-08 (cross-chapter rescan) re-targeted to V1.51 T-A P1; R-V150P1CRONBW-01 (novel-write preset YAML absent) deferred T-A P2 → V1.51 T-A P2 (in-scope per compass §1.1)."
     }
   },
   "v1_50_iteration_complete": true,
@@ -1194,6 +1203,115 @@
         "note": "V1.50 P-last T2 closed 10 WL-A items (R-V150-WLA-01/02/04/05/06/07/08/09/10 + R-V150-WLA-03 already resolved by T-A P0 spec update). The following qc Suggestions remain open and are deferred to V1.51+ as low-priority hygiene / feature work (no defect; no test gap; close on next touch):\n\nCRON-FAMILY:\n- cron-foundation/qc1 S1 (DEFAULT_SCHEDULE naming coherence with spec §2.2)\n- cron-foundation/qc1 S5 (doc_markdown clippy nits in works_schedule_migration.rs under --all-targets)\n- cron-foundation/qc2 S-1 (AC wording vs CliError::Config error type)\n- cron-foundation/qc2 S-2 (future blob size / structure guard for schedule_json)\n- cron-foundation/qc3 S-002 (no tracing on the cron hot path — feature work)\n- cron-brainstorm-write/qc1 S-002 (// COORDINATE-WITH-T-A-P2 literal marker — T-A P2 Done; marker no longer needed)\n- cron-brainstorm-write/qc1 S-004 (enqueue_cron_schedule near-duplicates enqueue_review_master_schedule — refactor; may diverge in V1.51+)\n- cron-brainstorm-write/qc1 S-005 (plan text vs impl drift on evaluate_next_step — doc only)\n- cron-brainstorm-write/qc1 S-006 (drift guard test between CLI WorkSchedule and daemon CronConfig — feature work)\n- cron-brainstorm-write/qc2 S-001/S-002 (test fidelity comment + has_active_role_schedule IN-list note)\n- cron-brainstorm-write/qc3 S-001..S-007 (per-tick heap/TZ/parse optimisations + shutdown drain + lost-fire catch-up + COUNT vs EXISTS — informational; current scale is fine)\n- cron-review-staggering/qc1 S-001 (plan text drift on T-B P1 hook stub — covered by R-V150P2CRONRV-03)\n- cron-review-staggering/qc2 (cron_review_respects_idempotency test label readability)\n- cron-review-staggering/qc3 S-001 (per-tick cost load note — informational)\n- cron-review-staggering/qc3 S-003 (CRON_COUNTER 16M-suffix overflow — astronomical; informational)\n- cron-review-staggering/qc3 S-004 (R-V150P2CRONRV-01 renumber rationale doc)\n\nAUTO-CHRONOLOGY:\n- auto-chronology/qc2 S-* (directory fsync after rename + last_advance_label scan hardening — defensive)\n- auto-chronology/qc3 S-1 (partial index on works.auto_chronology — V1.50 scale fine; revisit at scale)\n- auto-chronology/qc3 S-3 (clippy errors in tests/auto_chronology_tick.rs under --all-targets)\n- auto-chronology/qc3 S-4 (write_outline_atomic temp suffix — informational; concurrent calls serialized by gate)\n\nKB-FAMILY:\n- kb-auto-promotion/qc1 S-001 (work_entry_id semantic overload — schema-touch; defer to V1.51+ LLM extraction)\n- kb-auto-promotion/qc1 S-004 (adopt --block-type override — feature work; couples with R-V150KBED-01)\n- kb-auto-promotion/qc2 (proposed_payload bare serde_json + TOCTOU window notes — defensive)\n- kb-auto-promotion/qc3 S-002 (Logs/kb/rejected/ retention — feature work)\n- kb-auto-promotion/qc3 S-003 (KbStoreError::Duplicate surfaces generic message — UX; small fix)\n- kb-editor-cli/qc1 S-V150KBED-QC1-01 (plan Code touch references non-existent file — doc)\n- kb-editor-cli/qc1 S-V150KBED-QC1-02 (world_ref positional implies flexible resolution but only IDs accepted — UX)\n- kb-editor-cli/qc2 S-V150KBED-QC2-01 (WORLD_KB_FORBIDDEN as string constant — typed error catalog future)\n- kb-editor-cli/qc2 S-V150KBED-QC2-02 (map_kb_store_error uses verb 'show' for load step — cosmetic)\n- kb-editor-cli/qc2 S-V150KBED-QC2-03 (no test for soft-deleted block re-edit — feature work)\n- kb-editor-cli/qc3 S-1 (kb list silent truncation at 500 rows — UX)\n- kb-editor-cli/qc3 S-2 (soft-deleted KeyBlock silently re-editable — feature work)\n- kb-editor-cli/qc3 S-3 (BlockType Debug repr in human table vs wire format — cosmetic)\n- kb-refreshable-scan/qc1 S-001 (diff_and_apply O(N) per update — V1.50 scale fine)\n- kb-refreshable-scan/qc2 (rescan batch no outer transaction — design)\n- kb-refreshable-scan/qc3 S-QC3-01..05 (HashMap threading + tx wrapper + dry-run scope + parallel test safety + migration renumber note)\n\nALREADY-RESOLVED items verified during the sweep (closed by other V1.50 waves; not re-counted here):\n- cron-foundation/qc3 S-001 (partial index) — added by T-A P1 (cron_supervisor EXPLAIN test)\n- cron-foundation/qc3 S-003 (NEXUS_TZ docs) — already in cron-staggering.md §3.1 line 94\n- auto-chronology/qc3 S-2 (CompletionLocked log conflate) — tracked via R-V150P3AUTOCHRONO-01\n- kb-auto-promotion/qc1 S-002 + qc3 S-004 (misleading 'KeyBlock was not duplicated') — closed via R-V150KBED-03 transactional CAS\n- kb-auto-promotion/qc3 S-005 (transaction-boundary race test) — closed via kb_adopt_failure_rolls_back_insert regression test\n- kb-auto-promotion/qc1 S-003 (English-only heuristic) — tracked via R-V150KBED-01 (auto-promotion)",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+      }
+    ],
+    "2026-06-18-v1.51-llm-extraction": [
+      {
+        "id": "R-V151Q1-02",
+        "title": "--tests clippy nits in tasks/mod.rs (doc_markdown + unused_mut); not caught by CI gate cargo clippy --all",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-V151Q1-02",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs:2079, 2124",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 P-last WL-A",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc1.md §Suggestions",
+        "note": "CI gate cargo clippy --all passes; repo baseline already has 22 pre-existing --tests errors (not introduced by V1.51 T-A P0). Low-priority hygiene.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction"
+      },
+      {
+        "id": "R-V151Q1-04",
+        "title": "block_type→novel_category mapping not in spec text (entity-scope-model §5.1.1 SSOT references the mapping but quality_loop code re-encodes it)",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-V151Q1-04",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs:471-485 vs .mstar/knowledge/specs/entity-scope-model.md §5.1.1",
+        "decision": "defer",
+        "owner": "@writing-specialist or @architect",
+        "target": "V1.51 P-last overlay promotion",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc1.md §Suggestions",
+        "note": "Coherent with entity-scope-model §5.1.1; spec text amendment at P-last overlay promotion. Non-blocking.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction"
+      },
+      {
+        "id": "R-V151Q3-W001",
+        "title": "Two parallel LLM→KbCandidate paths (extract_kb_candidates_for_review + LlmExtractTask::evaluate) — consider unified entry",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-001",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs vs tasks/mod.rs",
+        "decision": "defer",
+        "owner": "@architect or @fullstack-dev",
+        "target": "V1.51+",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
+        "note": "Non-blocking per qc3 reviewer; both paths tested; unify at P-last or V1.51+ refactor.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction"
+      },
+      {
+        "id": "R-V151Q3-W002",
+        "title": "WorkerUnavailable empty-vec contract — caller must handle gracefully (heuristic fallback OK; consider explicit None check)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs (extract_via_llm WorkerUnavailable path)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.51+",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
+        "note": "Non-blocking per qc3 reviewer; contract documented; PM awareness note.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction"
+      }
+    ],
+    "2026-06-18-v1.51-advisory-lock": [
+      {
+        "id": "R-V151Q1-08",
+        "title": "tempfile::TempDir::into_path() deprecated in 3 cron_lock_integration.rs sites (compiler warning, not error)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-005",
+        "scope": "crates/nexus-daemon-runtime/tests/cron_lock_integration.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 P-last hygiene",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-advisory-lock/qc3.md §Suggestions",
+        "note": "Compiler warning; non-blocking.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-advisory-lock"
+      },
+      {
+        "id": "R-V151Q1-09",
+        "title": "Heartbeat write non-atomic (std::fs::write); corruption self-heals on next acquire but parse failure reports holder_name=unknown",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-004",
+        "scope": "crates/nexus-local-db/src/file_lock.rs (heartbeat)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 P-last",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-advisory-lock/qc3.md §Suggestions",
+        "note": "Consider marking stale=true on parse failure (60s advisory window absorbs risk today).",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-advisory-lock"
+      },
+      {
+        "id": "R-V151Q1-10",
+        "title": "Process note: spec edit bundled under qc:-prefixed commit (commit 3a6950d5 included concurrency.md spec body); future fix-waves should keep qc commits within {PLAN_DIR}/reports/**",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) process note",
+        "scope": "commit hygiene; future rounds",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "V1.51+ process hygiene",
+        "target_date": "V1.51+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-advisory-lock/qc1.md §Revalidation process note",
+        "note": "Content correct; non-blocking. Future fix-waves should split impl commits from qc commits.",
+        "lifecycle": "archived",
+        "_plan_id": "2026-06-18-v1.51-advisory-lock"
       }
     ]
   },
