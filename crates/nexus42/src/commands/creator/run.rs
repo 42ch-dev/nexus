@@ -61,6 +61,7 @@ pub struct RunCommand {
 ///
 /// Returns an error if the daemon API call fails, the preset is unknown,
 /// or required CLI args are missing.
+#[allow(clippy::too_many_lines)]
 pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     let client = crate::api::DaemonClient::from_config(config);
 
@@ -96,6 +97,57 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
 
     // Resolve work_id: if omitted, try the pool active Work.
     let resolved_work_id = super::work_utils::resolve_active_work_id(&client, work_id).await?;
+
+    // V1.51 T-B P0: acquire advisory file lock before mutating (W-001).
+    // Resolve work_ref from the DB, then acquire the lock. If we can't
+    // resolve a work_ref (no workspace, no DB, work hasn't been bootstrapped),
+    // skip the lock and let the mutation proceed (no-lock degradation is
+    // acceptable when there is no workspace to anchor the lock to).
+    let _file_lock = {
+        let maybe_lock = if let Ok(db_path) = crate::config::resolve_state_db_path(config) {
+            if let Ok(pool) = crate::db::Schema::init(&db_path).await {
+                let work_ref: Option<String> =
+                    sqlx::query_scalar("SELECT story_ref FROM works WHERE work_id = ?")
+                        .bind(&resolved_work_id)
+                        .fetch_optional(&pool)
+                        .await
+                        .ok()
+                        .flatten()
+                        .flatten();
+                if let Some(ref wref) = work_ref {
+                    if let Some(ws_root) = crate::config::find_workspace_root() {
+                        let work_dir = ws_root.join("Works").join(wref);
+                        if work_dir.exists() {
+                            match nexus_local_db::file_lock::try_acquire(&work_dir, "cli:run") {
+                                Ok(guard) => Some(guard),
+                                Err(nexus_local_db::file_lock::FileLockError::Locked(locked)) => {
+                                    return Err(crate::errors::CliError::Locked {
+                                        holder_pid: locked.holder_pid,
+                                        holder_name: locked.holder_name,
+                                        stale: locked.stale,
+                                    });
+                                }
+                                Err(nexus_local_db::file_lock::FileLockError::Io(e)) => {
+                                    return Err(crate::errors::CliError::LockIo(e));
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        maybe_lock
+    };
 
     // FL-E stage-advance presets: dispatch to stage_advance.
     if let Some(target_stage) = stage_for_preset(&preset_id) {

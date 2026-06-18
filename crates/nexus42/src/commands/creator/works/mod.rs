@@ -554,7 +554,15 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
         } else {
             (None, None)
         };
-        let output = enrich_status_json(resp, findings_vec.as_deref(), stale.as_ref());
+        let mut output = enrich_status_json(resp, findings_vec.as_deref(), stale.as_ref());
+
+        // V1.51 T-B P0: add lock_holder field (best-effort, reads from filesystem).
+        if let Some(lock_holder) = read_lock_holder_json(&output) {
+            if let Some(obj) = output.as_object_mut() {
+                obj.insert("lock_holder".to_string(), lock_holder);
+            }
+        }
+
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         // V1.39 P4 T3: stale findings banner — best-effort, never
@@ -1912,6 +1920,43 @@ fn operational_workspace_dir_from_config() -> Option<std::path::PathBuf> {
 /// semantics as [`operational_workspace_dir_from_config`] (best-effort).
 pub(crate) fn operational_workspace_dir_from_config_public() -> Option<std::path::PathBuf> {
     operational_workspace_dir_from_config()
+}
+
+/// V1.51 T-B P0: read the lock holder info from the filesystem and return
+/// it as a JSON value for `creator works status --json`. Returns `None` if
+/// the `work_ref` is missing, the workspace directory cannot be resolved, or
+/// the lock file doesn't exist / is unreadable.
+fn read_lock_holder_json(work_resp: &serde_json::Value) -> Option<serde_json::Value> {
+    let work_ref = work_resp.get("work_ref")?.as_str()?;
+    let ws_dir = operational_workspace_dir_from_config()?;
+    let work_dir = ws_dir.join("Works").join(work_ref);
+
+    #[cfg(unix)]
+    {
+        let info = nexus_local_db::file_lock::read_lock_holder_info(&work_dir)?;
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "pid".to_string(),
+            serde_json::Value::Number(info.pid.into()),
+        );
+        obj.insert(
+            "holder_name".to_string(),
+            serde_json::Value::String(info.holder_name),
+        );
+        obj.insert(
+            "expires_at_ms".to_string(),
+            serde_json::Value::Number(info.expires_at_ms.into()),
+        );
+        if info.stale {
+            obj.insert("stale".to_string(), serde_json::Value::Bool(true));
+        }
+        Some(serde_json::Value::Object(obj))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = work_dir;
+        None
+    }
 }
 
 /// V1.46 P2 (Grill #9; R-V139P5-N1): best-effort check of a chapter's

@@ -441,7 +441,7 @@ pub async fn kb_adopt(
     pool: &SqlitePool,
     creator_id: &str,
     extract_job_id: &str,
-    _workspace_dir: Option<&std::path::Path>,
+    workspace_dir: Option<&std::path::Path>,
     json: bool,
 ) -> Result<()> {
     let candidate = load_pending_candidate(pool, extract_job_id).await?;
@@ -449,6 +449,43 @@ pub async fn kb_adopt(
 
     // Author identity gate.
     require_world_owner(pool, world_id, creator_id).await?;
+
+    // V1.51 T-B P0: acquire advisory file lock before the DB transaction (W-001).
+    // Resolve work_ref from the candidate's work_id, then acquire the lock.
+    let _file_lock =
+        if let (Some(ws_dir), Some(ref wid)) = (workspace_dir, candidate.work_id.as_deref()) {
+            let work_ref: Option<String> =
+                sqlx::query_scalar("SELECT story_ref FROM works WHERE work_id = ?")
+                    .bind(wid)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| CliError::Other(format!("Failed to resolve work_ref: {e}")))?
+                    .flatten();
+            if let Some(ref wref) = work_ref {
+                let work_dir = ws_dir.join("Works").join(wref);
+                if work_dir.exists() {
+                    match nexus_local_db::file_lock::try_acquire(&work_dir, "cli:kb-adopt") {
+                        Ok(guard) => Some(guard),
+                        Err(nexus_local_db::file_lock::FileLockError::Locked(locked)) => {
+                            return Err(CliError::Locked {
+                                holder_pid: locked.holder_pid,
+                                holder_name: locked.holder_name,
+                                stale: locked.stale,
+                            });
+                        }
+                        Err(nexus_local_db::file_lock::FileLockError::Io(e)) => {
+                            return Err(CliError::LockIo(e));
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
     // Parse proposed body.
     let body: KeyBlockBody =

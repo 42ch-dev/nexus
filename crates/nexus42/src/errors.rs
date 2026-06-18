@@ -132,6 +132,23 @@ pub enum CliError {
         work_id: String,
     },
 
+    /// An advisory file lock is held by another process (V1.51 T-B P0).
+    /// Exit code 75 (`EX_TEMPFAIL`) — temporary failure, retry later.
+    Locked {
+        /// OS process ID of the lock holder.
+        holder_pid: u32,
+        /// Human-readable holder identity.
+        holder_name: String,
+        /// Whether the lock is stale (>60 s without heartbeat).
+        stale: bool,
+    },
+
+    /// An I/O error occurred during advisory file lock acquisition (V1.51 T-B P0).
+    /// Exit code 78 (`EX_CONFIG`) — configuration or environment error, not temporary.
+    /// Distinguished from `Locked` (exit 75, temporary contention) to avoid
+    /// misleading users with "work is held by unknown pid=0" on permission-denied.
+    LockIo(std::io::Error),
+
     Other(String),
 }
 
@@ -141,7 +158,7 @@ impl std::error::Error for CliError {
         match self {
             Self::Network(err) => Some(err),
             Self::Database(err) => Some(err),
-            Self::Io(err) => Some(err),
+            Self::Io(err) | Self::LockIo(err) => Some(err),
             Self::Json(err) => Some(err),
             Self::Acp(err) => Some(err),
             _ => None,
@@ -216,6 +233,26 @@ impl fmt::Display for CliError {
                     "422 world_required_for_extract: Work {work_id} is not World-bound.\n\n  \
                      Suggestion: Extract mode requires a Work with an associated World. \
                      Bind the Work to a World first, or use --mode review for worldless Works."
+                )
+            }
+
+            Self::Locked { holder_pid, holder_name, stale } => {
+                let stale_marker = if *stale { " (STALE)" } else { "" };
+                write!(
+                    f,
+                    "E_LOCK: work is held by {holder_name} pid={holder_pid}{stale_marker}\n\n  \
+                     Suggestion: The Work is currently locked by another process. \
+                     Wait for the holder to release the lock and retry. \
+                     If the holder is stale (>60 s), the lock will be auto-released."
+                )
+            }
+
+            Self::LockIo(err) => {
+                write!(
+                    f,
+                    "E_LOCK_IO: could not acquire file lock ({err})\n\n  \
+                     Suggestion: This is a configuration or environment error, not temporary lock contention. \
+                     Check filesystem permissions and disk space for the workspace directory."
                 )
             }
 
