@@ -543,7 +543,8 @@ pub async fn list_for_chapter(
     sqlx::query_as::<_, KbExtractPromotion>(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
-                block_type_guess, canonical_name_guess, created_at \
+                block_type_guess, canonical_name_guess, llm_confidence, \
+                llm_source_quote, created_at \
          FROM kb_extract_jobs \
          WHERE work_id = ? AND source_chapter_id = ? \
          ORDER BY canonical_name_guess ASC",
@@ -592,7 +593,8 @@ pub async fn upsert_pending_candidate(
     let existing: Option<KbExtractPromotion> = sqlx::query_as::<_, KbExtractPromotion>(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
-                block_type_guess, canonical_name_guess, created_at \
+                block_type_guess, canonical_name_guess, llm_confidence, \
+                llm_source_quote, created_at \
          FROM kb_extract_jobs \
          WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? \
          AND promotion_status IN ('pending', 'confirmed')",
@@ -699,6 +701,10 @@ pub async fn delete_pending_for_chapter(
 ///
 /// Separate from [`KbExtractJob`] (the V1.29 extraction-queue row) so the two
 /// lifecycles do not share a struct or its `query_as!` macros.
+///
+/// V1.51 T-A P0: `llm_confidence` + `llm_source_quote` carry the LLM-extracted
+/// metadata when the row was produced by `nexus.llm.extract` (NULL for V1.50
+/// heuristic rows). See `llm-extract.md` §3.2.
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
 pub struct KbExtractPromotion {
     /// Unique job ID (`xj_` prefix).
@@ -717,10 +723,20 @@ pub struct KbExtractPromotion {
     pub proposed_payload: Option<String>,
     /// Source chapter number (NULL for work-level candidates).
     pub source_chapter_id: Option<i64>,
-    /// Heuristic's `block_type` guess (`snake_case` wire value).
+    /// `block_type` guess (`snake_case` wire value). V1.50 heuristic always
+    /// `character`; V1.51 `nexus.llm.extract` fills the LLM-judged value.
     pub block_type_guess: Option<String>,
-    /// Heuristic's `canonical_name` guess.
+    /// `canonical_name` guess. V1.50 heuristic = matched phrase; V1.51
+    /// `nexus.llm.extract` = LLM-extracted canonical name.
     pub canonical_name_guess: Option<String>,
+    /// V1.51 T-A P0: LLM self-reported confidence in `[0.0, 1.0]`. `NULL` for
+    /// V1.50 heuristic rows and legacy queue rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_confidence: Option<f64>,
+    /// V1.51 T-A P0: verbatim chapter excerpt justifying the extraction.
+    /// `NULL` for V1.50 heuristic rows and legacy queue rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub llm_source_quote: Option<String>,
     /// Row creation timestamp.
     pub created_at: String,
 }
@@ -734,6 +750,10 @@ const DEFAULT_PENDING_LIMIT: i64 = 100;
 /// (`nexus_orchestration::quality_loop`). The caller is expected to have
 /// already called [`is_idempotent`] to avoid duplicates; this function does
 /// not re-check.
+///
+/// V1.50 heuristic callers use this entry point (LLM fields default to NULL).
+/// V1.51 `nexus.llm.extract` callers should use [`insert_pending_with_llm`]
+/// to populate `llm_confidence` + `llm_source_quote`.
 ///
 /// # Errors
 ///
@@ -750,20 +770,66 @@ pub async fn insert_pending(
     canonical_name_guess: &str,
     proposed_payload: &str,
 ) -> Result<KbExtractPromotion, sqlx::Error> {
+    insert_pending_with_llm(
+        pool,
+        creator_id,
+        workspace_id,
+        world_id,
+        work_id,
+        source_chapter_id,
+        block_type_guess,
+        canonical_name_guess,
+        proposed_payload,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Insert a new promotion candidate carrying LLM extraction metadata
+/// (V1.51 T-A P0).
+///
+/// Same as [`insert_pending`] but also populates `llm_confidence` +
+/// `llm_source_quote` when the candidate was produced by the
+/// `nexus.llm.extract` capability (entity-scope-model §5.5.6;
+/// `llm-extract.md` §3.2). Heuristic callers pass `None, None` (or use
+/// [`insert_pending`]).
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+// 11 params mirrors the kb_extract_jobs column layout — same rationale as
+// insert_with_retry. Splitting into a builder would add indirection for a
+// single call-site.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_pending_with_llm(
+    pool: &SqlitePool,
+    creator_id: &str,
+    workspace_id: &str,
+    world_id: &str,
+    work_id: Option<&str>,
+    source_chapter_id: Option<i64>,
+    block_type_guess: &str,
+    canonical_name_guess: &str,
+    proposed_payload: &str,
+    llm_confidence: Option<f64>,
+    llm_source_quote: Option<&str>,
+) -> Result<KbExtractPromotion, sqlx::Error> {
     let job_id = generate_job_id();
     // `work_entry_id` reuses the V1.29 idempotency unique index
     // `(creator_id, work_entry_id, world_id) WHERE status NOT IN ('failed')`
     // as an additional DB-level guard: a pending candidate for the same
     // `(creator, world, canonical_name)` is unique. Promotion rows set
-    // extraction `status='done'` (the heuristic runs inline, no queue), so the
+    // extraction `status='done'` (the extractor runs inline, no queue), so the
     // unique index applies (it excludes only 'failed').
     // SAFETY: static INSERT with bind params; no user-controlled identifiers.
     sqlx::query(
         "INSERT INTO kb_extract_jobs \
          (job_id, creator_id, workspace_id, work_entry_id, world_id, status, \
           work_id, promotion_status, proposed_payload, source_chapter_id, \
-          block_type_guess, canonical_name_guess) \
-         VALUES (?, ?, ?, ?, ?, 'done', ?, 'pending', ?, ?, ?, ?)",
+          block_type_guess, canonical_name_guess, llm_confidence, \
+          llm_source_quote) \
+         VALUES (?, ?, ?, ?, ?, 'done', ?, 'pending', ?, ?, ?, ?, ?, ?)",
     )
     .bind(&job_id)
     .bind(creator_id)
@@ -775,6 +841,8 @@ pub async fn insert_pending(
     .bind(source_chapter_id)
     .bind(block_type_guess)
     .bind(canonical_name_guess)
+    .bind(llm_confidence)
+    .bind(llm_source_quote)
     .execute(pool)
     .await?;
 
@@ -812,7 +880,8 @@ pub async fn list_pending_for_world(
     let query = format!(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
-                block_type_guess, canonical_name_guess, created_at \
+                block_type_guess, canonical_name_guess, llm_confidence, \
+                llm_source_quote, created_at \
          FROM kb_extract_jobs \
          WHERE world_id = ? AND promotion_status = 'pending' \
          ORDER BY created_at ASC LIMIT {limit}"
@@ -941,7 +1010,8 @@ async fn fetch_promotion_optional_by_id(
     sqlx::query_as::<_, KbExtractPromotion>(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
-                block_type_guess, canonical_name_guess, created_at \
+                block_type_guess, canonical_name_guess, llm_confidence, \
+                llm_source_quote, created_at \
          FROM kb_extract_jobs WHERE job_id = ?",
     )
     .bind(job_id)

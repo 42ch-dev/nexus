@@ -23,7 +23,7 @@ use super::{SubsystemBootstrap, SubsystemHealth};
 use crate::lifecycle::SubsystemKind;
 
 /// Maximum concurrent workers per daemon (configurable in future).
-const DEFAULT_MAX_WORKERS: usize = 16;
+pub const DEFAULT_MAX_WORKERS: usize = 16;
 
 /// Real implementation of Worker Manager subsystem.
 ///
@@ -59,6 +59,22 @@ impl WorkerMgrSubsystem {
 
         Self {
             registry: Arc::new(Mutex::new(registry)),
+            started: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    /// Create a Worker Manager subsystem wrapping an externally-constructed
+    /// shared registry (V1.51 T-A P0 / QC3 F-001).
+    ///
+    /// Use this when the daemon boot needs to share the registry between the
+    /// worker subsystem (for lifecycle management) and the capability layer
+    /// (for `nexus.llm.extract` IPC dispatch via `ProductionWorkerProvider`).
+    /// Both sides hold clones of the same `Arc<Mutex<...>>`, so a worker
+    /// spawned by either is visible to the other.
+    #[must_use]
+    pub fn with_registry(registry: Arc<Mutex<WorkerRegistry<WorkerManagerSpawner>>>) -> Self {
+        Self {
+            registry,
             started: Arc::new(Mutex::new(false)),
         }
     }

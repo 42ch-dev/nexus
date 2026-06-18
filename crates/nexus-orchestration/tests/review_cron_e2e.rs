@@ -220,10 +220,14 @@ async fn review_cron_fire_triggers_kb_extraction_hook() {
         .unwrap();
 
     // ── Step 3: the T-B P1 extraction hook fires on the completed schedule. ─
-    let inserted =
-        quality_loop::extract_kb_candidates_for_review(&pool, &schedule_id, Some(ws_dir.path()))
-            .await
-            .unwrap();
+    let inserted = quality_loop::extract_kb_candidates_for_review(
+        &pool,
+        &schedule_id,
+        Some(ws_dir.path()),
+        None,
+    )
+    .await
+    .unwrap();
     assert!(
         inserted >= 1,
         "T-B P1 hook should extract ≥1 candidate from the review-cron-launched schedule"

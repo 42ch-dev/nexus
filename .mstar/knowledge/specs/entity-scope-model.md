@@ -253,6 +253,33 @@ Rejected promotion candidates are retained in `Logs/kb/rejected/<YYYY-MM-DD>-<ex
 
 The promotion state machine does **not** change the `BlockType` enum (see §5.1.1 SSOT) or the `ValidationMode` constraints (see V1.40 P1 validation module). It governs **how** a row enters the World, not **what** the row contains.
 
+#### 5.5.6 LLM extraction pathway (V1.51 T-A P0 — Normative)
+
+V1.51 T-A P0 closes `R-V150KBED-01`. The V1.50 heuristic defaulted every
+review-time candidate to `block_type_guess='character'` (capitalized noun
+phrase), forcing authors to correct the type on adopt for every non-character
+entity. V1.51 replaces the heuristic with the `nexus.llm.extract` capability
+(see [llm-extract.md](llm-extract.md)) at the review-time extraction hook.
+
+The state machine in §5.5.1–§5.5.2 is **unchanged** — LLM extraction only
+improves the *quality* of the `block_type_guess` + `canonical_name_guess`
+proposed in the `pending` row. What changes:
+
+| Column / field | V1.50 heuristic | V1.51 LLM pathway |
+| --- | --- | --- |
+| `block_type_guess` | always `character` | LLM-judged wire `BlockType` |
+| `canonical_name_guess` | matched phrase as-is | LLM-extracted canonical name |
+| `llm_confidence` (new) | `NULL` | LLM self-reported `0.0`–`1.0` |
+| `llm_source_quote` (new) | `NULL` | verbatim chapter excerpt |
+| `proposed_payload.tags` | `["novel","heuristic-extracted"]` | `["novel","llm-extracted"]` |
+
+The promotion gate (§5.5.3), the `confirmed`/`rejected` terminal states
+(§5.5.2), and the `ValidationMode::Novel` re-run on adopt (§5.5.5) are all
+unchanged — the LLM only affects what the author *sees* on a `pending` row, not
+how it transitions. When the LLM worker is unavailable, the hook falls back to
+the V1.50 heuristic so no-worker environments (hermetic tests,
+daemon-without-worker) remain functional.
+
 ---
 
 ## 6. Scope transition rules

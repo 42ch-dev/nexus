@@ -1,63 +1,81 @@
-//! Review-time KB candidate extraction (V1.50 T-B P1).
+//! Review-time KB candidate extraction (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
 //!
 //! Implements the review-time hook referenced by
 //! [`novel-writing/cron-staggering.md` §4.4](../../.mstar/knowledge/specs/novel-writing/cron-staggering.md)
 //! and [`entity-scope-model.md` §5.5](../../.mstar/knowledge/specs/entity-scope-model.md).
 //!
-//! # Heuristic-only (V1.50)
+//! # Two pathways (V1.51)
 //!
-//! Per compass §0.1 decision 6, V1.50 ships **heuristic-only** extraction —
-//! no LLM call. The heuristic scans chapter prose for capitalized noun
-//! phrases (the most common shape of a proper noun / character / place name
-//! in English-language fiction), filters against existing
-//! `kb_key_blocks.canonical_name` to avoid duplicates, and inserts
-//! `kb_extract_jobs` rows with `promotion_status='pending'`.
+//! - **LLM pathway** (production, when the supervisor threads a
+//!   `CapabilityRegistry` with a live worker): the hook invokes
+//!   `LlmExtractTask` → `nexus.llm.extract` capability to obtain candidates
+//!   carrying an LLM-judged `block_type`, `canonical_name`, `confidence`, and
+//!   a verbatim `source_quote`. Closes `R-V150KBED-01`.
+//! - **Heuristic fallback** (V1.50 behavior; used when no registry/worker is
+//!   available — hermetic tests, daemon-without-worker): scans chapter prose
+//!   for capitalized noun phrases, tags every candidate `character`. Kept so
+//!   no-worker environments still produce character-name candidates.
 //!
-//! The author confirms or dismisses each candidate via
-//! `creator world kb adopt|reject`.
+//! See [`extract_kb_candidates_for_review`] for the pathway selection rule and
+//! `llm-extract.md` §5 for the full contract.
 //!
 //! # Hook wiring
 //!
 //! [`extract_kb_candidates_for_review`] is invoked by the schedule supervisor
 //! when a `novel-review-master` schedule reaches a terminal state (see
 //! `schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`).
-//!
-//! ```text
-//! // COORDINATE-WITH-T-A-P2
-//! ```
-//! T-A P2 (`2026-06-18-v1.50-cron-review-staggering`) wires the per-Work
-//! `review` cron role that enqueues `novel-review-master` schedules. Until
-//! T-A P2 lands, the hook still fires for any `novel-review-master`
-//! schedule that reaches the supervisor (e.g. the V1.39 stale-findings
-//! `auto_review_master_on_timeout` path, or manual `creator run`), so the
-//! extraction pipeline is independently testable.
 
 use crate::auto_chain::AutoChainError;
-use nexus_local_db::kb_extract_job::{insert_pending, is_idempotent};
+use crate::capability::{CapabilityError, CapabilityRegistry};
+use nexus_local_db::kb_extract_job::{insert_pending_with_llm, is_idempotent};
 use regex::Regex;
 use sqlx::SqlitePool;
 use std::sync::OnceLock;
 
+/// Capability name for the LLM extraction pathway (V1.51 T-A P0).
+///
+/// Registered in `CapabilityRegistry` as a sibling to `judge.llm`; both reuse
+/// the V1.32 LLM worker pool. See `llm-extract.md` §1.
+const LLM_EXTRACT_CAPABILITY: &str = "nexus.llm.extract";
+
 /// Default `block_type` guess for heuristic candidates.
 ///
 /// Capitalized noun phrases in fiction prose are most often character names,
-/// so the heuristic tags every candidate as `character`. The author corrects
-/// the type on adopt (or rejects) — see entity-scope-model §5.5.5: the
-/// promotion state machine governs *how* a row enters the World, not *what*
-/// it contains, and `ValidationMode::Novel` re-runs on adopt.
+/// so the heuristic tags every candidate as `character`. V1.51 `nexus.llm.extract`
+/// replaces this guess with an LLM-judged value; the heuristic is retained only
+/// as the no-worker fallback (entity-scope-model §5.5.6).
 const DEFAULT_BLOCK_TYPE_GUESS: &str = "character";
 
 /// Maximum candidates persisted per review pass (safety cap to avoid
 /// flooding `kb_extract_jobs.pending` from a single chapter scan).
 const MAX_CANDIDATES_PER_PASS: usize = 20;
 
-/// A heuristic-extracted KB candidate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A review-time KB candidate.
+///
+/// Carries both the V1.50 heuristic fields (`canonical_name_guess` +
+/// `proposed_payload`) and the V1.51 LLM-extracted metadata (`block_type`,
+/// `confidence`, `source_quote`). The heuristic pathway sets `confidence` +
+/// `source_quote` to `None` and `block_type` to [`DEFAULT_BLOCK_TYPE_GUESS`];
+/// the `nexus.llm.extract` pathway fills all five. [`persist_candidates`]
+/// uses the presence of `confidence`/`source_quote` to decide whether to write
+/// the dedicated LLM columns or leave them NULL.
+#[derive(Debug, Clone, PartialEq)]
 pub struct KbCandidate {
-    /// Capitalized phrase as it appeared in the chapter prose.
+    /// Canonical entity name (heuristic: matched phrase; LLM: extracted name).
     pub canonical_name_guess: String,
     /// Proposed `KeyBlockBody` serialized as JSON.
     pub proposed_payload: String,
+    /// `block_type` (`snake_case` wire value). Heuristic: always `character`;
+    /// LLM: the model's judgement.
+    pub block_type: String,
+    /// LLM self-reported confidence in `[0.0, 1.0]`. `None` for heuristic
+    /// candidates; `Some(x)` for `nexus.llm.extract` candidates. Stored as
+    /// `f64` to match the `SQLite` `REAL` column + JSON number representation
+    /// (avoids f32→f64 promotion precision loss in the persisted payload).
+    pub confidence: Option<f64>,
+    /// Verbatim chapter excerpt justifying the extraction. `None` for
+    /// heuristic candidates; `Some(s)` for `nexus.llm.extract` candidates.
+    pub source_quote: Option<String>,
 }
 
 // ── Heuristic ─────────────────────────────────────────────────────────
@@ -226,6 +244,9 @@ pub fn extract_candidates_from_text(text: &str) -> Vec<KbCandidate> {
             KbCandidate {
                 canonical_name_guess,
                 proposed_payload: payload,
+                block_type: DEFAULT_BLOCK_TYPE_GUESS.to_string(),
+                confidence: None,
+                source_quote: None,
             }
         })
         .collect()
@@ -233,24 +254,34 @@ pub fn extract_candidates_from_text(text: &str) -> Vec<KbCandidate> {
 
 // ── Hook entry point ──────────────────────────────────────────────────
 
-/// Review-time KB extraction hook.
+/// Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
 ///
 /// Mirrors the shape of
 /// [`auto_chain::persist_review_findings_for_schedule`] and
 /// [`auto_chain::promote_foreshadowing_for_schedule`]: load schedule → work →
-/// chapter body, run the heuristic, filter existing canonical names, insert
+/// chapter body, extract candidates, filter existing canonical names, insert
 /// pending rows.
+///
+/// # Pathway selection (V1.51)
+///
+/// - `registry` is `Some` AND `nexus.llm.extract` is registered AND the worker
+///   is available → **LLM pathway**: invokes the capability with the chapter
+///   prose, parses `Vec<KbCandidate>` carrying LLM-judged `block_type` +
+///   `confidence` + `source_quote`. Closes `R-V150KBED-01`.
+/// - Otherwise (no registry, capability absent, or `WorkerUnavailable`) →
+///   **heuristic fallback** ([`extract_candidates_from_text`]): V1.50 behavior,
+///   tags every candidate `character`. Keeps no-worker environments
+///   (hermetic tests, daemon-without-worker) functional.
 ///
 /// # Behavior
 ///
 /// 1. Loads the schedule row to read `preset_id`, `work_id`, `creator_id`.
 /// 2. Returns `Ok(0)` early when the preset is not `novel-review-master`.
 /// 3. Returns `Ok(0)` when `workspace_dir` is `None` (hermetic DB-only tests)
-///    or the work/chapter body file is missing — the heuristic needs prose.
-/// 4. Reads the current chapter body, runs [`extract_candidates_from_text`],
-///    filters out names already present in `kb_key_blocks.canonical_name`
-///    for the work's world, applies the [`is_idempotent`] guard, and inserts
-///    `pending` rows.
+///    or the work/chapter body file is missing.
+/// 4. Reads the current chapter body, runs the selected pathway, filters out
+///    names already present in `kb_key_blocks.canonical_name` for the work's
+///    world, applies the [`is_idempotent`] guard, and inserts `pending` rows.
 ///
 /// Best-effort + non-blocking by contract: the caller logs any `Err` and does
 /// NOT fail the terminal transition (mirrors the review-findings hook).
@@ -263,11 +294,24 @@ pub async fn extract_kb_candidates_for_review(
     pool: &SqlitePool,
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
+    registry: Option<&CapabilityRegistry>,
 ) -> Result<usize, AutoChainError> {
     let Some(ctx) = load_review_context(pool, schedule_id, workspace_dir).await? else {
         return Ok(0);
     };
-    let candidates = extract_candidates_from_text(&ctx.prose);
+    // Pathway selection: LLM when a registry + worker is available, else the
+    // V1.50 heuristic fallback (llm-extract.md §5.1).
+    let candidates = match extract_via_llm(registry, &ctx).await {
+        LlmExtractOutcome::Candidates(c) => c,
+        LlmExtractOutcome::Fallback(reason) => {
+            tracing::debug!(
+                schedule_id,
+                reason,
+                "kb-extract: falling back to heuristic extraction"
+            );
+            extract_candidates_from_text(&ctx.prose)
+        }
+    };
     let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
     let inserted = persist_candidates(pool, schedule_id, &ctx, &existing_names, candidates).await?;
     if inserted > 0 {
@@ -281,6 +325,166 @@ pub async fn extract_kb_candidates_for_review(
         );
     }
     Ok(inserted)
+}
+
+/// Outcome of an LLM extraction attempt.
+///
+/// `Candidates` carries the LLM-extracted candidates; `Fallback` signals that
+/// the LLM pathway was unavailable (no registry, capability absent, or
+/// `WorkerUnavailable`) and the caller should use the heuristic.
+enum LlmExtractOutcome {
+    Candidates(Vec<KbCandidate>),
+    Fallback(&'static str),
+}
+
+/// Attempt LLM extraction via the `nexus.llm.extract` capability.
+///
+/// Returns [`LlmExtractOutcome::Fallback`] (with a reason for the debug log)
+/// whenever the LLM pathway is unavailable, so the hook can fall back to the
+/// heuristic. The capability itself returns an empty candidate list on
+/// malformed LLM JSON (best-effort); that is surfaced as
+/// `Candidates(vec![])`, not a fallback.
+async fn extract_via_llm(
+    registry: Option<&CapabilityRegistry>,
+    ctx: &ReviewContext,
+) -> LlmExtractOutcome {
+    let Some(registry) = registry else {
+        return LlmExtractOutcome::Fallback("no capability registry threaded");
+    };
+    let Some(cap) = registry.get(LLM_EXTRACT_CAPABILITY) else {
+        return LlmExtractOutcome::Fallback("nexus.llm.extract not registered");
+    };
+
+    // High-level extraction instruction. The capability wraps this with the
+    // JSON output-format framing + the verbatim chapter prose (llm-extract.md §1.3).
+    let prompt = "Extract the fictional entities (characters, locations, organizations, items, events, abilities, conflicts, info points) that appear in the chapter prose below. For each entity, judge the most appropriate wire block_type, give a confidence in [0.0,1.0], and quote a verbatim excerpt from the chapter that justifies the extraction.";
+
+    let input = serde_json::json!({
+        "prompt": prompt,
+        "chapter_prose": ctx.prose,
+        "_creator_id": ctx.creator_id,
+        // The review-time hook runs outside a preset session; pass an empty
+        // session id. The capability only forwards it to the worker IPC for
+        // routing — it is not a security identity (SEC-V131-01 covers creator_id).
+        "_session_id": "",
+    });
+
+    let output = match cap.run(input).await {
+        Ok(o) => o,
+        Err(CapabilityError::WorkerUnavailable) => {
+            return LlmExtractOutcome::Fallback("nexus.llm.extract worker unavailable");
+        }
+        Err(e) => {
+            tracing::warn!(
+                schedule_context = %ctx.work_id,
+                error = %e,
+                "kb-extract: nexus.llm.extract capability error; falling back to heuristic"
+            );
+            return LlmExtractOutcome::Fallback("nexus.llm.extract capability error");
+        }
+    };
+
+    let candidates_json = output
+        .get("candidates")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let candidates: Vec<KbCandidate> = candidates_json
+        .iter()
+        .filter_map(candidate_from_llm_json)
+        .take(MAX_CANDIDATES_PER_PASS)
+        .collect();
+    LlmExtractOutcome::Candidates(candidates)
+}
+
+/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object.
+///
+/// Returns `None` when `canonical_name` is missing/empty (no point persisting
+/// a nameless candidate). Fills `proposed_payload` with a novel-profile
+/// `KeyBlockBody` JSON whose `novel_category` is derived from the LLM-judged
+/// `block_type` (entity-scope-model §5.1.1 mapping) so adopt-time
+/// `ValidationMode::Novel` passes. The payload also carries the four LLM keys
+/// so the adopt CLI can read them from either the dedicated columns or the
+/// JSON (llm-extract.md §3.1).
+///
+/// `pub(crate)`: reused by `tasks::LlmExtractTask` so there is a single
+/// LLM→KbCandidate mapping across the review-time hook and the task.
+pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandidate> {
+    let canonical_name = c
+        .get("canonical_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if canonical_name.is_empty() {
+        return None;
+    }
+    let block_type = c
+        .get("block_type")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_BLOCK_TYPE_GUESS)
+        .to_string();
+    let summary = c.get("summary").and_then(|v| v.as_str()).map(String::from);
+    let confidence = c
+        .get("confidence")
+        .and_then(serde_json::Value::as_f64)
+        .map(|x| x.clamp(0.0, 1.0));
+    let source_quote = c
+        .get("source_quote")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let novel_category = block_type_to_novel_category(&block_type);
+
+    let mut payload = serde_json::json!({
+        "summary": summary.clone().unwrap_or_else(|| format!("LLM-extracted entity: {canonical_name}")),
+        "attributes": {
+            "novel_category": novel_category,
+            "aliases": [canonical_name.as_str()],
+        },
+        "tags": ["novel", "llm-extracted"],
+        "block_type": block_type,
+        "canonical_name": canonical_name,
+        "source_quote": source_quote.clone().unwrap_or_default(),
+        "confidence": confidence.unwrap_or(0.0),
+    });
+    // If the LLM gave no explicit summary, drop the placeholder so the
+    // KeyBlockBody summary is None (cleaner adopt surface).
+    if summary.is_none() {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.remove("summary");
+        }
+    }
+
+    Some(KbCandidate {
+        canonical_name_guess: canonical_name,
+        proposed_payload: payload.to_string(),
+        block_type,
+        confidence,
+        source_quote,
+    })
+}
+
+/// Map a wire `block_type` (`snake_case`) to the novel-profile `novel_category`
+/// body attribute (entity-scope-model §5.1.1 recommended default mapping).
+///
+/// Used when constructing the `proposed_payload` for LLM-extracted candidates
+/// so adopt-time `ValidationMode::Novel` validates. Unknown `block_types`
+/// (e.g. `ability`) default to `foundation` — the most generic category — and
+/// emit no warning here (the V1.40 validator emits the advisory mismatch
+/// warning on adopt).
+fn block_type_to_novel_category(block_type: &str) -> &'static str {
+    match block_type {
+        "character" => "character",
+        "scene" => "location",
+        "organization" => "society",
+        "item" => "economy",
+        "conflict" => "rules",
+        "event" => "background",
+        // `info_point`, `ability`, and any unknown value → foundation (generic;
+        // the V1.40 validator emits the advisory mismatch warning on adopt).
+        _ => "foundation",
+    }
 }
 
 /// Loaded review context: schedule → work → chapter prose.
@@ -432,6 +636,11 @@ async fn load_chapter_prose(
 ///
 /// Returns the count of newly-inserted rows. Per-candidate insert errors are
 /// logged at `warn!` and do not abort the loop.
+///
+/// V1.51 T-A P0: writes `candidate.block_type` (LLM-judged or heuristic
+/// `character`) and the LLM metadata (`llm_confidence` + `llm_source_quote`)
+/// via [`insert_pending_with_llm`]. Heuristic candidates pass `None` for both
+/// LLM fields so the dedicated columns stay NULL (entity-scope-model §5.5.6).
 async fn persist_candidates(
     pool: &SqlitePool,
     schedule_id: &str,
@@ -453,16 +662,21 @@ async fn persist_candidates(
         {
             continue;
         }
-        match insert_pending(
+        // Convert for the REAL column; both are None for heuristic candidates.
+        let llm_confidence = candidate.confidence;
+        let llm_source_quote = candidate.source_quote.as_deref();
+        match insert_pending_with_llm(
             pool,
             &ctx.creator_id,
             &ctx.workspace_id,
             &ctx.world_id,
             Some(&ctx.work_id),
             Some(i64::from(ctx.chapter)),
-            DEFAULT_BLOCK_TYPE_GUESS,
+            &candidate.block_type,
             &candidate.canonical_name_guess,
             &candidate.proposed_payload,
+            llm_confidence,
+            llm_source_quote,
         )
         .await
         {
@@ -613,5 +827,99 @@ mod tests {
             serde_json::from_str(&candidates[0].proposed_payload).unwrap();
         assert_eq!(payload["attributes"]["novel_category"], "character");
         assert_eq!(payload["attributes"]["aliases"][0], "Aria Stormblade");
+    }
+
+    // ── V1.51 T-A P0: heuristic candidates carry the new fields as defaults ──
+
+    #[test]
+    fn heuristic_candidates_default_block_type_and_null_llm_fields() {
+        let candidates = extract_candidates_from_text("Lin Xia walked.");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].block_type, "character");
+        assert_eq!(candidates[0].confidence, None);
+        assert_eq!(candidates[0].source_quote, None);
+    }
+
+    // ── V1.51 T-A P0: block_type -> novel_category mapping ───────────────────
+
+    #[test]
+    fn block_type_mapping_covers_known_types() {
+        assert_eq!(block_type_to_novel_category("character"), "character");
+        assert_eq!(block_type_to_novel_category("scene"), "location");
+        assert_eq!(block_type_to_novel_category("organization"), "society");
+        assert_eq!(block_type_to_novel_category("item"), "economy");
+        assert_eq!(block_type_to_novel_category("conflict"), "rules");
+        assert_eq!(block_type_to_novel_category("info_point"), "foundation");
+        assert_eq!(block_type_to_novel_category("event"), "background");
+        // Unknown / ability -> foundation (generic).
+        assert_eq!(block_type_to_novel_category("ability"), "foundation");
+        assert_eq!(block_type_to_novel_category("nonsense"), "foundation");
+    }
+
+    // ── V1.51 T-A P0: candidate_from_llm_json builder ─────────────────────────
+
+    #[test]
+    fn candidate_from_llm_json_builds_full_payload() {
+        let c = serde_json::json!({
+            "canonical_name": "Azure Gate",
+            "block_type": "scene",
+            "summary": "The eastern gate",
+            "confidence": 0.92,
+            "source_quote": "...the eastern gate groaned open...",
+        });
+        let built = candidate_from_llm_json(&c).expect("canonical_name present");
+        assert_eq!(built.canonical_name_guess, "Azure Gate");
+        assert_eq!(built.block_type, "scene");
+        assert_eq!(built.confidence, Some(0.92));
+        assert_eq!(
+            built.source_quote.as_deref(),
+            Some("...the eastern gate groaned open...")
+        );
+
+        // proposed_payload JSON carries the 4 LLM keys + derived novel_category.
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["block_type"], "scene");
+        assert_eq!(payload["canonical_name"], "Azure Gate");
+        assert_eq!(payload["confidence"], 0.92);
+        assert_eq!(
+            payload["source_quote"],
+            "...the eastern gate groaned open..."
+        );
+        assert_eq!(payload["attributes"]["novel_category"], "location");
+        assert_eq!(payload["tags"][1], "llm-extracted");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_rejects_empty_name() {
+        let c = serde_json::json!({
+            "canonical_name": "   ",
+            "block_type": "character",
+            "confidence": 0.5,
+            "source_quote": "q",
+        });
+        assert!(candidate_from_llm_json(&c).is_none());
+    }
+
+    #[test]
+    fn candidate_from_llm_json_clamps_confidence() {
+        let c = serde_json::json!({
+            "canonical_name": "X",
+            "block_type": "character",
+            "confidence": 1.7,
+            "source_quote": "q",
+        });
+        let built = candidate_from_llm_json(&c).unwrap();
+        assert_eq!(built.confidence, Some(1.0));
+    }
+
+    #[test]
+    fn candidate_from_llm_json_defaults_missing_optional_fields() {
+        // Only canonical_name is required; block_type defaults to character,
+        // confidence/source_quote to None.
+        let c = serde_json::json!({"canonical_name": "Y"});
+        let built = candidate_from_llm_json(&c).unwrap();
+        assert_eq!(built.block_type, "character");
+        assert_eq!(built.confidence, None);
+        assert_eq!(built.source_quote, None);
     }
 }

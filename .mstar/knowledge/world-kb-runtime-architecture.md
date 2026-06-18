@@ -86,6 +86,35 @@ kb-extract preset (LLM inner_graph)
 
 Retire work-entry-only job semantics in V1.40; keep wire `BlockType` from contracts (grill-me #10).
 
+### 5.5 LLM extraction pathway (V1.51 T-A P0 — Normative)
+
+V1.51 T-A P0 closes `R-V150KBED-01` by swapping the V1.50 heuristic
+(`block_type_guess='character'` for every capitalized noun phrase) for an
+LLM-driven extraction pathway. The new `nexus.llm.extract` capability
+([llm-extract.md](specs/llm-extract.md)) is a sibling to `judge.llm`: both
+reuse the V1.32 LLM worker pool via `WorkerHandleProvider`, but
+`nexus.llm.extract` emits `Vec<KbCandidate>` carrying LLM-judged `block_type`,
+`canonical_name`, `confidence`, and a verbatim `source_quote`.
+
+```text
+novel-review-master (terminal) → supervisor hook
+  → quality_loop::extract_kb_candidates_for_review(pool, sched, ws, registry)
+     ├─ registry + worker available → LlmExtractTask → nexus.llm.extract
+     │     → Vec<KbCandidate> with block_type/confidence/source_quote
+     └─ no worker / WorkerUnavailable → heuristic fallback (V1.50 behavior)
+  → insert_pending_with_llm / insert_pending → kb_extract_jobs (pending)
+  → creator world kb adopt <id> (surfaces confidence + source_quote)
+```
+
+The hook is keyed on `preset_id == NOVEL_REVIEW_MASTER_PRESET_ID` (unchanged
+from V1.50); the supervisor threads its `CapabilityRegistry` (new optional
+field in V1.51) into the hook. The `proposed_payload` JSON gains
+`block_type`/`canonical_name`/`confidence`/`source_quote` keys; two dedicated
+columns (`llm_confidence REAL`, `llm_source_quote TEXT`) make confidence
+queryable/sortable. Heuristic rows keep the V1.50 shape (columns `NULL`,
+`tags: ["novel","heuristic-extracted"]`). Cross-chapter reconciliation
+(T-A P1) and missing-KB detection (T-A P2) build on this pathway.
+
 ---
 
 ## 6. Read path

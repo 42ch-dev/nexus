@@ -50,6 +50,11 @@ pub struct ScheduleSupervisor {
     tick_in_progress: AtomicBool,
     /// Optional workspace directory for on-disk operations (completion-lock write).
     workspace_dir: Arc<Option<std::path::PathBuf>>,
+    /// Optional capability registry (V1.51 T-A P0). Threaded into the
+    /// review-time KB extraction hook so `nexus.llm.extract` can run when a
+    /// worker is available; the hook falls back to the heuristic when this is
+    /// `None` or the worker is unavailable.
+    registry: Arc<Option<std::sync::Arc<crate::capability::CapabilityRegistry>>>,
 }
 
 struct Inner {
@@ -83,7 +88,22 @@ impl ScheduleSupervisor {
             }),
             tick_in_progress: AtomicBool::new(false),
             workspace_dir: Arc::new(workspace_dir),
+            registry: Arc::new(None),
         }
+    }
+
+    /// Attach a capability registry (V1.51 T-A P0).
+    ///
+    /// Threaded into the review-time KB extraction hook so `nexus.llm.extract`
+    /// can run when a worker is available. When unset (or when the worker is
+    /// unavailable), the hook falls back to the V1.50 heuristic.
+    #[must_use]
+    pub fn with_capability_registry(
+        mut self,
+        registry: std::sync::Arc<crate::capability::CapabilityRegistry>,
+    ) -> Self {
+        self.registry = Arc::new(Some(registry));
+        self
     }
 
     /// Load pending schedules from DB, evaluate admission, and start eligible ones.
@@ -489,9 +509,18 @@ impl ScheduleSupervisor {
                 use crate::quality_loop;
                 let ws_ref = self.workspace_dir.as_ref();
                 let ws_path = ws_ref.as_deref();
-                if let Err(e) =
-                    quality_loop::extract_kb_candidates_for_review(&self.pool, schedule_id, ws_path)
-                        .await
+                // V1.51 T-A P0: thread the capability registry so the hook can
+                // invoke nexus.llm.extract. `None` (no registry) or
+                // WorkerUnavailable falls back to the heuristic inside the hook.
+                let reg: Option<&crate::capability::CapabilityRegistry> =
+                    self.registry.as_ref().as_ref().map(|r| &**r);
+                if let Err(e) = quality_loop::extract_kb_candidates_for_review(
+                    &self.pool,
+                    schedule_id,
+                    ws_path,
+                    reg,
+                )
+                .await
                 {
                     tracing::warn!(
                         schedule_id,

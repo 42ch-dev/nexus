@@ -87,7 +87,7 @@ pub struct CapabilityRuntimeDeps {
     /// Pool for pool-backed capabilities (`kb.extract_work`, etc.).
     pub pool: Option<sqlx::SqlitePool>,
     /// Worker handle provider for LLM-backed capabilities (`judge.llm`,
-    /// `context.summarize`, `acp.prompt`).
+    /// `context.summarize`, `acp.prompt`, `nexus.llm.extract`).
     pub worker_provider: Option<std::sync::Arc<dyn WorkerHandleProvider>>,
     /// Daemon-side tool dispatch for `nexus.*` tools (DF-47, V1.42 P3).
     pub daemon_tool_dispatch: Option<std::sync::Arc<dyn DaemonToolDispatch>>,
@@ -140,7 +140,7 @@ impl CapabilityRegistry {
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
     /// `creator.write_brief`, `judge.rule`, `acp.prompt`, `acp.session_load`,
     /// `judge.llm`, `context.summarize`, `kb.extract_work`,
-    /// `soul.experience.aggregate`.
+    /// `nexus.llm.extract`, `soul.experience.aggregate`.
     ///
     /// `kb.extract_work` is created without a pool (placeholder mode).
     /// Use [`with_builtins_and_pool`] for full e2e support.
@@ -164,6 +164,7 @@ impl CapabilityRegistry {
             Box::new(builtins::JudgeLlm::new()),
             Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::new()),
+            Box::new(builtins::LlmExtract::new()),
             Box::new(builtins::SoulExperienceAggregate),
             // F6 (C-001): register novel.project_scaffold in the
             // pool-less registry so embedded preset validation can
@@ -215,6 +216,7 @@ impl CapabilityRegistry {
             Box::new(builtins::JudgeLlm::new()),
             Box::new(builtins::ContextSummarize::new()),
             Box::new(builtins::KbExtractWork::with_pool(pool.clone())),
+            Box::new(builtins::LlmExtract::new()),
             Box::new(builtins::SoulExperienceAggregate),
             Box::new(builtins::NovelProjectScaffold::with_pool(pool.clone())),
             Box::new(builtins::NovelChapterTransition::with_pool(pool)),
@@ -253,6 +255,15 @@ impl CapabilityRegistry {
             .as_ref()
             .map_or_else(builtins::ContextSummarize::new, |provider| {
                 builtins::ContextSummarize::with_worker_provider(provider.clone())
+            });
+
+        // V1.51 T-A P0: nexus.llm.extract reuses the same worker pool as
+        // judge.llm / context.summarize / acp.prompt (compass §0.1 #7).
+        let llm_extract = deps
+            .worker_provider
+            .as_ref()
+            .map_or_else(builtins::LlmExtract::new, |provider| {
+                builtins::LlmExtract::with_worker_provider(provider.clone())
             });
 
         let acp_prompt = deps
@@ -307,6 +318,7 @@ impl CapabilityRegistry {
             Box::new(judge_llm),
             Box::new(context_summarize),
             Box::new(kb),
+            Box::new(llm_extract),
             Box::new(builtins::SoulExperienceAggregate),
             Box::new(
                 deps.pool
@@ -386,9 +398,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_twenty_builtins() {
+    fn registry_has_twenty_one_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 20);
+        assert_eq!(reg.len(), 21);
     }
 
     #[test]
@@ -412,6 +424,7 @@ mod tests {
             "judge.llm",
             "context.summarize",
             "kb.extract_work",
+            "nexus.llm.extract",
             "soul.experience.aggregate",
             "novel.project_scaffold",
             "novel.chapter_transition",
@@ -433,13 +446,14 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 20);
+        assert_eq!(names.len(), 21);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
         assert!(names.contains(&"judge.llm"));
         assert!(names.contains(&"context.summarize"));
         assert!(names.contains(&"kb.extract_work"));
+        assert!(names.contains(&"nexus.llm.extract"));
         assert!(names.contains(&"soul.experience.aggregate"));
         assert!(names.contains(&"novel.project_scaffold"));
         assert!(names.contains(&"novel.chapter_transition"));
