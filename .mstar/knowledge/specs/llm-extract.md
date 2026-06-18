@@ -151,7 +151,7 @@ The heuristic pathway (fallback when no worker) emits the V1.50 shape with
 `tags: ["novel","heuristic-extracted"]` and omits the four LLM keys (or sets
 `confidence: 0.0`, `source_quote: ""`, `block_type: "character"`).
 
-### 3.2 Dedicated columns (migration `202606180004_kb_extract_jobs_llm_payload.sql`)
+### 3.2 Dedicated columns (migration `202606180006_kb_extract_jobs_llm_payload.sql`)
 
 | Column | Type | Default | Purpose |
 | --- | --- | --- | --- |
@@ -245,5 +245,5 @@ functional. Production daemons with a worker always take the LLM pathway.
 | §4.3 `novel-review-master` uses llm_extract; E2E asserts payload carries 4 LLM keys | §5, `tests/novel_review_master.rs` |
 | §4.4 adopt shows confidence + source_quote | cli-spec §6.2G, `creator_world_kb_adopt.rs` |
 | §4.5 R-V150KBED-01 closed | `status.json` residual_findings |
-| §4.7 additive DB migration | §3.2, `202606180004_kb_extract_jobs_llm_payload.sql` |
+| §4.7 additive DB migration | §3.2, `202606180006_kb_extract_jobs_llm_payload.sql` |
 | §4.8 wire contracts unchanged | §6 (no `schemas/` change) |
