@@ -439,6 +439,53 @@ unchanged.
 
 **Target (V1.51 T-A P0):** plan `2026-06-18-v1.51-llm-extraction`.
 
+**V1.51 T-A P1 amendment — `creator kb rescan --work <work_ref>` cross-chapter reconciliation.**
+The V1.50 chapter-scoped `creator kb rescan <work_ref>/<chapter>` (T-B P2) is
+extended with a mutually-exclusive work-scoped mode. Exactly one of the
+positional `<work_ref>/<chapter>` target or the `--work <work_ref>` flag must
+be supplied; supplying both (or neither) fails closed with remediation.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator kb rescan <work_ref>/<chapter> [--dry-run] [--json]` | V1.50 chapter-scoped rescan (unchanged). Re-syncs `kb_extract_jobs` candidates + confirmed `KeyBlock` bodies from one chapter's current text. |
+| `nexus42 creator kb rescan --work <work_ref> [--dry-run] [--json]` | V1.51 work-scoped rescan. Iterates **all** chapters in `Works/<work_ref>/Stories/`, aggregates candidates by `canonical_name` across chapters, and reconciles so a recurring entity collapses to a single `pending` candidate carrying cross-chapter provenance (e.g. `source_chapters: [3,5,7]`). |
+
+Rules (build on §6.2G V1.40 rules; see also
+[world-kb-runtime-architecture.md §5.5.1](../world-kb-runtime-architecture.md)):
+
+- **Mutual exclusivity.** `--work <work_ref>` and the positional
+  `<work_ref>/<chapter>` cannot be combined. `--work` resolves the Work by
+  `work_ref` / `story_ref` / `work_id` (same resolver as the positional path).
+- **Author gate.** Same `require_world_owner` (`narrative_worlds.owner_creator_id`
+  must match the active creator) → `403 WORLD_KB_FORBIDDEN` on mismatch. No
+  new error code.
+- **Reconciliation.** The DB uniqueness `(creator, canonical_name, world)` —
+  already enforced by the V1.50 P1 migration — is what collapses N
+  per-chapter same-name candidates into 1 row. The work-scoped path upserts
+  **once per aggregate**; the merged row's `source_chapter_id` is the lowest
+  referencing chapter and its `proposed_payload` records the full
+  `source_chapters` array. `confirmed` rows are terminal (§5.5.2); only their
+  `KeyBlock` body is refreshed via `diff_and_apply`.
+- **`--dry-run`.** Shows a cross-chapter reuse summary before any DB write,
+  e.g. `Entity 'Aelin' referenced in chapters 3, 5, 7; existing KB row found
+  → no new candidate`. The dry path is read-only and acquires **no** advisory
+  lock.
+- **Advisory lock (T-B P0).** The non-dry work-scoped path acquires
+  `Works/<work_ref>/.lock` before the cross-chapter upsert (same lock as
+  `creator world kb adopt`, `creator works cron set`, `creator run`).
+  Contention → `E_LOCK` exit 75 (`EX_TEMPFAIL`); I/O failure → `E_LOCK_IO`
+  exit 78 (`EX_CONFIG`). Chapter-scoped rescan does **not** acquire the lock
+  (single-chapter upsert; unchanged from V1.50).
+- **Extraction pathway.** Work-scoped rescan uses the heuristic
+  (`extract_candidates_from_text`), identical to the chapter-scoped path, so
+  the two modes agree on the same prose. The `canonical_name` grouping key is
+  the T-A P0 first-class field. Wiring the `nexus.llm.extract` LLM pathway
+  into rescan is out of scope (LLM extraction is review-time/finalize-time;
+  rescan is a sync tool).
+
+**Target (V1.51 T-A P1):** plan `2026-06-18-v1.51-cross-chapter-rescan`. Closes
+`R-V150KBED-08` (cross-chapter rescan scope).
+
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
 Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-lifecycle.md), [novel-writing/work-pool.md](./novel-writing/work-pool.md).
