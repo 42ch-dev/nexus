@@ -149,6 +149,20 @@ pub enum CliError {
     /// misleading users with "work is held by unknown pid=0" on permission-denied.
     LockIo(std::io::Error),
 
+    /// V1.51 T-B P1: OCC version conflict — the row's version changed between
+    /// the caller's read and its UPDATE (CAS check failed).
+    /// Exit code 76 — row was modified by another writer; retry.
+    VersionConflict {
+        /// Table where the conflict occurred.
+        table: String,
+        /// Row identifier.
+        row_id: String,
+        /// Version the caller expected.
+        expected_version: i64,
+        /// Current version in the database (if readable).
+        actual_version: Option<i64>,
+    },
+
     Other(String),
 }
 
@@ -167,6 +181,10 @@ impl std::error::Error for CliError {
 }
 
 // Custom Display for enhanced error variants with suggestions
+// V1.51 T-B P1: added VersionConflict arm (+8 lines). The enum has ~20
+// variants with user-facing suggestion text; splitting would scatter the
+// display logic without reducing the variant count.
+#[allow(clippy::too_many_lines)]
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -253,6 +271,21 @@ impl fmt::Display for CliError {
                     "E_LOCK_IO: could not acquire file lock ({err})\n\n  \
                      Suggestion: This is a configuration or environment error, not temporary lock contention. \
                      Check filesystem permissions and disk space for the workspace directory."
+                )
+            }
+
+            Self::VersionConflict {
+                table,
+                row_id,
+                expected_version,
+                actual_version,
+            } => {
+                write!(
+                    f,
+                    "E_VERSION: row '{row_id}' in '{table}' was modified by another writer \
+                     (expected v{expected_version}, actual v{actual_version}); \
+                     retry the operation",
+                    actual_version = actual_version.map_or("?".to_string(), |v| v.to_string())
                 )
             }
 

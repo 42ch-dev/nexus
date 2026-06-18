@@ -8,6 +8,8 @@
 
 use sqlx::SqlitePool;
 
+use crate::error::LocalDbError;
+
 /// Row from `kb_extract_jobs`.
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct KbExtractJob {
@@ -544,7 +546,7 @@ pub async fn list_for_chapter(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at \
+                llm_source_quote, created_at, version \
          FROM kb_extract_jobs \
          WHERE work_id = ? AND source_chapter_id = ? \
          ORDER BY canonical_name_guess ASC",
@@ -594,7 +596,7 @@ pub async fn upsert_pending_candidate(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at \
+                llm_source_quote, created_at, version \
          FROM kb_extract_jobs \
          WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? \
          AND promotion_status IN ('pending', 'confirmed')",
@@ -739,6 +741,12 @@ pub struct KbExtractPromotion {
     pub llm_source_quote: Option<String>,
     /// Row creation timestamp.
     pub created_at: String,
+    /// V1.51 T-B P1: OCC version column for CAS writes.
+    /// Read path: callers must capture this version and pass it to
+    /// [`mark_confirmed_in_tx_with_cas`] / [`upsert_pending_candidate`]
+    /// to close the TOCTOU window between read and write.
+    #[serde(skip)]
+    pub version: i64,
 }
 
 /// Default limit for `list_pending_for_world` when caller passes `None`.
@@ -881,7 +889,7 @@ pub async fn list_pending_for_world(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at \
+                llm_source_quote, created_at, version \
          FROM kb_extract_jobs \
          WHERE world_id = ? AND promotion_status = 'pending' \
          ORDER BY created_at ASC LIMIT {limit}"
@@ -971,6 +979,93 @@ pub async fn mark_confirmed_in_tx(
     Ok(result.rows_affected() > 0)
 }
 
+/// V1.51 T-B P1: CAS-aware variant of [`mark_confirmed_in_tx`].
+///
+/// Adds a version guard (`AND version = ?`) to the UPDATE so a stale
+/// preimage (read before another writer modified the row) is rejected
+/// with [`LocalDbError::VersionMismatch`].
+///
+/// # Returns
+///
+/// - `Ok(true)` — the row was flipped from `pending` to `confirmed`.
+/// - `Ok(false)` — the row exists but was already confirmed/rejected
+///   (non-pending status). Caller must rollback the transaction.
+/// - `Err(LocalDbError::VersionMismatch)` — the row's version changed
+///   between the caller's read and this UPDATE.
+/// - `Err(LocalDbError::Sqlx)` — database error.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::VersionMismatch` when the CAS check fails.
+/// Returns `LocalDbError::Sqlx` on database failure.
+///
+/// # Integration
+///
+/// Callers that read a promotion row, validate it, and then flip it
+/// MUST pass the `version` from the read row as `expected_version`.
+/// This closes the TOCTOU window between reading and confirming.
+pub async fn mark_confirmed_in_tx_with_cas(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    expected_version: i64,
+) -> Result<bool, LocalDbError> {
+    // SAFETY: runtime UPDATE with version guard — the version column was added
+    // by migration 202606190001 and is always present.
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed', version = version + 1 \
+         WHERE job_id = ? AND promotion_status = 'pending' AND version = ?",
+    )
+    .bind(job_id)
+    .bind(expected_version)
+    .execute(&mut **tx)
+    .await?;
+
+    if result.rows_affected() == 1 {
+        return Ok(true);
+    }
+
+    // rows_affected == 0 — either the row was already non-pending, or the
+    // version changed (CAS mismatch). Re-read to disambiguate.
+    let (status, version): (Option<String>, Option<i64>) =
+        sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
+            .bind(job_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .map_or((None, None), |(s, v): (String, i64)| (Some(s), Some(v)));
+
+    match (status.as_deref(), version) {
+        (Some(s), _) if s != "pending" => {
+            // Row exists but is already confirmed/rejected — not a version conflict.
+            Ok(false)
+        }
+        (Some(_), Some(actual)) if actual != expected_version => {
+            Err(LocalDbError::VersionMismatch {
+                table: "kb_extract_jobs".to_string(),
+                id: job_id.to_string(),
+                expected: expected_version,
+                actual: Some(actual),
+            })
+        }
+        (None, _) => {
+            // Row not found at all.
+            Err(LocalDbError::MissingVersionKey {
+                key: format!("kb_extract_jobs/{job_id}"),
+            })
+        }
+        _ => {
+            // Defensive: row is pending and version matches but rows_affected was 0
+            // — shouldn't happen, but treat as version mismatch for safety.
+            Err(LocalDbError::VersionMismatch {
+                table: "kb_extract_jobs".to_string(),
+                id: job_id.to_string(),
+                expected: expected_version,
+                actual: version,
+            })
+        }
+    }
+}
+
 /// Flip a promotion candidate to `rejected`.
 ///
 /// Only transitions from `pending`. Returns `Ok(true)` when the row was
@@ -1011,7 +1106,7 @@ async fn fetch_promotion_optional_by_id(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at \
+                llm_source_quote, created_at, version \
          FROM kb_extract_jobs WHERE job_id = ?",
     )
     .bind(job_id)

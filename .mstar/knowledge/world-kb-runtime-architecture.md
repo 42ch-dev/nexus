@@ -119,6 +119,50 @@ queryable/sortable. Heuristic rows keep the V1.50 shape (columns `NULL`,
 
 ## 6. Read path
 
+### 6.1 OCC protection (V1.51 T-B P1)
+
+`kb_extract_jobs.version` (added V1.51 T-B P1 migration `202606190001`) closes the
+TOCTOU window between promotion-row reads and `mark_confirmed` writes in the
+`creator world kb adopt` path. The adopt flow must:
+
+1. Read the promotion row — capture `version = V`.
+2. Validate and create the `KeyBlock`.
+3. Call `mark_confirmed_in_tx_with_cas(tx, job_id, V)` — the UPDATE includes
+   `AND version = V`.
+4. On `VersionMismatch` (rows_affected == 0, version changed), surface
+   `E_VERSION` (exit 76) to the CLI and advise retry.
+
+Cross-chapter rescan (T-A P1) and missing-KB detection (T-A P2) also write to
+`kb_extract_jobs` and **must** pass the read-preimage version through
+`upsert_pending_candidate` to avoid overwriting fresher `proposed_payload` /
+`promotion_status` values.
+
+```text
+┌────────────────────────────────────────────────┐
+│ creator world kb adopt <extract_job_id>        │
+├────────────────────────────────────────────────┤
+│ 1. load_pending_candidate() → version = 0     │
+│ 2. validate → KeyBlock                         │
+│ 3. BEGIN TRANSACTION                           │
+│ 4. insert KeyBlock                             │
+│ 5. mark_confirmed_in_tx_with_cas(version=0)    │
+│    ┌─ UPDATE ... SET version=version+1         │
+│    │  WHERE job_id=? AND status='pending'      │
+│    │  AND version=0                            │
+│    └─ rows_affected==1 → COMMIT               │
+│       rows_affected==0 → check cause:          │
+│         - status≠pending → rollback (already   │
+│           confirmed/rejected by another writer)│
+│         - version≠0 → E_VERSION exit 76        │
+│           (stale preimage; retry)              │
+└────────────────────────────────────────────────┘
+```
+
+The CAS is applied **inside** the file-lock scope (concurrency.md §2.4): file lock
+→ DB transaction → CAS. No deadlock risk.
+
+### 6.2 Query path
+
 ```text
 novel-writing outline/draft
   → refactor of fetch_world_kb → format_chapter_kb_block (moment-context-assembly)
