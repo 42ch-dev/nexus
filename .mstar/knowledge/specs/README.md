@@ -92,6 +92,7 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [orchestration-engine.md](orchestration-engine.md) | Master | Active |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
 | [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice |
+| [llm-extract.md](llm-extract.md) | Master | **Normative — V1.51 Shipped (T-A P0)** — `nexus.llm.extract` capability + `LlmExtractTask` + `kb_extract_jobs` LLM payload extension (closes R-V150KBED-01) |
 
 ### Creator product lines
 
@@ -153,6 +154,7 @@ When specs disagree, higher row wins:
 | Agent `nexus.*` tools | agent-nexus-tool-bridge | acp-capability-set, agent-host |
 | ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
 | KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
+| LLM extraction capability | [llm-extract.md](llm-extract.md) | entity-scope-model §5.5.6, world-kb-runtime-architecture §5.5, cli-spec §6.2G |
 
 ---
 

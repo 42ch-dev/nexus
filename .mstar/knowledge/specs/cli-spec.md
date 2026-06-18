@@ -417,6 +417,28 @@ Rules:
 
 **Target (V1.40 P0):** plan `2026-06-10-v1.40-world-create-and-validation`.
 
+**V1.51 T-A P0 amendment — `creator world kb adopt` surfaces LLM extraction metadata.**
+When a `pending` candidate was produced by the `nexus.llm.extract` pathway
+(V1.51; see [llm-extract.md](llm-extract.md)), the adopt output surfaces two
+additional fields so the author can judge extraction quality before confirming:
+
+- `confidence`: the LLM self-reported confidence (`0.0`–`1.0`), read from
+  `kb_extract_jobs.llm_confidence` (falls back to the `proposed_payload` JSON
+  `confidence` key for backward compat). Heuristic rows report `confidence: -`
+  (column `NULL`).
+- `source_quote`: the verbatim chapter excerpt justifying the extraction, read
+  from `kb_extract_jobs.llm_source_quote` (falls back to the `proposed_payload`
+  JSON `source_quote` key). Heuristic rows report `source_quote: -`.
+
+Example (LLM pathway): `confidence: 0.92 / block_type: scene / source_quote:
+"...the eastern gate groaned open..."`. Example (heuristic fallback):
+`confidence: - / block_type: character / source_quote: -`. The `--json` output
+includes `llm_confidence` and `llm_source_quote` keys (nullable). The promotion
+gate (§5.5.3 of entity-scope-model) and `ValidationMode::Novel` re-run are
+unchanged.
+
+**Target (V1.51 T-A P0):** plan `2026-06-18-v1.51-llm-extraction`.
+
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
 Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-lifecycle.md), [novel-writing/work-pool.md](./novel-writing/work-pool.md).
