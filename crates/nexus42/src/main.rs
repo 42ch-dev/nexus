@@ -85,10 +85,14 @@ async fn main() {
 
     if let Err(e) = result {
         eprintln!("Error: {e}");
-        // V1.51 T-B P0: E_LOCK exits with 75 (EX_TEMPFAIL) for advisory lock contention.
-        // All other errors exit with 1.
+        // V1.51 T-B P0: exit code mapping for advisory lock errors.
+        // - E_LOCK   (contention, temporary):  exit 75 (EX_TEMPFAIL)
+        // - E_LOCK_IO (I/O failure, config):   exit 78 (EX_CONFIG)
+        // - All other errors:                   exit 1
         let code = if matches!(e, nexus42::errors::CliError::Locked { .. }) {
             75
+        } else if matches!(e, nexus42::errors::CliError::LockIo(_)) {
+            78
         } else {
             1
         };

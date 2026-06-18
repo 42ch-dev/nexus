@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use nexus_local_db::file_lock;
+use nexus_local_db::file_lock::FileLockError;
 
 fn test_work_dir() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
@@ -23,7 +24,11 @@ async fn concurrent_tasks_serialise_via_file_lock() {
 
     // Task 2 fails to acquire while task 1 holds the lock.
     let err = file_lock::try_acquire(&work_dir, "cli:task-2").unwrap_err();
-    assert_eq!(err.holder_name, "cli:task-1");
+    let locked = match err {
+        FileLockError::Locked(locked) => locked,
+        _ => panic!("expected FileLockError::Locked, got {err:?}"),
+    };
+    assert_eq!(locked.holder_name, "cli:task-1");
 
     drop(g1);
 

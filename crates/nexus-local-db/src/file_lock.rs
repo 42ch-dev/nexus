@@ -68,6 +68,44 @@ pub struct FileLockGuard {
     heartbeat_cancel: tokio::sync::watch::Sender<bool>,
 }
 
+/// Error returned by [`try_acquire`].
+///
+/// Distinguishes real I/O failures (permission denied, disk full, missing
+/// parent directory) from lock contention. Callers must map these to different
+/// exit codes (e.g. 75 for temporary contention, 78 for configuration/I/O errors).
+#[derive(Debug)]
+pub enum FileLockError {
+    /// Another process holds the lock (contention — retryable).
+    Locked(Locked),
+    /// An I/O error prevented lock acquisition (not retryable — configuration
+    /// or environment problem).
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for FileLockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Locked(locked) => write!(f, "file lock held: {}", locked.display_line()),
+            Self::Io(e) => write!(f, "file lock I/O error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for FileLockError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Locked(_) => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for FileLockError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
 /// Build the lock file path for a Work directory.
 #[must_use]
 fn lock_file_path(work_dir: &Path) -> PathBuf {
@@ -143,17 +181,20 @@ fn write_lock_metadata_to_path(path: &Path, body: &str) {
 /// a `FileLockGuard` that releases the lock on drop.
 ///
 /// On conflict, reads the existing lock metadata from the file and returns
-/// `Locked` with holder details and staleness.
+/// `FileLockError::Locked` with holder details and staleness.
 ///
 /// # Errors
 ///
-/// Returns `Locked` if another process holds the lock.
-pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, Locked> {
+/// Returns `FileLockError::Locked` if another process holds the lock.
+/// Returns `FileLockError::Io` if an I/O error prevents acquisition
+/// (permission denied, disk full, missing parent directory, etc.).
+pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, FileLockError> {
     let lock_path = lock_file_path(work_dir);
 
-    // Ensure the parent directory exists.
+    // Ensure the parent directory exists. Propagate I/O errors up — do NOT
+    // silently swallow permission-denied or disk-full failures.
     if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent).ok();
+        std::fs::create_dir_all(parent)?;
     }
 
     // Open or create the lock file.
@@ -162,13 +203,7 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         .write(true)
         .create(true)
         .truncate(false)
-        .open(&lock_path)
-        .map_err(|_e| Locked {
-            holder_pid: 0,
-            holder_name: "unknown".to_string(),
-            expires_at_ms: 0,
-            stale: false,
-        })?;
+        .open(&lock_path)?;
 
     // Try non-blocking exclusive lock.
     let raw_fd = fd.as_raw_fd();
@@ -186,12 +221,12 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         let stale =
             expires_at_ms > 0 && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000;
 
-        return Err(Locked {
+        return Err(FileLockError::Locked(Locked {
             holder_pid,
             holder_name,
             expires_at_ms,
             stale,
-        });
+        }));
     }
 
     // Lock acquired. Write metadata.
@@ -373,9 +408,13 @@ mod tests {
         let _guard = try_acquire(&work_dir, "cli:holder-a").unwrap();
 
         let err = try_acquire(&work_dir, "cli:holder-b").unwrap_err();
-        assert_eq!(err.holder_name, "cli:holder-a");
-        assert_eq!(err.holder_pid, std::process::id());
-        assert!(!err.stale, "fresh lock should not be stale");
+        let locked = match err {
+            FileLockError::Locked(locked) => locked,
+            _ => panic!("expected FileLockError::Locked, got {err:?}"),
+        };
+        assert_eq!(locked.holder_name, "cli:holder-a");
+        assert_eq!(locked.holder_pid, std::process::id());
+        assert!(!locked.stale, "fresh lock should not be stale");
     }
 
     // ── Lock released after drop allows reacquire ──────────────────
@@ -486,10 +525,45 @@ mod tests {
 
         let guard_a = try_acquire(&work_dir, "cli:scope-a").unwrap();
         let err = try_acquire(&work_dir, "cli:scope-b").unwrap_err();
-        assert_eq!(err.holder_name, "cli:scope-a");
+        let locked = match err {
+            FileLockError::Locked(locked) => locked,
+            _ => panic!("expected FileLockError::Locked, got {err:?}"),
+        };
+        assert_eq!(locked.holder_name, "cli:scope-a");
 
         drop(guard_a);
         let guard_c = try_acquire(&work_dir, "cli:scope-c").unwrap();
         drop(guard_c);
+    }
+
+    // ── I/O errors surface as FileLockError::Io ─────────────────────
+
+    #[test]
+    fn test_io_error_surfaces_not_locked() {
+        // Use a path whose parent is a regular file, not a directory.
+        // create_dir_all will fail with "Not a directory" → Io, not Locked.
+        let dir = tempfile::tempdir().unwrap();
+        // Create a regular file at the lock path's parent so create_dir_all fails.
+        let work_dir = dir.path().join("Works").join("file-as-dir");
+        let _lock_path = work_dir.join(".lock");
+        // Create a regular file where a directory is expected.
+        std::fs::create_dir_all(work_dir.parent().unwrap()).unwrap();
+        std::fs::write(&work_dir, "block").unwrap();
+
+        let err = try_acquire(&work_dir, "cli:io-test").unwrap_err();
+        match err {
+            FileLockError::Io(io_err) => {
+                assert!(
+                    io_err.to_string().contains("Not a directory")
+                        || io_err.to_string().contains("File exists"),
+                    "expected I/O error about directory, got: {io_err}"
+                );
+            }
+            FileLockError::Locked(_) => {
+                panic!("expected FileLockError::Io, got Locked — I/O errors must not be mapped to Locked");
+            }
+        }
+        // Clean up for next test.
+        std::fs::remove_file(&work_dir).ok();
     }
 }

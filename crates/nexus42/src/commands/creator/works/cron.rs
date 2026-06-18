@@ -665,12 +665,15 @@ async fn handle_set(
         if work_dir.exists() {
             match nexus_local_db::file_lock::try_acquire(&work_dir, "cli:cron-set") {
                 Ok(guard) => Some(guard),
-                Err(locked) => {
+                Err(nexus_local_db::file_lock::FileLockError::Locked(locked)) => {
                     return Err(CliError::Locked {
                         holder_pid: locked.holder_pid,
                         holder_name: locked.holder_name,
                         stale: locked.stale,
                     });
+                }
+                Err(nexus_local_db::file_lock::FileLockError::Io(e)) => {
+                    return Err(CliError::LockIo(e));
                 }
             }
         } else {
