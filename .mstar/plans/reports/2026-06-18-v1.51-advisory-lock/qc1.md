@@ -3,8 +3,9 @@ report_kind: qc_review
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-18-v1.51-advisory-lock
-verdict: Request Changes
+verdict: Approve
 generated_at: 2026-06-18T00:00:00Z
+revalidated_at: 2026-06-18T00:00:00Z
 ---
 
 # Code Review Report
@@ -255,11 +256,11 @@ Confidence: High. Reproduced by code inspection.
 
 ## Summary
 
-| Severity | Count |
-|----------|-------|
-| 🔴 Critical | 0 |
-| 🟡 Warning | 2 |
-| 🟢 Suggestion | 7 |
+| Severity | Count | Resolved |
+|----------|-------|----------|
+| 🔴 Critical | 0 | — |
+| 🟡 Warning | 2 | 2 (W-001, W-002) |
+| 🟢 Suggestion | 7 | 0 (non-blocking) |
 
 **Test verification** (run locally in Review cwd):
 
@@ -288,11 +289,13 @@ The two Warnings are localised and fixable without re-architecting: W-001 is a s
 
 ## Verdict
 
-**Request Changes**
+**Original: Request Changes** — W-001 (incomplete CLI mutation-path coverage) and W-002 (I/O errors silently mapped to Locked) blocked approval.
 
-Two unresolved Warnings (W-001, W-002) block approval:
+**Revalidated: Approve** — both Warnings resolved (see §Revalidation below).
 
-- **W-001** is an explicit goal/acceptance-focus gap: the plan and assignment both name three CLI mutating commands; only one is integrated; the deferral is not registered as a residual.
-- **W-002** is a stability contract violation: exit code 75 (`EX_TEMPFAIL`) is reserved for temporary contention, but the current error mapping surfaces it for persistent I/O failures (permission denied, disk full, missing parent dir), misleading operators with "work is held by unknown pid=0".
+## Revalidation (2026-06-18)
 
-Suggestions (S-001 … S-007) are non-blocking; the implementer is encouraged to address S-002 (test warnings), S-004 (placeholder commit hash), and S-006 (cosmetic) in the same fix round since they are trivial.
+- **Resolved: W-001 (Warning)** — `creator run` + `creator world kb adopt` now acquire `Works/<work_ref>/.lock` before mutating (commits `6dccee36` + `3444d046`). Both paths mirror the `creator works cron set` pattern: resolve `work_ref` from DB, acquire non-blocking `flock(LOCK_EX|LOCK_NB)`, return `E_LOCK` + exit 75 on contention or `E_LOCK_IO` + exit 78 on I/O failure. New hermetic tests: `creator_run_lock` (3) + `kb_adopt_lock` (3).
+- **Resolved: W-002 (Warning)** — `FileLockError` enum (`Locked(Locked)` | `Io(io::Error)`) added; `try_acquire` propagates I/O errors with `?` (no more `.ok()` swallow). CLI maps `Locked` → exit 75 (`E_LOCK`, temporary contention) and `Io` → exit 78 (`E_LOCK_IO`, persistent config error). New hermetic test: `cli_lock_io_error` (5) + `test_io_error_surfaces_not_locked` (unit).
+- **Evidence:** All 59 tests pass (47 pre-existing + 12 new), clippy clean (`-D warnings`), `cargo +nightly fmt --all` clean. Spec `concurrency.md` §2.3-2.4 updated with `FileLockError` type and dual exit-code contract.
+- **Re-verdict:** **Approve** — both blocking Warnings resolved; architecture coherence preserved.

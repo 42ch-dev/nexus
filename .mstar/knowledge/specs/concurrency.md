@@ -67,20 +67,35 @@ Example: `12345:daemon:schedule:SCH20260618120000:1718700000000`
 /// Try to acquire the advisory file lock for a Work.
 ///
 /// On success, returns a `FileLockGuard` that releases on drop.
-/// On conflict, returns `Locked` with holder details (pid, name, staleness).
+/// On conflict, returns `FileLockError::Locked` with holder details (pid, name, staleness).
+/// On I/O failure, returns `FileLockError::Io(io::Error)` (permission denied, disk full, etc.).
 ///
 /// Never blocks — returns immediately.
-pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, Locked>;
+pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, FileLockError>;
 ```
 
 Where `work_dir` is the resolved `Works/<work_ref>/` directory.
 
-### 2.4 Lock Ordering
+### 2.4 Lock Ordering and Exit-Code Contract
 
 To prevent deadlocks:
 
 1. **File lock BEFORE DB lock.** Acquire `FileLockGuard` before beginning any SQLite transaction that mutates `works` or related rows.
 2. **Never acquire two file locks simultaneously** in the same process (single-Work scope per operation).
+
+The CLI maps `try_acquire` failures to distinct exit codes so operators can distinguish temporary contention from persistent I/O failures:
+
+| Error | Stable code | Exit code | Meaning |
+|-------|-------------|-----------|---------|
+| `FileLockError::Locked` | `E_LOCK` | 75 (`EX_TEMPFAIL`) | Temporary contention — another process holds the lock; retry later. |
+| `FileLockError::Io` | `E_LOCK_IO` | 78 (`EX_CONFIG`) | Persistent I/O failure — permission denied, disk full, or missing parent directory; operator intervention required. |
+
+These error types are surfaced through the `CliError` enum:
+
+- `CliError::Locked { holder_pid, holder_name, stale }` → `E_LOCK` + exit 75
+- `CliError::LockIo(io::Error)` → `E_LOCK_IO` + exit 78
+
+Callers must **never** map an I/O failure to `E_LOCK` or exit 75 — that would mislead operators into retrying against a permanent environment problem.
 
 ### 2.5 Relationship to DB-Level Runtime Lock
 
@@ -104,7 +119,7 @@ Before enqueuing a cron-triggered schedule (via `auto_chain::enqueue_cron_schedu
 1. Resolve `Works/<work_ref>/` directory from the Work record.
 2. Call `try_acquire(work_dir, holder_name)` where `holder_name` is `daemon:schedule:<new_schedule_id>`.
 3. On success: proceed to enqueue; the `FileLockGuard` must remain alive through the enqueue + DB write.
-4. On `Locked`: skip this fire with `info!("cron-supervisor: work is file-locked by {holder}, skipping fire")`; increment `skipped_gated` counter.
+4. On `FileLockError::Locked`: skip this fire with `info!("cron-supervisor: work is file-locked by {holder}, skipping fire")`; increment `skipped_gated` counter.
 
 ### 3.2 Cron Evaluator (Read-Only)
 
@@ -128,13 +143,21 @@ The following CLI paths must acquire the file lock before mutating any `works` o
 | `creator run` (all subcommands that mutate) | `nexus42::commands::creator::run::handle_run` | `cli:run` |
 | `creator world kb adopt` | `nexus42::commands::creator::world::handle_adopt` | `cli:kb-adopt` |
 
-### 4.2 Contention Behavior
+### 4.2 Contention and I/O Error Behavior
 
-When a CLI command cannot acquire the file lock (another process holds it):
+When a CLI command cannot acquire the file lock because another process holds it:
 
 - Return `CliError::Locked { holder_pid, holder_name, stale }` — a stable error variant.
-- Exit with code **75** (EX_TEMPFAIL — stable across Unix). This is the canonical sysexits code for temporary failure due to resource contention.
-- Print a user-friendly message: `E_LOCK: work is held by <holder_name> pid=<holder_pid>; retry after the holder releases`
+- Exit with code **75** (`EX_TEMPFAIL`). This is the canonical sysexits code for temporary failure due to resource contention.
+- Print a user-friendly message: `E_LOCK: work is held by <holder_name> pid=<holder_pid>; retry after the holder releases`.
+
+When a CLI command cannot acquire the file lock because of an I/O failure (permission denied, disk full, missing parent directory):
+
+- Return `CliError::LockIo(io::Error)` — a stable error variant.
+- Exit with code **78** (`EX_CONFIG`). This signals a persistent environment/configuration error that requires operator intervention, **not** a retry.
+- Print a user-friendly message: `E_LOCK_IO: could not acquire file lock (<error>); check filesystem permissions and disk space`.
+
+Callers must **never** map an I/O failure to `E_LOCK` or exit 75 — temporary contention and persistent I/O failure are distinct failure modes with distinct exit codes.
 
 ### 4.3 Read-Only Commands (Lock NOT Required)
 
