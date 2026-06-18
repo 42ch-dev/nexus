@@ -388,10 +388,7 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
         value = serde_json::json!({});
     }
     if let serde_json::Value::Object(map) = &mut value {
-        let arr: Vec<serde_json::Value> = chapters
-            .iter()
-            .map(|c| serde_json::json!(c))
-            .collect();
+        let arr: Vec<serde_json::Value> = chapters.iter().map(|c| serde_json::json!(c)).collect();
         map.insert("source_chapters".to_string(), serde_json::Value::Array(arr));
     }
     serde_json::to_string(&value).unwrap_or_else(|_| base_payload.to_string())
@@ -1113,7 +1110,10 @@ mod tests {
         ];
         let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
         assert_eq!(aggregates.len(), 2);
-        let names: Vec<&str> = aggregates.iter().map(|a| a.canonical_name.as_str()).collect();
+        let names: Vec<&str> = aggregates
+            .iter()
+            .map(|a| a.canonical_name.as_str())
+            .collect();
         assert!(names.contains(&"Aelin"));
         assert!(names.contains(&"Bran"));
     }
@@ -1140,7 +1140,10 @@ mod tests {
         // already, but aggregation must be robust to duplicates) + chapter 2
         // mentions it once.
         let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
-            (1, vec![heuristic_candidate("Aelin"), heuristic_candidate("Aelin")]),
+            (
+                1,
+                vec![heuristic_candidate("Aelin"), heuristic_candidate("Aelin")],
+            ),
             (2, vec![heuristic_candidate("Aelin")]),
         ];
         let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
@@ -1199,14 +1202,15 @@ mod tests {
             confidence: Some(0.92),
             source_quote: Some("...the eastern gate groaned open...".to_string()),
         };
-        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
-            (1, vec![llm]),
-            (2, vec![heuristic_candidate("Azure Gate")]),
-        ];
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> =
+            vec![(1, vec![llm]), (2, vec![heuristic_candidate("Azure Gate")])];
         let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
         assert_eq!(aggregates.len(), 1);
         assert_eq!(aggregates[0].confidence, Some(0.92));
-        assert_eq!(aggregates[0].source_quote.as_deref(), Some("...the eastern gate groaned open..."));
+        assert_eq!(
+            aggregates[0].source_quote.as_deref(),
+            Some("...the eastern gate groaned open...")
+        );
         assert_eq!(aggregates[0].block_type, "scene");
     }
 }
