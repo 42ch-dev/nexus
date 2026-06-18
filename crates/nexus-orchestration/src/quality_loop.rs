@@ -252,6 +252,151 @@ pub fn extract_candidates_from_text(text: &str) -> Vec<KbCandidate> {
         .collect()
 }
 
+// ── Cross-chapter aggregation (V1.51 T-A P1) ──────────────────────────
+
+/// An aggregate of the same canonical entity extracted across multiple
+/// chapters of a Work (V1.51 T-A P1 cross-chapter rescan).
+///
+/// Produced by [`aggregate_candidates_by_canonical_name`]. The
+/// `kb_extract_jobs` DB uniqueness `(creator, canonical_name, world)` (V1.50
+/// P1 migration) collapses one [`AggregatedCandidate`] to a single pending
+/// candidate row; `source_chapters` records every chapter that referenced the
+/// entity so the merged row carries cross-chapter provenance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AggregatedCandidate {
+    /// Canonical entity name (case preserved from the first chapter that
+    /// referenced the entity; grouping itself is case-insensitive).
+    pub canonical_name: String,
+    /// Chapters that referenced this entity, sorted ascending + deduped
+    /// (e.g. `[3, 5, 7]`). Injected into `proposed_payload` as a
+    /// `source_chapters` JSON array by the aggregator.
+    pub source_chapters: Vec<i32>,
+    /// Merged `KeyBlockBody` JSON. Based on the first contributing
+    /// candidate's payload, with a `source_chapters` array injected so the
+    /// upserted row records cross-chapter reuse (entity-scope-model §5.5.1).
+    pub proposed_payload: String,
+    /// `block_type` (`snake_case` wire value) from the contributing
+    /// candidates. Heuristic aggregates: `character`; LLM aggregates: the
+    /// model's judgement.
+    pub block_type: String,
+    /// LLM self-reported confidence, if any contributing candidate carried
+    /// one. `None` for pure-heuristic aggregates.
+    pub confidence: Option<f64>,
+    /// Verbatim source quote, if any contributing candidate carried one.
+    /// `None` for pure-heuristic aggregates.
+    pub source_quote: Option<String>,
+}
+
+/// Pure aggregation: group per-chapter candidates by `canonical_name`
+/// (case-insensitive), merging cross-chapter provenance.
+///
+/// Returns aggregates ordered by first-seen `canonical_name`. Each
+/// aggregate's `source_chapters` is the sorted, deduped union of chapters
+/// that produced the entity; `proposed_payload` is the first contributing
+/// candidate's payload with a `source_chapters` array injected so the
+/// upserted `kb_extract_jobs` row records cross-chapter reuse.
+///
+/// **Pathway-agnostic**: works for heuristic and LLM candidates. For
+/// heuristic candidates (`confidence`/`source_quote` are `None`), the
+/// aggregate's LLM fields stay `None`. When an LLM candidate and a heuristic
+/// candidate share a canonical name, the LLM candidate's metadata wins (it is
+/// strictly more informative); within the same pathway, the first-seen
+/// candidate's payload is the merge base.
+///
+/// No I/O — unit-testable hermetically. Used by the work-scoped
+/// `creator kb rescan --work <ref>` CLI path (V1.51 T-A P1).
+#[must_use]
+pub fn aggregate_candidates_by_canonical_name(
+    per_chapter: &[(i32, Vec<KbCandidate>)],
+) -> Vec<AggregatedCandidate> {
+    use std::collections::HashMap;
+
+    // The HashMap maps the lowercased canonical-name key → index into the
+    // parallel output Vecs. Output order follows first-seen canonical name.
+    let mut key_to_idx: HashMap<String, usize> = HashMap::new();
+    // Accumulators keyed by output index.
+    let mut canonical_names: Vec<String> = Vec::new();
+    let mut chapter_sets: Vec<std::collections::BTreeSet<i32>> = Vec::new();
+    let mut payloads: Vec<String> = Vec::new();
+    let mut block_types: Vec<String> = Vec::new();
+    let mut confidences: Vec<Option<f64>> = Vec::new();
+    let mut source_quotes: Vec<Option<String>> = Vec::new();
+
+    for (chapter, candidates) in per_chapter {
+        for candidate in candidates {
+            let key = candidate.canonical_name_guess.to_ascii_lowercase();
+            let idx = if let Some(&i) = key_to_idx.get(&key) {
+                i
+            } else {
+                let i = canonical_names.len();
+                key_to_idx.insert(key.clone(), i);
+                canonical_names.push(candidate.canonical_name_guess.clone());
+                chapter_sets.push(std::collections::BTreeSet::new());
+                payloads.push(candidate.proposed_payload.clone());
+                block_types.push(candidate.block_type.clone());
+                confidences.push(candidate.confidence);
+                source_quotes.push(candidate.source_quote.clone());
+                i
+            };
+            // Record this chapter's contribution.
+            chapter_sets[idx].insert(*chapter);
+            // Prefer LLM metadata when it appears (strictly more informative
+            // than heuristic None). First-seen payload stays the merge base.
+            if candidate.confidence.is_some() {
+                confidences[idx] = candidate.confidence;
+            }
+            if candidate.source_quote.is_some() {
+                source_quotes[idx].clone_from(&candidate.source_quote);
+            }
+            if candidate.block_type != DEFAULT_BLOCK_TYPE_GUESS
+                && block_types[idx] == DEFAULT_BLOCK_TYPE_GUESS
+            {
+                // An LLM-judged block_type overrides the heuristic default.
+                block_types[idx].clone_from(&candidate.block_type);
+            }
+        }
+    }
+
+    canonical_names
+        .into_iter()
+        .enumerate()
+        .map(|(idx, name)| {
+            let chapters: Vec<i32> = chapter_sets[idx].iter().copied().collect();
+            let merged_payload = inject_source_chapters(&payloads[idx], &chapters);
+            AggregatedCandidate {
+                canonical_name: name,
+                source_chapters: chapters,
+                proposed_payload: merged_payload,
+                block_type: block_types[idx].clone(),
+                confidence: confidences[idx],
+                source_quote: source_quotes[idx].clone(),
+            }
+        })
+        .collect()
+}
+
+/// Inject a `source_chapters` array into a candidate payload JSON.
+///
+/// Parses `base_payload` as a JSON object, sets `source_chapters` to the
+/// sorted chapter list, and re-serializes. If `base_payload` is not a JSON
+/// object (defensive — the heuristic always produces an object), wraps it as
+/// `{"source_chapters": [...]}` so the cross-chapter provenance is never lost.
+fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
+    let mut value: serde_json::Value =
+        serde_json::from_str(base_payload).unwrap_or_else(|_| serde_json::json!({}));
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    if let serde_json::Value::Object(map) = &mut value {
+        let arr: Vec<serde_json::Value> = chapters
+            .iter()
+            .map(|c| serde_json::json!(c))
+            .collect();
+        map.insert("source_chapters".to_string(), serde_json::Value::Array(arr));
+    }
+    serde_json::to_string(&value).unwrap_or_else(|_| base_payload.to_string())
+}
+
 // ── Hook entry point ──────────────────────────────────────────────────
 
 /// Review-time KB extraction hook (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
@@ -921,5 +1066,147 @@ mod tests {
         assert_eq!(built.block_type, "character");
         assert_eq!(built.confidence, None);
         assert_eq!(built.source_quote, None);
+    }
+
+    // ── V1.51 T-A P1: cross-chapter aggregation ───────────────────────────
+
+    /// Helper: a heuristic candidate for `name` (the shape
+    /// `extract_candidates_from_text` produces).
+    fn heuristic_candidate(name: &str) -> KbCandidate {
+        KbCandidate {
+            canonical_name_guess: name.to_string(),
+            proposed_payload: serde_json::json!({
+                "summary": format!("Candidate extracted from chapter prose: {name}"),
+                "attributes": {"novel_category": "character", "aliases": [name]},
+                "tags": ["novel", "heuristic-extracted"],
+            })
+            .to_string(),
+            block_type: DEFAULT_BLOCK_TYPE_GUESS.to_string(),
+            confidence: None,
+            source_quote: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_collapses_same_name_across_chapters() {
+        // Chapters 3, 5, 7 each reference "Aelin".
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
+            (3, vec![heuristic_candidate("Aelin")]),
+            (5, vec![heuristic_candidate("Aelin")]),
+            (7, vec![heuristic_candidate("Aelin")]),
+        ];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        assert_eq!(
+            aggregates.len(),
+            1,
+            "same canonical_name across chapters must collapse to one aggregate"
+        );
+        assert_eq!(aggregates[0].canonical_name, "Aelin");
+        assert_eq!(aggregates[0].source_chapters, vec![3, 5, 7]);
+    }
+
+    #[test]
+    fn aggregate_keeps_distinct_names_separate() {
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
+            (1, vec![heuristic_candidate("Aelin")]),
+            (2, vec![heuristic_candidate("Bran")]),
+        ];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        assert_eq!(aggregates.len(), 2);
+        let names: Vec<&str> = aggregates.iter().map(|a| a.canonical_name.as_str()).collect();
+        assert!(names.contains(&"Aelin"));
+        assert!(names.contains(&"Bran"));
+    }
+
+    #[test]
+    fn aggregate_is_case_insensitive_and_preserves_first_seen_case() {
+        // "Aelin" in ch1, "aelin" in ch2 (different case, same entity).
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
+            (1, vec![heuristic_candidate("Aelin")]),
+            (2, vec![heuristic_candidate("aelin")]),
+        ];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        assert_eq!(aggregates.len(), 1, "case-insensitive match must collapse");
+        assert_eq!(
+            aggregates[0].canonical_name, "Aelin",
+            "first-seen case is preserved"
+        );
+        assert_eq!(aggregates[0].source_chapters, vec![1, 2]);
+    }
+
+    #[test]
+    fn aggregate_dedupes_chapter_list() {
+        // Chapter 1 mentions "Aelin" twice (defensive — the heuristic dedupes
+        // already, but aggregation must be robust to duplicates) + chapter 2
+        // mentions it once.
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
+            (1, vec![heuristic_candidate("Aelin"), heuristic_candidate("Aelin")]),
+            (2, vec![heuristic_candidate("Aelin")]),
+        ];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].source_chapters, vec![1, 2]);
+    }
+
+    #[test]
+    fn aggregate_records_source_chapters_in_payload() {
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
+            (3, vec![heuristic_candidate("Aelin")]),
+            (5, vec![heuristic_candidate("Aelin")]),
+            (7, vec![heuristic_candidate("Aelin")]),
+        ];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        let payload: serde_json::Value =
+            serde_json::from_str(&aggregates[0].proposed_payload).unwrap();
+        assert_eq!(
+            payload["source_chapters"],
+            serde_json::json!([3, 5, 7]),
+            "merged payload must carry the cross-chapter provenance array"
+        );
+    }
+
+    #[test]
+    fn aggregate_empty_input_returns_empty() {
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        assert!(aggregates.is_empty());
+    }
+
+    #[test]
+    fn aggregate_skips_chapters_with_no_candidates() {
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
+            (1, vec![heuristic_candidate("Aelin")]),
+            (2, vec![]), // chapter 2 has no candidates
+            (3, vec![heuristic_candidate("Aelin")]),
+        ];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].source_chapters, vec![1, 3]);
+    }
+
+    #[test]
+    fn aggregate_preserves_llm_metadata_when_present() {
+        // An LLM-pathway candidate (confidence + source_quote) aggregating with
+        // a heuristic candidate: the LLM metadata is carried forward.
+        let llm = KbCandidate {
+            canonical_name_guess: "Azure Gate".to_string(),
+            proposed_payload: serde_json::json!({
+                "summary": "x", "attributes": {"novel_category": "scene"},
+                "tags": ["novel", "llm-extracted"],
+            })
+            .to_string(),
+            block_type: "scene".to_string(),
+            confidence: Some(0.92),
+            source_quote: Some("...the eastern gate groaned open...".to_string()),
+        };
+        let per_chapter: Vec<(i32, Vec<KbCandidate>)> = vec![
+            (1, vec![llm]),
+            (2, vec![heuristic_candidate("Azure Gate")]),
+        ];
+        let aggregates = aggregate_candidates_by_canonical_name(&per_chapter);
+        assert_eq!(aggregates.len(), 1);
+        assert_eq!(aggregates[0].confidence, Some(0.92));
+        assert_eq!(aggregates[0].source_quote.as_deref(), Some("...the eastern gate groaned open..."));
+        assert_eq!(aggregates[0].block_type, "scene");
     }
 }
