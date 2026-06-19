@@ -777,17 +777,63 @@ impl StateCompositeTask {
     /// V1.52 T-B P0: resolve labeled routing target from judge output.
     ///
     /// Scans the judge's output text (`judge_reason`) for known label
-    /// strings declared in `next` edges. Returns `GoTo(target)` for the
-    /// first matching label, or `WaitForInput` if no label matches.
-    fn resolve_labeled_target(&self, judge_reason: &str) -> NextAction {
-        if let Some(NextTarget::Labeled(edges)) = &self.next {
-            for edge in edges {
-                if judge_reason.contains(&edge.label) {
-                    return NextAction::GoTo(edge.target.clone());
-                }
+    /// strings declared in `next` edges. On match, writes the matched
+    /// label to context as `_judge_label` and returns `GoTo(target)`.
+    ///
+    /// For legacy binary `GoNogo` states, auto-converts: treats `"go"` and
+    /// `"nogo"` as labeled edges (same preset reachable via either routing API).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(GraphError::TaskExecutionFailed)` when no label
+    /// substring matches the judge output (deterministic branch fail
+    /// instead of silent stall). The error includes the list of known
+    /// labels and an excerpt of the judge output.
+    fn resolve_labeled_target(
+        &self,
+        context: &graph_flow::Context,
+        judge_reason: &str,
+    ) -> Result<NextAction, graph_flow::GraphError> {
+        // Collect candidate (label, target) pairs from the next target.
+        // Sort by descending label length to prevent shorter labels (e.g. "go")
+        // from matching as substrings of longer labels (e.g. "nogo").
+        let mut candidates: Vec<(&str, &str)> = match &self.next {
+            Some(NextTarget::Labeled(edges)) => edges
+                .iter()
+                .map(|e| (e.label.as_str(), e.target.as_str()))
+                .collect(),
+            Some(NextTarget::GoNogo(go_nogo)) => {
+                // W-QC3-2: binary→Labeled auto-conversion.
+                vec![("go", go_nogo.go.as_str()), ("nogo", go_nogo.nogo.as_str())]
+            }
+            _ => return Ok(NextAction::WaitForInput),
+        };
+        candidates.sort_by_key(|(label, _)| std::cmp::Reverse(label.len()));
+
+        for (label, target) in &candidates {
+            if judge_reason.contains(label) {
+                // W-001: write matched label to context for observability.
+                context.set_sync("_judge_label", (*label).to_string());
+                return Ok(NextAction::GoTo((*target).to_string()));
             }
         }
-        NextAction::WaitForInput
+
+        // W-QC3-3: no-match → deterministic fail (not silent stall).
+        let known_labels: Vec<String> = candidates.iter().map(|(l, _)| (*l).to_string()).collect();
+        let excerpt = if judge_reason.len() > 200 {
+            format!("{}...", &judge_reason[..200])
+        } else {
+            judge_reason.to_string()
+        };
+        tracing::warn!(
+            state_id = %self.id,
+            known_labels = ?known_labels,
+            judge_output_excerpt = %excerpt,
+            "resolve_labeled_target: no label matched judge output; failing deterministically"
+        );
+        Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+            "Labeled routing: no label matched judge output. Known labels: {known_labels:?}. Judge output excerpt: {excerpt}"
+        )))
     }
 }
 
@@ -1009,9 +1055,15 @@ impl Task for StateCompositeTask {
                                                 // V1.52 T-B P0: labeled routing via GoTo
                                                 if matches!(
                                                     &self.next,
-                                                    Some(NextTarget::Labeled(_))
+                                                    Some(
+                                                        NextTarget::Labeled(_)
+                                                            | NextTarget::GoNogo(_)
+                                                    )
                                                 ) {
-                                                    self.resolve_labeled_target(&prev_reason)
+                                                    self.resolve_labeled_target(
+                                                        &context,
+                                                        &prev_reason,
+                                                    )?
                                                 } else {
                                                     self.judge_next_action(prev_result)
                                                 }
@@ -1038,16 +1090,17 @@ impl Task for StateCompositeTask {
                     context.set("_judge_result", result).await;
                     context.set("_judge_reason", reason.clone()).await;
 
-                    // V1.52 T-B P0: for Labeled next, write _judge_label
-                    // and route via GoTo. For GoNogo/Linear/None, use
+                    // V1.52 T-B P0: for Labeled or GoNogo next, route via
+                    // resolve_labeled_target (GoTo). For Linear/None, use
                     // the existing judge_next_action(bool) path.
-                    if matches!(&self.next, Some(NextTarget::Labeled(_))) {
-                        self.resolve_labeled_target(&reason)
+                    if matches!(
+                        &self.next,
+                        Some(NextTarget::Labeled(_) | NextTarget::GoNogo(_))
+                    ) {
+                        self.resolve_labeled_target(&context, &reason)?
                     } else {
-                        // V1.42 P2: when next is GoNogo, both GO and NOGO
-                        // advance (the conditional edge routes to the correct
-                        // target). When next is Linear/None, GO advances but
-                        // NOGO waits.
+                        // V1.42 P2: when next is Linear/None, GO advances
+                        // but NOGO waits.
                         self.judge_next_action(result)
                     }
                 }
@@ -1935,7 +1988,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preset::manifest::GoNogoNext;
+    use crate::preset::manifest::{GoNogoNext, LabeledNext};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -3168,5 +3221,151 @@ mod tests {
             task.judge_next_action(false),
             NextAction::Continue
         ));
+    }
+
+    // ── V1.52 T-B P0: resolve_labeled_target unit tests ─────────────────
+
+    fn make_labeled_edges(labels: &[(&str, &str)]) -> Vec<LabeledNext> {
+        labels
+            .iter()
+            .map(|(l, t)| LabeledNext {
+                label: (*l).to_string(),
+                target: (*t).to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resolve_labeled_target_single_label_match() {
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[(
+            "outline",
+            "state_outline",
+        )]))));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "The judge recommends: outline");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            NextAction::GoTo("state_outline".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_multi_label_first_match() {
+        // First matching label (in edge order) should win.
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[
+            ("research", "state_research"),
+            ("outline", "state_outline"),
+            ("abandon", "state_abandon"),
+        ]))));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(
+            &ctx,
+            "I recommend to research more, but outline is also possible",
+        );
+        assert!(result.is_ok());
+        // "research" appears first in both the text and the edge list.
+        assert_eq!(
+            result.unwrap(),
+            NextAction::GoTo("state_research".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_no_match_errors() {
+        // W-QC3-3: no-match MUST NOT stall (return WaitForInput).
+        // Instead, return Err with diagnostic info.
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[
+            ("outline", "state_outline"),
+            ("research", "state_research"),
+        ]))));
+        let ctx = graph_flow::Context::new();
+        let result = task
+            .resolve_labeled_target(&ctx, "The judge output says something completely unrelated");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("no label matched"),
+            "error should mention 'no label matched': {err}"
+        );
+        assert!(
+            err.contains("Known labels"),
+            "error should list known labels: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_non_labeled_next_returns_ok_wait() {
+        // Non-Labeled next (e.g., Linear) should return Ok(WaitForInput).
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "anything");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::WaitForInput);
+    }
+
+    #[test]
+    fn resolve_labeled_target_none_next_returns_ok_wait() {
+        let task = make_composite_with_next(None);
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "anything");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::WaitForInput);
+    }
+
+    #[test]
+    fn resolve_labeled_target_writes_judge_label_context() {
+        // W-001: context._judge_label must be written on successful match.
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[(
+            "outline",
+            "state_outline",
+        )]))));
+        let ctx = graph_flow::Context::new();
+        let _ = task.resolve_labeled_target(&ctx, "choose outline please");
+        let label: Option<String> = ctx.get_sync("_judge_label");
+        assert_eq!(
+            label.as_deref(),
+            Some("outline"),
+            "context._judge_label should be 'outline' after match"
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_gonogo_auto_conversion_go_match() {
+        // W-QC3-2: binary GoNogo edges auto-converted to labeled routing.
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "state_go".to_string(),
+            nogo: "state_nogo".to_string(),
+        })));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "ready to go forward");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::GoTo("state_go".to_string()));
+    }
+
+    #[test]
+    fn resolve_labeled_target_gonogo_auto_conversion_nogo_match() {
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "state_go".to_string(),
+            nogo: "state_nogo".to_string(),
+        })));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "this is a nogo decision");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::GoTo("state_nogo".to_string()));
+    }
+
+    #[test]
+    fn resolve_labeled_target_gonogo_auto_conversion_no_match_errors() {
+        // Auto-converted GoNogo edges also error on no-match.
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "state_go".to_string(),
+            nogo: "state_nogo".to_string(),
+        })));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "completely unrelated text");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("no label matched"), "error: {err}");
     }
 }
