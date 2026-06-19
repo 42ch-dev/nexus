@@ -52,6 +52,14 @@ Pre-V1.42 state:
 
 When Status advances to **Draft** or **Normative**, orchestration-engine §7.5 defers to this document for the full conditional `next` schema.
 
+### 3.1 Multi-branch merge semantics (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-multi-branch-merge-semantics`)  
+**Authoring plan**: `2026-06-19-v1.52-multi-branch-merge-semantics`  
+**Promotes to Normative**: P-last of V1.52
+
+Draft overlay placeholder: define N-way branch merge/join semantics for preset graphs after T-B P0 generalizes binary GO/NOGO routing.
+
 Illustrative YAML (from orchestration-engine §7.5 — not loadable today):
 
 ```yaml

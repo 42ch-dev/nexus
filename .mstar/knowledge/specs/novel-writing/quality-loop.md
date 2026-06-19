@@ -180,6 +180,14 @@ When a `novel-writing` schedule completes and the active chapter transitions to 
 6. **Idempotency**: re-running finalize on the same day overwrites the same log file so repeated transitions do not accumulate duplicate entries.
 7. **Best-effort**: errors are logged at `warn!` and do **not** fail the schedule terminal transition.
 
+### 5.6 Auto-promote high-confidence KB candidates (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-outline-five-q-and-auto-promote`)  
+**Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
+**Promotes to Normative**: P-last of V1.52
+
+Draft overlay placeholder: define the safe auto-promotion rules for high-confidence `nexus.llm.extract` candidates, including validation, provenance, audit log, and fallback-to-pending behavior.
+
 ---
 
 ## 6. Master-decision timeout (DF-67)
@@ -278,4 +286,3 @@ V1.48 closes the novel quality loop: durable findings enrich the writing prompt,
 ## V1.45 supersession (P-last promotion)
 
 **Superseded by**: [creator-run-preset-entry.md](../creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.
-

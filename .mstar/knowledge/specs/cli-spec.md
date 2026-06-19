@@ -517,6 +517,14 @@ Rules:
 
 **Target (V1.51 T-A P2):** plan `2026-06-18-v1.51-missing-kb-detection`.
 
+### 6.2G.1 World KB CLI consolidation + `--auto` flag (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-cli-surface-consolidation-auto`)  
+**Authoring plan**: `2026-06-19-v1.52-cli-surface-consolidation-auto`  
+**Promotes to Normative**: P-last of V1.52
+
+Draft overlay placeholder: consolidate the user-facing World KB command surface around `creator world kb ...`, define legacy `creator kb --scope world` remediation/aliasing, and specify the explicit `--auto` happy-path flag for auto-promotion flows.
+
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
 Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-lifecycle.md), [novel-writing/work-pool.md](./novel-writing/work-pool.md).
@@ -1190,4 +1198,3 @@ v1 至少应保证：
 **Superseded by**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Shipped Master V1.45). The §6.2D/E `creator run` preset-entry table, FL-E stage advance mapping, preset-id examples, and global flags on `creator run` are now part of the canonical Master body.
 
 > **Note on §6.2D/E body**: The §6.2D/E body now defers to the Shipped Master [creator-run-preset-entry.md](./creator-run-preset-entry.md) (V1.45) for the canonical `creator run` surface — see the authoritative-surface pointer at the top of §6.2D and the supersession note in §6.2E. The V1.33–V1.44 bespoke subcommand table was replaced by the generic dispatch entry in commit `4aa5aa53` (V1.45 P-last); the stale `creator run stage` section was deleted in V1.46 P1. Closes residual `R-V145B3-001`.
-

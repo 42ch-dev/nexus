@@ -280,6 +280,14 @@ how it transitions. When the LLM worker is unavailable, the hook falls back to
 the V1.50 heuristic so no-worker environments (hermetic tests,
 daemon-without-worker) remain functional.
 
+#### 5.5.7 Work→KeyBlock provenance linkage (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`)  
+**Authoring plan**: `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`  
+**Promotes to Normative**: P-last of V1.52
+
+Draft overlay placeholder: define how a confirmed World KeyBlock records source Work and extract/provenance anchors so author gates no longer rely only on World ownership when Work-local authorship matters.
+
 ---
 
 ## 6. Scope transition rules
