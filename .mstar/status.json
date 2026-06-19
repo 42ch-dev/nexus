@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-19T15:00:00Z",
+  "updated_at": "2026-06-19T14:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
@@ -39,10 +39,10 @@
     {
       "plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto",
       "title": "T-A P1 \u2014 World KB CLI surface consolidation + --auto happy path",
-      "status": "Todo",
-      "owner": "@fullstack-dev",
+      "status": "InProgress",
+      "owner": "@fullstack-dev-2",
       "agents": [
-        "@fullstack-dev",
+        "@fullstack-dev-2",
         "@qa-engineer"
       ],
       "task_category": "logic",
