@@ -148,15 +148,15 @@
       "merged_at": "2026-06-20T12:30:00Z",
       "plan_count": 7,
       "plan_count_done": 7,
-      "open_at_ship": 1,
+      "open_at_ship": 0,
       "deferred_to_next": 30,
       "wire_contracts_changed": false,
       "profile_b_compaction": "pending"
     },
     "tech_debt_summary": {
       "total_open": 0,
-      "total_deferred": 30,
-      "total_resolved": 75,
+      "total_deferred": 29,
+      "total_resolved": 76,
       "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
@@ -1741,10 +1741,13 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.53",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-19-v1.52-hygiene-and-closeout][R-V152-PLAST-001]",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-hygiene-and-closeout",
         "deferral_note": "Pre-existing on V1.52 integration tree (introduced by migration 202606190004). qc3 flagged as collateral; verified passes on origin/main. Deferred to V1.53 hotfix; non-blocking for V1.52 ship.",
-        "note": "WORKAROUND: In migration 202606190004, ensure the CHECK constraint for works.status is preserved exactly as defined in the original works CREATE TABLE. The root cause is the migration rebuilds works table but the new CHECK constraint may differ from the original."
+        "note": "WORKAROUND: In migration 202606190004, ensure the CHECK constraint for works.status is preserved exactly as defined in the original works CREATE TABLE. The root cause is the migration rebuilds works table but the new CHECK constraint may differ from the original.",
+        "closed_at": "2026-06-20",
+        "closure_note": "Migration 202606190004 stage_status CHECK constraint fixed (commit 4e84b7d2): restored NOT NULL + added active and failed values matching original 20260606 migration. All 5 previously-failing tests now pass.",
+        "closure_evidence": "iteration/v1.52 (commit 4e84b7d2)"
       }
     ]
   }
