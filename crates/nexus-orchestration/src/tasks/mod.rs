@@ -2121,7 +2121,7 @@ mod tests {
             registry,
         );
 
-        let mut ctx = graph_flow::Context::new();
+        let ctx = graph_flow::Context::new();
         ctx.set(
             "chapter_prose".to_string(),
             "Lin Xia drew her blade.".to_string(),
