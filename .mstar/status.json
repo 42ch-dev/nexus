@@ -1236,15 +1236,17 @@
         "severity": "low",
         "source": "qc3 (performance/reliability) W-001",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs vs tasks/mod.rs",
-        "decision": "defer",
+        "decision": "fix",
         "owner": "@architect or @fullstack-dev",
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
         "note": "Non-blocking per qc3 reviewer; both paths tested; unify at P-last or V1.51+ refactor.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.51-llm-extraction",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P0 (commit 431aca4c on feature/v1.52-outline-five-q-and-auto-promote): introduced explicit LlmExtractOutcome enum + shared run_llm_extract helper used by both extract_kb_candidates_for_review (review-time hook) and LlmExtractTask::evaluate (task-runtime). Both paths now go through one canonical entry. Re-target to V1.52 T-A P0 done by PM at prepare.",
+        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote (commit 431aca4c)",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction"
       },
       {
         "id": "R-V151Q3-W002",
@@ -1252,15 +1254,17 @@
         "severity": "low",
         "source": "qc3 (performance/reliability) W-002",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (extract_via_llm WorkerUnavailable path)",
-        "decision": "defer",
+        "decision": "fix",
         "owner": "@fullstack-dev",
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
         "note": "Non-blocking per qc3 reviewer; contract documented; PM awareness note.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.51-llm-extraction",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P0 (commit 431aca4c): LlmExtractOutcome::WorkerUnavailable explicit variant replaces empty-vec contract; caller matches on outcome variant. Re-target to V1.52 T-A P0 done by PM at prepare.",
+        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote (commit 431aca4c)",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction"
       }
     ],
     "2026-06-18-v1.51-advisory-lock": [
@@ -1494,7 +1498,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "T-B P0 fix-wave (commit 1b460a17): _judge_label context key now written by resolve_labeled_target on successful label match (mirror _judge_result pattern); spec overlay preset-conditional-routing.md §3.1 updated to document the actual context key.",
+        "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, 4900b582)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
       {
@@ -1507,7 +1514,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "T-B P0 fix-wave (commits 1b460a17 + fda4e826): added tasks::tests::labeled module with 9 resolve_labeled_target unit tests covering single-label, multi-label first-match (descending-length sort), no-match (deterministic Err per W-004), malformed judge output, and orphan label detection.",
+        "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, fda4e826)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
       {
@@ -1520,7 +1530,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "T-B P0 fix-wave (commits 1b460a17 + fda4e826 + 4900b582): binary→Labeled auto-conversion implemented in resolve_labeled_target (legacy GoNogo edges treated as labeled with go/nogo labels); _judge_label context write implemented (R-V152TB-W001); orphan-label detection at LOAD time already shipped (qc3 W-QC3-2 runtime coverage reframed as tracing::warn! per W-004); named test module tasks::tests::labeled + tests/labeled_routing.rs added; plan body AC3/4/5 updated to reflect shipped scope.",
+        "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, fda4e826, 4900b582)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
       {
@@ -1533,7 +1546,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "T-B P0 fix-wave (commit 1b460a17): resolve_labeled_target no-match now returns Err(GraphError::TaskExecutionFailed(...)) with diagnostic info (known_labels + judge_output_excerpt). Cannot add new variant to external graph-flow crate's NextAction enum; Err with structured diagnostic is deterministic branch fail instead of silent WaitForInput stall. tracing::warn! at the orchestrator layer surfaces the no-match case in observability. Spec overlay preset-conditional-routing.md §3.1 documents the new behavior.",
+        "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, 4900b582)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
       {
@@ -1546,7 +1562,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "T-B P0 fix-wave (commits 1b460a17 + fda4e826): named test module tasks::tests::labeled (9 unit tests) + integration tests in tests/labeled_routing.rs (5 tests covering preset load+execute, hybrid GoNogo+Labeled precedence, orphan label detection, 6-embedded-preset regression). Total Labeled code path test coverage now spans: loader, validator, tasks/mod.rs (resolve_labeled_target), and all embedded presets.",
+        "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, fda4e826)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
       {
@@ -1560,7 +1579,8 @@
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md §Warnings",
         "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
+        "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
+        "deferral_note": "T-B P0 fix-wave partially mitigated via descending-length sort (commit 1b460a17); full hardening (anchored label tokens, normalization) deferred to V1.52 P-last WL-A per qc1 explicit non-blocking classification."
       },
       {
         "id": "R-V152TB-W007",
@@ -1573,7 +1593,8 @@
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
         "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
+        "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
+        "deferral_note": "Documentation hardening only; runtime path uses resolve_labeled_target (not add_edge). Doc comment is the only signal; deferred to V1.52 P-last WL-A."
       },
       {
         "id": "R-V152TB-W008",
@@ -1586,8 +1607,9 @@
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
         "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
+        "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
+        "deferral_note": "Sub-millisecond at typical N=2-5; pathological N=1000 with 10KB judge output ≈10ms/fire. Performance hardening deferred to V1.52 P-last WL-A."
       }
-    ]
+    ] 
   }
 }
