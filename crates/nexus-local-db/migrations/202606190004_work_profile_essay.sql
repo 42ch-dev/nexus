@@ -29,8 +29,8 @@ CREATE TABLE works_new (
     total_planned_chapters INTEGER DEFAULT NULL,
     current_chapter INTEGER NOT NULL DEFAULT 0,
     current_stage TEXT,
-    stage_status TEXT DEFAULT 'pending'
-        CHECK (stage_status IS NULL OR stage_status IN ('pending', 'in_progress', 'complete', 'skipped')),
+    stage_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (stage_status IN ('pending','active','in_progress','complete','skipped','failed')),
     auto_chain_enabled INTEGER NOT NULL DEFAULT 0,
     driver_schedule_id TEXT,
     auto_chain_interrupted INTEGER NOT NULL DEFAULT 0,
