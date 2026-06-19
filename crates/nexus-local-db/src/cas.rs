@@ -4,7 +4,7 @@
 //! Plan: `2026-06-18-v1.51-per-row-occ.md` §2.2, §2.4.
 //!
 //! Provides:
-//! - [`cas_update_result`] — check the result of a version-guarded UPDATE.
+//! - [`cas_check`] — check the result of a version-guarded UPDATE.
 //! - [`with_cas_retry`] — retry wrapper for CAS operations that may fail
 //!   due to stale preimages (cron-side fire paths).
 //!
