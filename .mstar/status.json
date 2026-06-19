@@ -1653,6 +1653,47 @@
         "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commit 2c223b78)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       }
+    ],
+    "2026-06-19-v1.52-cli-surface-consolidation-auto": [
+      {
+        "id": "R-V152TAP1-W001",
+        "title": "Alias forward wiring untested (qc1 W-001 + qc3 W-001; blocking; plan TDD contract T6/T7 violated)",
+        "severity": "medium",
+        "source": "qc1 (architecture/maintainability) W-001 + qc3 (performance/reliability) W-001 (cross-reviewer corroboration)",
+        "scope": "crates/nexus42/src/commands/creator/kb.rs:448-454, 610-615, 789-797 (forward call sites); tests/world_kb_alias.rs (missing forward-wiring tests for list/show/remove)",
+        "decision": "fix",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.52 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md §Warnings + qc3.md §Warnings",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
+      },
+      {
+        "id": "R-V152TAP1-W002",
+        "title": "Error message divergence between legacy and canonical Schema::init failure (qc3 W-002; blocking)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus42/src/commands/creator/kb.rs (legacy error message: \"Failed to open workspace pool: …\") vs crates/nexus42/src/commands/creator/world/kb.rs (canonical error message: \"local database error: …\")",
+        "decision": "fix",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.52 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc3.md §Warnings",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
+      },
+      {
+        "id": "R-V152TAP1-S001",
+        "title": "creator kb --scope world --help doesn't point to canonical surface (qc1 S-001; partial-blocking discoverability gap)",
+        "severity": "low",
+        "source": "qc1 S-001",
+        "scope": "crates/nexus42/src/commands/creator/kb.rs (--help output)",
+        "decision": "fix",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.52 T-A P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md §Suggestions",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
+      }
     ] 
   }
 }
