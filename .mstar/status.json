@@ -5,7 +5,8 @@
     {
       "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
       "title": "P-1 — V1.52 compass, plans, spec overlays, tracker, status (docs-only)",
-      "status": "Todo",
+      "status": "Done",
+      "done_at": "2026-06-19T08:30:00Z",
       "owner": "@project-manager",
       "agents": ["@project-manager", "@architect", "@writing-specialist"],
       "task_category": "docs",
@@ -92,10 +93,10 @@
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.51",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.52 (prepare GO pending P-1 signoff)",
+    "latest_active_iteration": "V1.52 (Active — implement GO)",
     "latest_active_compass": "v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "PENDING — V1.52 P-1 awaiting PM signoff",
+    "pre_implement_gate": "GO — V1.52 P-1 Done 2026-06-19",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {

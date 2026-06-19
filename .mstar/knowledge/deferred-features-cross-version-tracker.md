@@ -1,8 +1,8 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.52 Active prepare** (2026-06-19, P-1 pending PM signoff) · **V1.51 Shipped** (2026-06-19, PR #64 @ `c57b927b`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.52 Active** (2026-06-19, P-1 Done; implement GO) · **V1.51 Shipped** (2026-06-19, PR #64 @ `c57b927b`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.52 Active prepare (2026-06-19) — Author Completion & Multi-Branch Preset Orchestration locked; V1.51 Shipped (2026-06-19, PR #64 @ `c57b927b`).
+**Status**: V1.52 Active (2026-06-19) — Author Completion & Multi-Branch Preset Orchestration compass locked, P-1 Done, pre_implement_gate GO, T-A P0 ∥ T-B P0 dispatching; V1.51 Shipped (2026-06-19, PR #64 @ `c57b927b`).
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
@@ -281,7 +281,7 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.52** (Active, prepare GO pending PM signoff 2026-06-19) — [v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md](../iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md) — Author Completion & Multi-Branch Preset Orchestration: Track A outline 五问 + KB auto-promote + CLI consolidation + Work→KeyBlock provenance + essay profile; Track B N-way GO/NOGO + branch merge semantics. 7 plans registered; integration branch `iteration/v1.52`.
+- **V1.52** (Active 2026-06-19, P-1 Done; implement GO) — [v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md](../iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md) — Author Completion & Multi-Branch Preset Orchestration: Track A outline 五问 + KB auto-promote + CLI consolidation + Work→KeyBlock provenance + essay profile; Track B N-way GO/NOGO + branch merge semantics. 7 plans registered; integration branch `iteration/v1.52`; pre_implement_gate GO.
 
 **Latest shipped iteration**
 
