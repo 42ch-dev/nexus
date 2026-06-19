@@ -1,0 +1,22 @@
+{
+  "id": "2026-06-18-v1.51-hygiene-and-closeout",
+  "title": "P-last — V1.50/V1.51 carry-forwards + WL-A + overlay promotion + Profile B + PR",
+  "file": ".mstar/plans/2026-06-18-v1.51-hygiene-and-closeout.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev",
+    "@writing-specialist",
+    "@project-manager"
+  ],
+  "working_branch": "feature/v1.51-hygiene-and-closeout",
+  "merge_target": "iteration/v1.51",
+  "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+  "task_category": "docs",
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-19T06:34:13Z",
+  "done_at": "2026-06-19",
+  "merged_at": "2026-06-19",
+  "merge_commit": "16c19b71",
+  "pr": 65
+}

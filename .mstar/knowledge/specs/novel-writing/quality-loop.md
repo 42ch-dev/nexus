@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Shipped (V1.49 — findings lifecycle F6 integrated)  
+**Status**: Normative — V1.51 Shipped (findings lifecycle F6 + KB closure overwrites/supersedes integrated)  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-17 (V1.49 P-last — findings lifecycle F6 folded from overlay)  
+**Last updated**: 2026-06-19 (V1.51 P-last — findings lifecycle F6 marked Normative; no runtime change)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 
@@ -156,6 +156,7 @@ Works/<work_ref>/Logs/
   brainstorm/    # brainstorm session outputs
   write/         # drafting process logs
   review/        # review outputs, findings notes, review-report.md (V1.48 producer)
+  kb/            # V1.51: KB candidate audit trails (pending/rejected/missing)
   publish/       # reserved until platform publish (DF-59)
 ```
 
@@ -164,6 +165,20 @@ Write discipline:
 1. Logs are process evidence — not canonical正文, World KB, or SOUL.
 2. Promotion to findings, rules, or KB must be explicit.
 3. `Logs/**` is **not** scanned by the chapter sync module ([sync-contract.md](sync-contract.md); [workflow-profile.md](workflow-profile.md) §7).
+
+### 5.5 Missing-KB detection at finalize (V1.51 T-A P2)
+
+When a `novel-writing` schedule completes and the active chapter transitions to `finalized`, the orchestration supervisor runs an advisory missing-KB scan over the finalized chapter prose. The scan reuses the same `nexus.llm.extract` pathway as review-time extraction (T-A P0), falling back to the capitalized-noun heuristic when no worker is available.
+
+1. **Trigger**: `ScheduleSupervisor::on_schedule_terminal` for a completed `novel-writing` schedule.
+2. **Input**: the finalized chapter body from `Works/<work_ref>/Stories/` (the chapter indicated by `works.current_chapter` after finalization).
+3. **Diff**: extracted canonical names are compared against existing `confirmed` `KeyBlock` rows in the Work's World (`kb_key_blocks.canonical_name`). Candidates whose name is absent are classified as `missing`.
+4. **Output**: an advisory log file written to
+   `Works/<work_ref>/Logs/kb/missing/<YYYY-MM-DD>-ch<chapter>.md`.
+   The file uses YAML frontmatter (`generated_at`, `world_id`, `work_id`, `work_ref`, `chapter`, `candidate_count`, `candidates`) and a human-readable Markdown body.
+5. **Scope**: single chapter, single Work. Missing candidates are **not** written to `kb_extract_jobs`; they are surfaced only through the log file and the `creator world kb pending --missing-only` CLI view.
+6. **Idempotency**: re-running finalize on the same day overwrites the same log file so repeated transitions do not accumulate duplicate entries.
+7. **Best-effort**: errors are logged at `warn!` and do **not** fail the schedule terminal transition.
 
 ---
 

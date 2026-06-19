@@ -1,8 +1,10 @@
 //! Hermetic migration + DAO test for the V1.50 T-B P1 `kb_extract_jobs` promotion
-//! lifecycle extension.
+//! lifecycle extension, and the V1.51 T-A P0 LLM payload extension.
 //!
-//! Plan: `.mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md`
-//! Spec: `.mstar/knowledge/specs/entity-scope-model.md` §5.5
+//! Plan: `.mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md` (V1.50),
+//!       `.mstar/plans/2026-06-18-v1.51-llm-extraction.md` (V1.51 T-A P0)
+//! Spec: `.mstar/knowledge/specs/entity-scope-model.md` §5.5 + §5.5.6,
+//!       `.mstar/knowledge/specs/llm-extract.md` §3.2
 //!
 //! Covers:
 //! - **Forward migration**: `run_migrations` adds `promotion_status`,
@@ -326,4 +328,156 @@ async fn pending_list_uses_world_id_covering_index() {
         "R-V150KBED-04: legacy idx_kb_extract_jobs_promotion_status_work index \
          must no longer be referenced by the list query, got plan: {plan_text}"
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V1.51 T-A P0 — LLM payload extension (migration 202606180004)
+// Plan: 2026-06-18-v1.51-llm-extraction; Spec: llm-extract.md §3.2
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Forward migration adds `llm_confidence` + `llm_source_quote` columns.
+#[tokio::test]
+async fn v151_forward_migration_adds_llm_columns() {
+    let (pool, _dir) = fresh_pool().await;
+
+    // SAFETY: test-only PRAGMA inspection of the kb_extract_jobs schema.
+    let rows = sqlx::query("PRAGMA table_info(kb_extract_jobs)")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+    let col_names: Vec<String> = rows.iter().map(|r| r.get::<String, _>("name")).collect();
+    for expected in ["llm_confidence", "llm_source_quote"] {
+        assert!(
+            col_names.iter().any(|c| c == expected),
+            "V1.51 T-A P0: missing column '{expected}' in kb_extract_jobs: {col_names:?}"
+        );
+    }
+}
+
+/// Legacy / heuristic rows keep `llm_confidence` + `llm_source_quote` NULL
+/// (additive migration; no backfill; no destructive change).
+#[tokio::test]
+async fn v151_legacy_rows_default_llm_columns_to_null() {
+    let (pool, _dir) = fresh_pool().await;
+
+    // Insert a V1.50-style heuristic pending row via the legacy entry point.
+    use nexus_local_db::kb_extract_job::insert_pending;
+    let row = insert_pending(
+        &pool,
+        "ctr_v151",
+        "wrk_v151",
+        "wld_v151",
+        Some("wrk_v151"),
+        Some(1),
+        "character",
+        "Heuristic Hero",
+        "{}",
+    )
+    .await
+    .unwrap();
+
+    // Read the raw columns back.
+    // SAFETY: test-only SELECT by PK.
+    let (confidence, quote): (Option<f64>, Option<String>) = sqlx::query_as(
+        "SELECT llm_confidence, llm_source_quote FROM kb_extract_jobs WHERE job_id = ?",
+    )
+    .bind(&row.job_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        confidence, None,
+        "heuristic row llm_confidence must be NULL"
+    );
+    assert_eq!(quote, None, "heuristic row llm_source_quote must be NULL");
+}
+
+/// `insert_pending_with_llm` round-trips the LLM metadata into the dedicated
+/// columns and surfaces them on `KbExtractPromotion`.
+#[tokio::test]
+async fn v151_insert_pending_with_llm_round_trips_metadata() {
+    use nexus_local_db::kb_extract_job::{
+        get_promotion, insert_pending_with_llm, list_pending_for_world,
+    };
+
+    let (pool, _dir) = fresh_pool().await;
+
+    let payload = serde_json::json!({
+        "summary": "The eastern gate",
+        "attributes": {"novel_category": "location", "aliases": ["Azure Gate"]},
+        "tags": ["novel", "llm-extracted"],
+        "block_type": "scene",
+        "canonical_name": "Azure Gate",
+        "confidence": 0.92,
+        "source_quote": "...the eastern gate groaned open...",
+    })
+    .to_string();
+
+    let row = insert_pending_with_llm(
+        &pool,
+        "ctr_v151b",
+        "wrk_v151b",
+        "wld_v151b",
+        Some("wrk_novel_v151"),
+        Some(7),
+        "scene",
+        "Azure Gate",
+        &payload,
+        Some(0.92),
+        Some("...the eastern gate groaned open..."),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(row.block_type_guess.as_deref(), Some("scene"));
+    assert_eq!(row.canonical_name_guess.as_deref(), Some("Azure Gate"));
+    assert_eq!(row.llm_confidence, Some(0.92));
+    assert_eq!(
+        row.llm_source_quote.as_deref(),
+        Some("...the eastern gate groaned open...")
+    );
+
+    // get_promotion surfaces the same metadata.
+    let fetched = get_promotion(&pool, &row.job_id).await.unwrap().unwrap();
+    assert_eq!(fetched.llm_confidence, Some(0.92));
+    assert_eq!(
+        fetched.llm_source_quote.as_deref(),
+        Some("...the eastern gate groaned open...")
+    );
+
+    // list_pending_for_world surfaces the same metadata.
+    let pending = list_pending_for_world(&pool, "wld_v151b", None)
+        .await
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].llm_confidence, Some(0.92));
+    assert_eq!(pending[0].block_type_guess.as_deref(), Some("scene"));
+}
+
+/// `insert_pending` (V1.50 entry point) delegates to `insert_pending_with_llm`
+/// with NULL LLM fields — V1.50 callers keep working unchanged.
+#[tokio::test]
+async fn v151_insert_pending_delegates_with_null_llm_fields() {
+    use nexus_local_db::kb_extract_job::insert_pending;
+
+    let (pool, _dir) = fresh_pool().await;
+    let row = insert_pending(
+        &pool,
+        "ctr_v151c",
+        "wrk_v151c",
+        "wld_v151c",
+        Some("wrk_v151c"),
+        Some(2),
+        "character",
+        "Delegate Hero",
+        "{}",
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(row.llm_confidence, None);
+    assert_eq!(row.llm_source_quote, None);
+    assert_eq!(row.block_type_guess.as_deref(), Some("character"));
 }

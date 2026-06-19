@@ -90,13 +90,13 @@ fn schedule_blob(
     .to_string()
 }
 
-/// Seed a Work + its schedule_json.
+/// Seed a Work + its `schedule_json`.
 async fn seed_work(pool: &SqlitePool, work: &WorkRecord, schedule_json: &str) {
     works::create_work(pool, work).await.unwrap();
     set_schedule(pool, &work.work_id, schedule_json).await;
 }
 
-/// Count pending schedules for (work_id, preset_id).
+/// Count pending schedules for (`work_id`, `preset_id`).
 async fn count_schedules(pool: &SqlitePool, work_id: &str, preset_id: &str) -> i64 {
     let n: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM creator_schedules WHERE work_id = ? AND preset_id = ?",
@@ -126,7 +126,7 @@ async fn cron_fires_on_match_enqueues_brainstorm() {
     .await;
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 1, "brainstorm should fire: {summary:?}");
     assert_eq!(
@@ -149,7 +149,7 @@ async fn cron_fires_on_match_enqueues_write() {
     .await;
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 1, "write should fire: {summary:?}");
     assert_eq!(
@@ -173,7 +173,7 @@ async fn cron_no_match_does_not_enqueue() {
 
     // Pick a `now` that does NOT match either cron (e.g. 2026-06-19 05:30 UTC).
     let now = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 5, 30, 0).unwrap();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(
         summary.fired, 0,
@@ -202,7 +202,7 @@ async fn cron_fires_both_roles_same_minute() {
     .await;
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 2, "both roles should fire: {summary:?}");
     assert_eq!(
@@ -225,7 +225,7 @@ async fn cron_skips_disabled_role() {
     .await;
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(
         summary.fired, 0,
@@ -256,7 +256,7 @@ async fn cron_skips_intake_incomplete() {
     .await;
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 0, "intake-incomplete Work must not fire");
     assert_eq!(summary.skipped_gated, 2, "both roles gated");
@@ -283,7 +283,7 @@ async fn cron_skips_runtime_locked() {
         .unwrap();
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 0, "runtime-locked Work must not fire");
     assert_eq!(summary.skipped_gated, 2);
@@ -310,7 +310,7 @@ async fn cron_skips_completion_locked() {
         .unwrap();
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 0, "completion-locked Work must not fire");
     assert_eq!(summary.skipped_gated, 2);
@@ -334,7 +334,7 @@ async fn cron_idempotent_skip_second_fire_same_minute() {
     let now = chrono::Utc::now();
 
     // First evaluation: brainstorm fires (no prior active schedule).
-    let s1 = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let s1 = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
     assert_eq!(s1.fired, 1, "first sweep should fire: {s1:?}");
     assert_eq!(
         count_schedules(&pool, "wrk_idem", "novel-brainstorm").await,
@@ -342,7 +342,7 @@ async fn cron_idempotent_skip_second_fire_same_minute() {
     );
 
     // Second evaluation same minute: brainstorm skip (prior pending schedule).
-    let s2 = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let s2 = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
     assert_eq!(s2.fired, 0, "second sweep must not fire: {s2:?}");
     assert_eq!(
         s2.skipped_idempotent, 1,
@@ -369,7 +369,7 @@ async fn cron_refires_after_prior_schedule_terminal() {
     .await;
 
     let now = chrono::Utc::now();
-    let s1 = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let s1 = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
     assert_eq!(s1.fired, 1);
 
     // Simulate the prior schedule completing.
@@ -387,7 +387,7 @@ async fn cron_refires_after_prior_schedule_terminal() {
         .unwrap();
 
     // Next evaluation: fires again (prior is terminal, not active).
-    let s2 = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let s2 = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
     assert_eq!(s2.fired, 1, "should re-fire after prior completed: {s2:?}");
     assert_eq!(
         count_schedules(&pool, "wrk_refire", "novel-brainstorm").await,
@@ -514,7 +514,7 @@ async fn set_schedule_json_tx_concurrent_writers_serialise() {
     assert_eq!(stored.as_deref(), Some("{\"v\":\"A-merged\"}"));
 }
 
-/// CAS on a missing Work returns MissingVersionKey (not a false Ok(false)).
+/// CAS on a missing Work returns `MissingVersionKey` (not a false Ok(false)).
 #[tokio::test]
 async fn set_schedule_json_tx_missing_work_errors() {
     let pool = test_pool().await;
@@ -567,7 +567,7 @@ async fn partial_index_used_in_schedule_json_scan() {
 
 // ── Empty / malformed schedule_json edge cases ──────────────────────────────
 
-/// A Work with unparseable schedule_json is skipped (counted as parse error),
+/// A Work with unparseable `schedule_json` is skipped (counted as parse error),
 /// not crashed.
 #[tokio::test]
 async fn cron_skips_malformed_schedule_json() {
@@ -576,7 +576,7 @@ async fn cron_skips_malformed_schedule_json() {
     seed_work(&pool, &work, "{not valid json").await;
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 0);
     assert_eq!(
@@ -585,7 +585,7 @@ async fn cron_skips_malformed_schedule_json() {
     );
 }
 
-/// A Work with no schedule_json at all is not even scanned (the partial index
+/// A Work with no `schedule_json` at all is not even scanned (the partial index
 /// excludes it). A healthy Work with an empty-string blob is likewise excluded.
 #[tokio::test]
 async fn cron_ignores_works_without_schedule_json() {
@@ -595,7 +595,7 @@ async fn cron_ignores_works_without_schedule_json() {
     // No set_schedule call → schedule_json is NULL.
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(
         summary.total_evaluated(),
@@ -629,7 +629,7 @@ async fn cron_fire_then_tick_admits_schedule() {
 
     // Step 1: cron evaluator enqueues a pending brainstorm schedule.
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
     assert_eq!(summary.fired, 1);
 
     // Step 2: supervisor tick admits it (status → running).
@@ -700,7 +700,7 @@ async fn cron_fires_review_role_enqueues_review_master() {
 
     // 14:00 UTC matches the `:00` slot of `0,30 * * * *`.
     let now = chrono::Utc.with_ymd_and_hms(2026, 6, 19, 14, 0, 0).unwrap();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(summary.fired, 1, "review should fire at :00: {summary:?}");
     assert_eq!(
@@ -733,7 +733,7 @@ async fn cron_fires_review_role_enqueues_review_master() {
     let now_off = chrono::Utc
         .with_ymd_and_hms(2026, 6, 19, 14, 15, 0)
         .unwrap();
-    let summary_off = cron_supervisor::evaluate_cron_fires(&pool, now_off).await;
+    let summary_off = cron_supervisor::evaluate_cron_fires(&pool, None, now_off).await;
     assert_eq!(
         summary_off.fired, 0,
         "review must not fire at :15: {summary_off:?}"
@@ -768,7 +768,7 @@ async fn cron_review_respects_per_work_gating() {
         .unwrap();
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(
         summary.fired, 0,
@@ -805,8 +805,8 @@ async fn cron_review_respects_idempotency() {
          (schedule_id, creator_id, preset_id, preset_version, status, \
           concurrency_kind, current_core_context_version, label, \
           created_at, updated_at, work_id) \
-         VALUES ('RVM-PREEXISTING', 'ctr_test', 'novel-review-master', 1, \
-                 'pending', 'serial', 0, 'preexisting', ?, ?, 'wrk_review_idem')",
+         VALUES ('RVM-PREEXISTING-REVIEW', 'ctr_test', 'novel-review-master', 1, \
+                 'pending', 'serial', 0, 'preexisting-review-master', ?, ?, 'wrk_review_idem')",
     )
     .bind(now_ts)
     .bind(now_ts)
@@ -815,7 +815,7 @@ async fn cron_review_respects_idempotency() {
     .unwrap();
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     assert_eq!(
         summary.fired, 0,
@@ -850,7 +850,7 @@ async fn cron_review_graceful_when_no_review_role_configured() {
     .await;
 
     let now = chrono::Utc::now();
-    let summary = cron_supervisor::evaluate_cron_fires(&pool, now).await;
+    let summary = cron_supervisor::evaluate_cron_fires(&pool, None, now).await;
 
     // Brainstorm fires (its cron matches every minute); review is absent →
     // one fire (brainstorm) and one graceful review skip (skipped_no_match).

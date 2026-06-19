@@ -130,7 +130,7 @@ async fn pending_cross_author_returns_403() {
     let (pool, _dir) = fresh_pool().await;
     seed_pending(&pool, "Lin Xia").await;
 
-    let err = kb_pending(&pool, OTHER, WORLD, None, false)
+    let err = kb_pending(&pool, OTHER, WORLD, None, false, false, None)
         .await
         .unwrap_err();
     match err {

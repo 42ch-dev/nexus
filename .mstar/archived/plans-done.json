@@ -210,7 +210,14 @@
     "2026-06-18-v1.50-kb-editor-cli",
     "2026-06-18-v1.50-kb-auto-promotion",
     "2026-06-18-v1.50-kb-refreshable-scan",
-    "2026-06-18-v1.50-hygiene-and-closeout"
+    "2026-06-18-v1.50-hygiene-and-closeout",
+    "2026-06-18-v1.51-harness-docs-prepare",
+    "2026-06-18-v1.51-llm-extraction",
+    "2026-06-18-v1.51-cross-chapter-rescan",
+    "2026-06-18-v1.51-missing-kb-detection",
+    "2026-06-18-v1.51-advisory-lock",
+    "2026-06-18-v1.51-per-row-occ",
+    "2026-06-18-v1.51-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -321,6 +328,42 @@
       "note": "V1.50 P-last T1-T7 Done. T1-T2 (carry-forwards + WL-A 16 residuals closed) + T3 (overlay promotion) + T4 (Profile B compaction) + T5 (tech_debt rollup) + T6 (PR #63) + T7 (PM signoff). Merged to main at 4db0a37b on 2026-06-17 via PR #63. Integration branch iteration/v1.50 to be retired per mstar-branch-worktree.",
       "pr_url": "https://github.com/42ch-dev/nexus/pull/63",
       "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
+    },
+    "v1.51": {
+      "version": "v1.51",
+      "name": "KB Closure & Multi-Writer Concurrency",
+      "compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "shipped_at": "2026-06-19T06:34:13Z",
+      "merge_commit": "pending",
+      "plan_ids": [
+        "2026-06-18-v1.51-harness-docs-prepare",
+        "2026-06-18-v1.51-llm-extraction",
+        "2026-06-18-v1.51-cross-chapter-rescan",
+        "2026-06-18-v1.51-missing-kb-detection",
+        "2026-06-18-v1.51-advisory-lock",
+        "2026-06-18-v1.51-per-row-occ"
+      ],
+      "highlights": {
+        "T-A_P0": "nexus.llm.extract capability + heuristic→LLM swap (closes R-V150KBED-01)",
+        "T-A_P1": "creator kb rescan --work <ref> cross-chapter reconciliation (closes R-V150KBED-08)",
+        "T-A_P2": "finalize-time missing-KB detection + creator world kb pending --missing-only",
+        "T-B_P0": "Works/<work_ref>/.lock advisory lock + heartbeat + zombie detection (closes R-V149P1-01 advisory-lock note)",
+        "T-B_P1": "per-row OCC on kb_extract_jobs + novel_pool_entries; E_VERSION/E_LOCK stable CLI codes",
+        "P-last": "8 WL-A surgical fixes; 6 spec overlays promoted to Normative — V1.51 Shipped; Profile B compaction; tech debt rollup; PR to main"
+      },
+      "residual_lifecycle": {
+        "archived_in_v151": [
+          "R-V150KBED-01",
+          "R-V150KBED-08",
+          "R-V149P1-01",
+          "R-V150P1CRONBW-01"
+        ],
+        "open_v152_carry_forward": [],
+        "open_v152_count": 0
+      },
+      "wire_contract_changes": "None (per compass §0.1 #8)",
+      "pr": 64,
+      "note": "PR #64 open at https://github.com/42ch-dev/nexus/pull/64 — awaiting merge to main on 2026-06-19."
     }
   },
   "metadata": {

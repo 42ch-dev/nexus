@@ -33,7 +33,8 @@ use nexus_kb::store::KbStoreError;
 use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
-    get_promotion, list_pending_for_world, mark_confirmed_in_tx, mark_rejected, KbExtractPromotion,
+    get_promotion, list_pending_for_world, mark_confirmed_in_tx_with_cas, mark_rejected,
+    KbExtractPromotion,
 };
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -89,7 +90,9 @@ pub enum WorldKbCommand {
         yes: bool,
     },
 
-    /// List review-time KB candidates awaiting confirmation (V1.50 T-B P1)
+    /// List review-time KB candidates awaiting confirmation (V1.50 T-B P1).
+    /// With `--missing-only`, list advisory finalize-time missing candidates
+    /// from `Works/<work_ref>/Logs/kb/missing/` instead.
     Pending {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
@@ -99,6 +102,10 @@ pub enum WorldKbCommand {
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
+        /// List advisory missing candidates detected at finalize time
+        /// (scans `Works/<work_ref>/Logs/kb/missing/`)
+        #[arg(long)]
+        missing_only: bool,
     },
 
     /// Confirm a review-time KB candidate → promote to a `confirmed` `KeyBlock`
@@ -154,7 +161,20 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             world_ref,
             limit,
             json,
-        } => kb_pending(&pool, &creator_id, &world_ref, Some(limit), json).await,
+            missing_only,
+        } => {
+            let ws_root = crate::config::find_workspace_root();
+            kb_pending(
+                &pool,
+                &creator_id,
+                &world_ref,
+                Some(limit),
+                json,
+                missing_only,
+                ws_root.as_deref(),
+            )
+            .await
+        }
         WorldKbCommand::Adopt {
             extract_job_id,
             json,
@@ -292,7 +312,7 @@ pub async fn kb_edit(
     let mut block = store
         .get_key_block(block_id)
         .await
-        .map_err(|e| map_kb_store_error("show", block_id, world_id, e))?;
+        .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
     let new_body: KeyBlockBody = serde_json::from_str(body_str).map_err(|e| {
@@ -345,7 +365,7 @@ pub async fn kb_delete(
     let block = store
         .get_key_block(block_id)
         .await
-        .map_err(|e| map_kb_store_error("show", block_id, world_id, e))?;
+        .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
     if !yes && !confirm_delete(block_id, world_id) {
@@ -366,22 +386,32 @@ pub async fn kb_delete(
 
 /// `creator world kb pending` — list candidates awaiting confirmation.
 ///
+/// With `missing_only = false` (default), lists `pending` `kb_extract_jobs` rows
+/// (V1.50 behavior). With `missing_only = true`, scans advisory missing-KB logs
+/// under `Works/<work_ref>/Logs/kb/missing/` for every Work bound to this World.
+///
 /// Gates on world ownership: a cross-author attempt returns `403` with code
 /// `WORLD_KB_FORBIDDEN` (reuses the T-B P0 error code per acceptance §3).
 ///
 /// # Errors
 ///
 /// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access, or
-/// `CliError::Other` on store/serialization failure.
+/// `CliError::Other` on store/serialization/log-scan failure.
 pub async fn kb_pending(
     pool: &SqlitePool,
     creator_id: &str,
     world_id: &str,
     limit: Option<i64>,
     json: bool,
+    missing_only: bool,
+    workspace_dir: Option<&std::path::Path>,
 ) -> Result<()> {
     // Author identity gate (same code path as edit/delete).
     require_world_owner(pool, world_id, creator_id).await?;
+
+    if missing_only {
+        return kb_pending_missing_only(pool, world_id, limit, json, workspace_dir).await;
+    }
 
     let pending = list_pending_for_world(pool, world_id, limit)
         .await
@@ -415,6 +445,206 @@ pub async fn kb_pending(
     Ok(())
 }
 
+/// `creator world kb pending --missing-only` implementation.
+///
+/// Scans `Works/<work_ref>/Logs/kb/missing/*.md` for every Work bound to the
+/// given World, parses YAML frontmatter, and prints advisory missing candidates.
+async fn kb_pending_missing_only(
+    pool: &SqlitePool,
+    world_id: &str,
+    limit: Option<i64>,
+    json: bool,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<()> {
+    let Some(ws_dir) = workspace_dir else {
+        if json {
+            println!("[]");
+        } else {
+            println!("No missing-KB logs found: no workspace directory is bound.");
+        }
+        return Ok(());
+    };
+
+    let mut entries = collect_missing_entries(pool, world_id, ws_dir).await?;
+
+    // Stable ordering: chapter ascending, then canonical name.
+    entries.sort_by(|a, b| {
+        a.chapter
+            .cmp(&b.chapter)
+            .then_with(|| a.candidate.canonical_name.cmp(&b.candidate.canonical_name))
+    });
+
+    if let Some(lim) = limit {
+        let lim = usize::try_from(lim.max(0)).unwrap_or(usize::MAX);
+        entries.truncate(lim);
+    }
+
+    render_missing_entries(world_id, &entries, json)
+}
+
+/// Collect advisory missing-KB entries from log files.
+async fn collect_missing_entries(
+    pool: &SqlitePool,
+    world_id: &str,
+    ws_dir: &std::path::Path,
+) -> Result<Vec<MissingKbEntry>> {
+    let work_refs: Vec<String> =
+        sqlx::query_as("SELECT COALESCE(work_ref, story_ref) FROM works WHERE world_id = ?")
+            .bind(world_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| {
+                CliError::Other(format!("Failed to list works for world {world_id}: {e}"))
+            })?
+            .into_iter()
+            .filter_map(|(opt,): (Option<String>,)| opt)
+            .collect();
+
+    let mut entries: Vec<MissingKbEntry> = Vec::new();
+    for work_ref in work_refs {
+        let log_dir = ws_dir
+            .join("Works")
+            .join(&work_ref)
+            .join("Logs")
+            .join("kb")
+            .join("missing");
+        if !log_dir.is_dir() {
+            continue;
+        }
+        let mut dir_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&log_dir)
+            .map_err(|e| CliError::Other(format!("Cannot read missing-KB log dir: {e}")))?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        dir_entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in dir_entries {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("md") {
+                continue;
+            }
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "missing-kb: skip unreadable log");
+                    continue;
+                }
+            };
+            let (frontmatter, _body) = split_frontmatter(&text)
+                .map_err(|e| CliError::Other(format!("Parse error in {}: {e}", path.display())))?;
+            let log: MissingKbLogFrontmatter = serde_yaml::from_str(frontmatter)
+                .map_err(|e| CliError::Other(format!("YAML error in {}: {e}", path.display())))?;
+            if log.world_id != world_id {
+                continue;
+            }
+            for candidate in log.candidates {
+                entries.push(MissingKbEntry {
+                    chapter: log.chapter,
+                    world_id: log.world_id.clone(),
+                    generated_at: log.generated_at.clone(),
+                    candidate,
+                });
+            }
+        }
+    }
+    Ok(entries)
+}
+
+/// Render collected missing-KB entries as text or JSON.
+fn render_missing_entries(world_id: &str, entries: &[MissingKbEntry], json: bool) -> Result<()> {
+    if json {
+        let items: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "chapter": e.chapter,
+                    "world_id": e.world_id,
+                    "canonical_name": e.candidate.canonical_name,
+                    "block_type": e.candidate.block_type,
+                    "source_quote": e.candidate.source_quote,
+                    "confidence": e.candidate.confidence,
+                    "generated_at": e.generated_at,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&items)?);
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        println!("No missing KB candidates in world {world_id}.");
+        return Ok(());
+    }
+
+    println!("Missing KB candidates in world {world_id}:");
+    println!("{:<8} {:<15} {:<30} SOURCE", "CHAPTER", "TYPE", "NAME");
+    for e in entries {
+        let quote = e
+            .candidate
+            .source_quote
+            .as_deref()
+            .map_or_else(|| "-".to_string(), truncate_quote);
+        println!(
+            "[MISSING] {:<8} {:<15} {:<30} {}",
+            e.chapter, e.candidate.block_type, e.candidate.canonical_name, quote
+        );
+    }
+    Ok(())
+}
+
+/// Split a Markdown file into its YAML frontmatter and body.
+///
+/// Expects the file to start with `---` and contain a second `---` ending the
+/// frontmatter block. Returns the frontmatter text (without delimiters) and the
+/// body text (after the closing delimiter).
+fn split_frontmatter(text: &str) -> std::result::Result<(&str, &str), String> {
+    let rest = text
+        .strip_prefix("---")
+        .ok_or_else(|| "missing opening frontmatter delimiter".to_string())?;
+    let Some(split) = rest.find("\n---") else {
+        return Err("missing closing frontmatter delimiter".to_string());
+    };
+    let fm = &rest[..split];
+    let body_start = split + "\n---".len();
+    let body = &rest[body_start..];
+    Ok((fm.trim(), body.trim_start()))
+}
+
+/// Truncate a source quote for terminal output.
+fn truncate_quote(q: &str) -> String {
+    let q = q.trim();
+    if q.chars().count() > 50 {
+        let head: String = q.chars().take(47).collect();
+        format!("{head}...")
+    } else {
+        q.to_string()
+    }
+}
+
+/// Parsed frontmatter of a missing-KB log file.
+#[derive(Debug, serde::Deserialize)]
+struct MissingKbLogFrontmatter {
+    generated_at: String,
+    world_id: String,
+    chapter: i32,
+    candidates: Vec<MissingKbLogCandidate>,
+}
+
+/// Parsed candidate inside a missing-KB log frontmatter.
+#[derive(Debug, serde::Deserialize)]
+struct MissingKbLogCandidate {
+    canonical_name: String,
+    block_type: String,
+    source_quote: Option<String>,
+    confidence: Option<f64>,
+}
+
+/// Flattened missing-KB entry used for sorting/output.
+struct MissingKbEntry {
+    chapter: i32,
+    world_id: String,
+    generated_at: String,
+    candidate: MissingKbLogCandidate,
+}
+
 /// `creator world kb adopt` — confirm a candidate into a `confirmed` `KeyBlock`.
 ///
 /// Steps (entity-scope-model.md §5.5.3 promotion gate):
@@ -437,18 +667,63 @@ pub async fn kb_pending(
 /// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access.
 /// Returns `CliError::Other` on missing/non-pending rows, validation failure,
 /// transaction begin/commit failure, or store errors.
+// V1.51 T-B P0 added the advisory file-lock block (commit 6dccee36, +18 lines);
+// V1.51 T-B P1 added the CAS version check (+5 lines). Function has 8
+// sequential concerns (candidate load → author gate → file lock →
+// candidate gate → read+validate → conflict check → adopt transaction →
+// audit log); splitting into helpers would fragment the linear adopt flow
+// without reducing complexity.
+#[allow(clippy::too_many_lines)]
 pub async fn kb_adopt(
     pool: &SqlitePool,
     creator_id: &str,
     extract_job_id: &str,
-    _workspace_dir: Option<&std::path::Path>,
+    workspace_dir: Option<&std::path::Path>,
     json: bool,
 ) -> Result<()> {
     let candidate = load_pending_candidate(pool, extract_job_id).await?;
+    let candidate_version = candidate.version; // V1.51 T-B P1: CAS preimage version
     let world_id = candidate.world_id.as_str();
 
     // Author identity gate.
     require_world_owner(pool, world_id, creator_id).await?;
+
+    // V1.51 T-B P0: acquire advisory file lock before the DB transaction (W-001).
+    // Resolve work_ref from the candidate's work_id, then acquire the lock.
+    let _file_lock =
+        if let (Some(ws_dir), Some(ref wid)) = (workspace_dir, candidate.work_id.as_deref()) {
+            let work_ref: Option<String> =
+                sqlx::query_scalar("SELECT story_ref FROM works WHERE work_id = ?")
+                    .bind(wid)
+                    .fetch_optional(pool)
+                    .await
+                    .map_err(|e| CliError::Other(format!("Failed to resolve work_ref: {e}")))?
+                    .flatten();
+            if let Some(ref wref) = work_ref {
+                let work_dir = ws_dir.join("Works").join(wref);
+                if work_dir.exists() {
+                    match nexus_local_db::file_lock::try_acquire(&work_dir, "cli:kb-adopt") {
+                        Ok(guard) => Some(guard),
+                        Err(nexus_local_db::file_lock::FileLockError::Locked(locked)) => {
+                            return Err(CliError::Locked {
+                                holder_pid: locked.holder_pid,
+                                holder_name: locked.holder_name,
+                                stale: locked.stale,
+                            });
+                        }
+                        Err(nexus_local_db::file_lock::FileLockError::Io(e)) => {
+                            return Err(CliError::LockIo(e));
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
     // Parse proposed body.
     let body: KeyBlockBody =
@@ -489,9 +764,23 @@ pub async fn kb_adopt(
         .map_err(|e| map_kb_store_error("adopt", extract_job_id, world_id, e))?;
     // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
 
-    let flipped = mark_confirmed_in_tx(&mut tx, extract_job_id)
+    // V1.51 T-B P1: CAS-aware flip — guards against stale preimage
+    // (another writer raced between load_pending_candidate and this flip).
+    // On version mismatch → E_VERSION (exit 76, retry).
+    let flipped = mark_confirmed_in_tx_with_cas(&mut tx, extract_job_id, candidate_version)
         .await
-        .map_err(|e| CliError::Other(format!("Failed to mark candidate confirmed: {e}")))?;
+        .map_err(|e| {
+            if let nexus_local_db::LocalDbError::VersionMismatch { actual, .. } = &e {
+                CliError::VersionConflict {
+                    table: "kb_extract_jobs".to_string(),
+                    row_id: extract_job_id.to_string(),
+                    expected_version: candidate_version,
+                    actual_version: *actual,
+                }
+            } else {
+                CliError::Other(format!("Failed to mark candidate confirmed: {e}"))
+            }
+        })?;
     // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
 
     if !flipped {
@@ -516,6 +805,11 @@ pub async fn kb_adopt(
         .await
         .map_err(|e| CliError::Other(format!("Failed to commit adopt transaction: {e}")))?;
 
+    // V1.51 T-A P0: surface LLM extraction metadata (cli-spec §6.2G). Read
+    // the dedicated columns first; fall back to the proposed_payload JSON keys
+    // for V1.50 rows where the columns are NULL (llm-extract.md §3.2).
+    let (confidence, source_quote) = extract_llm_metadata(&candidate);
+
     if json {
         println!(
             "{}",
@@ -524,13 +818,35 @@ pub async fn kb_adopt(
                 "key_block_id": insert_result.key_block_id,
                 "world_id": insert_result.world_id,
                 "status": "confirmed",
+                "llm_confidence": confidence,
+                "llm_source_quote": source_quote,
             }))?
         );
     } else {
         println!("✓ KB candidate adopted: {extract_job_id}");
-        println!("  Key block:  {}", insert_result.key_block_id);
-        println!("  World:      {}", insert_result.world_id);
-        println!("  Status:     confirmed");
+        println!("  Key block:   {}", insert_result.key_block_id);
+        println!("  World:       {}", insert_result.world_id);
+        println!("  Status:      confirmed");
+        // Confidence is shown as 2-decimal or '-' for heuristic rows; source
+        // quote is truncated for terminal width (full text in --json).
+        let conf_display = confidence.map_or_else(|| "-".to_string(), |c| format!("{c:.2}"));
+        let quote_display = source_quote.as_deref().map_or_else(
+            || "-".to_string(),
+            |q| {
+                let q = q.trim();
+                if q.is_empty() {
+                    "-".to_string()
+                } else if q.chars().count() > 60 {
+                    // char-count truncation keeps multi-byte text correct.
+                    let head: String = q.chars().take(57).collect();
+                    format!("{head}...")
+                } else {
+                    q.to_string()
+                }
+            },
+        );
+        println!("  Confidence:  {conf_display}");
+        println!("  Source:      {quote_display}");
     }
     Ok(())
 }
@@ -723,6 +1039,36 @@ fn parse_block_type_cli(s: &str) -> Result<nexus_contracts::BlockType> {
              Valid values: character, ability, scene, organization, item, conflict, info_point, event."
         ))
     })
+}
+
+/// Resolve the LLM extraction metadata for an adopt display (V1.51 T-A P0,
+/// cli-spec §6.2G).
+///
+/// Reads the dedicated `llm_confidence` / `llm_source_quote` columns first;
+/// when they are `NULL` (V1.50 heuristic rows produced before the V1.51
+/// migration), falls back to parsing the same keys from `proposed_payload`
+/// JSON so adopt still surfaces them if the payload carries the LLM keys
+/// (llm-extract.md §3.2). Returns `(None, None)` for pure heuristic rows.
+fn extract_llm_metadata(candidate: &KbExtractPromotion) -> (Option<f64>, Option<String>) {
+    let confidence = candidate.llm_confidence.or_else(|| {
+        candidate
+            .proposed_payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+            .and_then(|v| v.get("confidence").and_then(serde_json::Value::as_f64))
+    });
+    let source_quote = candidate.llm_source_quote.clone().or_else(|| {
+        candidate
+            .proposed_payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+            .and_then(|v| {
+                v.get("source_quote")
+                    .and_then(|q| q.as_str())
+                    .map(std::string::ToString::to_string)
+            })
+    });
+    (confidence, source_quote)
 }
 
 /// Write the rejected-candidate audit log (entity-scope-model §5.5.4).

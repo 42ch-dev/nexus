@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-18T10:00:00+08:00",
+  "updated_at": "2026-06-19T06:34:13Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -9,61 +9,63 @@
       "plan_topic": "feature/{ver}-{plan-slug}",
       "iteration_integration": "iteration/{ver}"
     },
-    "integration_branch": null,
-    "last_integration_branch": "iteration/v1.49",
+    "integration_branch": "iteration/v1.51",
+    "last_integration_branch": "iteration/v1.50",
     "integration_merge_target": "main",
-    "integration_branch_role": "active",
-    "integration_branch_retired": true,
-    "latest_shipped_iteration": "V1.50 (Shipped 2026-06-17 via PR #63)",
-    "latest_shipped_at": "2026-06-17T18:26:46Z",
-    "latest_active_iteration": null,
+    "integration_branch_role": "final-landing-pending",
+    "integration_branch_retired": false,
+    "latest_shipped_iteration": "V1.51 (PR #64 open — awaiting merge to main)",
+    "latest_shipped_at": "2026-06-19T06:34:13Z",
+    "latest_active_iteration": "V1.52 (planning not started)",
     "latest_active_compass": null,
-    "platform_integration": "paused — local-only until further notice (V1.50 shipped 2026-06-17 via PR #63 at 4db0a37b; awaiting V1.51 planning)",
+    "platform_integration": "paused — local-only until further notice (V1.51 PR #64 open; merge to main pending)",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
-    "wave_0_spec": ".mstar/knowledge/specs/novel-writing/cron-staggering.md, .mstar/knowledge/specs/novel-writing/auto-chronology.md, .mstar/knowledge/specs/entity-scope-model.md §5.4",
+    "wave_0_spec": ".mstar/knowledge/specs/concurrency.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/llm-extract.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/novel-writing/quality-loop.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/entity-scope-model.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/cli-spec.md (Normative — V1.51 Shipped), .mstar/knowledge/world-kb-runtime-architecture.md (Normative — V1.51 Shipped)",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.50",
-      "compass": "v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1",
-      "integration_branch": "iteration/v1.50",
+      "iteration": "V1.51",
+      "compass": "v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1",
+      "integration_branch": "iteration/v1.51",
       "integration_merge_target": "main",
       "integration_branch_retired": false,
-      "pr": 63,
-      "merged_at": "2026-06-17T18:26:46Z",
-      "plan_count": 9,
-      "plan_count_done": 9,
-      "closed_residuals": 16,
-      "deferred_to_next": 8,
+      "pr": 64,
+      "merged_at": null,
+      "plan_count": 7,
+      "plan_count_done": 7,
+      "closed_residuals": 8,
+      "deferred_to_next": 6,
       "open_at_ship": 0,
       "wire_contracts_changed": false,
       "profile_b_compaction": "done",
-      "signoff_at": "2026-06-18T18:00:00Z",
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/63",
-      "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
+      "signoff_at": "2026-06-19T06:34:13Z",
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
+      "merge_commit": "pending"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-06-18 (V1.50 P-last closeout)",
+      "updated_at": "2026-06-19 (V1.51 P-last closeout)",
       "total_open": 0,
-      "total_deferred": 8,
-      "total_resolved": 46,
-      "total_archived": 3,
+      "total_deferred": 6,
+      "total_resolved": 59,
+      "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 7,
+        "medium": 0,
+        "low": 0,
         "nit": 0
       },
       "by_target_active": {
-        "V1.50": 3,
-        "V1.51+": 4
+        "V1.51 P-last": 0,
+        "V1.52+": 6
       },
-      "notes": "V1.50 P-last T1-T2 closed 6 V1.49 carry-forwards (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2, R-V149P0-01 medium, R-V149P1-02 flake) + 10 V1.50 WL-A. 11 rows normalized to lifecycle (8 deferred to V1.51+, 3 archived via QC accept). 0 open at iteration close. 8 V1.50 plan rows archived; 9th (P-last hygiene-and-closeout) still in status.json — to be marked Done in T7. Profile B layout invariant verified."
+      "notes": "V1.51 P-last closed 8 residuals via surgical WL-A fixes and overlay promotion; 6 items deferred to V1.52+. cargo clippy --all and cargo +nightly fmt --all clean after changes."
     }
   },
-  "v1_50_iteration_complete": false,
-  "v1_50_status": "PREPARE GO 2026-06-18 — compass v1 + 9 plans + 3 spec overlays + status/tracker update",
+  "v1_50_iteration_complete": true,
+  "v1_50_status": "SHIPPED 2026-06-17 — PR #63 merged at 4db0a37b3e6a; all 9 V1.50 plans Done; 16 residuals archived; 8 carry-forward to V1.51",
+  "v1_51_iteration_complete": true,
+  "v1_51_status": "PR #64 open (2026-06-19T06:34:13Z) — awaiting merge to main; integration branch contains all 7 V1.51 plans",
   "residual_findings": {
     "2026-06-13-v1.45-hygiene-and-closeout": [
       {
@@ -463,11 +465,14 @@
         "scope": ".mstar/knowledge/specs/novel-writing/narrative-indexes.md §3; runtime uses the scaffolded template 5-column shape (crates/nexus-orchestration/src/narrative_index.rs)",
         "decision": "defer",
         "owner": "@writing-specialist or @architect",
-        "target": "V1.49 P5",
-        "target_date": "V1.49 P5",
-        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision",
-        "note": "No runtime behavior gap — the runtime implements the template's 5-column shape (ground truth for round-trip), and the overlay §3 4-column summary maps onto it (Planted+Paid off realize `chapters`; Status honours planned|buried|paid_off). Documentation-only reconciliation when the overlay folds into workflow-profile.md §4.6 at P-last. Also tracks the deferred promotion-concurrency advisory-lock decision (single-writer daemon model + atomic temp+rename is the V1.49 choice; a hard advisory lock is a V1.50 follow-up if multi-writer arrives).",
-        "lifecycle": "deferred",
+        "target": "V1.49 P5 (closed 2026-06-17) + V1.51 T-B P0 (advisory-lock portion)",
+        "target_date": "V1.51 T-B P0",
+        "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md §Schema decision + .mstar/plans/2026-06-18-v1.51-advisory-lock.md",
+        "note": "Spec-reconciliation portion closed V1.49 P-last (workflow-profile.md §4.6 folded 5-col shape). The deferred promotion-concurrency advisory-lock decision is now in scope at V1.51 T-B P0 per V1.51 compass §0.1 #6. V1.49 chose single-writer daemon model + atomic temp+rename; V1.51 T-B P0 adds hard advisory lock + per-row OCC for cross-process safety.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "V1.51 T-B P0: Works/<work_ref>/.lock advisory lock (flock + heartbeat) implemented. Spec-reconciliation portion already closed V1.49 P-last. Advisory-lock portion: file_lock module (12 unit + 3 integration tests), daemon cron-side acquisition in try_fire_role, CLI-side acquisition in handle_set, E_LOCK exit code 75, lock_holder field in status JSON, zombie detection (>60s heartbeat expiry).",
+        "closure_evidence": "feature/v1.51-advisory-lock commit (pending), test names: file_lock::tests::test_acquire_and_release_via_drop, file_lock::tests::test_second_acquire_fails_with_locked_info, file_lock::tests::test_stale_lock_file_overwritten_on_acquire, file_lock::tests::test_read_lock_holder_info_stale, cron_lock_integration::file_lock_blocks_cron_fire_when_held, cli_lock_contention::locked_error_display_shows_holder_info",
         "_plan_id": "2026-06-17-v1.49-narrative-indexes"
       },
       {
@@ -594,8 +599,11 @@
         "target_date": "V1.50 T-A P2",
         "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
         "note": "Evaluator contract is complete and tested (18 cron_supervisor tests). novel-brainstorm works end-to-end. novel-write schedule persists + admits normally but the executor body is missing — author the embedded-presets/novel-writing/<write-stage>.yaml in T-A P2. This is a preset-authoring workstream, not an evaluator defect.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 T-A P2: authored embedded-presets/novel-write/preset.yaml + prompts; `preset_version_for_id` and `preset_version_mapping_matches_yaml_includes_cron_presets` now enforce strict YAML sync for novel-write. All embedded preset validation tests pass.",
+        "closure_evidence": "feature/v1.51-missing-kb-detection"
       },
       {
         "id": "R-V150P1CRONBW-02",
@@ -610,7 +618,10 @@
         "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
         "note": "Touched crates (nexus-orchestration, nexus-local-db, nexus42, nexus-daemon-runtime) verified clean locally; full-workspace clippy is the authoritative CI gate per .mstar/AGENTS.md `target/` hygiene rule. Accept (CI verifies).",
         "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write",
-        "lifecycle": "archived"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: full cargo clippy --all -- -D warnings verified clean locally; CI gate continues to enforce.",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ verification run 2026-06-19"
       },
       {
         "id": "R-V150P1CRONBW-03",
@@ -676,12 +687,13 @@
         "scope": "nexus42/CLI: creator world kb list/show/edit/delete vs creator kb --scope world",
         "decision": "accept",
         "owner": "@fullstack-dev or @product-manager",
-        "target": "V1.51+ docs sweep",
-        "target_date": "V1.51+",
+        "target": "V1.52+",
+        "target_date": "V1.52+",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
         "note": "Future hygiene may consolidate; out of T-B P0 scope. PM tracked for V1.51+ backlog.",
         "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
-        "lifecycle": "archived"
+        "lifecycle": "deferred",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
       },
       {
         "id": "R-V150KBED-02",
@@ -691,12 +703,13 @@
         "scope": "nexus42/CLI: author gate for edit/delete resolves via world ownership not works ownership",
         "decision": "accept",
         "owner": "@architect or @fullstack-dev",
-        "target": "V1.51+",
-        "target_date": "V1.51+",
+        "target": "V1.52+",
+        "target_date": "V1.52+",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
         "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode.",
         "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
-        "lifecycle": "archived"
+        "lifecycle": "deferred",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
       }
     ],
     "2026-06-18-v1.50-cron-review-staggering": [
@@ -748,8 +761,11 @@
         "target_date": "V1.50 P-last",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-review-staggering/qc1.md §S-001",
         "note": "Doc-only reconcile: implementer correctly avoided dead code per surgical principle; outcome is stronger than plan's literal requirement. At plan archive time, update Goal 4 + AC3 to reflect the real contract (T-B P1 hook is independent of T-A P2).",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.50-cron-review-staggering"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.50-cron-review-staggering",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: removed stale COORDINATE-WITH-T-A-P2 marker from cron hook comment and updated tense in supervisor.rs.",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ 6c3fcf6a"
       }
     ],
     "2026-06-18-v1.50-kb-refreshable-scan": [
@@ -801,22 +817,31 @@
         "target_date": "V1.51+",
         "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
         "note": "Current design: refreshable scan only updates bodies of existing candidates. Inserts (new candidates) happen via T-B P1 review-time extraction; deletes happen via author explicit `reject` or `delete`. Rescan is a sync tool, not a discovery tool. Acceptable at V1.50 scope.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: V1.51 T-A P0/P1/P2 KB closure (nexus.llm.extract + cross-chapter rescan + missing-KB detection) supersedes refreshable-scan delta-only body refresh path; behaviour documented in llm-extract.md and cli-spec.md §6.2K.",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ a9f72b95"
       },
       {
         "id": "R-V150KBED-08",
-        "title": "`--dry-run` candidate preview is chapter-scoped; non-dry DB upsert also reconciles cross-chapter reuse. Target V1.51+ for cross-chapter scope",
+        "title": "`--dry-run` candidate preview is chapter-scoped; non-dry DB upsert also reconciles cross-chapter reuse. Target V1.51 for cross-chapter scope",
         "severity": "low",
         "source": "T-B P2 implementer (scope decision)",
         "scope": "creator kb rescan CLI (chapter scope; cross-chapter deferred)",
-        "decision": "defer",
-        "owner": "@fullstack-dev or @product-manager",
-        "target": "V1.51+",
-        "target_date": "V1.51+",
-        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md (Completion Report v2)",
-        "note": "Current design: rescan operates on a single chapter. Work-scoped rescan is out of scope; V1.51+ backlog.",
-        "lifecycle": "deferred",
+        "decision": "fix",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 T-A P1",
+        "target_date": "V1.51 T-A P1",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.51-cross-chapter-rescan.md",
+        "note": "Current design: rescan operates on a single chapter. Work-scoped rescan is now in scope at V1.51 T-A P1 per V1.51 compass §1.1 #3. New `creator kb rescan --work <ref>` flag aggregates by canonical_name + world_id (depends on T-A P0 LLM-extracted canonical_name).",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_evidence": "Closed by plan 2026-06-18-v1.51-cross-chapter-rescan (branch feature/v1.51-cross-chapter-rescan). creator kb rescan gains a mutually-exclusive --work <work_ref> flag; work-scoped path iterates all chapters in Works/<work_ref>/Stories/ (work_chapters::list_chapters), runs the heuristic per chapter, aggregates by canonical_name (quality_loop::aggregate_candidates_by_canonical_name), and upserts ONCE per aggregate so the kb_extract_jobs DB uniqueness (creator, canonical_name, world) collapses N same-name per-chapter candidates to 1 row carrying a source_chapters:[3,5,7] provenance array. --dry-run surfaces a cross-chapter reuse summary before any DB write. Non-dry path acquires Works/<work_ref>/.lock (T-B P0 advisory lock) before the upsert; contention→E_LOCK exit 75, I/O→E_LOCK_IO exit 78; dry path acquires no lock. TODO(T-B P1) marker left at the upsert call-site for the versioned CAS swap. Spec: world-kb-runtime-architecture.md §5.5.1 + cli-spec.md §6.2G --work amendment. Tests: quality_loop::tests::aggregate_* (8), kb_rescan::cross_chapter_* (11: same-entity-collapse, distinct-entities, dry-run-reuse-summary, existing-kb-match-refresh, stale-removal, idempotent-rerun, lock-contention→E_LOCK, dry-run-under-lock, lock-io→E_LOCK_IO, missing-work, cross-author-403), kb_rescan_cli V1.50 chapter-scoped regression (8, unchanged).",
+        "resolution": {
+          "plan_id": "2026-06-18-v1.51-cross-chapter-rescan",
+          "commit": "feature/v1.51-cross-chapter-rescan (42d5329a aggregate primitive; 1ca91a9f CLI + DB + dry-run + lock + tests)"
+        },
         "_plan_id": "2026-06-18-v1.50-kb-refreshable-scan"
       }
     ],
@@ -827,13 +852,19 @@
         "severity": "low",
         "source": "P1 implementer (heuristic limitation)",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (review_time_extraction)",
-        "decision": "defer",
-        "owner": "@fullstack-dev or @product-manager",
-        "target": "V1.51+ (LLM-driven extraction)",
-        "target_date": "V1.51+",
-        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
-        "note": "Heuristic (capitalized noun phrases) cannot distinguish character/location/organization. Authors correct on adopt via `creator world kb adopt`. LLM extraction is compass §0.1 OUT (defer V1.51+). Accept at P1; not blocking.",
-        "lifecycle": "deferred",
+        "decision": "fix",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 T-A P0",
+        "target_date": "V1.51 T-A P0",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.51-llm-extraction.md",
+        "note": "Heuristic (capitalized noun phrases) cannot distinguish character/location/organization. Authors correct on adopt via `creator world kb adopt`. LLM extraction deferred from V1.50 OUT-B O13 (write-time) and now in scope at V1.51 T-A P0 (review-time + finalize-time) per V1.51 compass §0.1 #7. New `nexus.llm.extract` capability replaces heuristic.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_evidence": "Closed by plan 2026-06-18-v1.51-llm-extraction (branch feature/v1.51-llm-extraction). nexus.llm.extract capability + LlmExtractTask shipped; quality_loop::extract_kb_candidates_for_review now invokes the LLM pathway when a worker is available (heuristic retained as no-worker fallback). kb_extract_jobs gains llm_confidence + llm_source_quote columns (migration 202606180006). adopt surfaces confidence + source_quote (cli-spec §6.2G). Tests: capability::builtins::llm_extract::tests::* (11), tasks::tests::llm_extract_task_* (4), quality_loop::tests::candidate_from_llm_json_* + block_type_mapping_* (5), kb_extract_jobs_migration::v151_* (4), novel_review_master::review_master_llm_path_writes_llm_payload + review_master_llm_path_is_idempotent + review_master_no_registry_falls_back_to_heuristic (3), creator_world_kb_adopt::adopt_succeeds_on_llm_extracted_candidate + adopt_json_output_includes_llm_metadata (2).",
+        "resolution": {
+          "plan_id": "2026-06-18-v1.51-llm-extraction",
+          "commit": "feature/v1.51-llm-extraction HEAD (b56ef238 LlmExtractTask+hook swap; 887bbc07 adopt surfaces LLM metadata)"
+        },
         "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
       },
       {
@@ -844,12 +875,13 @@
         "scope": "T-B P1 / T-B P2 boundary",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.50 T-B P2",
-        "target_date": "V1.50 T-B P2",
+        "target": "V1.52+",
+        "target_date": "V1.52+",
         "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
         "note": "T-B P2 refreshable scan will use the freshest workspace_id from the chapter frontmatter; resolve_workspace_id staleness self-corrects in T-B P2.",
         "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion"
+        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
       },
       {
         "id": "R-V150KBED-03",
@@ -1081,11 +1113,158 @@
         "target_date": "V1.51+",
         "tracking_link": ".mstar/plans/2026-06-18-v1.50-hygiene-and-closeout.md §5 T2",
         "note": "V1.50 P-last T2 closed 10 WL-A items (R-V150-WLA-01/02/04/05/06/07/08/09/10 + R-V150-WLA-03 already resolved by T-A P0 spec update). The following qc Suggestions remain open and are deferred to V1.51+ as low-priority hygiene / feature work (no defect; no test gap; close on next touch):\n\nCRON-FAMILY:\n- cron-foundation/qc1 S1 (DEFAULT_SCHEDULE naming coherence with spec §2.2)\n- cron-foundation/qc1 S5 (doc_markdown clippy nits in works_schedule_migration.rs under --all-targets)\n- cron-foundation/qc2 S-1 (AC wording vs CliError::Config error type)\n- cron-foundation/qc2 S-2 (future blob size / structure guard for schedule_json)\n- cron-foundation/qc3 S-002 (no tracing on the cron hot path — feature work)\n- cron-brainstorm-write/qc1 S-002 (// COORDINATE-WITH-T-A-P2 literal marker — T-A P2 Done; marker no longer needed)\n- cron-brainstorm-write/qc1 S-004 (enqueue_cron_schedule near-duplicates enqueue_review_master_schedule — refactor; may diverge in V1.51+)\n- cron-brainstorm-write/qc1 S-005 (plan text vs impl drift on evaluate_next_step — doc only)\n- cron-brainstorm-write/qc1 S-006 (drift guard test between CLI WorkSchedule and daemon CronConfig — feature work)\n- cron-brainstorm-write/qc2 S-001/S-002 (test fidelity comment + has_active_role_schedule IN-list note)\n- cron-brainstorm-write/qc3 S-001..S-007 (per-tick heap/TZ/parse optimisations + shutdown drain + lost-fire catch-up + COUNT vs EXISTS — informational; current scale is fine)\n- cron-review-staggering/qc1 S-001 (plan text drift on T-B P1 hook stub — covered by R-V150P2CRONRV-03)\n- cron-review-staggering/qc2 (cron_review_respects_idempotency test label readability)\n- cron-review-staggering/qc3 S-001 (per-tick cost load note — informational)\n- cron-review-staggering/qc3 S-003 (CRON_COUNTER 16M-suffix overflow — astronomical; informational)\n- cron-review-staggering/qc3 S-004 (R-V150P2CRONRV-01 renumber rationale doc)\n\nAUTO-CHRONOLOGY:\n- auto-chronology/qc2 S-* (directory fsync after rename + last_advance_label scan hardening — defensive)\n- auto-chronology/qc3 S-1 (partial index on works.auto_chronology — V1.50 scale fine; revisit at scale)\n- auto-chronology/qc3 S-3 (clippy errors in tests/auto_chronology_tick.rs under --all-targets)\n- auto-chronology/qc3 S-4 (write_outline_atomic temp suffix — informational; concurrent calls serialized by gate)\n\nKB-FAMILY:\n- kb-auto-promotion/qc1 S-001 (work_entry_id semantic overload — schema-touch; defer to V1.51+ LLM extraction)\n- kb-auto-promotion/qc1 S-004 (adopt --block-type override — feature work; couples with R-V150KBED-01)\n- kb-auto-promotion/qc2 (proposed_payload bare serde_json + TOCTOU window notes — defensive)\n- kb-auto-promotion/qc3 S-002 (Logs/kb/rejected/ retention — feature work)\n- kb-auto-promotion/qc3 S-003 (KbStoreError::Duplicate surfaces generic message — UX; small fix)\n- kb-editor-cli/qc1 S-V150KBED-QC1-01 (plan Code touch references non-existent file — doc)\n- kb-editor-cli/qc1 S-V150KBED-QC1-02 (world_ref positional implies flexible resolution but only IDs accepted — UX)\n- kb-editor-cli/qc2 S-V150KBED-QC2-01 (WORLD_KB_FORBIDDEN as string constant — typed error catalog future)\n- kb-editor-cli/qc2 S-V150KBED-QC2-02 (map_kb_store_error uses verb 'show' for load step — cosmetic)\n- kb-editor-cli/qc2 S-V150KBED-QC2-03 (no test for soft-deleted block re-edit — feature work)\n- kb-editor-cli/qc3 S-1 (kb list silent truncation at 500 rows — UX)\n- kb-editor-cli/qc3 S-2 (soft-deleted KeyBlock silently re-editable — feature work)\n- kb-editor-cli/qc3 S-3 (BlockType Debug repr in human table vs wire format — cosmetic)\n- kb-refreshable-scan/qc1 S-001 (diff_and_apply O(N) per update — V1.50 scale fine)\n- kb-refreshable-scan/qc2 (rescan batch no outer transaction — design)\n- kb-refreshable-scan/qc3 S-QC3-01..05 (HashMap threading + tx wrapper + dry-run scope + parallel test safety + migration renumber note)\n\nALREADY-RESOLVED items verified during the sweep (closed by other V1.50 waves; not re-counted here):\n- cron-foundation/qc3 S-001 (partial index) — added by T-A P1 (cron_supervisor EXPLAIN test)\n- cron-foundation/qc3 S-003 (NEXUS_TZ docs) — already in cron-staggering.md §3.1 line 94\n- auto-chronology/qc3 S-2 (CompletionLocked log conflate) — tracked via R-V150P3AUTOCHRONO-01\n- kb-auto-promotion/qc1 S-002 + qc3 S-004 (misleading 'KeyBlock was not duplicated') — closed via R-V150KBED-03 transactional CAS\n- kb-auto-promotion/qc3 S-005 (transaction-boundary race test) — closed via kb_adopt_failure_rolls_back_insert regression test\n- kb-auto-promotion/qc1 S-003 (English-only heuristic) — tracked via R-V150KBED-01 (auto-promotion)",
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: 8 surgical WL-A fixes applied across V1.50/V1.51 residuals (R-V151Q1-02/08/09, R-V151Q1-04 overlay, COORDINATE marker, kb-editor verb, idempotency label, auto_chronology clippy, works_schedule_migration doc_markdown, file_lock rationale). Remainder deferred to V1.52+ informal backlog.",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ 619aa732..fd9a613b"
+      }
+    ],
+    "2026-06-18-v1.51-llm-extraction": [
+      {
+        "id": "R-V151Q1-02",
+        "title": "--tests clippy nits in tasks/mod.rs (doc_markdown + unused_mut); not caught by CI gate cargo clippy --all",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-V151Q1-02",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs:2079, 2124",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 P-last WL-A",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc1.md §Suggestions",
+        "note": "CI gate cargo clippy --all passes; repo baseline already has 22 pre-existing --tests errors (not introduced by V1.51 T-A P0). Low-priority hygiene.",
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: added backticks around `LlmExtractTask` and code literals in nexus-orchestration/src/tasks/mod.rs rustdoc (doc_markdown).",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ 619aa732"
+      },
+      {
+        "id": "R-V151Q1-04",
+        "title": "block_type→novel_category mapping not in spec text (entity-scope-model §5.1.1 SSOT references the mapping but quality_loop code re-encodes it)",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-V151Q1-04",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs:471-485 vs .mstar/knowledge/specs/entity-scope-model.md §5.1.1",
+        "decision": "defer",
+        "owner": "@writing-specialist or @architect",
+        "target": "V1.51 P-last overlay promotion",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc1.md §Suggestions",
+        "note": "Coherent with entity-scope-model §5.1.1; spec text amendment at P-last overlay promotion. Non-blocking.",
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: promoted entity-scope-model.md §5.5.6 LLM pathway to Normative and documented BlockType→novel_category mapping as SSOT.",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ a9f72b95"
+      },
+      {
+        "id": "R-V151Q3-W001",
+        "title": "Two parallel LLM→KbCandidate paths (extract_kb_candidates_for_review + LlmExtractTask::evaluate) — consider unified entry",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-001",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs vs tasks/mod.rs",
+        "decision": "defer",
+        "owner": "@architect or @fullstack-dev",
+        "target": "V1.52+",
+        "target_date": "V1.52+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
+        "note": "Non-blocking per qc3 reviewer; both paths tested; unify at P-last or V1.51+ refactor.",
         "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
+        "_plan_id": "2026-06-18-v1.51-llm-extraction",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+      },
+      {
+        "id": "R-V151Q3-W002",
+        "title": "WorkerUnavailable empty-vec contract — caller must handle gracefully (heuristic fallback OK; consider explicit None check)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": "crates/nexus-orchestration/src/quality_loop.rs (extract_via_llm WorkerUnavailable path)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.52+",
+        "target_date": "V1.52+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
+        "note": "Non-blocking per qc3 reviewer; contract documented; PM awareness note.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+      }
+    ],
+    "2026-06-18-v1.51-advisory-lock": [
+      {
+        "id": "R-V151Q1-08",
+        "title": "tempfile::TempDir::into_path() deprecated in 3 cron_lock_integration.rs sites (compiler warning, not error)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-005",
+        "scope": "crates/nexus-daemon-runtime/tests/cron_lock_integration.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 P-last hygiene",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-advisory-lock/qc3.md §Suggestions",
+        "note": "Compiler warning; non-blocking.",
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.51-advisory-lock",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: replaced deprecated tempfile::TempDir::into_path() with keep() in 3 cron_lock_integration.rs sites; removed unused imports.",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ 49c14faf"
+      },
+      {
+        "id": "R-V151Q1-09",
+        "title": "Heartbeat write non-atomic (std::fs::write); corruption self-heals on next acquire but parse failure reports holder_name=unknown",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-004",
+        "scope": "crates/nexus-local-db/src/file_lock.rs (heartbeat)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.51 P-last",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-advisory-lock/qc3.md §Suggestions",
+        "note": "Consider marking stale=true on parse failure (60s advisory window absorbs risk today).",
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.51-advisory-lock",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 P-last: added rationale comment explaining why parse-failure conflict path reports holder_name=unknown and stale=false (preserves current non-stale semantics intentionally).",
+        "closure_evidence": "feature/v1.51-hygiene-and-closeout @ fd9a613b"
+      },
+      {
+        "id": "R-V151Q1-10",
+        "title": "Process note: spec edit bundled under qc:-prefixed commit (commit 3a6950d5 included concurrency.md spec body); future fix-waves should keep qc commits within {PLAN_DIR}/reports/**",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) process note",
+        "scope": "commit hygiene; future rounds",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "V1.52+",
+        "target_date": "V1.52+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-advisory-lock/qc1.md §Revalidation process note",
+        "note": "Content correct; non-blocking. Future fix-waves should split impl commits from qc commits.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-18-v1.51-advisory-lock",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+      }
+    ],
+    "2026-06-18-v1.51-cross-chapter-rescan": [
+      {
+        "id": "R-V151-MERGE-CLIPPY-01",
+        "title": "cargo clippy --all -- -D warnings fails on iteration/v1.51 HEAD 388602d2 (pre-existing T-A P0/T-B P0 merge regression; not caused by T-A P1)",
+        "severity": "medium",
+        "source": "T-A P1 implementer (verification gate; pre-existing-claim verified per .mstar/AGENTS.md protocol)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (LlmExtractTask doc_markdown + unused mut) + crates/nexus42/src/commands/creator/world/kb.rs:440 (kb_adopt too_many_lines 118/100) + several pre-existing test files (cli_lock_io_error, world_kb_authz, cron_cli, creator_world_kb_adopt — unwrap_used)",
+        "decision": "fix",
+        "owner": "@fullstack-dev (P-last WL-A or dedicated hygiene)",
+        "target": "V1.51 P-last WL-A",
+        "target_date": "V1.51 P-last",
+        "tracking_link": ".mstar/plans/2026-06-18-v1.51-cross-chapter-rescan.md (Completion Report v2 §Verification)",
+        "note": "Pre-existing-claim verification (per .mstar/AGENTS.md): cargo clippy -p nexus-orchestration --lib --tests -- -D warnings AND cargo clippy -p nexus42 --lib -- -D warnings both FAIL on the clean base iteration/v1.51 HEAD 388602d2 (before any T-A P1 changes). T-A P0 completion report claimed 'cargo clippy --all -- -D warnings → Finished, no warnings/errors' but the merged tree fails; either the merge introduced the issues, a clippy version drifted, or the report was optimistic. T-A P1's own code (quality_loop.rs aggregation, rescan.rs/kb.rs CLI, tests/kb_rescan.rs) is clippy-clean in isolation. Reproduce: git checkout 388602d2 -- . && cargo clippy --all -- -D warnings. Not fixed in T-A P1 per surgical-changes (DO NOT piggyback); routed to P-last WL-A.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "PM fix at iteration/v1.51 @ 00829432 (fix(nexus42): surgical hygiene — #[allow(clippy::too_many_lines)] on kb_adopt) resolves the kb_adopt CI gate failure. T-B P1 rebased on top with consolidated allow annotation (rationale documents both T-B P0 + T-B P1 contributions). The other listed clippy items in this residual (LlmExtractTask doc_markdown + unused_mut, plus several pre-existing test-file clippy nits) remain in the V1.50 carry-over R-V150-WLA-DEFER-V1.51 batch and will be addressed in V1.51 P-last WL-A sweep alongside the existing 30+ V1.50 QC suggestions. cargo clippy --all -- -D warnings now exits 0 on iteration/v1.51 HEAD.",
+        "closure_evidence": "iteration/v1.51 @ 00829432 (commit) + feature/v1.51-cross-chapter-rescan rebased on 00829432 + feature/v1.51-per-row-occ rebased on 00829432. Both rebased branches verified cargo clippy --all -- -D warnings → exit 0.",
+        "_plan_id": "2026-06-18-v1.51-cross-chapter-rescan"
       }
     ]
   },
   "v1_49_iteration_complete": true,
-  "v1_49_status": "SHIPPED 2026-06-17 — PR #62 merged at d160379ff5a6; all 6 V1.49 plans Done; 19 residuals archived; 7 carry-forward to V1.50"
+  "v1_49_status": "SHIPPED 2026-06-17 — PR #62 merged at d160379ff5a6; all 6 V1.49 plans Done; 19 carry-forward to V1.50"
 }

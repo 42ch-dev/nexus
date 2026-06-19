@@ -1,13 +1,14 @@
 # Nexus CLI Spec
 
-**Status**: Normative  
+**Status**: Normative — V1.51 Shipped (T-A P0/P1/P2 KB CLI amendments folded into Master)  
 **Document class**: Master  
 **V1.35 shipped supplements:** [cli-command-ia.md](cli-command-ia.md) (§6 IA rationale), [creator-centric-entry-model.md](creator-centric-entry-model.md) (§7 entry paths)
 **V1.40 Shipped amendments:** §6.2G `nexus42 creator world create --title`/`list`/`show` (mandatory world binding; `--name` is alias); §6.x `nexus42 creator kb queue-extract --chapter N` sugar for novel profile (N ≥ 1).  
 **V1.41 Shipped amendments:** §6.2H `creator works` (list/status/use/pool); completion-lock + runtime lock (DF-60/61). Lineage via `--from-work` migrated to `creator works use` + `creator run <preset>` in V1.45.
 **V1.44 Shipped amendments:** §6.2D `creator run audit-chapter` (DF-69): dual-mode review/extract, embedded `novel-manuscript-audit` preset, `--mode`/`--chapter`/`--volume`/`--json` flags; does NOT enter FL-E auto-chain driver.  
 **V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface.  
-**V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).
+**V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).  
+**V1.51 Shipped amendments:** §6.2K `creator world kb adopt` LLM metadata surfaces; `creator kb rescan --work <work_ref>` cross-chapter reconciliation; `creator world kb pending --missing-only` (T-A P0/P1/P2).
 
 ## 0. 文档定位
 
@@ -416,6 +417,105 @@ Rules:
 - `show` for a nonexistent `world_id` prints remediation pointing to `creator world create --title` or `creator world list`.
 
 **Target (V1.40 P0):** plan `2026-06-10-v1.40-world-create-and-validation`.
+
+**V1.51 T-A P0 amendment — `creator world kb adopt` surfaces LLM extraction metadata.**
+When a `pending` candidate was produced by the `nexus.llm.extract` pathway
+(V1.51; see [llm-extract.md](llm-extract.md)), the adopt output surfaces two
+additional fields so the author can judge extraction quality before confirming:
+
+- `confidence`: the LLM self-reported confidence (`0.0`–`1.0`), read from
+  `kb_extract_jobs.llm_confidence` (falls back to the `proposed_payload` JSON
+  `confidence` key for backward compat). Heuristic rows report `confidence: -`
+  (column `NULL`).
+- `source_quote`: the verbatim chapter excerpt justifying the extraction, read
+  from `kb_extract_jobs.llm_source_quote` (falls back to the `proposed_payload`
+  JSON `source_quote` key). Heuristic rows report `source_quote: -`.
+
+Example (LLM pathway): `confidence: 0.92 / block_type: scene / source_quote:
+"...the eastern gate groaned open..."`. Example (heuristic fallback):
+`confidence: - / block_type: character / source_quote: -`. The `--json` output
+includes `llm_confidence` and `llm_source_quote` keys (nullable). The promotion
+gate (§5.5.3 of entity-scope-model) and `ValidationMode::Novel` re-run are
+unchanged.
+
+**Target (V1.51 T-A P0):** plan `2026-06-18-v1.51-llm-extraction`.
+
+**V1.51 T-A P1 amendment — `creator kb rescan --work <work_ref>` cross-chapter reconciliation.**
+The V1.50 chapter-scoped `creator kb rescan <work_ref>/<chapter>` (T-B P2) is
+extended with a mutually-exclusive work-scoped mode. Exactly one of the
+positional `<work_ref>/<chapter>` target or the `--work <work_ref>` flag must
+be supplied; supplying both (or neither) fails closed with remediation.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator kb rescan <work_ref>/<chapter> [--dry-run] [--json]` | V1.50 chapter-scoped rescan (unchanged). Re-syncs `kb_extract_jobs` candidates + confirmed `KeyBlock` bodies from one chapter's current text. |
+| `nexus42 creator kb rescan --work <work_ref> [--dry-run] [--json]` | V1.51 work-scoped rescan. Iterates **all** chapters in `Works/<work_ref>/Stories/`, aggregates candidates by `canonical_name` across chapters, and reconciles so a recurring entity collapses to a single `pending` candidate carrying cross-chapter provenance (e.g. `source_chapters: [3,5,7]`). |
+
+Rules (build on §6.2G V1.40 rules; see also
+[world-kb-runtime-architecture.md §5.5.1](../world-kb-runtime-architecture.md)):
+
+- **Mutual exclusivity.** `--work <work_ref>` and the positional
+  `<work_ref>/<chapter>` cannot be combined. `--work` resolves the Work by
+  `work_ref` / `story_ref` / `work_id` (same resolver as the positional path).
+- **Author gate.** Same `require_world_owner` (`narrative_worlds.owner_creator_id`
+  must match the active creator) → `403 WORLD_KB_FORBIDDEN` on mismatch. No
+  new error code.
+- **Reconciliation.** The DB uniqueness `(creator, canonical_name, world)` —
+  already enforced by the V1.50 P1 migration — is what collapses N
+  per-chapter same-name candidates into 1 row. The work-scoped path upserts
+  **once per aggregate**; the merged row's `source_chapter_id` is the lowest
+  referencing chapter and its `proposed_payload` records the full
+  `source_chapters` array. `confirmed` rows are terminal (§5.5.2); only their
+  `KeyBlock` body is refreshed via `diff_and_apply`.
+- **`--dry-run`.** Shows a cross-chapter reuse summary before any DB write,
+  e.g. `Entity 'Aelin' referenced in chapters 3, 5, 7; existing KB row found
+  → no new candidate`. The dry path is read-only and acquires **no** advisory
+  lock.
+- **Advisory lock (T-B P0).** The non-dry work-scoped path acquires
+  `Works/<work_ref>/.lock` before the cross-chapter upsert (same lock as
+  `creator world kb adopt`, `creator works cron set`, `creator run`).
+  Contention → `E_LOCK` exit 75 (`EX_TEMPFAIL`); I/O failure → `E_LOCK_IO`
+  exit 78 (`EX_CONFIG`). Chapter-scoped rescan does **not** acquire the lock
+  (single-chapter upsert; unchanged from V1.50).
+- **Extraction pathway.** Work-scoped rescan uses the heuristic
+  (`extract_candidates_from_text`), identical to the chapter-scoped path, so
+  the two modes agree on the same prose. The `canonical_name` grouping key is
+  the T-A P0 first-class field. Wiring the `nexus.llm.extract` LLM pathway
+  into rescan is out of scope (LLM extraction is review-time/finalize-time;
+  rescan is a sync tool).
+
+**Target (V1.51 T-A P1):** plan `2026-06-18-v1.51-cross-chapter-rescan`. Closes
+`R-V150KBED-08` (cross-chapter rescan scope).
+
+**V1.51 T-A P2 amendment — `creator world kb pending --missing-only`.**
+When a `novel-writing` chapter finalizes, the supervisor writes an advisory
+missing-KB log under
+`Works/<work_ref>/Logs/kb/missing/<YYYY-MM-DD>-ch<chapter>.md`
+(see [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §5.5). The
+`--missing-only` flag switches `creator world kb pending` from listing DB
+`pending` candidates to scanning those log files for the requested World.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator world kb pending <world_ref> [--missing-only] [--limit N] [--json]` | Lists candidates for the World. Without `--missing-only`: lists `pending` `kb_extract_jobs` rows (V1.50 behavior). With `--missing-only`: lists advisory `missing` candidates extracted at finalize time. |
+
+Rules:
+
+- `--missing-only` scans `Works/<work_ref>/Logs/kb/missing/*.md` for every Work
+  bound to the given `world_ref` (`world_id`). Each log file is parsed for YAML
+  frontmatter; candidates whose `world_id` matches are collected.
+- Text output shows `CHAPTER`, `TYPE`, `NAME`, and a truncated `SOURCE` quote,
+  prefixed with a `MISSING` label so authors can distinguish advisory finalize-time
+  gaps from review-time `pending` candidates.
+- `--json` output includes `chapter`, `world_id`, `canonical_name`,
+  `block_type`, `source_quote`, `confidence`, and `generated_at` for each
+  candidate.
+- Missing candidates are **advisory only** — they are not written to
+  `kb_extract_jobs` and cannot be adopted directly. The author may add them to
+  the World KB through the normal `creator world kb adopt` flow after creating a
+  `pending` candidate (e.g. via `creator kb rescan`).
+
+**Target (V1.51 T-A P2):** plan `2026-06-18-v1.51-missing-kb-detection`.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 

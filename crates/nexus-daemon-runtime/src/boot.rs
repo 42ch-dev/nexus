@@ -9,12 +9,14 @@ use std::sync::Arc;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
+use crate::worker_provider::ProductionWorkerProvider;
 use crate::workspace::WorkspaceState;
+use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
     schedule::supervisor::ScheduleSupervisor,
     storage::sqlite::SqliteSessionStorage,
-    system_preset_dir, CapabilityRegistry, GraphFlowEngine, WorkerManager,
+    system_preset_dir, CapabilityRegistry, CapabilityRuntimeDeps, GraphFlowEngine, WorkerManager,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -121,7 +123,35 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let db_pool: sqlx::SqlitePool = state.pool().clone();
     let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(db_pool)));
 
-    let capabilities = Arc::new(CapabilityRegistry::with_builtins());
+    // V1.51 T-A P0 (QC3 F-001): construct the shared worker registry BEFORE
+    // the capability registry so `ProductionWorkerProvider` can be injected
+    // into `CapabilityRegistry::with_runtime_deps`. The same registry is
+    // later shared with `WorkerMgrSubsystem` (see `create_subsystems`), so a
+    // worker spawned by the engine/preset-session path is visible to the
+    // capability-layer LLM dispatch path and vice versa.
+    //
+    // `pool: None` preserves the existing pool-less behavior of
+    // `with_builtins()` for `kb.extract_work` / `novel.project_scaffold` /
+    // `novel.chapter_transition` (they remain in placeholder mode — same as
+    // before this change). Only the worker_provider wiring changes, closing
+    // the V1.51 T-A P0 production gap where `nexus.llm.extract` (and the
+    // sibling LLM caps) returned `WorkerUnavailable` on every production call.
+    let shared_worker_registry: Arc<tokio::sync::Mutex<WorkerRegistry<WorkerManagerSpawner>>> = {
+        let manager = Arc::new(tokio::sync::Mutex::new(WorkerManager::new()));
+        let spawner = WorkerManagerSpawner::new(manager);
+        Arc::new(tokio::sync::Mutex::new(WorkerRegistry::new(
+            crate::lifecycle::subsystems::DEFAULT_MAX_WORKERS,
+            spawner,
+        )))
+    };
+    let worker_provider = ProductionWorkerProvider::new(shared_worker_registry.clone());
+    let runtime_deps = CapabilityRuntimeDeps {
+        pool: None,
+        worker_provider: Some(std::sync::Arc::new(worker_provider)),
+        daemon_tool_dispatch: None,
+    };
+    let capabilities = Arc::new(CapabilityRegistry::with_runtime_deps(&runtime_deps));
+    tracing::info!("Capability registry built via with_runtime_deps (production wiring)");
 
     // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
     // Stored in WorkspaceState so schedule-executed HostToolCallTask instances
@@ -215,10 +245,18 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 anyhow::bail!("Failed to open database pool for schedule supervisor: {e}");
             }
         };
-    let schedule_supervisor = Arc::new(ScheduleSupervisor::new_with_workspace(
+    // V1.51 T-A P0: thread the capability registry into the supervisor so the
+    // review-time KB extraction hook can invoke `nexus.llm.extract`. Falls back
+    // to the heuristic when the worker is unavailable (llm-extract.md §5.1).
+    let supervisor_registry = state.capability_registry();
+    let mut schedule_supervisor_builder = ScheduleSupervisor::new_with_workspace(
         Arc::new(schedule_pool),
         state.workspace_path().map(std::path::PathBuf::from),
-    ));
+    );
+    if let Some(reg) = supervisor_registry {
+        schedule_supervisor_builder = schedule_supervisor_builder.with_capability_registry(reg);
+    }
+    let schedule_supervisor = Arc::new(schedule_supervisor_builder);
     state.set_schedule_supervisor(schedule_supervisor.clone());
 
     match schedule_supervisor
@@ -442,11 +480,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // `crates/nexus-daemon-runtime/src/cron_supervisor.rs`.
     {
         let cron_pool = state.pool().clone();
+        let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
         let cron_supervisor = schedule_supervisor.clone();
         let cron_shutdown = state.shutdown_notify();
         let cron_config = crate::cron_supervisor::CronSupervisorConfig::from_env();
+        // V1.51 T-B P0: pass workspace_dir for file-lock path construction.
+        // If workspace_path is unset, use an empty path (defensive — a daemon
+        // without a workspace should not have schedule_json-bearing Works).
+        let cron_ws_path = cron_workspace.unwrap_or_default();
         let _cron_handle = crate::cron_supervisor::spawn_cron_supervisor(
             cron_pool,
+            cron_ws_path,
             cron_supervisor,
             cron_shutdown,
             cron_config,
@@ -482,7 +526,12 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Agent host facade wired");
 
     // --- Section 6: Lifecycle HSM initialization ---
-    let subsystems = create_subsystems(&state, config.port, agent_host_facade);
+    let subsystems = create_subsystems(
+        &state,
+        config.port,
+        agent_host_facade,
+        shared_worker_registry.clone(),
+    );
     let lifecycle = Arc::new(StatigLifecycle::new_with_subsystems(
         subsystems,
         config.shutdown_grace_ms,
@@ -691,6 +740,7 @@ fn create_subsystems(
     state: &WorkspaceState,
     port: u16,
     agent_host_facade: Arc<dyn nexus_agent_host::HostFacade>,
+    worker_registry: Arc<tokio::sync::Mutex<WorkerRegistry<WorkerManagerSpawner>>>,
 ) -> Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> {
     use crate::lifecycle::{AgentHostSubsystem, DbSubsystem, HttpSubsystem, WorkerMgrSubsystem};
 
@@ -703,7 +753,10 @@ fn create_subsystems(
     let mut subsystems: Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> = vec![
         Arc::new(HttpSubsystem::new(port)),
         Arc::new(DbSubsystem::new(Some(state.database_path()))),
-        Arc::new(WorkerMgrSubsystem::new()),
+        // V1.51 T-A P0 (QC3 F-001): share the same worker registry that
+        // backs `ProductionWorkerProvider` so workers spawned by either side
+        // are visible to the other.
+        Arc::new(WorkerMgrSubsystem::with_registry(worker_registry)),
     ];
 
     // Agent Host is an optional subsystem — failure does not block daemon startup
