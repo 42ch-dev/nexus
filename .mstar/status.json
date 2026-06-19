@@ -55,20 +55,23 @@
       "qc_dispatched_at": "2026-06-19T13:00:00Z",
       "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/"
     },
-    {
+{
       "plan_id": "2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile",
-      "title": "T-A P2 \u2014 Work\u2192KeyBlock provenance + essay profile",
-      "status": "Todo",
-      "owner": "@fullstack-dev",
+      "title": "T-A P2 — Work→KeyBlock provenance + essay profile",
+      "status": "InReview",
+      "started_at": "2026-06-19T18:30:00Z",
+      "owner": "@fullstack-dev-2",
       "agents": [
-        "@fullstack-dev",
+        "@fullstack-dev-2",
         "@qa-engineer"
       ],
       "task_category": "logic",
       "working_branch": "feature/v1.52-work-keyblock-provenance-and-essay-profile",
       "merge_target": "iteration/v1.52",
       "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z"
+      "created_at": "2026-06-19T08:30:00Z",
+      "qc_dispatched_at": "2026-06-19T19:00:00Z",
+      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile/"
     },
     {
       "plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
