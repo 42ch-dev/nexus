@@ -483,7 +483,9 @@ async fn manual_advance_bypasses_gates_and_seeds_chapters() {
             assert_eq!(next_volume, 2);
             assert_eq!(chapters_seeded, 4);
         }
-        other @ AdvanceOutcome::Skipped { .. } => panic!("manual advance should succeed, got {other:?}"),
+        other @ AdvanceOutcome::Skipped { .. } => {
+            panic!("manual advance should succeed, got {other:?}")
+        }
     }
 
     assert!(outline_path(ws.path(), "manual-novel", 2).exists());
