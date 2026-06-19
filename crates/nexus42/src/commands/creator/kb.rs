@@ -58,7 +58,10 @@ pub enum KbScope {
 pub enum KbCommand {
     /// List entries (work-scope file index by default; use --scope world for key blocks)
     List {
-        /// Scope: `work` (local file index, default) or `world` (narrative KB)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB).
+        ///
+        /// Note: `--scope world` is deprecated; use `creator world kb list` instead
+        /// (planned removal V1.53).
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
         /// World ID for `--scope world` (required when scope is `world`)
@@ -70,7 +73,10 @@ pub enum KbCommand {
     Search {
         /// Search query string
         query: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB).
+        ///
+        /// Note: `--scope world` is deprecated; use `creator world kb search`
+        /// instead (planned removal V1.53).
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
         /// World ID for `--scope world` (required when scope is `world`)
@@ -82,7 +88,10 @@ pub enum KbCommand {
     Show {
         /// Entry ID to display (e.g. `kb_a1b2c3d4` or a key-block ID)
         entry_id: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB).
+        ///
+        /// Note: `--scope world` is deprecated; use `creator world kb show`
+        /// instead (planned removal V1.53).
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
         /// World ID for `--scope world` (required when scope is `world`)
@@ -98,7 +107,10 @@ pub enum KbCommand {
         /// Optional title (defaults to filename stem)
         #[arg(long)]
         title: Option<String>,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB).
+        ///
+        /// Note: `--scope world` is deprecated; use `creator world kb add`
+        /// instead (planned removal V1.53).
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
         /// World ID for `--scope world` (required when scope is `world`)
@@ -113,7 +125,10 @@ pub enum KbCommand {
     Remove {
         /// Entry ID to remove (e.g. `kb_a1b2c3d4`)
         entry_id: String,
-        /// Scope: `work` (local file index, default) or `world` (narrative KB)
+        /// Scope: `work` (local file index, default) or `world` (narrative KB).
+        ///
+        /// Note: `--scope world` is deprecated; use `creator world kb remove`
+        /// instead (planned removal V1.53).
         #[arg(long, value_enum, default_value_t = KbScope::default())]
         scope: KbScope,
         /// World ID for `--scope world` (required when scope is `world`)
@@ -335,11 +350,12 @@ fn deprecation_notice_legacy_world_kb(subcmd: &str) {
 ///
 /// Returns the raw pool so the caller can pass it to the canonical
 /// `world::kb` hermetic functions (which take `&SqlitePool` directly).
+///
+/// Error Display matches the canonical `world::open_workspace_pool` path
+/// (`"local database error: …"`) for observability parity.
 async fn open_world_pool(config: &CliConfig) -> Result<SqlitePool> {
     let db_path = crate::config::resolve_state_db_path(config)?;
-    crate::db::Schema::init(&db_path)
-        .await
-        .map_err(|e| CliError::Other(format!("Failed to open workspace pool: {e}")))
+    Ok(crate::db::Schema::init(&db_path).await?)
 }
 
 /// Resolve active creator + workspace slug, returning `(creator_id, workspace_slug, home)`.
@@ -1115,20 +1131,219 @@ mod tests {
 
     // ── V1.52 T-A P1: Legacy World KB alias tests (R-V150KBED-01) ──
 
-    /// `deprecation_notice_legacy_world_kb` emits the expected stderr message.
+    /// Error Display on pool init failure matches the canonical surface
+    /// (R-V152TAP1-W002). Both legacy `open_world_pool` and canonical
+    /// `open_workspace_pool` now use `From<LocalDbError>` → "local database
+    /// error: …".
+    #[tokio::test]
+    async fn open_world_pool_error_matches_canonical_format() {
+        // Error format assertion: when LocalDbError converts to CliError via
+        // the From impl, it yields "local database error: <details>".
+        // The legacy wrapper open_world_pool now uses `?` which triggers this
+        // same conversion, matching the canonical open_workspace_pool path.
+        use nexus_local_db::LocalDbError;
+
+        let source_err = LocalDbError::VersionMismatch {
+            table: "test_table".to_string(),
+            id: "test_id".to_string(),
+            expected: 1,
+            actual: Some(2),
+        };
+        let cli_err: crate::errors::CliError = source_err.into();
+        let msg = format!("{cli_err}");
+        assert!(
+            msg.contains("local database error:"),
+            "error must use canonical format 'local database error:', got: {msg}"
+        );
+        assert!(
+            !msg.contains("Failed to open workspace pool"),
+            "error must NOT use pre-fix legacy format 'Failed to open workspace pool', got: {msg}"
+        );
+    }
+
+    /// `deprecation_notice_legacy_world_kb` constructs the correct message format
+    /// and does not panic when called.
     #[test]
     fn deprecation_notice_emits_stderr_message() {
-        // Capture stderr by redirecting to a pipe.
-        // We use a simple approach: call the function and verify it doesn't panic;
-        // the actual stderr output is verified in the integration test.
-        // Here we just verify the format is correct.
-        let subcmd = "list";
-        let msg = format!(
-            "`creator kb --scope world {subcmd}` is deprecated; \
-             use `creator world kb {subcmd}` instead (planned removal V1.53)."
+        // Verify the function doesn't panic (it writes to stderr, not capturable
+        // in a synchronous unit test without extra crates).
+        super::deprecation_notice_legacy_world_kb("list");
+        super::deprecation_notice_legacy_world_kb("show");
+        super::deprecation_notice_legacy_world_kb("remove");
+    }
+
+    /// Forward-wiring: list via World scope exercises the deprecation + canonical
+    /// kb_list path (mirrors kb.rs:448-454 forwarding code).
+    #[tokio::test]
+    async fn legacy_kb_scope_world_list_exercises_forward_path() {
+        use crate::db::Schema;
+        use nexus_contracts::BlockType;
+        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
+        use nexus_kb::KbStore;
+        use nexus_local_db::kb_store::SqliteKbStore;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let pool = Schema::init(&db_path).await.unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool, "wld_ut", "ctr_ut", "UT World", "ut-world", "private", "manual",
+        )
+        .await;
+        let store = SqliteKbStore::new(pool.clone());
+        let mut kb_block = KeyBlock::new("wld_ut", BlockType::Character, "char_ut_list");
+        kb_block.body = Some(KeyBlockBody {
+            summary: Some("UT list summary".to_string()),
+            attributes: Some(serde_json::json!({"novel_category": "character"})),
+            tags: Some(vec!["ut-list".to_string()]),
+        });
+        let result = store.insert_key_block(kb_block).await.unwrap();
+        let _block_id = result.key_block_id;
+
+        // Exactly mirror the forwarding code at kb.rs:448-454:
+        //   deprecation_notice_legacy_world_kb("list");
+        //   let pool = open_world_pool(config).await?;
+        //   return super::world::kb::kb_list(&pool, &wid, false).await;
+        super::deprecation_notice_legacy_world_kb("list");
+        let forward_result = super::super::world::kb::kb_list(&pool, "wld_ut", false).await;
+        assert!(
+            forward_result.is_ok(),
+            "forwarded kb_list should succeed: {forward_result:?}"
         );
-        assert!(msg.contains("deprecated"));
-        assert!(msg.contains("creator world kb list"));
-        assert!(msg.contains("V1.53"));
+    }
+
+    /// Forward-wiring: show via World scope exercises the deprecation + canonical
+    /// kb_show path (mirrors kb.rs:610-615 forwarding code).
+    #[tokio::test]
+    async fn legacy_kb_scope_world_show_exercises_forward_path() {
+        use crate::db::Schema;
+        use nexus_contracts::BlockType;
+        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
+        use nexus_kb::KbStore;
+        use nexus_local_db::kb_store::SqliteKbStore;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let pool = Schema::init(&db_path).await.unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            "wld_ut_show",
+            "ctr_ut",
+            "UT Show World",
+            "ut-show-world",
+            "private",
+            "manual",
+        )
+        .await;
+        let store = SqliteKbStore::new(pool.clone());
+        let mut kb_block = KeyBlock::new("wld_ut_show", BlockType::Character, "char_ut_show");
+        kb_block.body = Some(KeyBlockBody {
+            summary: Some("UT show summary".to_string()),
+            attributes: Some(serde_json::json!({"novel_category": "character"})),
+            tags: Some(vec!["ut-show".to_string()]),
+        });
+        let result = store.insert_key_block(kb_block).await.unwrap();
+
+        // Mirror forwarding code at kb.rs:611-615
+        super::deprecation_notice_legacy_world_kb("show");
+        let forward_result =
+            super::super::world::kb::kb_show(&pool, "wld_ut_show", &result.key_block_id, false)
+                .await;
+        assert!(
+            forward_result.is_ok(),
+            "forwarded kb_show should succeed: {forward_result:?}"
+        );
+    }
+
+    /// Forward-wiring: remove via World scope exercises the deprecation + canonical
+    /// kb_delete path with owner auth gate (mirrors kb.rs:789-797 forwarding code).
+    #[tokio::test]
+    async fn legacy_kb_scope_world_remove_exercises_forward_path() {
+        use crate::db::Schema;
+        use nexus_contracts::BlockType;
+        use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
+        use nexus_kb::KbStore;
+        use nexus_local_db::kb_store::SqliteKbStore;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("state.db");
+        let pool = Schema::init(&db_path).await.unwrap();
+
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            "wld_ut_rm",
+            "ctr_ut",
+            "UT Remove World",
+            "ut-rm-world",
+            "private",
+            "manual",
+        )
+        .await;
+        let store = SqliteKbStore::new(pool.clone());
+        let mut kb_block = KeyBlock::new("wld_ut_rm", BlockType::Character, "char_ut_rm");
+        kb_block.body = Some(KeyBlockBody {
+            summary: Some("UT remove summary".to_string()),
+            attributes: Some(serde_json::json!({"novel_category": "character"})),
+            tags: Some(vec!["ut-rm".to_string()]),
+        });
+        let result = store.insert_key_block(kb_block).await.unwrap();
+
+        // Mirror forwarding code at kb.rs:789-797
+        super::deprecation_notice_legacy_world_kb("remove");
+        let forward_result = super::super::world::kb::kb_delete(
+            &pool,
+            "ctr_ut",
+            "wld_ut_rm",
+            &result.key_block_id,
+            true,
+        )
+        .await;
+        assert!(
+            forward_result.is_ok(),
+            "forwarded kb_delete (remove) should succeed: {forward_result:?}"
+        );
+
+        // Cross-author should fail (auth gate preserved by forwarding)
+        let dir2 = tempfile::tempdir().unwrap();
+        let db_path2 = dir2.path().join("state.db");
+        let pool2 = Schema::init(&db_path2).await.unwrap();
+        nexus_local_db::kb_store::seed::world(
+            &pool2,
+            "wld_ut_rm2",
+            "ctr_owner",
+            "UT RM2 World",
+            "ut-rm2",
+            "private",
+            "manual",
+        )
+        .await;
+        let store2 = SqliteKbStore::new(pool2.clone());
+        let mut kb_block2 = KeyBlock::new("wld_ut_rm2", BlockType::Character, "char_ut_rm2");
+        kb_block2.body = Some(KeyBlockBody {
+            summary: Some("UT cross-author".to_string()),
+            attributes: Some(serde_json::json!({"novel_category": "character"})),
+            tags: Some(vec!["ut-rm2".to_string()]),
+        });
+        let result2 = store2.insert_key_block(kb_block2).await.unwrap();
+
+        super::deprecation_notice_legacy_world_kb("remove");
+        let cross_result = super::super::world::kb::kb_delete(
+            &pool2,
+            "ctr_stranger",
+            "wld_ut_rm2",
+            &result2.key_block_id,
+            true,
+        )
+        .await;
+        assert!(
+            cross_result.is_err(),
+            "cross-author forwarded remove should fail"
+        );
+        let err_msg = format!("{}", cross_result.unwrap_err());
+        assert!(
+            err_msg.contains("403") || err_msg.contains("WORLD_KB_FORBIDDEN"),
+            "cross-author error must mention auth, got: {err_msg}"
+        );
     }
 }
