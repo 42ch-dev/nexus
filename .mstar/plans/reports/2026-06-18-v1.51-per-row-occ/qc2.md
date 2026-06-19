@@ -3,7 +3,7 @@ report_kind: qc_review
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: 2026-06-18-v1.51-per-row-occ
-verdict: Request Changes
+verdict: Approve
 generated_at: 2026-06-19T12:00:00Z
 ---
 
@@ -87,10 +87,17 @@ None.
 | 🟡 Warning | 2 |
 | 🟢 Suggestion | 2 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
 ## Additional Notes
 - Core security invariants (CAS atomicity under parameterized WHERE, file-lock → CAS ordering, bounded retry, monotonic version, safe additive migration, transactional adopt) are correctly implemented and tested.
 - The two Warnings are narrow: one observability gap in error reporting for the documented user message, and one test-target naming mismatch with the assignment text. Neither introduces injection, deadlock, lost-update, or unbounded-retry risk.
 - No deviations from T-B P0/T-B P1 acquire-order discipline were found. No reverse lock acquisition introduced.
 - CI-equivalent checks (clippy -D warnings, tests) passed for the changed crates.
+
+## Revalidation (2026-06-19)
+
+- **Resolved: W-001 (qc2, actual_version discarded)** — Changed `kb_adopt` error mapping from `matches!(...VersionMismatch { .. })` to `if let ...VersionMismatch { actual, .. } = &e`, capturing `actual` from the `VersionMismatch` and threading it into `VersionConflict { actual_version: *actual }` (kb.rs:544). Added two hermetic tests in `kb_adopt_cas.rs`: `test_version_conflict_surfaces_actual_version_in_error_message` (asserts "actual v3" in user-visible message) and `test_version_conflict_without_actual_displays_question_mark` (asserts "?" fallback). Updated `test_kb_adopt_stale_preimage_returns_version_conflict` to exercise the concurrent-writer race path.
+- **Resolved: W-002 (qc2, missing test target)** — Created `crates/nexus-daemon-runtime/tests/cron_cas_retry.rs` with 3 tests: `test_cron_cas_happy_path` (CAS succeeds first try), `test_cron_cas_retry_succeeds_after_version_mismatch` (CAS fails first, succeeds on retry), `test_cron_cas_exhaustion_returns_version_mismatch` (all 3 retries fail, returns `VersionMismatch` with populated `actual`). All 3 pass. `cargo test -p nexus-daemon-runtime --test cron_cas_retry` is now executable.
+- **Evidence**: Commits `<impl-commits>`; tests: `cargo test -p nexus-daemon-runtime --test cron_cas_retry` (3/3), `cargo test -p nexus42 --test kb_adopt_cas` (6/6, +2 new), `cargo test -p nexus42 --test cli_version_error` (4/4), `cargo test -p nexus-local-db --test cas_migration_roundtrip` (5/5), `cargo test -p nexus-local-db --test file_lock` (3/3), `cargo test -p nexus42 --test cli_lock_contention` (3/3), `cargo test -p nexus-orchestration --test cron_supervisor` (22/22), `cargo clippy --all -- -D warnings` (clean), `cargo +nightly fmt --all --check` (clean)
+- **Re-verdict**: Approve
