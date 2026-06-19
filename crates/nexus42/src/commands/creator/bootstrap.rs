@@ -28,6 +28,12 @@ pub struct BootstrapArgs {
     #[arg(long)]
     pub idea: String,
 
+    /// Work profile: 'novel' (default) or 'essay' (V1.52 T-A P2).
+    /// Sets `work_profile` on the Work and selects the default init preset
+    /// (`novel-project-init` for novel, `essay-init` for essay).
+    #[arg(long, default_value = "novel")]
+    pub profile: String,
+
     /// Override the primary production preset (default: derived from policy)
     #[arg(long)]
     pub preset: Option<String>,
@@ -115,6 +121,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         preset,
         title,
         world_id,
+        profile,
         init_preset,
         skip_intake,
         chain_novel_writing,
@@ -171,13 +178,20 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         }
     });
 
+    // V1.52 T-A P2: derive primary_preset_id from --profile when --preset not set.
+    let primary_preset_id = preset.unwrap_or_else(|| match profile.as_str() {
+        "essay" => "essay".to_string(),
+        _ => "novel-writing".to_string(),
+    });
+
     let mut body = serde_json::json!({
         "title": work_title,
         "long_term_goal": "Complete creative work",
         "initial_idea": idea,
-        "primary_preset_id": preset,
+        "primary_preset_id": primary_preset_id,
         "world_id": world_id,
         "client_request_id": client_request_id,
+        "work_profile": profile,
     });
 
     // V1.36: pass init_preset through to the Work/schedule payload
@@ -253,9 +267,20 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         .unwrap_or("?")
         .to_string();
 
+    // V1.52 T-A P2: resolve effective init_preset from --profile when --init-preset
+    // isn't explicitly set. Essay profile defaults to `essay-init`; novel profile
+    // has no default init preset (user must pass --init-preset for novel scaffold).
+    let effective_init_preset = init_preset.or_else(|| {
+        if profile == "essay" {
+            Some("essay-init".to_string())
+        } else {
+            None
+        }
+    });
+
     // V1.36: Schedule init preset if requested (before intake)
     let mut init_schedule_id: Option<String> = None;
-    if let Some(ref ip) = init_preset {
+    if let Some(ref ip) = effective_init_preset {
         // V1.37 (R-V136P1-01): build structured input map from CLI flags
         // and work creation response so grill-me answers reach
         // preset.input.* for scaffold and prompt rendering.
@@ -353,7 +378,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
             "vibe": "literary",
             "chapter": 1,
         });
-        let production_preset = preset.as_deref().unwrap_or("novel-writing");
+        let production_preset = primary_preset_id.as_str();
         let novel_request = AddScheduleRequest {
             creator_id: resolved_creator_id.clone(),
             preset_id: production_preset.to_string(),
@@ -414,7 +439,10 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         let status = resp.get("status").and_then(|v| v.as_str()).unwrap_or("?");
         println!("Work created: {work_id} (status: {status})");
         if let Some(iid) = &init_schedule_id {
-            println!("Init preset scheduled: {iid} (preset: {init_preset:?})");
+            println!(
+                "Init preset scheduled: {iid} (preset: {})",
+                effective_init_preset.as_deref().unwrap_or("?")
+            );
             println!();
             println!("The init preset will bootstrap your Work's scaffold via ACP conversation.");
         }
@@ -425,10 +453,10 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
             // V1.45 P2: hint updated from `run stage advance --stage produce`
             // to the generic runner command `creator run novel-writing`.
             println!("Once intake completes, advance to production with:");
-            println!("  nexus42 creator run novel-writing {work_id}");
+            println!("  nexus42 creator run {primary_preset_id} {work_id}");
         } else if let Some(nid) = &novel_schedule_id {
-            // Intake skipped, novel-writing scheduled directly.
-            let production_preset = preset.as_deref().unwrap_or("novel-writing");
+            // Intake skipped, production scheduled directly.
+            let production_preset = primary_preset_id.as_str();
             println!(
                 "Production scheduled: {nid} (preset: {production_preset}, \
                  intake skipped)"
@@ -552,6 +580,36 @@ mod tests {
         match cli.command {
             BootstrapCmd::Bootstrap(args) => {
                 assert!(!args.chain_novel_writing);
+            }
+        }
+    }
+
+    #[test]
+    fn bootstrap_profile_default_is_novel() {
+        let cli =
+            BootstrapCli::try_parse_from(["nexus42", "bootstrap", "--idea", "A thoughtful essay"])
+                .expect("bootstrap without --profile should parse");
+        match cli.command {
+            BootstrapCmd::Bootstrap(args) => {
+                assert_eq!(args.profile, "novel");
+            }
+        }
+    }
+
+    #[test]
+    fn bootstrap_profile_essay_parses() {
+        let cli = BootstrapCli::try_parse_from([
+            "nexus42",
+            "bootstrap",
+            "--idea",
+            "A thoughtful essay",
+            "--profile",
+            "essay",
+        ])
+        .expect("bootstrap --profile essay should parse");
+        match cli.command {
+            BootstrapCmd::Bootstrap(args) => {
+                assert_eq!(args.profile, "essay");
             }
         }
     }

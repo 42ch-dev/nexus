@@ -318,9 +318,6 @@ pub async fn kb_edit(
     body_str: &str,
     json: bool,
 ) -> Result<()> {
-    // Author identity gate: world owner must match the active creator.
-    require_world_owner(pool, world_id, creator_id).await?;
-
     // Novel-mode store so update_key_block re-runs V1.40 P1 validation (§5.1.1).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
@@ -329,6 +326,12 @@ pub async fn kb_edit(
         .await
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
+
+    // Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
+    // the source Work's creator AND the World owner are both authorized.
+    // Legacy rows (NULL source_work_id) fall back to World owner only.
+    require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
+        .await?;
 
     let new_body: KeyBlockBody = serde_json::from_str(body_str).map_err(|e| {
         CliError::Other(format!(
@@ -371,9 +374,6 @@ pub async fn kb_delete(
     block_id: &str,
     yes: bool,
 ) -> Result<()> {
-    // Author identity gate: world owner must match the active creator.
-    require_world_owner(pool, world_id, creator_id).await?;
-
     let store = SqliteKbStore::new(pool.clone());
 
     // Pre-check existence + world binding for a clean error before prompting.
@@ -382,6 +382,12 @@ pub async fn kb_delete(
         .await
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
+
+    // Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
+    // the source Work's creator AND the World owner are both authorized.
+    // Legacy rows (NULL source_work_id) fall back to World owner only.
+    require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
+        .await?;
 
     if !yes && !confirm_delete(block_id, world_id) {
         println!("Delete cancelled.");
@@ -768,6 +774,10 @@ pub async fn kb_adopt(
     // Populate source_work_id and source_chapter from the extract job context.
     // provenance_kind is inferred: LLM extraction → review_time_extract,
     // heuristic/no LLM → manual.
+    //
+    // Deferred residual (W-004): 'finalize_time_extract' and 'cross_chapter_rescan'
+    // are valid CHECK values (migration 202606190003) but not yet exercised in
+    // any code path. Coverage for all 5 values deferred to V1.52 P-last WL-A.
     kb.source_work_id = candidate.work_id.clone();
     kb.source_chapter = candidate.source_chapter_id;
     kb.source_provenance_kind = if candidate.llm_confidence.is_some() {
@@ -893,6 +903,22 @@ pub async fn kb_adopt(
 /// columns, and an audit log is written under
 /// `Works/<work_ref>/Logs/kb/auto-promoted/`. Candidates that do not qualify
 /// remain `pending` and are reported in the `--json` `skipped` array.
+///
+/// # Scale limit (V1.52 T-A P2, W-006)
+///
+/// This function iterates all pending `kb_extract_jobs` rows for a World with
+/// no upper bound on N. Each promoted candidate incurs:
+///
+/// - A dedicated DB transaction (INSERT `KeyBlock` + CAS flip promotion row)
+/// - A best-effort audit log write under `Works/<work_ref>/Logs/kb/auto-promoted/`
+/// - Full `ValidationMode::Novel` re-validation
+///
+/// Recommended scale: ≤ 100 pending candidates. For > 100 candidates, the
+/// caller should batch in groups (e.g. 50–100 per invocation) via the daemon
+/// scheduler or manual CLI repeats. The CAS version guard on each promotion
+/// row already makes re-entrant invocations safe (no double-promotion).
+/// A future batched-transaction path (single tx for all promotions) would
+/// improve throughput for large candidate sets.
 ///
 /// # Errors
 ///
@@ -1250,6 +1276,46 @@ fn require_block_in_world(block: &KeyBlock, world_id: &str, block_id: &str) -> R
         )));
     }
     Ok(())
+}
+
+/// Author identity gate with Work→KeyBlock provenance support (§5.5.7).
+///
+/// When `source_work_id` is set (R-V150KBED-02 resolution), the authorisation
+/// gate accepts EITHER the World owner OR the source Work's creator — a KB row
+/// originated from a specific Work, so the author of that Work can edit/delete
+/// the resulting KB entry even if they do not own the World.
+///
+/// When `source_work_id` is `None` (legacy KB rows created before V1.52 T-A P2),
+/// the gate falls back to the World owner check only (existing behaviour).
+async fn require_world_or_work_owner(
+    pool: &SqlitePool,
+    world_id: &str,
+    creator_id: &str,
+    source_work_id: Option<&str>,
+) -> Result<()> {
+    // R-V150KBED-02: when source_work_id is set, check the source Work's creator.
+    if let Some(work_id) = source_work_id {
+        // SAFETY: static query against the known works table schema.
+        let work_creator: Option<String> =
+            sqlx::query_scalar("SELECT creator_id FROM works WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| {
+                    CliError::Other(format!("Failed to query source work creator: {e}"))
+                })?;
+
+        if let Some(ref wc) = work_creator {
+            if wc == creator_id {
+                return Ok(());
+            }
+        }
+        // Source work creator doesn't match; fall through to world owner check.
+    }
+
+    // Fall back to the canonical World owner check for legacy rows and
+    // for cases where the source work creator didn't match.
+    require_world_owner(pool, world_id, creator_id).await
 }
 
 /// Author identity gate. Reads `narrative_worlds.owner_creator_id` and requires

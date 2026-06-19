@@ -5,8 +5,20 @@
 //! from embedded templates, a README.md, and `PATCH`es the works row
 //! to set `work_profile = 'essay'` and `work_ref`.
 //!
-//! Concurrency: single-user daemon; one invocation per `(creator_id, work_id)`
-//! in flight. Same assumptions as `novel.project_scaffold`.
+//! # Concurrency note (V1.52 T-A P2)
+//!
+//! This capability runs in the single-user daemon process. We assume:
+//! 1. Only one `essay.project_scaffold` invocation per `(creator_id, work_id)`
+//!    is in flight at any time.
+//! 2. No external process is mutating `Works/<work_ref>/` while this runs.
+//!
+//! # Deferred (W-005, V1.52 P-last WL-A)
+//!
+//! The current implementation creates FS artifacts and updates the DB row
+//! in separate steps (TOCTOU window). The `novel.project_scaffold` wraps both
+//! in a `ScaffoldTransaction` with Drop-based FS rollback. The essay scaffold
+//! should adopt the same pattern before production use with concurrent
+//! presets. Tracked as deferred residual in `.mstar/status.json`.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
