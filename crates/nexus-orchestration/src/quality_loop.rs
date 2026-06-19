@@ -24,6 +24,13 @@
 //! [`extract_kb_candidates_for_review`] is invoked by the schedule supervisor
 //! when a `novel-review-master` schedule reaches a terminal state (see
 //! `schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`).
+//!
+//! V1.51 T-A P2 adds [`detect_missing_kb_on_finalize`], invoked by the same
+//! supervisor when a `novel-writing` schedule reaches terminal `Completed`.
+//! It scans the finalized chapter prose, diffs against confirmed World KB rows,
+//! and writes an advisory log file under
+//! `Works/<work_ref>/Logs/kb/missing/<date>-ch<chapter>.md`. Missing candidates
+//! are **not** inserted into `kb_extract_jobs`.
 
 use crate::auto_chain::AutoChainError;
 use crate::capability::{CapabilityError, CapabilityRegistry};
@@ -469,6 +476,95 @@ pub async fn extract_kb_candidates_for_review(
     Ok(inserted)
 }
 
+/// Finalize-time missing-KB detection hook (V1.51 T-A P2).
+///
+/// When a `novel-writing` schedule completes, scan the finalized chapter prose
+/// for entity references, diff against confirmed `KeyBlock` rows in the Work's
+/// World, and write an advisory log file under
+/// `Works/<work_ref>/Logs/kb/missing/<date>-ch<chapter>.md`. The log is
+/// **advisory only**: missing candidates are not inserted into `kb_extract_jobs`.
+///
+/// # Pathway selection
+///
+/// Reuses the same LLM/heuristic pathway as [`extract_kb_candidates_for_review`]:
+/// LLM when a registry + worker is available, heuristic fallback otherwise.
+///
+/// # Behavior
+///
+/// 1. Loads the schedule row; returns `Ok(0)` early unless `preset_id` is
+///    `novel-writing` and `work_id` is set.
+/// 2. Loads the Work and the finalized chapter body.
+/// 3. Extracts candidates, filters out names already present in confirmed
+///    `kb_key_blocks` for the World, and writes the missing log.
+///
+/// Best-effort + non-blocking: the caller logs any `Err` and does NOT fail the
+/// terminal transition.
+///
+/// # Errors
+///
+/// Returns `AutoChainError::Database` if the schedule/Work lookup fails, or
+/// `AutoChainError::InvalidState` for decode failures.
+pub async fn detect_missing_kb_on_finalize(
+    pool: &SqlitePool,
+    schedule_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+    registry: Option<&CapabilityRegistry>,
+) -> Result<usize, AutoChainError> {
+    let Some(ctx) = load_finalize_context(pool, schedule_id, workspace_dir).await? else {
+        return Ok(0);
+    };
+
+    let candidates = match extract_via_llm(registry, &ctx).await {
+        LlmExtractOutcome::Candidates(c) => c,
+        LlmExtractOutcome::Fallback(reason) => {
+            tracing::debug!(
+                schedule_id,
+                reason,
+                "kb-missing: falling back to heuristic extraction"
+            );
+            extract_candidates_from_text(&ctx.prose)
+        }
+    };
+
+    let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
+    let missing: Vec<KbCandidate> = candidates
+        .into_iter()
+        .filter(|c| {
+            !existing_names
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case(&c.canonical_name_guess))
+        })
+        .collect();
+
+    if missing.is_empty() {
+        tracing::info!(
+            schedule_id,
+            work_id = %ctx.work_id,
+            chapter = ctx.chapter,
+            world_id = ctx.world_id,
+            "kb-missing: no missing KB candidates detected"
+        );
+        return Ok(0);
+    }
+
+    let written = write_missing_kb_log(workspace_dir, &ctx, &missing).map_err(|e| {
+        AutoChainError::InvalidState(format!(
+            "failed to write missing-KB log for {schedule_id}: {e}"
+        ))
+    })?;
+
+    tracing::info!(
+        schedule_id,
+        work_id = %ctx.work_id,
+        chapter = ctx.chapter,
+        world_id = ctx.world_id,
+        missing = written,
+        "kb-missing: wrote missing KB candidates log"
+    );
+
+    Ok(written)
+}
+
 /// Outcome of an LLM extraction attempt.
 ///
 /// `Candidates` carries the LLM-extracted candidates; `Fallback` signals that
@@ -488,7 +584,7 @@ enum LlmExtractOutcome {
 /// `Candidates(vec![])`, not a fallback.
 async fn extract_via_llm(
     registry: Option<&CapabilityRegistry>,
-    ctx: &ReviewContext,
+    ctx: &ChapterContext,
 ) -> LlmExtractOutcome {
     let Some(registry) = registry else {
         return LlmExtractOutcome::Fallback("no capability registry threaded");
@@ -629,21 +725,24 @@ fn block_type_to_novel_category(block_type: &str) -> &'static str {
     }
 }
 
-/// Loaded review context: schedule → work → chapter prose.
+/// Loaded chapter context: schedule → work → chapter prose.
 ///
-/// Returned by [`load_review_context`] when all preconditions are met
-/// (preset is `novel-review-master`, work has a world, chapter body is
+/// Returned by [`load_review_context`] and [`load_finalize_context`] when all
+/// preconditions are met (preset matches, work has a world, chapter body is
 /// readable). `None` for any no-op early return (logged at `debug`/`warn`).
-struct ReviewContext {
+struct ChapterContext {
     creator_id: String,
     work_id: String,
     world_id: String,
     chapter: i32,
     workspace_id: String,
+    /// Human-readable Work slug for on-disk paths (`work_ref`, falling back to
+    /// `story_ref`). `None` in hermetic DB-only tests where no workspace exists.
+    work_ref: Option<String>,
     prose: String,
 }
 
-/// Resolve the schedule → work → chapter body for the extraction hook.
+/// Resolve the schedule → work → chapter body for the review-time extraction hook.
 ///
 /// Returns `Ok(None)` for every no-op early return (non-`review-master`
 /// preset, NULL `work_id`, no `workspace_dir`, missing work/world/chapter/body).
@@ -652,9 +751,47 @@ async fn load_review_context(
     pool: &SqlitePool,
     schedule_id: &str,
     workspace_dir: Option<&std::path::Path>,
-) -> Result<Option<ReviewContext>, AutoChainError> {
-    use crate::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID;
+) -> Result<Option<ChapterContext>, AutoChainError> {
+    load_context_for_preset(
+        pool,
+        schedule_id,
+        workspace_dir,
+        crate::preset_ids::NOVEL_REVIEW_MASTER_PRESET_ID,
+        "kb-extract",
+    )
+    .await
+}
 
+/// Resolve the schedule → work → chapter body for the finalize-time missing-KB hook.
+///
+/// Returns `Ok(None)` for every no-op early return (non-`novel-writing`
+/// preset, NULL `work_id`, no `workspace_dir`, missing work/world/chapter/body).
+async fn load_finalize_context(
+    pool: &SqlitePool,
+    schedule_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<Option<ChapterContext>, AutoChainError> {
+    load_context_for_preset(
+        pool,
+        schedule_id,
+        workspace_dir,
+        crate::preset_ids::NOVEL_WRITING_PRESET_ID,
+        "kb-missing",
+    )
+    .await
+}
+
+/// Shared loader for [`ChapterContext`].
+///
+/// `log_prefix` is used in `tracing` events so review-time and finalize-time
+/// skips are distinguishable in logs.
+async fn load_context_for_preset(
+    pool: &SqlitePool,
+    schedule_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+    expected_preset_id: &str,
+    log_prefix: &str,
+) -> Result<Option<ChapterContext>, AutoChainError> {
     // SAFETY: dynamic SQL — single-row schedule lookup by PK (nullable work_id).
     let row = sqlx::query(
         "SELECT preset_id, work_id, creator_id
@@ -666,7 +803,10 @@ async fn load_review_context(
     .map_err(nexus_local_db::LocalDbError::from)?;
 
     let Some(row) = row else {
-        tracing::debug!(schedule_id, "kb-extract: schedule row not found; skipping");
+        tracing::debug!(
+            schedule_id,
+            "{log_prefix}: schedule row not found; skipping"
+        );
         return Ok(None);
     };
 
@@ -677,51 +817,53 @@ async fn load_review_context(
     let creator_id: String = sqlx::Row::try_get(&row, "creator_id")
         .map_err(|e| AutoChainError::InvalidState(format!("decode creator_id: {e}")))?;
 
-    if preset_id != NOVEL_REVIEW_MASTER_PRESET_ID {
+    if preset_id != expected_preset_id {
         return Ok(None);
     }
     let Some(work_id) = work_id else {
         tracing::warn!(
             schedule_id,
-            "kb-extract: schedule has NULL work_id; skipping"
+            "{log_prefix}: schedule has NULL work_id; skipping"
         );
         return Ok(None);
     };
     let Some(ws_dir) = workspace_dir else {
-        tracing::debug!(schedule_id, "kb-extract: no workspace_dir; skipping");
+        tracing::debug!(schedule_id, "{log_prefix}: no workspace_dir; skipping");
         return Ok(None);
     };
 
     let work = match nexus_local_db::works::get_work(pool, &creator_id, &work_id).await {
         Ok(Some(w)) => w,
         Ok(None) => {
-            tracing::warn!(schedule_id, work_id = %work_id, "kb-extract: work not found; skipping");
+            tracing::warn!(schedule_id, work_id = %work_id, "{log_prefix}: work not found; skipping");
             return Ok(None);
         }
         Err(e) => return Err(AutoChainError::from(e)),
     };
     let Some(world_id) = work.world_id.as_deref() else {
-        tracing::debug!(schedule_id, work_id = %work_id, "kb-extract: work has no world_id; skipping");
+        tracing::debug!(schedule_id, work_id = %work_id, "{log_prefix}: work has no world_id; skipping");
         return Ok(None);
     };
     if work.current_chapter <= 0 {
-        tracing::debug!(schedule_id, work_id = %work_id, "kb-extract: current_chapter <= 0; skipping");
+        tracing::debug!(schedule_id, work_id = %work_id, "{log_prefix}: current_chapter <= 0; skipping");
         return Ok(None);
     }
 
     let workspace_id = resolve_workspace_id(pool, &creator_id).await;
+    let work_ref = work.work_ref.clone().or_else(|| work.story_ref.clone());
     let Some(prose) =
         load_chapter_prose(pool, schedule_id, &work_id, work.current_chapter, ws_dir).await?
     else {
         return Ok(None);
     };
 
-    Ok(Some(ReviewContext {
+    Ok(Some(ChapterContext {
         creator_id,
         work_id,
         world_id: world_id.to_string(),
         chapter: work.current_chapter,
         workspace_id,
+        work_ref,
         prose,
     }))
 }
@@ -786,7 +928,7 @@ async fn load_chapter_prose(
 async fn persist_candidates(
     pool: &SqlitePool,
     schedule_id: &str,
-    ctx: &ReviewContext,
+    ctx: &ChapterContext,
     existing_names: &[String],
     candidates: Vec<KbCandidate>,
 ) -> Result<usize, AutoChainError> {
@@ -875,6 +1017,115 @@ async fn existing_canonical_names(
             Err(nexus_local_db::LocalDbError::from(e).into())
         }
     }
+}
+
+/// Write the advisory missing-KB log for a finalized chapter.
+///
+/// Path: `<workspace_dir>/Works/<work_ref>/Logs/kb/missing/<YYYY-MM-DD>-ch<chapter>.md`.
+/// The log uses YAML frontmatter with the candidate list and a human-readable
+/// Markdown body. It overwrites any existing file for the same day/chapter so
+/// repeated finalize transitions remain idempotent.
+///
+/// Returns the number of candidates written. Returns `Ok(0)` when there is no
+/// `workspace_dir` or no resolvable `work_ref` (hermetic test path), and no log
+/// is written.
+fn write_missing_kb_log(
+    workspace_dir: Option<&std::path::Path>,
+    ctx: &ChapterContext,
+    missing: &[KbCandidate],
+) -> Result<usize, String> {
+    if missing.is_empty() {
+        return Ok(0);
+    }
+
+    let Some(ws_dir) = workspace_dir else {
+        return Ok(0);
+    };
+    let Some(ref work_ref) = ctx.work_ref else {
+        return Ok(0);
+    };
+
+    let date = chrono::Utc::now().format("%Y-%m-%d");
+    let log_dir = ws_dir
+        .join("Works")
+        .join(work_ref)
+        .join("Logs")
+        .join("kb")
+        .join("missing");
+    std::fs::create_dir_all(&log_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+
+    let log_path = log_dir.join(format!("{date}-ch{}.md", ctx.chapter));
+
+    let candidates: Vec<MissingLogCandidate> = missing
+        .iter()
+        .map(|c| MissingLogCandidate {
+            canonical_name: c.canonical_name_guess.clone(),
+            block_type: c.block_type.clone(),
+            source_quote: c.source_quote.clone(),
+            confidence: c.confidence,
+        })
+        .collect();
+
+    let frontmatter = MissingLogFrontmatter {
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        world_id: ctx.world_id.clone(),
+        work_id: ctx.work_id.clone(),
+        work_ref: work_ref.clone(),
+        chapter: ctx.chapter,
+        candidate_count: candidates.len(),
+        candidates,
+    };
+
+    let yaml =
+        serde_yaml::to_string(&frontmatter).map_err(|e| format!("serialize frontmatter: {e}"))?;
+    let mut body = String::new();
+    body.push_str("---\n");
+    body.push_str(&yaml);
+    body.push_str("---\n\n");
+    body.push_str("# Missing KB candidates detected at finalize\n\n");
+    let _ = std::fmt::Write::write_fmt(
+        &mut body,
+        format_args!(
+            "Chapter **{}** of Work **{}** (world `{}`) was finalized at `{}`. \
+             The following entities were referenced in the chapter prose but are not \
+             yet present in the World KB. These are advisory signals only; they are \
+             not pending candidates and cannot be adopted directly.\n\n",
+            ctx.chapter, work_ref, ctx.world_id, frontmatter.generated_at
+        ),
+    );
+    for c in missing {
+        let _ = std::fmt::Write::write_fmt(
+            &mut body,
+            format_args!("- **{}** (`{}`)\n", c.canonical_name_guess, c.block_type),
+        );
+        if let Some(ref q) = c.source_quote {
+            let _ = std::fmt::Write::write_fmt(&mut body, format_args!("  > Source: {q}\n"));
+        }
+    }
+
+    std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
+    Ok(missing.len())
+}
+
+/// YAML-frontmatter candidate entry for the missing-KB log.
+#[derive(Debug, serde::Serialize)]
+struct MissingLogCandidate {
+    canonical_name: String,
+    block_type: String,
+    source_quote: Option<String>,
+    confidence: Option<f64>,
+}
+
+/// YAML-frontmatter header for the missing-KB log.
+#[derive(Debug, serde::Serialize)]
+struct MissingLogFrontmatter {
+    generated_at: String,
+    world_id: String,
+    work_id: String,
+    work_ref: String,
+    chapter: i32,
+    candidate_count: usize,
+    candidates: Vec<MissingLogCandidate>,
 }
 
 /// Best-effort `workspace_id` resolution for the `kb_extract_jobs` row.

@@ -90,7 +90,9 @@ pub enum WorldKbCommand {
         yes: bool,
     },
 
-    /// List review-time KB candidates awaiting confirmation (V1.50 T-B P1)
+    /// List review-time KB candidates awaiting confirmation (V1.50 T-B P1).
+    /// With `--missing-only`, list advisory finalize-time missing candidates
+    /// from `Works/<work_ref>/Logs/kb/missing/` instead.
     Pending {
         /// World reference — the world ID (e.g. `wld_abc123`)
         world_ref: String,
@@ -100,6 +102,10 @@ pub enum WorldKbCommand {
         /// Emit machine-readable JSON
         #[arg(long)]
         json: bool,
+        /// List advisory missing candidates detected at finalize time
+        /// (scans `Works/<work_ref>/Logs/kb/missing/`)
+        #[arg(long)]
+        missing_only: bool,
     },
 
     /// Confirm a review-time KB candidate → promote to a `confirmed` `KeyBlock`
@@ -155,7 +161,20 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
             world_ref,
             limit,
             json,
-        } => kb_pending(&pool, &creator_id, &world_ref, Some(limit), json).await,
+            missing_only,
+        } => {
+            let ws_root = crate::config::find_workspace_root();
+            kb_pending(
+                &pool,
+                &creator_id,
+                &world_ref,
+                Some(limit),
+                json,
+                missing_only,
+                ws_root.as_deref(),
+            )
+            .await
+        }
         WorldKbCommand::Adopt {
             extract_job_id,
             json,
@@ -367,22 +386,32 @@ pub async fn kb_delete(
 
 /// `creator world kb pending` — list candidates awaiting confirmation.
 ///
+/// With `missing_only = false` (default), lists `pending` `kb_extract_jobs` rows
+/// (V1.50 behavior). With `missing_only = true`, scans advisory missing-KB logs
+/// under `Works/<work_ref>/Logs/kb/missing/` for every Work bound to this World.
+///
 /// Gates on world ownership: a cross-author attempt returns `403` with code
 /// `WORLD_KB_FORBIDDEN` (reuses the T-B P0 error code per acceptance §3).
 ///
 /// # Errors
 ///
 /// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access, or
-/// `CliError::Other` on store/serialization failure.
+/// `CliError::Other` on store/serialization/log-scan failure.
 pub async fn kb_pending(
     pool: &SqlitePool,
     creator_id: &str,
     world_id: &str,
     limit: Option<i64>,
     json: bool,
+    missing_only: bool,
+    workspace_dir: Option<&std::path::Path>,
 ) -> Result<()> {
     // Author identity gate (same code path as edit/delete).
     require_world_owner(pool, world_id, creator_id).await?;
+
+    if missing_only {
+        return kb_pending_missing_only(pool, world_id, limit, json, workspace_dir).await;
+    }
 
     let pending = list_pending_for_world(pool, world_id, limit)
         .await
@@ -414,6 +443,206 @@ pub async fn kb_pending(
         );
     }
     Ok(())
+}
+
+/// `creator world kb pending --missing-only` implementation.
+///
+/// Scans `Works/<work_ref>/Logs/kb/missing/*.md` for every Work bound to the
+/// given World, parses YAML frontmatter, and prints advisory missing candidates.
+async fn kb_pending_missing_only(
+    pool: &SqlitePool,
+    world_id: &str,
+    limit: Option<i64>,
+    json: bool,
+    workspace_dir: Option<&std::path::Path>,
+) -> Result<()> {
+    let Some(ws_dir) = workspace_dir else {
+        if json {
+            println!("[]");
+        } else {
+            println!("No missing-KB logs found: no workspace directory is bound.");
+        }
+        return Ok(());
+    };
+
+    let mut entries = collect_missing_entries(pool, world_id, ws_dir).await?;
+
+    // Stable ordering: chapter ascending, then canonical name.
+    entries.sort_by(|a, b| {
+        a.chapter
+            .cmp(&b.chapter)
+            .then_with(|| a.candidate.canonical_name.cmp(&b.candidate.canonical_name))
+    });
+
+    if let Some(lim) = limit {
+        let lim = usize::try_from(lim.max(0)).unwrap_or(usize::MAX);
+        entries.truncate(lim);
+    }
+
+    render_missing_entries(world_id, &entries, json)
+}
+
+/// Collect advisory missing-KB entries from log files.
+async fn collect_missing_entries(
+    pool: &SqlitePool,
+    world_id: &str,
+    ws_dir: &std::path::Path,
+) -> Result<Vec<MissingKbEntry>> {
+    let work_refs: Vec<String> =
+        sqlx::query_as("SELECT COALESCE(work_ref, story_ref) FROM works WHERE world_id = ?")
+            .bind(world_id)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| {
+                CliError::Other(format!("Failed to list works for world {world_id}: {e}"))
+            })?
+            .into_iter()
+            .filter_map(|(opt,): (Option<String>,)| opt)
+            .collect();
+
+    let mut entries: Vec<MissingKbEntry> = Vec::new();
+    for work_ref in work_refs {
+        let log_dir = ws_dir
+            .join("Works")
+            .join(&work_ref)
+            .join("Logs")
+            .join("kb")
+            .join("missing");
+        if !log_dir.is_dir() {
+            continue;
+        }
+        let mut dir_entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&log_dir)
+            .map_err(|e| CliError::Other(format!("Cannot read missing-KB log dir: {e}")))?
+            .filter_map(std::result::Result::ok)
+            .collect();
+        dir_entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in dir_entries {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("md") {
+                continue;
+            }
+            let text = match std::fs::read_to_string(&path) {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "missing-kb: skip unreadable log");
+                    continue;
+                }
+            };
+            let (frontmatter, _body) = split_frontmatter(&text)
+                .map_err(|e| CliError::Other(format!("Parse error in {}: {e}", path.display())))?;
+            let log: MissingKbLogFrontmatter = serde_yaml::from_str(frontmatter)
+                .map_err(|e| CliError::Other(format!("YAML error in {}: {e}", path.display())))?;
+            if log.world_id != world_id {
+                continue;
+            }
+            for candidate in log.candidates {
+                entries.push(MissingKbEntry {
+                    chapter: log.chapter,
+                    world_id: log.world_id.clone(),
+                    generated_at: log.generated_at.clone(),
+                    candidate,
+                });
+            }
+        }
+    }
+    Ok(entries)
+}
+
+/// Render collected missing-KB entries as text or JSON.
+fn render_missing_entries(world_id: &str, entries: &[MissingKbEntry], json: bool) -> Result<()> {
+    if json {
+        let items: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "chapter": e.chapter,
+                    "world_id": e.world_id,
+                    "canonical_name": e.candidate.canonical_name,
+                    "block_type": e.candidate.block_type,
+                    "source_quote": e.candidate.source_quote,
+                    "confidence": e.candidate.confidence,
+                    "generated_at": e.generated_at,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&items)?);
+        return Ok(());
+    }
+
+    if entries.is_empty() {
+        println!("No missing KB candidates in world {world_id}.");
+        return Ok(());
+    }
+
+    println!("Missing KB candidates in world {world_id}:");
+    println!("{:<8} {:<15} {:<30} SOURCE", "CHAPTER", "TYPE", "NAME");
+    for e in entries {
+        let quote = e
+            .candidate
+            .source_quote
+            .as_deref()
+            .map_or_else(|| "-".to_string(), truncate_quote);
+        println!(
+            "[MISSING] {:<8} {:<15} {:<30} {}",
+            e.chapter, e.candidate.block_type, e.candidate.canonical_name, quote
+        );
+    }
+    Ok(())
+}
+
+/// Split a Markdown file into its YAML frontmatter and body.
+///
+/// Expects the file to start with `---` and contain a second `---` ending the
+/// frontmatter block. Returns the frontmatter text (without delimiters) and the
+/// body text (after the closing delimiter).
+fn split_frontmatter(text: &str) -> std::result::Result<(&str, &str), String> {
+    let rest = text
+        .strip_prefix("---")
+        .ok_or_else(|| "missing opening frontmatter delimiter".to_string())?;
+    let Some(split) = rest.find("\n---") else {
+        return Err("missing closing frontmatter delimiter".to_string());
+    };
+    let fm = &rest[..split];
+    let body_start = split + "\n---".len();
+    let body = &rest[body_start..];
+    Ok((fm.trim(), body.trim_start()))
+}
+
+/// Truncate a source quote for terminal output.
+fn truncate_quote(q: &str) -> String {
+    let q = q.trim();
+    if q.chars().count() > 50 {
+        let head: String = q.chars().take(47).collect();
+        format!("{head}...")
+    } else {
+        q.to_string()
+    }
+}
+
+/// Parsed frontmatter of a missing-KB log file.
+#[derive(Debug, serde::Deserialize)]
+struct MissingKbLogFrontmatter {
+    generated_at: String,
+    world_id: String,
+    chapter: i32,
+    candidates: Vec<MissingKbLogCandidate>,
+}
+
+/// Parsed candidate inside a missing-KB log frontmatter.
+#[derive(Debug, serde::Deserialize)]
+struct MissingKbLogCandidate {
+    canonical_name: String,
+    block_type: String,
+    source_quote: Option<String>,
+    confidence: Option<f64>,
+}
+
+/// Flattened missing-KB entry used for sorting/output.
+struct MissingKbEntry {
+    chapter: i32,
+    world_id: String,
+    generated_at: String,
+    candidate: MissingKbLogCandidate,
 }
 
 /// `creator world kb adopt` — confirm a candidate into a `confirmed` `KeyBlock`.

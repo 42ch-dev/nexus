@@ -473,6 +473,7 @@ impl ScheduleSupervisor {
                 .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_WRITING_PRESET_ID)
             {
                 use crate::auto_chain;
+                use crate::quality_loop;
                 let ws_ref = self.workspace_dir.as_ref();
                 let ws_path = ws_ref.as_deref();
                 if let Err(e) =
@@ -483,6 +484,29 @@ impl ScheduleSupervisor {
                         schedule_id,
                         error = %e,
                         "foreshadowing-promote: hook failed (non-fatal)"
+                    );
+                }
+
+                // V1.51 T-A P2: finalize-time missing-KB detection. Scan the
+                // finalized chapter prose, diff against confirmed World KB rows,
+                // and write an advisory log under
+                // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
+                // inserted into kb_extract_jobs. Best-effort: errors are logged
+                // and do NOT fail the terminal transition.
+                let reg: Option<&crate::capability::CapabilityRegistry> =
+                    self.registry.as_ref().as_ref().map(|r| &**r);
+                if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
+                    &self.pool,
+                    schedule_id,
+                    ws_path,
+                    reg,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        schedule_id,
+                        error = %e,
+                        "kb-missing: finalize-time detection hook failed (non-fatal)"
                     );
                 }
             }

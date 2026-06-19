@@ -1470,13 +1470,12 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         // cron-triggered presets so the evaluator never silently stamps a
         // stale `preset_version` through the `_` fallback. `novel-brainstorm`
         // ships at v1 (embedded-presets/novel-brainstorm/preset.yaml).
-        // `novel-write` is deferred (R-V150P1CRONBW-01 — preset YAML not yet
-        // authored) and resolves to v1 until its first release. Bump in
-        // lockstep with the preset's `version:` field on any breaking change
+        // `novel-write` ships at v1 (embedded-presets/novel-write/preset.yaml);
+        // R-V150P1CRONBW-01 is closed in V1.51 T-A P2. Bump in lockstep with
+        // the preset's `version:` field on any breaking change
         // (R-V139P5-W-4 version policy); the
         // `preset_version_mapping_matches_yaml_includes_cron_presets` test
-        // guards the novel-brainstorm sync and asserts novel-write's pending
-        // value while its YAML is absent.
+        // enforces the sync for both presets.
         "novel-brainstorm" | "novel-write" => 1,
         // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
         // per compass §0.1 #6). Bumped to version 1 (was already 1 as
@@ -2151,9 +2150,7 @@ mod tests {
 
         // R-V150P1CRONBW-05 (qc3 W-003): both cron-triggered preset ids are
         // iterated here so a future `version:` bump cannot drift silently.
-        // `novel-write`'s YAML is deferred (R-V150P1CRONBW-01, T-A P2); until
-        // it ships the mapping must return 1, and the strict YAML-sync branch
-        // below enforces the comparison the moment the preset is authored.
+        // `novel-write` ships in V1.51 T-A P2 (R-V150P1CRONBW-01 closed).
         let known_ids = [
             "novel-writing",
             "research",

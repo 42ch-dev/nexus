@@ -9,7 +9,10 @@
       "status": "Done",
       "done_at": "2026-06-18",
       "owner": "@project-manager",
-      "agents": ["@project-manager", "@writing-specialist"],
+      "agents": [
+        "@project-manager",
+        "@writing-specialist"
+      ],
       "working_branch": "iteration/v1.51",
       "merge_target": "iteration/v1.51",
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
@@ -26,7 +29,11 @@
       "merged_at": "2026-06-18",
       "merge_commit": "ae7dfce0",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev", "@architect", "@qa-engineer"],
+      "agents": [
+        "@fullstack-dev",
+        "@architect",
+        "@qa-engineer"
+      ],
       "working_branch": "feature/v1.51-llm-extraction",
       "merge_target": "iteration/v1.51",
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
@@ -43,7 +50,10 @@
       "merged_at": "2026-06-18",
       "merge_commit": "45520f1f",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev", "@qa-engineer"],
+      "agents": [
+        "@fullstack-dev",
+        "@qa-engineer"
+      ],
       "working_branch": "feature/v1.51-cross-chapter-rescan",
       "merge_target": "iteration/v1.51",
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
@@ -55,15 +65,19 @@
       "id": "2026-06-18-v1.51-missing-kb-detection",
       "title": "T-A P2 — finalize-time entity reference detection + creator world kb pending --missing-only",
       "file": ".mstar/plans/2026-06-18-v1.51-missing-kb-detection.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev", "@qa-engineer"],
+      "agents": [
+        "@fullstack-dev",
+        "@qa-engineer"
+      ],
       "working_branch": "feature/v1.51-missing-kb-detection",
       "merge_target": "iteration/v1.51",
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
       "task_category": "logic",
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:00:00+08:00"
+      "updated_at": "2026-06-19T04:31:57Z",
+      "done_at": "2026-06-19"
     },
     {
       "id": "2026-06-18-v1.51-advisory-lock",
@@ -74,7 +88,11 @@
       "merged_at": "2026-06-18",
       "merge_commit": "d22075ef",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev", "@architect", "@qa-engineer"],
+      "agents": [
+        "@fullstack-dev",
+        "@architect",
+        "@qa-engineer"
+      ],
       "working_branch": "feature/v1.51-advisory-lock",
       "merge_target": "iteration/v1.51",
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
@@ -91,7 +109,10 @@
       "merged_at": "2026-06-18",
       "merge_commit": "8a970292",
       "owner": "@fullstack-dev",
-      "agents": ["@fullstack-dev", "@qa-engineer"],
+      "agents": [
+        "@fullstack-dev",
+        "@qa-engineer"
+      ],
       "working_branch": "feature/v1.51-per-row-occ",
       "merge_target": "iteration/v1.51",
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
@@ -105,7 +126,11 @@
       "file": ".mstar/plans/2026-06-18-v1.51-hygiene-and-closeout.md",
       "status": "Todo",
       "owner": "@project-manager",
-      "agents": ["@fullstack-dev", "@writing-specialist", "@project-manager"],
+      "agents": [
+        "@fullstack-dev",
+        "@writing-specialist",
+        "@project-manager"
+      ],
       "working_branch": "feature/v1.51-hygiene-and-closeout",
       "merge_target": "iteration/v1.51",
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
@@ -154,25 +179,25 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/63",
       "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
     },
-"tech_debt_summary": {
-      "updated_at": "2026-06-18 (V1.51 T-A P1 + T-B P1 Done)",
+    "tech_debt_summary": {
+      "updated_at": "2026-06-19 (V1.51 T-A P2 Done)",
       "total_open": 0,
-      "total_deferred": 11,
-      "total_resolved": 50,
+      "total_deferred": 10,
+      "total_resolved": 51,
       "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
         "high": 0,
         "medium": 0,
-        "low": 11,
+        "low": 10,
         "nit": 0
       },
       "by_target_active": {
-        "V1.51 T-A P2": 1,
+        "V1.51 T-A P2": 0,
         "V1.51 P-last": 10,
         "V1.51+": 0
       },
-      "notes": "V1.51 T-A P1 + T-B P1 closed 2026-06-18. T-A P1: R-V150KBED-08 low closed via merge 45520f1f (creator kb rescan --work <ref> cross-chapter reconciliation; 11 + 8 + 6 = 25 new tests). T-B P1: 3 W's closed via fix-wave ef16f12f + 18dd7390 + 621f496d (broken doc link + actual_version discarded + missing test target). Tri-review + re-review + QA all Approve on both plans. PM clippy fix at 00829432 (T-B P0 regression surfaced by T-A P1 verifier) closed R-V151-MERGE-CLIPPY-01. New low-priority residuals: 4 T-A P0 + 3 T-B P0 + 3 T-A P1 + 1 T-A P2 = 11 items, all deferred to V1.51 P-last WL-A sweep. R-V150-WLA-DEFER-V1.51 (30+ V1.50 WL-A) still deferred. R-V150P1CRONBW-01 (novel-write preset YAML absent) re-targeted to V1.51 T-A P2."
+      "notes": "V1.51 T-A P2 closed 2026-06-19: finalized missing-KB detection in nexus-orchestration, `creator world kb pending --missing-only` in nexus42, and authored novel-write embedded preset (R-V150P1CRONBW-01). 5 + 3 + 11 + 6 + 1 verification tests pass; cargo clippy --all and cargo +nightly fmt --all clean. T-A P0 + T-A P1 + T-B P0 + T-B P1 already Done. Residuals deferred to V1.51 P-last: 4 T-A P0 + 3 T-B P0 + 3 T-A P1 = 10 low items. R-V150-WLA-DEFER-V1.51 (30+ V1.50 WL-A) still deferred."
     }
   },
   "v1_50_iteration_complete": true,
@@ -712,8 +737,11 @@
         "target_date": "V1.50 T-A P2",
         "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-brainstorm-write.md (Completion Report v2)",
         "note": "Evaluator contract is complete and tested (18 cron_supervisor tests). novel-brainstorm works end-to-end. novel-write schedule persists + admits normally but the executor body is missing — author the embedded-presets/novel-writing/<write-stage>.yaml in T-A P2. This is a preset-authoring workstream, not an evaluator defect.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.50-cron-brainstorm-write",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.51 T-A P2: authored embedded-presets/novel-write/preset.yaml + prompts; `preset_version_for_id` and `preset_version_mapping_matches_yaml_includes_cron_presets` now enforce strict YAML sync for novel-write. All embedded preset validation tests pass.",
+        "closure_evidence": "feature/v1.51-missing-kb-detection"
       },
       {
         "id": "R-V150P1CRONBW-02",

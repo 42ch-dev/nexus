@@ -486,6 +486,36 @@ Rules (build on §6.2G V1.40 rules; see also
 **Target (V1.51 T-A P1):** plan `2026-06-18-v1.51-cross-chapter-rescan`. Closes
 `R-V150KBED-08` (cross-chapter rescan scope).
 
+**V1.51 T-A P2 amendment — `creator world kb pending --missing-only`.**
+When a `novel-writing` chapter finalizes, the supervisor writes an advisory
+missing-KB log under
+`Works/<work_ref>/Logs/kb/missing/<YYYY-MM-DD>-ch<chapter>.md`
+(see [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §5.5). The
+`--missing-only` flag switches `creator world kb pending` from listing DB
+`pending` candidates to scanning those log files for the requested World.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator world kb pending <world_ref> [--missing-only] [--limit N] [--json]` | Lists candidates for the World. Without `--missing-only`: lists `pending` `kb_extract_jobs` rows (V1.50 behavior). With `--missing-only`: lists advisory `missing` candidates extracted at finalize time. |
+
+Rules:
+
+- `--missing-only` scans `Works/<work_ref>/Logs/kb/missing/*.md` for every Work
+  bound to the given `world_ref` (`world_id`). Each log file is parsed for YAML
+  frontmatter; candidates whose `world_id` matches are collected.
+- Text output shows `CHAPTER`, `TYPE`, `NAME`, and a truncated `SOURCE` quote,
+  prefixed with a `MISSING` label so authors can distinguish advisory finalize-time
+  gaps from review-time `pending` candidates.
+- `--json` output includes `chapter`, `world_id`, `canonical_name`,
+  `block_type`, `source_quote`, `confidence`, and `generated_at` for each
+  candidate.
+- Missing candidates are **advisory only** — they are not written to
+  `kb_extract_jobs` and cannot be adopted directly. The author may add them to
+  the World KB through the normal `creator world kb adopt` flow after creating a
+  `pending` candidate (e.g. via `creator kb rescan`).
+
+**Target (V1.51 T-A P2):** plan `2026-06-18-v1.51-missing-kb-detection`.
+
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
 Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-lifecycle.md), [novel-writing/work-pool.md](./novel-writing/work-pool.md).
