@@ -286,7 +286,54 @@ daemon-without-worker) remain functional.
 **Authoring plan**: `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`  
 **Promotes to Normative**: P-last of V1.52
 
-Draft overlay placeholder: define how a confirmed World KeyBlock records source Work and extract/provenance anchors so author gates no longer rely only on World ownership when Work-local authorship matters.
+##### 5.5.7.1 Purpose
+
+When a `pending` KB candidate is promoted to `confirmed` via `creator world kb adopt`, the source Work that produced the extraction and the extraction pathway are recorded in `kb_key_blocks`. This closes the ownership ambiguity flagged in R-V150KBED-02: KB authorization gates can now prefer the source Work's author rather than relying only on World ownership.
+
+##### 5.5.7.2 Schema extension
+
+Three nullable columns added to `kb_key_blocks`:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `source_work_id` | TEXT (nullable) | FK to `works.work_id` — the Work that produced this KB row |
+| `source_chapter` | INTEGER (nullable) | Chapter number where the entity was extracted (novel only) |
+| `source_provenance_kind` | TEXT (nullable, CHECK) | Enum describing how the row entered the KB graph |
+
+`source_provenance_kind` permitted values:
+
+| Value | Meaning |
+|-------|---------|
+| `manual` | Author directly added via `creator world kb add` or initial scaffold |
+| `review_time_extract` | Review-time extraction hook (V1.50 heuristic or V1.51 LLM) |
+| `finalize_time_extract` | Finalize-time extraction (novel finalize hook) |
+| `cross_chapter_rescan` | V1.51 T-A P1 cross-chapter reconciliation |
+| `author_explicit` | Author explicitly confirmed/adopted a pending candidate |
+
+All three columns default to `NULL`; existing rows are not backfilled. Rows without provenance (legacy, manual entry) continue to resolve ownership via `narrative_worlds.owner_creator_id`.
+
+##### 5.5.7.3 Author gate interaction
+
+When a KeyBlock carries `source_work_id`, the authorization check for edit/delete operations prefers the Work author:
+
+1. If `source_work_id` is present → verify `works.creator_id` matches the active Creator
+2. Otherwise → fall back to `narrative_worlds.owner_creator_id` (existing behavior, unchanged)
+
+This is narrow: the gate only changes when provenance is present. It does not alter World-scoped uniqueness, `ValidationMode`, or the promotion state machine (§5.5.1–§5.5.2).
+
+##### 5.5.7.4 Adopt-flow provenance population
+
+On `creator world kb adopt <extract_job_id>`:
+
+- `source_work_id` is resolved from the extract job's source work context (`kb_extract_jobs.source_work_id` if available, or the linked Work via the extract job's artifact locator)
+- `source_chapter` is copied from `kb_extract_jobs.source_chapter_id`
+- `source_provenance_kind` is inferred from the extract job's origin:
+  - Jobs created by the review-time extraction hook → `review_time_extract`
+  - Jobs created by the finalize-time extraction hook → `finalize_time_extract`
+  - Jobs created by `creator world kb add` → `manual`
+  - Jobs promoted via `adopt --auto` → `author_explicit`
+
+On `creator world kb adopt --auto <world_ref>`: same logic applied to each auto-promoted candidate individually.
 
 ---
 

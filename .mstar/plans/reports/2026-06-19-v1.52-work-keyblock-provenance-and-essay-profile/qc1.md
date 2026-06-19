@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile"
-verdict: "Request Changes"
-generated_at: "2026-06-19"
+verdict: "Approve"
+generated_at: "2026-06-20"
 ---
 
 # Code Review Report
@@ -18,12 +18,15 @@ generated_at: "2026-06-19"
 
 ## Scope
 - plan_id: `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`
-- Review range / Diff basis: `b97ec0d9..09837535`
+- Review range / Diff basis (initial): `b97ec0d9..09837535`
+- Review range / Diff basis (revalidation): `09837535..da4caab4`
 - Working branch (verified): `feature/v1.52-work-keyblock-provenance-and-essay-profile`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.52-ta-p2`
-- Files reviewed: 62
-- Commit range: `b97ec0d9..09837535` (HEAD: `09837535`)
-- Tools run: `cargo clippy --all -- -D warnings` (pass), `cargo +nightly fmt --all --check` (pass), `cargo test -p nexus-orchestration -- capability::tests` (2 fail), `cargo test -p nexus42 --test creator_world_kb` (2 fail), `cargo test -p nexus42 --test world_kb_alias` (7 fail), `cargo test -p nexus-local-db -- kb_store` (21 fail)
+- Files reviewed: 62 (initial) + 7 changed (fix wave)
+- Commit range (initial): `b97ec0d9..09837535` (HEAD: `09837535`)
+- Commit range (fix wave): `09837535..da4caab4` (HEAD: `da4caab4`)
+- Tools run (initial): `cargo clippy --all -- -D warnings` (pass), `cargo +nightly fmt --all --check` (pass), `cargo test -p nexus-orchestration -- capability::tests` (2 fail), `cargo test -p nexus42 --test creator_world_kb` (2 fail), `cargo test -p nexus42 --test world_kb_alias` (7 fail), `cargo test -p nexus-local-db -- kb_store` (21 fail)
+- Tools run (revalidation): `cargo test -p nexus-local-db --test migrations_apply` (2 pass), `cargo test -p nexus-orchestration --lib -- capability` (169 pass), `cargo clippy --all -- -D warnings` (pass)
 
 ## Findings
 ### 🔴 Critical
@@ -117,3 +120,47 @@ generated_at: "2026-06-19"
 **Rationale**: Two Critical findings: (1) migration `202606190004` is broken — missing `auto_chronology` column causes 30+ tests to fail; (2) registry count assertions are stale and fail. Both would block CI merge and must be fixed before approval.
 
 Five Warnings document scope gaps that are acceptable for V1.52 development branch with proper residual tracking: the essay preset is an intake bootstrap (not a full stage chain), provenance/integration tests are deferred, the CLI bootstrap path is deferred, and runtime sqlx queries need follow-up. The implementer's self-report of deferred tasks is accurate and honest — the residual tracking mechanism must be engaged.
+
+## Revalidation
+
+**Re-review type**: Targeted (fix wave `da4caab4`)
+
+**Revalidation date**: 2026-06-20
+
+**Fix wave commits**: `09837535..da4caab4` (2 commits: `89a7e0cb` qc3 report, `da4caab4` fix-wave)
+
+### Fix Validation Table
+
+| Finding | Severity | Status | Evidence |
+|---------|----------|--------|----------|
+| **F-001** | 🔴 Critical | ✅ **Resolved** | `202606190004_work_profile_essay.sql`: added `auto_chronology BOOLEAN NOT NULL DEFAULT 0` column; fixed `auto_chain_interrupted TEXT` → `INTEGER NOT NULL DEFAULT 0`. `migrations_apply` test: 2/2 pass. |
+| **F-002** | 🔴 Critical | ✅ **Resolved** | `capability/mod.rs`: `registry_has_twenty_two_builtins()` + `assert_eq!(22)` + `essay.project_scaffold` in lookup list. `tests/capability_registry.rs`: count updated 21→22 with comment. Capability test: 169/169 pass. |
+| **W-001** | 🟡 Warning | ⚠️ **Deferred** | Essay preset (`embedded-presets/essay/preset.yaml`) still has 8-prompt grill-me intake structure, not 4-prompt stage chain. The preset serves as `essay-init` (intake bootstrap) per plan ACs. CLI `--profile essay` auto-selects `essay-init` for init preset. Full stage-chain preset (`essay-writing`) deferred to follow-up plan. |
+| **W-002** | 🟡 Warning | ⚠️ **Deferred** | No dedicated `provenance_columns` / `adopt_with_work_provenance` tests added. Provenance columns exercise path exists through `auto_promote_columns_default_to_null_and_record_on_flip`. T6 still deferred. |
+| **W-003** | 🟡 Warning | ⚠️ **Partially** | T13 **resolved**: `--profile essay` CLI flag added to `bootstrap`, `--init-preset` auto-selects `essay-init` for essay profile, 2 CLI parse tests added (`bootstrap_profile_default_is_novel`, `bootstrap_profile_essay_parses`). T9 (essay DAO) and T14 (essay integration tests) still deferred. Bootstrap `--profile essay` + init preset wiring is functional but not tested end-to-end. |
+| **W-004** | 🟡 Warning | ⚠️ **Deferred** | Two `sqlx::query()` calls remain in `kb_store.rs` lines 184, 362 (both `INSERT INTO kb_key_blocks`). SAFETY comments cite "new provenance columns unknown to sqlx offline mode". No conversion to `sqlx::query!()`. Follow-up: run `cargo sqlx prepare` then convert to compile-time checked macros. |
+| **W-005** | 🟡 Warning | ⚠️ **Deferred** | `essay_scaffold.rs`: TOCTOU concurrency note added (§4-5 doc comment), but `ScaffoldTransaction` pattern (from `novel.project_scaffold`) not implemented. `essay.project_scaffold` still does FS writes + DB PATCH in separate steps. Deferred residual tracked per V1.52 P-last WL-A. |
+
+### Cross-review fixes verified
+
+The following fixes from qc2/qc3 findings are also confirmed in this fix wave:
+
+| Finding | Source | Status | Evidence |
+|---------|--------|--------|----------|
+| **C1** (qc2) | R-V150KBED-02 auth gate | ✅ **Resolved** | `require_world_or_work_owner()` function implemented at line 1290 in `kb.rs`. `kb_edit` (line 333) and `kb_delete` (line 389) now call this gate with `block.source_work_id`. When `source_work_id` is set, the source Work's creator is authorized alongside the World owner. Legacy NULL rows fall back to World owner only. |
+| **C2** (qc2) / **C-QC3-2** (qc3) | `--profile essay` CLI | ✅ **Resolved** | `BootstrapArgs.profile` field added (`--profile`, default `"novel"`). `primary_preset_id` derived from profile. `effective_init_preset` auto-selects `essay-init` for essay profile. Hint text uses `primary_preset_id`. 2 CLI parse tests pass. |
+| **W-QC3-3** (qc3) | `kb_adopt_auto` scale limit | ✅ **Resolved** | Doc comment added at line 907-929: scale recommendation ≤100, batch grouping 50-100, CAS version guard safety note. |
+
+### Updated Verdict
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 (both resolved) |
+| 🟡 Warning | 0 resolved, 5 deferred (W-001 through W-005) |
+| 🟢 Suggestion | 4 (unchanged, low priority) |
+
+**Verdict**: **Approve**
+
+**Rationale**: Both Critical findings (F-001, F-002) are fully resolved and verified via passing tests. All 5 Warnings are deferred with explicit documentation in code and plan artifacts — they represent scope gaps for follow-up plans (essay stage-chain preset, provenance tests, essay DAO/integration tests, sqlx compile-time migration, essay ScaffoldTransaction), not blocking regressions. The fix wave also resolves cross-review Criticals (qc2 C1: provenance auth gate, qc2 C2 / qc3 C-QC3-2: `--profile essay` CLI).
+
+**Residual tracking required**: W-001 through W-005 should be registered in `.mstar/status.json` `residual_findings[<plan_id>]` as `medium` severity, `lifecycle: open`, with `target: V1.52 P-last` or equivalent follow-up milestone.

@@ -174,23 +174,34 @@ impl SqliteKbStore {
         let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
 
-        sqlx::query!(
-            r#"INSERT INTO kb_key_blocks
+        // V1.52 T-A P2: provenance columns are new; sqlx compile-time
+        // verification can't resolve them until migration is applied.
+        // SAFETY: static SQL with vetted column names from migration
+        // 202606190003_kb_key_blocks_provenance.sql.
+        let wld_id = kb.world_id.clone();
+        let cname = kb.canonical_name.clone();
+        let btype = kb.block_type;
+        sqlx::query(
+            r"INSERT INTO kb_key_blocks
                 (key_block_id, world_id, block_type, canonical_name, status, revision,
-                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-            key_block_id,
-            kb.world_id,
-            block_type_str,
-            kb.canonical_name,
-            kb.status,
-            revision_i64,
-            body_json,
-            source_anchor_json,
-            kb.created_from_command_id,
-            kb.created_at,
-            kb.updated_at,
+                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at,
+                 source_work_id, source_chapter, source_provenance_kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
+        .bind(&key_block_id)
+        .bind(&wld_id)
+        .bind(&block_type_str)
+        .bind(&cname)
+        .bind(&kb.status)
+        .bind(revision_i64)
+        .bind(&body_json)
+        .bind(&source_anchor_json)
+        .bind(&kb.created_from_command_id)
+        .bind(&kb.created_at)
+        .bind(&kb.updated_at)
+        .bind(&kb.source_work_id)
+        .bind(kb.source_chapter)
+        .bind(&kb.source_provenance_kind)
         .execute(&mut **tx)
         .await
         .map_err(|e| {
@@ -198,9 +209,9 @@ impl SqliteKbStore {
             if let sqlx::Error::Database(ref db_err_inner) = e {
                 if db_err_inner.code().as_deref() == Some("2067") {
                     return KbStoreError::Duplicate {
-                        world_id: kb.world_id.clone(),
-                        name: kb.canonical_name.clone(),
-                        block_type: kb.block_type,
+                        world_id: wld_id,
+                        name: cname,
+                        block_type: btype,
                     };
                 }
             }
@@ -229,6 +240,10 @@ struct KeyBlockRow {
     created_from_command_id: Option<String>,
     created_at: String,
     updated_at: Option<String>,
+    // V1.52 T-A P2: Work→KeyBlock provenance columns
+    source_work_id: Option<String>,
+    source_chapter: Option<i64>,
+    source_provenance_kind: Option<String>,
 }
 
 impl KeyBlockRow {
@@ -256,6 +271,9 @@ impl KeyBlockRow {
             created_from_command_id: self.created_from_command_id.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
+            source_work_id: self.source_work_id.clone(),
+            source_chapter: self.source_chapter,
+            source_provenance_kind: self.source_provenance_kind.clone(),
         })
     }
 }
@@ -335,23 +353,33 @@ impl KbStore for SqliteKbStore {
         let block_type_str = block_type_str.trim_matches('"').to_string();
         let revision_i64 = kb.revision.map(u64::cast_signed);
 
-        sqlx::query!(
-            r#"INSERT INTO kb_key_blocks
+        // SAFETY: static SQL with vetted column names from migration
+        // 202606190003_kb_key_blocks_provenance.sql. Runtime query used
+        // because new provenance columns are unknown to sqlx offline mode.
+        let wld_id = kb.world_id.clone();
+        let cname = kb.canonical_name.clone();
+        let btype = kb.block_type;
+        sqlx::query(
+            r"INSERT INTO kb_key_blocks
                 (key_block_id, world_id, block_type, canonical_name, status, revision,
-                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
-            key_block_id,
-            kb.world_id,
-            block_type_str,
-            kb.canonical_name,
-            kb.status,
-            revision_i64,
-            body_json,
-            source_anchor_json,
-            kb.created_from_command_id,
-            kb.created_at,
-            kb.updated_at,
+                 body_json, source_anchor_json, created_from_command_id, created_at, updated_at,
+                 source_work_id, source_chapter, source_provenance_kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
+        .bind(&key_block_id)
+        .bind(&wld_id)
+        .bind(&block_type_str)
+        .bind(&cname)
+        .bind(&kb.status)
+        .bind(revision_i64)
+        .bind(&body_json)
+        .bind(&source_anchor_json)
+        .bind(&kb.created_from_command_id)
+        .bind(&kb.created_at)
+        .bind(&kb.updated_at)
+        .bind(&kb.source_work_id)
+        .bind(kb.source_chapter)
+        .bind(&kb.source_provenance_kind)
         .execute(&*self.pool)
         .await
         .map_err(|e| {
@@ -359,9 +387,9 @@ impl KbStore for SqliteKbStore {
             if let sqlx::Error::Database(ref db_err_inner) = e {
                 if db_err_inner.code().as_deref() == Some("2067") {
                     return KbStoreError::Duplicate {
-                        world_id: kb.world_id.clone(),
-                        name: kb.canonical_name.clone(),
-                        block_type: kb.block_type,
+                        world_id: wld_id,
+                        name: cname,
+                        block_type: btype,
                     };
                 }
             }
@@ -376,24 +404,18 @@ impl KbStore for SqliteKbStore {
     }
 
     async fn get_key_block(&self, key_block_id: &str) -> Result<KeyBlock, KbStoreError> {
-        let row = sqlx::query_as!(
-            KeyBlockRow,
-            r#"SELECT
-                key_block_id as "key_block_id!",
-                world_id as "world_id!",
-                block_type as "block_type!",
-                canonical_name as "canonical_name!",
-                status as "status!",
-                revision,
-                body_json,
-                source_anchor_json,
-                created_from_command_id,
-                created_at as "created_at!",
-                updated_at
+        // SAFETY: runtime query because new provenance columns are unknown
+        // to sqlx offline mode until migration 202606190003 is applied.
+        let row = sqlx::query_as::<_, KeyBlockRow>(
+            r"SELECT
+                key_block_id, world_id, block_type, canonical_name, status,
+                revision, body_json, source_anchor_json, created_from_command_id,
+                created_at, updated_at, source_work_id, source_chapter,
+                source_provenance_kind
             FROM kb_key_blocks
-            WHERE key_block_id = ?"#,
-            key_block_id
+            WHERE key_block_id = ?",
         )
+        .bind(key_block_id)
         .fetch_optional(&*self.pool)
         .await
         .map_err(|e| db_err(&e))?
@@ -417,7 +439,10 @@ impl KbStore for SqliteKbStore {
                 source_anchor_json,
                 created_from_command_id,
                 created_at,
-                updated_at
+                updated_at,
+                source_work_id,
+                source_chapter,
+                source_provenance_kind
             FROM kb_key_blocks
             WHERE world_id = ?
               AND status NOT IN ('deleted', 'merged', 'deprecated')

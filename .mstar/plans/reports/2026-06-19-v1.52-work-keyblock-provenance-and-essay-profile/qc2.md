@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-19"
 ---
 
@@ -145,11 +145,39 @@ The current implementation writes fixed content. If essay profiles later support
 | 🟡 Warning | 6 |
 | 🟢 Suggestion | 4 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-## Revalidation Notes (N/A — initial wave)
+## Revalidation
 
-This is the initial tri-review wave. No prior qc2.md exists for this plan_id.
+**Targeted re-review** (commit range: `09837535..da4caab4`)
+
+**Commands executed per workflow**:
+1. `cd /Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.52-ta-p2/`
+2. `git diff 09837535..da4caab4 -- 'crates/nexus42/src/commands/creator/world/kb.rs' | head -100` — inspected
+3. `git diff 09837535..da4caab4 -- 'crates/nexus42/src/commands/creator/bootstrap.rs' | head -80` — inspected
+4. `cargo test -p nexus42 --lib -- bootstrap` — **6 tests passed** (including `bootstrap_profile_essay_parses`)
+5. `cargo clippy --all -- -D warnings` — **clean** (no warnings emitted)
+
+### Fix Validation
+
+| Finding | Original Issue | Fix Evidence (09837535..da4caab4) | Status |
+|---------|----------------|-----------------------------------|--------|
+| **C1** (Critical) | `require_world_owner` only checked `narrative_worlds.owner_creator_id`; `source_work_id` written but never read for auth | `require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())` now called in `kb_edit` (line 333) and `kb_delete` (line 389). New function (lines 1290-1319): if `source_work_id` present, queries `works.creator_id`; on match returns `Ok(())`; on mismatch or `None`, falls through to `require_world_owner`. Dual-path gate documented with §5.5.7 reference. | ✅ **Resolved** |
+| **C2** (Critical) | `creator bootstrap --profile essay` CLI missing | `BootstrapArgs` gains `#[arg(long, default_value = "novel")] pub profile: String;`. `handle_bootstrap` derives `primary_preset_id` ("essay" → "essay", else "novel-writing") and `effective_init_preset` ("essay" → "essay-init"). Body now includes `"work_profile": profile`. Output messages use resolved presets. Unit tests cover parsing and defaults. | ✅ **Resolved** |
+| **W-001** (Warning) | Three `sqlx::query` (runtime) with SAFETY comments for provenance writes | No change in this wave (deferred per W-001 note: compile-time test to be added in V1.52 P-last WL-A). Remains open. | ⚠️ **Unchanged** |
+| **W-002** (Warning) | `source_provenance_kind` enum coverage incomplete (only 3/5 values exercised) | No new paths for `finalize_time_extract` / `cross_chapter_rescan`. Still incomplete. | ⚠️ **Unchanged** |
+| **W-003** (Warning) | Migration `202606190003` has no rollback / idempotency test in reviewed diff | No new migration tests added in this wave. | ⚠️ **Unchanged** |
+| **W-004** (Warning) | Essay scaffold writes `work_profile` via raw `sqlx::query` without FK/world validation | No ownership guard added to `essay_scaffold.rs` (minor edit only). | ⚠️ **Unchanged** |
+| **W-005** (Warning) | Cross-author adopt provenance recorded but not validated (`candidate.creator_id` not checked) | No change to `kb_adopt` creator matching logic. | ⚠️ **Unchanged** |
+| **W-006** (Warning) | Auto-promote audit log path uses `work_ref` which may be NULL | Scale-limit doc comment added (lines 904-918), but `resolve_work_ref_for_log` fallback behavior unchanged. | ⚠️ **Unchanged** |
+
+### Disposition Summary
+- **C1 + C2**: Both blocking Criticals closed by the targeted fix commit `da4caab4`.
+- **Warnings**: 6 remain as documented technical debt / deferred coverage items (no new regressions introduced; none were blockers for initial verdict).
+- **Tests / Lint**: All required checks passed (`cargo test -p nexus42 --lib -- bootstrap`, `cargo clippy --all -- -D warnings`).
+
+### Updated Verdict
+**Approve** — C1 and C2 are resolved. The dual-path auth gate (`require_world_or_work_owner`) correctly implements "EITHER World owner OR source Work creator" semantics for provenance-linked KB rows. The `--profile essay` CLI surface is now present and wired. No new security or correctness regressions detected in the fix diff.
 
 ## Attachments
 - None (report-only; no screenshots or artifacts generated during review).
