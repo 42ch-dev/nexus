@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-19T14:00:00Z",
+  "updated_at": "2026-06-19T16:25:00Z",
   "plans": [
     {
       "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
@@ -136,7 +136,7 @@
     "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.52",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.52 (P-last closeout)",
+    "latest_active_iteration": null,
     "latest_active_compass": "v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
@@ -145,13 +145,16 @@
     "latest_ship": {
       "iteration": "V1.52",
       "compass": "v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1",
-      "merged_at": "2026-06-20T12:30:00Z",
+      "merged_at": "2026-06-19T16:22:21Z",
       "plan_count": 7,
       "plan_count_done": 7,
       "open_at_ship": 0,
       "deferred_to_next": 30,
       "wire_contracts_changed": false,
-      "profile_b_compaction": "pending"
+      "profile_b_compaction": "pending",
+      "merge_commit": "d6aadd2fb5f287056dbd41b701eea8d5e6114dcc",
+      "pr": 73,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/73"
     },
     "tech_debt_summary": {
       "total_open": 0,
