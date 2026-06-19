@@ -18,7 +18,7 @@
 
 use crate::capability::CapabilityRegistry;
 use crate::preset::manifest::{
-    EnterAction, ExitWhen, NextTarget, PresetKind, PresetManifest, RunIntent,
+    EnterAction, ExitWhen, MergeKind, NextTarget, PresetKind, PresetManifest, RunIntent,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -78,6 +78,8 @@ pub enum DiagnosticCategory {
     RunIntents,
     /// V1.52 T-B P0: duplicate label values in labeled next edges.
     DuplicateLabel,
+    /// V1.52 T-B P1: merge node integrity violations.
+    MergeIntegrity,
 }
 
 /// Result of semantic validation: a list of diagnostics.
@@ -156,6 +158,7 @@ pub fn validate_preset_semantic(
     check_bundle_id_match(manifest, &mut result);
     check_inner_graph_references(manifest, &mut result);
     check_labeled_edge_duplicates(manifest, &mut result);
+    check_merge_node_integrity(manifest, &mut result);
 
     // A4: Capability compatibility checks
     check_capability_arg_compatibility(manifest, caps, &mut result);
@@ -458,6 +461,103 @@ fn check_labeled_edge_duplicates(manifest: &PresetManifest, result: &mut Validat
                     });
                 }
             }
+        }
+    }
+}
+
+/// V1.52 T-B P1: validate merge node integrity.
+///
+/// Checks:
+/// - Each state with `merge:` must have ≥2 incoming labeled edges.
+/// - For `quorum N/M`: N ≥ 1 and N ≤ M.
+/// - M must equal the count of incoming labeled edges.
+/// - Merge nodes must have at least one outgoing edge.
+fn check_merge_node_integrity(manifest: &PresetManifest, result: &mut ValidationResult) {
+    // Count incoming labeled edges per state.
+    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
+    for state in &manifest.states {
+        if let Some(NextTarget::Labeled(edges)) = &state.next {
+            for edge in edges {
+                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Also count GoNogo edges (they also converge on merge nodes).
+    for state in &manifest.states {
+        if let Some(NextTarget::GoNogo(gonogo)) = &state.next {
+            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
+            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
+        }
+    }
+
+    for (i, state) in manifest.states.iter().enumerate() {
+        let Some(merge) = &state.merge else {
+            continue;
+        };
+
+        let state_path = format!("states[{i}]");
+        let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
+
+        // Must have ≥2 incoming labeled edges.
+        if incoming < 2 {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: format!("{state_path}.merge"),
+                message: format!(
+                    "merge node '{}' requires at least 2 incoming labeled edges, found {incoming}",
+                    state.id
+                ),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::MergeIntegrity,
+            });
+            continue;
+        }
+
+        // Quorum: validate N/M bounds.
+        if let MergeKind::Quorum { n, m } = merge {
+            if *n < 1 {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: format!("{state_path}.merge.n"),
+                    message: format!("quorum merge node '{}' n must be >= 1, got {n}", state.id),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::MergeIntegrity,
+                });
+            }
+            if *n > *m {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: format!("{state_path}.merge"),
+                    message: format!(
+                        "quorum merge node '{}' n ({n}) must not exceed m ({m})",
+                        state.id
+                    ),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::MergeIntegrity,
+                });
+            }
+            if *m != incoming {
+                result.diagnostics.push(ValidationDiagnostic {
+                    path: format!("{state_path}.merge.m"),
+                    message: format!(
+                        "quorum merge node '{}' declared m ({m}) does not match actual incoming labeled edge count ({incoming})",
+                        state.id
+                    ),
+                    severity: DiagnosticSeverity::Error,
+                    category: DiagnosticCategory::MergeIntegrity,
+                });
+            }
+        }
+
+        // Merge nodes must have at least one outgoing edge (not terminal without next).
+        if state.next.is_none() && !state.terminal {
+            result.diagnostics.push(ValidationDiagnostic {
+                path: format!("{state_path}.merge"),
+                message: format!(
+                    "merge node '{}' has no outgoing next edge and is not marked terminal",
+                    state.id
+                ),
+                severity: DiagnosticSeverity::Error,
+                category: DiagnosticCategory::MergeIntegrity,
+            });
         }
     }
 }
@@ -1061,7 +1161,8 @@ states:
     #[test]
     fn valid_preset_passes_semantic_validation() {
         let manifest = minimal_manifest();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             !result.has_errors(),
             "expected no errors: {:?}",
@@ -1095,7 +1196,8 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::Reachability
@@ -1129,7 +1231,8 @@ states:
     next: a
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::Reachability
@@ -1162,7 +1265,8 @@ states:
     exit_when: { kind: manual }
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::TerminalConsistency
@@ -1196,7 +1300,8 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::TerminalConsistency
@@ -1235,7 +1340,8 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::IdMismatch
@@ -1267,7 +1373,8 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::IdMismatch
@@ -1308,7 +1415,8 @@ inner_graphs:
         kind: acp_prompt
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::OrphanInnerGraph
@@ -1349,7 +1457,8 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::Structural
@@ -1462,7 +1571,8 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::MissingCapability
@@ -1496,7 +1606,8 @@ states:
     terminal: true
 ";
         let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             result.diagnostics.iter().any(|d| {
                 d.category == DiagnosticCategory::MissingCapability
@@ -1510,7 +1621,8 @@ states:
     #[test]
     fn known_capability_passes() {
         let manifest = minimal_manifest();
-        let result = validate_preset_semantic(&manifest, &test_caps());
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
         assert!(
             !result.has_errors(),
             "expected no errors for valid preset: {:?}",
@@ -1792,5 +1904,227 @@ mod stage_tests {
         );
         // Default should still be kb-extract (first entry)
         assert_eq!(default_preset_for_stage("persist"), Some("kb-extract"));
+    }
+
+    // ── V1.52 T-B P1: merge node integrity tests ───────────────────────────
+
+    #[test]
+    fn merge_node_valid_all_with_2_incoming() {
+        let yaml = r#"
+preset:
+  id: merge-valid
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: x
+        target: merged
+  - id: b
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: y
+        target: merged
+  - id: merged
+    merge:
+      kind: all
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
+        assert!(
+            !result
+                .errors()
+                .any(|d| d.category == DiagnosticCategory::MergeIntegrity),
+            "valid merge node should not produce errors: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn merge_node_too_few_incoming_errors() {
+        let yaml = r#"
+preset:
+  id: merge-few
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: x
+        target: merged
+  - id: merged
+    merge:
+      kind: all
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
+        assert!(
+            result.errors().any(|d| {
+                d.category == DiagnosticCategory::MergeIntegrity && d.message.contains("2 incoming")
+            }),
+            "merge node with <2 incoming edges should error: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn quorum_n_exceeds_m_errors() {
+        let yaml = r#"
+preset:
+  id: merge-bad-quorum
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: x
+        target: merged
+      - label: y
+        target: merged
+      - label: z
+        target: merged
+  - id: merged
+    merge:
+      kind: quorum
+      n: 4
+      m: 3
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
+        assert!(
+            result.errors().any(|d| {
+                d.category == DiagnosticCategory::MergeIntegrity
+                    && d.message.contains("must not exceed")
+            }),
+            "quorum with n > m should error: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn quorum_n_zero_errors() {
+        let yaml = r#"
+preset:
+  id: merge-zero-n
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: x
+        target: merged
+      - label: y
+        target: merged
+  - id: merged
+    merge:
+      kind: quorum
+      n: 0
+      m: 2
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
+        assert!(
+            result.errors().any(|d| {
+                d.category == DiagnosticCategory::MergeIntegrity
+                    && d.message.contains("n must be >=")
+            }),
+            "quorum with n<1 should error: {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn quorum_m_mismatch_errors() {
+        let yaml = r#"
+preset:
+  id: merge-m-mismatch
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: x
+        target: merged
+      - label: y
+        target: merged
+      - label: z
+        target: merged
+  - id: merged
+    merge:
+      kind: quorum
+      n: 1
+      m: 5
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
+        assert!(
+            result.errors().any(|d| {
+                d.category == DiagnosticCategory::MergeIntegrity
+                    && d.message.contains("does not match actual incoming")
+            }),
+            "quorum with m != actual incoming should error: {:?}",
+            result.diagnostics
+        );
     }
 }

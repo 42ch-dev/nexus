@@ -202,6 +202,12 @@ pub struct StateDefinition {
     /// Optional context update hook that fires on state exit (WS7 §7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_update: Option<ContextUpdateHook>,
+    /// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
+    ///
+    /// When absent and the state has ≥2 incoming labeled edges, defaults to
+    /// `wait-all`. States with ≤1 incoming labeled edge are not merge nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge: Option<MergeKind>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -378,6 +384,47 @@ pub struct LabeledNext {
     pub label: String,
     /// Target state ID when the judge returns this label.
     pub target: String,
+}
+
+// ---------------------------------------------------------------------------
+// MergeKind (V1.52 T-B P1)
+// ---------------------------------------------------------------------------
+
+/// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
+///
+/// When multiple `LabeledNext` edges from different `llm_judge` states converge
+/// on a single state, the orchestration engine uses the declared merge kind to
+/// decide when to advance to that state.
+///
+/// YAML forms:
+/// ```yaml
+/// merge:
+///   kind: all            # wait for ALL incoming labeled edges
+/// merge:
+///   kind: any            # advance on FIRST arrival
+/// merge:
+///   kind: quorum         # at least n of m arrivals
+///   n: 2
+///   m: 3
+/// ```
+///
+/// When `merge:` is absent on a state with multiple incoming labeled edges,
+/// the default is `All` (wait-all). States with zero or one incoming labeled
+/// edge are not merge nodes and the `merge:` field is ignored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MergeKind {
+    /// Advance when ALL incoming labeled edges have produced their target label.
+    All,
+    /// Advance when the FIRST incoming labeled edge produces its target label.
+    Any,
+    /// Advance when at least N of M incoming edges have produced their target label.
+    Quorum {
+        /// Minimum number of arrivals needed.
+        n: usize,
+        /// Total expected incoming labeled edges.
+        m: usize,
+    },
 }
 
 /// Conditional next form — post-V1.42; loader still rejects.
@@ -1183,6 +1230,7 @@ states:
                     next: Some(NextTarget::Linear("b".into())),
                     terminal: false,
                     context_update: None,
+                    merge: None,
                 },
                 StateDefinition {
                     id: "b".into(),
@@ -1192,6 +1240,7 @@ states:
                     next: None,
                     terminal: true,
                     context_update: None,
+                    merge: None,
                 },
             ],
             inner_graphs: None,
@@ -1202,5 +1251,151 @@ states:
         let back: PresetManifest = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(back.preset.id, "roundtrip");
         assert!(back.roles.is_empty());
+    }
+
+    // ── V1.52 T-B P1: Merge semantics ──────────────────────────────────
+
+    #[test]
+    fn parse_merge_all() {
+        let yaml = r#"
+preset:
+  id: merge-all
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: merged
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next:
+      - label: x
+        target: merged
+  - id: merged
+    merge:
+      kind: all
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.states.len(), 3);
+        assert_eq!(p.states[1].merge, Some(MergeKind::All));
+    }
+
+    #[test]
+    fn parse_merge_any() {
+        let yaml = r#"
+preset:
+  id: merge-any
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: merged
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next:
+      - label: x
+        target: merged
+  - id: merged
+    merge:
+      kind: any
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.states[1].merge, Some(MergeKind::Any));
+    }
+
+    #[test]
+    fn parse_merge_quorum() {
+        let yaml = r#"
+preset:
+  id: merge-quorum
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: merged
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next:
+      - label: x
+        target: merged
+  - id: merged
+    merge:
+      kind: quorum
+      n: 2
+      m: 3
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.states[1].merge, Some(MergeKind::Quorum { n: 2, m: 3 }));
+    }
+
+    #[test]
+    fn merge_defaults_to_none_when_absent() {
+        let yaml = r#"
+preset:
+  id: no-merge
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(p.states[0].merge, None);
+        assert_eq!(p.states[1].merge, None);
+    }
+
+    #[test]
+    fn merge_kind_roundtrip_all() {
+        let yaml = "kind: all\n";
+        let mk: MergeKind = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(mk, MergeKind::All);
+        let s = serde_yaml::to_string(&mk).unwrap();
+        let back: MergeKind = serde_yaml::from_str(&s).unwrap();
+        assert_eq!(back, MergeKind::All);
+    }
+
+    #[test]
+    fn merge_kind_roundtrip_any() {
+        let yaml = "kind: any\n";
+        let mk: MergeKind = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(mk, MergeKind::Any);
+    }
+
+    #[test]
+    fn merge_kind_roundtrip_quorum() {
+        let yaml = r"kind: quorum
+n: 2
+m: 3
+";
+        let mk: MergeKind = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(mk, MergeKind::Quorum { n: 2, m: 3 });
     }
 }
