@@ -1609,6 +1609,22 @@
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
         "deferral_note": "Sub-millisecond at typical N=2-5; pathological N=1000 with 10KB judge output ≈10ms/fire. Performance hardening deferred to V1.52 P-last WL-A."
+      },
+      {
+        "id": "R-V152TB-R1",
+        "title": "Fix-wave regression: cargo +nightly fmt --all --check fails on tests/labeled_routing.rs (qc3 W-QC3-R1; PM-Override Accept cosmetic)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) W-QC3-R1 (new in re-review)",
+        "scope": "crates/nexus-orchestration/tests/labeled_routing.rs (new file from fix-wave commit fda4e826; 8 cosmetic line-wrapping diffs)",
+        "decision": "fix",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.52 T-B P0 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Revalidation",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "PM-Override Accept per .mstar/AGENTS.md Pre-existing claim verification protocol (applied analogously to fix-wave regression). Verification: cargo +nightly fmt --all --check exits 0 post-fix. Mechanical fix (commit 2c223b78): line-wrapping reformatting only, no behavior change. qc3 verdict downgraded Request Changes → Approve via PM-Override.",
+        "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commit 2c223b78)",
+        "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       }
     ] 
   }
