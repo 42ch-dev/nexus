@@ -326,6 +326,17 @@ pub enum NextTarget {
     /// YAML form: `next: { go: <state_id>, nogo: <state_id> }`.
     /// Only valid when `exit_when.kind` is `llm_judge`.
     GoNogo(GoNogoNext),
+    /// N-way labeled routing for `llm_judge` states (V1.52 T-B P0).
+    ///
+    /// YAML form: a list of labeled edges:
+    /// ```yaml
+    /// next:
+    ///   - label: outline
+    ///     target: outlining
+    ///   - label: research
+    ///     target: gathering
+    /// ```
+    Labeled(Vec<LabeledNext>),
     /// Expression-based conditional transition (post-V1.42; loader rejects).
     Conditional(NextConditional),
 }
@@ -346,6 +357,27 @@ pub struct GoNogoNext {
     pub go: String,
     /// Target state ID when judge returns NOGO or worker is unavailable.
     pub nogo: String,
+}
+
+/// N-way labeled next edge for `llm_judge` states (V1.52 T-B P0).
+///
+/// Generalizes the binary GO/NOGO into N-way routing: the judge returns a
+/// label string (e.g. `"outline"`, `"research"`, `"abandon"`), and the
+/// matching `LabeledNext` edge is selected at runtime.
+///
+/// ```yaml
+/// next:
+///   - label: outline
+///     target: outlining
+///   - label: research
+///     target: gathering
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LabeledNext {
+    /// Label string that the judge returns to select this edge.
+    pub label: String,
+    /// Target state ID when the judge returns this label.
+    pub target: String,
 }
 
 /// Conditional next form — post-V1.42; loader still rejects.
@@ -986,6 +1018,141 @@ roles:
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.roles.len(), 1);
         assert!(p.roles[0].recommended_skills.is_empty());
+    }
+
+    // ── V1.52 T-B P0: N-way labeled routing ─────────────────────────────
+
+    #[test]
+    fn parse_labeled_next_n_way_from_yaml_list() {
+        let yaml = r#"
+preset:
+  id: n-way
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: judge
+  terminal: done
+states:
+  - id: judge
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: outline
+        target: outlining
+      - label: research
+        target: gathering
+      - label: abandon
+        target: done
+  - id: outlining
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+  - id: gathering
+    enter: []
+    exit_when: { kind: manual }
+    next: judge
+  - id: done
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        match &p.states[0].next {
+            Some(NextTarget::Labeled(edges)) => {
+                assert_eq!(edges.len(), 3);
+                assert_eq!(edges[0].label, "outline");
+                assert_eq!(edges[0].target, "outlining");
+                assert_eq!(edges[1].label, "research");
+                assert_eq!(edges[1].target, "gathering");
+                assert_eq!(edges[2].label, "abandon");
+                assert_eq!(edges[2].target, "done");
+            }
+            other => panic!("expected Labeled next target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_labeled_next_two_way_like_binary_gonogo() {
+        // New form: 2-way labeled edges (equivalent to old binary GoNogo).
+        let yaml = r#"
+preset:
+  id: labeled-2way
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: judge
+  terminal: done
+states:
+  - id: judge
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: go
+        target: approved
+      - label: nogo
+        target: rejected
+  - id: approved
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+  - id: rejected
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        match &p.states[0].next {
+            Some(NextTarget::Labeled(edges)) => {
+                assert_eq!(edges.len(), 2);
+                assert_eq!(edges[0].label, "go");
+                assert_eq!(edges[0].target, "approved");
+                assert_eq!(edges[1].label, "nogo");
+                assert_eq!(edges[1].target, "rejected");
+            }
+            other => panic!("expected Labeled next target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn backward_compat_binary_gonogo_still_parses() {
+        // Old binary GoNogo shape should still parse as GoNogo.
+        let yaml = r#"
+preset:
+  id: binary-gonogo
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  initial: judge
+  terminal: done
+states:
+  - id: judge
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      go: approved
+      nogo: rejected
+  - id: approved
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+  - id: rejected
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        match &p.states[0].next {
+            Some(NextTarget::GoNogo(gonogo)) => {
+                assert_eq!(gonogo.go, "approved");
+                assert_eq!(gonogo.nogo, "rejected");
+            }
+            other => panic!("expected GoNogo next target, got {other:?}"),
+        }
     }
 
     #[test]
