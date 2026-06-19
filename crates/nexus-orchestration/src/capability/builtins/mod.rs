@@ -8,6 +8,7 @@ mod acp_prompt;
 mod acp_session_load;
 mod context_summarize;
 mod creator;
+mod essay_scaffold;
 mod judge_llm;
 mod judge_rule;
 mod kb_extract_work;
@@ -29,6 +30,7 @@ pub use creator::{
     CreatorCapabilityStore, CreatorInjectPrompt, CreatorReadMemory, CreatorWriteBrief,
     CreatorWriteMemory,
 };
+pub use essay_scaffold::EssayProjectScaffold;
 pub use judge_llm::JudgeLlm;
 pub use judge_rule::JudgeRule;
 pub use kb_extract_work::KbExtractWork;

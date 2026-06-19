@@ -764,6 +764,18 @@ pub async fn kb_adopt(
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
 
+    // V1.52 T-A P2: Work→KeyBlock provenance linkage (entity-scope-model.md §5.5.7).
+    // Populate source_work_id and source_chapter from the extract job context.
+    // provenance_kind is inferred: LLM extraction → review_time_extract,
+    // heuristic/no LLM → manual.
+    kb.source_work_id = candidate.work_id.clone();
+    kb.source_chapter = candidate.source_chapter_id;
+    kb.source_provenance_kind = if candidate.llm_confidence.is_some() {
+        Some("review_time_extract".to_string())
+    } else {
+        Some("manual".to_string())
+    };
+
     // R-V150KBED-03: atomic promotion. The KeyBlock insert and the promotion
     // row flip share a single transaction; any failure (validation, insert,
     // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
@@ -973,6 +985,12 @@ pub async fn kb_adopt_auto(
         kb.body = Some(body);
         kb.status = "confirmed".to_string();
         kb.created_at = chrono::Utc::now().to_rfc3339();
+
+        // V1.52 T-A P2: Work→KeyBlock provenance linkage.
+        // Auto-adopt sets author_explicit provenance; source from extract job.
+        kb.source_work_id = candidate.work_id.clone();
+        kb.source_chapter = candidate.source_chapter_id;
+        kb.source_provenance_kind = Some("author_explicit".to_string());
 
         // ── Atomic insert + audit flip ─────────────────────────────────────
         let mut tx = pool
