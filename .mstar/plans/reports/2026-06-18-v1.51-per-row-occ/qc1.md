@@ -3,7 +3,7 @@ report_kind: qc_review
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-18-v1.51-per-row-occ
-verdict: Request Changes
+verdict: Approve
 generated_at: 2026-06-19T18:00:00Z
 ---
 
@@ -141,3 +141,9 @@ The single **Warning (W-001)** — a broken intra-doc link in the `cas.rs` modul
 | CAS retry on cron path (dormant) | ✅ Architecturally correct; documented as dormant |
 | `novel_pool_entries` version column (unused) | ✅ Column exists; CAS call-sites deferred to V1.52+ (documented) |
 | Documentation quality | ⚠️ W-001: broken doc link in module header |
+
+## Revalidation (2026-06-19)
+
+- **Resolved: W-001 (qc1, broken doc link)** — Fixed intra-doc link in `crates/nexus-local-db/src/cas.rs:7`: `[cas_update_result]` → `[cas_check]`, matching the actual function name at line 54. Verified with `cargo doc -p nexus-local-db --no-deps` — no unresolved link warnings for the `cas` module.
+- **Evidence**: Commit `<impl-commit>` + `cargo doc -p nexus-local-db --no-deps` (clean)
+- **Re-verdict**: Approve
