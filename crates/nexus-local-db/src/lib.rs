@@ -11,6 +11,7 @@
 //! See `.mstar/archived/knowledge/local-db-refactor-legacy.md` for design baseline.
 
 #[cfg(unix)]
+pub mod cas;
 pub mod file_lock;
 pub mod findings;
 pub mod force_gates_audit;

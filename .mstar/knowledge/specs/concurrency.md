@@ -227,9 +227,80 @@ The only safe recovery for a zombie lock is to kill the holder process (SIGTERM)
 
 ---
 
-## 7. Status Visibility
+## 7. Per-Row Optimistic Concurrency Control (OCC) — V1.51 T-B P1
 
-### 7.1 `creator works status --json`
+### 7.1 Rationale
+
+The advisory file lock (§2) serialises **intra-Work** mutating paths across processes, but does not guard against **logical state divergence** within the locked scope: if the daemon reads a row's state, then a concurrent internal path (e.g. an inline extractor) modifies the same row before the daemon's write lands, a stale preimage can overwrite a fresher write — even under the file lock.
+
+Per-row OCC adds a **version column** (`INTEGER NOT NULL DEFAULT 0`) to contention-prone tables. Every mutating UPDATE that carries semantic intent (state transition, payload refresh) must:
+
+1. Read the current version from the row (the **preimage**).
+2. Issue `UPDATE ... SET ..., version = version + 1 WHERE id = ? AND version = ?`.
+3. If `rows_affected == 0`, the version changed between read and write → retry or surface `E_VERSION` (exit 76).
+
+### 7.2 Versioned Tables
+
+| Table | Version column | Added | Rationale |
+|---|---|---|---|
+| `kb_extract_jobs` | `version` | V1.51 T-B P1 migration `202606190001` | Promotion status transitions (`mark_confirmed`, `upsert_pending_candidate`), LLM payload refresh (`insert_pending_with_llm`), and cron-side extract job mutation are multi-actor paths where a stale preimage can produce duplicate extracts or lost confirmations. |
+| `novel_pool_entries` | `version` | V1.51 T-B P1 migration `202606190001` | Pool promote/demote is an `INSERT ... ON CONFLICT DO UPDATE` that can race with concurrent `archive`/`completed` transitions from the FL-E completion hook. |
+
+`works.schedule_json` remains under its own column-value CAS (V1.50 P0 `set_schedule_json_tx`) because the compare-and-swap target is the JSON content itself, not a monotonic version counter.
+
+### 7.3 CAS Helper (`nexus-local-db::cas`)
+
+The `cas` module provides two primitives (source: `crates/nexus-local-db/src/cas.rs`):
+
+- **`cas_check(pool, rows_affected, table, id_col, id_val, expected_version) -> Result<(), LocalDbError>`** — call after `UPDATE ... WHERE version = ?`. On `rows_affected == 0`, re-reads the current version and returns `VersionMismatch`.
+- **`with_cas_retry(max_attempts, backoff_ms, name, f) -> Result<T, LocalDbError>`** — retries the closure `f` up to `max_attempts` times (default 3, 100 ms) when a `VersionMismatch` is caught. Logs `warn!` on each retry. Any other error is returned immediately without retrying.
+
+### 7.4 KB-Side CAS Integration (adopt / rescan)
+
+The `creator world kb adopt` path is the primary CAS consumer:
+
+```
+1. Read promotion row → version = V
+2. Validate canonical_name + block_type → KeyBlock
+3. Call mark_confirmed_in_tx_with_cas(tx, job_id, V)
+   - UPDATE ... SET promotion_status='confirmed', version=version+1
+     WHERE job_id = ? AND promotion_status='pending' AND version = V
+4. rows_affected == 0 → check cause:
+   - Row is confirmed/rejected → Ok(false) (already handled)
+   - Version mismatch → Err(VersionMismatch) → E_VERSION exit 76
+5. On success → commit KeyBlock + flip atomically
+```
+
+`upsert_pending_candidate` (V1.50 T-B P2) refreshes `proposed_payload` for an existing `pending` row. T-A P1 (cross-chapter rescan) and T-A P2 (missing-KB detection) **must** pass the version from their preimage read through this path to close the TOCTOU window.
+
+### 7.5 Cron-Side CAS Retry
+
+The daemon cron-fire enqueue path (`cron_supervisor::try_fire_role`) wraps `enqueue_cron_schedule` in a retry loop (3 attempts, 100 ms backoff). When a `VersionMismatch` propagates from a versioned-table mutation inside the fire scope, the loop re-reads the preimage and retries.
+
+**Acquire-order discipline:** file lock → DB lock → CAS (never reverse). The CAS always executes **inside** the file-lock scope (§2.4). Two CAS-protected writes to different tables are sequenced by the file lock; no two-phase commit or distributed consensus is needed (local-only).
+
+### 7.6 Exit Code Contract
+
+| Error | Code | Exit | Meaning |
+|---|---|---|---|
+| `LocalDbError::VersionMismatch` | `E_VERSION` | 76 | Row was modified by another writer between read and write; retry the operation. |
+| `FileLockError::Locked` | `E_LOCK` | 75 | Temporary file-lock contention; retry later. |
+| `FileLockError::Io` | `E_LOCK_IO` | 78 | Persistent I/O failure; operator intervention required. |
+
+All three codes are mapped in `crates/nexus42/src/main.rs` §Exit mapping.
+
+### 7.7 Anti-Patterns
+
+- **DO NOT** CAS-guard a write that is already fully serialised by the file lock and performs only INSERT (no read-modify-write). The `version` column adds a monotonic counter; INSERT is not a TOCTOU surface.
+- **DO NOT** increment `version` on purely informational/read-path queries.
+- **DO NOT** add a `version` column to tables outside the V1.51 scope (`kb_extract_jobs` + `novel_pool_entries`).
+- **DO NOT** use `unsafe` for any CAS code.
+
+---
+
+## 8. Status Visibility
+
+### 8.1 `creator works status --json`
 
 The JSON output includes an optional `lock_holder` field:
 
@@ -255,10 +326,10 @@ When a lock is held:
 }
 ```
 
-### 7.2 `creator world show <work_ref>`
+### 8.2 `creator world show <work_ref>`
 
 Same `lock_holder` field included in the output.
 
-### 7.3 Implementation
+### 8.3 Implementation
 
 The lock holder is read from the `.lock` file content only — it does not require acquiring the lock. The read is best-effort: if the file doesn't exist or is unreadable, `lock_holder` is `null`.

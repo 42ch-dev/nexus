@@ -33,7 +33,8 @@ use nexus_kb::store::KbStoreError;
 use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
-    get_promotion, list_pending_for_world, mark_confirmed_in_tx, mark_rejected, KbExtractPromotion,
+    get_promotion, list_pending_for_world, mark_confirmed_in_tx_with_cas, mark_rejected,
+    KbExtractPromotion,
 };
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -437,7 +438,13 @@ pub async fn kb_pending(
 /// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access.
 /// Returns `CliError::Other` on missing/non-pending rows, validation failure,
 /// transaction begin/commit failure, or store errors.
-#[allow(clippy::too_many_lines)] // kb_adopt has 8 sequential concerns (candidate load → author gate → file lock → candidate gate → read+validate → conflict check → adopt transaction → audit log); extracting helper would split the linear flow without readability gain. Surgical hygiene fix for the 18-line T-B P0 file-lock block addition (commit 6dccee36).
+// V1.51 T-B P0 added the advisory file-lock block (commit 6dccee36, +18 lines);
+// V1.51 T-B P1 added the CAS version check (+5 lines). Function has 8
+// sequential concerns (candidate load → author gate → file lock →
+// candidate gate → read+validate → conflict check → adopt transaction →
+// audit log); splitting into helpers would fragment the linear adopt flow
+// without reducing complexity.
+#[allow(clippy::too_many_lines)]
 pub async fn kb_adopt(
     pool: &SqlitePool,
     creator_id: &str,
@@ -446,6 +453,7 @@ pub async fn kb_adopt(
     json: bool,
 ) -> Result<()> {
     let candidate = load_pending_candidate(pool, extract_job_id).await?;
+    let candidate_version = candidate.version; // V1.51 T-B P1: CAS preimage version
     let world_id = candidate.world_id.as_str();
 
     // Author identity gate.
@@ -527,9 +535,23 @@ pub async fn kb_adopt(
         .map_err(|e| map_kb_store_error("adopt", extract_job_id, world_id, e))?;
     // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
 
-    let flipped = mark_confirmed_in_tx(&mut tx, extract_job_id)
+    // V1.51 T-B P1: CAS-aware flip — guards against stale preimage
+    // (another writer raced between load_pending_candidate and this flip).
+    // On version mismatch → E_VERSION (exit 76, retry).
+    let flipped = mark_confirmed_in_tx_with_cas(&mut tx, extract_job_id, candidate_version)
         .await
-        .map_err(|e| CliError::Other(format!("Failed to mark candidate confirmed: {e}")))?;
+        .map_err(|e| {
+            if let nexus_local_db::LocalDbError::VersionMismatch { actual, .. } = &e {
+                CliError::VersionConflict {
+                    table: "kb_extract_jobs".to_string(),
+                    row_id: extract_job_id.to_string(),
+                    expected_version: candidate_version,
+                    actual_version: *actual,
+                }
+            } else {
+                CliError::Other(format!("Failed to mark candidate confirmed: {e}"))
+            }
+        })?;
     // On `Err` above, `tx` is dropped → rolled back automatically by sqlx.
 
     if !flipped {

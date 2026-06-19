@@ -269,7 +269,11 @@ fn maybe_acquire_cron_file_lock(
 // a flat skip-or-fire sequence). A context struct would add indirection
 // without reducing real complexity — same rationale as `too_many_lines` allows
 // elsewhere in this crate (supervisor.rs, auto_chain.rs).
-#[allow(clippy::too_many_arguments)]
+// V1.51 T-B P1: the CAS retry loop (±12 lines) pushes this function slightly
+// over the 100-line nursery threshold. Extracting it would fragment the fire
+// flow (per-Work gating, file-lock acquire, enqueue, error handling) into a
+// helper that still needs the same context.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn try_fire_role(
     pool: &SqlitePool,
     workspace_dir: Option<&Path>,
@@ -354,34 +358,58 @@ async fn try_fire_role(
             }
             let _file_lock = lock_result.ok().flatten();
 
-            match crate::auto_chain::enqueue_cron_schedule(
-                pool,
-                &row.creator_id,
-                &row.work_id,
-                preset_id,
-                role_name,
-            )
-            .await
-            {
-                Ok(schedule_id) => {
-                    summary.fired += 1;
-                    info!(
-                        work_id = %row.work_id,
-                        role = role_name,
-                        preset_id,
-                        schedule_id = %schedule_id,
-                        "cron-supervisor: enqueued cron-triggered schedule"
-                    );
+            // V1.51 T-B P1: CAS retry-on-conflict for cron-fire enqueue
+            // (concurrency.md §7). The retry loop catches VersionMismatch
+            // from any versioned-table write within the enqueue chain.
+            // Today the retry is dormant (enqueue only touches unversioned
+            // `creator_schedules`); it activates when future T-A P1/P2
+            // paths in this fire scope touch `kb_extract_jobs.version`.
+            let max_attempts: u32 = 3;
+            let backoff_ms: u64 = 100;
+
+            let mut enqueue_ok: Option<String> = None;
+            for attempt in 1..=max_attempts {
+                match crate::auto_chain::enqueue_cron_schedule(
+                    pool,
+                    &row.creator_id,
+                    &row.work_id,
+                    preset_id,
+                    role_name,
+                )
+                .await
+                {
+                    Ok(schedule_id) => {
+                        enqueue_ok = Some(schedule_id);
+                        break;
+                    }
+                    Err(crate::auto_chain::AutoChainError::Database(
+                        nexus_local_db::LocalDbError::VersionMismatch { .. },
+                    )) if attempt < max_attempts => {
+                        warn!(
+                            work_id = %row.work_id, role = role_name,
+                            attempt, max_attempts,
+                            "cron-supervisor: CAS version mismatch; retrying"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                    }
+                    Err(e) => {
+                        warn!(
+                            work_id = %row.work_id, role = role_name,
+                            preset_id, error = %e,
+                            "cron-supervisor: enqueue failed; skipping fire"
+                        );
+                        break;
+                    }
                 }
-                Err(e) => {
-                    warn!(
-                        work_id = %row.work_id,
-                        role = role_name,
-                        preset_id,
-                        error = %e,
-                        "cron-supervisor: enqueue failed; skipping fire"
-                    );
-                }
+            }
+
+            if let Some(schedule_id) = enqueue_ok {
+                summary.fired += 1;
+                info!(
+                    work_id = %row.work_id, role = role_name, preset_id,
+                    schedule_id = %schedule_id,
+                    "cron-supervisor: enqueued cron-triggered schedule"
+                );
             }
             // FileLockGuard is dropped here, releasing the flock.
         }
