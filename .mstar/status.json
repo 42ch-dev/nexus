@@ -39,8 +39,9 @@
     {
       "plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto",
       "title": "T-A P1 — World KB CLI surface consolidation + --auto happy path",
-      "status": "InReview",
+      "status": "Done",
       "started_at": "2026-06-19T12:30:00Z",
+      "done_at": "2026-06-19T18:00:00Z",
       "owner": "@fullstack-dev-2",
       "agents": [
         "@fullstack-dev-2",
@@ -787,13 +788,15 @@
         "scope": "nexus42/CLI: creator world kb list/show/edit/delete vs creator kb --scope world",
         "decision": "accept",
         "owner": "@fullstack-dev or @product-manager",
-        "target": "V1.52 T-A P1",
-        "target_date": "V1.52 T-A P1",
-        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan \u00a75 Completion)",
+        "target": "V1.52+",
+        "target_date": "V1.52+",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
         "note": "Future hygiene may consolidate; out of T-B P0 scope. PM tracked for V1.51+ backlog.",
-        "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
-        "lifecycle": "deferred",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P1 (commits 771f89e7 + fe3c5730 on feature/v1.52-cli-surface-consolidation-auto): creator kb --scope world now aliases to creator world kb with deprecation warning (tracing::warn! + eprintln!). Error Display unified (canonical 'local database error: ...'). --help points to canonical surface. Forward wiring tested via 3 assert_cmd tests + 4 unit tests. Planned removal V1.53.",
+        "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commits 771f89e7 + fe3c5730)",
+        "_plan_id": "2026-06-18-v1.50-kb-editor-cli"
       },
       {
         "id": "R-V150KBED-02",
@@ -1665,7 +1668,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-A P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md §Warnings + qc3.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): added 3 assert_cmd integration tests + 4 unit tests in tests/world_kb_alias.rs + kb.rs covering all 3 forward call sites (list/show/remove). Each test exercises the actual forward path and asserts canonical function was called + result parity.",
+        "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
         "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
       },
       {
@@ -1678,7 +1684,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-A P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc3.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): kb.rs open_world_pool switched from .map_err(...) to ? operator, triggering From<LocalDbError> for CliError → canonical 'local database error: ...' Display matches world::kb::open_workspace_pool. Regression test verifies canonical format.",
+        "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
         "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
       },
       {
@@ -1691,7 +1700,10 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-A P1 fix-wave",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md §Suggestions",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): --scope arg doc comment on all 5 kb subcommands (List, Search, Show, Add, Remove) now includes [DEPRECATED] hint pointing to canonical surface + planned removal V1.53. Test asserts hint visible in --help output.",
+        "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
         "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
       }
     ] 
