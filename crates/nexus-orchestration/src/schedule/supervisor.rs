@@ -50,6 +50,11 @@ pub struct ScheduleSupervisor {
     tick_in_progress: AtomicBool,
     /// Optional workspace directory for on-disk operations (completion-lock write).
     workspace_dir: Arc<Option<std::path::PathBuf>>,
+    /// Optional capability registry (V1.51 T-A P0). Threaded into the
+    /// review-time KB extraction hook so `nexus.llm.extract` can run when a
+    /// worker is available; the hook falls back to the heuristic when this is
+    /// `None` or the worker is unavailable.
+    registry: Arc<Option<std::sync::Arc<crate::capability::CapabilityRegistry>>>,
 }
 
 struct Inner {
@@ -83,7 +88,22 @@ impl ScheduleSupervisor {
             }),
             tick_in_progress: AtomicBool::new(false),
             workspace_dir: Arc::new(workspace_dir),
+            registry: Arc::new(None),
         }
+    }
+
+    /// Attach a capability registry (V1.51 T-A P0).
+    ///
+    /// Threaded into the review-time KB extraction hook so `nexus.llm.extract`
+    /// can run when a worker is available. When unset (or when the worker is
+    /// unavailable), the hook falls back to the V1.50 heuristic.
+    #[must_use]
+    pub fn with_capability_registry(
+        mut self,
+        registry: std::sync::Arc<crate::capability::CapabilityRegistry>,
+    ) -> Self {
+        self.registry = Arc::new(Some(registry));
+        self
     }
 
     /// Load pending schedules from DB, evaluate admission, and start eligible ones.
@@ -453,6 +473,7 @@ impl ScheduleSupervisor {
                 .is_some_and(|r| r.preset_id == crate::preset_ids::NOVEL_WRITING_PRESET_ID)
             {
                 use crate::auto_chain;
+                use crate::quality_loop;
                 let ws_ref = self.workspace_dir.as_ref();
                 let ws_path = ws_ref.as_deref();
                 if let Err(e) =
@@ -465,6 +486,29 @@ impl ScheduleSupervisor {
                         "foreshadowing-promote: hook failed (non-fatal)"
                     );
                 }
+
+                // V1.51 T-A P2: finalize-time missing-KB detection. Scan the
+                // finalized chapter prose, diff against confirmed World KB rows,
+                // and write an advisory log under
+                // Works/<work_ref>/Logs/kb/missing/. Missing candidates are NOT
+                // inserted into kb_extract_jobs. Best-effort: errors are logged
+                // and do NOT fail the terminal transition.
+                let reg: Option<&crate::capability::CapabilityRegistry> =
+                    self.registry.as_ref().as_ref().map(|r| &**r);
+                if let Err(e) = quality_loop::detect_missing_kb_on_finalize(
+                    &self.pool,
+                    schedule_id,
+                    ws_path,
+                    reg,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        schedule_id,
+                        error = %e,
+                        "kb-missing: finalize-time detection hook failed (non-fatal)"
+                    );
+                }
             }
             // V1.50 T-B P1 (entity-scope-model.md §5.5 / cron-staggering.md
             // §4.4): review-time KB candidate extraction. When a
@@ -473,13 +517,11 @@ impl ScheduleSupervisor {
             // `kb_extract_jobs` rows with `promotion_status='pending'`. The
             // author confirms via `creator world kb adopt`.
             //
-            // // COORDINATE-WITH-T-A-P2
-            // T-A P2 (`2026-06-18-v1.50-cron-review-staggering`) wires the
-            // per-Work `review` cron role that enqueues these schedules on a
-            // schedule. Until T-A P2 lands, this hook still fires for any
-            // `novel-review-master` schedule reaching the supervisor (V1.39
-            // stale-findings path or manual `creator run`), so the
-            // extraction pipeline is independently testable.
+            // T-A P2 (`2026-06-18-v1.50-cron-review-staggering`) wired the
+            // per-Work `review` cron role that enqueues these schedules. The
+            // hook fires for any `novel-review-master` schedule reaching the
+            // supervisor (cron-fired, V1.39 stale-findings path, or manual
+            // `creator run`), so the extraction pipeline remains testable.
             // Best-effort + non-blocking: errors are logged and do NOT fail
             // the terminal transition (mirrors the review-findings hook).
             if schedule_row
@@ -489,9 +531,18 @@ impl ScheduleSupervisor {
                 use crate::quality_loop;
                 let ws_ref = self.workspace_dir.as_ref();
                 let ws_path = ws_ref.as_deref();
-                if let Err(e) =
-                    quality_loop::extract_kb_candidates_for_review(&self.pool, schedule_id, ws_path)
-                        .await
+                // V1.51 T-A P0: thread the capability registry so the hook can
+                // invoke nexus.llm.extract. `None` (no registry) or
+                // WorkerUnavailable falls back to the heuristic inside the hook.
+                let reg: Option<&crate::capability::CapabilityRegistry> =
+                    self.registry.as_ref().as_ref().map(|r| &**r);
+                if let Err(e) = quality_loop::extract_kb_candidates_for_review(
+                    &self.pool,
+                    schedule_id,
+                    ws_path,
+                    reg,
+                )
+                .await
                 {
                     tracing::warn!(
                         schedule_id,

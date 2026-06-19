@@ -13,7 +13,7 @@ pub use agent_host::AgentHostSubsystem;
 pub use db::DbSubsystem;
 pub use http::HttpSubsystem;
 pub use mock_all::MockAllSubsystems;
-pub use worker_mgr::WorkerMgrSubsystem;
+pub use worker_mgr::{WorkerMgrSubsystem, DEFAULT_MAX_WORKERS};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

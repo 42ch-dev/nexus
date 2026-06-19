@@ -9,12 +9,16 @@ use crate::paths;
 use nexus_kb::KbStore;
 use std::path::PathBuf;
 
-/// Refreshable-scan submodule (V1.50 T-B P2).
+/// Refreshable-scan submodule (V1.50 T-B P2; V1.51 T-A P1 work-scoped).
 ///
 /// `pub` so integration tests under `tests/` can drive `kb_rescan_hermetic`
-/// against a fresh temp DB, mirroring the `world::kb` testability pattern.
+/// and `kb_rescan_work_hermetic` against a fresh temp DB, mirroring the
+/// `world::kb` testability pattern.
 pub mod rescan;
-pub use rescan::{kb_rescan, kb_rescan_hermetic, RescanReport};
+pub use rescan::{
+    kb_rescan, kb_rescan_hermetic, kb_rescan_work, kb_rescan_work_hermetic, CrossChapterReuse,
+    RescanReport, WorkRescanReport,
+};
 
 /// KB scope: `work` (local workspace file index, default) or `world` (narrative KB via nexus-kb).
 ///
@@ -141,16 +145,29 @@ pub enum KbCommand {
         job_id: Option<String>,
     },
 
-    /// Re-scan a chapter's current text and sync KB extract candidates + KB rows.
+    /// Re-scan KB extract candidates + KB rows.
     ///
-    /// V1.50 T-B P2. `creator kb rescan <work_ref>/<chapter>` re-runs the
-    /// review-time heuristic over the chapter's current prose, idempotently
+    /// V1.50 T-B P2: `creator kb rescan <work_ref>/<chapter>` re-runs the
+    /// review-time heuristic over one chapter's current prose, idempotently
     /// upserts `kb_extract_jobs` candidates, refreshes confirmed `KeyBlock`
     /// bodies so KB rows reflect the current text, and reports the diff.
     /// Cross-author attempts return `403` (`WORLD_KB_FORBIDDEN`).
+    ///
+    /// V1.51 T-A P1: `creator kb rescan --work <work_ref>` is a mutually
+    /// exclusive work-scoped mode that iterates all chapters in
+    /// `Works/<work_ref>/Stories/` and reconciles candidates by
+    /// `canonical_name` across chapters (closes R-V150KBED-08). Exactly one of
+    /// the positional `<work_ref>/<chapter>` or `--work <work_ref>` must be
+    /// supplied; supplying both (or neither) fails closed.
     Rescan {
-        /// `<work_ref>/<chapter>` — e.g. `my-novel/05`
-        target: String,
+        /// `<work_ref>/<chapter>` — e.g. `my-novel/05`. Mutually exclusive with
+        /// `--work`.
+        target: Option<String>,
+        /// Work-scoped cross-chapter rescan: iterate all chapters in
+        /// `Works/<work_ref>/Stories/` and reconcile by `canonical_name`.
+        /// Mutually exclusive with the positional `<work_ref>/<chapter>`.
+        #[arg(long, value_name = "WORK_REF")]
+        work: Option<String>,
         /// Show what would change without writing
         #[arg(long)]
         dry_run: bool,
@@ -227,9 +244,21 @@ pub async fn run(cmd: KbCommand, config: &CliConfig) -> Result<()> {
         KbCommand::ExtractStatus { job_id } => kb_extract_status(config, job_id.as_deref()).await,
         KbCommand::Rescan {
             target,
+            work,
             dry_run,
             json,
-        } => rescan::kb_rescan(config, &target, dry_run, json).await,
+        } => match (target, work) {
+            (Some(t), None) => rescan::kb_rescan(config, &t, dry_run, json).await,
+            (None, Some(w)) => rescan::kb_rescan_work(config, &w, dry_run, json).await,
+            (Some(_), Some(_)) => Err(CliError::Other(
+                "Specify either <work_ref>/<chapter> positional or --work <work_ref>, not both."
+                    .into(),
+            )),
+            (None, None) => Err(CliError::Other(
+                "Specify either <work_ref>/<chapter> (e.g. my-novel/05) or --work <work_ref>."
+                    .into(),
+            )),
+        },
     }
 }
 

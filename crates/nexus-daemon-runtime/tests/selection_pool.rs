@@ -10,8 +10,8 @@
 
 use axum::extract::{Query, State};
 use nexus_daemon_runtime::api::handlers::works::{
-    AddInspirationRequest, ArchiveInspirationRequest, ArchivePoolRequest, CreateWorkRequest,
-    ListInspirationQuery, ListPoolQuery, PromoteInspirationRequest, PromotePoolRequest,
+    AddInspirationRequest, ArchivePoolRequest, CreateWorkRequest, ListInspirationQuery,
+    ListPoolQuery, PromoteInspirationRequest, PromotePoolRequest,
 };
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::workspace::WorkspaceState;

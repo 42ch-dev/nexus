@@ -14,6 +14,7 @@ pub mod cron_supervisor;
 pub mod db;
 pub mod lifecycle;
 pub mod stale_findings_watcher;
+pub mod worker_provider;
 pub mod workspace;
 
 /// Helpers for integration tests (also used by `tests/*.rs` in this crate).

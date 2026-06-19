@@ -85,7 +85,22 @@ async fn main() {
 
     if let Err(e) = result {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        // V1.51 T-B P0: exit code mapping for advisory lock errors.
+        // - E_LOCK   (contention, temporary):  exit 75 (EX_TEMPFAIL)
+        // - E_LOCK_IO (I/O failure, config):   exit 78 (EX_CONFIG)
+        // V1.51 T-B P1: exit code mapping for OCC version conflicts.
+        // - E_VERSION (CAS mismatch):          exit 76
+        // - All other errors:                   exit 1
+        let code = if matches!(e, nexus42::errors::CliError::Locked { .. }) {
+            75
+        } else if matches!(e, nexus42::errors::CliError::LockIo(_)) {
+            78
+        } else if matches!(e, nexus42::errors::CliError::VersionConflict { .. }) {
+            76
+        } else {
+            1
+        };
+        std::process::exit(code);
     }
 }
 

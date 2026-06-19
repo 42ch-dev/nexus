@@ -18,6 +18,7 @@
 //!
 //! This mirrors the [`crate::stale_findings_watcher`] spawn pattern (V1.39 P4).
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -67,8 +68,12 @@ impl CronSupervisorConfig {
 ///
 /// The first tick runs immediately on spawn so a freshly booted daemon
 /// surfaces any due cron fires without waiting a full interval.
+///
+/// `workspace_dir` is cloned into the spawned task for file-lock path
+/// construction (V1.51 T-B P0).
 pub fn spawn_cron_supervisor(
     pool: SqlitePool,
+    workspace_dir: std::path::PathBuf,
     supervisor: Arc<ScheduleSupervisor>,
     shutdown_notify: Arc<Notify>,
     config: CronSupervisorConfig,
@@ -87,7 +92,7 @@ pub fn spawn_cron_supervisor(
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    run_one_tick(&pool, &supervisor).await;
+                    run_one_tick(&pool, &workspace_dir, &supervisor).await;
                 }
                 () = shutdown_notify.notified() => {
                     tracing::info!("cron-supervisor task: shutdown received, exiting");
@@ -101,10 +106,18 @@ pub fn spawn_cron_supervisor(
 /// Perform a single cron-evaluation + admission tick. Public for hermetic
 /// integration tests which drive the tick deterministically without running
 /// the spawned interval loop.
-pub async fn run_one_tick(pool: &SqlitePool, supervisor: &ScheduleSupervisor) {
+///
+/// `workspace_dir` is the operational workspace directory
+/// (e.g. `~/.nexus42/creators/<id>/workspaces/<slug>`) — passed through to
+/// the cron evaluator for file-lock path construction (V1.51 T-B P0).
+pub async fn run_one_tick(
+    pool: &SqlitePool,
+    workspace_dir: &Path,
+    supervisor: &ScheduleSupervisor,
+) {
     let now = chrono::Utc::now();
     // Step 1: evaluate per-Work crons → enqueue pending schedules.
-    let summary = cron_eval::evaluate_cron_fires(pool, now).await;
+    let summary = cron_eval::evaluate_cron_fires(pool, Some(workspace_dir), now).await;
     // Step 2: admit due pending schedules (including any just enqueued).
     // `tick_clocked` filters by `scheduled_at <= now` (cron schedules have no
     // `scheduled_at`, so they are on-demand-admissible).

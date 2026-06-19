@@ -56,6 +56,15 @@ pub enum LocalDbError {
     },
     /// Path escapes its expected parent directory (defense-in-depth)
     PathEscape { path: String, prefix: String },
+    /// V1.51 T-B P1: OCC version mismatch — the row's version changed between
+    /// the caller's read and its UPDATE (CAS check failed). The caller should
+    /// surface this as `E_VERSION` (exit 76) and advise retrying.
+    VersionMismatch {
+        table: String,
+        id: String,
+        expected: i64,
+        actual: Option<i64>,
+    },
 }
 
 impl fmt::Display for LocalDbError {
@@ -130,6 +139,19 @@ impl fmt::Display for LocalDbError {
                 write!(
                     f,
                     "path '{path}' escapes expected prefix '{prefix}' — possible path traversal"
+                )
+            }
+            Self::VersionMismatch {
+                table,
+                id,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "version mismatch on '{table}' row '{id}': expected v{expected}, actual v{} — \
+                     row was modified by another writer; retry",
+                    actual.map_or("?".to_string(), |v| v.to_string())
                 )
             }
         }

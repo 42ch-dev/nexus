@@ -1,0 +1,67 @@
+# Novel Write Preset — Cron-Triggered Writing Nudge (V1.51 T-A P2)
+#
+# Consumes the per-Work `write` role cron fire and produces a focused writing
+# prompt for the active Work. It does NOT directly write manuscript text; the
+# output is a prompt injected into the author's chosen agent session.
+#
+# Input variables (passed via core_context when starting a schedule):
+#   work_id:        Work entity ID (wrk_...).
+#   work_ref:       Human-readable short reference used as directory name.
+#   topic:          Novel topic or description.
+#   current_chapter: Chapter the Work is currently producing.
+#
+# State machine: compose → done
+#   - compose: Ingest Work context and emit a writing prompt.
+#   - done:      Terminal; prompt delivered.
+#
+# Launch:
+#   Enqueued automatically by the daemon cron evaluator when the per-Work
+#   `write` role fires (spec cron-staggering.md §2.1 / §4.1).
+
+preset:
+  id: novel-write
+  version: 1
+  kind: creator
+  description: "Cron-triggered writing nudge: compose a focused prompt for the active Work without direct text write"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - judge.llm
+  run_intents:
+    - work_continue
+  initial: compose
+  terminal: done
+  world_binding:
+    mode: optional
+  # Preset gates — enforced at enqueue time.
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: novel
+    - kind: work_field
+      field: work_ref
+      op: required
+
+states:
+  - id: compose
+    description: "Compose a focused writing prompt from the active Work context"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/compose.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            work_id: "{{preset.input.work_id}}"
+            topic: "{{preset.input.topic}}"
+            current_chapter: "{{preset.input.current_chapter}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/compose-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: done
+
+  - id: done
+    terminal: true

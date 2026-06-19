@@ -10,6 +10,16 @@
 # itself returns a no-op skip when world_id is empty/absent, so legacy V1.39
 # worldless Works pass through cleanly to done.
 #
+# V1.51 T-A P0: review-time KB extraction now uses the `nexus.llm.extract`
+# capability (sibling to `judge.llm`) instead of the V1.50 capitalized-noun
+# heuristic. The extraction is invoked by the schedule-supervisor terminal
+# hook `quality_loop::extract_kb_candidates_for_review` (keyed on this
+# preset's id), which threads the daemon's CapabilityRegistry so the LLM
+# pathway runs when a worker is available; the heuristic remains the
+# no-worker fallback. Extracted candidates carry an LLM-judged block_type,
+# confidence, and a verbatim source_quote, surfaced on `creator world kb
+# adopt`. Closes R-V150KBED-01. See `knowledge/specs/llm-extract.md` §5.
+#
 # NOTE: The original plan (T8) described a `schedule.enqueue_child` approach
 # with parent dependency, but the shipped design uses direct capability
 # invocation from the preset state machine instead. `build_child_kb_extract_schedule`
@@ -31,6 +41,8 @@
 #   - await_decision: Wait for human to review and decide on each finding.
 #   - sync_world_kb:  (V1.40 P3) Enqueue child kb-extract if World-bound.
 #   - done:           Terminal; decisions written back via P1 findings API.
+#                     (V1.51 T-A P0) Supervisor terminal hook then runs
+#                     nexus.llm.extract review-time KB candidate extraction.
 #
 # Launch:
 #   nexus42 creator run stage advance <work_id> --stage review
@@ -42,12 +54,13 @@
 
 preset:
   id: novel-review-master
-  version: 2  # V1.40 P3: added sync_world_kb state
+  version: 3  # V1.51 T-A P0: review-time extraction swapped heuristic → nexus.llm.extract
   kind: creator
-  description: "Surface open findings for human master review; interactive approval/reject/wont_fix decisions; V1.40 syncs World KB after review"
+  description: "Surface open findings for human master review; interactive approval/reject/wont_fix decisions; V1.40 syncs World KB after review; V1.51 review-time extraction uses nexus.llm.extract"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
+    - nexus.llm.extract  # V1.51 T-A P0: review-time KB candidate extraction (supervisor terminal hook)
   run_intents:
     - work_continue
   initial: present

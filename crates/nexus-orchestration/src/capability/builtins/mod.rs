@@ -11,6 +11,7 @@ mod creator;
 mod judge_llm;
 mod judge_rule;
 mod kb_extract_work;
+mod llm_extract;
 mod novel_chapter_transition;
 mod novel_scaffold;
 mod novel_scaffold_sanitize;
@@ -31,6 +32,7 @@ pub use creator::{
 pub use judge_llm::JudgeLlm;
 pub use judge_rule::JudgeRule;
 pub use kb_extract_work::KbExtractWork;
+pub use llm_extract::LlmExtract;
 pub use novel_chapter_transition::NovelChapterTransition;
 pub use novel_scaffold::NovelProjectScaffold;
 pub use outbox::{OutboxCompact, OutboxFlush};

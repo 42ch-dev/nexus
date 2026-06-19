@@ -597,6 +597,12 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
     let db_path = crate::config::resolve_state_db_path(config)?;
     let pool = crate::db::Schema::init(&db_path).await?;
 
+    // V1.51 T-B P0: resolve workspace directory for file lock path construction.
+    let workspace_dir = {
+        let home = crate::config::nexus_home().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        nexus_home_layout::operational_workspace_dir(&home, &creator_id, &workspace_slug)
+    };
+
     match cmd {
         CronCommand::Set {
             work_ref,
@@ -615,6 +621,7 @@ pub async fn handle_cron(cmd: CronCommand, config: &CliConfig) -> Result<()> {
                 &creator_id,
                 &workspace_slug,
                 &work_ref,
+                &workspace_dir,
                 &CronSetArgs {
                     brainstorm,
                     write,
@@ -644,10 +651,35 @@ async fn handle_set(
     creator_id: &str,
     workspace_slug: &str,
     work_ref: &str,
+    workspace_dir: &std::path::Path,
     args: &CronSetArgs,
     json: bool,
 ) -> Result<()> {
     let work_id = resolve_work_id(pool, creator_id, workspace_slug, work_ref).await?;
+
+    // V1.51 T-B P0: acquire advisory file lock before mutating works.schedule_json.
+    // The lock is released on drop when this function returns.
+    let _file_lock = {
+        let work_dir = workspace_dir.join("Works").join(work_ref);
+        // Best-effort: only acquire if the work directory exists (production path).
+        if work_dir.exists() {
+            match nexus_local_db::file_lock::try_acquire(&work_dir, "cli:cron-set") {
+                Ok(guard) => Some(guard),
+                Err(nexus_local_db::file_lock::FileLockError::Locked(locked)) => {
+                    return Err(CliError::Locked {
+                        holder_pid: locked.holder_pid,
+                        holder_name: locked.holder_name,
+                        stale: locked.stale,
+                    });
+                }
+                Err(nexus_local_db::file_lock::FileLockError::Io(e)) => {
+                    return Err(CliError::LockIo(e));
+                }
+            }
+        } else {
+            None
+        }
+    };
 
     // R-V150P0-W5 (resolved in T-A P1): transactional compare-and-swap write.
     // The previous path (`get → apply → set`) was an unconditional

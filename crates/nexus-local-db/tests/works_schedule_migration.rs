@@ -6,12 +6,12 @@
 //! Covers:
 //! - **Forward**: `run_migrations` adds the column; existing Works get NULL
 //!   (= use defaults; spec §2.3).
-//! - **Rollback**: `ALTER TABLE … DROP COLUMN` (SQLite 3.35+) simulates a
+//! - **Rollback**: `ALTER TABLE … DROP COLUMN` (`SQLite` 3.35+) simulates a
 //!   down-migration; the column is removed and DAO calls fail gracefully.
 //! - **DAO round-trip**: `set_schedule_json` → `get_schedule_json` preserves
 //!   the blob; empty string and NULL both resolve to "use defaults".
 //!
-//! sqlx::migrate in this repo is forward-only (no `.down.sql` convention),
+//! `sqlx::migrate` in this repo is forward-only (no `.down.sql` convention),
 //! so "rollback" is simulated with a manual `DROP COLUMN`.
 
 use sqlx::Row;

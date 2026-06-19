@@ -1308,7 +1308,7 @@ states:
         let loaded = load_embedded_preset("novel-review-master", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-review-master");
-        assert_eq!(loaded.version, 2);
+        assert_eq!(loaded.version, 3);
 
         // State machine: present → await_decision → sync_world_kb → done
         assert_eq!(loaded.manifest.preset.initial, "present");

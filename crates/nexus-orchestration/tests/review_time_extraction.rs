@@ -165,7 +165,7 @@ async fn ac2_extraction_inserts_pending_candidates() {
     insert_review_master_schedule(&pool, "sch_ac2", "wrk_ac2").await;
 
     let count =
-        quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac2", Some(ws_dir.path()))
+        quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac2", Some(ws_dir.path()), None)
             .await
             .unwrap();
 
@@ -201,7 +201,7 @@ async fn ac6_rerun_does_not_duplicate_pending() {
 
     // First run.
     let count1 =
-        quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac6", Some(ws_dir.path()))
+        quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac6", Some(ws_dir.path()), None)
             .await
             .unwrap();
     assert!(count1 >= 1, "first run should extract ≥1 candidate");
@@ -211,7 +211,7 @@ async fn ac6_rerun_does_not_duplicate_pending() {
 
     // Second run on the same schedule (simulates re-fire) — no duplicates.
     let count2 =
-        quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac6", Some(ws_dir.path()))
+        quality_loop::extract_kb_candidates_for_review(&pool, "sch_ac6", Some(ws_dir.path()), None)
             .await
             .unwrap();
     assert_eq!(count2, 0, "second run should insert 0 (idempotent)");
@@ -273,10 +273,14 @@ async fn non_review_master_schedule_is_noop() {
     let (ws_dir, body_rel) = write_workspace_with_chapter("Lin Xia was here.");
     seed_chapter_with_body(&pool, "wrk_noop", 1, &body_rel).await;
 
-    let count =
-        quality_loop::extract_kb_candidates_for_review(&pool, "sch_noop", Some(ws_dir.path()))
-            .await
-            .unwrap();
+    let count = quality_loop::extract_kb_candidates_for_review(
+        &pool,
+        "sch_noop",
+        Some(ws_dir.path()),
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(count, 0, "non-review-master schedule must be a no-op");
 }
 
@@ -290,7 +294,7 @@ async fn missing_workspace_dir_is_noop() {
     works::create_work(&pool, &work).await.unwrap();
     insert_review_master_schedule(&pool, "sch_nows", "wrk_nows").await;
 
-    let count = quality_loop::extract_kb_candidates_for_review(&pool, "sch_nows", None)
+    let count = quality_loop::extract_kb_candidates_for_review(&pool, "sch_nows", None, None)
         .await
         .unwrap();
     assert_eq!(count, 0, "missing workspace_dir must be a safe no-op");

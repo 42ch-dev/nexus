@@ -491,6 +491,141 @@ impl LlmJudgeTask {
 }
 
 // ---------------------------------------------------------------------------
+// LlmExtractTask — invokes nexus.llm.extract via capability registry (V1.51 T-A P0)
+// ---------------------------------------------------------------------------
+
+/// Extract World KB candidates by invoking the `nexus.llm.extract` capability
+/// through the [`CapabilityRegistry`].
+///
+/// Sibling to [`LlmExtractTask`] (sic — see [`LlmJudgeTask`]): mirrors the
+/// `LlmJudgeTask` lifecycle (render template → build capability input → invoke
+/// → parse result), but emits `Vec<quality_loop::KbCandidate>` instead of a
+/// GO/NOGO verdict.
+///
+/// Flow:
+/// 1. Render `template_file` content using handlebars against the context.
+/// 2. Read `chapter_prose` from the context (the review-time hook writes the
+///    prose there before invoking the task).
+/// 3. Build capability input: `{ prompt, chapter_prose, _creator_id, _session_id }`.
+/// 4. Call `nexus.llm.extract` (or configured capability name) via the registry.
+/// 5. Parse the response `{ candidates: [...] }` into `Vec<KbCandidate>`.
+///
+/// When the capability returns [`CapabilityError::WorkerUnavailable`] (no
+/// worker IPC), returns an empty `Vec` so the caller can fall back to the
+/// heuristic. The task does NOT persist candidates — persistence is the
+/// caller's responsibility (the review-time hook), keeping the task pure.
+///
+/// Design: `llm-extract.md` §2, compass §0.1 #7.
+pub struct LlmExtractTask {
+    /// Extraction instruction template (rendered against the context).
+    template: String,
+    /// Capability name to invoke (default: `nexus.llm.extract`).
+    capability_name: String,
+    /// Shared capability registry.
+    registry: Arc<CapabilityRegistry>,
+}
+
+impl LlmExtractTask {
+    /// Create a new `LlmExtractTask`.
+    #[must_use]
+    pub const fn new(
+        template: String,
+        capability_name: String,
+        registry: Arc<CapabilityRegistry>,
+    ) -> Self {
+        Self {
+            template,
+            capability_name,
+            registry,
+        }
+    }
+
+    /// Render the template and invoke the extract capability.
+    ///
+    /// Returns the extracted candidates. An empty `Vec` means the LLM returned
+    /// no candidates OR the worker was unavailable (the caller decides whether
+    /// to fall back to the heuristic).
+    ///
+    /// Public so the review-time hook and future `exit_when: llm_extract`
+    /// preset routing can invoke it directly (`llm-extract.md` §2).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`graph_flow::GraphError::TaskExecutionFailed`] when the
+    /// configured capability is not registered, or when the capability returns
+    /// a non-`WorkerUnavailable` error. `WorkerUnavailable` is mapped to an
+    /// empty `Vec` (safe default), not an error.
+    pub async fn evaluate(
+        &self,
+        context: &graph_flow::Context,
+    ) -> Result<Vec<crate::quality_loop::KbCandidate>, graph_flow::GraphError> {
+        use crate::quality_loop::KbCandidate;
+
+        // 1. Render the extraction template.
+        let payload = build_nested_payload(context);
+        let prompt = render_core_context_template(&self.template, &payload).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "extract template render failed, using raw template");
+            self.template.clone()
+        });
+
+        // 2. Read chapter prose from the context (the hook writes it there).
+        let chapter_prose: String = context.get("chapter_prose").await.unwrap_or_default();
+
+        // 3. Build capability input with security-injected identity.
+        let creator_id: String = context.get("_creator_id").await.unwrap_or_default();
+        let session_id: String = context.get("_session_id").await.unwrap_or_default();
+        let mut input = serde_json::json!({
+            "prompt": prompt,
+            "chapter_prose": chapter_prose,
+        });
+        if let Some(obj) = input.as_object_mut() {
+            if !creator_id.is_empty() {
+                obj.insert("_creator_id".into(), Value::String(creator_id));
+            }
+            if !session_id.is_empty() {
+                obj.insert("_session_id".into(), Value::String(session_id));
+            }
+        }
+
+        // 4. Resolve the capability from the registry.
+        let cap = self.registry.get(&self.capability_name).ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(format!(
+                "extract capability '{}' not found in registry",
+                self.capability_name
+            ))
+        })?;
+
+        // 5. Invoke + parse candidates.
+        match cap.run(input).await {
+            Ok(output) => {
+                let candidates_json = output
+                    .get("candidates")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let candidates: Vec<KbCandidate> = candidates_json
+                    .iter()
+                    .filter_map(crate::quality_loop::candidate_from_llm_json)
+                    .collect();
+                Ok(candidates)
+            }
+            Err(CapabilityError::WorkerUnavailable) => {
+                // Safe default: empty Vec; caller falls back to heuristic.
+                tracing::warn!(
+                    capability = %self.capability_name,
+                    "extract capability unavailable (no worker); returning empty candidates"
+                );
+                Ok(Vec::new())
+            }
+            Err(e) => Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                "extract capability '{}' failed: {e}",
+                self.capability_name
+            ))),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // StateCompositeTask (outer graph — per §8.2)
 // ---------------------------------------------------------------------------
 
@@ -1936,6 +2071,120 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not found"), "error: {err}");
+    }
+
+    // ── V1.51 T-A P0: LlmExtractTask — golden input → golden Vec<KbCandidate> ──
+
+    /// Mock worker that returns a fixed JSON candidates payload for
+    /// `nexus.llm.extract`. Used by the `LlmExtractTask` hermetic tests.
+    struct MockExtractProvider {
+        response: String,
+    }
+
+    #[async_trait]
+    impl crate::capability::WorkerHandleProvider for MockExtractProvider {
+        async fn call_acp_prompt(
+            &self,
+            _creator_id: &str,
+            _session_id: &str,
+            _prompt: String,
+            _tool_policy: &str,
+        ) -> Result<serde_json::Value, crate::capability::CapabilityError> {
+            Ok(serde_json::json!({ "full_text": self.response.clone() }))
+        }
+    }
+
+    fn extract_registry_with_mock(response: &str) -> Arc<CapabilityRegistry> {
+        use crate::capability::CapabilityRuntimeDeps;
+        let deps = CapabilityRuntimeDeps {
+            pool: None,
+            worker_provider: Some(std::sync::Arc::new(MockExtractProvider {
+                response: response.to_string(),
+            })),
+            daemon_tool_dispatch: None,
+        };
+        Arc::new(CapabilityRegistry::with_runtime_deps(&deps))
+    }
+
+    #[tokio::test]
+    async fn llm_extract_task_with_mock_worker_returns_candidates() {
+        // Golden LLM response → golden Vec<KbCandidate>.
+        let registry = extract_registry_with_mock(
+            r#"{"candidates":[
+                {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.95,"source_quote":"Lin Xia drew her blade."},
+                {"canonical_name":"Azure Gate","block_type":"scene","summary":null,"confidence":0.8,"source_quote":"the Azure Gate groaned open"}
+            ]}"#,
+        );
+        let task = LlmExtractTask::new(
+            "Extract entities.".to_string(),
+            "nexus.llm.extract".to_string(),
+            registry,
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "chapter_prose".to_string(),
+            "Lin Xia drew her blade.".to_string(),
+        )
+        .await;
+
+        let candidates = task.evaluate(&ctx).await.unwrap();
+        assert_eq!(candidates.len(), 2, "expected 2 candidates");
+        assert_eq!(candidates[0].canonical_name_guess, "Lin Xia");
+        assert_eq!(candidates[0].block_type, "character");
+        assert_eq!(candidates[0].confidence, Some(0.95));
+        assert_eq!(candidates[1].canonical_name_guess, "Azure Gate");
+        assert_eq!(candidates[1].block_type, "scene");
+        assert_eq!(candidates[1].confidence, Some(0.8));
+    }
+
+    #[tokio::test]
+    async fn llm_extract_task_no_worker_returns_empty_vec() {
+        // No worker → WorkerUnavailable → LlmExtractTask returns empty Vec
+        // (safe default; caller decides fallback — mirrors LlmJudgeTask NOGO).
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let task = LlmExtractTask::new(
+            "Extract entities.".to_string(),
+            "nexus.llm.extract".to_string(),
+            registry,
+        );
+        let ctx = graph_flow::Context::new();
+        let candidates = task.evaluate(&ctx).await.unwrap();
+        assert!(candidates.is_empty(), "no worker → empty candidates");
+    }
+
+    #[tokio::test]
+    async fn llm_extract_task_missing_capability_errors() {
+        // Unknown capability name → TaskExecutionFailed.
+        let registry = Arc::new(CapabilityRegistry::with_builtins());
+        let task = LlmExtractTask::new(
+            "Extract entities.".to_string(),
+            "nexus.llm.nonexistent".to_string(),
+            registry,
+        );
+        let ctx = graph_flow::Context::new();
+        let result = task.evaluate(&ctx).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("not found"), "error: {err}");
+    }
+
+    #[tokio::test]
+    async fn llm_extract_task_malformed_llm_json_returns_empty() {
+        // Malformed LLM response → capability returns empty candidates;
+        // task surfaces them as an empty Vec (best-effort, no error).
+        let registry = extract_registry_with_mock("not json at all");
+        let task = LlmExtractTask::new(
+            "Extract entities.".to_string(),
+            "nexus.llm.extract".to_string(),
+            registry,
+        );
+        let ctx = graph_flow::Context::new();
+        let candidates = task.evaluate(&ctx).await.unwrap();
+        assert!(
+            candidates.is_empty(),
+            "malformed LLM JSON → empty candidates"
+        );
     }
 
     // ── T5: StateCompositeTask integration — llm_judge GO/NOGO ────────
