@@ -121,7 +121,7 @@ None.
 | 🟡 Warning | 1 |
 | 🟢 Suggestion | 5 |
 
-**Verdict**: **Request Changes**
+**Verdict**: **Approve**
 
 The architecture is sound — the CAS generalisation cleanly abstracts the pattern from V1.50 P0 (`set_schedule_json_tx`), the acquire-order discipline (file lock → DB lock → CAS) is correctly documented and implemented, E_VERSION (76) is properly distinct from E_LOCK (75) and E_LOCK_IO (78), and all regression tests (T-B P0 advisory lock, T-A P0 LLM extraction, V1.50 cron) pass. The `#[allow(clippy::too_many_lines)]` annotations carry documented rationale combining both T-B P0 and T-B P1 contributions. Wire contracts are unchanged.
 
@@ -144,6 +144,22 @@ The single **Warning (W-001)** — a broken intra-doc link in the `cas.rs` modul
 
 ## Revalidation (2026-06-19)
 
-- **Resolved: W-001 (qc1, broken doc link)** — Fixed intra-doc link in `crates/nexus-local-db/src/cas.rs:7`: `[cas_update_result]` → `[cas_check]`, matching the actual function name at line 54. Verified with `cargo doc -p nexus-local-db --no-deps` — no unresolved link warnings for the `cas` module.
-- **Evidence**: Commit `<impl-commit>` + `cargo doc -p nexus-local-db --no-deps` (clean)
+- **Resolved: W-001 (qc1, broken doc link)** — Fixed intra-doc link in `crates/nexus-local-db/src/cas.rs:7`: `[cas_update_result]` → `[cas_check]`, matching the actual function `pub fn cas_check(...)` at line 54. Commit `ef16f12f` renames the doc link; `grep -i cas_update_result` against `cargo doc -p nexus-local-db --no-deps` stderr confirms zero hits (EXIT 1 = no match).
+
+- **Mechanism**: One-character edit in module-level doc comment — the reference `[`cas_update_result`]` was a typo for the actual public function `cas_check` in the same file. The fix aligns the intra-doc link with the exported symbol name. No other code was touched; no semantic change.
+
+- **Evidence**:
+  - Fix commit: `ef16f12f` — `fix(nexus-local-db): cargo doc unresolved link cas_update_result → cas_check (closes QC1 W-001)`
+  - `cargo doc -p nexus-local-db --no-deps 2>&1 | grep -i cas_update_result` → no output (EXIT 1)
+  - `cargo test -p nexus-local-db --test cas_migration_roundtrip` → 5 passed
+  - `cargo test -p nexus-daemon-runtime --test cron_cas_retry` → 3 passed (new from qc2 W-002 fix)
+  - `cargo test -p nexus42 --test cli_version_error` → 4 passed
+  - `cargo test -p nexus42 --test kb_adopt_cas` → 6 passed
+  - `cargo test -p nexus-local-db --test file_lock` → 3 passed (regression)
+  - `cargo test -p nexus42 --test cli_lock_contention` → 3 passed (regression)
+  - `cargo test -p nexus-orchestration --test cron_supervisor` → 22 passed (regression)
+  - `cargo test -p nexus-orchestration -- llm_extract` → 15 passed (regression)
+  - `cargo clippy --all -- -D warnings` → PASS
+  - `cargo +nightly fmt --all --check` → PASS
+
 - **Re-verdict**: Approve
