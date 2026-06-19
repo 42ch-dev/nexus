@@ -186,7 +186,25 @@ When a `novel-writing` schedule completes and the active chapter transitions to 
 **Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
 **Promotes to Normative**: P-last of V1.52
 
-Draft overlay placeholder: define the safe auto-promotion rules for high-confidence `nexus.llm.extract` candidates, including validation, provenance, audit log, and fallback-to-pending behavior.
+The CLI command `creator world kb adopt --auto <world_ref>` promotes pending `kb_extract_jobs` rows to confirmed `KeyBlock`s without per-row author confirmation, provided every safety predicate holds:
+
+| Predicate | Reason |
+| --- | --- |
+| `llm_confidence >= 0.95` | High LLM self-reported confidence only; heuristic rows (`llm_confidence IS NULL`) are skipped. |
+| Non-empty `llm_source_quote` | Provenance-backed: the candidate carries a verbatim chapter excerpt. |
+| `source_chapter_id IS NOT NULL` | Provenance-backed: the candidate is tied to a specific chapter. |
+| `ValidationMode::Novel` passes | The generated `KeyBlock` body has a valid `novel_category` and canonical name. |
+| No duplicate `canonical_name` in the world | The world's active KeyBlocks do not already contain the same name. |
+
+Process:
+
+1. List `promotion_status='pending'` candidates for the world ordered by creation time.
+2. For each candidate, evaluate the predicates inside a dedicated transaction.
+3. On success, insert a confirmed `KeyBlock` (`status='confirmed'`), flip the `kb_extract_jobs` row to `promotion_status='confirmed'`, and set `auto_promoted_at`, `auto_promoted_reason`, and `auto_promoted_by`.
+4. On any predicate failure, skip the candidate with a reason recorded in `--json` output; the row remains `pending`.
+5. After all candidates, write a best-effort audit log per promoted row under `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md`.
+
+Each candidate uses its own transaction with a CAS version guard (`kb_extract_jobs.version`) so one failure does not roll back unrelated promotions and stale rows are not flipped.
 
 ---
 

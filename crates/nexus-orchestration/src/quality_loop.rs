@@ -452,11 +452,18 @@ pub async fn extract_kb_candidates_for_review(
     // V1.50 heuristic fallback (llm-extract.md §5.1).
     let candidates = match extract_via_llm(registry, &ctx).await {
         LlmExtractOutcome::Candidates(c) => c,
-        LlmExtractOutcome::Fallback(reason) => {
+        LlmExtractOutcome::WorkerUnavailable => {
             tracing::debug!(
                 schedule_id,
+                "kb-extract: LLM worker unavailable; falling back to heuristic"
+            );
+            extract_candidates_from_text(&ctx.prose)
+        }
+        LlmExtractOutcome::CapabilityError(ref reason) => {
+            tracing::warn!(
+                schedule_id,
                 reason,
-                "kb-extract: falling back to heuristic extraction"
+                "kb-extract: LLM extraction failed; falling back to heuristic"
             );
             extract_candidates_from_text(&ctx.prose)
         }
@@ -516,11 +523,18 @@ pub async fn detect_missing_kb_on_finalize(
 
     let candidates = match extract_via_llm(registry, &ctx).await {
         LlmExtractOutcome::Candidates(c) => c,
-        LlmExtractOutcome::Fallback(reason) => {
+        LlmExtractOutcome::WorkerUnavailable => {
             tracing::debug!(
                 schedule_id,
+                "kb-missing: LLM worker unavailable; falling back to heuristic"
+            );
+            extract_candidates_from_text(&ctx.prose)
+        }
+        LlmExtractOutcome::CapabilityError(ref reason) => {
+            tracing::warn!(
+                schedule_id,
                 reason,
-                "kb-missing: falling back to heuristic extraction"
+                "kb-missing: LLM extraction failed; falling back to heuristic"
             );
             extract_candidates_from_text(&ctx.prose)
         }
@@ -565,60 +579,68 @@ pub async fn detect_missing_kb_on_finalize(
     Ok(written)
 }
 
-/// Outcome of an LLM extraction attempt.
+/// Outcome of an LLM extraction attempt (V1.52 T-A P0).
 ///
-/// `Candidates` carries the LLM-extracted candidates; `Fallback` signals that
-/// the LLM pathway was unavailable (no registry, capability absent, or
-/// `WorkerUnavailable`) and the caller should use the heuristic.
-enum LlmExtractOutcome {
+/// - `Candidates`: LLM returned parsed candidates (may be empty if the LLM
+///   produced no entities).
+/// - `WorkerUnavailable`: no worker IPC was available. The caller should
+///   fall back to the heuristic rather than treat this as "zero candidates".
+/// - `CapabilityError`: the capability was missing or returned a non-worker
+///   error. Best-effort callers may fall back to the heuristic and log the
+///   reason (closes R-V151Q3-W002).
+#[derive(Debug)]
+pub(crate) enum LlmExtractOutcome {
     Candidates(Vec<KbCandidate>),
-    Fallback(&'static str),
+    WorkerUnavailable,
+    CapabilityError(String),
 }
 
-/// Attempt LLM extraction via the `nexus.llm.extract` capability.
+/// Shared LLM extraction invocation used by both the review-time hook and
+/// `LlmExtractTask::evaluate` (closes R-V151Q3-W001).
 ///
-/// Returns [`LlmExtractOutcome::Fallback`] (with a reason for the debug log)
-/// whenever the LLM pathway is unavailable, so the hook can fall back to the
-/// heuristic. The capability itself returns an empty candidate list on
-/// malformed LLM JSON (best-effort); that is surfaced as
-/// `Candidates(vec![])`, not a fallback.
-async fn extract_via_llm(
+/// Resolves the capability from `registry`, builds the canonical input shape
+/// `{ prompt, chapter_prose, _creator_id, _session_id }`, and parses the
+/// `candidates` array through [`candidate_from_llm_json`].
+///
+/// Returns [`LlmExtractOutcome::WorkerUnavailable`] when no worker IPC is
+/// available, so callers can distinguish "no worker" from "zero candidates"
+/// (closes R-V151Q3-W002).
+pub(crate) async fn run_llm_extract(
     registry: Option<&CapabilityRegistry>,
-    ctx: &ChapterContext,
+    capability_name: &str,
+    prompt: &str,
+    chapter_prose: &str,
+    creator_id: &str,
+    session_id: &str,
 ) -> LlmExtractOutcome {
     let Some(registry) = registry else {
-        return LlmExtractOutcome::Fallback("no capability registry threaded");
+        return LlmExtractOutcome::WorkerUnavailable;
     };
-    let Some(cap) = registry.get(LLM_EXTRACT_CAPABILITY) else {
-        return LlmExtractOutcome::Fallback("nexus.llm.extract not registered");
+    let Some(cap) = registry.get(capability_name) else {
+        return LlmExtractOutcome::CapabilityError(format!(
+            "capability '{capability_name}' not registered"
+        ));
     };
-
-    // High-level extraction instruction. The capability wraps this with the
-    // JSON output-format framing + the verbatim chapter prose (llm-extract.md §1.3).
-    let prompt = "Extract the fictional entities (characters, locations, organizations, items, events, abilities, conflicts, info points) that appear in the chapter prose below. For each entity, judge the most appropriate wire block_type, give a confidence in [0.0,1.0], and quote a verbatim excerpt from the chapter that justifies the extraction.";
 
     let input = serde_json::json!({
         "prompt": prompt,
-        "chapter_prose": ctx.prose,
-        "_creator_id": ctx.creator_id,
+        "chapter_prose": chapter_prose,
+        "_creator_id": creator_id,
         // The review-time hook runs outside a preset session; pass an empty
         // session id. The capability only forwards it to the worker IPC for
         // routing — it is not a security identity (SEC-V131-01 covers creator_id).
-        "_session_id": "",
+        "_session_id": session_id,
     });
 
     let output = match cap.run(input).await {
         Ok(o) => o,
         Err(CapabilityError::WorkerUnavailable) => {
-            return LlmExtractOutcome::Fallback("nexus.llm.extract worker unavailable");
+            return LlmExtractOutcome::WorkerUnavailable;
         }
         Err(e) => {
-            tracing::warn!(
-                schedule_context = %ctx.work_id,
-                error = %e,
-                "kb-extract: nexus.llm.extract capability error; falling back to heuristic"
-            );
-            return LlmExtractOutcome::Fallback("nexus.llm.extract capability error");
+            return LlmExtractOutcome::CapabilityError(format!(
+                "capability '{capability_name}' failed: {e}"
+            ));
         }
     };
 
@@ -633,6 +655,29 @@ async fn extract_via_llm(
         .take(MAX_CANDIDATES_PER_PASS)
         .collect();
     LlmExtractOutcome::Candidates(candidates)
+}
+
+/// Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter.
+///
+/// Thin wrapper around [`run_llm_extract`] that supplies the review-time hook's
+/// default extraction prompt and identity fields from [`ChapterContext`].
+async fn extract_via_llm(
+    registry: Option<&CapabilityRegistry>,
+    ctx: &ChapterContext,
+) -> LlmExtractOutcome {
+    // High-level extraction instruction. The capability wraps this with the
+    // JSON output-format framing + the verbatim chapter prose (llm-extract.md §1.3).
+    let prompt = "Extract the fictional entities (characters, locations, organizations, items, events, abilities, conflicts, info points) that appear in the chapter prose below. For each entity, judge the most appropriate wire block_type, give a confidence in [0.0,1.0], and quote a verbatim excerpt from the chapter that justifies the extraction.";
+
+    run_llm_extract(
+        registry,
+        LLM_EXTRACT_CAPABILITY,
+        prompt,
+        &ctx.prose,
+        &ctx.creator_id,
+        "",
+    )
+    .await
 }
 
 /// Build a [`KbCandidate`] from one LLM-returned candidate JSON object.
@@ -1128,6 +1173,165 @@ struct MissingLogFrontmatter {
     candidates: Vec<MissingLogCandidate>,
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// V1.52 T-A P0 — Outline 五问 quality gate
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Per-dimension results of the outline 五问 heuristic check.
+///
+/// The five dimensions are intentionally different from the finalize 五問:
+/// they evaluate the *outline* before any正文 is drafted.
+// The five boolean dimensions are a natural, compact DTO for the gate result;
+// a state machine would obscure the per-dimension breakdown.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FiveQDimensions {
+    /// Outline has clear beat-level structure (headings, bullets, numbered beats).
+    pub structure: bool,
+    /// A character or situation arc is present (conflict, stakes, change).
+    pub arc: bool,
+    /// At least one future-setup / foreshadowing signal is present.
+    pub foreshadow: bool,
+    /// Outline length is within sane bounds (not empty, not a full draft).
+    pub pacing: bool,
+    /// Final line ends with tension, a question, or unresolved action.
+    pub hook: bool,
+}
+
+/// Verdict returned by [`outline_five_q_check`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FiveQVerdict {
+    /// `true` only when all five dimensions pass.
+    pub go: bool,
+    /// Per-dimension breakdown.
+    pub dimensions: FiveQDimensions,
+    /// Human-readable reason summarizing pass/fail dimensions.
+    pub reason: String,
+}
+
+/// Pure heuristic evaluation of a chapter outline against the outline 五问 gate.
+///
+/// This is the deterministic / no-worker complement to the `llm_judge` outline
+/// gate in the `novel-writing` preset. It returns GO only when all five
+/// dimensions pass, plus a per-dimension breakdown and a short reason.
+///
+/// The heuristic is intentionally conservative: a sparse or generic outline
+/// will fail one or more dimensions, blocking draft generation until the
+/// author revises or overrides.
+#[must_use]
+pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
+    let trimmed = outline.trim();
+    let non_empty_lines: Vec<&str> = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let lower = trimmed.to_ascii_lowercase();
+
+    // 1. structure: at least 3 non-empty lines and visible beats/sections.
+    let has_headings = trimmed.contains("##") || trimmed.contains("# ");
+    let has_bullets = trimmed.contains("- ") || trimmed.contains("* ") || trimmed.contains("1. ");
+    let structure = non_empty_lines.len() >= 3 && (has_headings || has_bullets);
+
+    // 2. arc: conflict / stakes / change language.
+    let arc_signals = [
+        "conflict",
+        "stakes",
+        "revelation",
+        "discovers",
+        "realizes",
+        "must",
+        "change",
+        "turn",
+        "arc",
+        "confronts",
+        "decides",
+        "because",
+        "wants",
+        "needs",
+        "fear",
+        "risk",
+    ];
+    let arc = arc_signals.iter().any(|s| lower.contains(s));
+
+    // 3. foreshadow: explicit F### or future-setup language.
+    let fore_signals = [
+        "f###",
+        "foreshadow",
+        "setup",
+        "plant",
+        "later",
+        "will return",
+        "comes back",
+        "looming",
+        "seed",
+        "promise",
+    ];
+    let foreshadow = fore_signals.iter().any(|s| lower.contains(s));
+
+    // 4. pacing: not empty and not a full draft dumped into the outline field.
+    let char_count = trimmed.chars().count();
+    let pacing = (80..=2000).contains(&char_count);
+
+    // 5. hook: final non-empty line ends with punctuation or word signals that
+    //    leave the reader hanging.
+    let hook_signals = [
+        "cliffhanger",
+        "hook",
+        "tension",
+        "unresolved",
+        "mystery",
+        "what happens",
+        "to be continued",
+        "hangs",
+        "unknown",
+    ];
+    let last_line = non_empty_lines.last().copied().unwrap_or("").trim();
+    let hook_punctuation = last_line.ends_with('?')
+        || last_line.ends_with('!')
+        || last_line.ends_with("...")
+        || last_line.ends_with("—");
+    let hook_words = hook_signals.iter().any(|s| lower.contains(s));
+    let hook = hook_punctuation || hook_words;
+
+    let dimensions = FiveQDimensions {
+        structure,
+        arc,
+        foreshadow,
+        pacing,
+        hook,
+    };
+    let go = structure && arc && foreshadow && pacing && hook;
+
+    let reason = if go {
+        "outline 五问: all dimensions pass (structure, arc, foreshadow, pacing, hook)".to_string()
+    } else {
+        let mut failed = Vec::new();
+        if !structure {
+            failed.push("structure");
+        }
+        if !arc {
+            failed.push("arc");
+        }
+        if !foreshadow {
+            failed.push("foreshadow");
+        }
+        if !pacing {
+            failed.push("pacing");
+        }
+        if !hook {
+            failed.push("hook");
+        }
+        format!("outline 五问: failed on {}", failed.join(", "))
+    };
+
+    FiveQVerdict {
+        go,
+        dimensions,
+        reason,
+    }
+}
+
 /// Best-effort `workspace_id` resolution for the `kb_extract_jobs` row.
 ///
 /// Falls back to the `creator_id` when no workspace is registered (the column
@@ -1463,5 +1667,52 @@ mod tests {
             Some("...the eastern gate groaned open...")
         );
         assert_eq!(aggregates[0].block_type, "scene");
+    }
+
+    // ── V1.52 T-A P0: outline 五问 heuristic gate ───────────────────────
+
+    #[test]
+    fn outline_five_q_passes_on_complete_outline() {
+        let outline = "## Opening\n- Lin Xia enters the tavern and confronts the stranger.\n- She discovers the stranger carries her brother's blade.\n## Middle\n- Stakes rise: the stranger knows where the blade was found.\n- F001: he plants a seed about the eastern gate.\n## End\n- Lin Xia must decide: trust him or draw her sword?\n";
+        let verdict = outline_five_q_check(outline);
+        assert!(verdict.go, "expected GO, got: {verdict:?}");
+        assert!(verdict.dimensions.structure);
+        assert!(verdict.dimensions.arc);
+        assert!(verdict.dimensions.foreshadow);
+        assert!(verdict.dimensions.pacing);
+        assert!(verdict.dimensions.hook);
+        assert!(verdict.reason.contains("all dimensions pass"));
+    }
+
+    #[test]
+    fn outline_five_q_fails_on_empty_outline() {
+        let verdict = outline_five_q_check("");
+        assert!(!verdict.go);
+        assert!(!verdict.dimensions.structure);
+        assert!(!verdict.dimensions.pacing);
+        assert!(verdict.reason.contains("structure"));
+    }
+
+    #[test]
+    fn outline_five_q_fails_without_arc_or_hook() {
+        // Structured and paced, but no conflict/change and no hook.
+        let outline = "## Scene 1\n- The party walks through the forest.\n- They see many trees.\n## Scene 2\n- They stop for lunch.\n";
+        let verdict = outline_five_q_check(outline);
+        assert!(!verdict.go);
+        assert!(verdict.dimensions.structure);
+        assert!(!verdict.dimensions.arc);
+        assert!(!verdict.dimensions.foreshadow);
+        assert!(verdict.dimensions.pacing);
+        assert!(!verdict.dimensions.hook);
+        assert!(verdict.reason.contains("arc"));
+        assert!(verdict.reason.contains("hook"));
+    }
+
+    #[test]
+    fn outline_five_q_detects_hook_via_question() {
+        // Minimal structured outline with arc and foreshadow words; hook via '?'.
+        let outline = "## Beat 1\n- Kael must steal the map before dawn.\n- He plants a promise that the guard will return.\n## Beat 2\n- Will he make it out alive?";
+        let verdict = outline_five_q_check(outline);
+        assert!(verdict.go, "expected GO, got: {verdict:?}");
     }
 }

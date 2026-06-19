@@ -339,11 +339,11 @@ fn e2e_novel_writing_has_four_states() {
     let loaded = nexus_orchestration::preset::load_embedded_preset("novel-writing", &caps)
         .expect("novel-writing preset should load");
 
-    // P4 fix wave: 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
+    // V1.52 T-A P0: 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
     assert_eq!(
         loaded.manifest.states.len(),
-        5,
-        "novel-writing should have 5 states (finalize split into finalize + finalize_commit)"
+        6,
+        "novel-writing should have 6 states (outline_review added before draft_chapter)"
     );
 
     let state_ids: Vec<&str> = loaded
@@ -356,6 +356,7 @@ fn e2e_novel_writing_has_four_states() {
         state_ids,
         vec![
             "outline_chapter",
+            "outline_review",
             "draft_chapter",
             "finalize",
             "finalize_commit",

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-19T08:30:00Z",
+  "updated_at": "2026-06-19T15:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
@@ -18,7 +18,9 @@
     {
       "plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
       "title": "T-A P0 — outline 五问 quality gate + auto-promote high-confidence KB",
-      "status": "Todo",
+      "status": "Done",
+      "started_at": "2026-06-19T12:00:00Z",
+      "done_at": "2026-06-19T15:00:00Z",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev", "@qa-engineer"],
       "task_category": "logic",
@@ -116,8 +118,8 @@
     },
     "tech_debt_summary": {
       "total_open": 0,
-      "total_deferred": 6,
-      "total_resolved": 59,
+      "total_deferred": 4,
+      "total_resolved": 61,
       "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
@@ -127,7 +129,7 @@
         "nit": 0
       },
       "by_target_active": {
-        "V1.52 T-A P0": 2,
+        "V1.52 T-A P0": 0,
         "V1.52 T-A P1": 1,
         "V1.52 T-A P2": 1,
         "V1.52 P-last": 1,
@@ -1232,15 +1234,17 @@
         "severity": "low",
         "source": "qc3 (performance/reliability) W-001",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs vs tasks/mod.rs",
-        "decision": "defer",
-        "owner": "@architect or @fullstack-dev",
+        "decision": "resolve",
+        "owner": "@fullstack-dev",
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
-        "note": "Non-blocking per qc3 reviewer; both paths tested; unify at P-last or V1.51+ refactor.",
-        "lifecycle": "deferred",
+        "note": "Unified into shared `run_llm_extract` helper returning `LlmExtractOutcome`; both review-time hook and `LlmExtractTask::evaluate` reuse the same LLM→KbCandidate mapping.",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-18-v1.51-llm-extraction",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P0: introduced `LlmExtractOutcome` and `run_llm_extract` in `quality_loop.rs`; `LlmExtractTask::evaluate` now delegates to the shared path. Closes parallel-path warning.",
+        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote"
       },
       {
         "id": "R-V151Q3-W002",
@@ -1248,15 +1252,17 @@
         "severity": "low",
         "source": "qc3 (performance/reliability) W-002",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (extract_via_llm WorkerUnavailable path)",
-        "decision": "defer",
+        "decision": "resolve",
         "owner": "@fullstack-dev",
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
-        "note": "Non-blocking per qc3 reviewer; contract documented; PM awareness note.",
-        "lifecycle": "deferred",
+        "note": "`WorkerUnavailable` is now an explicit `LlmExtractOutcome::WorkerUnavailable` variant; callers decide whether to fall back to heuristic instead of interpreting an empty Vec.",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-18-v1.51-llm-extraction",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P0: `run_llm_extract` returns `LlmExtractOutcome::WorkerUnavailable` when no worker IPC is available; empty candidate Vec now unambiguously means LLM returned zero entities.",
+        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote"
       }
     ],
     "2026-06-18-v1.51-advisory-lock": [

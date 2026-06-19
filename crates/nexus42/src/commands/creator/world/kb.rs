@@ -33,8 +33,8 @@ use nexus_kb::store::KbStoreError;
 use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
-    get_promotion, list_pending_for_world, mark_confirmed_in_tx_with_cas, mark_rejected,
-    KbExtractPromotion,
+    get_promotion, list_pending_for_world, mark_auto_promoted_in_tx_with_cas,
+    mark_confirmed_in_tx_with_cas, mark_rejected, KbExtractPromotion,
 };
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -109,9 +109,19 @@ pub enum WorldKbCommand {
     },
 
     /// Confirm a review-time KB candidate → promote to a `confirmed` `KeyBlock`
+    ///
+    /// Without `--auto`, requires an `extract_job_id`. With `--auto --world-ref`,
+    /// promotes all high-confidence pending candidates in that world.
     Adopt {
-        /// `kb_extract_jobs` job ID (e.g. `xj_...`)
-        extract_job_id: String,
+        /// `kb_extract_jobs` job ID (e.g. `xj_...`). Required unless `--auto`.
+        #[arg(required_unless_present = "auto")]
+        extract_job_id: Option<String>,
+        /// Auto-promote all high-confidence pending candidates in `--world-ref`.
+        #[arg(long, requires = "world_ref")]
+        auto: bool,
+        /// World reference (required with `--auto`).
+        #[arg(long)]
+        world_ref: Option<String>,
         /// Emit machine-readable JSON confirmation
         #[arg(long)]
         json: bool,
@@ -177,17 +187,22 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
         }
         WorldKbCommand::Adopt {
             extract_job_id,
+            auto,
+            world_ref,
             json,
         } => {
             let ws_root = crate::config::find_workspace_root();
-            kb_adopt(
-                &pool,
-                &creator_id,
-                &extract_job_id,
-                ws_root.as_deref(),
-                json,
-            )
-            .await
+            if auto {
+                // clap `requires = "world_ref"` guarantees this is Some.
+                let world_ref = world_ref
+                    .ok_or_else(|| CliError::Other("--auto requires --world-ref".to_string()))?;
+                kb_adopt_auto(&pool, &creator_id, &world_ref, ws_root.as_deref(), json).await
+            } else {
+                let job_id = extract_job_id.ok_or_else(|| {
+                    CliError::Other("adopt requires an extract_job_id or --auto".to_string())
+                })?;
+                kb_adopt(&pool, &creator_id, &job_id, ws_root.as_deref(), json).await
+            }
         }
         WorldKbCommand::Reject { extract_job_id } => {
             let ws_root = crate::config::find_workspace_root();
@@ -848,6 +863,303 @@ pub async fn kb_adopt(
         println!("  Confidence:  {conf_display}");
         println!("  Source:      {quote_display}");
     }
+    Ok(())
+}
+
+/// `creator world kb adopt --auto` — auto-promote high-confidence pending candidates.
+///
+/// Iterates pending `kb_extract_jobs` rows for the given world and promotes those
+/// meeting the safe auto-promotion threshold:
+///
+/// - `llm_confidence >= 0.95`
+/// - non-empty `llm_source_quote` and `source_chapter_id` (`provenance_backed`)
+/// - adopt-time `ValidationMode::Novel` passes (`validation_clean`)
+/// - no duplicate `canonical_name` in the world
+///
+/// Each promoted candidate is inserted as a confirmed `KeyBlock` in a dedicated
+/// transaction, the promotion row is flipped with `auto_promoted_*` audit
+/// columns, and an audit log is written under
+/// `Works/<work_ref>/Logs/kb/auto-promoted/`. Candidates that do not qualify
+/// remain `pending` and are reported in the `--json` `skipped` array.
+///
+/// # Errors
+///
+/// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access, or
+/// `CliError::Other` on store/serialization failure.
+// V1.52 T-A P0: per-candidate transactions keep the blast radius of one
+// validation/log failure small; the CAS version guard prevents stale flips.
+#[allow(clippy::too_many_lines)]
+pub async fn kb_adopt_auto(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+    json: bool,
+) -> Result<()> {
+    #[derive(Debug, serde::Serialize)]
+    struct PromotedRecord {
+        extract_job_id: String,
+        key_block_id: String,
+        canonical_name: String,
+        confidence: f64,
+    }
+
+    #[derive(Debug, serde::Serialize)]
+    struct SkippedRecord {
+        extract_job_id: String,
+        reason: String,
+    }
+
+    // Author identity gate (same as single adopt).
+    require_world_owner(pool, world_id, creator_id).await?;
+
+    let pending = list_pending_for_world(pool, world_id, None)
+        .await
+        .map_err(|e| CliError::Other(format!("World KB pending list failed: {e}")))?;
+
+    let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
+
+    let mut promoted: Vec<PromotedRecord> = Vec::new();
+    let mut skipped: Vec<SkippedRecord> = Vec::new();
+
+    for candidate in pending {
+        let Some(ref canonical_name) = candidate.canonical_name_guess else {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "missing canonical_name_guess".to_string(),
+            });
+            continue;
+        };
+
+        // ── Eligibility checks ─────────────────────────────────────────────
+        let Some(confidence) = candidate.llm_confidence else {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "no LLM confidence (heuristic candidate)".to_string(),
+            });
+            continue;
+        };
+        if confidence < 0.95 {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: format!("confidence {confidence:.2} < 0.95"),
+            });
+            continue;
+        }
+        let source_quote = candidate.llm_source_quote.as_deref().unwrap_or("").trim();
+        if source_quote.is_empty() {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "missing source_quote (provenance)".to_string(),
+            });
+            continue;
+        }
+        if candidate.source_chapter_id.is_none() {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "missing source_chapter_id (provenance)".to_string(),
+            });
+            continue;
+        }
+
+        // ── Build KeyBlock ─────────────────────────────────────────────────
+        let body: KeyBlockBody =
+            serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
+                .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
+        let block_type_str = candidate.block_type_guess.as_deref().unwrap_or("character");
+        let block_type = parse_block_type_cli(block_type_str)?;
+
+        let mut kb = KeyBlock::new(world_id, block_type, canonical_name);
+        kb.body = Some(body);
+        kb.status = "confirmed".to_string();
+        kb.created_at = chrono::Utc::now().to_rfc3339();
+
+        // ── Atomic insert + audit flip ─────────────────────────────────────
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to begin adopt-auto transaction: {e}")))?;
+
+        let insert_result = match store.insert_key_block_in_tx(&mut tx, kb).await {
+            Ok(r) => r,
+            Err(KbStoreError::Duplicate { .. }) => {
+                tx.rollback().await.ok();
+                skipped.push(SkippedRecord {
+                    extract_job_id: candidate.job_id.clone(),
+                    reason: "duplicate canonical_name in world".to_string(),
+                });
+                continue;
+            }
+            Err(e) => {
+                tx.rollback().await.ok();
+                skipped.push(SkippedRecord {
+                    extract_job_id: candidate.job_id.clone(),
+                    reason: format!("KeyBlock validation/insert failed: {e}"),
+                });
+                continue;
+            }
+        };
+
+        let actor = format!("nexus42:cli:kb-adopt-auto:{creator_id}");
+        let reason = format!("confidence={confidence:.2}, validation_clean, provenance_backed");
+        let flipped = match mark_auto_promoted_in_tx_with_cas(
+            &mut tx,
+            &candidate.job_id,
+            candidate.version,
+            &reason,
+            &actor,
+        )
+        .await
+        {
+            Ok(f) => f,
+            Err(e) => {
+                tx.rollback().await.ok();
+                skipped.push(SkippedRecord {
+                    extract_job_id: candidate.job_id.clone(),
+                    reason: format!("CAS promotion flip failed: {e}"),
+                });
+                continue;
+            }
+        };
+
+        if !flipped {
+            tx.rollback().await.ok();
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "candidate was no longer pending".to_string(),
+            });
+            continue;
+        }
+
+        tx.commit().await.map_err(|e| {
+            CliError::Other(format!("Failed to commit adopt-auto transaction: {e}"))
+        })?;
+
+        // Best-effort audit log (non-fatal to the promotion outcome).
+        if let Err(e) = write_auto_promoted_log(
+            pool,
+            workspace_dir,
+            &candidate,
+            canonical_name,
+            &insert_result.key_block_id,
+            &reason,
+            &actor,
+        )
+        .await
+        {
+            tracing::warn!(
+                extract_job_id = %candidate.job_id,
+                error = %e,
+                "kb-adopt-auto: failed to write audit log (non-fatal)"
+            );
+        }
+
+        promoted.push(PromotedRecord {
+            extract_job_id: candidate.job_id.clone(),
+            key_block_id: insert_result.key_block_id,
+            canonical_name: canonical_name.clone(),
+            confidence,
+        });
+    }
+
+    // ── Output ───────────────────────────────────────────────────────────
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "world_id": world_id,
+                "promoted_count": promoted.len(),
+                "skipped_count": skipped.len(),
+                "promoted": promoted,
+                "skipped": skipped,
+            }))?
+        );
+    } else {
+        println!("✓ KB auto-promote complete for world {world_id}");
+        println!("  Promoted: {}", promoted.len());
+        for p in &promoted {
+            println!(
+                "    - {} → {} ({})",
+                p.extract_job_id, p.key_block_id, p.canonical_name
+            );
+        }
+        if !skipped.is_empty() {
+            println!("  Skipped: {}", skipped.len());
+            for s in &skipped {
+                println!("    - {}: {}", s.extract_job_id, s.reason);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Write the auto-promotion audit log (V1.52 T-A P0).
+///
+/// Path: `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md`.
+/// Returns Ok(()) without writing when no workspace is bound (hermetic tests).
+async fn write_auto_promoted_log(
+    pool: &SqlitePool,
+    workspace_dir: Option<&std::path::Path>,
+    candidate: &KbExtractPromotion,
+    canonical_name: &str,
+    key_block_id: &str,
+    reason: &str,
+    actor: &str,
+) -> std::result::Result<(), String> {
+    let Some(ws_dir) = workspace_dir else {
+        return Ok(());
+    };
+
+    // R-V150KBED-05: resolve the human-readable work_ref (works.story_ref)
+    // before constructing the log path.
+    let work_ref = resolve_work_ref_for_log(pool, candidate.work_id.as_deref(), workspace_dir)
+        .await
+        .map_err(|e| format!("resolve work_ref: {e}"))?
+        .unwrap_or_else(|| "unknown-work".to_string());
+
+    let date = chrono::Utc::now().format("%Y-%m-%d");
+    let log_dir = ws_dir
+        .join("Works")
+        .join(&work_ref)
+        .join("Logs")
+        .join("kb")
+        .join("auto-promoted");
+    std::fs::create_dir_all(&log_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    let log_path = log_dir.join(format!("{date}-{}.md", candidate.job_id));
+
+    let body = format!(
+        "# Auto-promoted KB candidate\n\
+         \n\
+         - **extract_job_id**: {job_id}\n\
+         - **key_block_id**: {key_block_id}\n\
+         - **world_id**: {world_id}\n\
+         - **work_id**: {work_id}\n\
+         - **work_ref**: {work_ref}\n\
+         - **canonical_name**: {canonical_name}\n\
+         - **block_type_guess**: {btype}\n\
+         - **source_chapter_id**: {chapter}\n\
+         - **confidence**: {confidence}\n\
+         - **reason**: {reason}\n\
+         - **actor**: {actor}\n\
+         - **promoted_at**: {ts}\n",
+        job_id = candidate.job_id,
+        key_block_id = key_block_id,
+        world_id = candidate.world_id,
+        work_id = candidate.work_id.as_deref().unwrap_or("-"),
+        work_ref = work_ref,
+        canonical_name = canonical_name,
+        btype = candidate.block_type_guess.as_deref().unwrap_or("-"),
+        chapter = candidate
+            .source_chapter_id
+            .map_or_else(|| "-".to_string(), |n| n.to_string()),
+        confidence = candidate
+            .llm_confidence
+            .map_or_else(|| "-".to_string(), |c| format!("{c:.2}")),
+        reason = reason,
+        actor = actor,
+        ts = chrono::Utc::now().to_rfc3339(),
+    );
+    std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
     Ok(())
 }
 

@@ -14,9 +14,9 @@
 
 preset:
   id: novel-writing
-  version: 8  # V1.48 P1: open_findings_block template var for chapter-scoped findings injection
+  version: 9  # V1.52 T-A P0: outline 五问 gate before drafting
   kind: creator
-  description: "Per-chapter outline → draft → finalize pipeline; gated by llm_judge 五問 quality check"
+  description: "Per-chapter outline → draft → finalize pipeline; gated by llm_judge 五問 quality checks at outline and finalize"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
@@ -93,6 +93,15 @@ states:
             foreshadowing_summary: "{{preset.input.foreshadowing_summary}}"
     exit_when:
       kind: manual
+    next: outline_review
+
+  - id: outline_review
+    description: "Run outline 五问 quality gate; NOGO returns WaitForInput (no state mutation in enter)"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/outline-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT6H"
     next: draft_chapter
 
   - id: draft_chapter

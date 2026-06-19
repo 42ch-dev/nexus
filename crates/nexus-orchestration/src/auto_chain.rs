@@ -1463,7 +1463,7 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         // to outline_chapter and draft_chapter prompt contracts (new prompt
         // input, not a breaking state-machine change, but versioned up so
         // pre-V1.48 schedules are correctly identified).
-        "novel-writing" => 8,
+        "novel-writing" => 9,
         "research" => 2,
         "novel-review-master" => 3,
         "kb-extract" => 3,
