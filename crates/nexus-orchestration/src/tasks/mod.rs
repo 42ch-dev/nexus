@@ -16,7 +16,7 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
-use crate::preset::manifest::{EnterAction, ExitWhen, NextTarget, StateDefinition};
+use crate::preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
@@ -516,6 +516,7 @@ impl LlmJudgeTask {
 /// caller's responsibility (the review-time hook), keeping the task pure.
 ///
 /// Design: `llm-extract.md` §2, compass §0.1 #7.
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct LlmExtractTask {
     /// Extraction instruction template (rendered against the context).
     template: String,
@@ -542,25 +543,26 @@ impl LlmExtractTask {
 
     /// Render the template and invoke the extract capability.
     ///
-    /// Returns the extracted candidates. An empty `Vec` means the LLM returned
-    /// no candidates OR the worker was unavailable (the caller decides whether
-    /// to fall back to the heuristic).
+    /// Returns [`LlmExtractOutcome`] so the caller can distinguish:
+    /// - `Candidates(vec)` — LLM returned candidates (may be empty).
+    /// - `WorkerUnavailable` — no worker IPC; caller should fall back.
+    /// - `CapabilityError(reason)` — capability missing or failed; caller may
+    ///   treat as a hard error or fall back.
     ///
     /// Public so the review-time hook and future `exit_when: llm_extract`
     /// preset routing can invoke it directly (`llm-extract.md` §2).
     ///
     /// # Errors
     ///
-    /// Returns [`graph_flow::GraphError::TaskExecutionFailed`] when the
-    /// configured capability is not registered, or when the capability returns
-    /// a non-`WorkerUnavailable` error. `WorkerUnavailable` is mapped to an
-    /// empty `Vec` (safe default), not an error.
-    pub async fn evaluate(
+    /// Returns [`graph_flow::GraphError::TaskExecutionFailed`] only for
+    /// unexpected internal failures (e.g., template render panic). Capability
+    /// errors are represented inside [`LlmExtractOutcome`] so callers decide
+    /// how to handle them.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) async fn evaluate(
         &self,
         context: &graph_flow::Context,
-    ) -> Result<Vec<crate::quality_loop::KbCandidate>, graph_flow::GraphError> {
-        use crate::quality_loop::KbCandidate;
-
+    ) -> Result<crate::quality_loop::LlmExtractOutcome, graph_flow::GraphError> {
         // 1. Render the extraction template.
         let payload = build_nested_payload(context);
         let prompt = render_core_context_template(&self.template, &payload).unwrap_or_else(|e| {
@@ -568,60 +570,21 @@ impl LlmExtractTask {
             self.template.clone()
         });
 
-        // 2. Read chapter prose from the context (the hook writes it there).
+        // 2. Read chapter prose and identity from the context.
         let chapter_prose: String = context.get("chapter_prose").await.unwrap_or_default();
-
-        // 3. Build capability input with security-injected identity.
         let creator_id: String = context.get("_creator_id").await.unwrap_or_default();
         let session_id: String = context.get("_session_id").await.unwrap_or_default();
-        let mut input = serde_json::json!({
-            "prompt": prompt,
-            "chapter_prose": chapter_prose,
-        });
-        if let Some(obj) = input.as_object_mut() {
-            if !creator_id.is_empty() {
-                obj.insert("_creator_id".into(), Value::String(creator_id));
-            }
-            if !session_id.is_empty() {
-                obj.insert("_session_id".into(), Value::String(session_id));
-            }
-        }
 
-        // 4. Resolve the capability from the registry.
-        let cap = self.registry.get(&self.capability_name).ok_or_else(|| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "extract capability '{}' not found in registry",
-                self.capability_name
-            ))
-        })?;
-
-        // 5. Invoke + parse candidates.
-        match cap.run(input).await {
-            Ok(output) => {
-                let candidates_json = output
-                    .get("candidates")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let candidates: Vec<KbCandidate> = candidates_json
-                    .iter()
-                    .filter_map(crate::quality_loop::candidate_from_llm_json)
-                    .collect();
-                Ok(candidates)
-            }
-            Err(CapabilityError::WorkerUnavailable) => {
-                // Safe default: empty Vec; caller falls back to heuristic.
-                tracing::warn!(
-                    capability = %self.capability_name,
-                    "extract capability unavailable (no worker); returning empty candidates"
-                );
-                Ok(Vec::new())
-            }
-            Err(e) => Err(graph_flow::GraphError::TaskExecutionFailed(format!(
-                "extract capability '{}' failed: {e}",
-                self.capability_name
-            ))),
-        }
+        // 3. Use the shared extraction path (closes R-V151Q3-W001).
+        Ok(crate::quality_loop::run_llm_extract(
+            Some(&self.registry),
+            &self.capability_name,
+            &prompt,
+            &chapter_prose,
+            &creator_id,
+            &session_id,
+        )
+        .await)
     }
 }
 
@@ -661,6 +624,15 @@ pub struct StateCompositeTask {
     registry: Option<std::sync::Arc<CapabilityRegistry>>,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    /// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
+    merge_kind: Option<MergeKind>,
+    /// Expected number of incoming labeled edges for merge nodes.
+    ///
+    /// Populated by the loader/graph-builder when wiring the outer graph.
+    /// Used at runtime to evaluate merge conditions (all/any/quorum).
+    expected_incoming: usize,
+    /// Pre-computed merge key ("_merge_{id}") to avoid per-tick allocation (W-QC3-2).
+    merge_key: String,
 }
 
 impl StateCompositeTask {
@@ -680,6 +652,9 @@ impl StateCompositeTask {
             output_bindings: std::collections::HashMap::new(),
             registry: None,
             daemon_tool_dispatch: None,
+            merge_kind: state.merge.clone(),
+            expected_incoming: 0,
+            merge_key: format!("_merge_{}", state.id),
         }
     }
 
@@ -727,6 +702,13 @@ impl StateCompositeTask {
         self
     }
 
+    /// Set the expected number of incoming labeled edges for merge tracking (V1.52 T-B P1).
+    #[must_use]
+    pub const fn with_expected_incoming(mut self, count: usize) -> Self {
+        self.expected_incoming = count;
+        self
+    }
+
     /// Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
     ///
     /// For embedded presets, reads the template content from the compiled-in
@@ -760,6 +742,9 @@ impl StateCompositeTask {
     ///
     /// When `next` is `GoNogo`, both GO and NOGO advance via `Continue`
     /// (the conditional edge routes to the correct target).
+    /// When `next` is `Labeled` (V1.52 T-B P0), routing is via
+    /// [`Self::resolve_labeled_target`] instead — this method should NOT
+    /// be called for `Labeled`.
     /// When `next` is `Linear` or `None`, GO advances but NOGO waits.
     // Clippy wants const but this borrows self.next; suppress.
     #[allow(clippy::missing_const_for_fn)]
@@ -769,6 +754,77 @@ impl StateCompositeTask {
             _ if judge_result => NextAction::Continue,
             _ => NextAction::WaitForInput,
         }
+    }
+
+    /// V1.52 T-B P0: resolve labeled routing target from judge output.
+    ///
+    /// Scans the judge's output text (`judge_reason`) for known label
+    /// strings declared in `next` edges. On match, writes the matched
+    /// label to context as `_judge_label` and returns `GoTo(target)`.
+    ///
+    /// For legacy binary `GoNogo` states, auto-converts: treats `"go"` and
+    /// `"nogo"` as labeled edges (same preset reachable via either routing API).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(GraphError::TaskExecutionFailed)` when no label
+    /// substring matches the judge output (deterministic branch fail
+    /// instead of silent stall). The error includes the list of known
+    /// labels and an excerpt of the judge output.
+    fn resolve_labeled_target(
+        &self,
+        context: &graph_flow::Context,
+        judge_reason: &str,
+    ) -> Result<NextAction, graph_flow::GraphError> {
+        // Collect candidate (label, target) pairs from the next target.
+        // Sort by descending label length to prevent shorter labels (e.g. "go")
+        // from matching as substrings of longer labels (e.g. "nogo").
+        let mut candidates: Vec<(&str, &str)> = match &self.next {
+            Some(NextTarget::Labeled(edges)) => edges
+                .iter()
+                .map(|e| (e.label.as_str(), e.target.as_str()))
+                .collect(),
+            Some(NextTarget::GoNogo(go_nogo)) => {
+                // W-QC3-2: binary→Labeled auto-conversion.
+                vec![("go", go_nogo.go.as_str()), ("nogo", go_nogo.nogo.as_str())]
+            }
+            _ => return Ok(NextAction::WaitForInput),
+        };
+        candidates.sort_by_key(|(label, _)| std::cmp::Reverse(label.len()));
+
+        for (label, target) in &candidates {
+            if judge_reason.contains(label) {
+                // W-001: write matched label to context for observability.
+                context.set_sync("_judge_label", (*label).to_string());
+                // V1.52 T-B P1: record label arrival for merge tracking.
+                // If target is a merge node, _merge_<target_id> accumulates labels.
+                // Non-merge targets ignore this key.
+                let merge_key = format!("_merge_{target}");
+                let mut arrived: Vec<String> = context.get_sync(&merge_key).unwrap_or_default();
+                if !arrived.contains(&(*label).to_string()) {
+                    arrived.push((*label).to_string());
+                }
+                context.set_sync(&merge_key, arrived);
+                return Ok(NextAction::GoTo((*target).to_string()));
+            }
+        }
+
+        // W-QC3-3: no-match → deterministic fail (not silent stall).
+        let known_labels: Vec<String> = candidates.iter().map(|(l, _)| (*l).to_string()).collect();
+        let excerpt = if judge_reason.len() > 200 {
+            format!("{}...", &judge_reason[..200])
+        } else {
+            judge_reason.to_string()
+        };
+        tracing::warn!(
+            state_id = %self.id,
+            known_labels = ?known_labels,
+            judge_output_excerpt = %excerpt,
+            "resolve_labeled_target: no label matched judge output; failing deterministically"
+        );
+        Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+            "Labeled routing: no label matched judge output. Known labels: {known_labels:?}. Judge output excerpt: {excerpt}"
+        )))
     }
 }
 
@@ -797,6 +853,48 @@ impl Task for StateCompositeTask {
             let response = Some(format!("state '{}': resumed, continuing", self.id));
             tracing::debug!(state_id = %self.id, terminal = self.terminal, "state resumed");
             return Ok(TaskResult::new(response, NextAction::Continue));
+        }
+
+        // 0.5. V1.52 T-B P1: Merge node gate.
+        // If this state has incoming labeled edges, check whether enough have
+        // arrived before processing enter actions. When `merge:` is absent but
+        // expected_incoming > 0, the default is WaitAll (W-QC1-1).
+        if self.expected_incoming > 0 {
+            let merge_kind = self.merge_kind.as_ref().unwrap_or(&MergeKind::All);
+            let arrived: Vec<String> = context.get(&self.merge_key).await.unwrap_or_default();
+            let arrived_count = arrived.len();
+
+            let condition_met = match merge_kind {
+                MergeKind::All => arrived_count >= self.expected_incoming,
+                MergeKind::Any => arrived_count >= 1,
+                MergeKind::Quorum { n, .. } => arrived_count >= *n,
+            };
+
+            if !condition_met {
+                let state_id = self.id.clone();
+                tracing::debug!(
+                    state_id = %state_id,
+                    arrived = arrived_count,
+                    expected = self.expected_incoming,
+                    merge_kind = ?merge_kind,
+                    "merge node waiting for more incoming labeled edges"
+                );
+                return Ok(TaskResult::new(
+                    Some(format!(
+                        "merge node '{state_id}': {arrived_count}/{expected} arrivals, waiting",
+                        expected = self.expected_incoming
+                    )),
+                    NextAction::WaitForInput,
+                ));
+            }
+
+            // Merge condition met — clear arrivals for next cycle.
+            context.set(&self.merge_key, serde_json::Value::Null).await;
+            tracing::info!(
+                state_id = %self.id,
+                arrived = arrived_count,
+                "merge node condition met, advancing"
+            );
         }
 
         // 1. Process enter actions.
@@ -987,7 +1085,21 @@ impl Task for StateCompositeTask {
                                             if self.terminal {
                                                 NextAction::End
                                             } else {
-                                                self.judge_next_action(prev_result)
+                                                // V1.52 T-B P0: labeled routing via GoTo
+                                                if matches!(
+                                                    &self.next,
+                                                    Some(
+                                                        NextTarget::Labeled(_)
+                                                            | NextTarget::GoNogo(_)
+                                                    )
+                                                ) {
+                                                    self.resolve_labeled_target(
+                                                        &context,
+                                                        &prev_reason,
+                                                    )?
+                                                } else {
+                                                    self.judge_next_action(prev_result)
+                                                }
                                             },
                                         ));
                                     }
@@ -1011,10 +1123,19 @@ impl Task for StateCompositeTask {
                     context.set("_judge_result", result).await;
                     context.set("_judge_reason", reason.clone()).await;
 
-                    // V1.42 P2: when next is GoNogo, both GO and NOGO advance
-                    // (the conditional edge routes to the correct target).
-                    // When next is Linear/None, GO advances but NOGO waits.
-                    self.judge_next_action(result)
+                    // V1.52 T-B P0: for Labeled or GoNogo next, route via
+                    // resolve_labeled_target (GoTo). For Linear/None, use
+                    // the existing judge_next_action(bool) path.
+                    if matches!(
+                        &self.next,
+                        Some(NextTarget::Labeled(_) | NextTarget::GoNogo(_))
+                    ) {
+                        self.resolve_labeled_target(&context, &reason)?
+                    } else {
+                        // V1.42 P2: when next is Linear/None, GO advances
+                        // but NOGO waits.
+                        self.judge_next_action(result)
+                    }
                 }
             }
             Some(ExitWhen::GraphComplete) => {
@@ -1900,7 +2021,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preset::manifest::GoNogoNext;
+    use crate::preset::manifest::{GoNogoNext, LabeledNext};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -2108,7 +2229,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_task_with_mock_worker_returns_candidates() {
-        // Golden LLM response → golden Vec<KbCandidate>.
+        // Golden LLM response → golden LlmExtractOutcome::Candidates.
         let registry = extract_registry_with_mock(
             r#"{"candidates":[
                 {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.95,"source_quote":"Lin Xia drew her blade."},
@@ -2128,7 +2249,11 @@ mod tests {
         )
         .await;
 
-        let candidates = task.evaluate(&ctx).await.unwrap();
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        let candidates = match outcome {
+            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            other => panic!("expected Candidates, got: {other:?}"),
+        };
         assert_eq!(candidates.len(), 2, "expected 2 candidates");
         assert_eq!(candidates[0].canonical_name_guess, "Lin Xia");
         assert_eq!(candidates[0].block_type, "character");
@@ -2139,9 +2264,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llm_extract_task_no_worker_returns_empty_vec() {
-        // No worker → WorkerUnavailable → LlmExtractTask returns empty Vec
-        // (safe default; caller decides fallback — mirrors LlmJudgeTask NOGO).
+    async fn llm_extract_task_no_worker_returns_unavailable() {
+        // No worker → WorkerUnavailable is explicit, not an empty Vec contract
+        // (closes R-V151Q3-W002).
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
@@ -2149,13 +2274,19 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
-        let candidates = task.evaluate(&ctx).await.unwrap();
-        assert!(candidates.is_empty(), "no worker → empty candidates");
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        assert!(
+            matches!(
+                outcome,
+                crate::quality_loop::LlmExtractOutcome::WorkerUnavailable
+            ),
+            "no worker → WorkerUnavailable outcome"
+        );
     }
 
     #[tokio::test]
-    async fn llm_extract_task_missing_capability_errors() {
-        // Unknown capability name → TaskExecutionFailed.
+    async fn llm_extract_task_missing_capability_returns_capability_error() {
+        // Unknown capability name → CapabilityError inside the outcome.
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
@@ -2163,16 +2294,22 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
-        let result = task.evaluate(&ctx).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"), "error: {err}");
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        match outcome {
+            crate::quality_loop::LlmExtractOutcome::CapabilityError(err) => {
+                assert!(
+                    err.contains("not registered"),
+                    "expected 'not registered' in error: {err}"
+                );
+            }
+            other => panic!("expected CapabilityError, got: {other:?}"),
+        }
     }
 
     #[tokio::test]
-    async fn llm_extract_task_malformed_llm_json_returns_empty() {
+    async fn llm_extract_task_malformed_llm_json_returns_empty_candidates() {
         // Malformed LLM response → capability returns empty candidates;
-        // task surfaces them as an empty Vec (best-effort, no error).
+        // task surfaces them as Candidates(vec![]) (best-effort, no error).
         let registry = extract_registry_with_mock("not json at all");
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
@@ -2180,11 +2317,40 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
-        let candidates = task.evaluate(&ctx).await.unwrap();
-        assert!(
-            candidates.is_empty(),
-            "malformed LLM JSON → empty candidates"
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        match outcome {
+            crate::quality_loop::LlmExtractOutcome::Candidates(c) => {
+                assert!(c.is_empty(), "malformed LLM JSON → empty candidates");
+            }
+            other => panic!("expected Candidates, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn llm_extract_unified_path_uses_quality_loop_mapping() {
+        // Regression for R-V151Q3-W001: LlmExtractTask must use the same
+        // LLM→KbCandidate mapping as the review-time hook, including derived
+        // novel_category in the proposed_payload.
+        let registry = extract_registry_with_mock(
+            r#"{"candidates":[{"canonical_name":"Azure Gate","block_type":"scene","confidence":0.92,"source_quote":"...the eastern gate groaned open..."}]}"#,
         );
+        let task = LlmExtractTask::new(
+            "Extract entities.".to_string(),
+            "nexus.llm.extract".to_string(),
+            registry,
+        );
+        let ctx = graph_flow::Context::new();
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        let candidates = match outcome {
+            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            other => panic!("expected Candidates, got: {other:?}"),
+        };
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].block_type, "scene");
+        let payload: serde_json::Value =
+            serde_json::from_str(&candidates[0].proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["novel_category"], "location");
+        assert_eq!(payload["block_type"], "scene");
     }
 
     // ── T5: StateCompositeTask integration — llm_judge GO/NOGO ────────
@@ -2245,6 +2411,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2291,6 +2458,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2326,6 +2494,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2358,6 +2527,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2389,6 +2559,7 @@ mod tests {
             next: None,
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task =
@@ -2436,6 +2607,7 @@ mod tests {
             next: None,
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -2806,6 +2978,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -2860,6 +3033,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -2906,6 +3080,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3013,6 +3188,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3080,6 +3256,9 @@ mod tests {
             output_bindings: std::collections::HashMap::new(),
             registry: None,
             daemon_tool_dispatch: None,
+            merge_kind: None,
+            expected_incoming: 0,
+            merge_key: "_merge_test_judge".to_string(),
         }
     }
 
@@ -3133,5 +3312,204 @@ mod tests {
             task.judge_next_action(false),
             NextAction::Continue
         ));
+    }
+
+    // ── V1.52 T-B P0: resolve_labeled_target unit tests ─────────────────
+
+    fn make_labeled_edges(labels: &[(&str, &str)]) -> Vec<LabeledNext> {
+        labels
+            .iter()
+            .map(|(l, t)| LabeledNext {
+                label: (*l).to_string(),
+                target: (*t).to_string(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resolve_labeled_target_single_label_match() {
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[(
+            "outline",
+            "state_outline",
+        )]))));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "The judge recommends: outline");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            NextAction::GoTo("state_outline".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_multi_label_first_match() {
+        // First matching label (in edge order) should win.
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[
+            ("research", "state_research"),
+            ("outline", "state_outline"),
+            ("abandon", "state_abandon"),
+        ]))));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(
+            &ctx,
+            "I recommend to research more, but outline is also possible",
+        );
+        assert!(result.is_ok());
+        // "research" appears first in both the text and the edge list.
+        assert_eq!(
+            result.unwrap(),
+            NextAction::GoTo("state_research".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_no_match_errors() {
+        // W-QC3-3: no-match MUST NOT stall (return WaitForInput).
+        // Instead, return Err with diagnostic info.
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[
+            ("outline", "state_outline"),
+            ("research", "state_research"),
+        ]))));
+        let ctx = graph_flow::Context::new();
+        let result = task
+            .resolve_labeled_target(&ctx, "The judge output says something completely unrelated");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("no label matched"),
+            "error should mention 'no label matched': {err}"
+        );
+        assert!(
+            err.contains("Known labels"),
+            "error should list known labels: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_non_labeled_next_returns_ok_wait() {
+        // Non-Labeled next (e.g., Linear) should return Ok(WaitForInput).
+        let task = make_composite_with_next(Some(NextTarget::Linear("next_state".to_string())));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "anything");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::WaitForInput);
+    }
+
+    #[test]
+    fn resolve_labeled_target_none_next_returns_ok_wait() {
+        let task = make_composite_with_next(None);
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "anything");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::WaitForInput);
+    }
+
+    #[test]
+    fn resolve_labeled_target_writes_judge_label_context() {
+        // W-001: context._judge_label must be written on successful match.
+        let task = make_composite_with_next(Some(NextTarget::Labeled(make_labeled_edges(&[(
+            "outline",
+            "state_outline",
+        )]))));
+        let ctx = graph_flow::Context::new();
+        let _ = task.resolve_labeled_target(&ctx, "choose outline please");
+        let label: Option<String> = ctx.get_sync("_judge_label");
+        assert_eq!(
+            label.as_deref(),
+            Some("outline"),
+            "context._judge_label should be 'outline' after match"
+        );
+    }
+
+    #[test]
+    fn resolve_labeled_target_gonogo_auto_conversion_go_match() {
+        // W-QC3-2: binary GoNogo edges auto-converted to labeled routing.
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "state_go".to_string(),
+            nogo: "state_nogo".to_string(),
+        })));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "ready to go forward");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::GoTo("state_go".to_string()));
+    }
+
+    #[test]
+    fn resolve_labeled_target_gonogo_auto_conversion_nogo_match() {
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "state_go".to_string(),
+            nogo: "state_nogo".to_string(),
+        })));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "this is a nogo decision");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), NextAction::GoTo("state_nogo".to_string()));
+    }
+
+    #[test]
+    fn resolve_labeled_target_gonogo_auto_conversion_no_match_errors() {
+        // Auto-converted GoNogo edges also error on no-match.
+        let task = make_composite_with_next(Some(NextTarget::GoNogo(GoNogoNext {
+            go: "state_go".to_string(),
+            nogo: "state_nogo".to_string(),
+        })));
+        let ctx = graph_flow::Context::new();
+        let result = task.resolve_labeled_target(&ctx, "completely unrelated text");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("no label matched"), "error: {err}");
+    }
+
+    // ── V1.52 T-B P1: wait-all default enforcement (W-QC1-1) ────────────
+
+    #[tokio::test]
+    async fn merge_wait_all_default_enforced_when_merge_absent() {
+        // A state with 2 incoming labeled edges but NO explicit `merge:`
+        // field MUST still enforce wait-all semantics (default).
+        let task = StateCompositeTask {
+            id: "merged".to_string(),
+            terminal: false,
+            enter_actions: vec![],
+            exit_when: None, // no exit condition → Continue after gate passes
+            next: Some(NextTarget::Linear("done".to_string())),
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
+            registry: None,
+            daemon_tool_dispatch: None,
+            merge_kind: None, // absent from YAML
+            expected_incoming: 2,
+            merge_key: "_merge_merged".to_string(),
+        };
+
+        let ctx = graph_flow::Context::new();
+
+        // With 0 arrivals → should wait (default wait-all enforces gate).
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::WaitForInput),
+            "with 0 arrivals and merge absent (default wait-all), should WaitForInput; got {:?}",
+            result.next_action
+        );
+
+        // With 1 arrival → should still wait (wait-all needs all 2).
+        ctx.set("_merge_merged", serde_json::json!(["label_a"]))
+            .await;
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::WaitForInput),
+            "with 1/2 arrivals and merge absent (default wait-all), should WaitForInput; got {:?}",
+            result.next_action
+        );
+
+        // With 2 arrivals → should continue.
+        ctx.set("_merge_merged", serde_json::json!(["label_a", "label_b"]))
+            .await;
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::Continue),
+            "with 2/2 arrivals and merge absent (default wait-all), should Continue; got {:?}",
+            result.next_action
+        );
     }
 }

@@ -33,8 +33,8 @@ use nexus_kb::store::KbStoreError;
 use nexus_kb::validation::ValidationMode;
 use nexus_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
-    get_promotion, list_pending_for_world, mark_confirmed_in_tx_with_cas, mark_rejected,
-    KbExtractPromotion,
+    get_promotion, list_pending_for_world, mark_auto_promoted_in_tx_with_cas,
+    mark_confirmed_in_tx_with_cas, mark_rejected, KbExtractPromotion,
 };
 use nexus_local_db::kb_store::SqliteKbStore;
 use sqlx::SqlitePool;
@@ -109,9 +109,19 @@ pub enum WorldKbCommand {
     },
 
     /// Confirm a review-time KB candidate → promote to a `confirmed` `KeyBlock`
+    ///
+    /// Without `--auto`, requires an `extract_job_id`. With `--auto --world-ref`,
+    /// promotes all high-confidence pending candidates in that world.
     Adopt {
-        /// `kb_extract_jobs` job ID (e.g. `xj_...`)
-        extract_job_id: String,
+        /// `kb_extract_jobs` job ID (e.g. `xj_...`). Required unless `--auto`.
+        #[arg(required_unless_present = "auto")]
+        extract_job_id: Option<String>,
+        /// Auto-promote all high-confidence pending candidates in `--world-ref`.
+        #[arg(long, requires = "world_ref")]
+        auto: bool,
+        /// World reference (required with `--auto`).
+        #[arg(long)]
+        world_ref: Option<String>,
         /// Emit machine-readable JSON confirmation
         #[arg(long)]
         json: bool,
@@ -177,17 +187,22 @@ pub async fn run(cmd: WorldKbCommand, config: &CliConfig) -> Result<()> {
         }
         WorldKbCommand::Adopt {
             extract_job_id,
+            auto,
+            world_ref,
             json,
         } => {
             let ws_root = crate::config::find_workspace_root();
-            kb_adopt(
-                &pool,
-                &creator_id,
-                &extract_job_id,
-                ws_root.as_deref(),
-                json,
-            )
-            .await
+            if auto {
+                // clap `requires = "world_ref"` guarantees this is Some.
+                let world_ref = world_ref
+                    .ok_or_else(|| CliError::Other("--auto requires --world-ref".to_string()))?;
+                kb_adopt_auto(&pool, &creator_id, &world_ref, ws_root.as_deref(), json).await
+            } else {
+                let job_id = extract_job_id.ok_or_else(|| {
+                    CliError::Other("adopt requires an extract_job_id or --auto".to_string())
+                })?;
+                kb_adopt(&pool, &creator_id, &job_id, ws_root.as_deref(), json).await
+            }
         }
         WorldKbCommand::Reject { extract_job_id } => {
             let ws_root = crate::config::find_workspace_root();
@@ -303,9 +318,6 @@ pub async fn kb_edit(
     body_str: &str,
     json: bool,
 ) -> Result<()> {
-    // Author identity gate: world owner must match the active creator.
-    require_world_owner(pool, world_id, creator_id).await?;
-
     // Novel-mode store so update_key_block re-runs V1.40 P1 validation (§5.1.1).
     let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
@@ -314,6 +326,12 @@ pub async fn kb_edit(
         .await
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
+
+    // Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
+    // the source Work's creator AND the World owner are both authorized.
+    // Legacy rows (NULL source_work_id) fall back to World owner only.
+    require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
+        .await?;
 
     let new_body: KeyBlockBody = serde_json::from_str(body_str).map_err(|e| {
         CliError::Other(format!(
@@ -356,9 +374,6 @@ pub async fn kb_delete(
     block_id: &str,
     yes: bool,
 ) -> Result<()> {
-    // Author identity gate: world owner must match the active creator.
-    require_world_owner(pool, world_id, creator_id).await?;
-
     let store = SqliteKbStore::new(pool.clone());
 
     // Pre-check existence + world binding for a clean error before prompting.
@@ -367,6 +382,12 @@ pub async fn kb_delete(
         .await
         .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
+
+    // Author identity gate (§5.5.7): when source_work_id is set (R-V150KBED-02),
+    // the source Work's creator AND the World owner are both authorized.
+    // Legacy rows (NULL source_work_id) fall back to World owner only.
+    require_world_or_work_owner(pool, world_id, creator_id, block.source_work_id.as_deref())
+        .await?;
 
     if !yes && !confirm_delete(block_id, world_id) {
         println!("Delete cancelled.");
@@ -749,6 +770,22 @@ pub async fn kb_adopt(
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
 
+    // V1.52 T-A P2: Work→KeyBlock provenance linkage (entity-scope-model.md §5.5.7).
+    // Populate source_work_id and source_chapter from the extract job context.
+    // provenance_kind is inferred: LLM extraction → review_time_extract,
+    // heuristic/no LLM → manual.
+    //
+    // Deferred residual (W-004): 'finalize_time_extract' and 'cross_chapter_rescan'
+    // are valid CHECK values (migration 202606190003) but not yet exercised in
+    // any code path. Coverage for all 5 values deferred to V1.52 P-last WL-A.
+    kb.source_work_id = candidate.work_id.clone();
+    kb.source_chapter = candidate.source_chapter_id;
+    kb.source_provenance_kind = if candidate.llm_confidence.is_some() {
+        Some("review_time_extract".to_string())
+    } else {
+        Some("manual".to_string())
+    };
+
     // R-V150KBED-03: atomic promotion. The KeyBlock insert and the promotion
     // row flip share a single transaction; any failure (validation, insert,
     // flip error, or `Ok(false)` race) rolls the whole thing back so no orphan
@@ -851,6 +888,325 @@ pub async fn kb_adopt(
     Ok(())
 }
 
+/// `creator world kb adopt --auto` — auto-promote high-confidence pending candidates.
+///
+/// Iterates pending `kb_extract_jobs` rows for the given world and promotes those
+/// meeting the safe auto-promotion threshold:
+///
+/// - `llm_confidence >= 0.95`
+/// - non-empty `llm_source_quote` and `source_chapter_id` (`provenance_backed`)
+/// - adopt-time `ValidationMode::Novel` passes (`validation_clean`)
+/// - no duplicate `canonical_name` in the world
+///
+/// Each promoted candidate is inserted as a confirmed `KeyBlock` in a dedicated
+/// transaction, the promotion row is flipped with `auto_promoted_*` audit
+/// columns, and an audit log is written under
+/// `Works/<work_ref>/Logs/kb/auto-promoted/`. Candidates that do not qualify
+/// remain `pending` and are reported in the `--json` `skipped` array.
+///
+/// # Scale limit (V1.52 T-A P2, W-006)
+///
+/// This function iterates all pending `kb_extract_jobs` rows for a World with
+/// no upper bound on N. Each promoted candidate incurs:
+///
+/// - A dedicated DB transaction (INSERT `KeyBlock` + CAS flip promotion row)
+/// - A best-effort audit log write under `Works/<work_ref>/Logs/kb/auto-promoted/`
+/// - Full `ValidationMode::Novel` re-validation
+///
+/// Recommended scale: ≤ 100 pending candidates. For > 100 candidates, the
+/// caller should batch in groups (e.g. 50–100 per invocation) via the daemon
+/// scheduler or manual CLI repeats. The CAS version guard on each promotion
+/// row already makes re-entrant invocations safe (no double-promotion).
+/// A future batched-transaction path (single tx for all promotions) would
+/// improve throughput for large candidate sets.
+///
+/// # Errors
+///
+/// Returns `CliError` (`Api { status: 403, .. }`) on cross-author access, or
+/// `CliError::Other` on store/serialization failure.
+// V1.52 T-A P0: per-candidate transactions keep the blast radius of one
+// validation/log failure small; the CAS version guard prevents stale flips.
+#[allow(clippy::too_many_lines)]
+pub async fn kb_adopt_auto(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+    workspace_dir: Option<&std::path::Path>,
+    json: bool,
+) -> Result<()> {
+    #[derive(Debug, serde::Serialize)]
+    struct PromotedRecord {
+        extract_job_id: String,
+        key_block_id: String,
+        canonical_name: String,
+        confidence: f64,
+    }
+
+    #[derive(Debug, serde::Serialize)]
+    struct SkippedRecord {
+        extract_job_id: String,
+        reason: String,
+    }
+
+    // Author identity gate (same as single adopt).
+    require_world_owner(pool, world_id, creator_id).await?;
+
+    let pending = list_pending_for_world(pool, world_id, None)
+        .await
+        .map_err(|e| CliError::Other(format!("World KB pending list failed: {e}")))?;
+
+    let store = SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
+
+    let mut promoted: Vec<PromotedRecord> = Vec::new();
+    let mut skipped: Vec<SkippedRecord> = Vec::new();
+
+    for candidate in pending {
+        let Some(ref canonical_name) = candidate.canonical_name_guess else {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "missing canonical_name_guess".to_string(),
+            });
+            continue;
+        };
+
+        // ── Eligibility checks ─────────────────────────────────────────────
+        let Some(confidence) = candidate.llm_confidence else {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "no LLM confidence (heuristic candidate)".to_string(),
+            });
+            continue;
+        };
+        if confidence < 0.95 {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: format!("confidence {confidence:.2} < 0.95"),
+            });
+            continue;
+        }
+        let source_quote = candidate.llm_source_quote.as_deref().unwrap_or("").trim();
+        if source_quote.is_empty() {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "missing source_quote (provenance)".to_string(),
+            });
+            continue;
+        }
+        if candidate.source_chapter_id.is_none() {
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "missing source_chapter_id (provenance)".to_string(),
+            });
+            continue;
+        }
+
+        // ── Build KeyBlock ─────────────────────────────────────────────────
+        let body: KeyBlockBody =
+            serde_json::from_str(candidate.proposed_payload.as_deref().unwrap_or("{}"))
+                .map_err(|e| CliError::Other(format!("Invalid proposed_payload JSON: {e}")))?;
+        let block_type_str = candidate.block_type_guess.as_deref().unwrap_or("character");
+        let block_type = parse_block_type_cli(block_type_str)?;
+
+        let mut kb = KeyBlock::new(world_id, block_type, canonical_name);
+        kb.body = Some(body);
+        kb.status = "confirmed".to_string();
+        kb.created_at = chrono::Utc::now().to_rfc3339();
+
+        // V1.52 T-A P2: Work→KeyBlock provenance linkage.
+        // Auto-adopt sets author_explicit provenance; source from extract job.
+        kb.source_work_id = candidate.work_id.clone();
+        kb.source_chapter = candidate.source_chapter_id;
+        kb.source_provenance_kind = Some("author_explicit".to_string());
+
+        // ── Atomic insert + audit flip ─────────────────────────────────────
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| CliError::Other(format!("Failed to begin adopt-auto transaction: {e}")))?;
+
+        let insert_result = match store.insert_key_block_in_tx(&mut tx, kb).await {
+            Ok(r) => r,
+            Err(KbStoreError::Duplicate { .. }) => {
+                tx.rollback().await.ok();
+                skipped.push(SkippedRecord {
+                    extract_job_id: candidate.job_id.clone(),
+                    reason: "duplicate canonical_name in world".to_string(),
+                });
+                continue;
+            }
+            Err(e) => {
+                tx.rollback().await.ok();
+                skipped.push(SkippedRecord {
+                    extract_job_id: candidate.job_id.clone(),
+                    reason: format!("KeyBlock validation/insert failed: {e}"),
+                });
+                continue;
+            }
+        };
+
+        let actor = format!("nexus42:cli:kb-adopt-auto:{creator_id}");
+        let reason = format!("confidence={confidence:.2}, validation_clean, provenance_backed");
+        let flipped = match mark_auto_promoted_in_tx_with_cas(
+            &mut tx,
+            &candidate.job_id,
+            candidate.version,
+            &reason,
+            &actor,
+        )
+        .await
+        {
+            Ok(f) => f,
+            Err(e) => {
+                tx.rollback().await.ok();
+                skipped.push(SkippedRecord {
+                    extract_job_id: candidate.job_id.clone(),
+                    reason: format!("CAS promotion flip failed: {e}"),
+                });
+                continue;
+            }
+        };
+
+        if !flipped {
+            tx.rollback().await.ok();
+            skipped.push(SkippedRecord {
+                extract_job_id: candidate.job_id.clone(),
+                reason: "candidate was no longer pending".to_string(),
+            });
+            continue;
+        }
+
+        tx.commit().await.map_err(|e| {
+            CliError::Other(format!("Failed to commit adopt-auto transaction: {e}"))
+        })?;
+
+        // Best-effort audit log (non-fatal to the promotion outcome).
+        if let Err(e) = write_auto_promoted_log(
+            pool,
+            workspace_dir,
+            &candidate,
+            canonical_name,
+            &insert_result.key_block_id,
+            &reason,
+            &actor,
+        )
+        .await
+        {
+            tracing::warn!(
+                extract_job_id = %candidate.job_id,
+                error = %e,
+                "kb-adopt-auto: failed to write audit log (non-fatal)"
+            );
+        }
+
+        promoted.push(PromotedRecord {
+            extract_job_id: candidate.job_id.clone(),
+            key_block_id: insert_result.key_block_id,
+            canonical_name: canonical_name.clone(),
+            confidence,
+        });
+    }
+
+    // ── Output ───────────────────────────────────────────────────────────
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "world_id": world_id,
+                "promoted_count": promoted.len(),
+                "skipped_count": skipped.len(),
+                "promoted": promoted,
+                "skipped": skipped,
+            }))?
+        );
+    } else {
+        println!("✓ KB auto-promote complete for world {world_id}");
+        println!("  Promoted: {}", promoted.len());
+        for p in &promoted {
+            println!(
+                "    - {} → {} ({})",
+                p.extract_job_id, p.key_block_id, p.canonical_name
+            );
+        }
+        if !skipped.is_empty() {
+            println!("  Skipped: {}", skipped.len());
+            for s in &skipped {
+                println!("    - {}: {}", s.extract_job_id, s.reason);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Write the auto-promotion audit log (V1.52 T-A P0).
+///
+/// Path: `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md`.
+/// Returns Ok(()) without writing when no workspace is bound (hermetic tests).
+async fn write_auto_promoted_log(
+    pool: &SqlitePool,
+    workspace_dir: Option<&std::path::Path>,
+    candidate: &KbExtractPromotion,
+    canonical_name: &str,
+    key_block_id: &str,
+    reason: &str,
+    actor: &str,
+) -> std::result::Result<(), String> {
+    let Some(ws_dir) = workspace_dir else {
+        return Ok(());
+    };
+
+    // R-V150KBED-05: resolve the human-readable work_ref (works.story_ref)
+    // before constructing the log path.
+    let work_ref = resolve_work_ref_for_log(pool, candidate.work_id.as_deref(), workspace_dir)
+        .await
+        .map_err(|e| format!("resolve work_ref: {e}"))?
+        .unwrap_or_else(|| "unknown-work".to_string());
+
+    let date = chrono::Utc::now().format("%Y-%m-%d");
+    let log_dir = ws_dir
+        .join("Works")
+        .join(&work_ref)
+        .join("Logs")
+        .join("kb")
+        .join("auto-promoted");
+    std::fs::create_dir_all(&log_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+    let log_path = log_dir.join(format!("{date}-{}.md", candidate.job_id));
+
+    let body = format!(
+        "# Auto-promoted KB candidate\n\
+         \n\
+         - **extract_job_id**: {job_id}\n\
+         - **key_block_id**: {key_block_id}\n\
+         - **world_id**: {world_id}\n\
+         - **work_id**: {work_id}\n\
+         - **work_ref**: {work_ref}\n\
+         - **canonical_name**: {canonical_name}\n\
+         - **block_type_guess**: {btype}\n\
+         - **source_chapter_id**: {chapter}\n\
+         - **confidence**: {confidence}\n\
+         - **reason**: {reason}\n\
+         - **actor**: {actor}\n\
+         - **promoted_at**: {ts}\n",
+        job_id = candidate.job_id,
+        key_block_id = key_block_id,
+        world_id = candidate.world_id,
+        work_id = candidate.work_id.as_deref().unwrap_or("-"),
+        work_ref = work_ref,
+        canonical_name = canonical_name,
+        btype = candidate.block_type_guess.as_deref().unwrap_or("-"),
+        chapter = candidate
+            .source_chapter_id
+            .map_or_else(|| "-".to_string(), |n| n.to_string()),
+        confidence = candidate
+            .llm_confidence
+            .map_or_else(|| "-".to_string(), |c| format!("{c:.2}")),
+        reason = reason,
+        actor = actor,
+        ts = chrono::Utc::now().to_rfc3339(),
+    );
+    std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
+    Ok(())
+}
+
 /// `creator world kb reject` — dismiss a candidate (archived to
 /// `Logs/kb/rejected/<YYYY-MM-DD>-<extract_job_id>.md`).
 ///
@@ -920,6 +1276,46 @@ fn require_block_in_world(block: &KeyBlock, world_id: &str, block_id: &str) -> R
         )));
     }
     Ok(())
+}
+
+/// Author identity gate with Work→KeyBlock provenance support (§5.5.7).
+///
+/// When `source_work_id` is set (R-V150KBED-02 resolution), the authorisation
+/// gate accepts EITHER the World owner OR the source Work's creator — a KB row
+/// originated from a specific Work, so the author of that Work can edit/delete
+/// the resulting KB entry even if they do not own the World.
+///
+/// When `source_work_id` is `None` (legacy KB rows created before V1.52 T-A P2),
+/// the gate falls back to the World owner check only (existing behaviour).
+async fn require_world_or_work_owner(
+    pool: &SqlitePool,
+    world_id: &str,
+    creator_id: &str,
+    source_work_id: Option<&str>,
+) -> Result<()> {
+    // R-V150KBED-02: when source_work_id is set, check the source Work's creator.
+    if let Some(work_id) = source_work_id {
+        // SAFETY: static query against the known works table schema.
+        let work_creator: Option<String> =
+            sqlx::query_scalar("SELECT creator_id FROM works WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| {
+                    CliError::Other(format!("Failed to query source work creator: {e}"))
+                })?;
+
+        if let Some(ref wc) = work_creator {
+            if wc == creator_id {
+                return Ok(());
+            }
+        }
+        // Source work creator doesn't match; fall through to world owner check.
+    }
+
+    // Fall back to the canonical World owner check for legacy rows and
+    // for cases where the source work creator didn't match.
+    require_world_owner(pool, world_id, creator_id).await
 }
 
 /// Author identity gate. Reads `narrative_worlds.owner_creator_id` and requires

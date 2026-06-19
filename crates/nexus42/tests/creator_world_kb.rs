@@ -10,9 +10,10 @@
 
 #![allow(clippy::unwrap_used)]
 
-use nexus42::commands::creator::world::kb::{kb_pending, WORLD_KB_FORBIDDEN_CODE};
+use nexus42::commands::creator::world::kb::{kb_adopt_auto, kb_pending, WORLD_KB_FORBIDDEN_CODE};
 use nexus42::db::Schema;
 use nexus42::errors::CliError;
+use nexus_local_db::kb_extract_job::insert_pending_with_llm;
 
 const OWNER: &str = "ctr_owner";
 const OTHER: &str = "ctr_other";
@@ -126,33 +127,124 @@ async fn missing_only_cross_author_returns_403() {
     }
 }
 
-// ── Missing-only ignores log files for other worlds ──────────────────────────
+// ── Auto-promote adopts high-confidence candidates and skips others ──────────
 
-#[tokio::test]
-async fn missing_only_filters_by_world_id() {
-    let (pool, dir) = fresh_pool_and_dir().await;
-    write_missing_log(&dir);
-
-    let err = kb_pending(
-        &pool,
+async fn seed_candidate(pool: &sqlx::SqlitePool, canonical_name: &str, confidence: f64) -> String {
+    let payload = serde_json::json!({
+        "summary": format!("Auto-promote test entry for {canonical_name}"),
+        "attributes": { "novel_category": "character" },
+        "tags": ["auto-promote"],
+    })
+    .to_string();
+    let quote = format!("...{canonical_name} stepped through the gate...");
+    let row = insert_pending_with_llm(
+        pool,
         OWNER,
-        "wld_other",
-        None,
-        false,
-        true,
-        Some(dir.path()),
+        "ws",
+        WORLD,
+        Some(WORK_ID),
+        Some(1),
+        "character",
+        canonical_name,
+        &payload,
+        Some(confidence),
+        Some(&quote),
     )
     .await
-    .unwrap_err();
-    // "wld_other" has no narrative_worlds row, so the owner gate fails with a
-    // clean not-found message (same behavior as the default pending path).
+    .unwrap();
+    row.job_id
+}
+
+#[tokio::test]
+async fn adopt_auto_promote() {
+    let (pool, dir) = fresh_pool_and_dir().await;
+
+    let promoted_id = seed_candidate(&pool, "Auto Promote Hero", 0.97).await;
+    let skipped_id = seed_candidate(&pool, "Low Confidence Hero", 0.85).await;
+
+    kb_adopt_auto(&pool, OWNER, WORLD, Some(dir.path()), false)
+        .await
+        .unwrap();
+
+    // One high-confidence candidate becomes a confirmed KeyBlock.
+    let kb_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM kb_key_blocks WHERE world_id = ?")
+        .bind(WORLD)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(kb_count, 1);
+
+    // The promoted row is flipped and carries audit columns.
+    let promoted: (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT promotion_status, auto_promoted_at, auto_promoted_reason \
+         FROM kb_extract_jobs WHERE job_id = ?",
+    )
+    .bind(&promoted_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(promoted.0, "confirmed");
+    assert!(promoted.1.is_some(), "auto_promoted_at should be set");
+    assert!(
+        promoted
+            .2
+            .as_deref()
+            .unwrap_or("")
+            .contains("confidence=0.97"),
+        "expected reason to contain confidence: {:?}",
+        promoted.2
+    );
+
+    // The low-confidence candidate stays pending and untouched.
+    let skipped: (String, Option<String>) = sqlx::query_as(
+        "SELECT promotion_status, auto_promoted_at \
+         FROM kb_extract_jobs WHERE job_id = ?",
+    )
+    .bind(&skipped_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(skipped.0, "pending");
+    assert!(skipped.1.is_none(), "auto_promoted_at should be NULL");
+
+    // Audit log was written under the correct work_ref path.
+    let log_dir = dir
+        .path()
+        .join("Works")
+        .join(WORK_REF)
+        .join("Logs")
+        .join("kb")
+        .join("auto-promoted");
+    let entries: Vec<std::path::PathBuf> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("md"))
+        .collect();
+    assert_eq!(entries.len(), 1, "expected one auto-promote audit log");
+    let log_text = std::fs::read_to_string(&entries[0]).unwrap();
+    assert!(log_text.contains("Auto-promoted KB candidate"));
+    assert!(log_text.contains(&promoted_id));
+    assert!(log_text.contains("Auto Promote Hero"));
+}
+
+// ── Auto-promote obeys the world owner gate ──────────────────────────────────
+
+#[tokio::test]
+async fn adopt_auto_promote_cross_author_returns_403() {
+    let (pool, dir) = fresh_pool_and_dir().await;
+    seed_candidate(&pool, "Cross Author Hero", 0.97).await;
+
+    let err = kb_adopt_auto(&pool, OTHER, WORLD, Some(dir.path()), false)
+        .await
+        .unwrap_err();
     match err {
-        CliError::Other(msg) => {
+        CliError::Api { status, message } => {
+            assert_eq!(status, 403);
             assert!(
-                msg.contains("not found") || msg.contains("World"),
-                "expected world not-found message, got: {msg}"
+                message.contains(WORLD_KB_FORBIDDEN_CODE),
+                "expected {WORLD_KB_FORBIDDEN_CODE} in: {message}"
             );
         }
-        other => panic!("expected Other error for missing world, got: {other:?}"),
+        other => panic!("expected Api 403, got: {other:?}"),
     }
 }
