@@ -72,7 +72,7 @@ async fn opt_in(pool: &sqlx::SqlitePool, work_id: &str) {
 }
 
 /// Seed `count` chapters for `volume`; when `finalize`, set them all to
-/// `finalized`. (insert_chapter always inserts `not_started`; finalize via
+/// `finalized`. (`insert_chapter` always inserts `not_started`; finalize via
 /// `update_status`.)
 async fn seed_and_finalize(
     pool: &sqlx::SqlitePool,
@@ -342,7 +342,7 @@ async fn tick_recovers_cleanly_after_crash_mid_advance() {
 
 /// The advance must commit the DB transaction BEFORE writing the outline file
 /// (V1.36 "DB first, FS second"). When the outline write fails post-commit,
-/// the DB state is already correct (chapters seeded, updated_at bumped) and the
+/// the DB state is already correct (chapters seeded, `updated_at` bumped) and the
 /// Work is NOT stuck — proving the ordering inversion fixes the "outline
 /// written before tx commits → Work stuck" reliability gap (qc3 W-1).
 #[tokio::test]
@@ -483,7 +483,7 @@ async fn manual_advance_bypasses_gates_and_seeds_chapters() {
             assert_eq!(next_volume, 2);
             assert_eq!(chapters_seeded, 4);
         }
-        other => panic!("manual advance should succeed, got {other:?}"),
+        other @ AdvanceOutcome::Skipped { .. } => panic!("manual advance should succeed, got {other:?}"),
     }
 
     assert!(outline_path(ws.path(), "manual-novel", 2).exists());
