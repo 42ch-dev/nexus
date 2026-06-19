@@ -908,8 +908,8 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
                 // V1.52 T-B P0: N-way labeled routing.
                 // Each labeled edge gets a regular add_edge for reachability
                 // validation. Actual routing is via NextAction::GoTo(target)
-                // in StateCompositeTask::judge_next_action, keyed by
-                // _judge_label in context.
+                // in StateCompositeTask::resolve_labeled_target, which also
+                // writes the matched label to context._judge_label.
                 for edge in labeled_edges {
                     graph.add_edge(&state.id, &edge.target);
                 }
