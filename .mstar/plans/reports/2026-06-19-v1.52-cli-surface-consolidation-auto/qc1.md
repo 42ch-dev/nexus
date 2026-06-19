@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-19-v1.52-cli-surface-consolidation-auto"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-19"
 ---
 
@@ -125,6 +125,39 @@ No deprecation notice or canonical-surface pointer appears here. Users who disco
 
 **Rationale**: One unresolved Warning (W-001 — missing CLI-level stderr integration tests). The plan explicitly listed T6/T7 as acceptance criteria, the tasks are marked `[x]`, but the tests are absent. Either the tests must be added, or the tasks must be re-scoped (with T6/T7 marked as explicitly deferred and a residual entry tracking the gap). Until resolved, the deprecation forwarding has no automated regression guard at the CLI surface level.
 
-## Revalidation
+## Revalidation (2026-06-19, targeted re-review)
 
-*N/A — initial tri-review wave.*
+**Re-review scope**: Review range `771f89e7..fe3c5730` (1 fix commit: `fe3c5730` — "fix(cli): V1.52 T-A P1 QC fix-wave — close R-V152TAP1-W001/W002/S001")
+
+### Verification Artifacts
+
+| Check | Command | Result |
+|-------|---------|--------|
+| world_kb_alias tests (9) | `cargo test -p nexus42 --test world_kb_alias -- --nocapture` | ✅ 9/9 pass |
+| kb.rs unit tests (12) | `cargo test -p nexus42 --lib -- commands::creator::kb::tests -- --nocapture` | ✅ 12/12 pass |
+| clippy | `cargo clippy --all -- -D warnings` | ✅ clean |
+| fmt | `cargo +nightly fmt --all --check` | ✅ clean |
+
+### Fix Validation
+
+| Initial Item | Status | Evidence |
+|--------------|--------|----------|
+| **W-001** (alias forward wiring untested) | **Resolved** | Commit `fe3c5730`: 3 new `assert_cmd` integration tests (`legacy_kb_scope_world_list_forwards_to_canonical`, `legacy_kb_scope_world_show_forwards_to_canonical`, `legacy_kb_scope_world_remove_forwards_to_canonical`) invoke the legacy surface with hermetic HOME, assert deprecation on stderr + output parity (or removal verification). 4 additional unit tests in `kb.rs` directly exercise the forwarding code paths (list/show/remove + cross-author auth gate). All 9+12 tests pass. |
+| **S-001** (`--help` discoverability gap) | **Resolved** | Commit `fe3c5730`: Deprecation hint added to `--scope` arg doc comments on all 5 `kb` subcommands (List, Search, Show, Add, Remove). Each now reads: "*Note: `--scope world` is deprecated; use `creator world kb <subcmd>` instead (planned removal V1.53).*" Verified via `cargo run -- creator kb {list,search,show,add,remove} --help` — all 5 output the deprecation hint. Existing `--help` test updated to assert hint presence. |
+| **S-003** (tautological unit test) | **Resolved** (bonus) | Commit `fe3c5730`: `deprecation_notice_emits_stderr_message()` now calls `super::deprecation_notice_legacy_world_kb("list"/"show"/"remove")` directly instead of constructing the format string manually. |
+
+### Side-effect Findings (W-002 from qc3, fixed in same commit)
+
+Commit `fe3c5730` also closes R-V152TAP1-W002 (error message divergence): `open_world_pool` now uses `?` operator (instead of `.map_err("Failed to open workspace pool: …")`), which triggers `From<LocalDbError>` → `"local database error: …"`, matching the canonical `open_workspace_pool` path. A regression unit test (`open_world_pool_error_matches_canonical_format`) verifies the canonical format.
+
+### Current Findings Status
+
+| Severity | Count | Notes |
+|----------|-------|-------|
+| 🔴 Critical | 0 | — |
+| 🟡 Warning | 0 | W-001 resolved |
+| 🟢 Suggestion | 3 | S-001 resolved; S-002 (naming), S-003 (test rigor) already addressed or deferred |
+
+**Open for V1.52 P-last WL-A**: S-002 (`open_world_pool` naming clarity) — low priority, non-blocking.
+
+### Updated Verdict: **Approve**
