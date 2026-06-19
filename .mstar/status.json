@@ -978,19 +978,21 @@
       },
       {
         "id": "R-V150KBED-02",
-        "title": "resolve_workspace_id reads narrative_gateway.workspace_id which may be stale; column is informational only (defer to T-B P2)",
+        "title": "Author identity uses world ownership (narrative_worlds.owner_creator_id) rather than works.creator_id; revisit if Work→KeyBlock provenance linkage is introduced",
         "severity": "low",
-        "source": "P1 implementer (cross-plan dependency)",
-        "scope": "T-B P1 / T-B P2 boundary",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.52+",
-        "target_date": "V1.52+",
-        "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-auto-promotion.md (Completion Report v2)",
-        "note": "T-B P2 refreshable scan will use the freshest workspace_id from the chapter frontmatter; resolve_workspace_id staleness self-corrects in T-B P2.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-18-v1.50-kb-auto-promotion",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "source": "implementer (Completion Report v2)",
+        "scope": "nexus42/CLI: author gate for edit/delete resolves via world ownership not works ownership",
+        "decision": "accept",
+        "owner": "@architect or @fullstack-dev",
+        "target": "V1.52 T-A P2",
+        "target_date": "V1.52 T-A P2",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
+        "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "V1.52 T-A P2 fix-wave (commit da4caab4 on feature/v1.52-work-keyblock-provenance-and-essay-profile): added require_world_or_work_owner auth gate. Source Work owner can edit/delete KB items (provenance via kb_key_blocks.source_work_id). When source_work_id is set, auth gate checks EITHER World owner OR source Work creator. Spec overlay entity-scope-model §5.5.7 documents provenance contract.",
+        "closure_evidence": "feature/v1.52-work-keyblock-provenance-and-essay-profile (commit da4caab4)",
+        "_plan_id": "2026-06-18-v1.50-kb-editor-cli"
       },
       {
         "id": "R-V150KBED-03",
@@ -1708,10 +1710,28 @@
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md §Suggestions",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
-        "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): --scope arg doc comment on all 5 kb subcommands (List, Search, Show, Add, Remove) now includes [DEPRECATED] hint pointing to canonical surface + planned removal V1.53. Test asserts hint visible in --help output.",
+        "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): --scope arg doc comment on all 5 kb subcommands now includes [DEPRECATED] hint pointing to canonical surface + planned removal V1.53.",
         "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
         "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
       }
-    ]
+    ],
+    "2026-06-19-v1.52-multi-branch-merge-semantics": [
+      {
+        "id": "R-V152TBP1-W001",
+        "title": "wait-all default not enforced at runtime (qc1 W-QC1-1; blocking)",
+        "severity": "medium",
+        "source": "qc1 (architecture) W-QC1-1",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs (merge gate)",
+        "decision": "fix",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.52 T-B P1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-multi-branch-merge-semantics/qc1.md",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-19",
+        "closure_note": "T-B P1 fix-wave (commit 3ab67781): changed gate from if let Some(merge_kind) to if expected_incoming > 0 { merge_kind.unwrap_or_default() }. Added test merge_wait_all_default_enforced_when_merge_absent.",
+        "closure_evidence": "feature/v1.52-multi-branch-merge-semantics (commit 3ab67781)",
+        "_plan_id": "2026-06-19-v1.52-multi-branch-merge-semantics"
+      }
+    ] 
   }
 }
