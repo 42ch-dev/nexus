@@ -484,6 +484,26 @@ Explicit promotion from index rows to World KB remains **manual/opt-in** per §3
 
 The 五问 template file lives at `embedded-presets/novel-writing/prompts/finalize-exit.md` (P3 deliverable). It references [writing-craft-rules.md §2 五问质量检验](../writing-craft-rules.md) when present; otherwise the template embeds the five questions inline.
 
+### 5.1.1 Outline 五问 gate (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-outline-five-q-and-auto-promote`)  
+**Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
+**Promotes to Normative**: P-last of V1.52
+
+`novel-writing` gains an `outline_review` state between `outline_chapter` and `draft_chapter`. Its `exit_when: kind: llm_judge` evaluates `prompts/outline-exit.md`, which asks five outline-specific questions:
+
+1. **Structure** — beat-level structure is explicit (headings, bullets, numbered beats).
+2. **Arc** — a character or situation arc is present (conflict, stakes, change).
+3. **Foreshadow** — at least one future-setup / foreshadowing signal is present.
+4. **Pacing** — outline length is within sane bounds (not empty, not a full draft).
+5. **Hook** — final line ends with tension, a question, or unresolved action.
+
+The deterministic complement `outline_five_q_check` in `nexus-orchestration::quality_loop` mirrors these five dimensions and is used by tests / fallback paths; the preset gate is the LLM judge.
+
+- **GO** → transition to `draft_chapter`; chapter frontmatter `status` stays `outlined` until drafting begins.
+- **NOGO** → `WaitForInput`; the author may revise the outline and `creator run continue <work_id>`.
+- The existing `finalize` 五問 gate in §5.1 is unchanged.
+
 ### 5.2 World-bound Work behavior (in `novel-writing` prompts)
 
 When a Work has `world_id != NULL`:
@@ -1000,6 +1020,14 @@ creator works chronology show my-work
 creator works chronology advance my-work --volume 3   # manual override
 creator works chronology advance my-work --volume 3 --force  # retry after outline-write failure
 ```
+
+### 11.7 真完本 UX (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-hygiene-and-closeout` unless pulled earlier by T-A P2)  
+**Authoring plan**: `2026-06-19-v1.52-hygiene-and-closeout`  
+**Promotes to Normative**: P-last of V1.52
+
+Draft overlay placeholder: define the user-visible "true completion" ceremony after all chapters/volumes are finalized, including status copy, no-auto-switch behavior, and next-Work guidance.
 
 ### 11.6 Cross-references
 

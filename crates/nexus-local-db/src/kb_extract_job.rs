@@ -546,7 +546,8 @@ pub async fn list_for_chapter(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at, version \
+                llm_source_quote, created_at, version, \
+                auto_promoted_at, auto_promoted_reason, auto_promoted_by \
          FROM kb_extract_jobs \
          WHERE work_id = ? AND source_chapter_id = ? \
          ORDER BY canonical_name_guess ASC",
@@ -596,7 +597,8 @@ pub async fn upsert_pending_candidate(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at, version \
+                llm_source_quote, created_at, version, \
+                auto_promoted_at, auto_promoted_reason, auto_promoted_by \
          FROM kb_extract_jobs \
          WHERE creator_id = ? AND work_entry_id = ? AND world_id = ? \
          AND promotion_status IN ('pending', 'confirmed')",
@@ -747,6 +749,18 @@ pub struct KbExtractPromotion {
     /// to close the TOCTOU window between read and write.
     #[serde(skip)]
     pub version: i64,
+    /// V1.52 T-A P0: when the candidate was auto-promoted via
+    /// `creator world kb adopt --auto`. `NULL` for manually adopted or
+    /// non-promoted rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_promoted_at: Option<String>,
+    /// V1.52 T-A P0: human-readable reason recorded by the auto-promotion path
+    /// (e.g. "confidence=0.97, `validation_clean`, `provenance_backed`").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_promoted_reason: Option<String>,
+    /// V1.52 T-A P0: actor marker for auto-promotion (e.g. `nexus42:cli:kb-adopt-auto:<creator_id>`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_promoted_by: Option<String>,
 }
 
 /// Default limit for `list_pending_for_world` when caller passes `None`.
@@ -889,7 +903,8 @@ pub async fn list_pending_for_world(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at, version \
+                llm_source_quote, created_at, version, \
+                auto_promoted_at, auto_promoted_reason, auto_promoted_by \
          FROM kb_extract_jobs \
          WHERE world_id = ? AND promotion_status = 'pending' \
          ORDER BY created_at ASC LIMIT {limit}"
@@ -1066,6 +1081,76 @@ pub async fn mark_confirmed_in_tx_with_cas(
     }
 }
 
+/// V1.52 T-A P0: CAS-aware auto-promotion flip.
+///
+/// Same semantics as [`mark_confirmed_in_tx_with_cas`], but also records the
+/// auto-promotion audit columns (`auto_promoted_at`, `auto_promoted_reason`,
+/// `auto_promoted_by`) in the same UPDATE so the promotion + audit trail are
+/// atomic.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::VersionMismatch` when the CAS check fails.
+/// Returns `LocalDbError::Sqlx` on database failure.
+pub async fn mark_auto_promoted_in_tx_with_cas(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    job_id: &str,
+    expected_version: i64,
+    reason: &str,
+    actor: &str,
+) -> Result<bool, LocalDbError> {
+    // SAFETY: runtime UPDATE with version guard + audit columns added by
+    // migration 202606190002.
+    let result = sqlx::query(
+        "UPDATE kb_extract_jobs \
+         SET promotion_status = 'confirmed', version = version + 1, \
+             auto_promoted_at = datetime('now'), \
+             auto_promoted_reason = ?, \
+             auto_promoted_by = ? \
+         WHERE job_id = ? AND promotion_status = 'pending' AND version = ?",
+    )
+    .bind(reason)
+    .bind(actor)
+    .bind(job_id)
+    .bind(expected_version)
+    .execute(&mut **tx)
+    .await?;
+
+    if result.rows_affected() == 1 {
+        return Ok(true);
+    }
+
+    // Disambiguate stale version vs already-confirmed/rejected using the same
+    // logic as mark_confirmed_in_tx_with_cas.
+    let (status, version): (Option<String>, Option<i64>) =
+        sqlx::query_as("SELECT promotion_status, version FROM kb_extract_jobs WHERE job_id = ?")
+            .bind(job_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .map_or((None, None), |(s, v): (String, i64)| (Some(s), Some(v)));
+
+    match (status.as_deref(), version) {
+        (Some(s), _) if s != "pending" => Ok(false),
+        (Some(_), Some(actual)) if actual != expected_version => {
+            Err(LocalDbError::VersionMismatch {
+                table: "kb_extract_jobs".to_string(),
+                id: job_id.to_string(),
+                expected: expected_version,
+                actual: Some(actual),
+            })
+        }
+        (None, _) => Err(LocalDbError::MissingVersionKey {
+            key: format!("kb_extract_jobs/{job_id}"),
+        }),
+        _ => Err(LocalDbError::VersionMismatch {
+            table: "kb_extract_jobs".to_string(),
+            id: job_id.to_string(),
+            expected: expected_version,
+            actual: version,
+        }),
+    }
+}
+
 /// Flip a promotion candidate to `rejected`.
 ///
 /// Only transitions from `pending`. Returns `Ok(true)` when the row was
@@ -1106,7 +1191,8 @@ async fn fetch_promotion_optional_by_id(
         "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
                 promotion_status, proposed_payload, source_chapter_id, \
                 block_type_guess, canonical_name_guess, llm_confidence, \
-                llm_source_quote, created_at, version \
+                llm_source_quote, created_at, version, \
+                auto_promoted_at, auto_promoted_reason, auto_promoted_by \
          FROM kb_extract_jobs WHERE job_id = ?",
     )
     .bind(job_id)
@@ -1420,5 +1506,66 @@ mod tests {
         assert!(job.source_locator.is_none());
         assert!(job.profile_hint.is_none());
         assert!(job.work_id.is_none());
+    }
+
+    // ── V1.52 T-A P0: auto-promote audit columns ──────────────────────
+
+    #[tokio::test]
+    async fn auto_promote_columns_default_to_null_and_record_on_flip() {
+        let (pool, _dir) = fresh_pool().await;
+        let payload = serde_json::json!({
+            "summary": "Auto candidate",
+            "attributes": {"novel_category": "character", "aliases": ["Lin Xia"]},
+            "tags": ["novel"],
+        })
+        .to_string();
+        let pending = insert_pending_with_llm(
+            &pool,
+            "ctr_1",
+            "ws",
+            "wld_1",
+            Some("wrk_1"),
+            Some(3),
+            "character",
+            "Lin Xia",
+            &payload,
+            Some(0.97),
+            Some("...Lin Xia drew her blade..."),
+        )
+        .await
+        .unwrap();
+
+        // Freshly inserted rows have no auto-promotion audit.
+        assert!(pending.auto_promoted_at.is_none());
+        assert!(pending.auto_promoted_reason.is_none());
+        assert!(pending.auto_promoted_by.is_none());
+
+        let mut tx = pool.begin().await.unwrap();
+        let flipped = mark_auto_promoted_in_tx_with_cas(
+            &mut tx,
+            &pending.job_id,
+            pending.version,
+            "confidence=0.97, validation_clean, provenance_backed",
+            "nexus42:cli:kb-adopt-auto:ctr_1",
+        )
+        .await
+        .unwrap();
+        assert!(flipped);
+        tx.commit().await.unwrap();
+
+        let promoted = get_promotion(&pool, &pending.job_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(promoted.promotion_status, "confirmed");
+        assert!(promoted.auto_promoted_at.is_some());
+        assert_eq!(
+            promoted.auto_promoted_reason.as_deref(),
+            Some("confidence=0.97, validation_clean, provenance_backed")
+        );
+        assert_eq!(
+            promoted.auto_promoted_by.as_deref(),
+            Some("nexus42:cli:kb-adopt-auto:ctr_1")
+        );
     }
 }

@@ -74,6 +74,13 @@ pub struct KeyBlock {
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    // V1.52 T-A P2: Work→KeyBlock provenance (entity-scope-model.md §5.5.7)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_work_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_chapter: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_provenance_kind: Option<String>,
 }
 
 impl KeyBlock {
@@ -95,6 +102,9 @@ impl KeyBlock {
             created_from_command_id: None,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: None,
+            source_work_id: None,
+            source_chapter: None,
+            source_provenance_kind: None,
         }
     }
 
@@ -279,6 +289,10 @@ impl From<nexus_contracts::KeyBlock> for KeyBlock {
             created_from_command_id: c.created_from_command_id,
             created_at: c.created_at,
             updated_at: c.updated_at,
+            // V1.52 T-A P2: provenance fields not yet on wire contract; default None
+            source_work_id: None,
+            source_chapter: None,
+            source_provenance_kind: None,
         }
     }
 }

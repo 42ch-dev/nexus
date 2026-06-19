@@ -122,6 +122,12 @@ async fn rollback_drops_schedule_json_column() {
         .execute(&pool)
         .await
         .expect("drop dependent partial index before DROP COLUMN");
+    // V1.52 migration 202606190004 also adds idx_works_schedule_json (non-partial);
+    // must drop that too before DROP COLUMN.
+    sqlx::query("DROP INDEX IF EXISTS idx_works_schedule_json")
+        .execute(&pool)
+        .await
+        .expect("drop V1.52 schedule_json index before DROP COLUMN");
     sqlx::query("ALTER TABLE works DROP COLUMN schedule_json")
         .execute(&pool)
         .await

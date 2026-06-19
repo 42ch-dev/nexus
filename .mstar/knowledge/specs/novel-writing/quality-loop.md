@@ -180,6 +180,32 @@ When a `novel-writing` schedule completes and the active chapter transitions to 
 6. **Idempotency**: re-running finalize on the same day overwrites the same log file so repeated transitions do not accumulate duplicate entries.
 7. **Best-effort**: errors are logged at `warn!` and do **not** fail the schedule terminal transition.
 
+### 5.6 Auto-promote high-confidence KB candidates (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-outline-five-q-and-auto-promote`)  
+**Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
+**Promotes to Normative**: P-last of V1.52
+
+The CLI command `creator world kb adopt --auto <world_ref>` promotes pending `kb_extract_jobs` rows to confirmed `KeyBlock`s without per-row author confirmation, provided every safety predicate holds:
+
+| Predicate | Reason |
+| --- | --- |
+| `llm_confidence >= 0.95` | High LLM self-reported confidence only; heuristic rows (`llm_confidence IS NULL`) are skipped. |
+| Non-empty `llm_source_quote` | Provenance-backed: the candidate carries a verbatim chapter excerpt. |
+| `source_chapter_id IS NOT NULL` | Provenance-backed: the candidate is tied to a specific chapter. |
+| `ValidationMode::Novel` passes | The generated `KeyBlock` body has a valid `novel_category` and canonical name. |
+| No duplicate `canonical_name` in the world | The world's active KeyBlocks do not already contain the same name. |
+
+Process:
+
+1. List `promotion_status='pending'` candidates for the world ordered by creation time.
+2. For each candidate, evaluate the predicates inside a dedicated transaction.
+3. On success, insert a confirmed `KeyBlock` (`status='confirmed'`), flip the `kb_extract_jobs` row to `promotion_status='confirmed'`, and set `auto_promoted_at`, `auto_promoted_reason`, and `auto_promoted_by`.
+4. On any predicate failure, skip the candidate with a reason recorded in `--json` output; the row remains `pending`.
+5. After all candidates, write a best-effort audit log per promoted row under `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md`.
+
+Each candidate uses its own transaction with a CAS version guard (`kb_extract_jobs.version`) so one failure does not roll back unrelated promotions and stale rows are not flipped.
+
 ---
 
 ## 6. Master-decision timeout (DF-67)
@@ -278,4 +304,3 @@ V1.48 closes the novel quality loop: durable findings enrich the writing prompt,
 ## V1.45 supersession (P-last promotion)
 
 **Superseded by**: [creator-run-preset-entry.md](../creator-run-preset-entry.md) (Shipped Master V1.45). The `novel-review-master` preset id + enqueue-only semantics + audit preset ids are now part of the canonical Master body.
-
