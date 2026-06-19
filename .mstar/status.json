@@ -38,7 +38,10 @@
       "id": "2026-06-18-v1.51-cross-chapter-rescan",
       "title": "T-A P1 — creator kb rescan --work <ref> cross-chapter reconciliation (closes R-V150KBED-08)",
       "file": ".mstar/plans/2026-06-18-v1.51-cross-chapter-rescan.md",
-      "status": "Todo",
+      "status": "Done",
+      "done_at": "2026-06-18",
+      "merged_at": "2026-06-18",
+      "merge_commit": "45520f1f",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev", "@qa-engineer"],
       "working_branch": "feature/v1.51-cross-chapter-rescan",
@@ -46,7 +49,7 @@
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
       "task_category": "logic",
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:00:00+08:00"
+      "updated_at": "2026-06-18T17:00:00+08:00"
     },
     {
       "id": "2026-06-18-v1.51-missing-kb-detection",
@@ -83,7 +86,10 @@
       "id": "2026-06-18-v1.51-per-row-occ",
       "title": "T-B P1 — version columns + CAS generalisation + E_VERSION/E_LOCK codes + retry-on-conflict",
       "file": ".mstar/plans/2026-06-18-v1.51-per-row-occ.md",
-      "status": "Todo",
+      "status": "Done",
+      "done_at": "2026-06-18",
+      "merged_at": "2026-06-18",
+      "merge_commit": "8a970292",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev", "@qa-engineer"],
       "working_branch": "feature/v1.51-per-row-occ",
@@ -91,7 +97,7 @@
       "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
       "task_category": "logic",
       "created_at": "2026-06-18",
-      "updated_at": "2026-06-18T11:00:00+08:00"
+      "updated_at": "2026-06-18T17:00:00+08:00"
     },
     {
       "id": "2026-06-18-v1.51-hygiene-and-closeout",
@@ -149,10 +155,10 @@
       "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
     },
 "tech_debt_summary": {
-      "updated_at": "2026-06-18 (V1.51 T-A P0 + T-B P0 Done)",
+      "updated_at": "2026-06-18 (V1.51 T-A P1 + T-B P1 Done)",
       "total_open": 0,
       "total_deferred": 11,
-      "total_resolved": 48,
+      "total_resolved": 50,
       "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
@@ -162,13 +168,11 @@
         "nit": 0
       },
       "by_target_active": {
-        "V1.51 T-A P1": 1,
-        "V1.51 T-B P1": 0,
-        "V1.51 T-A P2": 0,
-        "V1.51 P-last": 6,
-        "V1.51+": 4
+        "V1.51 T-A P2": 1,
+        "V1.51 P-last": 10,
+        "V1.51+": 0
       },
-      "notes": "V1.51 T-A P0 + T-B P0 closed 2026-06-18. T-A P0: R-V150KBED-01 medium closed via fix-wave dbdd21de (production WorkerHandleProvider wiring + 4 hermetic integration tests + 1 real IPC test). T-B P0: R-V149P1-01 advisory-lock portion low closed via fix-wave 3444d046 + 6dccee36 (FileLockError enum + 3 CLI integration paths + 12 new hermetic tests). Tri-review + QA all Approve on both plans. New low-priority residuals (3 T-A P0 + 3 T-B P0) registered for V1.51 P-last WL-A sweep. R-V150-WLA-DEFER-V1.51 (30+ V1.50 WL-A) still deferred; selective fix 8-10 at P-last; remainder V1.52+. R-V150KBED-08 (cross-chapter rescan) re-targeted to V1.51 T-A P1; R-V150P1CRONBW-01 (novel-write preset YAML absent) deferred T-A P2 → V1.51 T-A P2 (in-scope per compass §1.1)."
+      "notes": "V1.51 T-A P1 + T-B P1 closed 2026-06-18. T-A P1: R-V150KBED-08 low closed via merge 45520f1f (creator kb rescan --work <ref> cross-chapter reconciliation; 11 + 8 + 6 = 25 new tests). T-B P1: 3 W's closed via fix-wave ef16f12f + 18dd7390 + 621f496d (broken doc link + actual_version discarded + missing test target). Tri-review + re-review + QA all Approve on both plans. PM clippy fix at 00829432 (T-B P0 regression surfaced by T-A P1 verifier) closed R-V151-MERGE-CLIPPY-01. New low-priority residuals: 4 T-A P0 + 3 T-B P0 + 3 T-A P1 + 1 T-A P2 = 11 items, all deferred to V1.51 P-last WL-A sweep. R-V150-WLA-DEFER-V1.51 (30+ V1.50 WL-A) still deferred. R-V150P1CRONBW-01 (novel-write preset YAML absent) re-targeted to V1.51 T-A P2."
     }
   },
   "v1_50_iteration_complete": true,
@@ -1333,11 +1337,14 @@
         "target_date": "V1.51 P-last",
         "tracking_link": ".mstar/plans/2026-06-18-v1.51-cross-chapter-rescan.md (Completion Report v2 §Verification)",
         "note": "Pre-existing-claim verification (per .mstar/AGENTS.md): cargo clippy -p nexus-orchestration --lib --tests -- -D warnings AND cargo clippy -p nexus42 --lib -- -D warnings both FAIL on the clean base iteration/v1.51 HEAD 388602d2 (before any T-A P1 changes). T-A P0 completion report claimed 'cargo clippy --all -- -D warnings → Finished, no warnings/errors' but the merged tree fails; either the merge introduced the issues, a clippy version drifted, or the report was optimistic. T-A P1's own code (quality_loop.rs aggregation, rescan.rs/kb.rs CLI, tests/kb_rescan.rs) is clippy-clean in isolation. Reproduce: git checkout 388602d2 -- . && cargo clippy --all -- -D warnings. Not fixed in T-A P1 per surgical-changes (DO NOT piggyback); routed to P-last WL-A.",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-18",
+        "closure_note": "PM fix at iteration/v1.51 @ 00829432 (fix(nexus42): surgical hygiene — #[allow(clippy::too_many_lines)] on kb_adopt) resolves the kb_adopt CI gate failure. T-B P1 rebased on top with consolidated allow annotation (rationale documents both T-B P0 + T-B P1 contributions). The other listed clippy items in this residual (LlmExtractTask doc_markdown + unused_mut, plus several pre-existing test-file clippy nits) remain in the V1.50 carry-over R-V150-WLA-DEFER-V1.51 batch and will be addressed in V1.51 P-last WL-A sweep alongside the existing 30+ V1.50 QC suggestions. cargo clippy --all -- -D warnings now exits 0 on iteration/v1.51 HEAD.",
+        "closure_evidence": "iteration/v1.51 @ 00829432 (commit) + feature/v1.51-cross-chapter-rescan rebased on 00829432 + feature/v1.51-per-row-occ rebased on 00829432. Both rebased branches verified cargo clippy --all -- -D warnings → exit 0.",
         "_plan_id": "2026-06-18-v1.51-cross-chapter-rescan"
       }
     ]
   },
   "v1_49_iteration_complete": true,
-  "v1_49_status": "SHIPPED 2026-06-17 — PR #62 merged at d160379ff5a6; all 6 V1.49 plans Done; 19 residuals archived; 7 carry-forward to V1.50"
+  "v1_49_status": "SHIPPED 2026-06-17 — PR #62 merged at d160379ff5a6; all 6 V1.49 plans Done; 19 carry-forward to V1.50"
 }
