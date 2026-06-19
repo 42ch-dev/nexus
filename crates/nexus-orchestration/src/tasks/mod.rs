@@ -631,6 +631,8 @@ pub struct StateCompositeTask {
     /// Populated by the loader/graph-builder when wiring the outer graph.
     /// Used at runtime to evaluate merge conditions (all/any/quorum).
     expected_incoming: usize,
+    /// Pre-computed merge key ("_merge_{id}") to avoid per-tick allocation (W-QC3-2).
+    merge_key: String,
 }
 
 impl StateCompositeTask {
@@ -652,6 +654,7 @@ impl StateCompositeTask {
             daemon_tool_dispatch: None,
             merge_kind: state.merge.clone(),
             expected_incoming: 0,
+            merge_key: format!("_merge_{}", state.id),
         }
     }
 
@@ -853,11 +856,12 @@ impl Task for StateCompositeTask {
         }
 
         // 0.5. V1.52 T-B P1: Merge node gate.
-        // If this state has merge semantics, check whether enough incoming
-        // labeled edges have arrived before processing enter actions.
-        if let Some(ref merge_kind) = self.merge_kind {
-            let merge_key = format!("_merge_{}", self.id);
-            let arrived: Vec<String> = context.get(&merge_key).await.unwrap_or_default();
+        // If this state has incoming labeled edges, check whether enough have
+        // arrived before processing enter actions. When `merge:` is absent but
+        // expected_incoming > 0, the default is WaitAll (W-QC1-1).
+        if self.expected_incoming > 0 {
+            let merge_kind = self.merge_kind.as_ref().unwrap_or(&MergeKind::All);
+            let arrived: Vec<String> = context.get(&self.merge_key).await.unwrap_or_default();
             let arrived_count = arrived.len();
 
             let condition_met = match merge_kind {
@@ -885,7 +889,7 @@ impl Task for StateCompositeTask {
             }
 
             // Merge condition met — clear arrivals for next cycle.
-            context.set(&merge_key, serde_json::Value::Null).await;
+            context.set(&self.merge_key, serde_json::Value::Null).await;
             tracing::info!(
                 state_id = %self.id,
                 arrived = arrived_count,
@@ -3254,6 +3258,7 @@ mod tests {
             daemon_tool_dispatch: None,
             merge_kind: None,
             expected_incoming: 0,
+            merge_key: "_merge_test_judge".to_string(),
         }
     }
 
@@ -3453,5 +3458,58 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("no label matched"), "error: {err}");
+    }
+
+    // ── V1.52 T-B P1: wait-all default enforcement (W-QC1-1) ────────────
+
+    #[tokio::test]
+    async fn merge_wait_all_default_enforced_when_merge_absent() {
+        // A state with 2 incoming labeled edges but NO explicit `merge:`
+        // field MUST still enforce wait-all semantics (default).
+        let task = StateCompositeTask {
+            id: "merged".to_string(),
+            terminal: false,
+            enter_actions: vec![],
+            exit_when: None, // no exit condition → Continue after gate passes
+            next: Some(NextTarget::Linear("done".to_string())),
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
+            registry: None,
+            daemon_tool_dispatch: None,
+            merge_kind: None, // absent from YAML
+            expected_incoming: 2,
+            merge_key: "_merge_merged".to_string(),
+        };
+
+        let ctx = graph_flow::Context::new();
+
+        // With 0 arrivals → should wait (default wait-all enforces gate).
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::WaitForInput),
+            "with 0 arrivals and merge absent (default wait-all), should WaitForInput; got {:?}",
+            result.next_action
+        );
+
+        // With 1 arrival → should still wait (wait-all needs all 2).
+        ctx.set("_merge_merged", serde_json::json!(["label_a"]))
+            .await;
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::WaitForInput),
+            "with 1/2 arrivals and merge absent (default wait-all), should WaitForInput; got {:?}",
+            result.next_action
+        );
+
+        // With 2 arrivals → should continue.
+        ctx.set("_merge_merged", serde_json::json!(["label_a", "label_b"]))
+            .await;
+        let result = task.run(ctx.clone()).await.unwrap();
+        assert!(
+            matches!(result.next_action, NextAction::Continue),
+            "with 2/2 arrivals and merge absent (default wait-all), should Continue; got {:?}",
+            result.next_action
+        );
     }
 }

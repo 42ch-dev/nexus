@@ -441,10 +441,16 @@ fn check_inner_graph_references(manifest: &PresetManifest, result: &mut Validati
     }
 }
 
-/// V1.52 T-B P0: check for duplicate label values within a single state's
-/// `Labeled` next edges. Two edges with the same label would create an
-/// ambiguous routing decision at runtime.
+/// V1.52 T-B P0/P1: check for duplicate label values in labeled next edges.
+///
+/// Two checks:
+/// 1. **Within-state**: two edges in the same state with the same label.
+/// 2. **Cross-state** (W-QC3-1): two different states emitting the same label
+///    targeting the same merge node. The runtime dedupes by label, so
+///    duplicates from different sources would prevent `arrived_count` from
+///    ever reaching `expected_incoming` — a silent session stall.
 fn check_labeled_edge_duplicates(manifest: &PresetManifest, result: &mut ValidationResult) {
+    // Within-state check.
     for (i, state) in manifest.states.iter().enumerate() {
         if let Some(NextTarget::Labeled(edges)) = &state.next {
             let mut seen_labels: HashSet<&str> = HashSet::new();
@@ -459,6 +465,31 @@ fn check_labeled_edge_duplicates(manifest: &PresetManifest, result: &mut Validat
                         severity: DiagnosticSeverity::Error,
                         category: DiagnosticCategory::DuplicateLabel,
                     });
+                }
+            }
+        }
+    }
+
+    // W-QC3-1: Cross-state check — for each (target, label) pair, verify
+    // no two source states share the same label targeting the same merge node.
+    let mut merge_labels: HashMap<(&str, &str), &str> = HashMap::new();
+    for (i, state) in manifest.states.iter().enumerate() {
+        if let Some(NextTarget::Labeled(edges)) = &state.next {
+            for (k, edge) in edges.iter().enumerate() {
+                let key = (edge.target.as_str(), edge.label.as_str());
+                if let Some(&existing_source) = merge_labels.get(&key) {
+                    result.diagnostics.push(ValidationDiagnostic {
+                        path: format!("states[{i}].next[{k}].label"),
+                        message: format!(
+                            "duplicate label '{}' targeting merge node '{}' from state '{}' \
+                             (also emitted by state '{existing_source}')",
+                            edge.label, edge.target, state.id
+                        ),
+                        severity: DiagnosticSeverity::Error,
+                        category: DiagnosticCategory::DuplicateLabel,
+                    });
+                } else {
+                    merge_labels.insert(key, state.id.as_str());
                 }
             }
         }
@@ -1129,10 +1160,6 @@ fn check_cli_args(manifest: &PresetManifest, result: &mut ValidationResult) {
 mod tests {
     use super::*;
     use crate::capability::CapabilityRegistry;
-
-    fn test_caps() -> CapabilityRegistry {
-        CapabilityRegistry::with_builtins()
-    }
 
     fn minimal_manifest() -> PresetManifest {
         let yaml = r"
@@ -2078,6 +2105,55 @@ states:
                     && d.message.contains("n must be >=")
             }),
             "quorum with n<1 should error: {:?}",
+            result.diagnostics
+        );
+    }
+
+    // ── W-QC3-1: cross-state label duplicate check ────────────────────
+
+    #[test]
+    fn cross_state_label_duplicate_errors() {
+        let yaml = r#"
+preset:
+  id: cross-label-dup
+  version: 1
+  kind: creator
+  description: test
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: done
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: foo
+        target: merged
+  - id: b
+    enter: []
+    exit_when: { kind: llm_judge }
+    next:
+      - label: foo
+        target: merged
+  - id: merged
+    merge:
+      kind: all
+    exit_when: { kind: manual }
+    next: done
+  - id: done
+    terminal: true
+"#;
+        let manifest: PresetManifest = serde_yaml::from_str(yaml).unwrap();
+        let caps = CapabilityRegistry::with_builtins();
+        let result = validate_preset_semantic(&manifest, &caps);
+        assert!(
+            result.errors().any(|d| {
+                d.category == DiagnosticCategory::DuplicateLabel
+                    && d.message.contains("state 'b'")
+                    && d.message.contains("state 'a'")
+            }),
+            "cross-state duplicate label should produce DuplicateLabel error: {:?}",
             result.diagnostics
         );
     }
