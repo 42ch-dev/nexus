@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-19-v1.52-cli-surface-consolidation-auto"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-19"
 ---
 
@@ -111,10 +111,57 @@ generated_at: "2026-06-19"
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 2 |
+| 🟡 Warning | 2 (initial) → **0 (post-revalidation)** |
 | 🟢 Suggestion | 7 |
 
-**Verdict**: Request Changes
+**Verdict**: Request Changes (initial wave; **resolved in revalidation below**)
+
+## Revalidation (2026-06-19, targeted re-review)
+
+**Re-review scope**: Review range `771f89e7..fe3c5730` (1 fix commit: `fe3c5730`)
+
+**Re-review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.52-ta-p1/`
+**Working branch (verified)**: `feature/v1.52-cli-surface-consolidation-auto`
+**Commit range (verified)**: `fe3c5730 fix(cli): V1.52 T-A P1 QC fix-wave — close R-V152TAP1-W001/W002/S001`
+
+### Re-validation Method
+- `git diff 771f89e7..fe3c5730 --stat` (3 files: kb.rs +255, world_kb_alias.rs +251, qc3.md +189)
+- `git diff 771f89e7..fe3c5730 -- crates/nexus42/src/commands/creator/kb.rs` (full forward + error-wrapping change review)
+- `git diff 771f89e7..fe3c5730 -- crates/nexus42/tests/world_kb_alias.rs` (full new integration tests review)
+- `cargo test -p nexus42 --test world_kb_alias -- --nocapture` → **9/9 pass** (3 new: `legacy_kb_scope_world_{list,show,remove}_forwards_to_canonical` + 6 pre-existing)
+- `cargo test -p nexus42 --lib commands::creator::kb` → **12/12 pass** (5 new: `open_world_pool_error_matches_canonical_format` + 3 `_exercises_forward_path` + improved `deprecation_notice_emits_stderr_message`; 7 pre-existing)
+- `cargo test -p nexus42` → **760/760 unit tests pass** + all integration test suites green (no regressions)
+- `cargo clippy --all -- -D warnings` → **clean** (CI gate green)
+- `cargo +nightly fmt --all --check` → **clean**
+- `target/debug/nexus42 creator kb list --help` → deprecation note now appears in help text (`S-001` fix verified at runtime)
+
+### Fix Validation
+
+| Initial Warning | Status | Evidence |
+|----------------|--------|----------|
+| W-001 (alias forward wiring untested at kb.rs:448-454, 610-615, 789-797) | **Resolved** | commit `fe3c5730` adds **3 hermetic assert_cmd integration tests** in `tests/world_kb_alias.rs:256-422` (`legacy_kb_scope_world_list_forwards_to_canonical`, `legacy_kb_scope_world_show_forwards_to_canonical`, `legacy_kb_scope_world_remove_forwards_to_canonical`) that drive the full `nexus42` binary against a seeded hermetic HOME and assert: (a) deprecation string on stderr (`"deprecated"`, canonical surface name, `"V1.53"`), (b) output parity (seeded block `char_alias_cmd` in stdout), (c) for remove — block is actually soft-deleted (verified by re-listing). Additionally **3 unit tests** in `kb.rs:1178-1348` mirror the exact forward call shape (deprecation + canonical `kb_list`/`kb_show`/`kb_delete` call with same argument signature), and the previously tautological `deprecation_notice_emits_stderr_message` test now actually invokes the function. All 9/9 world_kb_alias tests pass; all 5 new kb unit tests pass. The forward call sites at lines 469 (kb_list), 631 (kb_show), 813 (kb_delete) are now covered by hermetic tests that exercise the actual binary path — not just direct canonical calls. |
+| W-002 (error message divergence: `"Failed to open workspace pool: …"` vs canonical `"local database error: …"`) | **Resolved** | commit `fe3c5730` `kb.rs:356-359`: `open_world_pool` switched from `.map_err(\|e\| CliError::Other(format!("Failed to open workspace pool: {e}")))` to `Ok(crate::db::Schema::init(&db_path).await?)` — the `?` operator now triggers `impl From<nexus_local_db::LocalDbError> for CliError` (`errors.rs:447-451`) which produces exactly `"local database error: {err}"`, matching canonical `world::open_workspace_pool` (`world/mod.rs:152-156`). New regression test `open_world_pool_error_matches_canonical_format` (`kb.rs:1138-1162`) explicitly constructs a `LocalDbError::VersionMismatch`, converts to `CliError`, and asserts (a) `msg.contains("local database error:")`, (b) `!msg.contains("Failed to open workspace pool")` (pre-fix format absence). Both legacy and canonical surfaces now emit identical error Display strings, so CI log parsers and monitoring rules keyed on `"local database error"` will work uniformly. |
+| S-001 (deprecation discoverability: help text had no hint) — listed in qc1 as partial-blocking | **Resolved** | commit `fe3c5730` `kb.rs:54-128` adds deprecation note to `Long` help of `--scope` for all 5 subcommands (List, Search, Show, Add, Remove), e.g. `"Note: \`--scope world\` is deprecated; use \`creator world kb list\` instead (planned removal V1.53)."`. Verified at runtime: `nexus42 creator kb list --help` now prints the deprecation note in the `--scope` description. Integration test `creator_kb_list_help_documents_scope_world` extended (`world_kb_alias.rs:85-89`) to assert the help text contains `"deprecated"` or `"creator world kb"`. |
+
+### Performance & Reliability Re-check
+- **Forward overhead**: unchanged from initial analysis. The 3 new hermetic integration tests use `tempfile::tempdir()` + `Schema::init` once per test, so per-test cost is bounded. No new hot-path allocation or syscall on the alias path itself.
+- **Error path**: `?` operator on `LocalDbError → CliError` is a zero-cost `From` impl (single `format!` call). No regression vs. prior `.map_err` wrapping; actually marginally cheaper (no double-format of the underlying error).
+- **Resource lifecycle**: hermetic HOME tests use `tempfile::TempDir` (auto-cleanup on drop); no leaked handles, no DB files in the user's actual `~/.nexus42/`.
+- **Deprecation frequency**: still per-call (1× `tracing::warn!` + 1× `eprintln!`); S-002/S-006 deferred to V1.53 monitoring per initial report — non-blocking.
+- **Cross-author auth gate**: `legacy_kb_scope_world_remove_exercises_forward_path` (`kb.rs:1330-1347`) explicitly asserts the forwarded `kb_delete` returns 403/`WORLD_KB_FORBIDDEN` for cross-author attempts — preserving the security improvement noted in qc2.
+
+### Updated Findings
+- 🔴 Critical: **0**
+- 🟡 Warning: **0** (both blocking Warnings resolved; S-001 elevated to blocking also resolved)
+- 🟢 Suggestion: **7** (unchanged from initial; S-002..S-007 deferred to V1.52 P-last WL-A for migration-quality hygiene)
+
+### Updated Verdict: **Approve**
+
+Both blocking items from the initial wave are **conclusively resolved** with hermetic test evidence and observable behavior changes. S-001 (partial-blocking Suggestion from qc1) is also addressed. No new blocking findings introduced. CI gates clean (`cargo clippy --all -- -D warnings`, `cargo +nightly fmt --all --check`). 9/9 world_kb_alias integration tests + 760/760 unit tests pass.
+
+**Handoff**: PM `@project-manager` — qc3 verdict flipped to `Approve` on revalidation. PM may now consolidate the re-review verdict (qc1 + qc3 both Approve → T-A P1 ready for `@qa-engineer` verification and merge to `iteration/v1.52`).
+
+---
 
 ## Detailed Performance & Reliability Review (per assignment)
 
@@ -184,6 +231,7 @@ generated_at: "2026-06-19"
 - Review range matches Assignment exactly: `b97ec0d9..771f89e7`.
 
 ## Residuals (for PM)
-- **W-001 and W-002 are blocking** for this plan's acceptance. They should be addressed in a fix round (or carried with explicit rationale + tracked in `residual_findings[2026-06-19-v1.52-cli-surface-consolidation-auto][]` with stable IDs R-V152TAP1-W001 / R-V152TAP1-W002).
-- Suggestions S-001..S-007 are migration-quality hygiene for V1.53 removal prep; non-blocking but worth tracking.
+- **Initial blocking items W-001 and W-002 are now resolved** (see Revalidation above). PM should close residual entries R-V152TAP1-W001 and R-V152TAP1-W002 in `status.json` (and archive to `.mstar/archived/residuals/2026-06-19-v1.52-cli-surface-consolidation-auto.json` per `mstar-plan-artifacts` lifecycle).
+- S-001 (help-text deprecation discoverability) was tracked as partial-blocking — now resolved by the same fix commit.
+- Suggestions S-002..S-007 remain as migration-quality hygiene for V1.53 removal prep; non-blocking. PM may keep them as open `residual_findings` or fold into V1.52 P-last WL-A backlog.
 - No new `Critical` findings to register.
