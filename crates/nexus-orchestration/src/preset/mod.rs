@@ -309,7 +309,7 @@ mod tests {
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
         assert_eq!(loaded.id, "novel-writing");
-        assert_eq!(loaded.version, 8); // V1.48 P1: open_findings_block template var for chapter-scoped findings injection
+        assert_eq!(loaded.version, 9); // V1.52 T-A P0: outline_review state + outline-exit prompt
 
         // V1.36 P3: inner graphs removed; chapter-scoped states instead.
         assert!(
@@ -317,8 +317,9 @@ mod tests {
             "P3 novel-writing should not have inner graphs"
         );
 
-        // Verify outer graph has 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
+        // Verify outer graph has 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
         assert!(loaded.outer_graph.get_task("outline_chapter").is_some());
+        assert!(loaded.outer_graph.get_task("outline_review").is_some());
         assert!(loaded.outer_graph.get_task("draft_chapter").is_some());
         assert!(loaded.outer_graph.get_task("finalize").is_some());
         assert!(loaded.outer_graph.get_task("finalize_commit").is_some());
@@ -375,8 +376,8 @@ mod tests {
         let caps = CapabilityRegistry::with_builtins();
         let loaded = load_embedded_preset("novel-writing", &caps).unwrap();
 
-        // P4 fix wave: 5 states (outline_chapter, draft_chapter, finalize, finalize_commit, done).
-        assert_eq!(loaded.manifest.states.len(), 5);
+        // V1.52 T-A P0: 6 states (outline_chapter, outline_review, draft_chapter, finalize, finalize_commit, done).
+        assert_eq!(loaded.manifest.states.len(), 6);
 
         // Verify state IDs.
         let state_ids: Vec<&str> = loaded
@@ -386,6 +387,7 @@ mod tests {
             .map(|s| s.id.as_str())
             .collect();
         assert!(state_ids.contains(&"outline_chapter"));
+        assert!(state_ids.contains(&"outline_review"));
         assert!(state_ids.contains(&"draft_chapter"));
         assert!(state_ids.contains(&"finalize"));
         assert!(state_ids.contains(&"finalize_commit"));
@@ -472,20 +474,39 @@ mod tests {
             }
         }
 
-        // P3: 2 prompt files from enter actions (outline-chapter.md, draft-chapter.md).
+        // Collect template_file references from exit_when llm_judge gates.
+        for s in &loaded.manifest.states {
+            if let Some(manifest::ExitWhen::LlmJudge {
+                ref template_file, ..
+            }) = s.exit_when
+            {
+                prompt_files.push(template_file.as_deref().unwrap_or(""));
+            }
+        }
+
+        // V1.52 T-A P0: 4 prompt references (2 enter + 2 exit_when):
+        // outline-chapter.md, draft-chapter.md, outline-exit.md, finalize-exit.md.
         // No context_update hooks or inner graphs in P3 preset.
         assert_eq!(
             prompt_files.len(),
-            2,
-            "expected 2 prompt template references in enter actions: {prompt_files:?}"
+            4,
+            "expected 4 prompt template references: {prompt_files:?}"
         );
         assert!(
             prompt_files.iter().any(|f| f.contains("outline-chapter")),
             "expected outline-chapter.md reference"
         );
         assert!(
+            prompt_files.iter().any(|f| f.contains("outline-exit")),
+            "expected outline-exit.md reference"
+        );
+        assert!(
             prompt_files.iter().any(|f| f.contains("draft-chapter")),
             "expected draft-chapter.md reference"
+        );
+        assert!(
+            prompt_files.iter().any(|f| f.contains("finalize-exit")),
+            "expected finalize-exit.md reference"
         );
 
         // Verify the embedded directory has only current prompt files.

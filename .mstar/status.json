@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-19T08:30:00Z",
+  "updated_at": "2026-06-19T15:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
@@ -18,7 +18,9 @@
     {
       "plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
       "title": "T-A P0 — outline 五问 quality gate + auto-promote high-confidence KB",
-      "status": "InReview",
+      "status": "Done",
+      "started_at": "2026-06-19T12:00:00Z",
+      "done_at": "2026-06-19T15:00:00Z",
       "owner": "@fullstack-dev",
       "agents": ["@fullstack-dev", "@qa-engineer"],
       "task_category": "logic",
@@ -56,7 +58,9 @@
     {
       "plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
       "title": "T-B P0 — N-way GO/NOGO routing",
-      "status": "InReview",
+      "status": "Done",
+      "started_at": "2026-06-19T12:00:00Z",
+      "done_at": "2026-06-19T17:00:00Z",
       "owner": "@fullstack-dev-2",
       "agents": ["@fullstack-dev-2", "@qa-engineer"],
       "task_category": "logic",
@@ -120,8 +124,8 @@
     },
     "tech_debt_summary": {
       "total_open": 0,
-      "total_deferred": 6,
-      "total_resolved": 59,
+      "total_deferred": 4,
+      "total_resolved": 61,
       "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
@@ -131,7 +135,7 @@
         "nit": 0
       },
       "by_target_active": {
-        "V1.52 T-A P0": 2,
+        "V1.52 T-A P0": 0,
         "V1.52 T-A P1": 1,
         "V1.52 T-A P2": 1,
         "V1.52 P-last": 1,
@@ -1237,16 +1241,16 @@
         "source": "qc3 (performance/reliability) W-001",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs vs tasks/mod.rs",
         "decision": "fix",
-        "owner": "@architect or @fullstack-dev",
+        "owner": "@fullstack-dev",
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
-        "note": "Non-blocking per qc3 reviewer; both paths tested; unify at P-last or V1.51+ refactor.",
+        "note": "Unified into shared `run_llm_extract` helper returning `LlmExtractOutcome`; both review-time hook and `LlmExtractTask::evaluate` reuse the same LLM→KbCandidate mapping.",
         "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction",
         "closed_at": "2026-06-19",
-        "closure_note": "V1.52 T-A P0 (commit 431aca4c on feature/v1.52-outline-five-q-and-auto-promote): introduced explicit LlmExtractOutcome enum + shared run_llm_extract helper used by both extract_kb_candidates_for_review (review-time hook) and LlmExtractTask::evaluate (task-runtime). Both paths now go through one canonical entry. Re-target to V1.52 T-A P0 done by PM at prepare.",
-        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote (commit 431aca4c)",
-        "_plan_id": "2026-06-18-v1.51-llm-extraction"
+        "closure_note": "V1.52 T-A P0: introduced `LlmExtractOutcome` and `run_llm_extract` in `quality_loop.rs`; `LlmExtractTask::evaluate` now delegates to the shared path. Closes parallel-path warning.",
+        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote"
       },
       {
         "id": "R-V151Q3-W002",
@@ -1259,12 +1263,12 @@
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
-        "note": "Non-blocking per qc3 reviewer; contract documented; PM awareness note.",
+        "note": "`WorkerUnavailable` is now an explicit `LlmExtractOutcome::WorkerUnavailable` variant; callers decide whether to fall back to heuristic instead of interpreting an empty Vec.",
         "lifecycle": "resolved",
+        "_plan_id": "2026-06-18-v1.51-llm-extraction",
         "closed_at": "2026-06-19",
-        "closure_note": "V1.52 T-A P0 (commit 431aca4c): LlmExtractOutcome::WorkerUnavailable explicit variant replaces empty-vec contract; caller matches on outcome variant. Re-target to V1.52 T-A P0 done by PM at prepare.",
-        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote (commit 431aca4c)",
-        "_plan_id": "2026-06-18-v1.51-llm-extraction"
+        "closure_note": "V1.52 T-A P0: `run_llm_extract` returns `LlmExtractOutcome::WorkerUnavailable` when no worker IPC is available; empty candidate Vec now unambiguously means LLM returned zero entities.",
+        "closure_evidence": "feature/v1.52-outline-five-q-and-auto-promote"
       }
     ],
     "2026-06-18-v1.51-advisory-lock": [
