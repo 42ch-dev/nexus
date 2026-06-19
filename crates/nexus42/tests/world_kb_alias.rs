@@ -82,6 +82,11 @@ fn creator_kb_list_help_documents_scope_world() {
         help_text.contains("world"),
         "expected 'world' scope mentioned in help output, got:\n{help_text}"
     );
+    // V1.52 T-A P1 / R-V152TAP1-S001: deprecation hint pointing to canonical surface
+    assert!(
+        help_text.contains("deprecated") || help_text.contains("creator world kb"),
+        "help text must point to canonical surface (R-V152TAP1-S001), got:\n{help_text}"
+    );
 }
 
 /// `creator world kb adopt --help` should be reachable even if `--auto` has
@@ -168,4 +173,250 @@ async fn canonical_kb_delete_cross_author_rejects() {
             "cross-author error should mention auth, got: {msg}"
         );
     }
+}
+
+// =============================================================================
+// Alias forward-wiring tests (R-V152TAP1-W001) — exercise kb.rs:448-454,
+// 610-615, 789-797 by invoking the legacy surface via assert_cmd with a
+// hermetic HOME directory.
+// =============================================================================
+
+use std::sync::Mutex;
+
+/// Global mutex serializes HOME setup across parallel test threads.
+static HOME_SETUP_LOCK: Mutex<()> = Mutex::new(());
+
+/// Set up a hermetic HOME directory with a seeded state.db for alias tests.
+///
+/// Returns the temp directory guard (keeps dir alive) and the world ID.
+fn hermetic_home_with_world_kb() -> (tempfile::TempDir, String) {
+    let _lock = HOME_SETUP_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path();
+    let nexus_dir = home.join(".nexus42");
+
+    // Create directory structure
+    std::fs::create_dir_all(&nexus_dir).unwrap();
+
+    // Write config.toml with active_creator_id
+    let config_toml = r#"
+active_creator_id = "ctr_alias_test"
+active_workspace_slug_by_creator = { ctr_alias_test = "default" }
+"#;
+    std::fs::write(nexus_dir.join("config.toml"), config_toml).unwrap();
+
+    // Create workspace directory and state.db
+    let ws_dir = home.join(".nexus42/creators/ctr_alias_test/workspaces/default");
+    std::fs::create_dir_all(&ws_dir).unwrap();
+    let db_path = ws_dir.join("state.db");
+
+    // Seed state.db using tokio runtime
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let pool = nexus42::db::Schema::init(&db_path).await.unwrap();
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            "wld_alias_cmd",
+            "ctr_alias_test",
+            "Alias Cmd World",
+            "alias-cmd-world",
+            "private",
+            "manual",
+        )
+        .await;
+        let store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        let mut kb = nexus_kb::key_block::KeyBlock::new(
+            "wld_alias_cmd",
+            nexus_contracts::BlockType::Character,
+            "char_alias_cmd",
+        );
+        kb.body = Some(nexus_kb::key_block::KeyBlockBody {
+            summary: Some("Alias command test summary".to_string()),
+            attributes: Some(serde_json::json!({"novel_category": "character"})),
+            tags: Some(vec!["alias-test".to_string()]),
+        });
+        let _result = store.insert_key_block(kb).await.unwrap();
+    });
+
+    (dir, "wld_alias_cmd".to_string())
+}
+
+/// Build an assert_cmd Command with HOME set to the temp directory.
+fn cmd_with_home(home: &std::path::Path) -> assert_cmd::Command {
+    let mut cmd = assert_cmd::Command::cargo_bin("nexus42").unwrap();
+    cmd.env("HOME", home);
+    cmd
+}
+
+/// `creator kb list --scope world --world-id <id>` emits deprecation on stderr
+/// and produces listing output.
+#[test]
+fn legacy_kb_scope_world_list_forwards_to_canonical() {
+    let (dir, wid) = hermetic_home_with_world_kb();
+
+    let output = cmd_with_home(dir.path())
+        .args([
+            "creator",
+            "kb",
+            "list",
+            "--scope",
+            "world",
+            "--world-id",
+            &wid,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    // Deprecation message on stderr
+    assert!(
+        stderr.contains("deprecated"),
+        "stderr must contain 'deprecated', got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("creator world kb list"),
+        "stderr must mention canonical surface, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("V1.53"),
+        "stderr must mention V1.53 removal, got:\n{stderr}"
+    );
+
+    // Output should contain the seeded block
+    assert!(
+        stdout.contains("char_alias_cmd"),
+        "stdout must contain the seeded block name, got:\n{stdout}"
+    );
+}
+
+/// `creator kb show --scope world --world-id <id> <entry_id>` emits deprecation
+/// on stderr and shows the seeded block.
+#[test]
+fn legacy_kb_scope_world_show_forwards_to_canonical() {
+    let (dir, wid) = hermetic_home_with_world_kb();
+    let home = dir.path();
+
+    // First get the block ID by calling kb list (via the binary)
+    let list_output = cmd_with_home(home)
+        .args(["creator", "world", "kb", "list", &wid])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_text = String::from_utf8(list_output).unwrap();
+    // Extract key_block_id from the listing output (format: KEY_BLOCK_ID ...)
+    let block_id = list_text
+        .lines()
+        .find(|l| l.contains("char_alias_cmd"))
+        .and_then(|l| l.split_whitespace().next())
+        .expect("must find key_block_id in list output")
+        .to_string();
+
+    // Now invoke the legacy alias for show
+    let output = cmd_with_home(home)
+        .args([
+            "creator",
+            "kb",
+            "show",
+            &block_id,
+            "--scope",
+            "world",
+            "--world-id",
+            &wid,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stderr.contains("deprecated"),
+        "stderr must contain 'deprecated', got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("creator world kb show"),
+        "stderr must mention canonical surface 'show', got:\n{stderr}"
+    );
+    // The output should contain block details
+    assert!(
+        stdout.contains("char_alias_cmd"),
+        "stdout must contain the block name, got:\n{stdout}"
+    );
+}
+
+/// `creator kb remove --scope world --world-id <id> <entry_id>` emits deprecation
+/// on stderr and removes the seeded block. Verifies the forward path delegates
+/// to canonical `kb_delete` (with owner auth gate).
+#[test]
+fn legacy_kb_scope_world_remove_forwards_to_canonical() {
+    let (dir, wid) = hermetic_home_with_world_kb();
+    let home = dir.path();
+
+    // Get block ID via canonical path
+    let list_output = cmd_with_home(home)
+        .args(["creator", "world", "kb", "list", &wid])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_text = String::from_utf8(list_output).unwrap();
+    let block_id = list_text
+        .lines()
+        .find(|l| l.contains("char_alias_cmd"))
+        .and_then(|l| l.split_whitespace().next())
+        .expect("must find key_block_id in list output")
+        .to_string();
+
+    // Remove via legacy alias path
+    let output = cmd_with_home(home)
+        .args([
+            "creator",
+            "kb",
+            "remove",
+            &block_id,
+            "--scope",
+            "world",
+            "--world-id",
+            &wid,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+
+    assert!(
+        stderr.contains("deprecated"),
+        "stderr must contain 'deprecated', got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("creator world kb remove"),
+        "stderr must mention canonical surface 'remove', got:\n{stderr}"
+    );
+
+    // Verify block is gone via canonical path
+    let verify_output = cmd_with_home(home)
+        .args(["creator", "world", "kb", "list", &wid])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let verify_text = String::from_utf8(verify_output).unwrap();
+    assert!(
+        !verify_text.contains("char_alias_cmd"),
+        "removed block should not appear in list, got:\n{verify_text}"
+    );
 }
