@@ -9,6 +9,7 @@
 **V1.45 Shipped amendments:** §6.2D generic `creator run <preset_id>` — see [creator-run-preset-entry.md](creator-run-preset-entry.md) (**Shipped Master**); legacy subcommand enum removed from clap surface.  
 **V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).  
 **V1.51 Shipped amendments:** §6.2K `creator world kb adopt` LLM metadata surfaces; `creator kb rescan --work <work_ref>` cross-chapter reconciliation; `creator world kb pending --missing-only` (T-A P0/P1/P2).
+**V1.52 T-A P1 Draft overlay:** §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01).
 
 ## 0. 文档定位
 
@@ -519,11 +520,49 @@ Rules:
 
 ### 6.2G.1 World KB CLI consolidation + `--auto` flag (Draft V1.52 overlay)
 
-**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-cli-surface-consolidation-auto`)  
-**Authoring plan**: `2026-06-19-v1.52-cli-surface-consolidation-auto`  
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-outline-five-q-and-auto-promote`)  
+**Authoring plan**: `2026-06-19-v1.52-outline-five-q-and-auto-promote`  
 **Promotes to Normative**: P-last of V1.52
 
-Draft overlay placeholder: consolidate the user-facing World KB command surface around `creator world kb ...`, define legacy `creator kb --scope world` remediation/aliasing, and specify the explicit `--auto` happy-path flag for auto-promotion flows.
+`creator world kb adopt` gains an `--auto` mode for high-confidence, provenance-backed candidates.
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 creator world kb adopt <extract_job_id> [--json]` | V1.50/V1.51 behavior: manually confirm a single pending candidate. |
+| `nexus42 creator world kb adopt --auto <world_ref> [--json]` | V1.52 T-A P0: auto-promote all eligible pending candidates for the World (see [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §5.6). |
+
+Rules:
+
+- `--auto` requires `--world-ref`; the clap contract enforces exactly one of positional `<extract_job_id>` or `--auto`.
+- Author gate: same `require_world_owner` check as manual adopt → `403 WORLD_KB_FORBIDDEN` on mismatch.
+- Eligibility is defined in [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §5.6 (`confidence >= 0.95`, provenance-backed, `ValidationMode::Novel` clean, no duplicate canonical name).
+- Each promotion is a separate transaction with a CAS version guard; failures are per-candidate and do not block other candidates.
+- Text output prints promoted and skipped counts; `--json` output includes `promoted_count`, `skipped_count`, `promoted[]`, and `skipped[]` with per-row `reason`.
+- Audit logs are written under `Works/<work_ref>/Logs/kb/auto-promoted/<YYYY-MM-DD>-<extract_job_id>.md` when a workspace root is bound.
+- The canonical World KB surface remains `creator world kb ...`; no new aliases or deprecations are introduced in V1.52.
+
+### 6.2G.2 Legacy `creator kb --scope world` alias + deprecation (Draft V1.52 overlay)
+
+**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-cli-surface-consolidation-auto`)
+**Authoring plan**: `2026-06-19-v1.52-cli-surface-consolidation-auto`
+**Promotes to Normative**: P-last of V1.52
+
+`creator kb --scope world <subcmd>` is a **deprecated alias** for `creator world kb <subcmd>`.
+
+| Legacy command | Canonical replacement |
+| --- | --- |
+| `nexus42 creator kb list --scope world --world-id <id>` | `nexus42 creator world kb list <id>` |
+| `nexus42 creator kb show <entry_id> --scope world --world-id <id>` | `nexus42 creator world kb show <id> <entry_id>` |
+| `nexus42 creator kb remove <entry_id> --scope world --world-id <id>` | `nexus42 creator world kb delete <id> <entry_id> --yes` |
+
+Rules:
+
+- Each legacy invocation emits a **deprecation warning** on stderr and via `tracing::warn!`: "`creator kb --scope world <subcmd>` is deprecated; use `creator world kb <subcmd>` instead (planned removal V1.53)."
+- `list`, `show`, and `remove` (World scope) **transparently forward** to the canonical `world::kb` hermetic functions. Output is identical to the canonical path.
+- `search` and `add` (World scope) do not have canonical equivalents; they continue to operate inline but emit the deprecation warning.
+- `remove` with World scope now gates on **world ownership** (the legacy path did not enforce auth; forwarding through `kb_delete` adds the `WORLD_KB_FORBIDDEN` gate, which is the correct behavior per entity-scope-model §5.5).
+- The `--scope world` flag on `creator kb` variants is preserved for backward compatibility; it will be removed in V1.53.
+- Work-scope operations (`creator kb --scope work`, the default) are **unaffected** by this consolidation.
 
 ### 6.2H `nexus42 creator works` — Work management and pool (V1.41 Draft — DF-60/61)
 
