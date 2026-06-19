@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-19-v1.52-n-way-gonogo-routing"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-19"
 ---
 
@@ -14,7 +14,7 @@ generated_at: "2026-06-19"
 - Runtime Agent ID: qc-specialist
 - Runtime Model: deepseek-v4-pro
 - Review Perspective: Architecture coherence and maintainability risk
-- Report Timestamp: 2026-06-19T18:00:00Z
+- Report Timestamp: 2026-06-19T23:00:00Z (revalidation)
 
 ## Scope
 - plan_id: 2026-06-19-v1.52-n-way-gonogo-routing
@@ -119,3 +119,41 @@ The N-way labeled routing generalization is well-designed at the architecture le
 - **Reuse over duplication**: The existing `GoNogo` path is fully preserved; the `Labeled` path adds without replacing. `add_edge` for reachability + `GoTo` for routing is clean separation.
 - **Spec alignment**: Spec §3.1 accurately describes the implementation with one minor gap (matching semantics — S-003).
 - **Reachability validator**: BFS treats `Labeled` edge targets as forward edges, preserving existing reachability guarantees. `DuplicateLabel` diagnostic is properly integrated with the existing `ValidationResult` emission path.
+
+## Revalidation (2026-06-19, targeted re-review)
+
+**Re-review scope**: Review range `b21492b3..4900b582` (3 fix commits: `1b460a17`, `fda4e826`, `4900b582`)
+
+### Fix Validation
+
+| Initial Warning | Status | Evidence |
+|----------------|--------|----------|
+| W-001 (`_judge_label` drift) | **Resolved** | commit `1b460a17`: `resolve_labeled_target` now accepts `context: &Context` and writes `context.set_sync("_judge_label", label)` on successful match (line ~804). Loader comment updated (`loader.rs:909-911`). Spec overlay §3.1.2 documents the write. Unit test `resolve_labeled_target_writes_judge_label_context` confirms `_judge_label` is set to `"outline"` after match. |
+| W-002 (no unit tests) | **Resolved** | commit `fda4e826`: 9 unit tests in `tasks::tests` covering single-label match, multi-label first-match, no-match error, non-Labeled next → WaitForInput, None next → WaitForInput, context write, GoNogo auto-conversion (3 variants). 5 integration tests in `tests/labeled_routing.rs` covering full preset load, hybrid GoNogo+Labeled, orphan label detection, embedded preset regression, no-match no-stall. All 14 tests pass. |
+| W-003 (substring matching fragility) | **Acknowledged (non-blocking)** | commit `1b460a17`: descending-length sort (`candidates.sort_by_key(… Reverse(label.len()))`) mitigates common-word collision (e.g., `"nogo"` checked before `"go"`). Spec overlay §3.1.2 documents substring matching semantics + caveat with descending-length mitigation note. Full normalization (anchored tokens, case-insensitive) deferred to V1.52 P-last WL-A per PM-override. |
+
+### Additional Fix-Wave Improvements (not requested by qc1)
+
+- **Binary→Labeled auto-conversion** (W-QC3-2): `resolve_labeled_target` now handles `GoNogo` edges as labeled edges `("go", "nogo")`, so legacy GoNogo presets are reachable via either routing API.
+- **No-match deterministic fail** (W-QC3-3): returns `Err(GraphError::TaskExecutionFailed)` instead of `WaitForInput`, with `tracing::warn!` logging known labels + judge output excerpt.
+- **Spec overlay** (`preset-conditional-routing.md`): §3.1 updated from placeholder to shipped spec covering wire format (§3.1.1), runtime routing (§3.1.2), backward compatibility, and substring matching caveat.
+- **Plan body**: AC matrix updated with ✅ SHIPPED annotations and additional shipped scope documentation.
+
+### Updated Findings
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (all blocking Warnings resolved) |
+| 🟢 Suggestion | 4 (3 from initial review + N-W001 below) |
+
+#### 🟢 N-W001: `cargo +nightly fmt --all --check` reports formatting diffs in `tests/labeled_routing.rs`
+
+- **Source**: `cargo +nightly fmt --all --check` on `tests/labeled_routing.rs`
+- **Evidence**: 8 formatting diffs (line wrapping only) in the newly added integration test file
+- **Impact**: None — cosmetic only; clippy passes clean; all tests pass
+- **Fix**: Run `cargo +nightly fmt --all` before merge
+
+### Updated Verdict: **Approve**
+
+All three blocking Warnings from the initial review are resolved with verified evidence. The fmt check failure is cosmetic and does not affect correctness. The architecture remains coherent: `_judge_label` is now written and observable, `resolve_labeled_target` has comprehensive test coverage, and substring matching fragility has a documented partial mitigation with deferred full normalization.
