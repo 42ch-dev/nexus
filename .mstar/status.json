@@ -3,47 +3,32 @@
   "updated_at": "2026-06-19T07:52:26Z",
   "plans": [],
   "metadata": {
-    "branch_naming": {
-      "feature": "feature/{ver}-{name}",
-      "fix": "fix/{name}",
-      "plan_topic": "feature/{ver}-{plan-slug}",
-      "iteration_integration": "iteration/{ver}"
-    },
     "integration_branch": null,
+    "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.51",
     "integration_merge_target": "main",
-    "integration_branch_role": "active",
-    "integration_branch_retired": true,
-    "latest_shipped_iteration": "V1.51 (Shipped 2026-06-19 via PR #64)",
-    "latest_shipped_at": "2026-06-19T07:52:26Z",
     "latest_active_iteration": null,
     "latest_active_compass": null,
-    "platform_integration": "paused — local-only until further notice (V1.51 shipped 2026-06-19 via PR #64 at c57b927bbf8621adf7ec59095d274f17f429c9b7; awaiting V1.52 planning)",
+    "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
-    "wave_0_spec": ".mstar/knowledge/specs/concurrency.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/llm-extract.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/novel-writing/quality-loop.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/entity-scope-model.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/cli-spec.md (Normative — V1.51 Shipped), .mstar/knowledge/world-kb-runtime-architecture.md (Normative — V1.51 Shipped)",
     "pre_iteration_hotfix": null,
     "latest_ship": {
       "iteration": "V1.51",
       "compass": "v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1",
-      "integration_branch": "iteration/v1.51",
-      "integration_merge_target": "main",
-      "integration_branch_retired": true,
       "pr": 64,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
       "merged_at": "2026-06-19T07:52:26Z",
+      "merge_commit": "c57b927bbf8621adf7ec59095d274f17f429c9b7",
       "plan_count": 7,
       "plan_count_done": 7,
       "closed_residuals": 8,
       "deferred_to_next": 6,
       "open_at_ship": 0,
       "wire_contracts_changed": false,
-      "profile_b_compaction": "done",
-      "signoff_at": "2026-06-19T06:34:13Z",
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
-      "merge_commit": "c57b927bbf8621adf7ec59095d274f17f429c9b7"
+      "profile_b_compaction": "done"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-06-19 (V1.51 P-last closeout)",
       "total_open": 0,
       "total_deferred": 6,
       "total_resolved": 59,
@@ -58,8 +43,7 @@
       "by_target_active": {
         "V1.51 P-last": 0,
         "V1.52+": 6
-      },
-      "notes": "V1.51 P-last closed 8 residuals via surgical WL-A fixes and overlay promotion; 6 items deferred to V1.52+. cargo clippy --all and cargo +nightly fmt --all clean after changes."
+      }
     }
   },
   "v1_50_iteration_complete": true,

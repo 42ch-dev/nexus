@@ -48,10 +48,11 @@ When an active delivery compass has **two or more** locked implement plans in th
 | **Per plan** | `plans[].working_branch` | Topic branch for that plan’s commits only |
 | **Per plan** | `plans[].merge_target` | Must equal `metadata.integration_branch` for the same iteration |
 
-**Naming** (extends `metadata.branch_naming.feature`):
+**Naming**:
 
-- Integration: `feature/<ver>-<iteration-slug>` (e.g. `feature/v1.27-local-authoring`)
-- Topic: `feature/<ver>-<plan-slug>` where `<plan-slug>` is the plan title slug without date prefix (e.g. `feature/v1.27-narrative-world-writes`)
+- Integration: `iteration/{ver}` (e.g. `iteration/v1.51`)
+- Topic: `feature/{ver}-{plan-slug}` where `<plan-slug>` is the plan title slug without date prefix (e.g. `feature/v1.51-llm-extraction`)
+- Hotfix: `fix/{short-name}` (e.g. `fix/v1.42.1-preset-gate-bypass` per V1.42.1 hotfix pattern)
 
 **PM / implement rules:**
 
