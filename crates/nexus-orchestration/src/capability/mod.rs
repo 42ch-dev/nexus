@@ -174,6 +174,9 @@ impl CapabilityRegistry {
             // P3 (T3): register novel.chapter_transition for chapter
             // status transitions (DB + frontmatter).
             Box::new(builtins::NovelChapterTransition::new()),
+            // V1.52 T-A P2: register essay.project_scaffold for
+            // embedded preset validation.
+            Box::new(builtins::EssayProjectScaffold::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -219,7 +222,9 @@ impl CapabilityRegistry {
             Box::new(builtins::LlmExtract::new()),
             Box::new(builtins::SoulExperienceAggregate),
             Box::new(builtins::NovelProjectScaffold::with_pool(pool.clone())),
-            Box::new(builtins::NovelChapterTransition::with_pool(pool)),
+            Box::new(builtins::NovelChapterTransition::with_pool(pool.clone())),
+            // V1.52 T-A P2: essay.project_scaffold with pool.
+            Box::new(builtins::EssayProjectScaffold::with_pool(pool)),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -235,6 +240,7 @@ impl CapabilityRegistry {
     /// and worker provider are available. Capabilities without runtime deps
     /// are constructed in their default (standalone) form.
     #[must_use]
+    #[allow(clippy::too_many_lines)]
     pub fn with_runtime_deps(deps: &CapabilityRuntimeDeps) -> Self {
         let kb = deps
             .pool
@@ -332,6 +338,14 @@ impl CapabilityRegistry {
                     .as_ref()
                     .map_or_else(builtins::NovelChapterTransition::new, |pool| {
                         builtins::NovelChapterTransition::with_pool(pool.clone())
+                    }),
+            ),
+            // V1.52 T-A P2: essay.project_scaffold with runtime deps.
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::EssayProjectScaffold::new, |pool| {
+                        builtins::EssayProjectScaffold::with_pool(pool.clone())
                     }),
             ),
         ];

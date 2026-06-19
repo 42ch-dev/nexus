@@ -1,0 +1,135 @@
+# Essay Init Preset — interactive grill-me for essay Work bootstrap
+#
+# V1.52 T-A P2: first non-novel profile per essay-profile.md
+# Multi-turn ACP conversation that collects thesis, audience, and structure,
+# then materializes Works/<work_ref>/Outlines/outline.md
+# and Works/<work_ref>/Drafts/draft.md templates.
+#
+# Input variables (passed via core_context / preset.input):
+#   work_id:       Work entity ID being initialized (required)
+#   creator_id:    Creator owning the Work (required)
+#   initial_idea:  Raw user idea text (required)
+#   work_ref:      Slug pre-derived by CLI from --idea / args (required)
+#   title:         Working title pre-collected via CLI / grill-me (required)
+#   world_id:      Optional world binding (string or null)
+#
+# This preset is one-shot (work_init only); it does NOT auto-chain
+# into essay-writing. After completion, the Work is in intake-started state.
+
+preset:
+  id: essay-init
+  version: 1
+  kind: creator
+  description: "Interactive grill-me: bootstrap an essay Work with outline and draft templates"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - essay.project_scaffold
+  run_intents:
+    - work_init
+  initial: init_intro
+  terminal: done
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: in
+      value: [null, essay]
+    - kind: work_field
+      field: workspace_slug
+      op: required
+
+states:
+  - id: init_intro
+    description: "Greet the creator and ask for an essay working title"
+    enter:
+      - kind: inner_graph
+        name: intro_graph
+    exit_when:
+      kind: graph_complete
+    next: collecting_details
+
+  - id: collecting_details
+    description: "Multi-turn ACP conversation to collect thesis, audience, structure, work_ref, and optional World binding"
+    enter:
+      - kind: inner_graph
+        name: details_graph
+    exit_when:
+      kind: graph_complete
+    next: summarizing
+
+  - id: summarizing
+    description: "Recap collected information and confirm before committing"
+    enter:
+      - kind: inner_graph
+        name: summary_graph
+    exit_when:
+      kind: graph_complete
+    next: committing
+
+  - id: committing
+    description: "Invoke essay.project_scaffold to materialize the Work scaffold"
+    enter:
+      - kind: capability
+        name: essay.project_scaffold
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          work_id: "{{preset.input.work_id}}"
+          work_ref: "{{preset.input.work_ref}}"
+          title: "{{preset.input.title}}"
+          world_id: "{{preset.input.world_id}}"
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true
+
+inner_graphs:
+  intro_graph:
+    nodes:
+      - id: ask_working_title
+        kind: acp_prompt
+        template_file: prompts/intake.md
+        tool_policy: auto_grant_read_only
+    output_binding: ask_working_title.text
+
+  details_graph:
+    nodes:
+      - id: collect_title
+        kind: acp_prompt
+        template_file: prompts/collect-title.md
+        tool_policy: auto_grant_read_only
+      - id: collect_thesis
+        kind: acp_prompt
+        depends_on: [collect_title]
+        template_file: prompts/collect-thesis.md
+        tool_policy: auto_grant_read_only
+      - id: collect_audience
+        kind: acp_prompt
+        depends_on: [collect_thesis]
+        template_file: prompts/collect-audience.md
+        tool_policy: auto_grant_read_only
+      - id: collect_structure
+        kind: acp_prompt
+        depends_on: [collect_audience]
+        template_file: prompts/collect-structure.md
+        tool_policy: auto_grant_read_only
+      - id: collect_work_ref
+        kind: acp_prompt
+        depends_on: [collect_structure]
+        template_file: prompts/collect-work-ref.md
+        tool_policy: auto_grant_read_only
+      - id: collect_world
+        kind: acp_prompt
+        depends_on: [collect_work_ref]
+        template_file: prompts/collect-world.md
+        tool_policy: auto_grant_read_only
+    output_binding: collect_world.text
+
+  summary_graph:
+    nodes:
+      - id: confirm_summary
+        kind: acp_prompt
+        template_file: prompts/summary.md
+        tool_policy: auto_grant_read_only
+    output_binding: confirm_summary.text

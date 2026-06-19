@@ -38,7 +38,7 @@
     },
     {
       "plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto",
-      "title": "T-A P1 — World KB CLI surface consolidation + --auto happy path",
+      "title": "T-A P1 \u2014 World KB CLI surface consolidation + --auto happy path",
       "status": "Done",
       "started_at": "2026-06-19T12:30:00Z",
       "done_at": "2026-06-19T18:00:00Z",
@@ -58,7 +58,7 @@
     {
       "plan_id": "2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile",
       "title": "T-A P2 \u2014 Work\u2192KeyBlock provenance + essay profile",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "agents": [
         "@fullstack-dev",
@@ -790,7 +790,7 @@
         "owner": "@fullstack-dev or @product-manager",
         "target": "V1.52+",
         "target_date": "V1.52+",
-        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan \u00a75 Completion)",
         "note": "Future hygiene may consolidate; out of T-B P0 scope. PM tracked for V1.51+ backlog.",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
@@ -811,8 +811,13 @@
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan \u00a75 Completion)",
         "note": "KeyBlocks are World-scoped (entity-scope-model \u00a75.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model \u00a71.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode.",
         "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
-        "lifecycle": "deferred",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "lifecycle": "resolved",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope.",
+        "resolution": {
+          "plan_id": "2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile",
+          "commit": "pending",
+          "summary": "Added source_work_id, source_chapter, source_provenance_kind to kb_key_blocks; updated adopt flow to populate from extract job context"
+        }
       }
     ],
     "2026-06-18-v1.50-cron-review-staggering": [
@@ -1262,7 +1267,7 @@
       },
       {
         "id": "R-V151Q3-W001",
-        "title": "Two parallel LLM→KbCandidate paths (extract_kb_candidates_for_review + LlmExtractTask::evaluate) — consider unified entry",
+        "title": "Two parallel LLM\u2192KbCandidate paths (extract_kb_candidates_for_review + LlmExtractTask::evaluate) \u2014 consider unified entry",
         "severity": "low",
         "source": "qc3 (performance/reliability) W-001",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs vs tasks/mod.rs",
@@ -1270,7 +1275,7 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
-        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md \u00a7Warnings",
         "note": "Non-blocking per qc3 reviewer; both paths tested; unify at P-last or V1.51+ refactor.",
         "lifecycle": "resolved",
         "_plan_id": "2026-06-18-v1.51-llm-extraction",
@@ -1280,7 +1285,7 @@
       },
       {
         "id": "R-V151Q3-W002",
-        "title": "WorkerUnavailable empty-vec contract — caller must handle gracefully (heuristic fallback OK; consider explicit None check)",
+        "title": "WorkerUnavailable empty-vec contract \u2014 caller must handle gracefully (heuristic fallback OK; consider explicit None check)",
         "severity": "low",
         "source": "qc3 (performance/reliability) W-002",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (extract_via_llm WorkerUnavailable path)",
@@ -1288,7 +1293,7 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 T-A P0",
         "target_date": "V1.52 T-A P0",
-        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-llm-extraction/qc3.md \u00a7Warnings",
         "note": "Non-blocking per qc3 reviewer; contract documented; PM awareness note.",
         "lifecycle": "resolved",
         "_plan_id": "2026-06-18-v1.51-llm-extraction",
@@ -1381,7 +1386,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
         "deferral_note": "T-A P0 tri-review verdict Approve; 11 Suggestions carry-forward to V1.52 P-last WL-A."
@@ -1395,7 +1400,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1408,7 +1413,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1421,7 +1426,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1434,20 +1439,20 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
       {
         "id": "R-V152TA-S006",
-        "title": "Outline 五问 gate observability: info-log on NOGO with dimension scores (qc3 S-001)",
+        "title": "Outline \u4e94\u95ee gate observability: info-log on NOGO with dimension scores (qc3 S-001)",
         "severity": "low",
         "source": "qc3 (performance/reliability) S-001",
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (outline_five_q_check)",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1460,7 +1465,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1473,7 +1478,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1486,7 +1491,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1499,7 +1504,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       },
@@ -1512,7 +1517,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
       }
@@ -1527,10 +1532,10 @@
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md \u00a7Warnings",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
-        "closure_note": "T-B P0 fix-wave (commit 1b460a17): _judge_label context key now written by resolve_labeled_target on successful label match (mirror _judge_result pattern); spec overlay preset-conditional-routing.md §3.1 updated to document the actual context key.",
+        "closure_note": "T-B P0 fix-wave (commit 1b460a17): _judge_label context key now written by resolve_labeled_target on successful label match (mirror _judge_result pattern); spec overlay preset-conditional-routing.md \u00a73.1 updated to document the actual context key.",
         "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, 4900b582)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
@@ -1543,7 +1548,7 @@
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md \u00a7Warnings",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
         "closure_note": "T-B P0 fix-wave (commits 1b460a17 + fda4e826): added tasks::tests::labeled module with 9 resolve_labeled_target unit tests covering single-label, multi-label first-match (descending-length sort), no-match (deterministic Err per W-004), malformed judge output, and orphan label detection.",
@@ -1555,14 +1560,14 @@
         "title": "Plan scope drift: 4 of stated ACs unmet (qc3 W-QC3-2; blocking)",
         "severity": "medium",
         "source": "qc3 (performance/reliability) W-QC3-2",
-        "scope": ".mstar/plans/2026-06-19-v1.52-n-way-gonogo-routing.md + implementation files (binary→Labeled auto-conversion, _judge_label context write, label coverage/orphan-label validation, named test modules)",
+        "scope": ".mstar/plans/2026-06-19-v1.52-n-way-gonogo-routing.md + implementation files (binary\u2192Labeled auto-conversion, _judge_label context write, label coverage/orphan-label validation, named test modules)",
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md \u00a7Warnings",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
-        "closure_note": "T-B P0 fix-wave (commits 1b460a17 + fda4e826 + 4900b582): binary→Labeled auto-conversion implemented in resolve_labeled_target (legacy GoNogo edges treated as labeled with go/nogo labels); _judge_label context write implemented (R-V152TB-W001); orphan-label detection at LOAD time already shipped (qc3 W-QC3-2 runtime coverage reframed as tracing::warn! per W-004); named test module tasks::tests::labeled + tests/labeled_routing.rs added; plan body AC3/4/5 updated to reflect shipped scope.",
+        "closure_note": "T-B P0 fix-wave (commits 1b460a17 + fda4e826 + 4900b582): binary\u2192Labeled auto-conversion implemented in resolve_labeled_target (legacy GoNogo edges treated as labeled with go/nogo labels); _judge_label context write implemented (R-V152TB-W001); orphan-label detection at LOAD time already shipped (qc3 W-QC3-2 runtime coverage reframed as tracing::warn! per W-004); named test module tasks::tests::labeled + tests/labeled_routing.rs added; plan body AC3/4/5 updated to reflect shipped scope.",
         "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, fda4e826, 4900b582)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
@@ -1575,23 +1580,23 @@
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md \u00a7Warnings",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
-        "closure_note": "T-B P0 fix-wave (commit 1b460a17): resolve_labeled_target no-match now returns Err(GraphError::TaskExecutionFailed(...)) with diagnostic info (known_labels + judge_output_excerpt). Cannot add new variant to external graph-flow crate's NextAction enum; Err with structured diagnostic is deterministic branch fail instead of silent WaitForInput stall. tracing::warn! at the orchestrator layer surfaces the no-match case in observability. Spec overlay preset-conditional-routing.md §3.1 documents the new behavior.",
+        "closure_note": "T-B P0 fix-wave (commit 1b460a17): resolve_labeled_target no-match now returns Err(GraphError::TaskExecutionFailed(...)) with diagnostic info (known_labels + judge_output_excerpt). Cannot add new variant to external graph-flow crate's NextAction enum; Err with structured diagnostic is deterministic branch fail instead of silent WaitForInput stall. tracing::warn! at the orchestrator layer surfaces the no-match case in observability. Spec overlay preset-conditional-routing.md \u00a73.1 documents the new behavior.",
         "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commits 1b460a17, 4900b582)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       },
       {
         "id": "R-V152TB-W005",
-        "title": "New Labeled code paths entirely untested in nexus-orchestration (qc3 W-QC3-1; blocking — plan T3/T5 TDD contract)",
+        "title": "New Labeled code paths entirely untested in nexus-orchestration (qc3 W-QC3-1; blocking \u2014 plan T3/T5 TDD contract)",
         "severity": "medium",
         "source": "qc3 W-QC3-1",
         "scope": "crates/nexus-orchestration/src/preset/loader.rs + validation.rs + tasks/mod.rs (Labeled code path tests)",
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md \u00a7Warnings",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
         "closure_note": "T-B P0 fix-wave (commits 1b460a17 + fda4e826): named test module tasks::tests::labeled (9 unit tests) + integration tests in tests/labeled_routing.rs (5 tests covering preset load+execute, hybrid GoNogo+Labeled precedence, orphan label detection, 6-embedded-preset regression). Total Labeled code path test coverage now spans: loader, validator, tasks/mod.rs (resolve_labeled_target), and all embedded presets.",
@@ -1607,7 +1612,7 @@
         "decision": "defer",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md \u00a7Warnings",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
         "deferral_note": "T-B P0 fix-wave partially mitigated via descending-length sort (commit 1b460a17); full hardening (anchored label tokens, normalization) deferred to V1.52 P-last WL-A per qc1 explicit non-blocking classification."
@@ -1621,24 +1626,24 @@
         "decision": "defer",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md \u00a7Warnings",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
         "deferral_note": "Documentation hardening only; runtime path uses resolve_labeled_target (not add_edge). Doc comment is the only signal; deferred to V1.52 P-last WL-A."
       },
       {
         "id": "R-V152TB-W008",
-        "title": "Unbounded label count + O(N×M) substring scan (qc3 W-QC3-5; non-blocking — typical N=2-5 sub-millisecond)",
+        "title": "Unbounded label count + O(N\u00d7M) substring scan (qc3 W-QC3-5; non-blocking \u2014 typical N=2-5 sub-millisecond)",
         "severity": "low",
         "source": "qc3 W-QC3-5",
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs (resolve_labeled_target substring loop)",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 P-last WL-A",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md \u00a7Warnings",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
-        "deferral_note": "Sub-millisecond at typical N=2-5; pathological N=1000 with 10KB judge output ≈10ms/fire. Performance hardening deferred to V1.52 P-last WL-A."
+        "deferral_note": "Sub-millisecond at typical N=2-5; pathological N=1000 with 10KB judge output \u224810ms/fire. Performance hardening deferred to V1.52 P-last WL-A."
       },
       {
         "id": "R-V152TB-R1",
@@ -1649,10 +1654,10 @@
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-B P0 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Revalidation",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md \u00a7Revalidation",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
-        "closure_note": "PM-Override Accept per .mstar/AGENTS.md Pre-existing claim verification protocol (applied analogously to fix-wave regression). Verification: cargo +nightly fmt --all --check exits 0 post-fix. Mechanical fix (commit 2c223b78): line-wrapping reformatting only, no behavior change. qc3 verdict downgraded Request Changes → Approve via PM-Override.",
+        "closure_note": "PM-Override Accept per .mstar/AGENTS.md Pre-existing claim verification protocol (applied analogously to fix-wave regression). Verification: cargo +nightly fmt --all --check exits 0 post-fix. Mechanical fix (commit 2c223b78): line-wrapping reformatting only, no behavior change. qc3 verdict downgraded Request Changes \u2192 Approve via PM-Override.",
         "closure_evidence": "feature/v1.52-n-way-gonogo-routing (commit 2c223b78)",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing"
       }
@@ -1667,7 +1672,7 @@
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-A P1 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md §Warnings + qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md \u00a7Warnings + qc3.md \u00a7Warnings",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
         "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): added 3 assert_cmd integration tests + 4 unit tests in tests/world_kb_alias.rs + kb.rs covering all 3 forward call sites (list/show/remove). Each test exercises the actual forward path and asserts canonical function was called + result parity.",
@@ -1679,14 +1684,14 @@
         "title": "Error message divergence between legacy and canonical Schema::init failure (qc3 W-002; blocking)",
         "severity": "medium",
         "source": "qc3 (performance/reliability) W-002",
-        "scope": "crates/nexus42/src/commands/creator/kb.rs (legacy error message: \"Failed to open workspace pool: …\") vs crates/nexus42/src/commands/creator/world/kb.rs (canonical error message: \"local database error: …\")",
+        "scope": "crates/nexus42/src/commands/creator/kb.rs (legacy error message: \"Failed to open workspace pool: \u2026\") vs crates/nexus42/src/commands/creator/world/kb.rs (canonical error message: \"local database error: \u2026\")",
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-A P1 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc3.md §Warnings",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc3.md \u00a7Warnings",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
-        "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): kb.rs open_world_pool switched from .map_err(...) to ? operator, triggering From<LocalDbError> for CliError → canonical 'local database error: ...' Display matches world::kb::open_workspace_pool. Regression test verifies canonical format.",
+        "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): kb.rs open_world_pool switched from .map_err(...) to ? operator, triggering From<LocalDbError> for CliError \u2192 canonical 'local database error: ...' Display matches world::kb::open_workspace_pool. Regression test verifies canonical format.",
         "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
         "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
       },
@@ -1699,13 +1704,13 @@
         "decision": "fix",
         "owner": "@fullstack-dev-2",
         "target": "V1.52 T-A P1 fix-wave",
-        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md §Suggestions",
+        "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md \u00a7Suggestions",
         "lifecycle": "resolved",
         "closed_at": "2026-06-19",
         "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): --scope arg doc comment on all 5 kb subcommands (List, Search, Show, Add, Remove) now includes [DEPRECATED] hint pointing to canonical surface + planned removal V1.53. Test asserts hint visible in --help output.",
         "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
         "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
       }
-    ] 
+    ]
   }
 }
