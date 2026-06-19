@@ -16,7 +16,7 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
-use crate::preset::manifest::{EnterAction, ExitWhen, NextTarget, StateDefinition};
+use crate::preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
@@ -624,6 +624,13 @@ pub struct StateCompositeTask {
     registry: Option<std::sync::Arc<CapabilityRegistry>>,
     /// Daemon-side tool dispatch for `nexus.*` host tool actions (DF-47, V1.42 P3).
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
+    /// Merge semantics for states with multiple incoming labeled edges (V1.52 T-B P1).
+    merge_kind: Option<MergeKind>,
+    /// Expected number of incoming labeled edges for merge nodes.
+    ///
+    /// Populated by the loader/graph-builder when wiring the outer graph.
+    /// Used at runtime to evaluate merge conditions (all/any/quorum).
+    expected_incoming: usize,
 }
 
 impl StateCompositeTask {
@@ -643,6 +650,8 @@ impl StateCompositeTask {
             output_bindings: std::collections::HashMap::new(),
             registry: None,
             daemon_tool_dispatch: None,
+            merge_kind: state.merge.clone(),
+            expected_incoming: 0,
         }
     }
 
@@ -687,6 +696,13 @@ impl StateCompositeTask {
         dispatch: std::sync::Arc<dyn crate::capability::DaemonToolDispatch>,
     ) -> Self {
         self.daemon_tool_dispatch = Some(dispatch);
+        self
+    }
+
+    /// Set the expected number of incoming labeled edges for merge tracking (V1.52 T-B P1).
+    #[must_use]
+    pub const fn with_expected_incoming(mut self, count: usize) -> Self {
+        self.expected_incoming = count;
         self
     }
 
@@ -777,6 +793,15 @@ impl StateCompositeTask {
             if judge_reason.contains(label) {
                 // W-001: write matched label to context for observability.
                 context.set_sync("_judge_label", (*label).to_string());
+                // V1.52 T-B P1: record label arrival for merge tracking.
+                // If target is a merge node, _merge_<target_id> accumulates labels.
+                // Non-merge targets ignore this key.
+                let merge_key = format!("_merge_{target}");
+                let mut arrived: Vec<String> = context.get_sync(&merge_key).unwrap_or_default();
+                if !arrived.contains(&(*label).to_string()) {
+                    arrived.push((*label).to_string());
+                }
+                context.set_sync(&merge_key, arrived);
                 return Ok(NextAction::GoTo((*target).to_string()));
             }
         }
@@ -825,6 +850,47 @@ impl Task for StateCompositeTask {
             let response = Some(format!("state '{}': resumed, continuing", self.id));
             tracing::debug!(state_id = %self.id, terminal = self.terminal, "state resumed");
             return Ok(TaskResult::new(response, NextAction::Continue));
+        }
+
+        // 0.5. V1.52 T-B P1: Merge node gate.
+        // If this state has merge semantics, check whether enough incoming
+        // labeled edges have arrived before processing enter actions.
+        if let Some(ref merge_kind) = self.merge_kind {
+            let merge_key = format!("_merge_{}", self.id);
+            let arrived: Vec<String> = context.get(&merge_key).await.unwrap_or_default();
+            let arrived_count = arrived.len();
+
+            let condition_met = match merge_kind {
+                MergeKind::All => arrived_count >= self.expected_incoming,
+                MergeKind::Any => arrived_count >= 1,
+                MergeKind::Quorum { n, .. } => arrived_count >= *n,
+            };
+
+            if !condition_met {
+                let state_id = self.id.clone();
+                tracing::debug!(
+                    state_id = %state_id,
+                    arrived = arrived_count,
+                    expected = self.expected_incoming,
+                    merge_kind = ?merge_kind,
+                    "merge node waiting for more incoming labeled edges"
+                );
+                return Ok(TaskResult::new(
+                    Some(format!(
+                        "merge node '{state_id}': {arrived_count}/{expected} arrivals, waiting",
+                        expected = self.expected_incoming
+                    )),
+                    NextAction::WaitForInput,
+                ));
+            }
+
+            // Merge condition met — clear arrivals for next cycle.
+            context.set(&merge_key, serde_json::Value::Null).await;
+            tracing::info!(
+                state_id = %self.id,
+                arrived = arrived_count,
+                "merge node condition met, advancing"
+            );
         }
 
         // 1. Process enter actions.
@@ -2341,6 +2407,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2387,6 +2454,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2422,6 +2490,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2454,6 +2523,7 @@ mod tests {
             )),
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2485,6 +2555,7 @@ mod tests {
             next: None,
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task =
@@ -2532,6 +2603,7 @@ mod tests {
             next: None,
             terminal: false,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -2902,6 +2974,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -2956,6 +3029,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3002,6 +3076,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3109,6 +3184,7 @@ mod tests {
             next: None,
             terminal: true,
             context_update: None,
+            merge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3176,6 +3252,8 @@ mod tests {
             output_bindings: std::collections::HashMap::new(),
             registry: None,
             daemon_tool_dispatch: None,
+            merge_kind: None,
+            expected_incoming: 0,
         }
     }
 
