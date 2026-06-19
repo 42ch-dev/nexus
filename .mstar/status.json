@@ -22,7 +22,7 @@
     {
       "plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
       "title": "T-A P0 — outline 五问 quality gate + auto-promote high-confidence KB",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "agents": [
         "@fullstack-dev",
@@ -34,7 +34,8 @@
       "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
       "created_at": "2026-06-19T08:30:00Z",
       "qc_dispatched_at": "2026-06-19T08:45:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/"
+      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/",
+      "done_at": "2026-06-19T15:00:00Z"
     },
     {
       "plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto",
@@ -77,7 +78,7 @@
     {
       "plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
       "title": "T-B P0 — N-way GO/NOGO routing",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@fullstack-dev-2",
       "agents": [
         "@fullstack-dev-2",
@@ -89,7 +90,8 @@
       "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
       "created_at": "2026-06-19T08:30:00Z",
       "qc_dispatched_at": "2026-06-19T08:45:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/"
+      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/",
+      "done_at": "2026-06-19T17:00:00Z"
     },
     {
       "plan_id": "2026-06-19-v1.52-multi-branch-merge-semantics",
@@ -113,7 +115,7 @@
     {
       "plan_id": "2026-06-19-v1.52-hygiene-and-closeout",
       "title": "P-last — V1.50/V1.51 carry-forwards + V1.52 QC lows + overlay promotion + Profile B + PR",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@project-manager",
@@ -124,7 +126,8 @@
       "working_branch": "feature/v1.52-hygiene-and-closeout",
       "merge_target": "iteration/v1.52",
       "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z"
+      "created_at": "2026-06-19T08:30:00Z",
+      "started_at": "2026-06-20T12:30:00Z"
     }
   ],
   "metadata": {
