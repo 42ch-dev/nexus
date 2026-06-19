@@ -2238,7 +2238,7 @@ mod tests_fix_d {
     async fn create_work_with_nonexistent_world_id_returns_error() {
         use crate::test_utils;
 
-        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         test_utils::seed_test_creator_and_world(state.pool()).await;
 
@@ -2275,7 +2275,7 @@ mod tests_fix_d {
     async fn create_work_with_other_creators_world_id_returns_error() {
         use crate::test_utils;
 
-        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         test_utils::seed_test_creator_and_world(state.pool()).await;
 
@@ -2404,7 +2404,7 @@ mod tests_fix_d {
     async fn create_work_with_adversarial_world_ids_returns_error() {
         use crate::test_utils;
 
-        let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+        let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         test_utils::seed_test_creator_and_world(state.pool()).await;
 
