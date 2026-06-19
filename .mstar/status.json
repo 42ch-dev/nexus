@@ -115,7 +115,7 @@
     {
       "plan_id": "2026-06-19-v1.52-hygiene-and-closeout",
       "title": "P-last — V1.50/V1.51 carry-forwards + V1.52 QC lows + overlay promotion + Profile B + PR",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@project-manager",
@@ -127,39 +127,36 @@
       "merge_target": "iteration/v1.52",
       "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
       "created_at": "2026-06-19T08:30:00Z",
-      "started_at": "2026-06-20T12:30:00Z"
+      "started_at": "2026-06-20T12:30:00Z",
+      "done_at": "2026-06-20T12:30:00Z"
     }
   ],
   "metadata": {
     "integration_branch": "iteration/v1.52",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.51",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.52",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.52 (Active — implement GO)",
+    "latest_active_iteration": "V1.52 (P-last closeout)",
     "latest_active_compass": "v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO — V1.52 P-1 Done 2026-06-19",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.51",
-      "compass": "v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1",
-      "pr": 64,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
-      "merged_at": "2026-06-19T07:52:26Z",
-      "merge_commit": "c57b927bbf8621adf7ec59095d274f17f429c9b7",
+      "iteration": "V1.52",
+      "compass": "v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1",
+      "merged_at": "2026-06-20T12:30:00Z",
       "plan_count": 7,
       "plan_count_done": 7,
-      "closed_residuals": 8,
-      "deferred_to_next": 6,
-      "open_at_ship": 0,
+      "open_at_ship": 1,
+      "deferred_to_next": 30,
       "wire_contracts_changed": false,
-      "profile_b_compaction": "done"
+      "profile_b_compaction": "pending"
     },
     "tech_debt_summary": {
       "total_open": 0,
-      "total_deferred": 17,
-      "total_resolved": 67,
+      "total_deferred": 30,
+      "total_resolved": 75,
       "total_archived": 4,
       "by_severity_active": {
         "critical": 0,
@@ -169,12 +166,7 @@
         "nit": 0
       },
       "by_target_active": {
-        "V1.52 T-A P0": 0,
-        "V1.52 T-A P1": 1,
-        "V1.52 T-A P2": 1,
-        "V1.52 T-B P1": 0,
-        "V1.52 P-last": 14,
-        "V1.52+": 1
+        "V1.53+": 30
       }
     }
   },
@@ -1736,6 +1728,23 @@
         "closure_note": "T-B P1 fix-wave (commit 3ab67781): changed gate from if let Some(merge_kind) to if expected_incoming > 0 { merge_kind.unwrap_or_default() }. Added test merge_wait_all_default_enforced_when_merge_absent.",
         "closure_evidence": "feature/v1.52-multi-branch-merge-semantics (commit 3ab67781)",
         "_plan_id": "2026-06-19-v1.52-multi-branch-merge-semantics"
+      }
+    ],
+    "2026-06-19-v1.52-hygiene-and-closeout": [
+      {
+        "id": "R-V152-PLAST-001",
+        "title": "V1.52 regression: stage_advance_failure_does_not_apply_non_stage_fields CHECK constraint fails (passes on origin/main; regression introduced by migration 202606190004 works table rebuild)",
+        "severity": "medium",
+        "source": "V1.52 P-last cargo test --all (daemon-runtime test)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (stage_advance_failure_does_not_apply_non_stage_fields); root cause: migration 202606190004_work_profile_essay.sql",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.53",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-19-v1.52-hygiene-and-closeout][R-V152-PLAST-001]",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-19-v1.52-hygiene-and-closeout",
+        "deferral_note": "Pre-existing on V1.52 integration tree (introduced by migration 202606190004). qc3 flagged as collateral; verified passes on origin/main. Deferred to V1.53 hotfix; non-blocking for V1.52 ship.",
+        "note": "WORKAROUND: In migration 202606190004, ensure the CHECK constraint for works.status is preserved exactly as defined in the original works CREATE TABLE. The root cause is the migration rebuilds works table but the new CHECK constraint may differ from the original."
       }
     ]
   }
