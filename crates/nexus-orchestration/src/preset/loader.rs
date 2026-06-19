@@ -639,6 +639,30 @@ fn validate_manifest(
                 }
             }
         }
+
+        // V1.52 T-B P1: validate merge field
+        if let Some(ref merge_kind) = state.merge {
+            match merge_kind {
+                crate::preset::manifest::MergeKind::All
+                | crate::preset::manifest::MergeKind::Any => {
+                    // All and Any are always valid.
+                }
+                crate::preset::manifest::MergeKind::Quorum { n, m } => {
+                    if *n < 1 {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.merge.n"),
+                            error: format!("quorum n must be >= 1, got {n}"),
+                        });
+                    }
+                    if *n > *m {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.merge"),
+                            error: format!("quorum n ({n}) must not exceed m ({m})"),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     // --- WS-E T6: Role validation ---
@@ -880,11 +904,27 @@ fn validate_skill_slug_format(s: &str) -> bool {
 /// code uses `build_wired_outer_graph` which resolves `template_file` paths.
 fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
+    use std::collections::HashMap;
 
     let graph = graph_flow::Graph::new(&manifest.preset.id);
 
+    // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
+    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
     for state in &manifest.states {
-        let task = StateCompositeTask::from_manifest(state);
+        if let Some(crate::preset::manifest::NextTarget::Labeled(edges)) = &state.next {
+            for edge in edges {
+                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
+            }
+        }
+        if let Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) = &state.next {
+            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
+            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
+        }
+    }
+
+    for state in &manifest.states {
+        let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
+        let task = StateCompositeTask::from_manifest(state).with_expected_incoming(incoming);
         graph.add_task(std::sync::Arc::new(task));
     }
 
@@ -934,12 +974,29 @@ pub fn build_wired_outer_graph(
     daemon_tool_dispatch: Option<std::sync::Arc<dyn crate::capability::DaemonToolDispatch>>,
 ) -> graph_flow::Graph {
     use crate::tasks::StateCompositeTask;
+    use std::collections::HashMap;
 
     let graph = graph_flow::Graph::new(&loaded.id);
 
+    // V1.52 T-B P1: pre-compute incoming labeled edge counts for merge nodes.
+    let mut incoming_labeled: HashMap<&str, usize> = HashMap::new();
     for state in &loaded.manifest.states {
+        if let Some(crate::preset::manifest::NextTarget::Labeled(edges)) = &state.next {
+            for edge in edges {
+                *incoming_labeled.entry(edge.target.as_str()).or_insert(0) += 1;
+            }
+        }
+        if let Some(crate::preset::manifest::NextTarget::GoNogo(gonogo)) = &state.next {
+            *incoming_labeled.entry(gonogo.go.as_str()).or_insert(0) += 1;
+            *incoming_labeled.entry(gonogo.nogo.as_str()).or_insert(0) += 1;
+        }
+    }
+
+    for state in &loaded.manifest.states {
+        let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
         let mut task = StateCompositeTask::from_manifest(state)
             .with_resolved_template(&loaded.id)
+            .with_expected_incoming(incoming)
             .with_engine(engine.clone())
             .with_inner_graphs(loaded.inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())
