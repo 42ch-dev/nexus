@@ -222,9 +222,9 @@ async fn with_runtime_deps_registers_all_llm_capabilities() {
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
-    // Same 21 builtins as with_builtins() — proves with_runtime_deps is a
+    // Same 22 builtins as with_builtins() + essay.scaffold from V1.52 T-A P2 —
     // drop-in replacement for the production registry construction.
-    assert_eq!(registry.len(), 21, "registry should have 21 builtins");
+    assert_eq!(registry.len(), 22, "registry should have 22 builtins (21 V1.51 + 1 essay.scaffold from V1.52 T-A P2)");
 
     // LLM-backed caps must all be present.
     for name in [

@@ -41,8 +41,7 @@ CREATE TABLE works_new (
     runtime_lock_holder TEXT,
     runtime_lock_acquired_at TEXT,
     lineage_from_work_id TEXT,
-    schedule_json TEXT,
-    FOREIGN KEY (world_id) REFERENCES narrative_worlds (world_id)
+    schedule_json TEXT
 );
 
 -- Step 2: Copy data from old table to new table
@@ -67,6 +66,8 @@ CREATE INDEX IF NOT EXISTS works_auto_chain_resume
     ON works (auto_chain_enabled, auto_chain_interrupted, status);
 CREATE INDEX IF NOT EXISTS idx_works_schedule_json
     ON works (schedule_json);
+CREATE INDEX IF NOT EXISTS idx_works_schedule_json_nonempty
+    ON works (schedule_json) WHERE schedule_json IS NOT NULL;
 
 -- New V1.52 indexes for faster lookups
 CREATE INDEX IF NOT EXISTS idx_works_creator_id
