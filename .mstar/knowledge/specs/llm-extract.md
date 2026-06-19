@@ -7,7 +7,7 @@
 | **Status** | Normative — V1.51 Shipped (T-A P0). The `nexus.llm.extract` capability, `LlmExtractTask`, and the `kb_extract_jobs` payload extension landed together; review-time extraction in `novel-review-master` swapped from the V1.50 heuristic to this LLM pathway (closes `R-V150KBED-01`). |
 | **Document class** | Master |
 | **Scope** | `nexus.llm.extract` capability contract; `LlmExtractTask` lifecycle; `kb_extract_jobs.proposed_payload` LLM extension; worker-pool reuse; integration with `novel-review-master` review-time extraction |
-| **Last updated** | 2026-06-18 — V1.51 T-A P0 implementation |
+| **Last updated** | 2026-06-19 — V1.51 T-A P0 closeout; status confirmed Normative |
 | **Related** | [orchestration-engine.md](./orchestration-engine.md) §4.4.1 (`LlmJudgeTask` sibling), [entity-scope-model.md](./entity-scope-model.md) §5.5 (World KB promotion), [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md) §5.5, [cli-spec.md](./cli-spec.md) §6.2G, [local-db-schema.md](./local-db-schema.md) §4.1.2 |
 
 This Master is normative for the `nexus.llm.extract` capability surface. It is a

@@ -1,6 +1,6 @@
 # Concurrency — Master Specification
 
-**Status**: Draft (V1.51 T-B P0)
+**Status**: Normative — V1.51 Shipped (T-B P0/P1 advisory lock + heartbeat + OCC)
 **Document class**: Master
 **Created**: 2026-06-18
 **Scope**: Multi-writer concurrency control for the local-first daemon + CLI model — advisory file lock + heartbeat + zombie detection + CLI integration.
