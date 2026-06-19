@@ -4,11 +4,8 @@
 //! Works directory) gracefully skips the file lock and does not regress
 //! existing cron supervisor behavior.
 
-use std::sync::Arc;
-
 use nexus_local_db::works::{self, WorkRecord};
 use sqlx::SqlitePool;
-use tokio::sync::Notify;
 
 async fn test_pool() -> SqlitePool {
     let db = tempfile::Builder::new()
@@ -76,7 +73,7 @@ async fn cron_fires_without_workspace_dir_gracefully_skips_file_lock() {
 
     // Pass None as workspace_dir — file lock should be skipped (no Works/ dir).
     // A tempdir with no Works subdirectory produces the same effect.
-    let ws_dir = tempfile::tempdir().unwrap().into_path();
+    let ws_dir = tempfile::tempdir().unwrap().keep();
     let summary = nexus_orchestration::schedule::cron_supervisor::evaluate_cron_fires(
         &pool,
         Some(&ws_dir),
@@ -102,7 +99,7 @@ async fn run_one_tick_with_workspace_dir_handles_file_lock() {
         .unwrap();
 
     // Create an empty workspace dir (no Works/ subdir → file lock skipped).
-    let ws_dir = tempfile::tempdir().unwrap().into_path();
+    let ws_dir = tempfile::tempdir().unwrap().keep();
 
     // Build a minimal supervisor for the tick.
     let ctx = nexus_local_db::open_pool(&ws_dir.join("test_state.db"))
@@ -141,7 +138,7 @@ async fn file_lock_blocks_cron_fire_when_held() {
         .unwrap();
 
     // Create a workspace directory with a Works/<work_ref>/ subdirectory.
-    let ws_dir = tempfile::tempdir().unwrap().into_path();
+    let ws_dir = tempfile::tempdir().unwrap().keep();
     let work_ref = format!("cronlk-{}", work.work_id);
     let work_dir = ws_dir.join("Works").join(&work_ref);
     std::fs::create_dir_all(&work_dir).unwrap();

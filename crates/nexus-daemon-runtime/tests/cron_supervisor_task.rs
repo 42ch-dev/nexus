@@ -80,7 +80,8 @@ async fn run_one_tick_enqueues_and_admits() {
         .unwrap();
 
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
-    cron_supervisor::run_one_tick(&pool, &supervisor).await;
+    let workspace_tmp = tempfile::tempdir().unwrap();
+    cron_supervisor::run_one_tick(&pool, workspace_tmp.path(), &supervisor).await;
 
     let status: String = sqlx::query_scalar(
         "SELECT status FROM creator_schedules \
@@ -115,7 +116,8 @@ async fn run_one_tick_no_match_is_noop() {
         .unwrap();
 
     let supervisor = Arc::new(ScheduleSupervisor::new(pool.clone()));
-    cron_supervisor::run_one_tick(&pool, &supervisor).await;
+    let workspace_tmp = tempfile::tempdir().unwrap();
+    cron_supervisor::run_one_tick(&pool, workspace_tmp.path(), &supervisor).await;
 
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM creator_schedules WHERE work_id = 'wrk_daemon_idle'",

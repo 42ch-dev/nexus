@@ -312,7 +312,7 @@ pub async fn kb_edit(
     let mut block = store
         .get_key_block(block_id)
         .await
-        .map_err(|e| map_kb_store_error("show", block_id, world_id, e))?;
+        .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
     let new_body: KeyBlockBody = serde_json::from_str(body_str).map_err(|e| {
@@ -365,7 +365,7 @@ pub async fn kb_delete(
     let block = store
         .get_key_block(block_id)
         .await
-        .map_err(|e| map_kb_store_error("show", block_id, world_id, e))?;
+        .map_err(|e| map_kb_store_error("load", block_id, world_id, e))?;
     require_block_in_world(&block, world_id, block_id)?;
 
     if !yes && !confirm_delete(block_id, world_id) {

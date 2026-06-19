@@ -218,6 +218,11 @@ pub fn try_acquire(work_dir: &Path, holder_name: &str) -> Result<FileLockGuard, 
         let now = now_ms();
         let (holder_pid, holder_name, expires_at_ms) =
             metadata.unwrap_or_else(|| (0, "unknown".to_string(), 0));
+        // NB: We intentionally do NOT mark a parse failure as stale here. If
+        // another live process holds the flock, the lock is genuinely held;
+        // reporting holder_name="unknown" with stale=false keeps the conflict
+        // information conservative. The 60 s heartbeat window absorbs the small
+        // risk of a partially-written metadata file (R-V151Q1-09).
         let stale =
             expires_at_ms > 0 && now.saturating_sub(expires_at_ms) > STALE_THRESHOLD_SECS * 1000;
 

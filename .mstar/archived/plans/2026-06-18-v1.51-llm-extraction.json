@@ -1,0 +1,21 @@
+{
+  "id": "2026-06-18-v1.51-llm-extraction",
+  "title": "T-A P0 \u2014 nexus.llm.extract capability + heuristic\u2192LLM swap (closes R-V150KBED-01)",
+  "file": ".mstar/plans/2026-06-18-v1.51-llm-extraction.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "merged_at": "2026-06-18",
+  "merge_commit": "ae7dfce0",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev",
+    "@architect",
+    "@qa-engineer"
+  ],
+  "working_branch": "feature/v1.51-llm-extraction",
+  "merge_target": "iteration/v1.51",
+  "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+  "task_category": "logic",
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T15:00:00+08:00"
+}

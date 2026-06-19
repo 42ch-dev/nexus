@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.51 Active (prepare GO 2026-06-18)** · **V1.50 Shipped** (2026-06-17, PR #63 @ `4db0a37b`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.51 Shipped** (2026-06-19, P-last closeout) · **V1.50 Shipped** (2026-06-17, PR #63 @ `4db0a37b`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.50 Shipped (2026-06-17, P-last closeout, PR #63 @ `4db0a37b`); V1.51 harness prepare in progress (P-1 GO target 2026-06-18; S-B dual track: T-A Full KB closure + T-B Multi-writer concurrency; 7 plans + 6 spec overlays + status/tracker registered)
+**Status**: V1.51 Shipped (2026-06-19, P-last closeout) — V1.50 residuals R-V150KBED-01/08 + R-V149P1-01 advisory-lock portion resolved; V1.50 Shipped (2026-06-17, P-last closeout, PR #63 @ `4db0a37b`); V1.52+ planning not started.
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-18 (V1.51 harness prepare — compass + 7 plans + 6 spec overlays + status registered; closes R-V150KBED-01/08 + R-V149P1-01 advisory-lock note)
+**Last updated**: 2026-06-19 (V1.51 P-last closeout — 8 WL-A surgical fixes, 6 spec overlays promoted to Normative, 7 plans archived; V1.51 residuals resolved)
 
 ---
 
@@ -122,15 +122,13 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 **V1.42 P0 defer carry-forward** (from V1.41 P-last hygiene): R-V140P0-S3, R-V140P1-S6, R-V140P2-S2, R-V140P3-S1/S2/S3, R-V140P4-INFRA — see [2026-06-11-v1.42-runtime-lock-and-hygiene.md](../plans/2026-06-11-v1.42-runtime-lock-and-hygiene.md) §2.
 
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-18**; `tech_debt_summary.updated_at` **2026-06-18 (V1.51 harness prepare)**; **0 open** at V1.50 ship close; **8 deferred** to V1.51+ / V1.51 plans; legacy V1.30–V1.45 rows **archived** to `.mstar/archived/residuals/`). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-19**; `tech_debt_summary.updated_at` **2026-06-19 (V1.51 P-last closeout)**; **0 open** at V1.51 ship close; legacy V1.30–V1.51 rows **archived** to `.mstar/archived/residuals/`). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.50 carry-forward → V1.51 plans | 3 | `2026-06-18-v1.50-kb-auto-promotion` (R-V150KBED-01 → T-A P0), `2026-06-18-v1.50-kb-refreshable-scan` (R-V150KBED-08 → T-A P1), `2026-06-17-v1.49-narrative-indexes` (R-V149P1-01 advisory-lock portion → T-B P0) |
-| V1.50 P-last T2 WL-A defer bucket → V1.51+ | 1 | `2026-06-18-v1.50-hygiene-and-closeout` (R-V150-WLA-DEFER-V1.51; selective fix 8-10 in P-last; remainder V1.52+) |
-| V1.50 deferred (other) → V1.51+ | 4 | `2026-06-18-v1.50-kb-editor-cli` (R-V150KBED-01 archived CLI surface consolidation), `2026-06-18-v1.50-cron-brainstorm-write` (R-V150P1CRONBW-01 novel-write preset absent; deferred T-A P2 → V1.51+), `2026-06-18-v1.50-cron-review-staggering` (R-V150P2CRONRV-03 plan text drift; P-last) |
-| **Total open at V1.50 close** | **0** | See `metadata.tech_debt_summary.total_open` |
-| **Total deferred to V1.51** | **8** | See `metadata.tech_debt_summary.total_deferred` |
+| V1.51 P-last WL-A defer bucket | 0 | `2026-06-18-v1.51-hygiene-and-closeout` (8 fixed; remainder deferred to V1.52+ if any) |
+| **Total open at V1.51 close** | **0** | See `metadata.tech_debt_summary.total_open` |
+| **Total deferred to V1.52+** | **0** | See `metadata.tech_debt_summary.total_deferred` |
 
 **Closed / historical residuals**
 

@@ -2076,7 +2076,7 @@ mod tests {
     // ── V1.51 T-A P0: LlmExtractTask — golden input → golden Vec<KbCandidate> ──
 
     /// Mock worker that returns a fixed JSON candidates payload for
-    /// `nexus.llm.extract`. Used by the LlmExtractTask hermetic tests.
+    /// `nexus.llm.extract`. Used by the `LlmExtractTask` hermetic tests.
     struct MockExtractProvider {
         response: String,
     }

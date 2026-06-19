@@ -61,7 +61,7 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | Document | Class | Status |
 | --- | --- | --- |
 | [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active |
-| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1 (taxonomy + canonical_name grammar) |
+| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1 (taxonomy + `canonical_name` grammar); **V1.51 Shipped** §5.5.6 LLM pathway |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative |
 
@@ -73,13 +73,14 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | --- | --- | --- |
 | [daemon-runtime.md](daemon-runtime.md) | Master | Normative |
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
+| [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 
 ### CLI product surface
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [cli-spec.md](cli-spec.md) | Master | Normative — V1.40 Shipped §6.2G + **Draft V1.46 overlay** (§6.2E superseded — delete in P1) |
+| [cli-spec.md](cli-spec.md) | Master | **Normative — V1.51 Shipped** — V1.40 §6.2G world binding + **V1.51** `kb adopt`/`rescan`/`pending --missing-only` (T-A P0/P1/P2); legacy V1.46 overlay fully merged |
 | [cli-command-ia.md](cli-command-ia.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 | [creator-centric-entry-model.md](creator-centric-entry-model.md) | Master (Shipped V1.35) | Shipped (V1.35) |
 

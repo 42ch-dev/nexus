@@ -517,13 +517,11 @@ impl ScheduleSupervisor {
             // `kb_extract_jobs` rows with `promotion_status='pending'`. The
             // author confirms via `creator world kb adopt`.
             //
-            // // COORDINATE-WITH-T-A-P2
-            // T-A P2 (`2026-06-18-v1.50-cron-review-staggering`) wires the
-            // per-Work `review` cron role that enqueues these schedules on a
-            // schedule. Until T-A P2 lands, this hook still fires for any
-            // `novel-review-master` schedule reaching the supervisor (V1.39
-            // stale-findings path or manual `creator run`), so the
-            // extraction pipeline is independently testable.
+            // T-A P2 (`2026-06-18-v1.50-cron-review-staggering`) wired the
+            // per-Work `review` cron role that enqueues these schedules. The
+            // hook fires for any `novel-review-master` schedule reaching the
+            // supervisor (cron-fired, V1.39 stale-findings path, or manual
+            // `creator run`), so the extraction pipeline remains testable.
             // Best-effort + non-blocking: errors are logged and do NOT fail
             // the terminal transition (mirrors the review-findings hook).
             if schedule_row

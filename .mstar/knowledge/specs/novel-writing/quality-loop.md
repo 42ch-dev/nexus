@@ -1,9 +1,9 @@
 # Novel Quality Loop — Normative Specification v1
 
-**Status**: Shipped (V1.49 — findings lifecycle F6 integrated)  
+**Status**: Normative — V1.51 Shipped (findings lifecycle F6 + KB closure overwrites/supersedes integrated)  
 **Document class**: Feature line (quality-loop supplement)  
 **Created**: 2026-06-09  
-**Last updated**: 2026-06-17 (V1.49 P-last — findings lifecycle F6 folded from overlay)  
+**Last updated**: 2026-06-19 (V1.51 P-last — findings lifecycle F6 marked Normative; no runtime change)  
 **Scope**: Local-first quality loop for `work_profile: novel` — findings, review routing, rules, logs, 96h escalation, on-demand audit cross-refs  
 **Coordinates with**:
 

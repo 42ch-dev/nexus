@@ -210,7 +210,13 @@
     "2026-06-18-v1.50-kb-editor-cli",
     "2026-06-18-v1.50-kb-auto-promotion",
     "2026-06-18-v1.50-kb-refreshable-scan",
-    "2026-06-18-v1.50-hygiene-and-closeout"
+    "2026-06-18-v1.50-hygiene-and-closeout",
+    "2026-06-18-v1.51-harness-docs-prepare",
+    "2026-06-18-v1.51-llm-extraction",
+    "2026-06-18-v1.51-cross-chapter-rescan",
+    "2026-06-18-v1.51-missing-kb-detection",
+    "2026-06-18-v1.51-advisory-lock",
+    "2026-06-18-v1.51-per-row-occ"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -264,8 +270,8 @@
         "P0_findings_lifecycle": "F6 extended findings lifecycle (6 states; transition state machine; actionable consumer filter; W-1 typed error split: IllegalTransition vs InvalidEnum)",
         "P1_narrative_indexes": "F###/E### narrative index runtime (parser, serializer, id allocation, outline promotion; W-1+W-2 typed ForeshadowingStatus enum + explicit F### token requirement)",
         "P2_author_desk_ux": "Author desk UX (creator works intake [<work_id>]; reconcile-chapters --dry-run/--yes; R-V147P1-01 + R-V148P4-W2 closed; W-1 clap help text accuracy)",
-        "P3_serial_reliability": "Serial reliability (reconcile lock optimization — compute_reconcile_diff unlocked + apply_reconcile_diff under lock; creator works findings prune CLI + --dry-run; review-report path-traversal guard; R-V148P4-W3 + R-V148P0-W1 closed)",
-        "P-last_hygiene": "WL-A hygiene (10 V1.46 lows closed) + overlay promotion (3 overlays folded into masters: findings-lifecycle → quality-loop.md §2; narrative-indexes → workflow-profile.md §4.6 with 5-col reconciliation per R-V149P1-01; author-experience.md §8) + tracker V1.49 snapshot"
+        "P3_serial_reliability": "Serial reliability (reconcile lock optimization \u2014 compute_reconcile_diff unlocked + apply_reconcile_diff under lock; creator works findings prune CLI + --dry-run; review-report path-traversal guard; R-V148P4-W3 + R-V148P0-W1 closed)",
+        "P-last_hygiene": "WL-A hygiene (10 V1.46 lows closed) + overlay promotion (3 overlays folded into masters: findings-lifecycle \u2192 quality-loop.md \u00a72; narrative-indexes \u2192 workflow-profile.md \u00a74.6 with 5-col reconciliation per R-V149P1-01; author-experience.md \u00a78) + tracker V1.49 snapshot"
       },
       "residual_lifecycle": {
         "archived_in_v149": [
@@ -300,7 +306,7 @@
         ],
         "open_v150_count": 7
       },
-      "wire_contract_changes": "None (per compass §0.1 #8)",
+      "wire_contract_changes": "None (per compass \u00a70.1 #8)",
       "carry_forward_v150": "7 residuals: 1 CLI gap (R-V149P0-01), 1 overlay reconciliation (R-V149P1-01), 1 flake (R-V149P1-02), 4 V1.46 lows (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2)",
       "pr": "PR #62",
       "note": "Merged to main at d160379ff5a6 via PR #62 on 2026-06-17. Integration branch iteration/v1.49 retired."
@@ -321,11 +327,47 @@
       "note": "V1.50 P-last T1-T7 Done. T1-T2 (carry-forwards + WL-A 16 residuals closed) + T3 (overlay promotion) + T4 (Profile B compaction) + T5 (tech_debt rollup) + T6 (PR #63) + T7 (PM signoff). Merged to main at 4db0a37b on 2026-06-17 via PR #63. Integration branch iteration/v1.50 to be retired per mstar-branch-worktree.",
       "pr_url": "https://github.com/42ch-dev/nexus/pull/63",
       "merge_commit": "4db0a37b3e6a01836d8d90f968c75bcdd89754fc"
+    },
+    "v1.51": {
+      "version": "v1.51",
+      "name": "KB Closure & Multi-Writer Concurrency",
+      "compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+      "shipped_at": "2026-06-19",
+      "merge_commit": "TBD",
+      "plan_ids": [
+        "2026-06-18-v1.51-harness-docs-prepare",
+        "2026-06-18-v1.51-llm-extraction",
+        "2026-06-18-v1.51-cross-chapter-rescan",
+        "2026-06-18-v1.51-missing-kb-detection",
+        "2026-06-18-v1.51-advisory-lock",
+        "2026-06-18-v1.51-per-row-occ"
+      ],
+      "highlights": {
+        "T-A_P0": "nexus.llm.extract capability + heuristic\u2192LLM swap (closes R-V150KBED-01)",
+        "T-A_P1": "creator kb rescan --work <ref> cross-chapter reconciliation (closes R-V150KBED-08)",
+        "T-A_P2": "finalize-time missing-KB detection + creator world kb pending --missing-only",
+        "T-B_P0": "Works/<work_ref>/.lock advisory lock + heartbeat + zombie detection (closes R-V149P1-01 advisory-lock note)",
+        "T-B_P1": "per-row OCC on kb_extract_jobs + novel_pool_entries; E_VERSION/E_LOCK stable CLI codes",
+        "P-last": "8 WL-A surgical fixes; 6 spec overlays promoted to Normative \u2014 V1.51 Shipped; Profile B compaction; tech debt rollup; PR to main"
+      },
+      "residual_lifecycle": {
+        "archived_in_v151": [
+          "R-V150KBED-01",
+          "R-V150KBED-08",
+          "R-V149P1-01",
+          "R-V150P1CRONBW-01"
+        ],
+        "open_v152_carry_forward": [],
+        "open_v152_count": 0
+      },
+      "wire_contract_changes": "None (per compass \u00a70.1 #8)",
+      "pr": "TBD",
+      "note": "Merged to main via PR TBD on 2026-06-19. Integration branch iteration/v1.51 to be retired."
     }
   },
   "metadata": {
     "last_updated": "2026-06-17 (V1.50 shipped at 4db0a37b via PR #63)",
-    "v1_47_iteration_complete": "yes — ready for PR to main",
-    "v1_50_iteration_complete": "yes — ready for PR to main"
+    "v1_47_iteration_complete": "yes \u2014 ready for PR to main",
+    "v1_50_iteration_complete": "yes \u2014 ready for PR to main"
   }
 }

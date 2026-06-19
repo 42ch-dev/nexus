@@ -90,13 +90,13 @@ fn schedule_blob(
     .to_string()
 }
 
-/// Seed a Work + its schedule_json.
+/// Seed a Work + its `schedule_json`.
 async fn seed_work(pool: &SqlitePool, work: &WorkRecord, schedule_json: &str) {
     works::create_work(pool, work).await.unwrap();
     set_schedule(pool, &work.work_id, schedule_json).await;
 }
 
-/// Count pending schedules for (work_id, preset_id).
+/// Count pending schedules for (`work_id`, `preset_id`).
 async fn count_schedules(pool: &SqlitePool, work_id: &str, preset_id: &str) -> i64 {
     let n: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM creator_schedules WHERE work_id = ? AND preset_id = ?",
@@ -514,7 +514,7 @@ async fn set_schedule_json_tx_concurrent_writers_serialise() {
     assert_eq!(stored.as_deref(), Some("{\"v\":\"A-merged\"}"));
 }
 
-/// CAS on a missing Work returns MissingVersionKey (not a false Ok(false)).
+/// CAS on a missing Work returns `MissingVersionKey` (not a false Ok(false)).
 #[tokio::test]
 async fn set_schedule_json_tx_missing_work_errors() {
     let pool = test_pool().await;
@@ -567,7 +567,7 @@ async fn partial_index_used_in_schedule_json_scan() {
 
 // ── Empty / malformed schedule_json edge cases ──────────────────────────────
 
-/// A Work with unparseable schedule_json is skipped (counted as parse error),
+/// A Work with unparseable `schedule_json` is skipped (counted as parse error),
 /// not crashed.
 #[tokio::test]
 async fn cron_skips_malformed_schedule_json() {
@@ -585,7 +585,7 @@ async fn cron_skips_malformed_schedule_json() {
     );
 }
 
-/// A Work with no schedule_json at all is not even scanned (the partial index
+/// A Work with no `schedule_json` at all is not even scanned (the partial index
 /// excludes it). A healthy Work with an empty-string blob is likewise excluded.
 #[tokio::test]
 async fn cron_ignores_works_without_schedule_json() {
@@ -805,8 +805,8 @@ async fn cron_review_respects_idempotency() {
          (schedule_id, creator_id, preset_id, preset_version, status, \
           concurrency_kind, current_core_context_version, label, \
           created_at, updated_at, work_id) \
-         VALUES ('RVM-PREEXISTING', 'ctr_test', 'novel-review-master', 1, \
-                 'pending', 'serial', 0, 'preexisting', ?, ?, 'wrk_review_idem')",
+         VALUES ('RVM-PREEXISTING-REVIEW', 'ctr_test', 'novel-review-master', 1, \
+                 'pending', 'serial', 0, 'preexisting-review-master', ?, ?, 'wrk_review_idem')",
     )
     .bind(now_ts)
     .bind(now_ts)
