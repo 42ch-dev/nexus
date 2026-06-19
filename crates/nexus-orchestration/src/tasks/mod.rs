@@ -516,6 +516,7 @@ impl LlmJudgeTask {
 /// caller's responsibility (the review-time hook), keeping the task pure.
 ///
 /// Design: `llm-extract.md` §2, compass §0.1 #7.
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct LlmExtractTask {
     /// Extraction instruction template (rendered against the context).
     template: String,
@@ -542,25 +543,26 @@ impl LlmExtractTask {
 
     /// Render the template and invoke the extract capability.
     ///
-    /// Returns the extracted candidates. An empty `Vec` means the LLM returned
-    /// no candidates OR the worker was unavailable (the caller decides whether
-    /// to fall back to the heuristic).
+    /// Returns [`LlmExtractOutcome`] so the caller can distinguish:
+    /// - `Candidates(vec)` — LLM returned candidates (may be empty).
+    /// - `WorkerUnavailable` — no worker IPC; caller should fall back.
+    /// - `CapabilityError(reason)` — capability missing or failed; caller may
+    ///   treat as a hard error or fall back.
     ///
     /// Public so the review-time hook and future `exit_when: llm_extract`
     /// preset routing can invoke it directly (`llm-extract.md` §2).
     ///
     /// # Errors
     ///
-    /// Returns [`graph_flow::GraphError::TaskExecutionFailed`] when the
-    /// configured capability is not registered, or when the capability returns
-    /// a non-`WorkerUnavailable` error. `WorkerUnavailable` is mapped to an
-    /// empty `Vec` (safe default), not an error.
-    pub async fn evaluate(
+    /// Returns [`graph_flow::GraphError::TaskExecutionFailed`] only for
+    /// unexpected internal failures (e.g., template render panic). Capability
+    /// errors are represented inside [`LlmExtractOutcome`] so callers decide
+    /// how to handle them.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) async fn evaluate(
         &self,
         context: &graph_flow::Context,
-    ) -> Result<Vec<crate::quality_loop::KbCandidate>, graph_flow::GraphError> {
-        use crate::quality_loop::KbCandidate;
-
+    ) -> Result<crate::quality_loop::LlmExtractOutcome, graph_flow::GraphError> {
         // 1. Render the extraction template.
         let payload = build_nested_payload(context);
         let prompt = render_core_context_template(&self.template, &payload).unwrap_or_else(|e| {
@@ -568,60 +570,21 @@ impl LlmExtractTask {
             self.template.clone()
         });
 
-        // 2. Read chapter prose from the context (the hook writes it there).
+        // 2. Read chapter prose and identity from the context.
         let chapter_prose: String = context.get("chapter_prose").await.unwrap_or_default();
-
-        // 3. Build capability input with security-injected identity.
         let creator_id: String = context.get("_creator_id").await.unwrap_or_default();
         let session_id: String = context.get("_session_id").await.unwrap_or_default();
-        let mut input = serde_json::json!({
-            "prompt": prompt,
-            "chapter_prose": chapter_prose,
-        });
-        if let Some(obj) = input.as_object_mut() {
-            if !creator_id.is_empty() {
-                obj.insert("_creator_id".into(), Value::String(creator_id));
-            }
-            if !session_id.is_empty() {
-                obj.insert("_session_id".into(), Value::String(session_id));
-            }
-        }
 
-        // 4. Resolve the capability from the registry.
-        let cap = self.registry.get(&self.capability_name).ok_or_else(|| {
-            graph_flow::GraphError::TaskExecutionFailed(format!(
-                "extract capability '{}' not found in registry",
-                self.capability_name
-            ))
-        })?;
-
-        // 5. Invoke + parse candidates.
-        match cap.run(input).await {
-            Ok(output) => {
-                let candidates_json = output
-                    .get("candidates")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let candidates: Vec<KbCandidate> = candidates_json
-                    .iter()
-                    .filter_map(crate::quality_loop::candidate_from_llm_json)
-                    .collect();
-                Ok(candidates)
-            }
-            Err(CapabilityError::WorkerUnavailable) => {
-                // Safe default: empty Vec; caller falls back to heuristic.
-                tracing::warn!(
-                    capability = %self.capability_name,
-                    "extract capability unavailable (no worker); returning empty candidates"
-                );
-                Ok(Vec::new())
-            }
-            Err(e) => Err(graph_flow::GraphError::TaskExecutionFailed(format!(
-                "extract capability '{}' failed: {e}",
-                self.capability_name
-            ))),
-        }
+        // 3. Use the shared extraction path (closes R-V151Q3-W001).
+        Ok(crate::quality_loop::run_llm_extract(
+            Some(&self.registry),
+            &self.capability_name,
+            &prompt,
+            &chapter_prose,
+            &creator_id,
+            &session_id,
+        )
+        .await)
     }
 }
 
@@ -2108,7 +2071,7 @@ mod tests {
 
     #[tokio::test]
     async fn llm_extract_task_with_mock_worker_returns_candidates() {
-        // Golden LLM response → golden Vec<KbCandidate>.
+        // Golden LLM response → golden LlmExtractOutcome::Candidates.
         let registry = extract_registry_with_mock(
             r#"{"candidates":[
                 {"canonical_name":"Lin Xia","block_type":"character","summary":"A warrior","confidence":0.95,"source_quote":"Lin Xia drew her blade."},
@@ -2128,7 +2091,11 @@ mod tests {
         )
         .await;
 
-        let candidates = task.evaluate(&ctx).await.unwrap();
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        let candidates = match outcome {
+            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            other => panic!("expected Candidates, got: {other:?}"),
+        };
         assert_eq!(candidates.len(), 2, "expected 2 candidates");
         assert_eq!(candidates[0].canonical_name_guess, "Lin Xia");
         assert_eq!(candidates[0].block_type, "character");
@@ -2139,9 +2106,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn llm_extract_task_no_worker_returns_empty_vec() {
-        // No worker → WorkerUnavailable → LlmExtractTask returns empty Vec
-        // (safe default; caller decides fallback — mirrors LlmJudgeTask NOGO).
+    async fn llm_extract_task_no_worker_returns_unavailable() {
+        // No worker → WorkerUnavailable is explicit, not an empty Vec contract
+        // (closes R-V151Q3-W002).
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
@@ -2149,13 +2116,19 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
-        let candidates = task.evaluate(&ctx).await.unwrap();
-        assert!(candidates.is_empty(), "no worker → empty candidates");
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        assert!(
+            matches!(
+                outcome,
+                crate::quality_loop::LlmExtractOutcome::WorkerUnavailable
+            ),
+            "no worker → WorkerUnavailable outcome"
+        );
     }
 
     #[tokio::test]
-    async fn llm_extract_task_missing_capability_errors() {
-        // Unknown capability name → TaskExecutionFailed.
+    async fn llm_extract_task_missing_capability_returns_capability_error() {
+        // Unknown capability name → CapabilityError inside the outcome.
         let registry = Arc::new(CapabilityRegistry::with_builtins());
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
@@ -2163,16 +2136,22 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
-        let result = task.evaluate(&ctx).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"), "error: {err}");
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        match outcome {
+            crate::quality_loop::LlmExtractOutcome::CapabilityError(err) => {
+                assert!(
+                    err.contains("not registered"),
+                    "expected 'not registered' in error: {err}"
+                );
+            }
+            other => panic!("expected CapabilityError, got: {other:?}"),
+        }
     }
 
     #[tokio::test]
-    async fn llm_extract_task_malformed_llm_json_returns_empty() {
+    async fn llm_extract_task_malformed_llm_json_returns_empty_candidates() {
         // Malformed LLM response → capability returns empty candidates;
-        // task surfaces them as an empty Vec (best-effort, no error).
+        // task surfaces them as Candidates(vec![]) (best-effort, no error).
         let registry = extract_registry_with_mock("not json at all");
         let task = LlmExtractTask::new(
             "Extract entities.".to_string(),
@@ -2180,11 +2159,40 @@ mod tests {
             registry,
         );
         let ctx = graph_flow::Context::new();
-        let candidates = task.evaluate(&ctx).await.unwrap();
-        assert!(
-            candidates.is_empty(),
-            "malformed LLM JSON → empty candidates"
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        match outcome {
+            crate::quality_loop::LlmExtractOutcome::Candidates(c) => {
+                assert!(c.is_empty(), "malformed LLM JSON → empty candidates");
+            }
+            other => panic!("expected Candidates, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn llm_extract_unified_path_uses_quality_loop_mapping() {
+        // Regression for R-V151Q3-W001: LlmExtractTask must use the same
+        // LLM→KbCandidate mapping as the review-time hook, including derived
+        // novel_category in the proposed_payload.
+        let registry = extract_registry_with_mock(
+            r#"{"candidates":[{"canonical_name":"Azure Gate","block_type":"scene","confidence":0.92,"source_quote":"...the eastern gate groaned open..."}]}"#,
         );
+        let task = LlmExtractTask::new(
+            "Extract entities.".to_string(),
+            "nexus.llm.extract".to_string(),
+            registry,
+        );
+        let ctx = graph_flow::Context::new();
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        let candidates = match outcome {
+            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            other => panic!("expected Candidates, got: {other:?}"),
+        };
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].block_type, "scene");
+        let payload: serde_json::Value =
+            serde_json::from_str(&candidates[0].proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["novel_category"], "location");
+        assert_eq!(payload["block_type"], "scene");
     }
 
     // ── T5: StateCompositeTask integration — llm_judge GO/NOGO ────────
