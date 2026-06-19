@@ -3,7 +3,7 @@ report_kind: qc_review
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-06-18-v1.51-missing-kb-detection
-verdict: Request Changes
+verdict: Approve   # (was Request Changes)
 generated_at: 2026-06-19T12:45:00Z
 ---
 
@@ -57,7 +57,35 @@ generated_at: 2026-06-19T12:45:00Z
 | 🟡 Warning | 1 |
 | 🟢 Suggestion | 2 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
+
+---
+
+## Revalidation (2026-06-19)
+
+- **Resolved**: C-001 (Critical, novel-review-master version mismatch) — Split the shared `"research" | "novel-review-master" => 2` match arm in `crates/nexus-orchestration/src/auto_chain.rs::preset_version_for_id()` so that `research` remains `2` (matching `embedded-presets/research/preset.yaml` `version: 2`) and `novel-review-master` returns `3` (matching `embedded-presets/novel-review-master/preset.yaml` `version: 3`). QC1's suggested one-line update to `=> 3` for the combined arm would have regressed `research`, so the arms were separated.
+- **Evidence**:
+  - Diff hunk:
+    ```diff
+    -        "research" | "novel-review-master" => 2,
+    +        "research" => 2,
+    +        "novel-review-master" => 3,
+    ```
+  - YAML versions:
+    ```text
+    crates/nexus-orchestration/embedded-presets/novel-review-master/preset.yaml:57:  version: 3
+    crates/nexus-orchestration/embedded-presets/research/preset.yaml:31:  version: 2
+    ```
+  - Targeted test now passes:
+    ```bash
+    cargo test -p nexus-orchestration preset_version_mapping_matches_yaml_includes_cron_presets
+    # test auto_chain::tests::preset_version_mapping_matches_yaml_includes_cron_presets ... ok
+    ```
+  - Regression suites passed: T-A P2 (`missing_kb_detection`, `creator_world_kb`, `world_kb_promotion_cli`), T-A P0 (`novel_review_master`), T-A P1 (`llm_extract`, `kb_rescan`), T-B P0 (`file_lock`, `cli_lock_contention`), T-B P1 (`cas_migration_roundtrip`, `kb_adopt_cas`, `cron_cas_retry`).
+  - Static gates passed: `cargo clippy --all -- -D warnings`, `cargo +nightly fmt --all --check`.
+- **Re-verdict**: Approve (C-001 resolved; the C-001 fix does not change wire contracts or add `#[allow(...)]`).
+
+**Note**: W-001, S-001, and S-002 from the initial review remain outside the scope of this targeted fix-wave and are not addressed here.
 
 ---
 
