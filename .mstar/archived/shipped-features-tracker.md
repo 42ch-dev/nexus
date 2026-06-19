@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-18 (V1.50 closeout: 9 plans all Done — 8 implement plans (T-A 0-3 + T-B 0-2) + P-1 docs + P-last hygiene; 16 residuals closed (6 V1.49 carry + 10 V1.50 WL-A); 8 deferred to V1.51+; Profile B done; wire contracts unchanged; PR pending)
+**Last updated**: 2026-06-19 (V1.51 closeout: 7 plans all Done — 5 implement plans (T-A P0-P2 + T-B P0-P1) + P-1 docs + P-last hygiene; 8 residuals closed (4 V1.50 carry-forwards + 4 V1.51 WL-A) via 8 surgical WL-A commits; 6 deferred to V1.52+; Profile B done; wire contracts unchanged; **merged to main at `c57b927bbf8621adf7ec59095d274f17f429c9b7` on 2026-06-19T07:52:26Z via PR [#64](https://github.com/42ch-dev/nexus/pull/64)**)
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -577,14 +577,31 @@ When a version ships, append new closed rows here and remove them from the activ
 | **QC & QA** | All 8 implement plans passed QC tri-review (3/3 per plan = 24/24). Cross-worktree migration renumber collisions surfaced in T-A P2/T-B P2/T-A P3 fix waves; PM-coordinated resolution. V1.50 has 1 trivial flake (R-V150P3AUTOCHRONO-02 in serialized review report) — closed via `#[serial_test::serial]` guard. |
 | **Profile B compaction** | **Done** (V1.50 P-last T4): 8 plan JSON files in `.mstar/archived/plans/<plan-id>.json`; plans-done.json layout invariant verified (all 218 entries are strings); v1.50 iteration_summaries entry added; tech_debt_summary normalized (11 rows reconciled: 8 deferred + 3 archived via QC accept). |
 
-### V1.51+ carry-forward index
+### V1.51 delivery snapshot (Shipped 2026-06-19)
 
-- R-V150P1CRONBW-01 (medium): novel-write preset authoring needs operational write-gate; carry to V1.51.
+| Aspect | Detail |
+|---|---|
+| **PR / Merge** | PR [#64](https://github.com/42ch-dev/nexus/pull/64) (iteration/v1.51 → main); P-last HEAD: `bc259c19` (CI fix completion report); **Merged 2026-06-19T07:52:26Z at commit `c57b927bbf8621adf7ec59095d274f17f429c9b7`** (squash of 54 commits: 49 V1.51 + 4 CI warning hygiene + 1 CI workflow matrix split) |
+|---|---|
+| **Theme** | **KB Closure & Multi-Writer Concurrency** — S-B dual track. Track A (T-A P0–P2) KB closure pipeline: LLM-extract capability (P0), cross-chapter rescan (P1), missing-KB detection (P2). Track B (T-B P0–P1) multi-writer concurrency: per-key advisory lock with heartbeat + zombie detection (P0), per-row OCC on `kb_extract_jobs` and `novel_pool_entries` with stable `E_VERSION`/`E_LOCK` CLI codes (P1). 5 implement plans + P-1 docs + P-last hygiene = 7 plans total. |
+| **Compass** | [v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md](../iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md) — 16 grill-me decisions; 7 plans (P-1 + T-A P0–P2 + T-B P0–P1 + P-last) |
+| **Active specs** | [concurrency.md](../knowledge/specs/concurrency.md) (per-key advisory lock + per-row OCC normative) + [llm-extract.md](../knowledge/specs/llm-extract.md) (LLM extraction capability normative) + [novel-writing/quality-loop.md §12](../knowledge/specs/novel-writing/quality-loop.md) (missing-KB detection + cron interplay) + [entity-scope-model.md §5.5.2](../knowledge/specs/entity-scope-model.md) (KB delta write scope) + [cli-spec.md §6.2G](../knowledge/specs/cli-spec.md) (`creator world kb pending --missing-only`) + [world-kb-runtime-architecture.md](../knowledge/world-kb-runtime-architecture.md) (full pipeline normative) |
+| **Draft overlays archived** | [concurrency.md](../knowledge/specs/concurrency.md) → Promoted (V1.51 P-last T3); [llm-extract.md](../knowledge/specs/llm-extract.md) → Promoted (V1.51 P-last T3); 4 other overlays (quality-loop §12, entity-scope §5.5.2, cli-spec §6.2G, world-kb-runtime-architecture) → folded into Masters |
+| **Plans shipped** | **7 plans all Done**: P-1 (`2026-06-18-v1.51-harness-docs-prepare` — compass + plans + status activation) + T-A P0 (`2026-06-18-v1.51-llm-extraction` — `nexus.llm.extract` capability + heuristic→LLM swap, closes R-V150KBED-01) + T-A P1 (`2026-06-18-v1.51-cross-chapter-rescan` — `creator kb rescan --work <ref>`, closes R-V150KBED-08) + T-A P2 (`2026-06-18-v1.51-missing-kb-detection` — finalize-time missing-KB detection + `creator world kb pending --missing-only` CLI, closes R-V150P1CRONBW-01) + T-B P0 (`2026-06-18-v1.51-advisory-lock` — `Works/<work_ref>/.lock` advisory lock + heartbeat + zombie detection, closes R-V149P1-01 advisory-lock note) + T-B P1 (`2026-06-18-v1.51-per-row-occ` — per-row OCC + E_VERSION/E_LOCK stable CLI codes) + P-last (`2026-06-18-v1.51-hygiene-and-closeout` — 8 WL-A surgical fixes + 6 spec overlays promoted to Normative + Profile B compaction + tech debt rollup) |
+| **Closed at ship** | **8 residuals total** = 4 V1.50 carry-forwards (R-V150KBED-01 via T-A P0; R-V150KBED-08 via T-A P1; R-V149P1-01 advisory-lock portion via T-B P0; R-V150P1CRONBW-01 via T-A P2) + 4 V1.51 WL-A (R-V151Q1-02, R-V151Q1-04, R-V151Q1-08, R-V151Q1-09) + 1 stale post-merge (R-V151-MERGE-CLIPPY-01 medium — clippy::unnecessary_trailing_comma in merge baseline) |
+| **Wire contract changes** | None — per compass §0.1 #8. No new JSON Schema in `schemas/`. 1 DB migration landed: `202606190001_kb_extract_jobs_and_pool_version.sql`. 2 new test binaries (cas_migration_roundtrip, file_lock). |
+| **Open residuals at ship** | **0 open**; **6 deferred to V1.52+** (per `status.json.tech_debt_summary.by_target_active.V1.52+`): R-V150KBED-01 (low — `creator world kb` legacy coexistence note, sweep docs) + R-V150KBED-02 (low — World vs World KB ownership narrative, 2 entries under kb-editor-cli + kb-auto-promotion) + R-V151Q3-W001 (low — two parallel LLM→KbCandidate paths merge candidate) + R-V151Q3-W002 (low — `WorkerUnavailable` empty-vec contract — caller must handle gracefully) + R-V151Q1-10 (low — process note: spec edit bundled under qc:-prefixed commit). |
+| **Carry-forward (V1.52+)** | 6 items listed above. All low. R-V150KBED-01/02 are doc-sweep items; R-V151Q3-W001/W002 are refactor candidates; R-V151Q1-10 is a process note. |
+| **QC & QA** | All 5 implement plans passed QC tri-review (3/3 per plan = 15/15). **T-A P0 qc3** had 1 re-review round (Request Changes on heuristic→LLM swap architecture). **T-B P0 qc1** had 1 re-review round (Request Changes on heartbeat semantics). **T-B P1 qc1+qc2** had 1 re-review round (Request Changes on per-row OCC + E_VERSION error code stability). **T-A P2 qc1** had 1 re-review round (Request Changes on missing-KB detection edge case). **P-last** PM-consolidated (single review per P-last rule). All fix waves surgical, no scope creep. |
+| **Profile B compaction** | **Done** (V1.51 P-last T4): 7 plan JSON files in `.mstar/archived/plans/<plan-id>.json`; plans-done.json layout invariant verified (all 218 entries are strings); v1.51 iteration_summaries entry added; tech_debt_summary normalized (5 rows reconciled: 4 archived + 6 deferred to V1.52+ via 1 R-V151Q3 process note). |
+| **Post-merge CI** | Run `27811732086` (squash merge) failed on Rust tests job with `os error 28` (No space left on device) on the ephemeral runner. PM dispatched architect: split monolithic `cargo test --all` into 4-leg job matrix (core / orchestration-domain / daemon / cli-hosts) with per-leg rust-cache keys, all legs passing in subsequent run `27812385526` (max 6m28s cli-hosts). Surgical change: `477aafbe` `ci(workflow): split rust-tests into per-group job matrix to fix ENOSPC on ephemeral runner` (+32/-4 in `.github/workflows/ci.yml` only, no Rust/Cargo.toml impact). |
+| **Wire-contracts / signoff** | All 6 spec overlays now Normative; 8 WL-A selective fixes surgical. `cargo clippy --all -- -D warnings` and `cargo +nightly fmt --all --check` clean at ship. |
+
+
+### V1.52+ carry-forward index
+
 - R-V150KBED-01 (low): KB editor — legacy `<work>/Worldbuilding/` coexistence; sweep docs.
-- R-V150KBED-02 (low): KB editor — World vs World KB ownership narrative in `cli-spec.md`.
-- R-V150P2CRONRV-03 (low): review cron plan text reconciliation between preset labels.
-- R-V150KBED-07 (low): KB rescan delta write scope (entity body updates only; new entities via T-B P1 review-time).
-- R-V150KBED-08 (low): KB rescan cross-chapter propagation on body update.
-- R-V150P3AUTOCHRONO-01 (low): auto-chronology last-planned-volume edge (subsumed by completion_lock).
-- R-V150P3AUTOCHRONO-02 (low): auto-chronology serialized review report flake; closed in V1.50 via serial_test guard.
-- R-V150-WLA-DEFER-V1.51 (low): V1.50 QC tri-review Suggestion aggregate (≈30 items; non-blocking).
+- R-V150KBED-02 (low): KB editor — World vs World KB ownership narrative in `cli-spec.md` (2 entries: kb-editor-cli + kb-auto-promotion).
+- R-V151Q3-W001 (low): Two parallel LLM→KbCandidate paths (extract_kb_candidates_for_review + LlmExtractTask::evaluate) — merge candidate.
+- R-V151Q3-W002 (low): `WorkerUnavailable` empty-vec contract — caller must handle gracefully (heuristic fallback OK; consolidate semantics).
+- R-V151Q1-10 (low): Process note: spec edit bundled under qc:-prefixed commit (commit 3a6950d5 included `concurrency.md` spec edit; future: keep spec edits in docs/ docs-only commits).

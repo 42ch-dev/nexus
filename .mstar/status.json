@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-19T06:34:13Z",
+  "updated_at": "2026-06-19T07:52:26Z",
   "plans": [],
   "metadata": {
     "branch_naming": {
@@ -14,11 +14,11 @@
     "integration_merge_target": "main",
     "integration_branch_role": "final-landing-pending",
     "integration_branch_retired": false,
-    "latest_shipped_iteration": "V1.51 (PR #64 open — awaiting merge to main)",
-    "latest_shipped_at": "2026-06-19T06:34:13Z",
+    "latest_shipped_iteration": "V1.51 (Shipped 2026-06-19 via PR #64)",
+    "latest_shipped_at": "2026-06-19T07:52:26Z",
     "latest_active_iteration": "V1.52 (planning not started)",
     "latest_active_compass": null,
-    "platform_integration": "paused — local-only until further notice (V1.51 PR #64 open; merge to main pending)",
+    "platform_integration": "paused — local-only until further notice (V1.51 shipped 2026-06-19 via PR #64 at c57b927bbf8621adf7ec59095d274f17f429c9b7; awaiting V1.52 planning)",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "wave_0_spec": ".mstar/knowledge/specs/concurrency.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/llm-extract.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/novel-writing/quality-loop.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/entity-scope-model.md (Normative — V1.51 Shipped), .mstar/knowledge/specs/cli-spec.md (Normative — V1.51 Shipped), .mstar/knowledge/world-kb-runtime-architecture.md (Normative — V1.51 Shipped)",
@@ -30,7 +30,7 @@
       "integration_merge_target": "main",
       "integration_branch_retired": false,
       "pr": 64,
-      "merged_at": null,
+      "merged_at": "2026-06-19T07:52:26Z",
       "plan_count": 7,
       "plan_count_done": 7,
       "closed_residuals": 8,
@@ -40,7 +40,7 @@
       "profile_b_compaction": "done",
       "signoff_at": "2026-06-19T06:34:13Z",
       "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
-      "merge_commit": "pending"
+      "merge_commit": "c57b927bbf8621adf7ec59095d274f17f429c9b7"
     },
     "tech_debt_summary": {
       "updated_at": "2026-06-19 (V1.51 P-last closeout)",
@@ -65,7 +65,7 @@
   "v1_50_iteration_complete": true,
   "v1_50_status": "SHIPPED 2026-06-17 — PR #63 merged at 4db0a37b3e6a; all 9 V1.50 plans Done; 16 residuals archived; 8 carry-forward to V1.51",
   "v1_51_iteration_complete": true,
-  "v1_51_status": "PR #64 open (2026-06-19T06:34:13Z) — awaiting merge to main; integration branch contains all 7 V1.51 plans",
+  "v1_51_status": "SHIPPED 2026-06-19 — PR #64 merged at c57b927bbf8621adf7ec59095d274f17f429c9b7; all 7 V1.51 plans Done; 8 residuals closed; 6 deferred to V1.52+",
   "residual_findings": {
     "2026-06-13-v1.45-hygiene-and-closeout": [
       {

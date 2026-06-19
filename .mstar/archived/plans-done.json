@@ -333,8 +333,8 @@
       "version": "v1.51",
       "name": "KB Closure & Multi-Writer Concurrency",
       "compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
-      "shipped_at": "2026-06-19T06:34:13Z",
-      "merge_commit": "pending",
+      "shipped_at": "2026-06-19T07:52:26Z",
+      "merge_commit": "c57b927bbf8621adf7ec59095d274f17f429c9b7",
       "plan_ids": [
         "2026-06-18-v1.51-harness-docs-prepare",
         "2026-06-18-v1.51-llm-extraction",
@@ -358,17 +358,27 @@
           "R-V149P1-01",
           "R-V150P1CRONBW-01"
         ],
-        "open_v152_carry_forward": [],
-        "open_v152_count": 0
+        "open_v152_carry_forward": [
+          "R-V150KBED-01 (kb-editor-cli)",
+          "R-V150KBED-02 (kb-editor-cli)",
+          "R-V150KBED-02 (kb-auto-promotion)",
+          "R-V151Q3-W001 (llm-extraction)",
+          "R-V151Q3-W002 (llm-extraction)",
+          "R-V151Q1-10 (advisory-lock)"
+        ],
+        "open_v152_count": 6
       },
       "wire_contract_changes": "None (per compass §0.1 #8)",
       "pr": 64,
-      "note": "PR #64 open at https://github.com/42ch-dev/nexus/pull/64 — awaiting merge to main on 2026-06-19."
+      "merged_at": "2026-06-19T07:52:26Z",
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
+      "note": "V1.51 P-last T1-T7 Done. T1-T2 (8 WL-A residuals closed) + T3 (6 spec overlays promoted to Normative — V1.51 Shipped) + T4 (Profile B compaction: 7 plans archived) + T5 (tech_debt rollup: 6 deferred to V1.52+) + T6 (PR #64) + T7 (PM signoff). Merged to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 on 2026-06-19 via PR #64. Integration branch iteration/v1.51 to be retired per mstar-branch-worktree."
     }
   },
   "metadata": {
-    "last_updated": "2026-06-17 (V1.50 shipped at 4db0a37b via PR #63)",
+    "last_updated": "2026-06-19 (V1.51 shipped at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64)",
     "v1_47_iteration_complete": "yes — ready for PR to main",
-    "v1_50_iteration_complete": "yes — ready for PR to main"
+    "v1_50_iteration_complete": "yes — ready for PR to main",
+    "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
   }
 }
