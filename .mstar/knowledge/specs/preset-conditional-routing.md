@@ -1,9 +1,9 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; full DF-56 roadmap in deferred tracker §3.6.3)  
-**Document class**: Feature line (conditional routing — minimal slice → N-way labeled)  
+**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; full DF-56 roadmap in deferred tracker §3.6.3)  
+**Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics)  
 **Created**: 2026-06-06  
-**Last updated**: 2026-06-19 (V1.52 T-B P0: N-way labeled routing shipped, §3.1 replaced placeholder with shipped spec)
+**Last updated**: 2026-06-19 (V1.52 T-B P1: merge semantics shipped, §3.2 added)
 **Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (future iteration)  
 **Coordinates with**:
@@ -93,6 +93,71 @@ When `next` contains `Labeled` (or `GoNogo` via auto-conversion), the orchestrat
 **Reachability**: the preset loader adds simple edges (`add_edge`) for each `Labeled` target, so the existing BFS reachability validator covers all labeled branches without needing separate conditional edge wiring. Duplicate labels within the same state are caught by `check_labeled_edge_duplicates` at validation time.
 
 **Substring matching caveat**: matching uses `String::contains()` (substring containment). Authors should choose labels that are unlikely to appear as substrings of unrelated words. The descending-length sort mitigates the most common case (e.g., `"nogo"` checked before `"go"`). A future iteration may add word-boundary or exact matching.
+
+### 3.2 Merge semantics (Draft V1.52 overlay — shipped T-B P1)
+
+**Status**: Draft (V1.52 T-B P1 shipped — implemented in plan `2026-06-19-v1.52-multi-branch-merge-semantics`)
+**Authoring plan**: `2026-06-19-v1.52-multi-branch-merge-semantics`
+**Promotes to Normative**: P-last of V1.52
+
+When multiple `LabeledNext` edges from different `llm_judge` states converge on a single state, the orchestration engine uses merge semantics to decide when to advance to that state.
+
+#### §3.2.1 Merge node declaration
+
+States declare merge semantics via the `merge:` field, using an internally-tagged enum (`kind`):
+
+```yaml
+# wait-all (default when merge: is absent)
+merge:
+  kind: all
+
+# advance on first arrival
+merge:
+  kind: any
+
+# quorum: at least n of m arrivals
+merge:
+  kind: quorum
+  n: 2
+  m: 3
+```
+
+Three merge modes:
+- **`all` (default)**: advance only when ALL incoming labeled edges have produced their target label.
+- **`any`**: advance on FIRST incoming labeled edge result.
+- **`quorum N/M`**: advance when at least N of M incoming edges have produced their target.
+
+When `merge:` is absent on a state with multiple incoming labeled edges, the default is `wait-all`. States with ≤1 incoming labeled edge are not merge nodes.
+
+#### §3.2.2 Runtime tracking
+
+On each labeled edge match (`resolve_labeled_target`), the runtime writes the matched label to context key `_merge_<target_state_id>` as a JSON array of unique label strings. When the engine enters a merge node, the `StateCompositeTask`:
+
+1. Reads `_merge_<state_id>` from context.
+2. Counts unique arrivals.
+3. Evaluates the merge condition:
+   - `All`: `arrived_count >= expected_incoming`
+   - `Any`: `arrived_count >= 1`
+   - `Quorum { n, .. }`: `arrived_count >= n`
+4. If satisfied: clears the context key and processes enter actions normally.
+5. If not satisfied: returns `NextAction::WaitForInput` — the engine will re-enter the state when the next labeled edge arrives.
+
+**Incoming count discovery**: the loader pre-computes incoming labeled edge counts per state during graph construction. The `expected_incoming` field on `StateCompositeTask` is populated at build time.
+
+#### §3.2.3 Validator integration
+
+The semantic validator (`check_merge_node_integrity`) enforces:
+- Each state with `merge:` must have ≥2 incoming labeled edges (from `LabeledNext` or `GoNogo` targets).
+- `quorum N/M`: N ≥ 1, N ≤ M, and M must equal the actual incoming labeled edge count.
+- Merge nodes must have at least one outgoing edge.
+
+Violations produce `DiagnosticCategory::MergeIntegrity` errors and block preset loading.
+
+#### §3.2.4 Backward compatibility
+
+- States without `merge:` field default to `wait-all`.
+- Existing binary `GoNogo` + N-way `Labeled` presets continue to work without modification — the `merge:` field is additive.
+- `GoNogo` edges are also counted as incoming labeled edges for merge node purposes (labels `"go"` and `"nogo"`).
 
 ---
 
