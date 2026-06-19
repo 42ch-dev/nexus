@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-19-v1.52-multi-branch-merge-semantics"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-19"
+revalidated_at: "2026-06-19"
 ---
 
 # Code Review Report
@@ -120,3 +121,40 @@ generated_at: "2026-06-19"
 - ⚠️ W-QC1-1: docstring promises wait-all default; runtime delivers no merge logic
 - 🟢 S-QC1-1: plan examples use wrong YAML form
 - 🟢 S-QC1-4: integration test gap for merge flow
+
+---
+
+## Revalidation
+
+**Re-review scope**: targeted (`qc-specialist` only — W-QC1-1)
+
+**Revalidation diff basis**: `93416cf8..3ab67781` (fix commit `3ab67781` — `fix(orchestration): V1.52 T-B P1 fix-wave`)
+
+### W-QC1-1: wait-all default not enforced → **RESOLVED**
+
+**Evidence**:
+- **Gate change** (`crates/nexus-orchestration/src/tasks/mod.rs` lines 856–866): The merge gate changed from `if let Some(ref merge_kind) = self.merge_kind` to `if self.expected_incoming > 0 { let merge_kind = self.merge_kind.as_ref().unwrap_or(&MergeKind::All); ... }`. A state with `expected_incoming > 0` but `merge_kind: None` now correctly enforces wait-all semantics.
+- **merge_key pre-computation** (same struct, line 635): Added `merge_key: String` field initialized at construction time as `format!("_merge_{}", state.id)`. This eliminates the per-tick allocation previously done inside the gate block.
+- **Test** (lines 3462–3536): `merge_wait_all_default_enforced_when_merge_absent` — tests three arrival states (0, 1, 2) against a task with `merge_kind: None, expected_incoming: 2`. Confirms: 0 arrivals → `WaitForInput`, 1 arrival → `WaitForInput`, 2 arrivals → `Continue`. **Passed**.
+
+**Verification**:
+| Check | Result |
+|-------|--------|
+| `cargo test -p nexus-orchestration -- merge_wait_all_default_enforced_when_merge_absent` | 1 passed, 0 failed |
+| `cargo test -p nexus-orchestration` (full suite) | 43 binaries, **0 failures** |
+| `cargo clippy -p nexus-orchestration -- -D warnings` | clean |
+| `git rev-parse HEAD` | `3ab67781` (matches fix commit) |
+
+**Disposition**: **Resolved**. The runtime now correctly enforces the documented default: states with ≥1 incoming labeled edges but no explicit `merge:` field default to wait-all. Architecture remains clean — the fix adds ~6 lines of logic and a pre-computed `merge_key` field, with no new dependencies or boundary bleed.
+
+### Remaining open suggestions (not blocking)
+
+The four Suggestions (S-QC1-1 through S-QC1-4) from wave 1 remain open as non-blocking improvements:
+- S-QC1-1: plan YAML examples use wrong form
+- S-QC1-2: `Quorum { n, m }` naming
+- S-QC1-3: `Value::Null` clearing fragility
+- S-QC1-4: missing merge flow integration test
+
+Per `mstar-review-qc` gate rules: **0 Critical, 0 unresolved Warning** → `Approve`.
+
+**Updated Verdict**: Approve
