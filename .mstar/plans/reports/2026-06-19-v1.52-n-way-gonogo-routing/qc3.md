@@ -5,6 +5,8 @@ reviewer_index: 3
 plan_id: "2026-06-19-v1.52-n-way-gonogo-routing"
 verdict: "Request Changes"
 generated_at: "2026-06-19"
+revalidated_at: "2026-06-19"
+revalidation_verdict: "Request Changes"
 ---
 
 # Code Review Report
@@ -204,3 +206,88 @@ Concrete estimates:
 The implementation is **structurally correct, clippy-clean, fmt-clean, and all existing tests pass** (696 in `nexus-orchestration`, 0 failed). The new `Labeled` variant deserializes correctly and the reachability BFS is implemented for N-way. However, **the new code paths are untested at the orchestration layer** (W-QC3-1), **the plan's stated acceptance criteria are partially unmet** (W-QC3-2), and the runtime behavior has **two silent failure modes** (W-QC3-3) and **one latent routing ambiguity** (W-QC3-4). Performance is acceptable for typical N (W-QC3-5 is a scaling concern, not a current bug). The plan's T3/T5 TDD contract was not honored — fix tests first, then merge.
 
 Per `mstar-review-qc` §门禁规则: unresolved Warning findings block Approve. Verdict: **Request Changes** until at least W-QC3-1 (test coverage) and W-QC3-3 (silent stall) are addressed, or until PM accepts the gaps as residual risk via the residual_findings process per `mstar-plan-artifacts`.
+
+---
+
+## Revalidation (2026-06-19, targeted re-review)
+
+**Re-review scope**: Review range `b21492b3..4900b582` (3 fix commits: `1b460a17`, `fda4e826`, `4900b582`)
+**Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus/.worktrees/v1.52-tb-p0`
+**Working branch (verified)**: `feature/v1.52-n-way-gonogo-routing`
+**Tools run** (this re-review pass):
+- `cargo test -p nexus-orchestration` — 705 lib + 43 integration test binaries passed, 1 ignored (pre-existing network-bound)
+- `cargo test -p nexus-orchestration -- resolve_labeled_target --nocapture` — 9/9 passed (the 9 new unit tests in `tasks::tests`)
+- `cargo test -p nexus-orchestration --test labeled_routing -- --nocapture` — 5/5 passed (new integration tests in `tests/labeled_routing.rs`)
+- `cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate` — 1/1 passed
+- `cargo clippy --all -- -D warnings` — clean
+- `cargo +nightly fmt --all --check` — **exit code 1** (see W-QC3-R1 below)
+
+### Fix Validation
+
+| Initial Warning | Severity | Status | Evidence |
+|----------------|---------:|--------|----------|
+| W-QC3-1 (untested Labeled code paths) | medium | **Resolved** | commit `fda4e826`: `tasks::tests::resolve_labeled_target_*` (9 new unit tests covering single-label match, multi-label first-match, no-match, non-Labeled/None returns Ok(WaitForInput), `_judge_label` context write, GoNogo auto-conversion (go/nogo/no-match)). commit `fda4e826`: `tests/labeled_routing.rs` (5 new integration tests: 3-way labeled load+validate, hybrid GoNogo+Labeled load+validate, orphan label detection at validation, all embedded presets regression, no-match does NOT stall session). Total test coverage of Labeled code paths went from 0 → 14 tests across loader+validator+runtime. |
+| W-QC3-2 (plan scope drift — 4 ACs unmet) | medium | **Resolved** | commits `1b460a17` + `4900b582`: (a) binary→Labeled auto-conversion implemented in `resolve_labeled_target` (`Some(NextTarget::GoNogo(g))` arm yields `vec![("go", g.go.as_str()), ("nogo", g.nogo.as_str())]` — verified by tests `resolve_labeled_target_gonogo_auto_conversion_go_match`/`nogo_match`/`no_match_errors`); (b) `_judge_label` context write implemented (`context.set_sync("_judge_label", …)` on match — verified by test `resolve_labeled_target_writes_judge_label_context`); (c) plan body ACs 1–6 marked as "✅ SHIPPED" with implementation notes and an "Additional shipped scope" paragraph explaining deviations; (d) spec overlay `preset-conditional-routing.md` §3.1 documents N-way labeled routing with binary→Labeled auto-conversion, `_judge_label` context key, descending-length label sort, no-match deterministic fail. |
+| W-QC3-3 (HIGH severity silent stall on no-match) | **high** | **Resolved** | commit `1b460a17`: `resolve_labeled_target` no-match returns `Err(graph_flow::GraphError::TaskExecutionFailed(format!("Labeled routing: no label matched judge output. Known labels: {…:?}. Judge output excerpt: {…}")))` — `?` propagation at the two call sites (`tasks/mod.rs:1063, 1100`) bubbles the error to the orchestrator (deterministic branch fail, NOT silent stall). External `graph-flow` crate's `NextAction` enum cannot be modified, so a new internal `Result<NextAction, GraphError>` return type is the deterministic-fail path; this aligns with the suggested fix in the initial report. `tracing::warn!(state_id, known_labels, judge_output_excerpt, …)` surfaces the failure to observability. Spec overlay §3.1 §3.1.2 step 4 explicitly documents the new behavior. Verified by tests `resolve_labeled_target_no_match_errors`, `resolve_labeled_target_gonogo_auto_conversion_no_match_errors`, and the integration test `labeled_no_match_does_not_stall_session` (which sets an unrelated judge text and asserts the engine returns an error containing "no label matched", proving the session no longer stalls). |
+| W-QC3-4 (latent `find_next_task` ambiguity) | low | **Acknowledged (deferred)** | Doc comment in `loader.rs:911-914` was updated (still says "Reachability-validation only; routing is via GoTo"). Per PM-override, deferred to V1.52 P-last WL-A as low-severity residual (`R-V152Q3-W006`). |
+| W-QC3-5 (unbounded label count + O(N×M) scan) | low | **Acknowledged (deferred)** | Code is unchanged; typical N=2–5 with descending-length label sort (now mitigates the common "nogo"/"go" overlap) is sub-millisecond. Per PM-override, deferred to V1.52 P-last WL-A as low-severity residual (`R-V152Q3-W007`). |
+
+### Performance & Reliability Notes (Re-review Pass)
+
+- **Descending-length label sort** (new in `resolve_labeled_target`): `candidates.sort_by_key(|(label, _)| std::cmp::Reverse(label.len()))` — prevents shorter labels (e.g. `"go"`) from matching as substrings of longer labels (e.g. `"nogo"`). This is an additional reliability improvement beyond the W-QC3-3 fix and partially addresses W-QC3-3's substring ambiguity risk in the initial review.
+- **`context.set_sync` vs `context.set`**: the fix uses `set_sync` (synchronous) for `_judge_label` write. Since `Context` is `Send + Sync` and `set_sync` does not require `.await`, the orchestrator path remains in the existing sync context without introducing an async boundary. Acceptable trade-off.
+- **Error path observability**: `tracing::warn!` is emitted before `Err` return. The error message itself contains known labels + judge output excerpt for downstream log aggregation. Both code paths (line 1057 and 1099) use `?` propagation; no silent `unwrap()`/`expect()` on the new fallible return.
+- **Spec overlay §3.1.2 step 5** (added by `4900b582`): documents that non-`Labeled`/non-`GoNogo` next still returns `Ok(NextAction::WaitForInput)`, preventing future readers from being surprised that the error path is only for labeled/gonogo routing.
+- **Backward compatibility**: existing 6 `judge_next_action_*` tests pass unchanged. `all_embedded_presets_pass_strict_validation_gate` and `all_embedded_presets_still_parse_regression` both pass — the legacy `{ go, nogo }` shape continues to parse and run identically through both the boolean `_judge_result` path AND the new labeled path.
+
+### New Finding (introduced by fix wave)
+
+#### W-QC3-R1: Fix-wave test file fails `cargo +nightly fmt --all --check` (CI gate regression)
+
+**Scope:** `crates/nexus-orchestration/tests/labeled_routing.rs` (new file added by commit `fda4e826`).
+
+`cargo +nightly fmt --all --check` exits with **code 1** on the re-review HEAD. 8 fmt violations at lines 8, 150, 174, 201, 208, 215, 242, 285 of the new test file (e.g. multi-line `import { ... }` should be one line; multi-line `assert!` macros should reformat; long `let` bindings should collapse). The initial review (`b97ec0d9..b21492b3`) reported `cargo +nightly fmt --all --check (clean)` — **this is a fix-wave regression**. The fix-wave implementer did not run `cargo +nightly fmt --all` before committing `fda4e826`.
+
+**Reliability/CI impact:** Per `AGENTS.md` Development Policy:
+> Formatting: cargo fmt must use the nightly toolchain: cargo +nightly fmt --all. Stable cargo fmt ignores .rustfmt.toml's ignore field and will incorrectly reformat generated code under crates/nexus-contracts/src/generated/.
+
+Per `mstar-review-qc` §CI 门禁补充（强制）:
+> 任何与本次变更范围相关的 CI 失败（编译、测试、lint、类型检查、构建、发布前校验）默认按 >= Warning 处理，进入本轮必须修复项。
+> CI 失败未修复前，不得给出 Approve；应按上方门禁判定为 Request Changes。
+
+This is a **CI gate failure in the fix-wave scope**. The merge to `iteration/v1.52` would fail CI's fmt check, blocking the next iteration step. The fix is trivial (one `cargo +nightly fmt --all` invocation), but it must happen before approval.
+
+**Suggested fix:**
+```bash
+cargo +nightly fmt --all
+git add crates/nexus-orchestration/tests/labeled_routing.rs
+git commit -m "style(orchestration): nightly fmt labeled_routing.rs"
+```
+
+After this single follow-up commit, the re-review can pass through `cargo +nightly fmt --all --check` (exit 0) and the verdict can be downgraded to **Approve**.
+
+### Updated Findings
+
+- 🔴 Critical: 0
+- 🟡 Warning: 1 (W-QC3-R1, new in fix wave — blocks Approve per CI gate rule; the 3 original blocking Warnings W-QC3-1/W-QC3-2/W-QC3-3 are all Resolved; the 2 deferred non-blocking Warnings W-QC3-4/W-QC3-5 remain Acknowledged)
+- 🟢 Suggestion: 6 (unchanged from initial; deferred to V1.52 P-last WL-A)
+
+### Updated Verdict: **Request Changes**
+
+The 3 blocking Warnings raised in the initial review are all **Resolved** with high-quality evidence:
+- Test coverage of the new Labeled code paths went from **0 → 14 tests** spanning loader, validator, and runtime.
+- Plan scope drift is fully closed: binary→Labeled auto-conversion works (3 tests), `_judge_label` context write works (1 test), plan body updated, spec overlay updated.
+- The HIGH-severity silent-stall failure mode is **eliminated**: deterministic `Err(TaskExecutionFailed)` with diagnostic info + `tracing::warn!` observability + integration test that proves the session no longer stalls.
+
+**However**, the fix wave introduced a new Warning (W-QC3-R1) by adding a test file that fails `cargo +nightly fmt --all --check`. Per `mstar-review-qc` §CI 门禁补充（强制）, CI failures block Approve. The fix is a single `cargo +nightly fmt --all` invocation that the implementer should have run before committing.
+
+**Re-review pass once W-QC3-R1 is fixed** → verdict can be downgraded to **Approve** (no further Warnings blocking).
+
+---
+
+## Source Trace (re-review)
+
+- W-QC3-1 fix validation: `git show fda4e826 -- crates/nexus-orchestration/src/tasks/mod.rs` (lines 1988–3371 of new file content) + `git show fda4e826 -- crates/nexus-orchestration/tests/labeled_routing.rs` (new 289-line file). Confidence: High.
+- W-QC3-2 fix validation: `git show 1b460a17 -- crates/nexus-orchestration/src/tasks/mod.rs` (lines 777–838 for `resolve_labeled_target`; 1057–1102 for call sites with `?` propagation) + `git show 4900b582 -- .mstar/plans/2026-06-19-v1.52-n-way-gonogo-routing.md` (AC list updated). Confidence: High.
+- W-QC3-3 fix validation: `tasks/mod.rs:824-833` (Err construction) + `tasks/mod.rs:838-841` (tracing::warn!). Integration test `labeled_no_match_does_not_stall_session` confirms deterministic error. Spec overlay `preset-conditional-routing.md` §3.1.2 step 4 documents new behavior. Confidence: High.
+- W-QC3-R1 (new): `cargo +nightly fmt --all --check` exit code 1; 8 diff hunks all in the same new file. Confirmed stable fmt also flags the same file (lines 8, 150, 174, 201, 208, 215, 242, 285). Confidence: High.
