@@ -1,9 +1,9 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; full DF-56 roadmap in deferred tracker §3.6.3)  
-**Document class**: Feature line (conditional routing — minimal slice)  
+**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; full DF-56 roadmap in deferred tracker §3.6.3)  
+**Document class**: Feature line (conditional routing — minimal slice → N-way labeled)  
 **Created**: 2026-06-06  
-**Last updated**: 2026-06-12 (V1.43 P-last — promoted from Draft overlay to Shipped Feature line)
+**Last updated**: 2026-06-19 (V1.52 T-B P0: N-way labeled routing shipped, §3.1 replaced placeholder with shipped spec)
 **Tracker**: DF-56 (conditional routing / branching engine)  
 **Scope**: Preset `next.kind: conditional` loader + runtime evaluator (future iteration)  
 **Coordinates with**:
@@ -52,13 +52,15 @@ Pre-V1.42 state:
 
 When Status advances to **Draft** or **Normative**, orchestration-engine §7.5 defers to this document for the full conditional `next` schema.
 
-### 3.1 N-way labeled routing (Draft V1.52 overlay — T-B P0)
+### 3.1 N-way labeled routing (Draft V1.52 overlay — shipped T-B P0)
 
-**Status**: Draft (V1.52 — T-B P0 implemented 2026-06-19)  
-**Authoring plan**: `2026-06-19-v1.52-n-way-gonogo-routing`  
+**Status**: Draft (V1.52 T-B P0 shipped — implemented in plan `2026-06-19-v1.52-n-way-gonogo-routing`)
+**Authoring plan**: `2026-06-19-v1.52-n-way-gonogo-routing`
 **Promotes to Normative**: P-last of V1.52
 
-V1.52 T-B P0 generalizes the binary GO/NOGO conditional `next` (V1.42 P2) into **N-way labeled routing**. Instead of a fixed `{ go: <s1>, nogo: <s2> }` pair, presets may declare an ordered list of labeled edges:
+N-way labeled routing generalizes the binary GO/NOGO routing into multi-label routing for `llm_judge` states. The judge returns a label string (e.g. `"outline"`, `"research"`, `"abandon"`), and the runtime selects the first matching `LabeledNext` edge.
+
+#### §3.1.1 Wire format: `LabeledNext`
 
 ```yaml
 next:
@@ -67,94 +69,30 @@ next:
   - label: research
     target: gathering
   - label: abandon
-    target: done
+    target: archive
 ```
 
-#### 3.1.1 `LabeledNext` struct
+Each `LabeledNext` has:
+- `label: String` — the label string the judge must output to select this edge
+- `target: String` — the target state ID when the judge returns this label
 
-```rust
-pub struct LabeledNext {
-    /// Label string that the judge returns to select this edge.
-    pub label: String,
-    /// Target state ID when the judge returns this label.
-    pub target: String,
-}
-```
+The legacy binary `{ go: <s>, nogo: <s> }` shape (GoNogo) is auto-converted at runtime: `resolve_labeled_target` treats GoNogo edges as labeled edges with labels `"go"` and `"nogo"`. Legacy presets are therefore reachable via either routing API (boolean `_judge_result` or labeled string matching).
 
-The `NextTarget` enum gains a new variant `Labeled(Vec<LabeledNext>)`:
+#### §3.1.2 Runtime: `resolve_labeled_target`
 
-```rust
-pub enum NextTarget {
-    Linear(String),              // → single state ID
-    GoNogo(GoNogoNext),          // ← V1.42 binary (preserved)
-    Labeled(Vec<LabeledNext>),   // ← V1.52 N-way
-    Conditional(NextConditional), // ← deferred
-}
-```
+When `next` contains `Labeled` (or `GoNogo` via auto-conversion), the orchestration runtime calls `StateCompositeTask::resolve_labeled_target(context, judge_reason)`:
 
-**Serde untagged ordering:** `Linear → GoNogo → Labeled → Conditional`. The existing `{ go, nogo }` YAML shape continues to deserialize as `GoNogo(GoNogoNext)`. The new list-of-objects shape deserializes as `Labeled(Vec<LabeledNext>)`. No ambiguity.
+1. Collects all (label, target) pairs from the state's `next` edges, sorted by **descending label length** (to prevent shorter labels like `"go"` from matching as substrings of longer labels like `"nogo"`).
+2. Scans the judge's output text (`_judge_reason` in context) for each label string using substring matching (`contains()`).
+3. On first match: writes the matched label to `context._judge_label` and returns `NextAction::GoTo(target)`.
+4. On no match: logs `tracing::warn!` with the known labels and a judge output excerpt, then returns `Err(GraphError::TaskExecutionFailed(...))` — **deterministic branch fail** (no silent `WaitForInput` stall). The error message includes the list of known labels and the judge output excerpt.
+5. On non-`Labeled` / non-`GoNogo` next (e.g., `Linear`, `None`): returns `Ok(NextAction::WaitForInput)`.
 
-#### 3.1.2 Router: `resolve_labeled_target`
+**Backward compatibility**: legacy GoNogo presets continue to use the boolean `_judge_result` path via `judge_next_action(result)`. The auto-conversion allows the same presets to also work with the labeled path if called from `resolve_labeled_target`.
 
-`StateCompositeTask` gains a `resolve_labeled_target(judge_reason: &str) → NextAction` method. When the state's `next` is `Labeled(edges)`, it scans the judge's output text for known label strings and returns `GoTo(target)` for the first match. If no label matches, the state returns `WaitForInput`.
+**Reachability**: the preset loader adds simple edges (`add_edge`) for each `Labeled` target, so the existing BFS reachability validator covers all labeled branches without needing separate conditional edge wiring. Duplicate labels within the same state are caught by `check_labeled_edge_duplicates` at validation time.
 
-The `GoTo(String)` action (from `graph_flow::NextAction`) tells the engine to jump directly to the named task, skipping normal edge-based flow. Labeled edges registered via `graph.add_edge()` serve only for **reachability validation**; the actual routing is via `GoTo`.
-
-#### 3.1.3 Backward-compat example: binary GO/NOGO as a special case
-
-The old binary shape continues to work identically:
-
-```yaml
-# V1.42 shape (still valid, unchanged behavior)
-next:
-  go: approved
-  nogo: rejected
-```
-
-The equivalent new labeled form:
-
-```yaml
-# V1.52 labeled N-way (equivalent behavior for binary)
-next:
-  - label: go
-    target: approved
-  - label: nogo
-    target: rejected
-```
-
-Both shapes are **valid**. The GoNogo path uses `add_conditional_edge` with `_judge_result: bool`; the Labeled path uses `add_edge` + `GoTo` with `_judge_label` lookup. All existing embedded presets (`novel-writing`, `novel-chapter-review`, `research`, etc.) use the old shape and are unaffected.
-
-#### 3.1.4 Validation
-
-The loader enforces:
-- `Labeled` edges are only valid on `exit_when.kind: llm_judge` states (mirrors GoNogo gate).
-- Each `LabeledNext.target` must reference a valid state ID.
-- **Duplicate label detection**: two labeled edges on the same state must not share the same `label` value (produces `DiagnosticCategory::DuplicateLabel` error).
-
-The reachability validator (`validate_reachability`) treats each `LabeledNext.target` as a forward edge from the source state, so BFS from `initial` covers all labeled branches.
-
-### 3.2 Multi-branch merge semantics (Draft V1.52 overlay)
-
-**Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-multi-branch-merge-semantics`)  
-**Authoring plan**: `2026-06-19-v1.52-multi-branch-merge-semantics`  
-**Promotes to Normative**: P-last of V1.52
-
-Draft overlay placeholder: define N-way branch merge/join semantics for preset graphs after T-B P0 generalizes binary GO/NOGO routing.
-
-Illustrative YAML (from orchestration-engine §7.5 — not loadable today):
-
-```yaml
-next:
-  kind: conditional
-  rules:
-    - when: "{{state.brainstorming.output | length > 2000}}"
-      to: outlining
-    - when: "{{state.brainstorming.output | contains 'unclear'}}"
-      to: gathering               # allow re-entry
-  default: outlining
-```
-
-**Engine rule (proposed):** runtime evaluator chooses branch; agents supply data via tools only — agents do not directly select graph edges.
+**Substring matching caveat**: matching uses `String::contains()` (substring containment). Authors should choose labels that are unlikely to appear as substrings of unrelated words. The descending-length sort mitigates the most common case (e.g., `"nogo"` checked before `"go"`). A future iteration may add word-boundary or exact matching.
 
 ---
 
