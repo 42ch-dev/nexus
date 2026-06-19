@@ -332,8 +332,8 @@
       "version": "v1.51",
       "name": "KB Closure & Multi-Writer Concurrency",
       "compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
-      "shipped_at": "2026-06-19",
-      "merge_commit": "TBD",
+      "shipped_at": "2026-06-19T06:34:13Z",
+      "merge_commit": "pending",
       "plan_ids": [
         "2026-06-18-v1.51-harness-docs-prepare",
         "2026-06-18-v1.51-llm-extraction",
@@ -361,8 +361,8 @@
         "open_v152_count": 0
       },
       "wire_contract_changes": "None (per compass \u00a70.1 #8)",
-      "pr": "TBD",
-      "note": "Merged to main via PR TBD on 2026-06-19. Integration branch iteration/v1.51 to be retired."
+      "pr": 64,
+      "note": "PR #64 open at https://github.com/42ch-dev/nexus/pull/64 \u2014 awaiting merge to main on 2026-06-19."
     }
   },
   "metadata": {
