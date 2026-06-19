@@ -541,12 +541,12 @@ pub async fn kb_adopt(
     let flipped = mark_confirmed_in_tx_with_cas(&mut tx, extract_job_id, candidate_version)
         .await
         .map_err(|e| {
-            if matches!(e, nexus_local_db::LocalDbError::VersionMismatch { .. }) {
+            if let nexus_local_db::LocalDbError::VersionMismatch { actual, .. } = &e {
                 CliError::VersionConflict {
                     table: "kb_extract_jobs".to_string(),
                     row_id: extract_job_id.to_string(),
                     expected_version: candidate_version,
-                    actual_version: None,
+                    actual_version: *actual,
                 }
             } else {
                 CliError::Other(format!("Failed to mark candidate confirmed: {e}"))
