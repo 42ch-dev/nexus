@@ -8,9 +8,7 @@
 //! - No-match does NOT stall the session (deterministic fail)
 
 use graph_flow::SessionStorage;
-use nexus_orchestration::{
-    preset, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine,
-};
+use nexus_orchestration::{preset, CapabilityRegistry, GraphFlowEngine, OrchestrationEngine};
 use std::sync::Arc;
 
 fn test_capability_registry() -> CapabilityRegistry {
@@ -150,16 +148,16 @@ states:
 /// Full preset with 3-way labeled edges loads and passes validation.
 #[test]
 fn labeled_preset_loads_and_validates() {
-    let yaml = labeled_preset_yaml(&[
-        ("good", "good_branch"),
-        ("retry", "retry_branch"),
-    ]);
+    let yaml = labeled_preset_yaml(&[("good", "good_branch"), ("retry", "retry_branch")]);
     let caps = test_capability_registry();
-    let loaded = preset::load_preset_from_str(&yaml, &caps)
-        .expect("3-way labeled preset should load");
+    let loaded =
+        preset::load_preset_from_str(&yaml, &caps).expect("3-way labeled preset should load");
     let result = preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
     assert!(
-        result.diagnostics.iter().all(|d| d.severity != preset::validation::DiagnosticSeverity::Error),
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != preset::validation::DiagnosticSeverity::Error),
         "labeled preset should pass semantic validation: {:?}",
         result.diagnostics
     );
@@ -174,7 +172,10 @@ fn hybrid_gonogo_labeled_preset_loads_and_validates() {
         .expect("hybrid GoNogo+Labeled preset should load");
     let result = preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
     assert!(
-        result.diagnostics.iter().all(|d| d.severity != preset::validation::DiagnosticSeverity::Error),
+        result
+            .diagnostics
+            .iter()
+            .all(|d| d.severity != preset::validation::DiagnosticSeverity::Error),
         "hybrid preset should pass semantic validation: {:?}",
         result.diagnostics
     );
@@ -201,19 +202,20 @@ fn orphan_label_detected_at_validation_time() {
 fn all_embedded_presets_still_parse_regression() {
     let caps = test_capability_registry();
     let preset_ids = preset::list_embedded_presets();
-    assert!(!preset_ids.is_empty(), "expected at least one embedded preset");
+    assert!(
+        !preset_ids.is_empty(),
+        "expected at least one embedded preset"
+    );
 
     let mut failures: Vec<String> = Vec::new();
     for preset_id in &preset_ids {
         match preset::load_embedded_preset(preset_id, &caps) {
             Ok(loaded) => {
-                let result =
-                    preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
+                let result = preset::validation::validate_preset_semantic(&loaded.manifest, &caps);
                 for d in &result.diagnostics {
                     if d.severity == preset::validation::DiagnosticSeverity::Error {
                         // Known false positive: capability arg drift for creator.inject_prompt.
-                        if d.category
-                            == preset::validation::DiagnosticCategory::CapabilityArgDrift
+                        if d.category == preset::validation::DiagnosticCategory::CapabilityArgDrift
                             && d.message.contains("capability 'creator.inject_prompt'")
                         {
                             continue; // known false positive, not a regression
@@ -242,8 +244,7 @@ fn all_embedded_presets_still_parse_regression() {
 async fn labeled_no_match_does_not_stall_session() {
     let yaml = labeled_preset_yaml(&[("outline", "good_branch")]);
     let caps = Arc::new(test_capability_registry());
-    let loaded = preset::load_preset_from_str(&yaml, &caps)
-        .expect("labeled preset should load");
+    let loaded = preset::load_preset_from_str(&yaml, &caps).expect("labeled preset should load");
 
     let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
     let engine = GraphFlowEngine::new_with_storage(storage.clone(), caps.clone());
@@ -285,5 +286,8 @@ async fn labeled_no_match_does_not_stall_session() {
             }
         }
     }
-    assert!(errored, "labeled no-match should cause error, not silent stall");
+    assert!(
+        errored,
+        "labeled no-match should cause error, not silent stall"
+    );
 }
