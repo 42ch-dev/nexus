@@ -1464,7 +1464,8 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         // input, not a breaking state-machine change, but versioned up so
         // pre-V1.48 schedules are correctly identified).
         "novel-writing" => 8,
-        "research" | "novel-review-master" => 2,
+        "research" => 2,
+        "novel-review-master" => 3,
         "kb-extract" => 3,
         // V1.50 T-A P1 (R-V150P1CRONBW-05 / qc3 W-003): explicit arms for the
         // cron-triggered presets so the evaluator never silently stamps a
