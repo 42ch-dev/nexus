@@ -616,7 +616,7 @@ async fn patch_work_updates_stage_fields() {
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
     };
-    nexus_daemon_runtime::api::handlers::works::patch_work(
+    let _ = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
         Path(work_id.clone()),
         axum::Json(intake_patch),
@@ -1225,11 +1225,10 @@ async fn patch_work_invalid_stage_value_returns_400() {
         lineage_from_work_id: None,
         set_pool_active: None,
     };
-    let (_, resp) =
+    let (_, _resp) =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
             .await
             .unwrap();
-    let work_id = resp.work_id.clone();
 
     // Need to set up a separate state since we already consumed it
     let (state, _tmp) = handler_state().await;
