@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-19-v1.52-multi-branch-merge-semantics"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-19"
 ---
 
@@ -278,3 +278,70 @@ For each labeled-edge arrival into a merge target `M`:
 - 🟢 S-QC3-1: pedantic clippy warnings (cosmetic).
 - 🟢 S-QC3-2: advance-counter for ops monitoring (optional).
 - 🟢 S-QC3-3: source-ID tracking aligns validator semantics with runtime (preferred W-QC3-1 remedy).
+
+## Revalidation
+
+**Type**: Targeted re-review (wave 2, fix commit `3ab67781`)  
+**Date**: 2026-06-19  
+**Fix scope**: `93416cf8..3ab67781` (fix-wave commit atop qc1/qc3 reports)  
+**Files changed**: `crates/nexus-orchestration/src/preset/validation.rs` (+90/-10), `crates/nexus-orchestration/src/tasks/mod.rs` (+70/-3)
+
+### Finding Disposition
+
+#### W-QC3-1: Cross-state label duplicates — validator-level fix ✅ RESOLVED
+
+**Fix**: `check_labeled_edge_duplicates` now performs a **cross-state** check in addition to the existing within-state check. A `HashMap<(&str, &str), &str>` maps `(target, label)` pairs to source state IDs; if any pair appears from two different source states, a `DiagnosticSeverity::Error` + `DiagnosticCategory::DuplicateLabel` diagnostic is produced.
+
+**Evidence**:
+- **Diff**: `validation.rs:469-497` — second loop over all states collects `(target, label)` → source ID, errors on collision
+- **Test**: `cross_state_label_duplicate_errors` (validation.rs:2112) — creates a preset with two states (`a`, `b`) both emitting `label: foo` → `target: merged` (merge node with `kind: all`), asserts `DuplicateLabel` error with both state names in the message
+- **Test run**: `cargo test -p nexus-orchestration --lib cross_state_label_duplicate_errors` → **1 passed, 0 failed**
+
+**Assessment**: Fix correctly prevents the silent-runtime-stall class by rejecting the preset at validation time. The cross-state check covers the full surface area (any two states sharing a label → same merge target). The `DiagnosticCategory::DuplicateLabel` is already mapped to `Error` severity, which blocks preset load — appropriate for a correctness-required invariant.
+
+**Remaining gap (not blocking)**: The fix follows "Option A" (validator-level). "Option B" (source-ID tracking at runtime) was not implemented — so the runtime still dedupes by label string. This is semantically correct **now** because the validator rejects duplicate labels before runtime, but the runtime's dedup-by-label remains a latent implementation detail. Tracked as S-QC3-3 (suggestion, not blocking).
+
+#### W-QC3-2: `format!` per tick — pre-computed `merge_key` ✅ RESOLVED
+
+**Fix**: `StateCompositeTask` gained a `merge_key: String` field, pre-computed once in `from_manifest` (`format!("_merge_{}", state.id)`) and reused in the hot-path merge gate and arrival handler — replacing two `format!(_merge_{})` calls that allocated per tick.
+
+**Evidence**:
+- **Diff**: `tasks/mod.rs:634-636` (field added), `tasks/mod.rs:657` (pre-computed in `from_manifest`), `tasks/mod.rs:863-864` (hot path uses `self.merge_key` and `context.get(&self.merge_key)`)
+- **Regression**: All 717 lib tests pass; all 13 integration tests pass
+- **Clippy**: `cargo clippy -p nexus-orchestration --lib -- -D warnings` → clean
+
+**Assessment**: Straightforward performance hygiene. The field is always populated (`from_manifest` is the only constructor path), and the test constructor (`test_task`) also sets it. No behavioral change.
+
+#### W-QC3-3: Dead `test_caps()` — removed ✅ RESOLVED
+
+**Fix**: The `test_caps()` function (`validation.rs:1161-1163`) was deleted. All 11 call sites already used `CapabilityRegistry::with_builtins()` directly, making `test_caps()` a dead alias.
+
+**Evidence**:
+- **Grep**: `grep -n "fn test_caps" crates/nexus-orchestration/src/preset/validation.rs` → **NOT FOUND**
+- **Clippy**: `cargo clippy -p nexus-orchestration --lib -- -D warnings` → clean (no dead_code warning)
+- **Tests**: All 717 lib tests pass (including the 11 call sites that now use `CapabilityRegistry::with_builtins()`)
+
+**Assessment**: Clean removal. No residual dead code.
+
+### Regression Suite
+
+| Command | Result |
+|---------|--------|
+| `cargo test -p nexus-orchestration --lib` | **717 passed, 0 failed, 1 ignored** |
+| `cargo test -p nexus-orchestration --tests` | **13 passed, 0 failed** |
+| `cargo clippy -p nexus-orchestration --lib -- -D warnings` | **clean** |
+| `cargo test -p nexus-orchestration --lib cross_state_label_duplicate_errors` | **1 passed** |
+| `cargo test -p nexus-orchestration --lib merge_wait_all_default_enforced_when_merge_absent` | **1 passed** |
+| Embedded preset regression (`all_embedded_presets_pass_strict_validation_gate`) | **1 passed** |
+
+### Revalidated Verdict
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (all 3 resolved) |
+| 🟢 Suggestion | 3 (unchanged, non-blocking: S-QC3-1 cosmetic clippy, S-QC3-2 advance counter, S-QC3-3 source-ID tracking) |
+
+**All 3 Warning findings from qc3 resolved.** No new issues introduced by the fix wave. Tests confirm correctness and backward compatibility. 🟢 Suggestions remain non-blocking.
+
+**Verdict**: **Approve**
