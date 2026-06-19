@@ -529,6 +529,24 @@ fn validate_manifest(
                         });
                     }
                 }
+                NextTarget::Labeled(labeled_edges) => {
+                    // V1.52 T-B P0: Labeled edges are only valid on llm_judge states.
+                    if !matches!(state.exit_when, Some(ExitWhen::LlmJudge { .. })) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next"),
+                            error: "labeled conditional next is only valid on llm_judge states"
+                                .to_string(),
+                        });
+                    }
+                    for (k, edge) in labeled_edges.iter().enumerate() {
+                        if !state_ids.contains(edge.target.as_str()) {
+                            problems.push(ValidationProblem {
+                                path: format!("{state_path}.next[{k}].target"),
+                                error: format!("unknown state: '{}'", edge.target),
+                            });
+                        }
+                    }
+                }
                 NextTarget::Conditional(_) => {
                     problems.push(ValidationProblem {
                         path: format!("{state_path}.next"),
@@ -886,6 +904,16 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
                     &go_nogo.nogo,
                 );
             }
+            Some(NextTarget::Labeled(ref labeled_edges)) => {
+                // V1.52 T-B P0: N-way labeled routing.
+                // Each labeled edge gets a regular add_edge for reachability
+                // validation. Actual routing is via NextAction::GoTo(target)
+                // in StateCompositeTask::resolve_labeled_target, which also
+                // writes the matched label to context._judge_label.
+                for edge in labeled_edges {
+                    graph.add_edge(&state.id, &edge.target);
+                }
+            }
             Some(NextTarget::Conditional(_)) | None => {}
         }
     }
@@ -938,6 +966,12 @@ pub fn build_wired_outer_graph(
                     &go_nogo.go,
                     &go_nogo.nogo,
                 );
+            }
+            Some(NextTarget::Labeled(ref labeled_edges)) => {
+                // V1.52 T-B P0: N-way labeled routing.
+                for edge in labeled_edges {
+                    graph.add_edge(&state.id, &edge.target);
+                }
             }
             Some(NextTarget::Conditional(_)) | None => {}
         }
