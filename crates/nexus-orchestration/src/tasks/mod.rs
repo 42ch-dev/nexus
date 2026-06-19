@@ -760,6 +760,9 @@ impl StateCompositeTask {
     ///
     /// When `next` is `GoNogo`, both GO and NOGO advance via `Continue`
     /// (the conditional edge routes to the correct target).
+    /// When `next` is `Labeled` (V1.52 T-B P0), routing is via
+    /// [`Self::resolve_labeled_target`] instead — this method should NOT
+    /// be called for `Labeled`.
     /// When `next` is `Linear` or `None`, GO advances but NOGO waits.
     // Clippy wants const but this borrows self.next; suppress.
     #[allow(clippy::missing_const_for_fn)]
@@ -769,6 +772,22 @@ impl StateCompositeTask {
             _ if judge_result => NextAction::Continue,
             _ => NextAction::WaitForInput,
         }
+    }
+
+    /// V1.52 T-B P0: resolve labeled routing target from judge output.
+    ///
+    /// Scans the judge's output text (`judge_reason`) for known label
+    /// strings declared in `next` edges. Returns `GoTo(target)` for the
+    /// first matching label, or `WaitForInput` if no label matches.
+    fn resolve_labeled_target(&self, judge_reason: &str) -> NextAction {
+        if let Some(NextTarget::Labeled(edges)) = &self.next {
+            for edge in edges {
+                if judge_reason.contains(&edge.label) {
+                    return NextAction::GoTo(edge.target.clone());
+                }
+            }
+        }
+        NextAction::WaitForInput
     }
 }
 
@@ -987,7 +1006,15 @@ impl Task for StateCompositeTask {
                                             if self.terminal {
                                                 NextAction::End
                                             } else {
-                                                self.judge_next_action(prev_result)
+                                                // V1.52 T-B P0: labeled routing via GoTo
+                                                if matches!(
+                                                    &self.next,
+                                                    Some(NextTarget::Labeled(_))
+                                                ) {
+                                                    self.resolve_labeled_target(&prev_reason)
+                                                } else {
+                                                    self.judge_next_action(prev_result)
+                                                }
                                             },
                                         ));
                                     }
@@ -1011,10 +1038,18 @@ impl Task for StateCompositeTask {
                     context.set("_judge_result", result).await;
                     context.set("_judge_reason", reason.clone()).await;
 
-                    // V1.42 P2: when next is GoNogo, both GO and NOGO advance
-                    // (the conditional edge routes to the correct target).
-                    // When next is Linear/None, GO advances but NOGO waits.
-                    self.judge_next_action(result)
+                    // V1.52 T-B P0: for Labeled next, write _judge_label
+                    // and route via GoTo. For GoNogo/Linear/None, use
+                    // the existing judge_next_action(bool) path.
+                    if matches!(&self.next, Some(NextTarget::Labeled(_))) {
+                        self.resolve_labeled_target(&reason)
+                    } else {
+                        // V1.42 P2: when next is GoNogo, both GO and NOGO
+                        // advance (the conditional edge routes to the correct
+                        // target). When next is Linear/None, GO advances but
+                        // NOGO waits.
+                        self.judge_next_action(result)
+                    }
                 }
             }
             Some(ExitWhen::GraphComplete) => {

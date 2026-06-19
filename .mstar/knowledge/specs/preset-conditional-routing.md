@@ -52,7 +52,88 @@ Pre-V1.42 state:
 
 When Status advances to **Draft** or **Normative**, orchestration-engine §7.5 defers to this document for the full conditional `next` schema.
 
-### 3.1 Multi-branch merge semantics (Draft V1.52 overlay)
+### 3.1 N-way labeled routing (Draft V1.52 overlay — T-B P0)
+
+**Status**: Draft (V1.52 — T-B P0 implemented 2026-06-19)  
+**Authoring plan**: `2026-06-19-v1.52-n-way-gonogo-routing`  
+**Promotes to Normative**: P-last of V1.52
+
+V1.52 T-B P0 generalizes the binary GO/NOGO conditional `next` (V1.42 P2) into **N-way labeled routing**. Instead of a fixed `{ go: <s1>, nogo: <s2> }` pair, presets may declare an ordered list of labeled edges:
+
+```yaml
+next:
+  - label: outline
+    target: outlining
+  - label: research
+    target: gathering
+  - label: abandon
+    target: done
+```
+
+#### 3.1.1 `LabeledNext` struct
+
+```rust
+pub struct LabeledNext {
+    /// Label string that the judge returns to select this edge.
+    pub label: String,
+    /// Target state ID when the judge returns this label.
+    pub target: String,
+}
+```
+
+The `NextTarget` enum gains a new variant `Labeled(Vec<LabeledNext>)`:
+
+```rust
+pub enum NextTarget {
+    Linear(String),              // → single state ID
+    GoNogo(GoNogoNext),          // ← V1.42 binary (preserved)
+    Labeled(Vec<LabeledNext>),   // ← V1.52 N-way
+    Conditional(NextConditional), // ← deferred
+}
+```
+
+**Serde untagged ordering:** `Linear → GoNogo → Labeled → Conditional`. The existing `{ go, nogo }` YAML shape continues to deserialize as `GoNogo(GoNogoNext)`. The new list-of-objects shape deserializes as `Labeled(Vec<LabeledNext>)`. No ambiguity.
+
+#### 3.1.2 Router: `resolve_labeled_target`
+
+`StateCompositeTask` gains a `resolve_labeled_target(judge_reason: &str) → NextAction` method. When the state's `next` is `Labeled(edges)`, it scans the judge's output text for known label strings and returns `GoTo(target)` for the first match. If no label matches, the state returns `WaitForInput`.
+
+The `GoTo(String)` action (from `graph_flow::NextAction`) tells the engine to jump directly to the named task, skipping normal edge-based flow. Labeled edges registered via `graph.add_edge()` serve only for **reachability validation**; the actual routing is via `GoTo`.
+
+#### 3.1.3 Backward-compat example: binary GO/NOGO as a special case
+
+The old binary shape continues to work identically:
+
+```yaml
+# V1.42 shape (still valid, unchanged behavior)
+next:
+  go: approved
+  nogo: rejected
+```
+
+The equivalent new labeled form:
+
+```yaml
+# V1.52 labeled N-way (equivalent behavior for binary)
+next:
+  - label: go
+    target: approved
+  - label: nogo
+    target: rejected
+```
+
+Both shapes are **valid**. The GoNogo path uses `add_conditional_edge` with `_judge_result: bool`; the Labeled path uses `add_edge` + `GoTo` with `_judge_label` lookup. All existing embedded presets (`novel-writing`, `novel-chapter-review`, `research`, etc.) use the old shape and are unaffected.
+
+#### 3.1.4 Validation
+
+The loader enforces:
+- `Labeled` edges are only valid on `exit_when.kind: llm_judge` states (mirrors GoNogo gate).
+- Each `LabeledNext.target` must reference a valid state ID.
+- **Duplicate label detection**: two labeled edges on the same state must not share the same `label` value (produces `DiagnosticCategory::DuplicateLabel` error).
+
+The reachability validator (`validate_reachability`) treats each `LabeledNext.target` as a forward edge from the source state, so BFS from `initial` covers all labeled branches.
+
+### 3.2 Multi-branch merge semantics (Draft V1.52 overlay)
 
 **Status**: Draft (V1.52 — body authored in plan `2026-06-19-v1.52-multi-branch-merge-semantics`)  
 **Authoring plan**: `2026-06-19-v1.52-multi-branch-merge-semantics`  

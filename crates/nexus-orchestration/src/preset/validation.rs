@@ -17,7 +17,9 @@
 //! may elevate to error in strict mode (future work).
 
 use crate::capability::CapabilityRegistry;
-use crate::preset::manifest::{EnterAction, ExitWhen, PresetKind, PresetManifest, RunIntent};
+use crate::preset::manifest::{
+    EnterAction, ExitWhen, NextTarget, PresetKind, PresetManifest, RunIntent,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -74,6 +76,8 @@ pub enum DiagnosticCategory {
     SchemaCheckSkipped,
     /// Run intent classification issue (V1.33 §5).
     RunIntents,
+    /// V1.52 T-B P0: duplicate label values in labeled next edges.
+    DuplicateLabel,
 }
 
 /// Result of semantic validation: a list of diagnostics.
@@ -151,6 +155,7 @@ pub fn validate_preset_semantic(
     check_terminal_marker_consistency(manifest, &mut result);
     check_bundle_id_match(manifest, &mut result);
     check_inner_graph_references(manifest, &mut result);
+    check_labeled_edge_duplicates(manifest, &mut result);
 
     // A4: Capability compatibility checks
     check_capability_arg_compatibility(manifest, caps, &mut result);
@@ -224,6 +229,15 @@ fn check_initial_to_terminal_reachability(
                 }
                 if state_ids.contains(gonogo.nogo.as_str()) {
                     adj.entry(&state.id).or_default().push(gonogo.nogo.as_str());
+                }
+            }
+            Some(crate::preset::manifest::NextTarget::Labeled(labeled)) => {
+                // V1.52 T-B P0: N-way labeled edges — each edge's target
+                // is a reachable state from the source.
+                for edge in labeled {
+                    if state_ids.contains(edge.target.as_str()) {
+                        adj.entry(&state.id).or_default().push(edge.target.as_str());
+                    }
                 }
             }
             _ => {}
@@ -420,6 +434,30 @@ fn check_inner_graph_references(manifest: &PresetManifest, result: &mut Validati
                 severity: DiagnosticSeverity::Warning,
                 category: DiagnosticCategory::OrphanInnerGraph,
             });
+        }
+    }
+}
+
+/// V1.52 T-B P0: check for duplicate label values within a single state's
+/// `Labeled` next edges. Two edges with the same label would create an
+/// ambiguous routing decision at runtime.
+fn check_labeled_edge_duplicates(manifest: &PresetManifest, result: &mut ValidationResult) {
+    for (i, state) in manifest.states.iter().enumerate() {
+        if let Some(NextTarget::Labeled(edges)) = &state.next {
+            let mut seen_labels: HashSet<&str> = HashSet::new();
+            for (k, edge) in edges.iter().enumerate() {
+                if !seen_labels.insert(&edge.label) {
+                    result.diagnostics.push(ValidationDiagnostic {
+                        path: format!("states[{i}].next[{k}].label"),
+                        message: format!(
+                            "duplicate label '{}' in labeled next edges of state '{}'",
+                            edge.label, state.id
+                        ),
+                        severity: DiagnosticSeverity::Error,
+                        category: DiagnosticCategory::DuplicateLabel,
+                    });
+                }
+            }
         }
     }
 }
