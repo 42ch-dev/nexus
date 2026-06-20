@@ -1643,8 +1643,8 @@ async fn execute_manuscript_chapter_update(
         .as_i64()
         .map_or(1, |v| i32::try_from(v).unwrap_or(1));
 
-    // Verify work ownership first (W-003 will use work_ref from record for path construction).
-    let _work_record = works::get_work(state.pool(), creator_id, work_id)
+    // Verify work ownership first (keep record for work_ref used in W-003 path).
+    let work_record = works::get_work(state.pool(), creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1679,29 +1679,40 @@ async fn execute_manuscript_chapter_update(
                 code: "WORKSPACE_PATH_ERROR".to_string(),
                 message: "workspace path not available".to_string(),
             })?;
-        let body_dir = Path::new(&workspace_root)
-            .join("Stories")
-            .join(work_id)
-            .join(format!("ch_{chapter:02}_v{volume:02}"));
-        // C-002: use tokio::fs to avoid blocking the async runtime.
-        tokio::fs::create_dir_all(&body_dir)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DIR_CREATE_FAILED".into(),
-                message: format!("failed to create chapter dir: {e}"),
-            })?;
-        let body_file = body_dir.join("body.md");
+        // W-003: use the canonical body_path from the existing chapter record
+        // (set by seed_chapters), which follows Works/{work_ref}/Stories/{slug}.md.
+        // Fall back to constructing the path if the chapter has no body_path yet.
+        let canonical_path = chapter_exists
+            .as_ref()
+            .and_then(|cr| cr.body_path.clone())
+            .unwrap_or_else(|| {
+                let ch_nn = format!("ch{chapter:02}");
+                let wr = work_record.work_ref.as_deref().unwrap_or(work_id);
+                format!("Works/{wr}/Stories/{ch_nn}-{ch_nn}.md")
+            });
+        let body_file = Path::new(&workspace_root).join(&canonical_path);
+        if let Some(parent) = body_file.parent() {
+            // C-002: use tokio::fs to avoid blocking the async runtime.
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DIR_CREATE_FAILED".into(),
+                    message: format!("failed to create chapter dir: {e}"),
+                })?;
+        }
         // C-002: write to a temp file first, then atomically rename within a
         // DB transaction to prevent orphaned files on crash between write and
         // DB commit.
-        let tmp_file = body_dir.join("body.md.tmp");
+        let tmp_file = body_file.with_extension("md.tmp");
         tokio::fs::write(&tmp_file, content)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "FILE_WRITE_FAILED".into(),
                 message: format!("failed to write chapter body: {e}"),
             })?;
-        Some(body_file.to_string_lossy().to_string())
+        // W-003: store the relative canonical path in the DB, matching
+        // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
+        Some(canonical_path)
     } else {
         None
     };
@@ -1710,7 +1721,15 @@ async fn execute_manuscript_chapter_update(
     // C-002: wrap DB update + file rename in a single transaction so the
     // DB row is only updated when the final file is in place.
     if let Some(ref bp) = body_path {
-        let tmp_path = Path::new(bp).with_extension("md.tmp");
+        // W-003: bp is a relative canonical path; resolve to absolute for FS ops.
+        let workspace_root = state
+            .workspace_path()
+            .ok_or_else(|| NexusApiError::Internal {
+                code: "WORKSPACE_PATH_ERROR".to_string(),
+                message: "workspace path not available".to_string(),
+            })?;
+        let abs_body = Path::new(&workspace_root).join(bp);
+        let abs_tmp = abs_body.with_extension("md.tmp");
         let word_count = req.parameters["content"]
             .as_str()
             .map_or(0, |c| c.split_whitespace().count());
@@ -1741,11 +1760,11 @@ async fn execute_manuscript_chapter_update(
             message: format!("chapter update: {e}"),
         })?;
         // Atomically rename temp → final (after DB update succeeds inside tx).
-        tokio::fs::rename(&tmp_path, Path::new(bp))
+        tokio::fs::rename(&abs_tmp, &abs_body)
             .await
             .map_err(|e| {
                 // Best-effort cleanup: remove temp file on rename failure.
-                let _ = std::fs::remove_file(&tmp_path);
+                let _ = std::fs::remove_file(&abs_tmp);
                 NexusApiError::Internal {
                     code: "FILE_RENAME_FAILED".into(),
                     message: format!("failed to finalize chapter file: {e}"),
@@ -3552,15 +3571,26 @@ mod tests {
                 .expect("get_chapter after update")
                 .expect("chapter should exist after update");
         let db_body_path = chapter_record.body_path.expect("body_path should be set");
+        // W-003: verify canonical path follows Works/{work_ref}/Stories/... pattern.
+        assert!(
+            db_body_path.starts_with("Works/"),
+            "body_path should start with Works/, got: {db_body_path}"
+        );
         assert!(
             db_body_path.contains("Stories/"),
             "body_path should use Stories/ layout, got: {db_body_path}"
         );
         assert!(
+            db_body_path.ends_with(".md"),
+            "body_path should end with .md, got: {db_body_path}"
+        );
+        assert!(
             !db_body_path.ends_with(".tmp"),
             "body_path should be the final file, not a .tmp: {db_body_path}"
         );
-        let on_disk = tokio::fs::read_to_string(&db_body_path)
+        // W-003: db_body_path is a relative canonical path; resolve to absolute.
+        let on_disk_path = workspace_dir.join(&db_body_path);
+        let on_disk = tokio::fs::read_to_string(&on_disk_path)
             .await
             .expect("file should exist on disk");
         assert_eq!(
