@@ -168,8 +168,10 @@
     },
     {
       "plan_id": "2026-06-21-v1.53-df46-read-capability-slice",
-      "title": "P1 — First DF-46 read-heavy nexus.* capability slice",
-      "status": "Pending",
+      "title": "P1 — First DF-46 read-heavy nexus.* capability slice (5 tools) + P0 residual closure",
+      "status": "Done",
+      "started_at": "2026-06-20T00:00:00Z",
+      "done_at": "2026-06-20T17:00:00Z",
       "owner": "@fullstack-dev-2",
       "agents": [
         "@fullstack-dev-2",
@@ -179,7 +181,10 @@
       "working_branch": "feature/v1.53-df46-read-capability-slice",
       "merge_target": "iteration/v1.53",
       "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
-      "created_at": "2026-06-20T00:00:00Z"
+      "created_at": "2026-06-20T00:00:00Z",
+      "qc_dispatched_at": "2026-06-20T16:30:00Z",
+      "qc_reports_path": ".mstar/plans/reports/2026-06-21-v1.53-df46-read-capability-slice/",
+      "merge_commit": "iteration/v1.53 (merge of feature/v1.53-df46-read-capability-slice)"
     },
     {
       "plan_id": "2026-06-22-v1.53-skills-cli-cleanup",
