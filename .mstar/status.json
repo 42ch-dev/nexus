@@ -2112,6 +2112,22 @@
         "closure_evidence": "feature/v1.53-df46-read-capability-slice @ 4d8fb458",
         "_plan_id": "2026-06-21-v1.53-df46-read-capability-slice"
       }
+    ],
+    "2026-06-22-v1.53-skills-cli-cleanup": [
+      {
+        "id": "R-V153PC1-N001",
+        "title": "cli-spec.md §6.4 omits acp skills subcommand but does not explicitly label the omission as a pre-1.0 intentional breaking-change removal",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) N-1 (single-review)",
+        "scope": ".mstar/knowledge/specs/cli-spec.md §6.4 (lines ~628-634)",
+        "decision": "defer",
+        "owner": "@writing-specialist or @fullstack-dev",
+        "target": "V1.53 P-last (spec hygiene)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.53-skills-cli-cleanup][R-V153PC1-N001]",
+        "note": "DF-50 cancellation is documented in deferred tracker archive. cli-spec.md §6.4 currently shows the surviving subcommand list but doesn't explicitly mark the omission of `acp skills export|verify` as a pre-1.0 intentional breaking change. Add a brief explicit note in P-last hygiene pass for traceability.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-22-v1.53-skills-cli-cleanup"
+      }
     ]
   }
 }
