@@ -355,6 +355,7 @@ pub fn host_tool_registry() -> &'static CapabilityRegistry {
 /// Builds the full registry (called once by `LazyLock`).
 /// Marked `pub` so benchmarks can measure cold-path initialization;
 /// external callers should use `host_tool_registry()` instead.
+#[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn build_registry() -> CapabilityRegistry {
     use crate::api::handlers::host_tool_executor as hte;
