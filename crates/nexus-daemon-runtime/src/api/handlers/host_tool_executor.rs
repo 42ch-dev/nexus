@@ -2137,6 +2137,7 @@ pub(crate) fn registry_pool_entry_manage<'a>(
 mod tests {
     use super::*;
     use crate::test_utils::create_test_workspace;
+    use crate::test_utils::create_initialized_test_workspace;
     use crate::workspace::WorkspaceState;
 
     #[tokio::test]
@@ -2785,7 +2786,7 @@ mod tests {
         assert!(val["pool_healthy"].as_bool().unwrap_or(false));
         assert_eq!(
             val["registry_ids"].as_array().expect("registry_ids").len(),
-            13
+            19
         );
     }
 
@@ -3235,5 +3236,695 @@ mod tests {
             events.len()
         );
         drop(tmp);
+    }
+
+    // ─── V1.54 P0: DF-46 write-tool hermetic tests (T10) ──────────────────
+
+    // --- nexus.kb_snapshot.write (3 tests) ---
+
+    #[tokio::test]
+    async fn kb_snapshot_write_upserts_key_blocks() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.write".to_string(),
+            parameters: serde_json::json!({
+                "world_id": "wld_test_world",
+                "blocks": [{
+                    "schema_version": 1,
+                    "key_block_id": "kb_write_1",
+                    "world_id": "wld_test_world",
+                    "block_type": "character",
+                    "canonical_name": "test_character",
+                    "status": "provisional",
+                    "body": {"name": "Test Char"},
+                    "created_at": "2026-01-01T00:00:00Z"
+                }]
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "kb_snapshot.write should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["written"], 1);
+        assert_eq!(val["world_id"], "wld_test_world");
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn kb_snapshot_write_rejects_missing_world_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.write".to_string(),
+            parameters: serde_json::json!({"blocks": []}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn kb_snapshot_write_rejects_unknown_tool_variant() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.write_nonexistent".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
+    }
+
+    // --- nexus.manuscript.chapter.update (3 tests) ---
+
+    #[tokio::test]
+    async fn manuscript_chapter_update_writes_content() {
+        let (tmp, nexus_home, db_path, workspace_dir) =
+            create_initialized_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, Some(workspace_dir.to_string_lossy().to_string())).await;
+
+        // Create a work and seed chapters
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Chapter Update Test".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: Some(3),
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+        nexus_local_db::work_chapters::seed_chapters(
+            state.pool(),
+            &work_id,
+            "test-update",
+            3,
+            &now,
+        )
+        .await
+        .expect("seed chapters");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.manuscript.chapter.update".to_string(),
+            parameters: serde_json::json!({
+                "work_id": work_id,
+                "chapter": 1,
+                "content": "Updated chapter content for testing."
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "manuscript.chapter.update should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["work_id"], work_id);
+        assert_eq!(val["chapter"], 1);
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn manuscript_chapter_update_rejects_missing_chapter() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.manuscript.chapter.update".to_string(),
+            parameters: serde_json::json!({"work_id": "wrk_test"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn manuscript_chapter_update_rejects_unknown_tool_variant() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.manuscript.chapter.update_v2".to_string(),
+            parameters: serde_json::json!({"work_id": "wrk_test", "chapter": 1}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
+    }
+
+    // --- nexus.world.configure (3 tests) ---
+
+    #[tokio::test]
+    async fn world_configure_updates_metadata() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.world.configure".to_string(),
+            parameters: serde_json::json!({
+                "world_id": "wld_test_world",
+                "title": "Renamed World",
+                "visibility": "public"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "world.configure should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["world_id"], "wld_test_world");
+        assert_eq!(val["updated"], true);
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn world_configure_rejects_invalid_visibility() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.world.configure".to_string(),
+            parameters: serde_json::json!({
+                "world_id": "wld_test_world",
+                "visibility": "top_secret"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn world_configure_rejects_missing_world_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.world.configure".to_string(),
+            parameters: serde_json::json!({"title": "No World"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    // --- nexus.work.schedule.set (3 tests) ---
+
+    #[tokio::test]
+    async fn work_schedule_set_links_schedules() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Schedule Test".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.schedule.set".to_string(),
+            parameters: serde_json::json!({
+                "work_id": work_id,
+                "schedule_ids": ["sch_a", "sch_b"]
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "work.schedule.set should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["work_id"], work_id);
+        let ids = val["schedule_ids"].as_array().expect("schedule_ids array");
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn work_schedule_set_rejects_non_string_ids() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.schedule.set".to_string(),
+            parameters: serde_json::json!({
+                "work_id": "wrk_test",
+                "schedule_ids": [1, 2, 3]
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn work_schedule_set_rejects_missing_schedule_ids() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.schedule.set".to_string(),
+            parameters: serde_json::json!({"work_id": "wrk_test"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    // --- nexus.finding.resolve (3 tests) ---
+
+    #[tokio::test]
+    async fn finding_resolve_marks_resolved() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work first for FK constraint
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Findings Test".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+
+        // Seed a finding
+        let finding_id = format!("fnd_{}", uuid::Uuid::new_v4());
+        let now_epoch = chrono::Utc::now().timestamp();
+        // SAFETY: test-only data setup.
+        sqlx::query(
+            "INSERT INTO findings (finding_id, work_id, chapter, severity, status, \
+             title, description, target_executor, creator_id, created_at, updated_at) \
+             VALUES (?, ?, 1, 'minor', 'open', \
+             'Test Finding', 'A test finding', 'none', 'test_creator', ?, ?)",
+        )
+        .bind(&finding_id)
+        .bind(&work_id)
+        .bind(now_epoch)
+        .bind(now_epoch)
+        .execute(state.pool())
+        .await
+        .expect("seed finding");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.finding.resolve".to_string(),
+            parameters: serde_json::json!({
+                "finding_id": finding_id,
+                "resolution": "Fixed in code"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "finding.resolve should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["finding_id"], finding_id);
+        assert_eq!(val["resolved"], true);
+    }
+
+    #[tokio::test]
+    async fn finding_resolve_nonexistent_returns_success() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.finding.resolve".to_string(),
+            parameters: serde_json::json!({"finding_id": "fnd_nonexistent_99999"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        // DAO update_finding does not error on 0-row updates.
+        // The handler returns success with "resolved": true.
+        assert!(result.is_ok(), "finding resolve should succeed: {result:?}");
+        let val = result.expect("result");
+        assert_eq!(val["finding_id"], "fnd_nonexistent_99999");
+        assert_eq!(val["resolved"], true);
+    }
+
+    // --- nexus.pool.entry.manage (3 tests) ---
+
+    #[tokio::test]
+    async fn pool_entry_manage_adds_to_pool() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Pool Test Work".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.pool.entry.manage".to_string(),
+            parameters: serde_json::json!({
+                "work_id": work_id,
+                "action": "add"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "pool.entry.manage should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["work_id"], work_id);
+        assert_eq!(val["action"], "add");
+        assert_eq!(val["success"], true);
+    }
+
+    #[tokio::test]
+    async fn pool_entry_manage_rejects_invalid_action() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work so the ownership check passes
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Pool Invalid Test".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.pool.entry.manage".to_string(),
+            parameters: serde_json::json!({
+                "work_id": work_id,
+                "action": "destroy"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn pool_entry_manage_rejects_missing_action() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.pool.entry.manage".to_string(),
+            parameters: serde_json::json!({"work_id": "wrk_test"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    // ─── Cross-cutting tests (R-V153P0QC2-003/004) ──
+
+    /// Concurrent dispatch: 10 parallel invocations of `nexus.context.whoami`
+    /// through `registry_dispatch()` — verifies no deadlock/data race on
+    /// `LazyLock<CapabilityRegistry>`.
+    #[tokio::test]
+    async fn concurrent_dispatch_ten_parallel_whoami() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let state = std::sync::Arc::new(state);
+
+        let mut handles = Vec::new();
+        for i in 0..10 {
+            let state = state.clone();
+            handles.push(tokio::spawn(async move {
+                let req = ToolExecuteRequest {
+                    tool_name: "nexus.context.whoami".to_string(),
+                    parameters: serde_json::json!({}),
+                    session_id: Some(format!("sess_{i}")),
+                    request_id: Some(format!("req_{i}")),
+                    caller_kind: None,
+                };
+                HostToolExecutor::registry_dispatch(&req, &state).await
+            }));
+        }
+
+        for handle in handles {
+            let result = handle.await.expect("no panic");
+            assert!(result.is_ok(), "concurrent dispatch should succeed: {result:?}");
+            let val = result.expect("result");
+            assert_eq!(val["creator_id"], "test_creator");
+        }
+    }
+
+    /// Schedule caller-kind admission: `dispatch_for_schedule` produces
+    /// the same result as direct `execute()` for `nexus.context.whoami`.
+    #[tokio::test]
+    async fn schedule_caller_kind_same_result_as_direct_execute() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let direct_result = HostToolExecutor::execute(
+            &ToolExecuteRequest {
+                tool_name: "nexus.context.whoami".to_string(),
+                parameters: serde_json::json!({}),
+                session_id: None,
+                request_id: None,
+                caller_kind: None,
+            },
+            &state,
+        )
+        .await
+        .expect("direct execute");
+
+        let schedule_result = HostToolExecutor::dispatch_for_schedule(
+            "nexus.context.whoami",
+            &serde_json::json!({}),
+            "req-sch-001",
+            &state,
+        )
+        .await
+        .expect("schedule dispatch");
+
+        assert_eq!(
+            direct_result["creator_id"], schedule_result["creator_id"],
+            "schedule dispatch should produce same creator_id"
+        );
+        assert_eq!(
+            direct_result["workspace_slug"], schedule_result["workspace_slug"],
+            "schedule dispatch should produce same workspace_slug"
+        );
     }
 }
