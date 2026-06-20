@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-22-v1.54-df46-write-tools"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-20"
+revalidated_at: "2026-06-20"
 ---
 
 # Code Review Report
@@ -91,6 +92,76 @@ generated_at: "2026-06-20"
 | 🟡 Warning | 3 |
 | 🟢 Suggestion | 2 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-`cargo clippy --all -- -D warnings` and `cargo test --all` both passed (clean). However, from the security + correctness perspective the write-tool surface introduces a blocking authorization/data-integrity defect (C-001) that allows a caller to bypass `RequireWorldOwnership` for individual key blocks. W-001 (registry admission metadata vs runtime) and W-002 (false-positive success on resolve) remain open and affect correctness/auditability of the new surface. Per QC gate rules, this cannot be approved until the Critical is fixed and the high-impact Warnings are addressed or explicitly reassigned by PM as residuals with accepted risk decision.
+## Revalidation
+
+**Revalidation performed**: 2026-06-20 (targeted re-review of qc2 findings only).
+
+**Git state verified** (at revalidation time):
+- Branch: `iteration/v1.54`
+- HEAD: `3c1b4c29bec3e96e1fc528d18d02057e604ebbb7`
+- Merge-base: `4e26305b876170a51841ca8d36b027dbc20f03f0`
+- Review range: `merge-base: origin/main` + `tip: iteration/v1.54 HEAD`
+
+**Fix-wave commits inspected** (from git log on `iteration/v1.54`):
+- `9f8e5ef5` — C-001: reject cross-world key blocks in kb_snapshot.write
+- `1283f579` — W-001: centralize admission gate accountability in CapabilityRegistry::dispatch
+- `663cc55b` — W-002: finding.resolve returns NOT_FOUND for nonexistent findings
+- `22db9700` — C-001(qc3): propagate audit-log failures in registry_dispatch (cross-ref)
+- `7c8c2a8b` — C-002 (not in qc2 scope)
+- Integration merge: `3c1b4c29` (feature/v1.54-df46-write-tools → iteration/v1.54)
+
+**Per-finding disposition** (qc2 scope only):
+
+- **C-001 (Critical)**: **RESOLVED**.
+  - Fix commit `9f8e5ef5` adds the cross-check in `execute_kb_snapshot_write` (host_tool_executor.rs:1582-1592):
+    ```rust
+    if kb.world_id != world_id {
+        return Err(NexusApiError::Forbidden { ... });
+    }
+    ```
+  - New tests added and pass:
+    - `kb_snapshot_write_rejects_cross_world_block_same_creator`
+    - `kb_snapshot_write_rejects_cross_creator_world_block`
+  - Verified by direct test run: 4 lib tests pass (including both mismatch cases).
+  - Scope text in original report preserved verbatim.
+
+- **W-001 (Warning)**: **RESOLVED**.
+  - Fix commit `1283f579` extends `CapabilityRegistry::dispatch` (capability_registry.rs:249-268) to iterate `row.admission` as a centralized accountability checkpoint (with `debug_assert` coverage for all known gates).
+  - Adds invariant test `registry_all_admission_gates_have_enforcement` that exhaustively matches every gate variant to its enforcement path (pipeline / per-handler / caller).
+  - Documentation updated in dispatch() doc comment explaining the enforcement split.
+  - Verified via source inspection of the diff and current file state. No SSOT drift between declared gates and runtime checks.
+
+- **W-002 (Warning)**: **RESOLVED**.
+  - Fix commit `663cc55b` updates `execute_finding_resolve` to check the `bool` returned by `update_finding`:
+    ```rust
+    if !updated {
+        return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
+    }
+    ```
+  - Test renamed and updated: `finding_resolve_nonexistent_returns_not_found` now asserts `NOT_FOUND` instead of silent success.
+  - Verified by direct test run: passes.
+  - Scope text in original report preserved verbatim.
+
+- **W-003 (Warning)**: **ACCEPTED AS DEFERRED** (per original qc2 report and PM decision).
+  - Marked non-blocking for this plan. Runtime `sqlx::query` with SAFETY comments remains in audit/write paths. No change in revalidation scope.
+  - Original finding text and rationale preserved verbatim.
+
+- **S-001 (Suggestion)**: **ACCEPTED AS DEFERRED**.
+  - Per-block audit / granular error context for kb_snapshot.write is future work. Not blocking.
+  - Original text preserved.
+
+- **S-002 (Suggestion)**: **ACCEPTED AS FUTURE WORK**.
+  - Benchmark remains warm-only (cold-path addressed in qc3 W-002). No change required from qc2.
+  - Original text preserved.
+
+**Static checks (revalidation time)**:
+- `cargo clippy --all -- -D warnings`: clean (finished dev profile in ~10s).
+- `cargo test --all`: all relevant suites pass (0 failures across lib + integration; doc-tests also clean). Targeted re-runs of C-001 and W-002 tests confirmed green.
+
+**Scope section**: text-identical to original (no modification to plan_id, Review range, Working branch, Review cwd, or file list).
+
+**Verdict change**: `Request Changes` → `Approve` (no unresolved Critical; no unresolved high-impact Warnings within qc2 scope; W-003/S-001/S-002 remain accepted per original report and PM decision).
+
+**Commit SHA for this revalidation update**: (to be captured after `git commit` of only this file).
