@@ -425,9 +425,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_twenty_two_builtins() {
+    fn registry_has_twenty_three_builtins() {
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 22);
+        assert_eq!(reg.len(), 23);
     }
 
     #[test]

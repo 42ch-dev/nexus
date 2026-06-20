@@ -48,7 +48,7 @@ async fn insert_test_work(pool: &sqlx::SqlitePool, work_id: &str, work_ref: &str
          'intake', 'pending', NULL, NULL, NULL, 0)",
     )
     .bind(work_id)
-    .bind(work_ref)   // work_ref column value
+    .bind(work_ref) // work_ref column value
     .execute(pool)
     .await
     .expect("insert test work");
@@ -195,10 +195,7 @@ async fn bootstrap_game_bible_creates_design_tree() {
         "work_profile should be 'game_bible' after scaffold"
     );
     let persisted_ref: String = row.get("work_ref");
-    assert_eq!(
-        persisted_ref, work_ref,
-        "work_ref should match input"
-    );
+    assert_eq!(persisted_ref, work_ref, "work_ref should match input");
 }
 
 #[tokio::test]
@@ -287,19 +284,26 @@ async fn game_bible_work_status_json() {
 
     // Verify output JSON is well-formed and contains expected keys
     assert!(output.is_object(), "output should be a JSON object");
-    assert!(output["scaffold_root"].is_string(), "scaffold_root should be string");
-    assert!(output["files_created"].is_array(), "files_created should be array");
-    assert!(output["dirs_created"].is_array(), "dirs_created should be array");
+    assert!(
+        output["scaffold_root"].is_string(),
+        "scaffold_root should be string"
+    );
+    assert!(
+        output["files_created"].is_array(),
+        "files_created should be array"
+    );
+    assert!(
+        output["dirs_created"].is_array(),
+        "dirs_created should be array"
+    );
 
     // Verify works row: work_profile set, work_ref set
     // SAFETY: runtime query for e2e assertion
-    let row = sqlx::query(
-        "SELECT work_profile, work_ref FROM works WHERE work_id = ?",
-    )
-    .bind(work_id)
-    .fetch_one(&pool)
-    .await
-    .expect("fetch work row");
+    let row = sqlx::query("SELECT work_profile, work_ref FROM works WHERE work_id = ?")
+        .bind(work_id)
+        .fetch_one(&pool)
+        .await
+        .expect("fetch work row");
 
     let profile: Option<String> = row.get("work_profile");
     assert_eq!(
@@ -343,7 +347,10 @@ async fn game_bible_scaffold_with_world_id() {
         "title": "World Test",
         "world_id": "wld_test_123",
     });
-    let output = cap.run(input).await.expect("scaffold with world_id should succeed");
+    let output = cap
+        .run(input)
+        .await
+        .expect("scaffold with world_id should succeed");
 
     // Verify file/dir creation still works
     assert!(!output["scaffold_root"].as_str().unwrap().is_empty());
