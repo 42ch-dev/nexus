@@ -970,6 +970,16 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 历史兼容叙述：规格与 ACP 能力名仍可能出现 **`manuscript`**（如 `manuscript.read_range`）；其实现路径须对齐到 **preset 声明的正文根**（上表为 **`novel-writing`** 默认）。
 
+**非 novel 预设（V1.52+ essay, V1.54+ game-bible）** — `creator bootstrap --profile` 支持以下值：
+
+| `--profile` | init preset | 布局规范 | 状态 |
+| --- | --- | --- | --- |
+| `novel` (default) | `novel-project-init` (显式传入) | [novel-writing/workflow-profile.md](./novel-writing/workflow-profile.md) | Shipped V1.36 |
+| `essay` | `essay-init` (自动派生) | [essay-profile.md](./essay-profile.md) | Shipped V1.52 |
+| `game_bible` | `game-bible-init` (自动派生) | [game-bible-profile.md](./game-bible-profile.md) | Shipped V1.54 |
+
+V1.54 game-bible 布局（`works_profile: game_bible`）：`Works/<work_ref>/Design/`（12 个 section 模板），`Logs/{design,review}/`，无 `Stories/`、`Outlines/` 或 `work_chapters`。详见 [game-bible-profile.md](./game-bible-profile.md) §3。`--profile game_bible` 自动选择 `--init-preset game-bible-init`；V1.54 不自动链式推进后续预设。
+
 ### 12.1C `novel-writing` preset sync module contract
 
 `novel-writing` preset 可以声明 `sync` 子模块，用于把 preset 产物映射到既有 Nexus 同步 / 发布合同。该子模块**不**新增第二套 DTO 或 wire type；合同来源仍是本 v1-spec 与生成的 `@42ch/nexus-contracts` 类型。
