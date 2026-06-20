@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-19 (V1.51 closeout: 7 plans all Done — 5 implement plans (T-A P0-P2 + T-B P0-P1) + P-1 docs + P-last hygiene; 8 residuals closed (4 V1.50 carry-forwards + 4 V1.51 WL-A) via 8 surgical WL-A commits; 6 deferred to V1.52+; Profile B done; wire contracts unchanged; **merged to main at `c57b927bbf8621adf7ec59095d274f17f429c9b7` on 2026-06-19T07:52:26Z via PR [#64](https://github.com/42ch-dev/nexus/pull/64)**)
+**Last updated**: 2026-06-20 (V1.53 closeout: 5 plans all Done — P-1 docs (compass + capability-registry Draft overlay + skills-export spec retirement + DF-50 cancel) + P0 registry SSOT unification (3 sub-phase cutover, 13 host tools, tri-review + qc1 fix-wave) + P1 DF-46 read slice (5 new read-heavy nexus.* tools + cross-creator isolation + qc1 fix-wave) + P-c skills CLI cleanup (179 deletions, single-review Approve with Notes) + P-last spec hygiene + dual Profile B (V1.53 + V1.52 retro) + R-V153PC1-N001 cli-spec.md §6.4 annotation pending; 13 open residuals deferred to V1.54+ (4 medium + 9 low); Profile B done; wire contracts unchanged; capability-registry.md kept as Draft overlay (deferred Master promotion to V1.54+)
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -599,7 +599,64 @@ When a version ships, append new closed rows here and remove them from the activ
 | **Wire-contracts / signoff** | All 6 spec overlays now Normative; 8 WL-A selective fixes surgical. `cargo clippy --all -- -D warnings` and `cargo +nightly fmt --all --check` clean at ship. |
 
 
-### V1.52+ carry-forward index
+### V1.52 delivery snapshot (Shipped 2026-06-19 — retroactively added by V1.53 P-last)
+
+**Note**: V1.52 P-last closed out shipping but did **not** add a §2 delivery snapshot or perform Profile B compaction. V1.53 P-last retroactively completed both (per V1.53 PM-locked rule to clean up V1.52 Profile B violation).
+
+| Aspect | Detail |
+|---|---|
+| **PR / Merge** | PR [#73](https://github.com/42ch-dev/nexus/pull/73) (iteration/v1.52 → main); P-last HEAD: `f4e7e201` (finalize delivery metadata); **Merged 2026-06-19T16:22:21Z at commit `d6aadd2fb5f287056dbd41b701eea8d5e6114dcc`** |
+|---|---|
+| **Theme** | **Author Completion & Multi-Branch Preset Orchestration** — T-A (outline 五问 quality gate + auto-promote + CLI surface consolidation + Work→KeyBlock provenance + essay profile) ∥ T-B (N-way GO/NOGO routing + multi-branch merge semantics). 7 plans in tracks + P-1 docs + P-last hygiene = 7 plans all Done. |
+| **Plans shipped** | 7 plans all Done: P-1 + T-A P0-P2 + T-B P0-P1 + P-last. |
+| **Wire contract changes** | None — per compass §0.1 #8. |
+| **Closed at ship** | Per V1.52 compass; full list in `2026-06-19-v1.52-harness-docs-prepare` plan stub. |
+| **Open residuals at ship** | **30 open**, all `target: V1.53+` (per `status.json.tech_debt_summary.by_target_active.V1.53+`). |
+| **Carry-forward (V1.53+)** | 30 items listed above. |
+| **QC & QA** | Per V1.52 P-last; tri-review and targeted re-review across 7 plans. |
+| **Profile B compaction** | **Done (retroactive by V1.53 P-last)**: 7 V1.52 plan JSON files in `.mstar/archived/plans/2026-06-19-v1.52-*.json`; plans-done.json layout invariant verified (all 230 entries are strings); tech_debt_summary normalized. |
+
+### V1.53 delivery snapshot (Shipped 2026-06-20)
+
+| Aspect | Detail |
+|---|---|
+| **PR / Merge** | iteration/v1.53 → main; P-last HEAD on iteration branch: `33eb8201`; PR to main pending. |
+|---|---|
+| **Theme** | **Capability Surface Completion & Skills CLI Cleanup** — Theme A primary: `CapabilityRegistry` SSOT unification (id → access → admission → handler → ACP wire → failure mode → handler test vector) + DF-46 read-heavy slice (5 new read-heavy `nexus.*` tools) + skills-export CLI/spec retirement (DF-50 Cancelled). 5 plans total. |
+| **Plans shipped** | **5 plans all Done**: P-1 (compass + capability-registry Draft overlay + DF-50 cancel + skills-export spec retirement) + P0 (registry SSOT unification, 3 sub-phase cutover, 8 → 13 host tools) + P1 (DF-46 read slice: 5 new read-heavy nexus.* tools + 9 new tests + 3 P0 residuals closed) + P-c (skills CLI cleanup: 179 deletions) + P-last (spec hygiene + dual Profile B + cli-spec.md §6.4 annotation). |
+| **Wire contract changes** | None — per compass §0.1 #8. No `schemas/` changes. |
+| **Closed at ship** | **All 6 P0 QC findings closed via fix-wave** (1 HIGH cross-creator isolation, 3 MEDIUMs, 1 NIT comments, 1 bonus timeline LIMIT). **All 6 P1 QC findings closed via fix-wave** (1 HIGH cross-creator isolation, 4 MEDIUMs, 1 NIT comments). **3 P0 residuals closed in P1** (parity expansion, catalog↔registry bijection test, DaemonToolDispatchAdapter doc). **DF-50 Cancelled** (skills-export CLI + spec retirement; see §1 row 83). |
+| **Open residuals at ship** | **13 open** (per `status.json.tech_debt_summary.by_severity_active`): **4 medium** (R-V153P1QC2-003 daemon.health registry_ids exposure, R-V153P0QC2-001 P1 parity expansion deferred, R-V153P0QC2-002 catalog↔registry bijection test deferred, R-V153P0QC3-001 per-dispatch registry allocation) + **9 low** (R-V153P0QC2-003/004, R-V153P0QC3-002/003, R-V153P0-002, R-V153P1QC1R-001 timeline SQL dynamic LIMIT, R-V153P1QC2-004 kb_store runtime query, R-V153P1QC3-002 per-dispatch rebuild, R-V153PC1-N001 cli-spec.md §6.4 breaking-change annotation). |
+| **Carry-forward (V1.54+)** | 13 items listed above. 1 medium is product-visible (daemon.health observability); 1 medium is correctness (catalog↔registry bijection); 2 mediums are optimization candidates (registry allocation + cache). Rest are docs / process / minor SQL runtime queries. |
+| **QC & QA** | **P0**: tri-review (qc1 Request Changes → fix-wave → targeted qc1 re-review Approve with Notes; qc2/qc3 Approve with Notes). **P1**: tri-review (qc1 Request Changes → fix-wave → targeted qc1 re-review Approve with Notes; qc2/qc3 Approve with Notes). **P-c**: single-review (qc1 Approve with Notes). **P-last**: report-only QA (PM-direct; qa-engineer report-only verification pending). All fix waves surgical, no scope creep. |
+| **Spec promotion decision** | **`capability-registry.md` kept as Draft overlay** — not promoted to Master in V1.53 P-last. Rationale: only validated in 2 iterations (P0 + P1, 13 tools); more tools coming in V1.54+ (DF-46 complete slice + non-novel profiles). Recommend re-evaluate at V1.54 P-last or V1.55. |
+| **DF-50 disposition** | **Cancelled** — `nexus42 acp skills export\|verify` CLI surface removed (P-c); `skills-export-compatibility.md` retired to `archived/` (P-1); tracker DF-50 row moved to Cancelled archive. Static `embedded-skills/` model remains the only non-ACP integration path. |
+| **Profile B compaction** | **Done (V1.53 P-last + V1.52 retro)**: 12 plan JSON files in `.mstar/archived/plans/2026-06-{19-v1.52,20-v1.53}-*.json` (7 V1.52 retro + 5 V1.53); plans-done.json layout invariant verified (all 230 entries are strings); tech_debt_summary normalized (13 open: 4 medium + 9 low; 0 critical/high). |
+
+### V1.54+ carry-forward index
+
+- **13 items deferred to V1.54+** (per `status.json.tech_debt_summary.by_target_active.V1.54+`):
+  - R-V153P1QC2-003 (medium): `daemon.health` exposes full registry_ids list — should be gated behind additional policy check for agent-facing observability
+  - R-V153P0QC2-001 (medium): P1 parity coverage expansion (deferred to V1.54 P0 fix-wave or P1 extension)
+  - R-V153P0QC2-002 (medium): catalog↔registry id bijection test (deferred to V1.54 P0 fix-wave or P1 extension)
+  - R-V153P0QC3-001 (medium): per-dispatch registry allocation on schedule hot path — needs caching + benchmark
+  - R-V153P0QC2-003 (low): no concurrent dispatch test
+  - R-V153P0QC2-004 (low): no separate Schedule caller-kind admission test
+  - R-V153P0QC3-002 (low): missing dispatch-latency benchmark
+  - R-V153P0QC3-003 (low): admission vectors could be `&'static [AdmissionGate]` instead of `Vec`
+  - R-V153P0-002 (low): DaemonToolDispatchAdapter documentation
+  - R-V153P1QC1R-001 (low): timeline SQL uses sanitized dynamic `LIMIT {limit_i64}` rather than `LIMIT ?`
+  - R-V153P1QC2-004 (low): kb_store runtime sqlx query with `format!` for LIMIT clause
+  - R-V153P1QC3-002 (low): per-dispatch CapabilityRegistry rebuild (R-V153P0QC3-001 same theme)
+  - R-V153PC1-N001 (low): cli-spec.md §6.4 omits acp skills subcommand but does not explicitly label the omission as a pre-1.0 intentional breaking-change removal (target: V1.54 hygiene pass)
+
+**Note**: V1.53 P-last also retroactively added the V1.52 delivery snapshot (above) since V1.52 P-last did not perform Profile B compaction or add a §2 snapshot. The retroactive V1.52 entry is marked with explicit "retroactively added by V1.53 P-last" note.
+
+---
+
+### V1.52+ carry-forward index (historical; V1.53 retro completed)
+
+*Original V1.52+ carry-forward index retained for historical reference; all items already resolved in V1.52/V1.53 closeout.*
 
 - R-V150KBED-01 (low): KB editor — legacy `<work>/Worldbuilding/` coexistence; sweep docs.
 - R-V150KBED-02 (low): KB editor — World vs World KB ownership narrative in `cli-spec.md` (2 entries: kb-editor-cli + kb-auto-promotion).

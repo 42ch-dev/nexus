@@ -629,6 +629,8 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 - `nexus42 acp registry list|inspect`
 - `nexus42 acp agent use|list`
 
+> **V1.53 intentional breaking-change removal** (pre-1.0 OSS, see `.mstar/archived/shipped-features-tracker.md` §1 row 83, DF-50 Cancelled): `nexus42 acp skills export|verify` was removed in V1.53 P-c (`2026-06-22-v1.53-skills-cli-cleanup`) because the runtime export command was redundant with the static committed `embedded-skills/` model (see §13.2). The corresponding spec `skills-export-compatibility.md` was retired to `archived/` in V1.53 P-1.
+
 **Embedded skills（安装 / 升级）**：实现应将 `nexus-orchestration/embedded-skills/` 同步到 `$HOME/.nexus42/skills/`，并通过 `{$workspace_dir}/.agents/skills/` 暴露/链接，使 ACP `recommended_skills` 可被首轮会话解析。
 
 失败语义：`recommended_skills[]` 缺失、越权或不可读时，session 初始化必须返回可操作错误，不得静默降级。

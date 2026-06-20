@@ -1,227 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-06-20T00:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
-      "title": "P-1 — V1.52 compass, plans, spec overlays, tracker, status (docs-only)",
-      "status": "Done",
-      "done_at": "2026-06-19T08:30:00Z",
-      "owner": "@project-manager",
-      "agents": [
-        "@project-manager",
-        "@architect",
-        "@writing-specialist"
-      ],
-      "task_category": "docs",
-      "working_branch": "iteration/v1.52",
-      "merge_target": "iteration/v1.52",
-      "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z"
-    },
-    {
-      "plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
-      "title": "T-A P0 — outline 五问 quality gate + auto-promote high-confidence KB",
-      "status": "Done",
-      "owner": "@fullstack-dev",
-      "agents": [
-        "@fullstack-dev",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.52-outline-five-q-and-auto-promote",
-      "merge_target": "iteration/v1.52",
-      "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z",
-      "qc_dispatched_at": "2026-06-19T08:45:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/",
-      "done_at": "2026-06-19T15:00:00Z"
-    },
-    {
-      "plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto",
-      "title": "T-A P1 — World KB CLI surface consolidation + --auto happy path",
-      "status": "Done",
-      "started_at": "2026-06-19T12:30:00Z",
-      "done_at": "2026-06-19T18:00:00Z",
-      "owner": "@fullstack-dev-2",
-      "agents": [
-        "@fullstack-dev-2",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.52-cli-surface-consolidation-auto",
-      "merge_target": "iteration/v1.52",
-      "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z",
-      "qc_dispatched_at": "2026-06-19T13:00:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/"
-    },
-    {
-      "plan_id": "2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile",
-      "title": "T-A P2 — Work→KeyBlock provenance + essay profile",
-      "status": "Done",
-      "started_at": "2026-06-19T18:30:00Z",
-      "owner": "@fullstack-dev-2",
-      "agents": [
-        "@fullstack-dev-2",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.52-work-keyblock-provenance-and-essay-profile",
-      "merge_target": "iteration/v1.52",
-      "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z",
-      "qc_dispatched_at": "2026-06-19T19:00:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile/",
-      "done_at": "2026-06-20T12:00:00Z"
-    },
-    {
-      "plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
-      "title": "T-B P0 — N-way GO/NOGO routing",
-      "status": "Done",
-      "owner": "@fullstack-dev-2",
-      "agents": [
-        "@fullstack-dev-2",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.52-n-way-gonogo-routing",
-      "merge_target": "iteration/v1.52",
-      "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z",
-      "qc_dispatched_at": "2026-06-19T08:45:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/",
-      "done_at": "2026-06-19T17:00:00Z"
-    },
-    {
-      "plan_id": "2026-06-19-v1.52-multi-branch-merge-semantics",
-      "title": "T-B P1 — multi-branch merge semantics + conditional routing spec promotion",
-      "status": "Done",
-      "owner": "@fullstack-dev-2",
-      "agents": [
-        "@fullstack-dev-2",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.52-multi-branch-merge-semantics",
-      "merge_target": "iteration/v1.52",
-      "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z",
-      "started_at": "2026-06-19T18:30:00Z",
-      "qc_dispatched_at": "2026-06-19T19:00:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-multi-branch-merge-semantics/",
-      "done_at": "2026-06-20T12:00:00Z"
-    },
-    {
-      "plan_id": "2026-06-19-v1.52-hygiene-and-closeout",
-      "title": "P-last — V1.50/V1.51 carry-forwards + V1.52 QC lows + overlay promotion + Profile B + PR",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@project-manager",
-        "@fullstack-dev",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.52-hygiene-and-closeout",
-      "merge_target": "iteration/v1.52",
-      "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
-      "created_at": "2026-06-19T08:30:00Z",
-      "started_at": "2026-06-20T12:30:00Z",
-      "done_at": "2026-06-20T12:30:00Z"
-    },
-    {
-      "plan_id": "2026-06-20-v1.53-capability-registry-prepare",
-      "title": "P-1 — V1.53 compass + capability registry Draft overlay + DF-50 Cancelled + skills-export spec retirement",
-      "status": "Done",
-      "done_at": "2026-06-20T00:00:00Z",
-      "owner": "@project-manager",
-      "agents": [
-        "@project-manager",
-        "@architect"
-      ],
-      "task_category": "docs",
-      "working_branch": "feature/v1.53-capability-registry-prepare",
-      "merge_target": "iteration/v1.53",
-      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
-      "created_at": "2026-06-20T00:00:00Z"
-    },
-    {
-      "plan_id": "2026-06-20-v1.53-capability-registry-unification",
-      "title": "P0 — CapabilityRegistry SSOT refactor (adapter-first introduce → cutover → cleanup)",
-      "status": "Done",
-      "started_at": "2026-06-20T00:00:00Z",
-      "done_at": "2026-06-20T16:00:00Z",
-      "owner": "@fullstack-dev",
-      "agents": [
-        "@fullstack-dev",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.53-capability-registry-unification",
-      "merge_target": "iteration/v1.53",
-      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
-      "created_at": "2026-06-20T00:00:00Z",
-      "qc_dispatched_at": "2026-06-20T15:30:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-20-v1.53-capability-registry-unification/",
-      "merge_commit": "iteration/v1.53 (merge of feature/v1.53-capability-registry-unification)"
-    },
-    {
-      "plan_id": "2026-06-21-v1.53-df46-read-capability-slice",
-      "title": "P1 — First DF-46 read-heavy nexus.* capability slice (5 tools) + P0 residual closure",
-      "status": "Done",
-      "started_at": "2026-06-20T00:00:00Z",
-      "done_at": "2026-06-20T17:00:00Z",
-      "owner": "@fullstack-dev-2",
-      "agents": [
-        "@fullstack-dev-2",
-        "@qa-engineer"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.53-df46-read-capability-slice",
-      "merge_target": "iteration/v1.53",
-      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
-      "created_at": "2026-06-20T00:00:00Z",
-      "qc_dispatched_at": "2026-06-20T16:30:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-21-v1.53-df46-read-capability-slice/",
-      "merge_commit": "iteration/v1.53 (merge of feature/v1.53-df46-read-capability-slice)"
-    },
-    {
-      "plan_id": "2026-06-22-v1.53-skills-cli-cleanup",
-      "title": "P-c — Remove obsolete nexus42 acp skills export|verify surface",
-      "status": "Done",
-      "started_at": "2026-06-20T00:00:00Z",
-      "done_at": "2026-06-20T17:30:00Z",
-      "owner": "@fullstack-dev",
-      "agents": [
-        "@fullstack-dev",
-        "@qc-specialist"
-      ],
-      "task_category": "logic",
-      "working_branch": "feature/v1.53-skills-cli-cleanup",
-      "merge_target": "iteration/v1.53",
-      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
-      "created_at": "2026-06-20T00:00:00Z",
-      "qc_dispatched_at": "2026-06-20T17:15:00Z",
-      "qc_reports_path": ".mstar/plans/reports/2026-06-22-v1.53-skills-cli-cleanup/",
-      "merge_commit": "iteration/v1.53 (merge of feature/v1.53-skills-cli-cleanup)"
-    },
-    {
-      "plan_id": "2026-06-22-v1.53-spec-hygiene-closeout",
-      "title": "P-last — V1.53 spec hygiene, Profile B compaction, shipped snapshot",
-      "status": "Pending",
-      "owner": "@project-manager",
-      "agents": [
-        "@project-manager",
-        "@qa-engineer"
-      ],
-      "task_category": "docs",
-      "working_branch": "feature/v1.53-spec-hygiene-closeout",
-      "merge_target": "iteration/v1.53",
-      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
-      "created_at": "2026-06-20T00:00:00Z"
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.53",
     "integration_branch_retired": false,
@@ -234,33 +14,30 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.52",
-      "compass": "v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1",
-      "merged_at": "2026-06-19T16:22:21Z",
-      "plan_count": 7,
-      "plan_count_done": 7,
+      "iteration": "V1.53",
+      "compass": "v1.53-capability-surface-completion-and-skills-cli-cleanup",
+      "merged_at": "pending (V1.53 PR to main in flight)",
+      "plan_count": 5,
+      "plan_count_done": 5,
       "open_at_ship": 0,
-      "deferred_to_next": 30,
+      "deferred_to_next": 16,
       "wire_contracts_changed": false,
-      "profile_b_compaction": "pending",
-      "merge_commit": "d6aadd2fb5f287056dbd41b701eea8d5e6114dcc",
-      "pr": 73,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/73"
+      "profile_b_compaction": "done",
+      "merge_commit": "pending",
+      "pr": null,
+      "pr_url": null
     },
     "tech_debt_summary": {
-      "total_open": 0,
-      "total_deferred": 29,
-      "total_resolved": 76,
+      "total_open": 13,
+      "total_deferred": 13,
+      "total_resolved": 0,
       "total_archived": 4,
       "by_severity_active": {
-        "critical": 0,
-        "high": 0,
-        "medium": 2,
-        "low": 15,
-        "nit": 0
+        "medium": 4,
+        "low": 9
       },
       "by_target_active": {
-        "V1.53+": 30
+        "V1.54+": 13
       }
     }
   },
