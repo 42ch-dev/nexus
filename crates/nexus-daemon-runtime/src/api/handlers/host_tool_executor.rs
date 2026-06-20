@@ -1574,12 +1574,22 @@ async fn execute_kb_snapshot_write(
         })?;
 
     for block_val in blocks {
-        let kb: nexus_kb::key_block::KeyBlock = serde_json::from_value(block_val.clone()).map_err(|e| {
-            NexusApiError::InvalidInput {
+        let kb: nexus_kb::key_block::KeyBlock =
+            serde_json::from_value(block_val.clone()).map_err(|e| NexusApiError::InvalidInput {
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),
-            }
-        })?;
+            })?;
+        // C-001: reject blocks whose embedded world_id does not match the
+        // request-level world_id (prevents cross-world block payload bypass).
+        if kb.world_id != world_id {
+            return Err(NexusApiError::Forbidden {
+                resource: "key_block.world_id".to_string(),
+                reason: format!(
+                    "block {} targets world '{}' but request targets world '{}'",
+                    kb.key_block_id, kb.world_id, world_id
+                ),
+            });
+        }
         kb_store
             .insert_key_block_in_tx(&mut tx, kb)
             .await
@@ -3313,6 +3323,107 @@ mod tests {
         let result = HostToolExecutor::execute(&req, &state).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
+    }
+
+    /// C-001 regression: same-creator, block with wrong world_id → rejection.
+    #[tokio::test]
+    async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed a second world owned by same creator
+        // SAFETY: test-only data setup.
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES ('wld_other_world', 'ws', 'test_creator', 'Other World', 'other-world', \
+             'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed second world");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.write".to_string(),
+            parameters: serde_json::json!({
+                "world_id": "wld_test_world",
+                "blocks": [{
+                    "schema_version": 1,
+                    "key_block_id": "kb_cross_world_block",
+                    "world_id": "wld_other_world",  // mismatched!
+                    "block_type": "character",
+                    "canonical_name": "cross_world_char",
+                    "status": "provisional",
+                    "body": {"name": "Cross-world Char"},
+                    "created_at": "2026-01-01T00:00:00Z"
+                }]
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_err(),
+            "cross-world block should be rejected: {result:?}"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    /// C-001 regression: cross-creator world embedded in block → rejection.
+    #[tokio::test]
+    async fn kb_snapshot_write_rejects_cross_creator_world_block() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed a world owned by a different creator
+        // SAFETY: test-only data setup.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other Creator', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES ('wld_other_creator_world', 'ws', 'other_creator', 'Other Creator World', \
+             'other-creator-world', 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator world");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.write".to_string(),
+            parameters: serde_json::json!({
+                "world_id": "wld_test_world",
+                "blocks": [{
+                    "schema_version": 1,
+                    "key_block_id": "kb_cross_creator_block",
+                    "world_id": "wld_other_creator_world",  // different creator's world
+                    "block_type": "character",
+                    "canonical_name": "cross_creator_char",
+                    "status": "provisional",
+                    "body": {"name": "Cross-creator Char"},
+                    "created_at": "2026-01-01T00:00:00Z"
+                }]
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_err(),
+            "cross-creator block should be rejected: {result:?}"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
     }
 
     // --- nexus.manuscript.chapter.update (3 tests) ---
