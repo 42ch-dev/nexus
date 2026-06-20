@@ -16,24 +16,26 @@
     {
       "plan_id": "2026-06-22-v1.54-df46-write-tools",
       "title": "V1.54 P0 — DF-46 Full Spectrum Write Tools & V1.53 Residual Convergence",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "effort": "L",
       "working_branch": "feature/v1.54-df46-write-tools",
       "merge_target": "iteration/v1.54",
       "type": "implement",
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "qc_status": "pending"
     },
     {
       "plan_id": "2026-06-22-v1.54-game-bible-scaffold",
       "title": "V1.54 P1 — Game-Bible Profile Scaffold & Init",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev-2",
       "effort": "M",
       "working_branch": "feature/v1.54-game-bible-scaffold",
       "merge_target": "iteration/v1.54",
       "type": "implement",
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "qc_status": "pending"
     },
     {
       "plan_id": "2026-06-22-v1.54-spec-hygiene-closeout",
