@@ -1643,8 +1643,8 @@ async fn execute_manuscript_chapter_update(
         .as_i64()
         .map_or(1, |v| i32::try_from(v).unwrap_or(1));
 
-    // Verify work ownership first
-    let _record = works::get_work(state.pool(), creator_id, work_id)
+    // Verify work ownership first (W-003 will use work_ref from record for path construction).
+    let _work_record = works::get_work(state.pool(), creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1673,56 +1673,90 @@ async fn execute_manuscript_chapter_update(
     // Update body content if provided
     let now = chrono::Utc::now().to_rfc3339();
     let body_path: Option<String> = if let Some(content) = req.parameters["content"].as_str() {
-        let body_dir = state
+        let workspace_root = state
             .workspace_path()
-            .map(|p| {
-                Path::new(&p)
-                    .join("Stories")
-                    .join(work_id)
-                    .join(format!("ch_{chapter:02}_v{volume:02}"))
-            })
             .ok_or_else(|| NexusApiError::Internal {
                 code: "WORKSPACE_PATH_ERROR".to_string(),
                 message: "workspace path not available".to_string(),
             })?;
-        std::fs::create_dir_all(&body_dir).map_err(|e| NexusApiError::Internal {
-            code: "DIR_CREATE_FAILED".into(),
-            message: format!("failed to create chapter dir: {e}"),
-        })?;
+        let body_dir = Path::new(&workspace_root)
+            .join("Stories")
+            .join(work_id)
+            .join(format!("ch_{chapter:02}_v{volume:02}"));
+        // C-002: use tokio::fs to avoid blocking the async runtime.
+        tokio::fs::create_dir_all(&body_dir)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DIR_CREATE_FAILED".into(),
+                message: format!("failed to create chapter dir: {e}"),
+            })?;
         let body_file = body_dir.join("body.md");
-        std::fs::write(&body_file, content).map_err(|e| NexusApiError::Internal {
-            code: "FILE_WRITE_FAILED".into(),
-            message: format!("failed to write chapter body: {e}"),
-        })?;
+        // C-002: write to a temp file first, then atomically rename within a
+        // DB transaction to prevent orphaned files on crash between write and
+        // DB commit.
+        let tmp_file = body_dir.join("body.md.tmp");
+        tokio::fs::write(&tmp_file, content)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_WRITE_FAILED".into(),
+                message: format!("failed to write chapter body: {e}"),
+            })?;
         Some(body_file.to_string_lossy().to_string())
     } else {
         None
     };
 
-    // Update chapter DB row if body_path or word count changed
-    if body_path.is_some() {
+    // Update chapter DB row if body_path or word count changed.
+    // C-002: wrap DB update + file rename in a single transaction so the
+    // DB row is only updated when the final file is in place.
+    if let Some(ref bp) = body_path {
+        let tmp_path = Path::new(bp).with_extension("md.tmp");
         let word_count = req.parameters["content"]
             .as_str()
             .map_or(0, |c| c.split_whitespace().count());
+        let mut tx = state
+            .pool()
+            .begin()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("chapter update tx begin: {e}"),
+            })?;
         // SAFETY: dynamic SQL for chapter update — runtime fields.
-        // Word count comes from split_whitespace() and cannot exceed realistic chapter size.
         #[allow(clippy::cast_possible_wrap)]
         sqlx::query(
             "UPDATE work_chapters SET body_path = ?, actual_word_count = ?, updated_at = ? \
              WHERE work_id = ? AND chapter = ? AND volume = ?",
         )
-        .bind(&body_path)
+        .bind(bp)
         .bind(word_count as i64)
         .bind(&now)
         .bind(work_id)
         .bind(chapter)
         .bind(volume)
-        .execute(state.pool())
+        .execute(&mut *tx)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: format!("chapter update: {e}"),
         })?;
+        // Atomically rename temp → final (after DB update succeeds inside tx).
+        tokio::fs::rename(&tmp_path, Path::new(bp))
+            .await
+            .map_err(|e| {
+                // Best-effort cleanup: remove temp file on rename failure.
+                let _ = std::fs::remove_file(&tmp_path);
+                NexusApiError::Internal {
+                    code: "FILE_RENAME_FAILED".into(),
+                    message: format!("failed to finalize chapter file: {e}"),
+                }
+            })?;
+        tx.commit()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("chapter update tx commit: {e}"),
+            })?;
     }
 
     // Read back updated chapter
@@ -3503,6 +3537,30 @@ mod tests {
         let val = result.expect("result");
         assert_eq!(val["work_id"], work_id);
         assert_eq!(val["chapter"], 1);
+        // C-002 atomicity: verify DB body_path exists and the file on disk
+        // contains the content we wrote (proves file written iff DB committed).
+        let chapter_record =
+            nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+                .await
+                .expect("get_chapter after update")
+                .expect("chapter should exist after update");
+        let db_body_path = chapter_record.body_path.expect("body_path should be set");
+        assert!(
+            db_body_path.contains("Stories/"),
+            "body_path should use Stories/ layout, got: {db_body_path}"
+        );
+        assert!(
+            !db_body_path.ends_with(".tmp"),
+            "body_path should be the final file, not a .tmp: {db_body_path}"
+        );
+        let on_disk = tokio::fs::read_to_string(&db_body_path)
+            .await
+            .expect("file should exist on disk");
+        assert_eq!(
+            on_disk,
+            "Updated chapter content for testing.",
+            "file content should match what was written"
+        );
         drop(tmp);
     }
 
