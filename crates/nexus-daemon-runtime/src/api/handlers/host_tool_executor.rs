@@ -2002,7 +2002,7 @@ async fn execute_finding_resolve(
         rule_suggestion: None,
     };
 
-    nexus_local_db::findings::update_finding(
+    let updated = nexus_local_db::findings::update_finding(
         state.pool(),
         creator_id,
         finding_id,
@@ -2028,6 +2028,13 @@ async fn execute_finding_resolve(
             message: e.to_string(),
         },
     })?;
+
+    // W-002: check the returned bool — false means no row was updated.
+    if !updated {
+        return Err(NexusApiError::NotFound(format!(
+            "finding {finding_id}"
+        )));
+    }
 
     Ok(serde_json::json!({
         "finding_id": finding_id,
@@ -3859,8 +3866,9 @@ mod tests {
         assert_eq!(val["resolved"], true);
     }
 
+    /// W-002: nonexistent finding IDs must return NOT_FOUND, not success.
     #[tokio::test]
-    async fn finding_resolve_nonexistent_returns_success() {
+    async fn finding_resolve_nonexistent_returns_not_found() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
@@ -3872,12 +3880,11 @@ mod tests {
             caller_kind: None,
         };
         let result = HostToolExecutor::execute(&req, &state).await;
-        // DAO update_finding does not error on 0-row updates.
-        // The handler returns success with "resolved": true.
-        assert!(result.is_ok(), "finding resolve should succeed: {result:?}");
-        let val = result.expect("result");
-        assert_eq!(val["finding_id"], "fnd_nonexistent_99999");
-        assert_eq!(val["resolved"], true);
+        assert!(
+            result.is_err(),
+            "finding.resolve should reject nonexistent finding: {result:?}"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "NOT_FOUND");
     }
 
     // --- nexus.pool.entry.manage (3 tests) ---
