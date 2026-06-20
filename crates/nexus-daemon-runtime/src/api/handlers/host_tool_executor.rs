@@ -63,6 +63,13 @@ const TOOL_ALLOWLIST: &[&str] = &[
     "nexus.kb_snapshot.read",
     "nexus.manuscript.chapter.get",
     "nexus.observability.daemon.health",
+    // nexus.* tools (V1.54 P0: DF-46 write tools)
+    "nexus.kb_snapshot.write",
+    "nexus.manuscript.chapter.update",
+    "nexus.world.configure",
+    "nexus.work.schedule.set",
+    "nexus.finding.resolve",
+    "nexus.pool.entry.manage",
     // fs/* baseline (V1.33)
     "fs/read_text_file",
     "fs/write_text_file",
@@ -234,7 +241,17 @@ fn check_nexus_tool_permission(
     tool_name: &str,
     policy: &WorkspacePermissionPolicy,
 ) -> Result<(), NexusApiError> {
-    let allowed = if tool_name == "nexus.work.patch" {
+    const NEXUS_WRITE_TOOLS: &[&str] = &[
+        "nexus.work.patch",
+        "nexus.kb_snapshot.write",
+        "nexus.manuscript.chapter.update",
+        "nexus.world.configure",
+        "nexus.work.schedule.set",
+        "nexus.finding.resolve",
+        "nexus.pool.entry.manage",
+    ];
+
+    let allowed = if NEXUS_WRITE_TOOLS.contains(&tool_name) {
         is_nexus_write_granted(tool_name, policy)
     } else {
         is_nexus_read_granted(tool_name, policy)
@@ -244,7 +261,7 @@ fn check_nexus_tool_permission(
         return Ok(());
     }
 
-    let reason = if tool_name == "nexus.work.patch" {
+    let reason = if NEXUS_WRITE_TOOLS.contains(&tool_name) {
         "write tool not granted"
     } else {
         "no nexus read grant"
@@ -1506,6 +1523,601 @@ pub(crate) fn registry_daemon_health<'a>(
     Box::pin(async move { Ok(result) })
 }
 
+// ─── V1.54 P0: DF-46 write tool handlers ──────────────────────────────────
+
+/// `nexus.kb_snapshot.write` — upsert key blocks for a world.
+async fn execute_kb_snapshot_write(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let world_id =
+        req.parameters["world_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.world_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+
+    let blocks = req
+        .parameters["blocks"]
+        .as_array()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.blocks".into(),
+            reason: "must be an array of key blocks".into(),
+        })?;
+
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(state.pool().clone());
+    let mut written: usize = 0;
+    let mut tx = state
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    for block_val in blocks {
+        let kb: nexus_kb::key_block::KeyBlock = serde_json::from_value(block_val.clone()).map_err(|e| {
+            NexusApiError::InvalidInput {
+                field: "parameters.blocks[]".into(),
+                reason: format!("invalid key block: {e}"),
+            }
+        })?;
+        kb_store
+            .insert_key_block_in_tx(&mut tx, kb)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "KB_STORE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+        written += 1;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(serde_json::json!({
+        "written": written,
+        "world_id": world_id
+    }))
+}
+
+/// `nexus.manuscript.chapter.update` — update chapter content and metadata.
+async fn execute_manuscript_chapter_update(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let chapter: i32 = req.parameters["chapter"]
+        .as_i64()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be an integer".into(),
+        })?
+        .try_into()
+        .map_err(|_| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be a valid i32 chapter number".into(),
+        })?;
+
+    let volume: i32 = req.parameters["volume"]
+        .as_i64()
+        .map_or(1, |v| i32::try_from(v).unwrap_or(1));
+
+    // Verify work ownership first
+    let _record = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    // Check chapter exists
+    let chapter_exists =
+        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+
+    if chapter_exists.is_none() {
+        return Err(NexusApiError::NotFound(format!(
+            "{work_id}/ch{chapter}/v{volume}"
+        )));
+    }
+
+    // Update body content if provided
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut body_path: Option<String> = None;
+    if let Some(content) = req.parameters["content"].as_str() {
+        let body_dir = state
+            .workspace_path()
+            .map(|p| {
+                Path::new(&p)
+                    .join("Stories")
+                    .join(work_id)
+                    .join(format!("ch_{chapter:02}_v{volume:02}"))
+            })
+            .ok_or_else(|| NexusApiError::Internal {
+                code: "WORKSPACE_PATH_ERROR".to_string(),
+                message: "workspace path not available".to_string(),
+            })?;
+        std::fs::create_dir_all(&body_dir).map_err(|e| NexusApiError::Internal {
+            code: "DIR_CREATE_FAILED".into(),
+            message: format!("failed to create chapter dir: {e}"),
+        })?;
+        let body_file = body_dir.join("body.md");
+        std::fs::write(&body_file, content).map_err(|e| NexusApiError::Internal {
+            code: "FILE_WRITE_FAILED".into(),
+            message: format!("failed to write chapter body: {e}"),
+        })?;
+        body_path = Some(body_file.to_string_lossy().to_string());
+    }
+
+    // Update chapter DB row if body_path or word count changed
+    if body_path.is_some() {
+        let word_count = req.parameters["content"]
+            .as_str()
+            .map(|c| c.split_whitespace().count())
+            .unwrap_or(0);
+        // SAFETY: dynamic SQL for chapter update — runtime fields.
+        sqlx::query(
+            "UPDATE work_chapters SET body_path = ?, actual_word_count = ?, updated_at = ? \
+             WHERE work_id = ? AND chapter = ? AND volume = ?",
+        )
+        .bind(&body_path)
+        .bind(word_count as i64)
+        .bind(&now)
+        .bind(work_id)
+        .bind(chapter)
+        .bind(volume)
+        .execute(state.pool())
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("chapter update: {e}"),
+        })?;
+    }
+
+    // Read back updated chapter
+    let updated =
+        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+
+    updated.map_or_else(
+        || {
+            Err(NexusApiError::NotFound(format!(
+                "{work_id}/ch{chapter}"
+            )))
+        },
+        |ch| Ok(serde_json::to_value(&ch).unwrap_or_else(|_| serde_json::json!({}))),
+    )
+}
+
+/// `nexus.world.configure` — update world metadata.
+async fn execute_world_configure(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let world_id =
+        req.parameters["world_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.world_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut updated = false;
+
+    // Update title if provided
+    if let Some(title) = req.parameters["title"].as_str() {
+        if title.trim().is_empty() {
+            return Err(NexusApiError::InvalidInput {
+                field: "parameters.title".into(),
+                reason: "must not be empty".into(),
+            });
+        }
+        // SAFETY: dynamic SQL — runtime field updates on narrative_worlds.
+        sqlx::query("UPDATE narrative_worlds SET title = ?, updated_at = ? WHERE world_id = ?")
+            .bind(title)
+            .bind(&now)
+            .bind(world_id)
+            .execute(state.pool())
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("world title update: {e}"),
+            })?;
+        updated = true;
+    }
+
+    // Update visibility if provided
+    if let Some(visibility) = req.parameters["visibility"].as_str() {
+        let valid = ["public", "private", "invited"].contains(&visibility);
+        if !valid {
+            return Err(NexusApiError::InvalidInput {
+                field: "parameters.visibility".into(),
+                reason: "must be one of: public, private, invited".into(),
+            });
+        }
+        // SAFETY: dynamic SQL for visibility update.
+        sqlx::query(
+            "UPDATE narrative_worlds SET visibility = ?, updated_at = ? WHERE world_id = ?",
+        )
+        .bind(visibility)
+        .bind(&now)
+        .bind(world_id)
+        .execute(state.pool())
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("world visibility update: {e}"),
+        })?;
+        updated = true;
+    }
+
+    // Update time_policy if provided
+    if let Some(time_policy) = req.parameters["time_policy"].as_str() {
+        let valid = ["manual", "auto_advance"].contains(&time_policy);
+        if !valid {
+            return Err(NexusApiError::InvalidInput {
+                field: "parameters.time_policy".into(),
+                reason: "must be one of: manual, auto_advance".into(),
+            });
+        }
+        // SAFETY: dynamic SQL for time_policy update.
+        sqlx::query(
+            "UPDATE narrative_worlds SET time_policy = ?, updated_at = ? WHERE world_id = ?",
+        )
+        .bind(time_policy)
+        .bind(&now)
+        .bind(world_id)
+        .execute(state.pool())
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("world time_policy update: {e}"),
+        })?;
+        updated = true;
+    }
+
+    Ok(serde_json::json!({
+        "world_id": world_id,
+        "updated": updated
+    }))
+}
+
+/// `nexus.work.schedule.set` — link/unlink schedule ids to a work.
+async fn execute_work_schedule_set(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let schedule_ids =
+        req.parameters["schedule_ids"]
+            .as_array()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.schedule_ids".into(),
+                reason: "must be an array of schedule id strings".into(),
+            })?;
+
+    // Validate all entries are strings
+    for (i, id) in schedule_ids.iter().enumerate() {
+        if !id.is_string() {
+            return Err(NexusApiError::InvalidInput {
+                field: format!("parameters.schedule_ids[{i}]"),
+                reason: "must be a string".into(),
+            });
+        }
+    }
+
+    // Verify work ownership first
+    let _record = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    let schedule_ids_json = serde_json::to_string(&schedule_ids).unwrap_or_default();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let patch = nexus_local_db::works::WorkPatch {
+        schedule_ids: Some(schedule_ids_json),
+        title: None,
+        long_term_goal: None,
+        creative_brief: None,
+        intake_status: None,
+        status: None,
+        world_id: None,
+        story_ref: None,
+        primary_preset_id: None,
+        current_stage: None,
+        stage_status: None,
+        work_profile: None,
+        work_ref: None,
+        total_planned_chapters: None,
+        current_chapter: None,
+        auto_chain_enabled: None,
+        driver_schedule_id: None,
+        auto_chain_interrupted: None,
+        auto_review_master_on_timeout: None,
+        runtime_lock_holder: None,
+        runtime_lock_acquired_at: None,
+        completion_locked_at: None,
+        novel_completion_status: None,
+        lineage_from_work_id: None,
+    };
+
+    works::patch_work(state.pool(), creator_id, work_id, &patch, &now)
+        .await
+        .map_err(|e| match &e {
+            nexus_local_db::LocalDbError::MissingVersionKey { .. } => NexusApiError::Forbidden {
+                resource: "work".into(),
+                reason: "work not found or cross-creator".into(),
+            },
+            _ => NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: e.to_string(),
+            },
+        })?;
+
+    Ok(serde_json::json!({
+        "work_id": work_id,
+        "schedule_ids": schedule_ids
+    }))
+}
+
+/// `nexus.finding.resolve` — resolve/close a finding.
+async fn execute_finding_resolve(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let finding_id =
+        req.parameters["finding_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.finding_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let resolution = req
+        .parameters["resolution"]
+        .as_str()
+        .unwrap_or("resolved via tool");
+
+    let now_epoch = chrono::Utc::now().timestamp();
+
+    let patch = nexus_local_db::findings::FindingPatch {
+        status: Some("resolved".to_string()),
+        severity: None,
+        title: None,
+        description: Some(format!(
+            "Resolved via tool: {resolution}"
+        )),
+        target_executor: None,
+        kind: None,
+        rule_suggestion: None,
+    };
+
+    nexus_local_db::findings::update_finding(
+        state.pool(),
+        creator_id,
+        finding_id,
+        &patch,
+        now_epoch,
+    )
+    .await
+    .map_err(|e| match &e {
+        nexus_local_db::LocalDbError::MissingVersionKey { .. } => NexusApiError::Forbidden {
+            resource: "finding".into(),
+            reason: "finding not found or cross-creator".into(),
+        },
+        nexus_local_db::LocalDbError::IllegalTransition { .. } => NexusApiError::BadRequest {
+            code: "INVALID_TRANSITION".to_string(),
+            message: e.to_string(),
+        },
+        nexus_local_db::LocalDbError::InvalidEnum { .. } => NexusApiError::InvalidInput {
+            field: "parameters.status".into(),
+            reason: e.to_string(),
+        },
+        _ => NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        },
+    })?;
+
+    Ok(serde_json::json!({
+        "finding_id": finding_id,
+        "resolved": true
+    }))
+}
+
+/// `nexus.pool.entry.manage` — add/remove/promote pool entries.
+async fn execute_pool_entry_manage(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let action = req.parameters["action"]
+        .as_str()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.action".into(),
+            reason: "must be a string (add, remove, promote, archive)".into(),
+        })?;
+
+    // Verify work ownership for non-creator-scoped actions
+    let _record = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    match action {
+        "add" | "promote" => {
+            nexus_local_db::novel_pool_entries::promote_to_active(
+                state.pool(),
+                creator_id,
+                work_id,
+            )
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "POOL_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+        }
+        "remove" | "archive" => {
+            let entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
+                state.pool(),
+                creator_id,
+                work_id,
+            )
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "POOL_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!(
+                "pool entry for {work_id}"
+            )))?;
+
+            nexus_local_db::novel_pool_entries::archive_pool_entry(
+                state.pool(),
+                &entry.entry_id,
+                creator_id,
+            )
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "POOL_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+        }
+        _ => {
+            return Err(NexusApiError::InvalidInput {
+                field: "parameters.action".into(),
+                reason: "must be one of: add, remove, promote, archive".into(),
+            });
+        }
+    }
+
+    Ok(serde_json::json!({
+        "work_id": work_id,
+        "action": action,
+        "success": true
+    }))
+}
+
+// ─── V1.54 P0: Registry wrappers for DF-46 write tools ─────────────────────
+
+/// Registry wrapper: `nexus.kb_snapshot.write` — async passthrough.
+pub(crate) fn registry_kb_snapshot_write<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_kb_snapshot_write(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.manuscript.chapter.update` — async passthrough.
+pub(crate) fn registry_manuscript_chapter_update<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_manuscript_chapter_update(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.world.configure` — async passthrough.
+pub(crate) fn registry_world_configure<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_world_configure(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.work.schedule.set` — async passthrough.
+pub(crate) fn registry_work_schedule_set<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_work_schedule_set(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.finding.resolve` — async passthrough.
+pub(crate) fn registry_finding_resolve<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_finding_resolve(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.pool.entry.manage` — async passthrough.
+pub(crate) fn registry_pool_entry_manage<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_pool_entry_manage(req, state, creator_id))
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2156,7 +2768,7 @@ mod tests {
         let val = result.expect("result");
         assert!(val["uptime_seconds"].as_u64().is_some());
         assert_eq!(val["runtime_mode"], "local_only");
-        assert_eq!(val["registry_size"], 13);
+        assert_eq!(val["registry_size"], 19);
         assert!(val["pool_healthy"].as_bool().unwrap_or(false));
         assert_eq!(
             val["registry_ids"].as_array().expect("registry_ids").len(),
