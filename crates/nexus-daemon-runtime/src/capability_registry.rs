@@ -372,7 +372,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
         handler_test_vector: TestVector {
             description: "schedule status returns schedule ids for work",
             expected_outcome: "success",
-            test_fn_name: "schedule_status_returns_ids",
+            test_fn_name: "schedule_status_happy_path",
         },
     });
 
@@ -506,6 +506,58 @@ mod tests {
             assert!(
                 !row.handler_test_vector.test_fn_name.is_empty(),
                 "test fn name must not be empty for {id}"
+            );
+        }
+    }
+
+    /// **R-V153P0QC1-002 enforcement**: static accepted set of test function names.
+    ///
+    /// Every `CapabilityRow.handler_test_vector.test_fn_name` MUST appear in
+    /// this set. When P1 adds new rows, the author MUST also add the test fn
+    /// name here — otherwise the `all_test_fn_names_accepted` test will fail.
+    const ACCEPTED_TEST_FN_NAMES: &[&str] = &[
+        "whoami_returns_active_creator",
+        "workspace_info_returns_details",
+        "work_get_happy_path",
+        "work_patch_rejects_stage_field",
+        "schedule_status_happy_path",
+        "context_assemble_policy_blocked_when_local_only",
+        "execute_read_file_succeeds",
+        "execute_write_file_succeeds",
+    ];
+
+    #[test]
+    fn all_test_fn_names_accepted() {
+        let reg = host_tool_registry();
+        for id in reg.ids() {
+            let row = reg.lookup(id).expect("row must exist");
+            let name = row.handler_test_vector.test_fn_name;
+            assert!(
+                ACCEPTED_TEST_FN_NAMES.contains(&name),
+                "test_fn_name '{name}' (tool '{id}') is not in ACCEPTED_TEST_FN_NAMES — \
+                 add it to the const in capability_registry.rs test module"
+            );
+        }
+    }
+
+    #[test]
+    fn all_accepted_test_fn_names_referenced() {
+        // Every accepted name must be referenced by at least one registry row
+        // (ensures ACCEPTED_TEST_FN_NAMES does not accumulate dead entries).
+        let reg = host_tool_registry();
+        let registry_names: std::collections::HashSet<&str> = reg
+            .ids()
+            .map(|id| {
+                reg.lookup(id)
+                    .expect("row must exist")
+                    .handler_test_vector
+                    .test_fn_name
+            })
+            .collect();
+        for accepted in ACCEPTED_TEST_FN_NAMES {
+            assert!(
+                registry_names.contains(accepted),
+                "ACCEPTED_TEST_FN_NAMES entry '{accepted}' is not referenced by any registry row"
             );
         }
     }

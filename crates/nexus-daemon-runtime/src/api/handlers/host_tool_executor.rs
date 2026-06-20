@@ -1589,6 +1589,38 @@ mod tests {
         }
     }
 
+    /// **R-V153P0QC1-001 enforcement**: `TOOL_ALLOWLIST` and
+    /// `CapabilityRegistry` rows must agree on every tool ID.
+    ///
+    /// P1 will add 5 new `nexus.*` tools. This test ensures they cannot
+    /// be added to one list without the other — catching the drift risk
+    /// that qc1 identified.
+    #[test]
+    fn tool_allowlist_matches_registry_ids() {
+        let reg = crate::capability_registry::host_tool_registry();
+        let registry_ids: std::collections::HashSet<&str> = reg.ids().collect();
+        let allowlist_ids: std::collections::HashSet<&str> =
+            TOOL_ALLOWLIST.iter().copied().collect();
+
+        // Every TOOL_ALLOWLIST entry must have a matching registry row
+        for id in &allowlist_ids {
+            assert!(
+                registry_ids.contains(id),
+                "TOOL_ALLOWLIST contains '{id}' but CapabilityRegistry has no row for it. \
+                 Add the row to host_tool_registry() or remove the entry from TOOL_ALLOWLIST."
+            );
+        }
+
+        // Every registry row must appear in TOOL_ALLOWLIST
+        for id in &registry_ids {
+            assert!(
+                allowlist_ids.contains(id),
+                "CapabilityRegistry row '{id}' is not in TOOL_ALLOWLIST. \
+                 Add the id to TOOL_ALLOWLIST or remove the row from host_tool_registry()."
+            );
+        }
+    }
+
     /// Parity test: old and new dispatch both reject unknown tools.
     #[tokio::test]
     async fn registry_parity_unknown_tool() {
