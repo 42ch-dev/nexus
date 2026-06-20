@@ -1,16 +1,50 @@
 {
   "version": 1,
-  "updated_at": "2026-06-20T09:32:58Z",
-  "plans": [],
+  "updated_at": "2026-06-22T00:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-06-22-v1.54-compass-and-plan-stubs",
+      "title": "V1.54 Compass & Plan Stubs",
+      "status": "InProgress",
+      "owner": "@project-manager",
+      "effort": "S",
+      "working_branch": "iteration/v1.54",
+      "merge_target": "iteration/v1.54",
+      "type": "prepare",
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.54-df46-write-tools",
+      "title": "V1.54 P0 — DF-46 Full Spectrum Write Tools & V1.53 Residual Convergence",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "effort": "L",
+      "working_branch": "feature/v1.54-df46-write-tools",
+      "merge_target": "iteration/v1.54",
+      "type": "implement",
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.54-game-bible-scaffold",
+      "title": "V1.54 P1 — Game-Bible Profile Scaffold & Init",
+      "status": "Todo",
+      "owner": "@fullstack-dev-2",
+      "effort": "M",
+      "working_branch": "feature/v1.54-game-bible-scaffold",
+      "merge_target": "iteration/v1.54",
+      "type": "implement",
+      "created": "2026-06-22"
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.53",
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.54",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.53",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.54",
+    "latest_active_compass": "v1.54-df46-completion-and-game-bible-foundation",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "P-1 (prepare) — 2026-06-22",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {

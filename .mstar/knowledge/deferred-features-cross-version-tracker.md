@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.53 Shipped** (2026-06-20, PR #74) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.54 Active** (P-1 prepare, 2026-06-22) · V1.53 Shipped (2026-06-20, PR #74) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
 **Status**: V1.53 Shipped (2026-06-20) — Capability Surface Completion & Skills CLI Cleanup; 5 plans all Done; merged to main at `e6c214840e457faaa23298a532b4b0de90905807` via PR [#74](https://github.com/42ch-dev/nexus/pull/74); 13 open residuals deferred to V1.54+.
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
@@ -277,7 +277,7 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- *(none — between iterations; V1.53 shipped 2026-06-20; next compass TBD)*
+- **V1.54** (P-1 active, 2026-06-22): [v1.54-df46-completion-and-game-bible-foundation-delivery-compass-v1.md](../iterations/v1.54-df46-completion-and-game-bible-foundation-delivery-compass-v1.md) — DF-46 Completion & Game-Bible Foundation: P0 DF-46 full-spectrum write tools (6 tools) + 13 V1.53 residual convergence; P1 game-bible scaffold + init; P-last spec hygiene + WL-A sweep + capability-registry.md → Master + Profile B.
 
 **Latest shipped iteration**
 
