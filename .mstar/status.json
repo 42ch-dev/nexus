@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-06-22-v1.54-compass-and-plan-stubs",
       "title": "V1.54 Compass & Plan Stubs",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "effort": "S",
       "working_branch": "iteration/v1.54",
