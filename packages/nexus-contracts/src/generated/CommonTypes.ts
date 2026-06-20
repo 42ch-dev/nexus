@@ -64,8 +64,8 @@ export type TimePolicy = 'manual' | 'owner_driven' | 'event_driven';
 /** Visibility/access level (data-model-v1.md §5.3) */
 export type Visibility = 'private' | 'unlisted' | 'public';
 
-/** KeyBlock content type (data-model-v1.md §5.5) */
-export type BlockType = 'character' | 'ability' | 'scene' | 'organization' | 'item' | 'conflict' | 'info_point' | 'event';
+/** KeyBlock content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). */
+export type BlockType = 'character' | 'ability' | 'scene' | 'organization' | 'item' | 'conflict' | 'info_point' | 'event' | 'species' | 'faction' | 'magic_system' | 'technology' | 'deity' | 'level' | 'economy_tier';
 
 /** MemoryItem type (data-model-v1.md §5.8) */
 export type MemoryType = 'canon' | 'working' | 'experience';

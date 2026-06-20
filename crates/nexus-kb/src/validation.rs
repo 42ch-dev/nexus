@@ -63,6 +63,29 @@ const FORBIDDEN_CHARS: &[char] = &[
     '[', ']', '#',
 ];
 
+/// Valid `game_bible_category` values (V1.54 P1).
+///
+/// Per entity-scope-model.md §5.1.1 game-bible taxonomy:
+///
+/// | `game_bible_category` | Default wire `block_type` |
+/// |-----------------------|---------------------------|
+/// | `species`             | `species`                 |
+/// | `faction`             | `faction`                 |
+/// | `magic_system`        | `magic_system`            |
+/// | `technology`          | `technology`              |
+/// | `deity`               | `deity`                   |
+/// | `level`               | `level`                   |
+/// | `economy_tier`        | `economy_tier`            |
+pub const GAME_BIBLE_CATEGORIES: &[&str] = &[
+    "species",
+    "faction",
+    "magic_system",
+    "technology",
+    "deity",
+    "level",
+    "economy_tier",
+];
+
 /// Validation mode controlling how strictly `body` is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationMode {
@@ -71,6 +94,10 @@ pub enum ValidationMode {
     /// Novel profile validation — requires `novel_category` in `body.attributes`
     /// and validates it against the mapping table.
     Novel,
+    /// Game-bible profile validation (V1.54 P1) — requires `game_bible_category`
+    /// in `body.attributes` and validates it against the mapping table.
+    /// Rejects `novel_category` when active.
+    GameBible,
 }
 
 impl fmt::Display for ValidationMode {
@@ -78,7 +105,28 @@ impl fmt::Display for ValidationMode {
         match self {
             Self::Generic => write!(f, "generic"),
             Self::Novel => write!(f, "novel"),
+            Self::GameBible => write!(f, "game_bible"),
         }
+    }
+}
+
+/// Check whether a string is a valid `game_bible_category` (V1.54 P1).
+#[must_use]
+pub fn is_valid_game_bible_category(category: &str) -> bool {
+    GAME_BIBLE_CATEGORIES.contains(&category)
+}
+
+/// Default mapping from `game_bible_category` to `BlockType` (V1.54 P1).
+pub fn default_block_type_for_game_bible_category(category: &str) -> Option<BlockType> {
+    match category {
+        "species" => Some(BlockType::Species),
+        "faction" => Some(BlockType::Faction),
+        "magic_system" => Some(BlockType::MagicSystem),
+        "technology" => Some(BlockType::Technology),
+        "deity" => Some(BlockType::Deity),
+        "level" => Some(BlockType::Level),
+        "economy_tier" => Some(BlockType::EconomyTier),
+        _ => None,
     }
 }
 
@@ -178,11 +226,18 @@ pub fn validate_body(
         }
     }
 
-    if mode != ValidationMode::Novel {
-        return Ok(());
+    match mode {
+        ValidationMode::Generic => Ok(()),
+        ValidationMode::Novel => validate_novel_body(block_type, body),
+        ValidationMode::GameBible => validate_game_bible_body(block_type, body),
     }
+}
 
-    // Novel-mode checks
+/// Validate novel-profile `body` semantics (V1.40 P1).
+fn validate_novel_body(
+    block_type: BlockType,
+    body: Option<&KeyBlockBody>,
+) -> Result<(), KbError> {
     let b = body.ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
@@ -235,6 +290,89 @@ pub fn validate_body(
                 provided_block_type = ?block_type,
                 default_block_type = ?default_bt,
                 "novel_category '{}' does not map to default block_type {:?} \
+                 (provided {:?}); this is advisory, not an error",
+                category,
+                default_bt,
+                block_type
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate game-bible profile `body` semantics (V1.54 P1).
+///
+/// Requires `game_bible_category` in `body.attributes` and validates it
+/// against the seven valid values. Rejects `novel_category` if present.
+fn validate_game_bible_body(
+    block_type: BlockType,
+    body: Option<&KeyBlockBody>,
+) -> Result<(), KbError> {
+    let b = body.ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingBody,
+            field: Some("body".to_string()),
+            message: "body is required for game-bible-profile KeyBlocks".to_string(),
+        })
+    })?;
+
+    let attrs = b.attributes.as_ref().ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingAttributes,
+            field: Some("body.attributes".to_string()),
+            message: "body.attributes is required for game-bible-profile KeyBlocks".to_string(),
+        })
+    })?;
+
+    // Reject novel_category in game-bible mode — profile categories must not leak
+    if attrs.get("novel_category").is_some() {
+        return Err(KbError::Validation(ValidationError {
+            kind: ValidationKind::InvalidNovelCategory,
+            field: Some("body.attributes.novel_category".to_string()),
+            message:
+                "body.attributes.novel_category is not valid for game-bible-profile KeyBlocks"
+                    .to_string(),
+        }));
+    }
+
+    let category_value = attrs.get("game_bible_category").ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingGameBibleCategory,
+            field: Some("body.attributes.game_bible_category".to_string()),
+            message:
+                "body.attributes.game_bible_category is required for game-bible-profile KeyBlocks"
+                    .to_string(),
+        })
+    })?;
+
+    let category = category_value.as_str().ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::NonStringGameBibleCategory,
+            field: Some("body.attributes.game_bible_category".to_string()),
+            message: "body.attributes.game_bible_category must be a string".to_string(),
+        })
+    })?;
+
+    if !is_valid_game_bible_category(category) {
+        return Err(KbError::Validation(ValidationError {
+            kind: ValidationKind::InvalidGameBibleCategory,
+            field: Some("body.attributes.game_bible_category".to_string()),
+            message: format!(
+                "invalid game_bible_category '{}': must be one of {:?}",
+                category, GAME_BIBLE_CATEGORIES
+            ),
+        }));
+    }
+
+    // Advisory: warn if the game_bible_category doesn't map to the default block_type.
+    if let Some(default_bt) = default_block_type_for_game_bible_category(category) {
+        if block_type != default_bt {
+            tracing::warn!(
+                game_bible_category = category,
+                provided_block_type = ?block_type,
+                default_block_type = ?default_bt,
+                "game_bible_category '{}' does not map to default block_type {:?} \
                  (provided {:?}); this is advisory, not an error",
                 category,
                 default_bt,
@@ -436,6 +574,176 @@ mod tests {
         }
     }
 
+    // ── Game-Bible mode: happy paths ──────────────────────────────
+
+    fn make_game_bible_body(category: Option<&str>) -> KeyBlockBody {
+        KeyBlockBody {
+            summary: Some("test".to_string()),
+            attributes: category.map(|cat| {
+                serde_json::json!({
+                    "game_bible_category": cat,
+                    "traits": ["expansionist"]
+                })
+            }),
+            tags: Some(vec!["game_bible".to_string()]),
+        }
+    }
+
+    #[test]
+    fn game_bible_mode_accepts_all_seven_categories() {
+        let block_types = [
+            BlockType::Species,
+            BlockType::Faction,
+            BlockType::MagicSystem,
+            BlockType::Technology,
+            BlockType::Deity,
+            BlockType::Level,
+            BlockType::EconomyTier,
+        ];
+
+        for (i, bt) in block_types.iter().enumerate() {
+            let body = make_game_bible_body(Some(GAME_BIBLE_CATEGORIES[i]));
+            assert!(
+                validate_body(*bt, Some(&body), ValidationMode::GameBible).is_ok(),
+                "game_bible_category '{}' with block_type {:?} should pass",
+                GAME_BIBLE_CATEGORIES[i],
+                bt
+            );
+        }
+    }
+
+    #[test]
+    fn game_bible_mode_rejects_novel_category() {
+        let body = make_body(Some("character")); // novel_category in game-bible mode
+        let result =
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("novel_category is not valid for game-bible-profile"),
+            "expected rejection of novel_category in game-bible mode, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn game_bible_mode_rejects_missing_game_bible_category() {
+        let body = KeyBlockBody {
+            summary: Some("test".to_string()),
+            attributes: Some(serde_json::json!({"traits": ["ancient"]})),
+            tags: None,
+        };
+        let result =
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(
+            msg.contains("game_bible_category is required"),
+            "expected missing game_bible_category error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn game_bible_mode_rejects_invalid_game_bible_category() {
+        let body = make_game_bible_body(Some("invalid_category"));
+        let result =
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("invalid game_bible_category"));
+    }
+
+    #[test]
+    fn game_bible_mode_rejects_non_string_game_bible_category() {
+        let body = KeyBlockBody {
+            summary: Some("test".to_string()),
+            attributes: Some(serde_json::json!({"game_bible_category": 42})),
+            tags: None,
+        };
+        let result =
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("must be a string"));
+    }
+
+    // ── Game-Bible: structured error verification ──────────────────
+
+    #[test]
+    fn game_bible_missing_body_returns_structured_kind() {
+        let err =
+            validate_body(BlockType::Species, None, ValidationMode::GameBible).unwrap_err();
+        match err {
+            KbError::Validation(ve) => {
+                assert_eq!(ve.kind, ValidationKind::MissingBody);
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn game_bible_missing_category_returns_structured_kind() {
+        let body = KeyBlockBody {
+            summary: Some("test".to_string()),
+            attributes: Some(serde_json::json!({"traits": ["ancient"]})),
+            tags: None,
+        };
+        let err =
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible)
+                .unwrap_err();
+        match err {
+            KbError::Validation(ve) => {
+                assert_eq!(ve.kind, ValidationKind::MissingGameBibleCategory);
+                assert_eq!(
+                    ve.field.as_deref(),
+                    Some("body.attributes.game_bible_category")
+                );
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn game_bible_invalid_category_returns_structured_kind() {
+        let body = make_game_bible_body(Some("bad_category"));
+        let err =
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible)
+                .unwrap_err();
+        match err {
+            KbError::Validation(ve) => {
+                assert_eq!(ve.kind, ValidationKind::InvalidGameBibleCategory);
+                assert!(ve.message.contains("bad_category"));
+            }
+            other => panic!("expected structured Validation, got: {other}"),
+        }
+    }
+
+    // ── BlockType deserialize new variants ─────────────────────────
+
+    #[test]
+    fn blocktype_deserialize_new_game_bible_variants() {
+        let variants: Vec<(&str, BlockType)> = vec![
+            ("species", BlockType::Species),
+            ("faction", BlockType::Faction),
+            ("magic_system", BlockType::MagicSystem),
+            ("technology", BlockType::Technology),
+            ("deity", BlockType::Deity),
+            ("level", BlockType::Level),
+            ("economy_tier", BlockType::EconomyTier),
+        ];
+
+        for (wire_name, expected) in variants {
+            let v = serde_json::Value::String(wire_name.to_string());
+            let bt: BlockType = serde_json::from_value(v).unwrap_or_else(|e| {
+                panic!("failed to deserialize '{wire_name}': {e}")
+            });
+            assert_eq!(
+                bt, expected,
+                "wire '{wire_name}' should deserialize to {:?}",
+                expected
+            );
+        }
+    }
+
     // ── canonical_name validation ─────────────────────────────────
 
     #[test]
@@ -510,6 +818,7 @@ mod tests {
     fn validation_mode_display() {
         assert_eq!(ValidationMode::Generic.to_string(), "generic");
         assert_eq!(ValidationMode::Novel.to_string(), "novel");
+        assert_eq!(ValidationMode::GameBible.to_string(), "game_bible");
     }
 
     #[test]
@@ -521,6 +830,14 @@ mod tests {
         assert_eq!(
             ValidationKind::InvalidCanonicalName.to_string(),
             "invalid_canonical_name"
+        );
+        assert_eq!(
+            ValidationKind::MissingGameBibleCategory.to_string(),
+            "missing_game_bible_category"
+        );
+        assert_eq!(
+            ValidationKind::InvalidGameBibleCategory.to_string(),
+            "invalid_game_bible_category"
         );
     }
 
@@ -535,5 +852,61 @@ mod tests {
             Some(BlockType::Character)
         );
         assert_eq!(default_block_type_for_category("unknown"), None);
+    }
+
+    // ── Game-Bible utility ─────────────────────────────────────────
+
+    #[test]
+    fn is_valid_game_bible_category_true_for_all_seven() {
+        for cat in GAME_BIBLE_CATEGORIES {
+            assert!(
+                is_valid_game_bible_category(cat),
+                "expected '{}' valid",
+                cat
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_game_bible_category_false_for_unknown() {
+        assert!(!is_valid_game_bible_category("unknown"));
+        assert!(!is_valid_game_bible_category("Species")); // case-sensitive
+        assert!(!is_valid_game_bible_category("character")); // novel category, not game-bible
+    }
+
+    #[test]
+    fn default_block_type_for_game_bible_category_mapping() {
+        assert_eq!(
+            default_block_type_for_game_bible_category("species"),
+            Some(BlockType::Species)
+        );
+        assert_eq!(
+            default_block_type_for_game_bible_category("faction"),
+            Some(BlockType::Faction)
+        );
+        assert_eq!(
+            default_block_type_for_game_bible_category("magic_system"),
+            Some(BlockType::MagicSystem)
+        );
+        assert_eq!(
+            default_block_type_for_game_bible_category("technology"),
+            Some(BlockType::Technology)
+        );
+        assert_eq!(
+            default_block_type_for_game_bible_category("deity"),
+            Some(BlockType::Deity)
+        );
+        assert_eq!(
+            default_block_type_for_game_bible_category("level"),
+            Some(BlockType::Level)
+        );
+        assert_eq!(
+            default_block_type_for_game_bible_category("economy_tier"),
+            Some(BlockType::EconomyTier)
+        );
+        assert_eq!(
+            default_block_type_for_game_bible_category("unknown"),
+            None
+        );
     }
 }
