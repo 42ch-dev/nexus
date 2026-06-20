@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "updated_at": "2026-06-20T00:00:00Z",
+  "updated_at": "2026-06-20T09:32:58Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.53",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.52",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.53",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.53",
-    "latest_active_compass": "v1.53-capability-surface-completion-and-skills-cli-cleanup",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -16,16 +16,16 @@
     "latest_ship": {
       "iteration": "V1.53",
       "compass": "v1.53-capability-surface-completion-and-skills-cli-cleanup",
-      "merged_at": "pending (V1.53 PR to main in flight)",
+      "merged_at": "2026-06-20T09:32:58Z",
       "plan_count": 5,
       "plan_count_done": 5,
       "open_at_ship": 0,
-      "deferred_to_next": 16,
+      "deferred_to_next": 13,
       "wire_contracts_changed": false,
       "profile_b_compaction": "done",
-      "merge_commit": "pending",
-      "pr": null,
-      "pr_url": null
+      "merge_commit": "e6c214840e457faaa23298a532b4b0de90905807",
+      "pr": 74,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/74"
     },
     "tech_debt_summary": {
       "total_open": 13,

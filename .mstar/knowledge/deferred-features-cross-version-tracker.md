@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.53 Active (P-1 Done; P0 pending)** · **V1.52 Shipped** (2026-06-19, PR #73) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.53 Shipped** (2026-06-20, PR #74) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.53 Active (2026-06-20) — Capability Surface Completion & Skills CLI Cleanup compass locked, P-1 Done, P0 pending; V1.52 Shipped (2026-06-19, PR #73).
+**Status**: V1.53 Shipped (2026-06-20) — Capability Surface Completion & Skills CLI Cleanup; 5 plans all Done; merged to main at `e6c214840e457faaa23298a532b4b0de90905807` via PR [#74](https://github.com/42ch-dev/nexus/pull/74); 13 open residuals deferred to V1.54+.
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-20 (V1.53 P-1 prepare — active compass + DF-50 cancellation)
+**Last updated**: 2026-06-20 (V1.53 ship metadata finalization)
 
 ---
 
@@ -121,18 +121,15 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
-**V1.52 active residual retargeting**: R-V150KBED-01 → T-A P1, R-V150KBED-02 → T-A P2, R-V151Q3-W001/W002 → T-A P0, R-V151Q1-10 → P-last; machine SSOT remains [`status.json`](../status.json).
+**V1.53 active residual retargeting (V1.54+ carry-forward)**: 13 open residuals (4 medium + 9 low) deferred from V1.53 ship. See [`shipped-features-tracker.md`](../archived/shipped-features-tracker.md) §2 V1.54+ carry-forward index. Medium items: R-V153P1QC2-003 (daemon.health registry_ids exposure), R-V153P0QC2-001 (P1 parity coverage expansion), R-V153P0QC2-002 (catalog↔registry bijection test), R-V153P0QC3-001 (per-dispatch registry allocation on schedule hot path). Machine SSOT remains [`status.json`](../status.json).
 
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-19**; active branch `iteration/v1.52`; deferred residuals retargeted to V1.52 plan buckets). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-20**; integration_branch_retired=true; V1.53 Shipped 2026-06-20; PR #74 merged; 13 open residuals target V1.54+). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.52 T-A P0 | 2 | `R-V151Q3-W001`, `R-V151Q3-W002` |
-| V1.52 T-A P1 | 1 | `R-V150KBED-01` |
-| V1.52 T-A P2 | 1 | `R-V150KBED-02` |
-| V1.52 P-last | 1 | `R-V151Q1-10` |
-| **Total deferred at V1.52 prepare** | **6** | See `metadata.tech_debt_summary.total_deferred` |
+| V1.54+ carry-forward (V1.53 ship) | **13** | 4 medium + 9 low; see shipped-features-tracker.md V1.54+ index |
+| **Total deferred at V1.53 ship** | **13** | See `metadata.tech_debt_summary.total_deferred` (= 13; 4 medium + 9 low) |
 
 **Closed / historical residuals**
 
@@ -280,15 +277,15 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.53** (Active 2026-06-20, P-1 Done; P0 pending) — [v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md](../iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md) — Capability Surface Completion & Skills CLI Cleanup: P0 registry SSOT, P1 first DF-46 read-heavy tool slice, P-c skills-export CLI/spec cleanup, P-last spec hygiene closeout. 5 plans registered; integration branch `iteration/v1.53`.
+- *(none — between iterations; V1.53 shipped 2026-06-20; next compass TBD)*
 
 **Latest shipped iteration**
 
-- **V1.51** (Shipped 2026-06-19): [v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md](../iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md) — KB Closure & Multi-Writer Concurrency; PR [#64](https://github.com/42ch-dev/nexus/pull/64) merged to `main` at `c57b927b`.
+- **V1.53** (Shipped 2026-06-20): [v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md](../iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md) — Capability Surface Completion & Skills CLI Cleanup: P0 CapabilityRegistry SSOT (3 sub-phase cutover, 8 → 13 host tools), P1 DF-46 read slice (5 new read-heavy `nexus.*` tools + cross-creator isolation), P-c skills-export CLI cleanup (DF-50 Cancelled), P-last spec hygiene + dual Profile B (V1.53 + V1.52 retro). 5 plans all Done; merged to `main` at `e6c214840e457faaa23298a532b4b0de90905807` via PR [#74](https://github.com/42ch-dev/nexus/pull/74). `iteration/v1.53` retired. 13 open residuals (4 medium + 9 low) deferred to V1.54+. `capability-registry.md` kept as Draft overlay (Master promotion deferred to V1.54+).
 
 **Recent shipped compasses** (detail in archive §2)
 
-- **V1.47** (Shipped 2026-06-15, P-last closeout): [v1.47-novel-quality-loop-closure-delivery-compass-v1.md](../iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md) — Novel quality loop closure (`reflection-loop` → `novel-chapter-review` findings producer) + remediation audit + §4.5.7 acceptance tests + spec reconcile; PR [#60](https://github.com/42ch-dev/nexus/pull/60) MERGED to `main` at `8f4f9f2b` (2026-06-15); integration branch `iteration/v1.47` retired. 6 plans all Done (P-1 + P0–P-last); 5 whitelist residuals closed (R-V145-PRE-CLIPPY-001, R-V146P1-QC3-S1/S4, R-V145B2-001/002); 33 V1.45/V1.46 lows deferred to V1.48; `novel-writing/quality-loop.md` + `novel-writing/workflow-profile.md` Draft → **Shipped (V1.47)**; Profile B compaction complete.
+- **V1.52** (Shipped 2026-06-19): [v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md](../iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md) — Author Completion & Multi-Branch Preset Orchestration: T-A outline 五问 + auto-promote + CLI consolidation + Work→KeyBlock provenance + essay profile; T-B N-way GO/NOGO + branch merge semantics. 7 plans all Done; merged to `main` at `d6aadd2fb5f287056dbd41b701eea8d5e6114dcc` via PR [#73](https://github.com/42ch-dev/nexus/pull/73); `iteration/v1.52` retired. (Profile B retroactively completed by V1.53 P-last.)
 
 - V1.44 (Shipped 2026-06-13): [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) — DF-69 + review-master CLI + multi-volume + author-desk; PR #57 merged `76a9eb79`.
 - V1.43 (Shipped 2026-06-12): [v1.43-novel-author-experience-delivery-compass-v1.md](../iterations/v1.43-novel-author-experience-delivery-compass-v1.md) — BL-10 author quickstart + CLI copy P1 + author visibility P2 + P-last hygiene; `iteration/v1.43` retired.
