@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-22-v1.54-df46-write-tools"
-verdict: "Request Changes"
-generated_at: "2026-06-20T11:43:43Z"
+verdict: "Approve"
+generated_at: "2026-06-20T12:42:30Z"
+revalidated_at: "2026-06-20T12:42:30Z"
 ---
 
 # Code Review Report
@@ -75,3 +76,22 @@ generated_at: "2026-06-20T11:43:43Z"
 **Verdict**: Request Changes
 
 `cargo clippy --all -- -D warnings` and `cargo test --all` both passed, but the write-tool review found one blocking authorization/data-integrity issue and three unresolved warning-level architecture/correctness issues. Per QC gate rules, this cannot be approved until the Critical and Warning findings are addressed or explicitly reassigned by PM as residuals with an accepted risk decision.
+
+## Revalidation
+
+Targeted re-review scope: only qc1 findings C-001, W-001, W-002, W-003, with S-001 accepted as deferred outside the P0 fix-wave and S-002 noted for PM residual lifecycle review. Current checkout verified as `/Users/bibi/workspace/organizations/42ch/nexus` on `iteration/v1.54`; fix-wave commits verified in `git log --oneline -15` including `9f8e5ef5`, `1283f579`, `663cc55b`, `d383e6e6`, `2a0b8024`, `b29d36b8`, `22db9700`, and `e188979d`.
+
+- **C-001 — Resolved.** `execute_kb_snapshot_write` now rejects any block whose embedded `kb.world_id` differs from the request-level `world_id` before inserting into the KB store (`host_tool_executor.rs:1576-1592`). Regression coverage passed: `cargo test -p nexus-daemon-runtime kb_snapshot_write_rejects_cross` (`kb_snapshot_write_rejects_cross_world_block_same_creator`, `kb_snapshot_write_rejects_cross_creator_world_block`).
+- **W-001 — Resolved.** The fix explicitly makes registry admission rows declarative/accountability metadata, documents the enforcement split in `CapabilityRegistry::dispatch`, iterates `row.admission` as the central checkpoint, and adds `registry_all_admission_gates_have_enforcement` to bind every declared `AdmissionGate` variant to a runtime enforcement path. This satisfies qc1's alternate fix path (downgrade documentation-only semantics + invariant) rather than converting `dispatch` into the executor for every gate. Regression coverage passed: `cargo test -p nexus-daemon-runtime registry_all_admission_gates_have_enforcement`.
+- **W-002 — Resolved.** `execute_finding_resolve` now checks the `bool` returned by `nexus_local_db::findings::update_finding` and maps `false` to `NOT_FOUND` instead of returning `{ resolved: true }` (`host_tool_executor.rs:2024-2056`). Regression coverage passed: `cargo test -p nexus-daemon-runtime finding_resolve_nonexistent_returns_not_found`.
+- **W-003 — Resolved.** `execute_manuscript_chapter_update` now uses the existing canonical `WorkChapterRecord.body_path`, or falls back to `Works/{work_ref}/Stories/{ch_nn}-{ch_nn}.md`, and stores the relative canonical path in `work_chapters.body_path` (`host_tool_executor.rs:1682-1715`, `1720-1757`). Regression coverage passed: `cargo test -p nexus-daemon-runtime manuscript_chapter_update_writes_content`, which asserts the DB path starts with `Works/`, contains `Stories/`, ends with `.md`, and the file content is written at that canonical relative path.
+
+Non-blocking qc1 notes:
+- **S-001 — Accepted as deferred / out of fix-wave scope.** The benchmark now includes a cold-path case and clarified that end-to-end `dispatch_whoami` is not benchmarked here (`dispatch_latency.rs:3-13`, `24-55`). Evidence: `cargo bench -p nexus-daemon-runtime --bench dispatch_latency --no-run` compiled successfully.
+- **S-002 — PM residual lifecycle review still advised.** QC1 does not own `.mstar/status.json` lifecycle edits; PM should ensure any deferred LIMIT/sqlx closure notes are represented as defer/accepted residuals rather than overstated resolved closures.
+
+Revalidation gates:
+- `cargo test --all` — passed (`760 passed; 0 failed` plus integration/doc tests; command exit 0).
+- `cargo clippy --all -- -D warnings` — passed (command exit 0).
+
+**Revalidated Verdict**: Approve
