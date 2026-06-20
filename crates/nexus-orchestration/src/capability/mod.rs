@@ -425,9 +425,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_twenty_two_builtins() {
+    fn registry_has_twenty_three_builtins() {
+        // 23 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 22);
+        assert_eq!(reg.len(), 23);
     }
 
     #[test]
