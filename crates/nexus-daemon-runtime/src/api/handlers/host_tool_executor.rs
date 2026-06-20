@@ -369,6 +369,56 @@ impl HostToolExecutor {
         }
     }
 
+    /// V1.53 P0 Sub-phase 1: Dispatch through the new `CapabilityRegistry`.
+    ///
+    /// This is the **parallel path** for parity testing during adapter-first
+    /// migration. It runs the same admission pipeline as `execute()`, then
+    /// dispatches through the registry instead of the old `dispatch_tool()`
+    /// match table.
+    ///
+    /// During Sub-phase 1, both `execute()` (old path) and `registry_dispatch()`
+    /// (new path) are active. Tests verify they produce identical output.
+    /// During Sub-phase 2, `execute()` is cut over to call this internally;
+    /// during Sub-phase 3 the old match table is removed.
+    pub async fn registry_dispatch(
+        req: &ToolExecuteRequest,
+        state: &WorkspaceState,
+    ) -> Result<serde_json::Value, NexusApiError> {
+        tracing::info!(
+            tool_name = %req.tool_name,
+            caller_kind = ?req.caller_kind,
+            "HostToolExecutor: executing tool via CapabilityRegistry"
+        );
+
+        // Gates 1–4 (same admission pipeline as execute())
+        let admission_result = admission_pipeline(req, state);
+
+        let (creator_id, _workspace_slug) = match admission_result {
+            Ok(pair) => pair,
+            Err(e) => {
+                let error_code = e.error_code();
+                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
+                return Err(e);
+            }
+        };
+
+        // Dispatch through registry (not old match table)
+        let reg = crate::capability_registry::host_tool_registry();
+        let dispatch_result = reg.dispatch(req, state, &creator_id).await;
+
+        match &dispatch_result {
+            Ok(_) => {
+                let _ = audit_tool_execution(req, "success", None, state).await;
+            }
+            Err(e) => {
+                let error_code = e.error_code();
+                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
+            }
+        }
+
+        dispatch_result
+    }
+
     /// Dispatch a schedule-initiated `nexus.*` tool call through the unified registry.
     ///
     /// V1.42 P3 (DF-47 production wiring): the schedule executor calls this
@@ -1144,6 +1194,95 @@ async fn audit_tool_execution(
     Ok(())
 }
 
+// ─── Registry handler wrappers (V1.53 P0) ─────────────────────────────────
+///
+/// These `pub(crate)` wrappers adapt the existing private handler functions
+/// to the `RegistryHandlerFn` signature used by `CapabilityRegistry`.
+/// They exist so the registry can reference the same handler implementations
+/// without duplicating logic.
+///
+/// Each wrapper uses an explicit named lifetime `'a` to satisfy the
+/// higher-ranked trait bound `for<'a> fn(&'a ..., &'a ..., &'a str) -> ...`.
+
+use std::future::Future;
+use std::pin::Pin;
+
+/// Registry wrapper: `nexus.context.whoami` — sync → async wrapper.
+pub(crate) fn registry_context_whoami<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_context_whoami(req, state, creator_id);
+    Box::pin(async move { Ok(result) })
+}
+
+/// Registry wrapper: `nexus.workspace.info` — sync → async wrapper.
+pub(crate) fn registry_workspace_info<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_workspace_info(req, state, creator_id);
+    Box::pin(async move { Ok(result) })
+}
+
+/// Registry wrapper: `nexus.work.get` — async passthrough.
+pub(crate) fn registry_work_get<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_work_get(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.work.patch` — async passthrough.
+pub(crate) fn registry_work_patch<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_work_patch(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.orchestration.schedule_status` — async passthrough.
+pub(crate) fn registry_schedule_status<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_schedule_status(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.context.assemble` — async passthrough.
+pub(crate) fn registry_context_assemble<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_context_assemble(req, state, creator_id))
+}
+
+/// Registry wrapper: `fs/read_text_file` — sync → async wrapper (ignores creator_id).
+pub(crate) fn registry_read_file<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    _creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_read_file(req, state);
+    Box::pin(async move { result })
+}
+
+/// Registry wrapper: `fs/write_text_file` — sync → async wrapper (ignores creator_id).
+pub(crate) fn registry_write_file<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    _creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_write_file(req, state);
+    Box::pin(async move { result })
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1404,5 +1543,80 @@ mod tests {
             output, http_result,
             "HTTP and worker must produce same result"
         );
+    }
+
+    // ─── V1.53 P0 Sub-phase 1: Registry parity tests ───────────────────────
+
+    /// Parity test: old `execute()` and new `registry_dispatch()` produce
+    /// the same output for `nexus.context.whoami`.
+    #[tokio::test]
+    async fn registry_parity_whoami() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.context.whoami".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let old_result = HostToolExecutor::execute(&req, &state).await;
+        let new_result = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(old_result.is_ok(), new_result.is_ok());
+        if let (Ok(old_val), Ok(new_val)) = (&old_result, &new_result) {
+            assert_eq!(old_val["creator_id"], new_val["creator_id"]);
+            assert_eq!(old_val["workspace_slug"], new_val["workspace_slug"]);
+        }
+    }
+
+    /// Parity test: old `execute()` and new `registry_dispatch()` produce
+    /// the same output for `nexus.workspace.info`.
+    #[tokio::test]
+    async fn registry_parity_workspace_info() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.workspace.info".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let old_result = HostToolExecutor::execute(&req, &state).await;
+        let new_result = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(old_result.is_ok(), new_result.is_ok());
+        if let (Ok(old_val), Ok(new_val)) = (&old_result, &new_result) {
+            assert_eq!(old_val["creator_id"], new_val["creator_id"]);
+            assert_eq!(old_val["workspace_slug"], new_val["workspace_slug"]);
+            assert_eq!(old_val["workspace_path"], new_val["workspace_path"]);
+        }
+    }
+
+    /// Parity test: old and new dispatch both reject unknown tools.
+    #[tokio::test]
+    async fn registry_parity_unknown_tool() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "unknown/tool".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let old_result = HostToolExecutor::execute(&req, &state).await;
+        let new_result = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert!(old_result.is_err());
+        assert!(new_result.is_err());
+        // Both should produce NOT_SUPPORTED
+        match (&old_result, &new_result) {
+            (Err(old_e), Err(new_e)) => {
+                assert_eq!(old_e.error_code(), new_e.error_code());
+            }
+            _ => panic!("Both should be errors"),
+        }
     }
 }
