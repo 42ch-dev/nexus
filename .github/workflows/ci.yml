@@ -21,13 +21,17 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   validate-schemas:
     name: Validate JSON Schemas
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
         with:
           version: 9
       - uses: actions/setup-node@v4
@@ -43,9 +47,12 @@ jobs:
     name: Verify Codegen Output
     runs-on: ubuntu-latest
     needs: validate-schemas
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
         with:
           version: 9
       - uses: actions/setup-node@v4
@@ -88,7 +95,7 @@ jobs:
       SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           components: rustfmt, clippy
       - name: Install nightly rustfmt (for workspace .rustfmt.toml `ignore` on codegen output)
@@ -102,7 +109,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
       - name: Check formatting
@@ -118,7 +125,7 @@ jobs:
       SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
       - uses: actions/download-artifact@v4
         with:
           name: generated-types
@@ -135,7 +142,7 @@ jobs:
     needs: verify-codegen
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
         with:
           version: 9
       - uses: actions/setup-node@v4
@@ -211,7 +218,7 @@ jobs:
       SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
       - uses: actions/download-artifact@v4
         with:
           name: generated-types
@@ -221,7 +228,7 @@ jobs:
         run: |
           v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-${{ matrix.group }}
       - name: Run tests
