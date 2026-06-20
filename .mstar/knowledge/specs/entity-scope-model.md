@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Shipped**: §5.5 World KB promotion state machine (T-B P1); promotion row promoted Draft → Normative at V1.50 P-last when the `kb_extract_jobs` migration landed and review-time extraction is verified end-to-end. **V1.51 Shipped**: §5.5.6 LLM pathway subsection (T-A P0) — `nexus.llm.extract` wire `BlockType` → `novel_category` mapping documented as SSOT. |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Shipped**: §5.5 World KB promotion state machine (T-B P1); promotion row promoted Draft → Normative at V1.50 P-last when the `kb_extract_jobs` migration landed and review-time extraction is verified end-to-end. **V1.51 Shipped**: §5.5.6 LLM pathway subsection (T-A P0) — `nexus.llm.extract` wire `BlockType` → `novel_category` mapping documented as SSOT. **V1.54 Shipped**: §5.1.1 game-bible taxonomy — 7 new `BlockType` variants (`species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`) registered in wire schema; `game_bible_category` body-layer field + `ValidationMode::GameBible` wired. |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-06-19 — V1.51 §5.5.6 LLM pathway marked Normative (T-A P0 closeout) |
+| **Last updated** | 2026-06-22 — V1.54 §5.1.1 game-bible BlockType taxonomy + `ValidationMode::GameBible` (P1 closeout) |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
@@ -183,6 +183,56 @@ Minimum common `body` shape for novel-profile items (V1.40 P1):
 ```
 
 P1 adds validation helpers in `nexus-kb` for wire `BlockType` + optional `novel_category` / per-category `body.attributes` minimums. **Shipped in V1.40 P1** (`nexus-kb::validation`). No `schemas/` enum change in V1.40 unless a future ADR opts into a wire superset (out of V1.40 scope).
+
+**Game-bible profile semantics (body layer — V1.54 P1):** Seven new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for game-bible domain concepts. The corresponding body-layer category is `game_bible_category` (string, carried in `KeyBlock.body.attributes`). It does **not** replace wire `block_type`.
+
+Shipped `BlockType` values (snake_case on wire) extended with:
+
+| Wire `block_type` | UI label | `game_bible_category` | Design section |
+| --- | --- | --- | --- |
+| `species` | Species | `species` | `species.md` |
+| `faction` | Faction | `faction` | `factions.md` |
+| `magic_system` | Magic System | `magic_system` | `magic_system.md` |
+| `technology` | Technology | `technology` | `technology.md` |
+| `deity` | Deity | `deity` | `lore.md` |
+| `level` | Level | `level` | `locations.md` |
+| `economy_tier` | Economy Tier | `economy_tier` | `economy.md` |
+
+Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`) are reused for cross-domain concepts (e.g., a game character uses `BlockType::Character` with `game_bible_category: "character"`).
+
+**V1.54 P1 implementation:** `nexus-kb::validation` adds `ValidationMode::GameBible` that requires `game_bible_category` in `body.attributes` when active and rejects `novel_category`. The game-bible category validation mirrors the novel pattern: seven valid categories, structured (`ValidationKind`) errors, advisory warnings on `game_bible_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
+
+Valid `game_bible_category` values:
+
+```
+species, faction, magic_system, technology, deity, level, economy_tier
+```
+
+Default mapping from `game_bible_category` to `BlockType`:
+
+| `game_bible_category` | Default wire `block_type` |
+| --- | --- |
+| `species` | `species` |
+| `faction` | `faction` |
+| `magic_system` | `magic_system` |
+| `technology` | `technology` |
+| `deity` | `deity` |
+| `level` | `level` |
+| `economy_tier` | `economy_tier` |
+
+Minimum common `body` shape for game-bible items:
+
+```json
+{
+  "summary": "One-line prompt descriptor",
+  "attributes": {
+    "game_bible_category": "faction",
+    "aliases": ["The Iron Council"],
+    "traits": ["..."]
+  },
+  "tags": ["game_bible"]
+}
+```
 
 ### 5.2 `nexus-knowledge` — User-scoped global knowledge
 

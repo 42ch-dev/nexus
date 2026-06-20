@@ -4,12 +4,12 @@
 //! generated from JSON Schema. This file extends generated types without modifying them.
 
 use crate::generated::common_types::{
-    AccountStatus, AgentProfileStatus, BindingStatus, CommandOrigin, CommandStatus, CommandType,
-    CreatorStatus, DeliveryState, DeltaOperation, DeltaType, ForkBranchStatus, KeyBlockStatus,
-    ManifestType, ManuscriptStorage, MembershipRole, MembershipStatus, MemoryKind, MemoryStatus,
-    PairingSource, PairingStatus, ProfileKind, PublishStoryOutcome, ReferenceSourceType,
-    RegistrationSource, ScanStatus, SelectionMode, StoryManifestStatus, SubscriptionTier,
-    TimelineEventStatus, TimelineEventType, VerificationStatus, WorldStatus,
+    AccountStatus, AgentProfileStatus, BindingStatus, BlockType, CommandOrigin, CommandStatus,
+    CommandType, CreatorStatus, DeliveryState, DeltaOperation, DeltaType, ForkBranchStatus,
+    KeyBlockStatus, ManifestType, ManuscriptStorage, MembershipRole, MembershipStatus, MemoryKind,
+    MemoryStatus, PairingSource, PairingStatus, ProfileKind, PublishStoryOutcome,
+    ReferenceSourceType, RegistrationSource, ScanStatus, SelectionMode, StoryManifestStatus,
+    SubscriptionTier, TimelineEventStatus, TimelineEventType, VerificationStatus, WorldStatus,
 };
 use crate::local::domain::runtime_mode::RuntimeMode;
 use std::fmt;
@@ -81,6 +81,36 @@ impl SubscriptionTier {
             Self::Studio => "studio",
             Self::Enterprise => "enterprise",
         }
+    }
+}
+
+// V1.54 P1: BlockType as_str — supports both novel and game-bible variants.
+impl BlockType {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Character => "character",
+            Self::Ability => "ability",
+            Self::Scene => "scene",
+            Self::Organization => "organization",
+            Self::Item => "item",
+            Self::Conflict => "conflict",
+            Self::InfoPoint => "info_point",
+            Self::Event => "event",
+            Self::Species => "species",
+            Self::Faction => "faction",
+            Self::MagicSystem => "magic_system",
+            Self::Technology => "technology",
+            Self::Deity => "deity",
+            Self::Level => "level",
+            Self::EconomyTier => "economy_tier",
+        }
+    }
+}
+
+impl fmt::Display for BlockType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 

@@ -18,6 +18,27 @@ pub const WORKS_COLUMNS: &str = "\
     runtime_lock_holder, runtime_lock_acquired_at, completion_locked_at, \
     novel_completion_status, lineage_from_work_id";
 
+// ── Profile detection helpers (V1.54 P1) ──────────────────────────────────
+
+/// Returns `true` if `profile` indicates a novel Work.
+///
+/// V1.54 P1: extracted to avoid string-literal fragility across profile-gate
+/// sites. Use this instead of comparing `work_profile == "novel"` directly.
+#[must_use]
+pub fn is_novel_profile(profile: Option<&str>) -> bool {
+    profile == Some("novel")
+}
+
+/// Returns `true` if `profile` indicates a game-bible Work.
+///
+/// V1.54 P1: game-bible Works do not use `work_chapters`, `Stories/`,
+/// or novel completion logic. All novel-specific code paths should gate
+/// on [`is_novel_profile`] before executing.
+#[must_use]
+pub fn is_game_bible_profile(profile: Option<&str>) -> bool {
+    profile == Some("game_bible")
+}
+
 /// Map a sqlx row to [`WorkRecord`].
 #[must_use]
 pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
@@ -2238,5 +2259,41 @@ mod tests {
             "index should cover auto_chain_interrupted: {sql}"
         );
         assert!(sql.contains("status"), "index should cover status: {sql}");
+    }
+
+    // ── Profile detection helpers (V1.54 P1) ───────────────────────
+
+    #[test]
+    fn is_novel_profile_true_for_novel() {
+        assert!(super::is_novel_profile(Some("novel")));
+        assert!(!super::is_novel_profile(Some("essay")));
+        assert!(!super::is_novel_profile(Some("game_bible")));
+        assert!(!super::is_novel_profile(None));
+    }
+
+    #[test]
+    fn is_game_bible_profile_true_for_game_bible() {
+        assert!(super::is_game_bible_profile(Some("game_bible")));
+        assert!(!super::is_game_bible_profile(Some("novel")));
+        assert!(!super::is_game_bible_profile(Some("essay")));
+        assert!(!super::is_game_bible_profile(None));
+    }
+
+    #[test]
+    fn profile_helpers_are_mutually_exclusive() {
+        // No profile string should match both helpers simultaneously.
+        let profiles = [
+            Some("novel"),
+            Some("essay"),
+            Some("game_bible"),
+            Some("script"),
+            None,
+        ];
+        for p in &profiles {
+            assert!(
+                !(super::is_novel_profile(*p) && super::is_game_bible_profile(*p)),
+                "profile '{p:?}' matched both novel and game_bible — helpers must be exclusive"
+            );
+        }
     }
 }
