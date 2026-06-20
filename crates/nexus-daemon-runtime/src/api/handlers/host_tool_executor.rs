@@ -395,7 +395,7 @@ impl HostToolExecutor {
             Ok(pair) => pair,
             Err(e) => {
                 let error_code = e.error_code();
-                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
+                audit_tool_execution(req, "denied", Some(error_code), state).await?;
                 return Err(e);
             }
         };
@@ -406,11 +406,11 @@ impl HostToolExecutor {
 
         match &dispatch_result {
             Ok(_) => {
-                let _ = audit_tool_execution(req, "success", None, state).await;
+                audit_tool_execution(req, "success", None, state).await?;
             }
             Err(e) => {
                 let error_code = e.error_code();
-                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
+                audit_tool_execution(req, "denied", Some(error_code), state).await?;
             }
         }
 
@@ -4232,5 +4232,57 @@ mod tests {
             direct_result["workspace_slug"], schedule_result["workspace_slug"],
             "schedule dispatch should produce same workspace_slug"
         );
+    }
+
+    /// C-001 (qc3): Verify audit-log failure is propagated, not silently swallowed.
+    ///
+    /// Drops the `acp_tool_audit_log` table before calling `registry_dispatch`
+    /// to simulate an audit write failure. The dispatch must return an
+    /// `Internal` error with code `AUDIT_LOG_FAILED` rather than silently
+    /// succeeding.
+    #[tokio::test]
+    async fn registry_dispatch_propagates_audit_write_failure() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+
+        // Simulate audit-write failure by dropping the audit table before
+        // constructing WorkspaceState. This causes the INSERT in
+        // `audit_tool_execution` to fail with a SQLite error.
+        {
+            let audit_pool = nexus_local_db::open_pool(&db_path)
+                .await
+                .expect("open pool for table drop");
+            sqlx::query("DROP TABLE IF EXISTS acp_tool_audit_log")
+                .execute(&audit_pool)
+                .await
+                .expect("drop acp_tool_audit_log");
+            audit_pool.close().await;
+        }
+
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Use whoami — a read-only tool that passes admission and would
+        // normally succeed. If the audit write fails, the dispatch must
+        // propagate that failure.
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.context.whoami".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+
+        let result = HostToolExecutor::registry_dispatch(&req, &state).await;
+
+        match result {
+            Err(NexusApiError::Internal { code, .. }) => {
+                assert_eq!(
+                    code, "AUDIT_LOG_FAILED",
+                    "audit write failure must propagate with code AUDIT_LOG_FAILED"
+                );
+            }
+            other => panic!(
+                "expected NexusApiError::Internal with code AUDIT_LOG_FAILED, got: {other:?}"
+            ),
+        }
     }
 }
