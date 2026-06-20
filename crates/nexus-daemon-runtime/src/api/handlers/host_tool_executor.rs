@@ -1574,12 +1574,22 @@ async fn execute_kb_snapshot_write(
         })?;
 
     for block_val in blocks {
-        let kb: nexus_kb::key_block::KeyBlock = serde_json::from_value(block_val.clone()).map_err(|e| {
-            NexusApiError::InvalidInput {
+        let kb: nexus_kb::key_block::KeyBlock =
+            serde_json::from_value(block_val.clone()).map_err(|e| NexusApiError::InvalidInput {
                 field: "parameters.blocks[]".into(),
                 reason: format!("invalid key block: {e}"),
-            }
-        })?;
+            })?;
+        // C-001: reject blocks whose embedded world_id does not match the
+        // request-level world_id (prevents cross-world block payload bypass).
+        if kb.world_id != world_id {
+            return Err(NexusApiError::Forbidden {
+                resource: "key_block.world_id".to_string(),
+                reason: format!(
+                    "block {} targets world '{}' but request targets world '{}'",
+                    kb.key_block_id, kb.world_id, world_id
+                ),
+            });
+        }
         kb_store
             .insert_key_block_in_tx(&mut tx, kb)
             .await
@@ -1633,8 +1643,8 @@ async fn execute_manuscript_chapter_update(
         .as_i64()
         .map_or(1, |v| i32::try_from(v).unwrap_or(1));
 
-    // Verify work ownership first
-    let _record = works::get_work(state.pool(), creator_id, work_id)
+    // Verify work ownership first (keep record for work_ref used in W-003 path).
+    let work_record = works::get_work(state.pool(), creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1663,56 +1673,109 @@ async fn execute_manuscript_chapter_update(
     // Update body content if provided
     let now = chrono::Utc::now().to_rfc3339();
     let body_path: Option<String> = if let Some(content) = req.parameters["content"].as_str() {
-        let body_dir = state
+        let workspace_root = state
             .workspace_path()
-            .map(|p| {
-                Path::new(&p)
-                    .join("Stories")
-                    .join(work_id)
-                    .join(format!("ch_{chapter:02}_v{volume:02}"))
-            })
             .ok_or_else(|| NexusApiError::Internal {
                 code: "WORKSPACE_PATH_ERROR".to_string(),
                 message: "workspace path not available".to_string(),
             })?;
-        std::fs::create_dir_all(&body_dir).map_err(|e| NexusApiError::Internal {
-            code: "DIR_CREATE_FAILED".into(),
-            message: format!("failed to create chapter dir: {e}"),
-        })?;
-        let body_file = body_dir.join("body.md");
-        std::fs::write(&body_file, content).map_err(|e| NexusApiError::Internal {
-            code: "FILE_WRITE_FAILED".into(),
-            message: format!("failed to write chapter body: {e}"),
-        })?;
-        Some(body_file.to_string_lossy().to_string())
+        // W-003: use the canonical body_path from the existing chapter record
+        // (set by seed_chapters), which follows Works/{work_ref}/Stories/{slug}.md.
+        // Fall back to constructing the path if the chapter has no body_path yet.
+        let canonical_path = chapter_exists
+            .as_ref()
+            .and_then(|cr| cr.body_path.clone())
+            .unwrap_or_else(|| {
+                let ch_nn = format!("ch{chapter:02}");
+                let wr = work_record.work_ref.as_deref().unwrap_or(work_id);
+                format!("Works/{wr}/Stories/{ch_nn}-{ch_nn}.md")
+            });
+        let body_file = Path::new(&workspace_root).join(&canonical_path);
+        if let Some(parent) = body_file.parent() {
+            // C-002: use tokio::fs to avoid blocking the async runtime.
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DIR_CREATE_FAILED".into(),
+                    message: format!("failed to create chapter dir: {e}"),
+                })?;
+        }
+        // C-002: write to a temp file first, then atomically rename within a
+        // DB transaction to prevent orphaned files on crash between write and
+        // DB commit.
+        let tmp_file = body_file.with_extension("md.tmp");
+        tokio::fs::write(&tmp_file, content)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_WRITE_FAILED".into(),
+                message: format!("failed to write chapter body: {e}"),
+            })?;
+        // W-003: store the relative canonical path in the DB, matching
+        // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
+        Some(canonical_path)
     } else {
         None
     };
 
-    // Update chapter DB row if body_path or word count changed
-    if body_path.is_some() {
+    // Update chapter DB row if body_path or word count changed.
+    // C-002: wrap DB update + file rename in a single transaction so the
+    // DB row is only updated when the final file is in place.
+    if let Some(ref bp) = body_path {
+        // W-003: bp is a relative canonical path; resolve to absolute for FS ops.
+        let workspace_root = state
+            .workspace_path()
+            .ok_or_else(|| NexusApiError::Internal {
+                code: "WORKSPACE_PATH_ERROR".to_string(),
+                message: "workspace path not available".to_string(),
+            })?;
+        let abs_body = Path::new(&workspace_root).join(bp);
+        let abs_tmp = abs_body.with_extension("md.tmp");
         let word_count = req.parameters["content"]
             .as_str()
             .map_or(0, |c| c.split_whitespace().count());
+        let mut tx = state
+            .pool()
+            .begin()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("chapter update tx begin: {e}"),
+            })?;
         // SAFETY: dynamic SQL for chapter update — runtime fields.
-        // Word count comes from split_whitespace() and cannot exceed realistic chapter size.
         #[allow(clippy::cast_possible_wrap)]
         sqlx::query(
             "UPDATE work_chapters SET body_path = ?, actual_word_count = ?, updated_at = ? \
              WHERE work_id = ? AND chapter = ? AND volume = ?",
         )
-        .bind(&body_path)
+        .bind(bp)
         .bind(word_count as i64)
         .bind(&now)
         .bind(work_id)
         .bind(chapter)
         .bind(volume)
-        .execute(state.pool())
+        .execute(&mut *tx)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: format!("chapter update: {e}"),
         })?;
+        // Atomically rename temp → final (after DB update succeeds inside tx).
+        tokio::fs::rename(&abs_tmp, &abs_body)
+            .await
+            .map_err(|e| {
+                // Best-effort cleanup: remove temp file on rename failure.
+                let _ = std::fs::remove_file(&abs_tmp);
+                NexusApiError::Internal {
+                    code: "FILE_RENAME_FAILED".into(),
+                    message: format!("failed to finalize chapter file: {e}"),
+                }
+            })?;
+        tx.commit()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: format!("chapter update tx commit: {e}"),
+            })?;
     }
 
     // Read back updated chapter
@@ -1958,7 +2021,7 @@ async fn execute_finding_resolve(
         rule_suggestion: None,
     };
 
-    nexus_local_db::findings::update_finding(
+    let updated = nexus_local_db::findings::update_finding(
         state.pool(),
         creator_id,
         finding_id,
@@ -1984,6 +2047,13 @@ async fn execute_finding_resolve(
             message: e.to_string(),
         },
     })?;
+
+    // W-002: check the returned bool — false means no row was updated.
+    if !updated {
+        return Err(NexusApiError::NotFound(format!(
+            "finding {finding_id}"
+        )));
+    }
 
     Ok(serde_json::json!({
         "finding_id": finding_id,
@@ -3315,6 +3385,107 @@ mod tests {
         assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
     }
 
+    /// C-001 regression: same-creator, block with wrong world_id → rejection.
+    #[tokio::test]
+    async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed a second world owned by same creator
+        // SAFETY: test-only data setup.
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES ('wld_other_world', 'ws', 'test_creator', 'Other World', 'other-world', \
+             'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed second world");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.write".to_string(),
+            parameters: serde_json::json!({
+                "world_id": "wld_test_world",
+                "blocks": [{
+                    "schema_version": 1,
+                    "key_block_id": "kb_cross_world_block",
+                    "world_id": "wld_other_world",  // mismatched!
+                    "block_type": "character",
+                    "canonical_name": "cross_world_char",
+                    "status": "provisional",
+                    "body": {"name": "Cross-world Char"},
+                    "created_at": "2026-01-01T00:00:00Z"
+                }]
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_err(),
+            "cross-world block should be rejected: {result:?}"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    /// C-001 regression: cross-creator world embedded in block → rejection.
+    #[tokio::test]
+    async fn kb_snapshot_write_rejects_cross_creator_world_block() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed a world owned by a different creator
+        // SAFETY: test-only data setup.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other Creator', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+              time_policy, metadata_json, created_at) \
+             VALUES ('wld_other_creator_world', 'ws', 'other_creator', 'Other Creator World', \
+             'other-creator-world', 'active', 'private', 'manual', '{}', datetime('now'))",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator world");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.write".to_string(),
+            parameters: serde_json::json!({
+                "world_id": "wld_test_world",
+                "blocks": [{
+                    "schema_version": 1,
+                    "key_block_id": "kb_cross_creator_block",
+                    "world_id": "wld_other_creator_world",  // different creator's world
+                    "block_type": "character",
+                    "canonical_name": "cross_creator_char",
+                    "status": "provisional",
+                    "body": {"name": "Cross-creator Char"},
+                    "created_at": "2026-01-01T00:00:00Z"
+                }]
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_err(),
+            "cross-creator block should be rejected: {result:?}"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
     // --- nexus.manuscript.chapter.update (3 tests) ---
 
     #[tokio::test]
@@ -3392,6 +3563,41 @@ mod tests {
         let val = result.expect("result");
         assert_eq!(val["work_id"], work_id);
         assert_eq!(val["chapter"], 1);
+        // C-002 atomicity: verify DB body_path exists and the file on disk
+        // contains the content we wrote (proves file written iff DB committed).
+        let chapter_record =
+            nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+                .await
+                .expect("get_chapter after update")
+                .expect("chapter should exist after update");
+        let db_body_path = chapter_record.body_path.expect("body_path should be set");
+        // W-003: verify canonical path follows Works/{work_ref}/Stories/... pattern.
+        assert!(
+            db_body_path.starts_with("Works/"),
+            "body_path should start with Works/, got: {db_body_path}"
+        );
+        assert!(
+            db_body_path.contains("Stories/"),
+            "body_path should use Stories/ layout, got: {db_body_path}"
+        );
+        assert!(
+            db_body_path.ends_with(".md"),
+            "body_path should end with .md, got: {db_body_path}"
+        );
+        assert!(
+            !db_body_path.ends_with(".tmp"),
+            "body_path should be the final file, not a .tmp: {db_body_path}"
+        );
+        // W-003: db_body_path is a relative canonical path; resolve to absolute.
+        let on_disk_path = workspace_dir.join(&db_body_path);
+        let on_disk = tokio::fs::read_to_string(&on_disk_path)
+            .await
+            .expect("file should exist on disk");
+        assert_eq!(
+            on_disk,
+            "Updated chapter content for testing.",
+            "file content should match what was written"
+        );
         drop(tmp);
     }
 
@@ -3690,8 +3896,9 @@ mod tests {
         assert_eq!(val["resolved"], true);
     }
 
+    /// W-002: nonexistent finding IDs must return NOT_FOUND, not success.
     #[tokio::test]
-    async fn finding_resolve_nonexistent_returns_success() {
+    async fn finding_resolve_nonexistent_returns_not_found() {
         let (_tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
@@ -3703,12 +3910,11 @@ mod tests {
             caller_kind: None,
         };
         let result = HostToolExecutor::execute(&req, &state).await;
-        // DAO update_finding does not error on 0-row updates.
-        // The handler returns success with "resolved": true.
-        assert!(result.is_ok(), "finding resolve should succeed: {result:?}");
-        let val = result.expect("result");
-        assert_eq!(val["finding_id"], "fnd_nonexistent_99999");
-        assert_eq!(val["resolved"], true);
+        assert!(
+            result.is_err(),
+            "finding.resolve should reject nonexistent finding: {result:?}"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "NOT_FOUND");
     }
 
     // --- nexus.pool.entry.manage (3 tests) ---
@@ -3889,6 +4095,103 @@ mod tests {
             assert!(result.is_ok(), "concurrent dispatch should succeed: {result:?}");
             let val = result.expect("result");
             assert_eq!(val["creator_id"], "test_creator");
+        }
+    }
+
+    /// W-003(qc3): concurrent write-tool dispatch — 10 parallel
+    /// `nexus.pool.entry.manage` create calls plus 10 concurrent reads
+    /// through `registry_dispatch()`. Verifies no deadlock/data race on
+    /// transaction contention for write tools.
+    #[tokio::test]
+    async fn concurrent_dispatch_ten_parallel_write_tools() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work for FK constraint
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Concurrent Write Test".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+        let state = std::sync::Arc::new(state);
+
+        let mut handles = Vec::new();
+        // 5 write handles (pool.entry.manage create)
+        for i in 0..5 {
+            let state = state.clone();
+            let wid = work_id.clone();
+            handles.push(tokio::spawn(async move {
+                let req = ToolExecuteRequest {
+                    tool_name: "nexus.pool.entry.manage".to_string(),
+                    parameters: serde_json::json!({
+                        "work_id": wid,
+                        "action": "add",
+                        "pool_type": "ideas",
+                        "content": format!("concurrent entry {i}"),
+                    }),
+                    session_id: Some(format!("sess_write_{i}")),
+                    request_id: Some(format!("req_write_{i}")),
+                    caller_kind: None,
+                };
+                HostToolExecutor::registry_dispatch(&req, &state).await
+            }));
+        }
+        // 5 read handles (whoami — read-only, verifies LazyLock works under
+        // concurrent write+read pressure).
+        for i in 5..10 {
+            let state = state.clone();
+            handles.push(tokio::spawn(async move {
+                let req = ToolExecuteRequest {
+                    tool_name: "nexus.context.whoami".to_string(),
+                    parameters: serde_json::json!({}),
+                    session_id: Some(format!("sess_read_{i}")),
+                    request_id: Some(format!("req_read_{i}")),
+                    caller_kind: None,
+                };
+                HostToolExecutor::registry_dispatch(&req, &state).await
+            }));
+        }
+
+        for handle in handles {
+            let result = handle.await.expect("no panic");
+            assert!(
+                result.is_ok(),
+                "concurrent write dispatch should succeed: {result:?}"
+            );
         }
     }
 
