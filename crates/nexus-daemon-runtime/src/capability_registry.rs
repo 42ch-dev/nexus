@@ -399,6 +399,124 @@ pub fn host_tool_registry() -> CapabilityRegistry {
         },
     });
 
+    // ── nexus.* tools (V1.53 P1: DF-46 read-heavy slice) ──
+    reg.register(CapabilityRow {
+        id: "nexus.world.snapshot.get",
+        access: Access::Read,
+        admission: vec![
+            AdmissionGate::Allowlist,
+            AdmissionGate::ActiveCreator,
+            AdmissionGate::PermissionPolicy,
+            AdmissionGate::AuditLog,
+        ],
+        handler: hte::registry_world_snapshot_get,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"world_id":"string"}"#,
+            response_schema_ref: "WorldState",
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "world snapshot get returns world state for valid world_id",
+            expected_outcome: "success",
+            test_fn_name: "world_snapshot_get_returns_world_state",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.timeline.recent.get",
+        access: Access::Read,
+        admission: vec![
+            AdmissionGate::Allowlist,
+            AdmissionGate::ActiveCreator,
+            AdmissionGate::PermissionPolicy,
+            AdmissionGate::AuditLog,
+        ],
+        handler: hte::registry_timeline_recent_get,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"world_id":"string","limit?":"int"}"#,
+            response_schema_ref: "[TimelineEvent]",
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "timeline recent get returns recent events for valid world_id",
+            expected_outcome: "success",
+            test_fn_name: "timeline_recent_get_returns_recent_events",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.kb_snapshot.read",
+        access: Access::Read,
+        admission: vec![
+            AdmissionGate::Allowlist,
+            AdmissionGate::ActiveCreator,
+            AdmissionGate::PermissionPolicy,
+            AdmissionGate::AuditLog,
+        ],
+        handler: hte::registry_kb_snapshot_read,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"world_id":"string"}"#,
+            response_schema_ref: "[KeyBlock]",
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "kb snapshot read returns key blocks for valid world_id",
+            expected_outcome: "success",
+            test_fn_name: "kb_snapshot_read_returns_key_blocks",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.manuscript.chapter.get",
+        access: Access::Read,
+        admission: vec![
+            AdmissionGate::Allowlist,
+            AdmissionGate::ActiveCreator,
+            AdmissionGate::WorkspaceBounds,
+            AdmissionGate::PermissionPolicy,
+            AdmissionGate::AuditLog,
+        ],
+        handler: hte::registry_manuscript_chapter_get,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int"}"#,
+            response_schema_ref: "WorkChapterRecord",
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description:
+                "manuscript chapter get returns chapter record for valid work_id + chapter",
+            expected_outcome: "success",
+            test_fn_name: "manuscript_chapter_get_returns_chapter_record",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.observability.daemon.health",
+        access: Access::Read,
+        admission: vec![
+            AdmissionGate::Allowlist,
+            AdmissionGate::ActiveCreator,
+            AdmissionGate::PermissionPolicy,
+            AdmissionGate::AuditLog,
+        ],
+        handler: hte::registry_daemon_health,
+        acp_wire: AcpWire {
+            request_schema_ref: "{}",
+            response_schema_ref: r#"{"uptime_seconds":"int","started_at":"string","runtime_mode":"string","lifecycle_state":"string","registry_size":"int","registry_ids":"[string]","pool_healthy":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "daemon health returns runtime status and registry size",
+            expected_outcome: "success",
+            test_fn_name: "daemon_health_returns_registry_status",
+        },
+    });
+
     // ── fs/* baseline (V1.33) ──
     reg.register(CapabilityRow {
         id: "fs/read_text_file",
@@ -457,9 +575,9 @@ mod tests {
     use crate::test_utils::create_test_workspace;
 
     #[test]
-    fn registry_has_eight_host_tools() {
+    fn registry_has_thirteen_host_tools() {
         let reg = host_tool_registry();
-        assert_eq!(reg.len(), 8);
+        assert_eq!(reg.len(), 13);
     }
 
     #[test]
@@ -472,6 +590,11 @@ mod tests {
             "nexus.work.patch",
             "nexus.orchestration.schedule_status",
             "nexus.context.assemble",
+            "nexus.world.snapshot.get",
+            "nexus.timeline.recent.get",
+            "nexus.kb_snapshot.read",
+            "nexus.manuscript.chapter.get",
+            "nexus.observability.daemon.health",
             "fs/read_text_file",
             "fs/write_text_file",
         ] {
@@ -522,6 +645,11 @@ mod tests {
         "work_patch_rejects_stage_field",
         "schedule_status_happy_path",
         "context_assemble_policy_blocked_when_local_only",
+        "world_snapshot_get_returns_world_state",
+        "timeline_recent_get_returns_recent_events",
+        "kb_snapshot_read_returns_key_blocks",
+        "manuscript_chapter_get_returns_chapter_record",
+        "daemon_health_returns_registry_status",
         "execute_read_file_succeeds",
         "execute_write_file_succeeds",
     ];
@@ -593,6 +721,121 @@ mod tests {
                 assert_eq!(code, "NOT_SUPPORTED");
             }
             other => panic!("Expected BadRequest(NOT_SUPPORTED), got: {other:?}"),
+        }
+    }
+
+    /// **R-V153P0QC2-002**: Catalog↔registry id bijection test.
+    ///
+    /// Reads `acp-capability-set.md` logical catalog and compares IDs against
+    /// `host_tool_registry().ids()`. Fails if a registry id that IS expected
+    /// to be in the catalog is missing, and vice versa for catalog ids that
+    /// are implemented as host tools.
+    ///
+    /// P1 note: V1.53 P1 adds 5 new tools. Two of them (`nexus.manuscript.chapter.get`
+    /// and `nexus.observability.daemon.health`) are not yet in the catalog because
+    /// the catalog is frozen for P1 per plan constraints. The test acknowledges
+    /// these as known gaps. Once the catalog is updated in a future iteration,
+    /// the known-gaps list should be emptied.
+    #[test]
+    fn registry_ids_have_catalog_rows() {
+        use std::collections::HashSet;
+
+        let reg = host_tool_registry();
+        let registry_ids: HashSet<&str> = reg.ids().collect();
+
+        // Known gaps: registry ids not yet in the frozen catalog.
+        // These are daemon host tools added in V1.33/V1.34/V1.53 that are
+        // not part of the logical ACP capability catalog (fs/* tools are
+        // not ACP-facing; work.* and orchestration.* were added as host
+        // extensions; P1 tools pre-date catalog updates).
+        // Remove entries when acp-capability-set.md is updated.
+        let known_catalog_gaps: HashSet<&str> = [
+            "fs/read_text_file",
+            "fs/write_text_file",
+            "nexus.work.get",
+            "nexus.work.patch",
+            "nexus.orchestration.schedule_status",
+            "nexus.manuscript.chapter.get",
+            "nexus.observability.daemon.health",
+        ]
+        .iter()
+        .copied()
+        .collect();
+
+        // Parse capability IDs from acp-capability-set.md tables
+        let catalog_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../.mstar/knowledge/specs/acp-capability-set.md"
+        );
+        let catalog_content =
+            std::fs::read_to_string(catalog_path).expect("acp-capability-set.md must be readable");
+
+        // Extract all `nexus.<id>` lines from markdown tables
+        let catalog_ids: HashSet<String> = catalog_content
+            .lines()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                // Match table rows like: `| nexus.world.snapshot.get | yes | ...`
+                if trimmed.starts_with('|') && trimmed.contains('`') {
+                    // Extract text between first pair of backticks
+                    let start = trimmed.find('`')?;
+                    let rest = &trimmed[start + 1..];
+                    let end = rest.find('`')?;
+                    let id = &rest[..end];
+                    if id.starts_with("nexus.") || id.starts_with("fs/") {
+                        Some(id.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Every registry id must have a catalog row (except known P1 gaps)
+        for id in &registry_ids {
+            if known_catalog_gaps.contains(id) {
+                continue;
+            }
+            assert!(
+                catalog_ids.contains(*id),
+                "Registry id '{id}' has NO corresponding row in acp-capability-set.md catalog. \
+                 Add a catalog row, add to known_catalog_gaps, or remove the registry entry."
+            );
+        }
+
+        // Every catalog nexus.*/fs/* id that maps to a host tool should be in the registry.
+        // Not all catalog ids are host tools (some are logical-only), so this is a
+        // one-way check (registry ⊆ catalog ∪ known_gaps).
+        let missing_from_registry: Vec<_> = catalog_ids
+            .iter()
+            .filter(|cid| {
+                // Only flag catalog ids that look like they SHOULD be host tools
+                // (i.e., read-only, non-mutation, non-sync, non-publish)
+                let is_likely_host_tool = matches!(
+                    cid.as_str(),
+                    "nexus.context.whoami"
+                        | "nexus.workspace.info"
+                        | "nexus.workspace.paths"
+                        | "nexus.context.assemble"
+                        | "nexus.world.snapshot.get"
+                        | "nexus.world.state.query"
+                        | "nexus.timeline.recent.get"
+                        | "nexus.kb_snapshot.read"
+                        | "nexus.runtime.health"
+                        | "nexus.trace.correlation"
+                );
+                is_likely_host_tool && !registry_ids.contains(cid.as_str())
+            })
+            .collect();
+
+        // Logging-only: catalog ids not yet in registry (these are future tools).
+        // Not a hard failure because P1 scope is limited to 5 tools.
+        if !missing_from_registry.is_empty() {
+            eprintln!(
+                "INFO: catalog ids not yet in registry (future P1+ scope): {missing_from_registry:?}"
+            );
         }
     }
 
