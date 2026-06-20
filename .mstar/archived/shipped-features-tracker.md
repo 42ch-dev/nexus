@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-20 (V1.53 closeout: 5 plans all Done — P-1 docs (compass + capability-registry Draft overlay + skills-export spec retirement + DF-50 cancel) + P0 registry SSOT unification (3 sub-phase cutover, 13 host tools, tri-review + qc1 fix-wave) + P1 DF-46 read slice (5 new read-heavy nexus.* tools + cross-creator isolation + qc1 fix-wave) + P-c skills CLI cleanup (179 deletions, single-review Approve with Notes) + P-last spec hygiene + dual Profile B (V1.53 + V1.52 retro) + R-V153PC1-N001 cli-spec.md §6.4 annotation pending; 13 open residuals deferred to V1.54+ (4 medium + 9 low); Profile B done; wire contracts unchanged; capability-registry.md kept as Draft overlay (deferred Master promotion to V1.54+)
+**Last updated**: 2026-06-20 (V1.54 closeout: 4 plans all Done — P-1 prepare + P0 DF-46 full-spectrum write tools (6 tools + LazyLock cache + 13 V1.53 residuals all converged) + P1 game-bible profile scaffold (Depth 2: spec + 7 BlockType variants + bootstrap + 12 Design templates) + P-last spec hygiene (capability-registry.md Draft → Master + Profile B + shipped snapshot); 2 open residuals deferred to V1.55+; wire contracts unchanged)
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -633,28 +633,50 @@ When a version ships, append new closed rows here and remove them from the activ
 | **DF-50 disposition** | **Cancelled** — `nexus42 acp skills export\|verify` CLI surface removed (P-c); `skills-export-compatibility.md` retired to `archived/` (P-1); tracker DF-50 row moved to Cancelled archive. Static `embedded-skills/` model remains the only non-ACP integration path. |
 | **Profile B compaction** | **Done (V1.53 P-last + V1.52 retro)**: 12 plan JSON files in `.mstar/archived/plans/2026-06-{19-v1.52,20-v1.53}-*.json` (7 V1.52 retro + 5 V1.53); plans-done.json layout invariant verified (all 230 entries are strings); tech_debt_summary normalized (13 open: 4 medium + 9 low; 0 critical/high). |
 
-### V1.54+ carry-forward index
+### V1.54 delivery snapshot (Shipped 2026-06-20)
 
-- **13 items deferred to V1.54+** (per `status.json.tech_debt_summary.by_target_active.V1.54+`):
-  - R-V153P1QC2-003 (medium): `daemon.health` exposes full registry_ids list — should be gated behind additional policy check for agent-facing observability
-  - R-V153P0QC2-001 (medium): P1 parity coverage expansion (deferred to V1.54 P0 fix-wave or P1 extension)
-  - R-V153P0QC2-002 (medium): catalog↔registry id bijection test (deferred to V1.54 P0 fix-wave or P1 extension)
-  - R-V153P0QC3-001 (medium): per-dispatch registry allocation on schedule hot path — needs caching + benchmark
-  - R-V153P0QC2-003 (low): no concurrent dispatch test
-  - R-V153P0QC2-004 (low): no separate Schedule caller-kind admission test
-  - R-V153P0QC3-002 (low): missing dispatch-latency benchmark
-  - R-V153P0QC3-003 (low): admission vectors could be `&'static [AdmissionGate]` instead of `Vec`
-  - R-V153P0-002 (low): DaemonToolDispatchAdapter documentation
-  - R-V153P1QC1R-001 (low): timeline SQL uses sanitized dynamic `LIMIT {limit_i64}` rather than `LIMIT ?`
-  - R-V153P1QC2-004 (low): kb_store runtime sqlx query with `format!` for LIMIT clause
-  - R-V153P1QC3-002 (low): per-dispatch CapabilityRegistry rebuild (R-V153P0QC3-001 same theme)
-  - R-V153PC1-N001 (low): cli-spec.md §6.4 omits acp skills subcommand but does not explicitly label the omission as a pre-1.0 intentional breaking-change removal (target: V1.54 hygiene pass)
+| Aspect | Detail |
+|---|---|
+| **PR / Merge** | TBD (P-last in progress at iteration/v1.54 HEAD; PR pending); merge target `main` |
+| **Plans** | 4/4 Done (P-1 prepare, P0 DF-46 write tools, P1 game-bible scaffold, P-last spec hygiene) |
+| **P0 — DF-46 write tools** | 6 new mutation-side tools (kb_snapshot.write, manuscript.chapter.update, world.configure, work.schedule.set, finding.resolve, pool.entry.manage); LazyLock<CapabilityRegistry> cache + &'_static [AdmissionGate] conversion; Criterion dispatch_latency benchmark; 13 V1.53 residuals (4 medium + 9 low) all converged |
+| **P1 — Game-bible scaffold (Depth 2)** | specs/game-bible-profile.md Draft + 7 new BlockType variants (species, faction, magic_system, technology, deity, level, economy_tier) + ValidationMode::GameBible + game-bible-init preset + GameBibleProjectScaffold capability + 12 Design templates + profile gates (is_novel_profile / is_game_bible_profile) + bootstrap --profile game-bible |
+| **P-last** | capability-registry.md Draft → Master (promoted after V1.54 P0 validates write-tool patterns + V1.54 P1 adds GameBibleProjectScaffold); Profile B compaction (P0 + P1 archived to .mstar/archived/plans/; plans-done.json layout invariant verified); shipped-features-tracker V1.54 snapshot; deferred-features tracker V1.54 ship metadata; 13 V1.53 residuals archived; 2 P1 W-001/S-002 residuals registered to V1.55+ carry-forward |
+| **Spec promotions** | `capability-registry.md` Draft → Master; `game-bible-profile.md` new Draft |
+| **Spec amends** | acp-capability-set.md (+6 write IDs); agent-nexus-tool-bridge.md §8; cli-spec.md §6.2M + §12.1; entity-scope-model.md §5.1.1; non-novel-profiles-roadmap.md (game-bible Scaffold Shipped) |
+| **QC outcomes** | P0: 3/3 Request Changes → 8-fix-wave (C-001 cross-world blocks, C-002 async fs + tx, W-001 admission metadata, W-002 finding.resolve NOT_FOUND, W-003 chapter path, W-002(qc3) benchmark cold path, W-003(qc3) concurrent write test, C-001(qc3) audit-log propagation) → all Approve. P1: 2/3 Request Changes + 1/3 Approve (qc2) → 2 fix-waves (C-001 profile spelling normalization, C-002 init_input creator_id, W-001 production schedule gate, W-002 nightly fmt, W-004 e2e tests, W-001(qc3) scaffold atomicity deferral) → all Pass after final QA |
+| **CI gate** | `cargo clippy --all -- -D warnings` clean; `cargo test --all` ≥3970 passing (pre-existing flake on nexus-creator-memory verified TRUE per AGENTS.md protocol); `cargo +nightly fmt --all --check` clean on P1 files; Criterion dispatch_latency benchmark 1.8µs cold / ~446ns warm (both within target) |
+| **Wire contracts** | Unchanged (no schema changes required) |
+| **Open at ship / deferred to V1.55+** | 2 carry-over residuals: R-V154P1-W001 (game_bible.project_scaffold ScaffoldTransaction deferred), R-V154P1-S002 (profile-gate tracing::warn observability) |
+| **Branch topology** | `iteration/v1.54` + per-plan `feature/v1.54-df46-write-tools` + `feature/v1.54-game-bible-scaffold` (peak 2 worktrees; both feature branches merged into integration before QC tri-review) |
 
-**Note**: V1.53 P-last also retroactively added the V1.52 delivery snapshot (above) since V1.52 P-last did not perform Profile B compaction or add a §2 snapshot. The retroactive V1.52 entry is marked with explicit "retroactively added by V1.53 P-last" note.
+### V1.55+ carry-forward index
+
+- **2 items deferred to V1.55+** (per `status.json.residual_findings["2026-06-22-v1.54-game-bible-scaffold"]`):
+  - R-V154P1-W001 (low): `game_bible.project_scaffold` not atomic — FS writes + DB PATCH not wrapped in transaction (ScaffoldTransaction deferred to V1.55+); `novel.project_scaffold` uses ScaffoldTransaction pattern (novel_scaffold.rs:763-830) — adopt same for game-bible
+  - R-V154P1-S002 (low): profile-gate paths (is_work_completed, reconcile_from_filesystem) lack tracing::warn! / audit observability
+
+**Note**: V1.53 P-last retroactively added V1.52 delivery snapshot. V1.54 P-last added V1.54 delivery snapshot directly (no retroactive needed since P-last ran normally).
 
 ---
 
-### V1.52+ carry-forward index (historical; V1.53 retro completed)
+### V1.54+ carry-forward index (historical; V1.54 closed)
+
+*Original V1.54+ carry-forward index retained for historical reference; all items resolved in V1.54 closeout.*
+
+- R-V153P1QC2-003 (medium): `daemon.health` exposes full registry_ids list — **resolved V1.54 P0 fix-wave (T8, gating via policy check)**
+- R-V153P0QC2-001 (medium): P1 parity coverage expansion — **resolved V1.54 P0 fix-wave (T10, 20 hermetic write-tool tests)**
+- R-V153P0QC2-002 (medium): catalog↔registry id bijection test — **resolved V1.54 P0 fix-wave (T10, `tool_allowlist_matches_registry_ids` test)**
+- R-V153P0QC3-001 (medium): per-dispatch registry allocation on schedule hot path — **resolved V1.54 P0 (T5, `LazyLock<CapabilityRegistry>` cache)**
+- R-V153P0QC2-003 (low): no concurrent dispatch test — **resolved V1.54 P0 (T10, `concurrent_dispatch_ten_parallel_write_tools` test)**
+- R-V153P0QC2-004 (low): no separate Schedule caller-kind admission test — **resolved V1.54 P0 (T10, schedule admission test)**
+- R-V153P0QC3-002 (low): missing dispatch-latency benchmark — **resolved V1.54 P0 (T6, `registry_lookup_cold_init_plus_19_lookups` Criterion benchmark)**
+- R-V153P0QC3-003 (low): admission vectors `Vec<AdmissionGate>` instead of `&'static` — **resolved V1.54 P0 (T5, `&'_static [AdmissionGate]` conversion)**
+- R-V153P0-002 (low): DaemonToolDispatchAdapter documentation — **resolved V1.54 P0 (T7, doc comment)**
+- R-V153P1QC1R-001 (low): timeline SQL `LIMIT ?` + sqlx regen — **resolved V1.54 P0 (T7, deferred sqlx regen — non-blocking)**
+- R-V153P1QC2-004 (low): kb_store runtime sqlx format! for LIMIT — **resolved V1.54 P0 (T7)**
+- R-V153P1QC3-002 (low): per-dispatch CapabilityRegistry rebuild — **resolved V1.54 P0 (same theme as R-V153P0QC3-001)**
+- R-V153PC1-N001 (low): cli-spec.md §6.4 acp skills omission annotation — **resolved V1.54 P0 (T7, intentional pre-1.0 breaking-change removal note added)**
 
 *Original V1.52+ carry-forward index retained for historical reference; all items already resolved in V1.52/V1.53 closeout.*
 

@@ -1,10 +1,10 @@
-# Capability Registry — Draft Overlay v1
+# Capability Registry — Master v1
 
-**Status**: Draft (V1.53 P-1 — initial framework; details iterate in P0)  
-**Document class**: Master overlay (pending P-last promote decision)  
-**Created**: 2026-06-20  
-**Last updated**: 2026-06-20 (V1.53 P0 — field semantics filled)  
-**Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch  
+**Status**: Master (V1.54 P-last promoted from Draft overlay)  
+**Document class**: Master  
+**Created**: 2026-06-20 (V1.53 P-1 Draft)  
+**Last updated**: 2026-06-20 (V1.54 P-last promote to Master after V1.54 P0 validates write-tool patterns + V1.54 P1 adds GameBibleProjectScaffold)  
+**Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch — 19 tools (13 read + 6 write) + GameBibleProjectScaffold  
 **Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md)  
 **Iteration compass**: [v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md](../../iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md)
 

@@ -229,7 +229,9 @@
     "2026-06-20-v1.53-capability-registry-unification",
     "2026-06-21-v1.53-df46-read-capability-slice",
     "2026-06-22-v1.53-skills-cli-cleanup",
-    "2026-06-22-v1.53-spec-hygiene-closeout"
+    "2026-06-22-v1.53-spec-hygiene-closeout",
+    "2026-06-22-v1.54-df46-write-tools",
+    "2026-06-22-v1.54-game-bible-scaffold"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -385,6 +387,68 @@
       "merged_at": "2026-06-19T07:52:26Z",
       "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
       "note": "V1.51 P-last T1-T7 Done. T1-T2 (8 WL-A residuals closed) + T3 (6 spec overlays promoted to Normative — V1.51 Shipped) + T4 (Profile B compaction: 7 plans archived) + T5 (tech_debt rollup: 6 deferred to V1.52+) + T6 (PR #64) + T7 (PM signoff). Merged to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 on 2026-06-19 via PR #64. Integration branch iteration/v1.51 to be retired per mstar-branch-worktree."
+    },
+    "v1.54": {
+      "version": "v1.54",
+      "name": "DF-46 Completion & Game-Bible Foundation",
+      "compass": ".mstar/iterations/v1.54-df46-completion-and-game-bible-foundation-delivery-compass-v1.md",
+      "shipped_at": "TBD (P-last in progress 2026-06-20)",
+      "plan_ids": [
+        "2026-06-22-v1.54-compass-and-plan-stubs",
+        "2026-06-22-v1.54-df46-write-tools",
+        "2026-06-22-v1.54-game-bible-scaffold",
+        "2026-06-22-v1.54-spec-hygiene-closeout"
+      ],
+      "highlights": {
+        "P0_DF46_write_tools": "6 write tools (kb_snapshot.write, manuscript.chapter.update, world.configure, work.schedule.set, finding.resolve, pool.entry.manage) + LazyLock<CapabilityRegistry> cache + &'_static [AdmissionGate] conversion + Criterion dispatch_latency benchmark + 13 V1.53 residuals (4 medium + 9 low) all converged",
+        "P1_game_bible_scaffold": "Depth-2 scaffold: specs/game-bible-profile.md Draft + 7 new BlockType variants (species, faction, magic_system, technology, deity, level, economy_tier) + ValidationMode::GameBible + game-bible-init preset + GameBibleProjectScaffold capability + 12 Design templates + profile gates (is_novel_profile / is_game_bible_profile) + bootstrap --profile game-bible",
+        "P_last_closeout": "capability-registry.md Draft → Master promotion; Profile B compaction (P0+P1 archived); deferred-features tracker V1.54 ship snapshot; shipped-features-tracker V1.54 snapshot; WL-A sweep"
+      },
+      "residual_lifecycle": {
+        "archived_in_v154": [
+          "R-V153P0QC2-001",
+          "R-V153P0QC2-002",
+          "R-V153P0QC2-003",
+          "R-V153P0QC2-004",
+          "R-V153P0QC3-001",
+          "R-V153P0QC3-002",
+          "R-V153P0QC3-003",
+          "R-V153P0-002",
+          "R-V153P1QC1R-001",
+          "R-V153P1QC2-003",
+          "R-V153P1QC2-004",
+          "R-V153P1QC3-002",
+          "R-V153PC1-N001"
+        ],
+        "open_v155_carry_forward": [
+          "R-V154P1-W001",
+          "R-V154P1-S002"
+        ],
+        "open_v155_count": 2
+      },
+      "wire_contract_changes": "None (per compass §0.1)",
+      "qc_tri_review_outcome": "P0: 3/3 Request Changes → targeted re-review → all Approve; P1: 2/3 Request Changes (qc1+3) + 1/3 Approve (qc2) → 2 fix-waves → consolidated Pass",
+      "spec_promotions": [
+        {
+          "spec": "capability-registry.md",
+          "from": "Draft (V1.53)",
+          "to": "Master (V1.54)"
+        },
+        {
+          "spec": "game-bible-profile.md",
+          "from": "new",
+          "to": "Draft (V1.54 P1)"
+        }
+      ],
+      "spec_amends": [
+        "acp-capability-set.md (6 new write-tool IDs)",
+        "agent-nexus-tool-bridge.md §8 (write-tool dispatch patterns)",
+        "cli-spec.md §6.2M (write-tool mappings) + §12.1 (game-bible bootstrap)",
+        "entity-scope-model.md §5.1.1 (game-bible BlockType taxonomy)",
+        "non-novel-profiles-roadmap.md (game-bible marked Scaffold Shipped)"
+      ],
+      "code_smoke": "3970+ tests passing; cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all --check clean on P1 files (P0 carry-over files clean per f665e1c2); 2 carry-over residuals registered",
+      "note": "P-last in progress at 2026-06-20. Integration branch iteration/v1.54 to be retired post-merge per mstar-branch-worktree."
     }
   },
   "metadata": {

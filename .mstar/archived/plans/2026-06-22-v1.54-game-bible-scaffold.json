@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-06-22-v1.54-game-bible-scaffold",
+  "title": "V1.54 P1 \u2014 Game-Bible Profile Scaffold & Init",
+  "status": "Done",
+  "owner": "@fullstack-dev-2",
+  "effort": "M",
+  "working_branch": "feature/v1.54-game-bible-scaffold",
+  "merge_target": "iteration/v1.54",
+  "type": "implement",
+  "created": "2026-06-22",
+  "qc_status": "consolidated-approve",
+  "qa_status": "Pass",
+  "merge_commit": "edea342f",
+  "done_at": "2026-06-20"
+}
