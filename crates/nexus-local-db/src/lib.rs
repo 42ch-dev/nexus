@@ -126,8 +126,9 @@ pub use findings::{
 // Re-export works types
 pub use works::{
     advance_work_stage_atomic, append_inspiration, count_works, create_work,
-    find_work_by_client_request_id, get_work, has_active_fl_e_schedule, list_works, patch_work,
-    record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
+    find_work_by_client_request_id, get_work, has_active_fl_e_schedule, is_game_bible_profile,
+    is_novel_profile, list_works, patch_work, record_idempotency, InspirationLogEntry,
+    WorkListFilters, WorkPatch, WorkRecord,
 };
 
 // Re-export novel_pool_entries types
