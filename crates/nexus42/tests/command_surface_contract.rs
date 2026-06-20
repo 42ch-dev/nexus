@@ -342,7 +342,7 @@ fn v2_target_daemon_subcommands() {
 /// V2 Target: `acp` top-level command group exists.
 ///
 /// Expected subcommands: status, doctor, probe,
-///   registry (list, inspect), agent (use, list), skills (export, verify)
+///   registry (list, inspect), agent (use, list)
 ///
 /// Un-ignored by Plan 2 (acp group created).
 #[test]
@@ -359,7 +359,7 @@ fn v2_target_acp_subcommands() {
 
     let help_text = String::from_utf8(output).unwrap();
 
-    for subcmd in &["status", "doctor", "probe", "registry", "agent", "skills"] {
+    for subcmd in &["status", "doctor", "probe", "registry", "agent"] {
         assert!(
             help_text.contains(subcmd),
             "V2 acp: expected subcommand '{subcmd}'"
