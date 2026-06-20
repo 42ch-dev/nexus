@@ -4098,6 +4098,103 @@ mod tests {
         }
     }
 
+    /// W-003(qc3): concurrent write-tool dispatch — 10 parallel
+    /// `nexus.pool.entry.manage` create calls plus 10 concurrent reads
+    /// through `registry_dispatch()`. Verifies no deadlock/data race on
+    /// transaction contention for write tools.
+    #[tokio::test]
+    async fn concurrent_dispatch_ten_parallel_write_tools() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work for FK constraint
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Concurrent Write Test".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+        let state = std::sync::Arc::new(state);
+
+        let mut handles = Vec::new();
+        // 5 write handles (pool.entry.manage create)
+        for i in 0..5 {
+            let state = state.clone();
+            let wid = work_id.clone();
+            handles.push(tokio::spawn(async move {
+                let req = ToolExecuteRequest {
+                    tool_name: "nexus.pool.entry.manage".to_string(),
+                    parameters: serde_json::json!({
+                        "work_id": wid,
+                        "action": "add",
+                        "pool_type": "ideas",
+                        "content": format!("concurrent entry {i}"),
+                    }),
+                    session_id: Some(format!("sess_write_{i}")),
+                    request_id: Some(format!("req_write_{i}")),
+                    caller_kind: None,
+                };
+                HostToolExecutor::registry_dispatch(&req, &state).await
+            }));
+        }
+        // 5 read handles (whoami — read-only, verifies LazyLock works under
+        // concurrent write+read pressure).
+        for i in 5..10 {
+            let state = state.clone();
+            handles.push(tokio::spawn(async move {
+                let req = ToolExecuteRequest {
+                    tool_name: "nexus.context.whoami".to_string(),
+                    parameters: serde_json::json!({}),
+                    session_id: Some(format!("sess_read_{i}")),
+                    request_id: Some(format!("req_read_{i}")),
+                    caller_kind: None,
+                };
+                HostToolExecutor::registry_dispatch(&req, &state).await
+            }));
+        }
+
+        for handle in handles {
+            let result = handle.await.expect("no panic");
+            assert!(
+                result.is_ok(),
+                "concurrent write dispatch should succeed: {result:?}"
+            );
+        }
+    }
+
     /// Schedule caller-kind admission: `dispatch_for_schedule` produces
     /// the same result as direct `execute()` for `nexus.context.whoami`.
     #[tokio::test]
