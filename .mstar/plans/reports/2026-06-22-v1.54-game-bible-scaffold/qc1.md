@@ -5,6 +5,7 @@ reviewer_index: 1
 plan_id: "2026-06-22-v1.54-game-bible-scaffold"
 verdict: "Request Changes"
 generated_at: "2026-06-20"
+revalidated_at: "2026-06-20"
 ---
 
 # Code Review Report
@@ -83,3 +84,34 @@ generated_at: "2026-06-20"
 **Verdict**: Request Changes
 
 The scaffold structure, BlockType taxonomy, `ValidationMode::GameBible`, and local-db completion/reconcile gates are broadly coherent, but the public bootstrap path and init scheduling path are not reliable enough to approve. The two Critical items directly affect the advertised `creator bootstrap --profile game-bible` acceptance path.
+
+## Revalidation
+
+### Revalidation Scope
+- Targeted re-review on `iteration/v1.54` HEAD `4abfd43b161b02245e2574fca57c4c4098bef20e`.
+- Review range / Diff basis: `merge-base: origin/main` + `tip: iteration/v1.54 HEAD` (post fix-wave).
+- Fix-wave commits checked: `07d39486` (C-001, C-002, W-001), `d5c4eb42`, `9bbf1e25`, `7427e8ff`, `ca948acf`.
+- Worktree/cwd verified: `/Users/bibi/workspace/organizations/42ch/nexus`; branch verified: `iteration/v1.54`.
+- Pre-existing workspace note: `.mstar/status.json` was already modified before this re-review; this report did not edit it.
+
+### Finding-by-Finding Status
+- **C-001 — Resolved.** `07d39486` normalizes the CLI spelling `game-bible` to canonical stored `game_bible` in `handle_bootstrap` before deriving presets and before POSTing `/v1/local/works`. Current code uses the normalized value for `work_profile`, `primary_preset_id`, and effective `game-bible-init` selection. Regression test verified: `commands::creator::bootstrap::tests::bootstrap_profile_game_bible_hyphen_parses`.
+- **C-002 — Resolved.** `07d39486` adds both `creator_id` and `initial_idea` to `init_input`, so the `game-bible-init` preset's strict `{{preset.input.creator_id}}` / `{{preset.input.initial_idea}}` placeholders have seeded values. Targeted game-bible scaffold e2e tests also pass (`game_bible_scaffold_e2e.rs`).
+- **W-001 — Resolved for the reviewed gate.** `07d39486` gates the direct production schedule branch with `profile == "novel"`, so normalized `game_bible` bootstrap with `--skip-intake` no longer enters the novel production auto-chain path. Regression test verified: `commands::creator::bootstrap::tests::bootstrap_game_bible_skip_intake_no_production_schedule`.
+- **S-001 — Deferred / accepted.** The daemon enrichment helper still uses the local literal check (`dto.work_profile.as_deref() != Some("novel")`), but this remains a non-blocking maintainability suggestion and is accepted as deferred per PM assignment.
+
+### Validation Evidence
+- `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus`; `git branch --show-current` → `iteration/v1.54`; `git rev-parse HEAD` → `4abfd43b161b02245e2574fca57c4c4098bef20e`.
+- `git log --oneline -10` confirms fix-wave sequence through merge `4abfd43b` with `07d39486`, `d5c4eb42`, `9bbf1e25`, `7427e8ff`, and `ca948acf` present.
+- `cargo clippy --all -- -D warnings` → pass.
+- Targeted tests → pass:
+  - `cargo test -p nexus42 bootstrap_profile_game_bible_hyphen_parses`
+  - `cargo test -p nexus42 bootstrap_game_bible_skip_intake_no_production_schedule`
+  - `cargo test -p nexus-orchestration --test game_bible_scaffold_e2e` (`bootstrap_game_bible_creates_design_tree`, `bootstrap_game_bible_idempotent`, `game_bible_work_status_json`, `game_bible_scaffold_with_world_id`).
+- Mandatory workspace gates did **not** fully pass in this checkout:
+  - `cargo +nightly fmt --all --check` → fail; rustfmt reports diffs in `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs` and `crates/nexus-daemon-runtime/src/capability_registry.rs`.
+  - `cargo test --all` → fail in `nexus-creator-memory` with 11 unrelated memory I/O / personality sync / review tests (examples: `memory_io::tests::update_memory_overwrites`, `personality_sync::tests::push_creates_valid_memory_with_frontmatter`, `review::tests::promote_truncates_oversized_raw_digest_at_utf8_boundary`).
+
+### Revalidation Verdict
+
+The four qc1 findings are resolved or accepted-deferred as listed above. However, because this assignment explicitly required clean `cargo +nightly fmt --all --check` and green `cargo test --all`, and both mandatory workspace gates failed on `iteration/v1.54` HEAD, this targeted re-review remains **Request Changes** rather than Approve.
