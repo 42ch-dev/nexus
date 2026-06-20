@@ -28,11 +28,13 @@ pub trait NarrativeGateway {
     /// Get the current world state projection by world ID.
     async fn get_world_state(&self, world_id: &str) -> Result<WorldState, NarrativeError>;
 
-    /// Get timeline events for a world, optionally filtered by branch.
+    /// Get timeline events for a world, optionally filtered by branch
+    /// and capped by `limit` (server-side `LIMIT` clause; `None` = unlimited).
     async fn get_timeline(
         &self,
         world_id: &str,
         branch_id: Option<&str>,
+        limit: Option<usize>,
     ) -> Result<Vec<TimelineEvent>, NarrativeError>;
 
     /// Get a single event by its ID.
@@ -216,6 +218,7 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
         &self,
         world_id: &str,
         branch_id: Option<&str>,
+        limit: Option<usize>,
     ) -> Result<Vec<TimelineEvent>, NarrativeError> {
         let result = {
             let events = self.read_events()?;
@@ -235,6 +238,9 @@ impl<K: KbStore> NarrativeGateway for InMemoryNarrativeGateway<K> {
                 .cloned()
                 .collect();
             result.sort_by_key(|e| e.sequence_no);
+            if let Some(lim) = limit {
+                result.truncate(lim);
+            }
             result
         };
         Ok(result)
@@ -406,7 +412,7 @@ mod tests {
         gw.insert_event(make_event("wld_1", "fbk_root", 1));
         gw.insert_event(make_event("wld_1", "fbk_root", 2));
 
-        let timeline = gw.get_timeline("wld_1", None).await.unwrap();
+        let timeline = gw.get_timeline("wld_1", None, None).await.unwrap();
         assert_eq!(timeline.len(), 3);
         assert_eq!(timeline[0].sequence_no, 1);
         assert_eq!(timeline[1].sequence_no, 2);
@@ -420,7 +426,10 @@ mod tests {
         gw.insert_event(make_event("wld_1", "fbk_root", 1));
         gw.insert_event(make_event("wld_1", "fbk_fork", 1));
 
-        let root = gw.get_timeline("wld_1", Some("fbk_root")).await.unwrap();
+        let root = gw
+            .get_timeline("wld_1", Some("fbk_root"), None)
+            .await
+            .unwrap();
         assert_eq!(root.len(), 1);
         assert_eq!(root[0].branch_id, "fbk_root");
     }
