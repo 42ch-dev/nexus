@@ -1166,7 +1166,12 @@ pub async fn seed_chapters_multi_volume_tx(
 /// `current_chapter >= total` predicate which was fragile for multi-volume Works
 /// where chapter numbers reset per volume.
 ///
-/// For **non-novel** Works (V1.36 backwards compat): returns `true` immediately
+/// For **game-bible** Works (`work_profile == 'game_bible'` — V1.54 P1): returns
+/// `false` immediately. Completion detection is deferred to V1.55+ where the
+/// daemon will evaluate `section_status` frontmatter across Design files.
+/// In V1.54, completion is manual via `creator works complete`.
+///
+/// For **other non-novel** Works (V1.36 backwards compat): returns `true` immediately
 /// if `works.status == 'completed'` — the early exit preserves legacy behaviour.
 ///
 /// Returns `false` if:
