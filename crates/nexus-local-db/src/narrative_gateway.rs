@@ -214,53 +214,68 @@ impl NarrativeGateway for SqliteNarrativeGateway {
         &self,
         world_id: &str,
         branch_id: Option<&str>,
+        limit: Option<usize>,
     ) -> Result<Vec<TimelineEvent>, NarrativeError> {
+        // SQLite `LIMIT -1` means no limit.
+        let limit_i64: i64 = limit.and_then(|n| i64::try_from(n).ok()).unwrap_or(-1);
+
+        // SAFETY: dynamic SQL — LIMIT + ordering depend on whether limit is set.
+        // When limit is requested, ORDER BY DESC to get most-recent events first
+        // (caller reverses for ASC display). Uses the same runtime format! pattern
+        // as kb_store.rs:427-451.
+        // Note: runtime query_as maps by column-name-to-field-name matching;
+        // the `as "field!"` aliases used by the compile-time macros are omitted.
+        let (order_dir, limit_clause) = if limit_i64 > 0 {
+            ("DESC", format!("LIMIT {limit_i64}"))
+        } else {
+            ("ASC", String::new())
+        };
         let events = if let Some(bid) = branch_id {
-            sqlx::query_as!(
-                TimelineEventRow,
-                r#"SELECT
-                    timeline_event_id as "timeline_event_id!",
-                    world_id as "world_id!",
-                    branch_id as "branch_id!",
-                    event_type as "event_type!",
-                    status as "status!",
-                    sequence_no as "sequence_no!",
+            sqlx::query_as::<_, TimelineEventRow>(&format!(
+                r"SELECT
+                    timeline_event_id,
+                    world_id,
+                    branch_id,
+                    event_type,
+                    status,
+                    sequence_no,
                     title,
                     summary,
                     caused_by_event_ids_json,
                     affected_key_block_ids_json,
                     source_command_id,
-                    created_at as "created_at!"
+                    created_at
                 FROM narrative_timeline_events
                 WHERE world_id = ? AND branch_id = ?
-                ORDER BY sequence_no ASC"#,
-                world_id,
-                bid
-            )
+                ORDER BY sequence_no {order_dir}
+                {limit_clause}"
+            ))
+            .bind(world_id)
+            .bind(bid)
             .fetch_all(&*self.pool)
             .await
             .map_err(|e| db_err(&e))?
         } else {
-            sqlx::query_as!(
-                TimelineEventRow,
-                r#"SELECT
-                    timeline_event_id as "timeline_event_id!",
-                    world_id as "world_id!",
-                    branch_id as "branch_id!",
-                    event_type as "event_type!",
-                    status as "status!",
-                    sequence_no as "sequence_no!",
+            sqlx::query_as::<_, TimelineEventRow>(&format!(
+                r"SELECT
+                    timeline_event_id,
+                    world_id,
+                    branch_id,
+                    event_type,
+                    status,
+                    sequence_no,
                     title,
                     summary,
                     caused_by_event_ids_json,
                     affected_key_block_ids_json,
                     source_command_id,
-                    created_at as "created_at!"
+                    created_at
                 FROM narrative_timeline_events
                 WHERE world_id = ?
-                ORDER BY branch_id ASC, sequence_no ASC"#,
-                world_id
-            )
+                ORDER BY branch_id {order_dir}, sequence_no {order_dir}
+                {limit_clause}"
+            ))
+            .bind(world_id)
             .fetch_all(&*self.pool)
             .await
             .map_err(|e| db_err(&e))?
@@ -309,7 +324,9 @@ impl NarrativeGateway for SqliteNarrativeGateway {
 
         // Phase 2: resolve timeline position
         let timeline_position = if let Some(ref branch_id) = query.branch_id {
-            let events = self.get_timeline(&query.world_id, Some(branch_id)).await?;
+            let events = self
+                .get_timeline(&query.world_id, Some(branch_id), None)
+                .await?;
             if events.is_empty() {
                 None
             } else {
@@ -502,16 +519,22 @@ mod tests {
         let gw = SqliteNarrativeGateway::new(pool);
 
         // All events for world
-        let all = gw.get_timeline("wld_1", None).await.unwrap();
+        let all = gw.get_timeline("wld_1", None, None).await.unwrap();
         assert_eq!(all.len(), 3);
 
         // Filtered by branch
-        let root = gw.get_timeline("wld_1", Some("fbk_root")).await.unwrap();
+        let root = gw
+            .get_timeline("wld_1", Some("fbk_root"), None)
+            .await
+            .unwrap();
         assert_eq!(root.len(), 2);
         assert_eq!(root[0].sequence_no, 1);
         assert_eq!(root[1].sequence_no, 2);
 
-        let fork = gw.get_timeline("wld_1", Some("fbk_fork")).await.unwrap();
+        let fork = gw
+            .get_timeline("wld_1", Some("fbk_fork"), None)
+            .await
+            .unwrap();
         assert_eq!(fork.len(), 1);
     }
 

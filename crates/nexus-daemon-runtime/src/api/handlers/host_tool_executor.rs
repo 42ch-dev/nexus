@@ -44,7 +44,7 @@ use std::path::Path;
 
 // ─── V1.34 Tool IDs (spec §12.2) ──────────────────────────────────────────
 
-/// Allowlist of all V1.34 tool IDs.
+/// Allowlist of all V1.34 + V1.53 P1 tool IDs.
 ///
 /// V1.53 P0 Sub-phase 2: This allowlist is still used by `admission_pipeline()`
 /// (which `registry_dispatch()` calls). It will remain as the runtime allowlist;
@@ -1166,11 +1166,42 @@ async fn audit_tool_execution(
 
 // ─── V1.53 P1: DF-46 read-heavy nexus.* handlers ─────────────────────────
 
+/// Verify that `creator_id` owns `world_id` by querying `narrative_worlds`.
+///
+/// Reuses the pattern from `works.rs:429-435`: `world_id` must exist AND
+/// `owner_creator_id` must match. Returns `Forbidden { resource: "world" }`
+/// on mismatch/missing; `Internal` on DB errors.
+async fn ensure_world_accessible_for_creator(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+) -> Result<(), NexusApiError> {
+    let exists = sqlx::query_scalar!(
+        r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
+        world_id,
+        creator_id,
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("world ownership check: {e}"),
+    })?;
+
+    if exists.is_none() {
+        return Err(NexusApiError::Forbidden {
+            resource: "world".to_string(),
+            reason: "world not found or cross-creator access denied".to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// `nexus.world.snapshot.get` — consistent read of structured world snapshot.
 async fn execute_world_snapshot_get(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
-    _creator_id: &str,
+    creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let world_id =
         req.parameters["world_id"]
@@ -1179,6 +1210,8 @@ async fn execute_world_snapshot_get(
                 field: "parameters.world_id".into(),
                 reason: "must be a string".into(),
             })?;
+
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
 
     let gw = state.narrative_gateway();
     let world_state =
@@ -1202,7 +1235,7 @@ async fn execute_world_snapshot_get(
 async fn execute_timeline_recent_get(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
-    _creator_id: &str,
+    creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let world_id =
         req.parameters["world_id"]
@@ -1212,33 +1245,33 @@ async fn execute_timeline_recent_get(
                 reason: "must be a string".into(),
             })?;
 
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+
+    // Default limit 100, clamp to max 500
     let limit: usize = req.parameters["limit"]
         .as_u64()
         .and_then(|v| usize::try_from(v).ok())
-        .unwrap_or(20);
+        .unwrap_or(100)
+        .min(500);
 
     let gw = state.narrative_gateway();
-    let all_events =
-        gw.get_timeline(world_id, None)
-            .await
-            .map_err(
-                |e: nexus_narrative::NarrativeError| NexusApiError::Internal {
-                    code: "NARRATIVE_ERROR".to_string(),
-                    message: e.to_string(),
-                },
-            )?;
+    let mut events = gw.get_timeline(world_id, None, Some(limit)).await.map_err(
+        |e: nexus_narrative::NarrativeError| NexusApiError::Internal {
+            code: "NARRATIVE_ERROR".to_string(),
+            message: e.to_string(),
+        },
+    )?;
 
-    // Return the most recent `limit` events
-    let recent: Vec<_> = all_events.iter().rev().take(limit).rev().cloned().collect();
-
-    Ok(serde_json::to_value(&recent).unwrap_or_else(|_| serde_json::json!([])))
+    // SQL returns DESC order when limit is set; reverse to ASC for display.
+    events.reverse();
+    Ok(serde_json::to_value(&events).unwrap_or_else(|_| serde_json::json!([])))
 }
 
 /// `nexus.kb_snapshot.read` — focused KB snapshot read for a world.
 async fn execute_kb_snapshot_read(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
-    _creator_id: &str,
+    creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     let world_id =
         req.parameters["world_id"]
@@ -1247,6 +1280,8 @@ async fn execute_kb_snapshot_read(
                 field: "parameters.world_id".into(),
                 reason: "must be a string".into(),
             })?;
+
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
 
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(state.pool().clone());
     let blocks =
@@ -2300,5 +2335,280 @@ mod tests {
         if let (Err(e_val), Err(r_val)) = (&via_execute, &via_registry) {
             assert_eq!(e_val.error_code(), r_val.error_code());
         }
+    }
+
+    // ─── V1.53 P1: Cross-creator/world isolation tests (R-V153P1QC1-001) ──
+
+    /// Helper: overwrite the active creator in config.toml and return a new
+    /// WorkspaceState (same db) with that identity.
+    async fn switch_active_creator(
+        nexus_home: &std::path::Path,
+        db_path: &std::path::Path,
+        new_creator_id: &str,
+    ) -> WorkspaceState {
+        let toml_str = format!(
+            "active_creator_id = \"{new_creator_id}\"\n[active_workspace_slug_by_creator]\n\"{new_creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+        WorkspaceState::new_for_testing(nexus_home.to_path_buf(), db_path.to_path_buf(), None).await
+    }
+
+    #[tokio::test]
+    async fn world_snapshot_get_cross_creator_denied() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed another creator
+        // SAFETY: test-only data setup.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+
+        // Switch to other_creator — should be denied
+        let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.world.snapshot.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test_world"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &other_state).await;
+        assert!(result.is_err(), "cross-creator should be denied");
+        assert_eq!(
+            result.unwrap_err().error_code(),
+            "FORBIDDEN",
+            "should return FORBIDDEN for cross-creator access"
+        );
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn timeline_recent_get_cross_creator_denied() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed other creator
+        // SAFETY: test-only.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+
+        let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test_world"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &other_state).await;
+        assert!(result.is_err(), "cross-creator should be denied");
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn kb_snapshot_read_cross_creator_denied() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // SAFETY: test-only.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+
+        let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.read".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test_world"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &other_state).await;
+        assert!(result.is_err(), "cross-creator should be denied");
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    // ─── V1.53 P1: Failure/admission test coverage (R-V153P1QC1-002) ──
+
+    #[tokio::test]
+    async fn timeline_recent_get_rejects_missing_world_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn kb_snapshot_read_rejects_missing_world_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.read".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn manuscript_chapter_get_rejects_missing_chapter_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.manuscript.chapter.get".to_string(),
+            parameters: serde_json::json!({"work_id": "nonexistent_work", "chapter": 1}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    }
+
+    #[tokio::test]
+    async fn daemon_health_rejects_without_active_creator() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        // Remove active_creator_id from config
+        let toml_str = "[active_workspace_slug_by_creator]\n";
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.observability.daemon.health".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_err(),
+            "daemon.health should require active creator"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    // ─── V1.53 P1: Timeline limit test (R-V153P1QC3-001) ──
+
+    #[tokio::test]
+    async fn timeline_recent_get_respects_server_limit() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        let pool = state.pool().clone();
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_limit",
+            "test_creator",
+            "Limit World",
+            "limit-world",
+            "private",
+            "manual",
+        )
+        .await;
+        // Seed 5 timeline events
+        for i in 1..=5 {
+            let evt_id = format!("evt_limit_{i}");
+            nexus_local_db::narrative_gateway::seed::event(
+                &pool,
+                &evt_id,
+                "wld_limit",
+                "fbk_root",
+                "story_advance",
+                i,
+            )
+            .await;
+        }
+
+        // Request with limit=2 → should get only 2 events (the most recent 2)
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_limit", "limit": 2}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "timeline with limit should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        let events = val.as_array().expect("should be an array");
+        assert_eq!(events.len(), 2, "should return exactly 2 events");
+        assert_eq!(events[0]["sequence_no"], 4);
+        assert_eq!(events[1]["sequence_no"], 5);
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn timeline_recent_get_clamps_limit_to_500() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        let pool = state.pool().clone();
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_clamp",
+            "test_creator",
+            "Clamp World",
+            "clamp-world",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_clamp", "limit": 10000}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        // Should succeed but effective limit is capped at 500
+        assert!(result.is_ok(), "clamped limit should succeed: {result:?}");
+        let val = result.expect("result");
+        let events = val.as_array().expect("should be an array");
+        assert!(
+            events.len() <= 500,
+            "should be capped at 500 events, got {}",
+            events.len()
+        );
+        drop(tmp);
     }
 }

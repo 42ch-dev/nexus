@@ -74,6 +74,8 @@ pub enum AdmissionGate {
     WorkspaceBounds,
     /// `permissions.toml` / policy must grant the capability.
     PermissionPolicy,
+    /// World must exist and be owned by the active creator.
+    RequireWorldOwnership,
     /// Audit log entry must be written (always last gate).
     AuditLog,
 }
@@ -241,7 +243,7 @@ impl Default for CapabilityRegistry {
 
 // ─── Registry constructor ──────────────────────────────────────────────────
 
-/// Create a registry pre-populated with all 8 V1.34 host tools.
+/// Create a registry pre-populated with all V1.34 + V1.53 P1 host tools.
 ///
 /// Each handler is wired to the corresponding `pub(crate)` wrapper
 /// function in `host_tool_executor.rs`. The wrapper functions exist
@@ -406,6 +408,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
         admission: vec![
             AdmissionGate::Allowlist,
             AdmissionGate::ActiveCreator,
+            AdmissionGate::RequireWorldOwnership,
             AdmissionGate::PermissionPolicy,
             AdmissionGate::AuditLog,
         ],
@@ -429,6 +432,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
         admission: vec![
             AdmissionGate::Allowlist,
             AdmissionGate::ActiveCreator,
+            AdmissionGate::RequireWorldOwnership,
             AdmissionGate::PermissionPolicy,
             AdmissionGate::AuditLog,
         ],
@@ -452,6 +456,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
         admission: vec![
             AdmissionGate::Allowlist,
             AdmissionGate::ActiveCreator,
+            AdmissionGate::RequireWorldOwnership,
             AdmissionGate::PermissionPolicy,
             AdmissionGate::AuditLog,
         ],
