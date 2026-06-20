@@ -18,7 +18,7 @@
 //!                          │     ├─ workspace bounds
 //!                          │     ├─ permissions.toml / policy
 //!                          │     └─ audit log (written by execute() on all paths)
-//!                          └─► dispatch_tool → handler
+//!                          └─► CapabilityRegistry::dispatch() → handler
 //! ```
 //!
 //! All three entrypoints (HTTP, internal, worker upcall) share a single
@@ -285,21 +285,18 @@ pub struct HostToolExecutor;
 impl HostToolExecutor {
     /// Execute a host tool request end-to-end through the unified registry:
     /// 1. Admission pipeline (5 gates, spec §4.3)
-    /// 2. Tool dispatch
+    /// 2. Tool dispatch (via `CapabilityRegistry`)
     /// 3. Audit logging (gate 5) — written on **every** invocation path
     ///    (success + all denials/failures), per spec §4.3 gate 5 and §12.6.
     ///
-    /// V1.53 P0 Sub-phase 2: Dispatch is now routed through `CapabilityRegistry`
-    /// instead of the old `dispatch_tool()` match table. The old table is retained
-    /// but unused during Sub-phase 2, and will be removed in Sub-phase 3.
-    ///
+    /// V1.53 P0: All dispatch now routes through `CapabilityRegistry`.
+    /// Old `dispatch_tool()` match table has been removed.
     /// This is the single dispatch table (spec §7.1).
     pub async fn execute(
         req: &ToolExecuteRequest,
         state: &WorkspaceState,
     ) -> Result<serde_json::Value, NexusApiError> {
-        // Sub-phase 2: all dispatch routes through registry.
-        // Sub-phase 3 will remove the old dispatch_tool() entirely.
+        // All dispatch routes through CapabilityRegistry.
         Self::registry_dispatch(req, state).await
     }
 
@@ -485,41 +482,13 @@ impl nexus_orchestration::capability::DaemonToolDispatch for DaemonToolDispatchA
     }
 }
 
-// ─── Dispatch table (spec §7.1) ───────────────────────────────────────────
-
-/// Dispatch to the correct handler based on `tool_name`.
-///
-/// V1.53 P0 Sub-phase 2: This function is no longer the primary dispatch path.
-/// All dispatch now routes through `CapabilityRegistry`. This function will be
-/// removed in Sub-phase 3.
-#[allow(dead_code)]
-async fn dispatch_tool(
-    req: &ToolExecuteRequest,
-    state: &WorkspaceState,
-    creator_id: &str,
-) -> Result<serde_json::Value, NexusApiError> {
-    match req.tool_name.as_str() {
-        // nexus.* tools (V1.34)
-        "nexus.context.whoami" => Ok(execute_context_whoami(req, state, creator_id)),
-        "nexus.workspace.info" => Ok(execute_workspace_info(req, state, creator_id)),
-        "nexus.work.get" => execute_work_get(req, state, creator_id).await,
-        "nexus.work.patch" => execute_work_patch(req, state, creator_id).await,
-        "nexus.orchestration.schedule_status" => {
-            execute_schedule_status(req, state, creator_id).await
-        }
-        "nexus.context.assemble" => execute_context_assemble(req, state, creator_id).await,
-        // fs/* baseline (V1.33)
-        "fs/read_text_file" => execute_read_file(req, state),
-        "fs/write_text_file" => execute_write_file(req, state),
-        // Unknown — should have been caught by gate 1, but fail-closed
-        other => Err(NexusApiError::BadRequest {
-            code: "NOT_SUPPORTED".to_string(),
-            message: format!("unsupported tool: {other}"),
-        }),
-    }
-}
-
 // ─── nexus.* Handlers ─────────────────────────────────────────────────────
+//
+// V1.53 P0 Sub-phase 3: Old `dispatch_tool()` match table removed.
+// All dispatch now routes through `CapabilityRegistry` (see
+// `HostToolExecutor::registry_dispatch()` and `capability_registry.rs`).
+// The handler functions below remain as they are referenced by the
+// `pub(crate)` registry wrapper functions.
 
 /// `nexus.context.whoami` — return active `creator_id` and workspace slug.
 fn execute_context_whoami(

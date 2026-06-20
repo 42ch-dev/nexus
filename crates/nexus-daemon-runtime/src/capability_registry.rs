@@ -13,13 +13,13 @@
 //!   → CapabilityRegistry::dispatch()  (lookup → invoke handler)
 //! ```
 //!
-//! # Sub-phase tracker (P0)
+//! # Migration complete (V1.53 P0)
 //!
-//! - **Sub-phase 1 (introduce)**: Registry exists; old dispatch is primary path.
-//!   `HostToolExecutor::registry_dispatch()` is a parallel path for parity testing.
+//! All three sub-phases are done:
+//! - **Sub-phase 1 (introduce)**: Registry introduced behind adapter with parity tests.
 //! - **Sub-phase 2 (cutover)**: `HostToolExecutor::execute()` routes through registry.
-//!   Old `dispatch_tool()` is present but unused.
-//! - **Sub-phase 3 (cleanup)**: Old `dispatch_tool()` removed. No lingering parallel paths.
+//! - **Sub-phase 3 (cleanup)**: Old `dispatch_tool()` match table removed.
+//!   No lingering parallel paths remain.
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::host_tool_executor::ToolExecuteRequest;
