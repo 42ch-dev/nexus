@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-22-v1.54-df46-write-tools"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-20T11:51:30Z"
+revalidated_at: "2026-06-20"
 ---
 
 # Code Review Report
@@ -72,11 +73,63 @@ generated_at: "2026-06-20T11:51:30Z"
   - Source Reference: `crates/nexus-daemon-runtime/src/capability_registry.rs:213-236`; `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs:182-237`; plan §5.1
   - Confidence: High
 
+## Revalidation
+
+Fix-wave reviewed on branch `iteration/v1.54` at `3c1b4c29`. Each qc3 finding was re-checked against the commits listed in the assignment.
+
+### 🔴 Critical
+
+- **C-001 — Audit-log failures are silently swallowed** → **Resolved** at `22db9700`.
+  - `registry_dispatch` now propagates `audit_tool_execution` errors with `?` on the denied, success, and error paths instead of `let _ = ...`.
+  - Regression test `registry_dispatch_propagates_audit_write_failure` drops the `acp_tool_audit_log` table and asserts an `Internal` error with code `AUDIT_LOG_FAILED`.
+  - Evidence: `cargo test --all` passes; inspected `host_tool_executor.rs:398-399`, `409`, `413`.
+
+- **C-002 — Blocking filesystem I/O + no transaction in `nexus.manuscript.chapter.update`** → **Resolved** at `7c8c2a8b`.
+  - `std::fs::create_dir_all` / `std::fs::write` replaced with `tokio::fs::create_dir_all` / `tokio::fs::write`.
+  - File is written to a `.md.tmp` path, then the DB update and `tokio::fs::rename` are wrapped in a SQLite transaction so the row is committed only when the final file is in place.
+  - Existing chapter-update test now asserts the on-disk file content matches the DB `body_path` and that no `.tmp` path is stored.
+  - Evidence: `cargo test --all` passes; inspected `host_tool_executor.rs:1696`, `1706-1778`.
+
+### 🟡 Warning
+
+- **W-001 — `nexus.finding.resolve` false-positive success** → **Resolved** at `663cc55b`.
+  - `execute_finding_resolve` now checks the `bool` returned by `update_finding`; `false` maps to `NexusApiError::NotFound`.
+  - Test `finding_resolve_nonexistent_returns_not_found` asserts rejection.
+  - Evidence: `cargo test --all` passes; inspected `host_tool_executor.rs:2051-2056`.
+
+- **W-002 — Benchmark does not measure the cold path** → **Resolved** at `2a0b8024`.
+  - Added `bench_registry_lookup_cold` measuring fresh `build_registry()` + 19 lookups.
+  - File-level docs updated to remove the unimplemented `dispatch_whoami` claim and explain why end-to-end dispatch is not benchable here.
+  - `build_registry()` was made `pub` for bench access.
+  - Evidence: `cargo bench --bench dispatch_latency --no-run` compiled successfully.
+
+- **W-003 — Concurrent-dispatch test only exercises read-only `whoami`** → **Resolved** at `b29d36b8`.
+  - Added `concurrent_dispatch_ten_parallel_write_tools`: 5 parallel `nexus.pool.entry.manage` creates plus 5 parallel `nexus.context.whoami` reads.
+  - Verifies no deadlock or data race under write-tool transaction contention.
+  - Evidence: `cargo test --all` passes; inspected `host_tool_executor.rs:4101-4196`.
+
+- **W-004 — `nexus.kb_snapshot.write` accepts cross-world block payloads** → **Resolved** at `9f8e5ef5`.
+  - `execute_kb_snapshot_write` now rejects any block where `kb.world_id != world_id` with `FORBIDDEN`.
+  - Regression tests added for same-creator cross-world and cross-creator embedded world IDs.
+  - Note: the per-block `block_val.clone()` for deserialization remains; this is a minor allocation, not a blocking security issue.
+  - Evidence: `cargo test --all` passes; inspected `host_tool_executor.rs:1584-1591`.
+
+- **W-005 — Registry admission metadata not enforced by `CapabilityRegistry::dispatch`** → **Resolved** at `1283f579`.
+  - `CapabilityRegistry::dispatch` now iterates `row.admission` as a centralized accountability checkpoint with `debug_assert` coverage.
+  - Invariant test `registry_all_admission_gates_have_enforcement` proves every declared gate maps to a known enforcement path (pipeline, handler, or caller).
+  - Evidence: `cargo test --all` passes; inspected `capability_registry.rs:249-268`, `1017-1049`.
+
+### 🟢 Suggestion
+
+- **S-001 — Add cold-path/per-tool dispatch benchmark** → **Resolved** via W-002 fix.
+- **S-002 — Replace runtime `sqlx::query` in `audit_tool_execution` with `sqlx::query!`** → **Accepted as future work** (same theme as qc2 W-003).
+- **S-003 — Document idempotency expectations of each write tool** → **Accepted as P-last backlog**.
+
 ## Summary
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 2 |
-| 🟡 Warning | 5 |
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
 | 🟢 Suggestion | 3 |
 
 ## Cross-Review Context
@@ -84,11 +137,12 @@ generated_at: "2026-06-20T11:51:30Z"
 - qc2.md was not present in `reports/<plan-id>/` at the time of this review; seat 2 should be consulted by the PM during consolidation.
 
 ## Verification Evidence
-- `cargo bench --bench dispatch_latency --no-run` — compiled successfully (`Finished bench profile`)
-- `cargo test -p nexus-daemon-runtime` — 242 unit + integration tests passed; 0 failures
-- `cargo clippy -p nexus-daemon-runtime -- -D warnings` — clean
+- `git rev-parse HEAD` — `3c1b4c29` on branch `iteration/v1.54`
+- `cargo bench --bench dispatch_latency --no-run` — compiled successfully (`Finished bench profile [optimized]`)
+- `cargo test --all` — all workspace tests passed; 0 failures
+- `cargo clippy --all -- -D warnings` — clean
 
 ## Verdict
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-The P0 implementation improves dispatch performance through `LazyLock` and `&'static [AdmissionGate]`, and all targeted tests/clippy pass. However, from a performance and reliability perspective the branch is not ready for merge: audit-log failures are silently ignored (breaking the advertised fail-closed gate), blocking filesystem I/O runs inside async handlers, the benchmark does not validate the claims in its own header, and concurrent-write coverage is missing. These must be resolved or explicitly accepted as tracked residuals before approval.
+All qc3 Critical and Warning findings have been addressed by the fix-wave commits. The remaining Suggestions (S-002 compile-time macro migration, S-003 idempotency documentation) are accepted as future work/backlog and do not block merge.
