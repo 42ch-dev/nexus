@@ -163,6 +163,15 @@ impl GameBibleProjectScaffold {
             works_root: PathBuf::from("Works"),
         }
     }
+
+    /// Create an instance with a DB pool and custom Works root (for e2e tests).
+    #[must_use]
+    pub const fn new_with_root(pool: sqlx::SqlitePool, works_root: PathBuf) -> Self {
+        Self {
+            pool: Some(pool),
+            works_root,
+        }
+    }
 }
 
 impl Default for GameBibleProjectScaffold {
@@ -243,11 +252,9 @@ impl Capability for GameBibleProjectScaffold {
         for tmpl in DESIGN_TEMPLATES {
             let content = render_template(tmpl);
             let path = design_dir.join(tmpl.filename);
-            tokio::fs::write(&path, &content)
-                .await
-                .map_err(|e| {
-                    CapabilityError::Internal(format!("write Design/{}: {e}", tmpl.filename))
-                })?;
+            tokio::fs::write(&path, &content).await.map_err(|e| {
+                CapabilityError::Internal(format!("write Design/{}: {e}", tmpl.filename))
+            })?;
             files_created.push(format!("Design/{}", tmpl.filename));
         }
 
