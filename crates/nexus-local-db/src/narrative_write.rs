@@ -595,7 +595,7 @@ mod tests {
         // Verify via the read gateway
         let gw = crate::narrative_gateway::SqliteNarrativeGateway::new(pool);
         let events = gw
-            .get_timeline(&world.world_id, Some(&world.root_fork_branch_id))
+            .get_timeline(&world.world_id, Some(&world.root_fork_branch_id), None)
             .await
             .unwrap();
         assert_eq!(events.len(), 2);

@@ -413,7 +413,7 @@ async fn fetch_narrative_context<G: NarrativeGateway>(
 
     let world_state_text = world_state_result.ok().map(|ws| format_world_state(&ws));
 
-    let timeline_text = match gateway.get_timeline(world_id, branch_id).await {
+    let timeline_text = match gateway.get_timeline(world_id, branch_id, None).await {
         Ok(events) if !events.is_empty() => Some(format_timeline(&events)),
         _ => None,
     };

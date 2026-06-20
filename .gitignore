@@ -171,4 +171,6 @@ target
 .sqlx/state.db
 .sqlx/state.db-wal
 .sqlx/state.db-shm
+
 .gitnexus
+.gh-user
