@@ -217,7 +217,19 @@
     "2026-06-18-v1.51-missing-kb-detection",
     "2026-06-18-v1.51-advisory-lock",
     "2026-06-18-v1.51-per-row-occ",
-    "2026-06-18-v1.51-hygiene-and-closeout"
+    "2026-06-18-v1.51-hygiene-and-closeout",
+    "2026-06-19-v1.52-harness-docs-prepare",
+    "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+    "2026-06-19-v1.52-cli-surface-consolidation-auto",
+    "2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile",
+    "2026-06-19-v1.52-n-way-gonogo-routing",
+    "2026-06-19-v1.52-multi-branch-merge-semantics",
+    "2026-06-19-v1.52-hygiene-and-closeout",
+    "2026-06-20-v1.53-capability-registry-prepare",
+    "2026-06-20-v1.53-capability-registry-unification",
+    "2026-06-21-v1.53-df46-read-capability-slice",
+    "2026-06-22-v1.53-skills-cli-cleanup",
+    "2026-06-22-v1.53-spec-hygiene-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

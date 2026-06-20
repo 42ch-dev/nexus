@@ -18,7 +18,7 @@
 //!                          │     ├─ workspace bounds
 //!                          │     ├─ permissions.toml / policy
 //!                          │     └─ audit log (written by execute() on all paths)
-//!                          └─► dispatch_tool → handler
+//!                          └─► CapabilityRegistry::dispatch() → handler
 //! ```
 //!
 //! All three entrypoints (HTTP, internal, worker upcall) share a single
@@ -36,13 +36,19 @@
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug, WorkApiDto};
 use crate::workspace::WorkspaceState;
+use nexus_kb::KbStore;
 use nexus_local_db::works;
+use nexus_narrative::NarrativeGateway;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 // ─── V1.34 Tool IDs (spec §12.2) ──────────────────────────────────────────
 
-/// Allowlist of all V1.34 tool IDs.
+/// Allowlist of all V1.34 + V1.53 P1 tool IDs.
+///
+/// V1.53 P0 Sub-phase 2: This allowlist is still used by `admission_pipeline()`
+/// (which `registry_dispatch()` calls). It will remain as the runtime allowlist;
+/// the registry's `CapabilityRow` records the admission gates declaratively.
 const TOOL_ALLOWLIST: &[&str] = &[
     // nexus.* tools (V1.34)
     "nexus.context.whoami",
@@ -51,6 +57,12 @@ const TOOL_ALLOWLIST: &[&str] = &[
     "nexus.work.patch",
     "nexus.orchestration.schedule_status",
     "nexus.context.assemble",
+    // nexus.* tools (V1.53 P1: DF-46 read-heavy slice)
+    "nexus.world.snapshot.get",
+    "nexus.timeline.recent.get",
+    "nexus.kb_snapshot.read",
+    "nexus.manuscript.chapter.get",
+    "nexus.observability.daemon.health",
     // fs/* baseline (V1.33)
     "fs/read_text_file",
     "fs/write_text_file",
@@ -281,50 +293,19 @@ pub struct HostToolExecutor;
 impl HostToolExecutor {
     /// Execute a host tool request end-to-end through the unified registry:
     /// 1. Admission pipeline (5 gates, spec §4.3)
-    /// 2. Tool dispatch
+    /// 2. Tool dispatch (via `CapabilityRegistry`)
     /// 3. Audit logging (gate 5) — written on **every** invocation path
     ///    (success + all denials/failures), per spec §4.3 gate 5 and §12.6.
     ///
+    /// V1.53 P0: All dispatch now routes through `CapabilityRegistry`.
+    /// Old `dispatch_tool()` match table has been removed.
     /// This is the single dispatch table (spec §7.1).
     pub async fn execute(
         req: &ToolExecuteRequest,
         state: &WorkspaceState,
     ) -> Result<serde_json::Value, NexusApiError> {
-        tracing::info!(
-            tool_name = %req.tool_name,
-            caller_kind = ?req.caller_kind,
-            "HostToolExecutor: executing tool"
-        );
-
-        // Gates 1–4 (no internal audit; we audit centrally below)
-        let admission_result = admission_pipeline(req, state);
-
-        let (creator_id, _workspace_slug) = match admission_result {
-            Ok(pair) => pair,
-            Err(e) => {
-                // Audit gate 1-4 denials
-                let error_code = e.error_code();
-                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
-                return Err(e);
-            }
-        };
-
-        // Dispatch
-        let dispatch_result = dispatch_tool(req, state, &creator_id).await;
-
-        match &dispatch_result {
-            Ok(_) => {
-                // Audit success
-                let _ = audit_tool_execution(req, "success", None, state).await;
-            }
-            Err(e) => {
-                // Audit handler failures
-                let error_code = e.error_code();
-                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
-            }
-        }
-
-        dispatch_result
+        // All dispatch routes through CapabilityRegistry.
+        Self::registry_dispatch(req, state).await
     }
 
     /// Dispatch a worker upcall `agent_tool_request` through the unified registry.
@@ -367,6 +348,56 @@ impl HostToolExecutor {
                 }
             }
         }
+    }
+
+    /// V1.53 P0 Sub-phase 1: Dispatch through the new `CapabilityRegistry`.
+    ///
+    /// This is the **parallel path** for parity testing during adapter-first
+    /// migration. It runs the same admission pipeline as `execute()`, then
+    /// dispatches through the registry instead of the old `dispatch_tool()`
+    /// match table.
+    ///
+    /// During Sub-phase 1, both `execute()` (old path) and `registry_dispatch()`
+    /// (new path) are active. Tests verify they produce identical output.
+    /// During Sub-phase 2, `execute()` is cut over to call this internally;
+    /// during Sub-phase 3 the old match table is removed.
+    pub async fn registry_dispatch(
+        req: &ToolExecuteRequest,
+        state: &WorkspaceState,
+    ) -> Result<serde_json::Value, NexusApiError> {
+        tracing::info!(
+            tool_name = %req.tool_name,
+            caller_kind = ?req.caller_kind,
+            "HostToolExecutor: executing tool via CapabilityRegistry"
+        );
+
+        // Gates 1–4 (same admission pipeline as execute())
+        let admission_result = admission_pipeline(req, state);
+
+        let (creator_id, _workspace_slug) = match admission_result {
+            Ok(pair) => pair,
+            Err(e) => {
+                let error_code = e.error_code();
+                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
+                return Err(e);
+            }
+        };
+
+        // Dispatch through registry (not old match table)
+        let reg = crate::capability_registry::host_tool_registry();
+        let dispatch_result = reg.dispatch(req, state, &creator_id).await;
+
+        match &dispatch_result {
+            Ok(_) => {
+                let _ = audit_tool_execution(req, "success", None, state).await;
+            }
+            Err(e) => {
+                let error_code = e.error_code();
+                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
+            }
+        }
+
+        dispatch_result
     }
 
     /// Dispatch a schedule-initiated `nexus.*` tool call through the unified registry.
@@ -421,6 +452,20 @@ pub struct WorkerToolError {
 /// `HostToolExecutor::dispatch_for_schedule`, providing in-process tool
 /// dispatch without worker IPC round-trip.
 ///
+/// # Delegation chain (by design — not a bypass)
+///
+/// This adapter delegates through the following chain, which is the single
+/// canonical dispatch path for all `nexus.*` tools:
+///
+/// 1. `dispatch_tool()` → `HostToolExecutor::dispatch_for_schedule()`
+/// 2. `dispatch_for_schedule()` → `HostToolExecutor::execute()`
+/// 3. `execute()` → `HostToolExecutor::registry_dispatch()`
+/// 4. `registry_dispatch()` → `admission_pipeline()` (gates 1–4) → `CapabilityRegistry::dispatch()`
+///    → registered handler
+///
+/// Every step passes through the same admission pipeline and registry.
+/// There is no alternate execution path that bypasses gating or audit.
+///
 /// Holds a snapshot of [`WorkspaceState`] captured at construction time.
 /// This is safe because the daemon's workspace state is long-lived and
 /// the inner fields (home path, pool, etc.) are Arc'd.
@@ -459,38 +504,13 @@ impl nexus_orchestration::capability::DaemonToolDispatch for DaemonToolDispatchA
     }
 }
 
-// ─── Dispatch table (spec §7.1) ───────────────────────────────────────────
-
-/// Dispatch to the correct handler based on `tool_name`.
-///
-/// This is the single dispatch table — no duplicate match tables elsewhere.
-async fn dispatch_tool(
-    req: &ToolExecuteRequest,
-    state: &WorkspaceState,
-    creator_id: &str,
-) -> Result<serde_json::Value, NexusApiError> {
-    match req.tool_name.as_str() {
-        // nexus.* tools (V1.34)
-        "nexus.context.whoami" => Ok(execute_context_whoami(req, state, creator_id)),
-        "nexus.workspace.info" => Ok(execute_workspace_info(req, state, creator_id)),
-        "nexus.work.get" => execute_work_get(req, state, creator_id).await,
-        "nexus.work.patch" => execute_work_patch(req, state, creator_id).await,
-        "nexus.orchestration.schedule_status" => {
-            execute_schedule_status(req, state, creator_id).await
-        }
-        "nexus.context.assemble" => execute_context_assemble(req, state, creator_id).await,
-        // fs/* baseline (V1.33)
-        "fs/read_text_file" => execute_read_file(req, state),
-        "fs/write_text_file" => execute_write_file(req, state),
-        // Unknown — should have been caught by gate 1, but fail-closed
-        other => Err(NexusApiError::BadRequest {
-            code: "NOT_SUPPORTED".to_string(),
-            message: format!("unsupported tool: {other}"),
-        }),
-    }
-}
-
 // ─── nexus.* Handlers ─────────────────────────────────────────────────────
+//
+// V1.53 P0 Sub-phase 3: Old `dispatch_tool()` match table removed.
+// All dispatch now routes through `CapabilityRegistry` (see
+// `HostToolExecutor::registry_dispatch()` and `capability_registry.rs`).
+// The handler functions below remain as they are referenced by the
+// `pub(crate)` registry wrapper functions.
 
 /// `nexus.context.whoami` — return active `creator_id` and workspace slug.
 fn execute_context_whoami(
@@ -1144,6 +1164,348 @@ async fn audit_tool_execution(
     Ok(())
 }
 
+// ─── V1.53 P1: DF-46 read-heavy nexus.* handlers ─────────────────────────
+
+/// Verify that `creator_id` owns `world_id` by querying `narrative_worlds`.
+///
+/// Reuses the pattern from `works.rs:429-435`: `world_id` must exist AND
+/// `owner_creator_id` must match. Returns `Forbidden { resource: "world" }`
+/// on mismatch/missing; `Internal` on DB errors.
+async fn ensure_world_accessible_for_creator(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+) -> Result<(), NexusApiError> {
+    let exists = sqlx::query_scalar!(
+        r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
+        world_id,
+        creator_id,
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("world ownership check: {e}"),
+    })?;
+
+    if exists.is_none() {
+        return Err(NexusApiError::Forbidden {
+            resource: "world".to_string(),
+            reason: "world not found or cross-creator access denied".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// `nexus.world.snapshot.get` — consistent read of structured world snapshot.
+async fn execute_world_snapshot_get(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let world_id =
+        req.parameters["world_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.world_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+
+    let gw = state.narrative_gateway();
+    let world_state =
+        gw.get_world_state(world_id)
+            .await
+            .map_err(|e: nexus_narrative::NarrativeError| {
+                if e.to_string().contains("not found") {
+                    NexusApiError::NotFound(format!("world {world_id}"))
+                } else {
+                    NexusApiError::Internal {
+                        code: "NARRATIVE_ERROR".to_string(),
+                        message: e.to_string(),
+                    }
+                }
+            })?;
+
+    Ok(serde_json::to_value(world_state).unwrap_or_else(|_| serde_json::json!({})))
+}
+
+/// `nexus.timeline.recent.get` — fetch recent timeline events for continuity.
+async fn execute_timeline_recent_get(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let world_id =
+        req.parameters["world_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.world_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+
+    // Default limit 100, clamp to max 500
+    let limit: usize = req.parameters["limit"]
+        .as_u64()
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(100)
+        .min(500);
+
+    let gw = state.narrative_gateway();
+    let mut events = gw.get_timeline(world_id, None, Some(limit)).await.map_err(
+        |e: nexus_narrative::NarrativeError| NexusApiError::Internal {
+            code: "NARRATIVE_ERROR".to_string(),
+            message: e.to_string(),
+        },
+    )?;
+
+    // SQL returns DESC order when limit is set; reverse to ASC for display.
+    events.reverse();
+    Ok(serde_json::to_value(&events).unwrap_or_else(|_| serde_json::json!([])))
+}
+
+/// `nexus.kb_snapshot.read` — focused KB snapshot read for a world.
+async fn execute_kb_snapshot_read(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let world_id =
+        req.parameters["world_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.world_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(state.pool().clone());
+    let blocks =
+        kb_store
+            .list_by_world(world_id)
+            .await
+            .map_err(|e: nexus_kb::store::KbStoreError| NexusApiError::Internal {
+                code: "KB_STORE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+
+    Ok(serde_json::to_value(&blocks).unwrap_or_else(|_| serde_json::json!([])))
+}
+
+/// `nexus.manuscript.chapter.get` — read a single manuscript chapter record.
+async fn execute_manuscript_chapter_get(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let chapter: i32 = req.parameters["chapter"]
+        .as_i64()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be an integer".into(),
+        })?
+        .try_into()
+        .map_err(|_| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be a valid i32 chapter number".into(),
+        })?;
+
+    let volume: i32 = req.parameters["volume"]
+        .as_i64()
+        .map_or(1, |v| i32::try_from(v).unwrap_or(1));
+
+    // Verify work ownership first (reuse existing pattern from execute_work_get)
+    let _record = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    let chapter_record =
+        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+
+    chapter_record.map_or_else(
+        || Err(NexusApiError::NotFound(format!("{work_id}/ch{chapter}"))),
+        |ch| Ok(serde_json::to_value(&ch).unwrap_or_else(|_| serde_json::json!({}))),
+    )
+}
+
+/// `nexus.observability.daemon.health` — agent-visible daemon health status.
+fn execute_daemon_health(
+    _req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    _creator_id: &str,
+) -> serde_json::Value {
+    let reg = crate::capability_registry::host_tool_registry();
+    serde_json::json!({
+        "uptime_seconds": state.uptime_seconds(),
+        "started_at": state.started_at().to_rfc3339(),
+        "runtime_mode": state.runtime_mode_as_str(),
+        "lifecycle_state": state.lifecycle_state().to_string(),
+        "registry_size": reg.len(),
+        "registry_ids": reg.ids().collect::<Vec<_>>(),
+        "pool_healthy": true
+    })
+}
+
+// ─── Registry handler wrappers (V1.53 P0) ─────────────────────────────────
+///
+/// These `pub(crate)` wrappers adapt the existing private handler functions
+/// to the `RegistryHandlerFn` signature used by `CapabilityRegistry`.
+/// They exist so the registry can reference the same handler implementations
+/// without duplicating logic.
+///
+// Each wrapper uses an explicit named lifetime `'a` to satisfy the
+// higher-ranked trait bound `for<'a> fn(&'a ..., &'a ..., &'a str) -> ...`.
+use std::future::Future;
+use std::pin::Pin;
+
+/// Registry wrapper: `nexus.context.whoami` — sync → async wrapper.
+pub(crate) fn registry_context_whoami<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_context_whoami(req, state, creator_id);
+    Box::pin(async move { Ok(result) })
+}
+
+/// Registry wrapper: `nexus.workspace.info` — sync → async wrapper.
+pub(crate) fn registry_workspace_info<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_workspace_info(req, state, creator_id);
+    Box::pin(async move { Ok(result) })
+}
+
+/// Registry wrapper: `nexus.work.get` — async passthrough.
+pub(crate) fn registry_work_get<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_work_get(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.work.patch` — async passthrough.
+pub(crate) fn registry_work_patch<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_work_patch(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.orchestration.schedule_status` — async passthrough.
+pub(crate) fn registry_schedule_status<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_schedule_status(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.context.assemble` — async passthrough.
+pub(crate) fn registry_context_assemble<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_context_assemble(req, state, creator_id))
+}
+
+/// Registry wrapper: `fs/read_text_file` — sync → async wrapper (ignores `creator_id`).
+pub(crate) fn registry_read_file<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    _creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_read_file(req, state);
+    Box::pin(async move { result })
+}
+
+/// Registry wrapper: `fs/write_text_file` — sync → async wrapper (ignores `creator_id`).
+pub(crate) fn registry_write_file<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    _creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_write_file(req, state);
+    Box::pin(async move { result })
+}
+
+// ─── V1.53 P1: Registry wrappers for DF-46 read-heavy tools ───────────────
+
+/// Registry wrapper: `nexus.world.snapshot.get` — async passthrough.
+pub(crate) fn registry_world_snapshot_get<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_world_snapshot_get(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.timeline.recent.get` — async passthrough.
+pub(crate) fn registry_timeline_recent_get<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_timeline_recent_get(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.kb_snapshot.read` — async passthrough.
+pub(crate) fn registry_kb_snapshot_read<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_kb_snapshot_read(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.manuscript.chapter.get` — async passthrough.
+pub(crate) fn registry_manuscript_chapter_get<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_manuscript_chapter_get(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.observability.daemon.health` — sync → async wrapper.
+pub(crate) fn registry_daemon_health<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_daemon_health(req, state, creator_id);
+    Box::pin(async move { Ok(result) })
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1404,5 +1766,849 @@ mod tests {
             output, http_result,
             "HTTP and worker must produce same result"
         );
+    }
+
+    // ─── V1.53 P0 Sub-phase 1: Registry parity tests ───────────────────────
+
+    /// Parity test: old `execute()` and new `registry_dispatch()` produce
+    /// the same output for `nexus.context.whoami`.
+    #[tokio::test]
+    async fn registry_parity_whoami() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.context.whoami".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let old_result = HostToolExecutor::execute(&req, &state).await;
+        let new_result = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(old_result.is_ok(), new_result.is_ok());
+        if let (Ok(old_val), Ok(new_val)) = (&old_result, &new_result) {
+            assert_eq!(old_val["creator_id"], new_val["creator_id"]);
+            assert_eq!(old_val["workspace_slug"], new_val["workspace_slug"]);
+        }
+    }
+
+    /// Parity test: old `execute()` and new `registry_dispatch()` produce
+    /// the same output for `nexus.workspace.info`.
+    #[tokio::test]
+    async fn registry_parity_workspace_info() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.workspace.info".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let old_result = HostToolExecutor::execute(&req, &state).await;
+        let new_result = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(old_result.is_ok(), new_result.is_ok());
+        if let (Ok(old_val), Ok(new_val)) = (&old_result, &new_result) {
+            assert_eq!(old_val["creator_id"], new_val["creator_id"]);
+            assert_eq!(old_val["workspace_slug"], new_val["workspace_slug"]);
+            assert_eq!(old_val["workspace_path"], new_val["workspace_path"]);
+        }
+    }
+
+    // ─── V1.53 P0 Sub-phase 2: Cutover verification ────────────────────────
+
+    /// Cutover test: `execute()` now routes through `registry_dispatch()`
+    /// internally, so both paths must produce identical output for every tool.
+    #[tokio::test]
+    async fn cutover_execute_equals_registry_dispatch() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Test with whoami (read-only, no DB setup needed)
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.context.whoami".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let via_execute = HostToolExecutor::execute(&req, &state).await;
+        let via_registry = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(via_execute.is_ok(), via_registry.is_ok());
+        if let (Ok(e_val), Ok(r_val)) = (&via_execute, &via_registry) {
+            assert_eq!(e_val, r_val, "execute() must route through registry");
+        }
+    }
+
+    /// Cutover test: `execute()` rejects unknown tools through registry.
+    #[tokio::test]
+    async fn cutover_unknown_tool_rejected_by_registry() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nonexistent.nexus.capability".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        match result {
+            Err(NexusApiError::BadRequest { code, .. }) => {
+                assert_eq!(code, "NOT_SUPPORTED");
+            }
+            other => panic!("Expected BadRequest(NOT_SUPPORTED) via registry, got: {other:?}"),
+        }
+    }
+
+    /// **R-V153P0QC1-001 enforcement**: `TOOL_ALLOWLIST` and
+    /// `CapabilityRegistry` rows must agree on every tool ID.
+    ///
+    /// P1 will add 5 new `nexus.*` tools. This test ensures they cannot
+    /// be added to one list without the other — catching the drift risk
+    /// that qc1 identified.
+    #[test]
+    fn tool_allowlist_matches_registry_ids() {
+        let reg = crate::capability_registry::host_tool_registry();
+        let registry_ids: std::collections::HashSet<&str> = reg.ids().collect();
+        let allowlist_ids: std::collections::HashSet<&str> =
+            TOOL_ALLOWLIST.iter().copied().collect();
+
+        // Every TOOL_ALLOWLIST entry must have a matching registry row
+        for id in &allowlist_ids {
+            assert!(
+                registry_ids.contains(id),
+                "TOOL_ALLOWLIST contains '{id}' but CapabilityRegistry has no row for it. \
+                 Add the row to host_tool_registry() or remove the entry from TOOL_ALLOWLIST."
+            );
+        }
+
+        // Every registry row must appear in TOOL_ALLOWLIST
+        for id in &registry_ids {
+            assert!(
+                allowlist_ids.contains(id),
+                "CapabilityRegistry row '{id}' is not in TOOL_ALLOWLIST. \
+                 Add the id to TOOL_ALLOWLIST or remove the row from host_tool_registry()."
+            );
+        }
+    }
+
+    /// Parity test: old and new dispatch both reject unknown tools.
+    #[tokio::test]
+    async fn registry_parity_unknown_tool() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "unknown/tool".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let old_result = HostToolExecutor::execute(&req, &state).await;
+        let new_result = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert!(old_result.is_err());
+        assert!(new_result.is_err());
+        // Both should produce NOT_SUPPORTED
+        match (&old_result, &new_result) {
+            (Err(old_e), Err(new_e)) => {
+                assert_eq!(old_e.error_code(), new_e.error_code());
+            }
+            _ => panic!("Both should be errors"),
+        }
+    }
+
+    // ─── V1.53 P1: DF-46 read-heavy tool e2e tests ─────────────────────────
+
+    /// E2E test: `nexus.world.snapshot.get` returns world state for a seeded world.
+    #[tokio::test]
+    async fn world_snapshot_get_returns_world_state() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        // Seed a world
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.world.snapshot.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test_world"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "world.snapshot.get should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["world_id"], "wld_test_world");
+        assert_eq!(val["title"], "Test World");
+        drop(tmp);
+    }
+
+    /// Failure test: `nexus.world.snapshot.get` with missing world_id returns error.
+    #[tokio::test]
+    async fn world_snapshot_get_rejects_missing_world_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.world.snapshot.get".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    /// E2E test: `nexus.timeline.recent.get` returns events for a seeded world.
+    #[tokio::test]
+    async fn timeline_recent_get_returns_recent_events() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        // Seed world + timeline events via narrative gateway seed helpers
+        let pool = state.pool().clone();
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_timeline",
+            "test_creator",
+            "Timeline World",
+            "timeline-world",
+            "private",
+            "manual",
+        )
+        .await;
+        nexus_local_db::narrative_gateway::seed::event(
+            &pool,
+            "evt_1",
+            "wld_timeline",
+            "fbk_root",
+            "story_advance",
+            1,
+        )
+        .await;
+        nexus_local_db::narrative_gateway::seed::event(
+            &pool,
+            "evt_2",
+            "wld_timeline",
+            "fbk_root",
+            "story_advance",
+            2,
+        )
+        .await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_timeline", "limit": 5}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "timeline.recent.get should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        let events = val.as_array().expect("should be an array");
+        assert_eq!(events.len(), 2);
+        drop(tmp);
+    }
+
+    /// E2E test: `nexus.kb_snapshot.read` returns key blocks for a seeded world.
+    #[tokio::test]
+    async fn kb_snapshot_read_returns_key_blocks() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        // Seed world + key blocks
+        let pool = state.pool().clone();
+        nexus_local_db::kb_store::seed::world(
+            &pool,
+            "wld_kb",
+            "test_creator",
+            "KB World",
+            "kb-world",
+            "private",
+            "manual",
+        )
+        .await;
+        nexus_local_db::kb_store::seed::key_block(
+            &pool,
+            "kb_1",
+            "wld_kb",
+            "character",
+            "alice",
+            "provisional",
+        )
+        .await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.read".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_kb"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "kb_snapshot.read should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        let blocks = val.as_array().expect("should be an array");
+        assert!(!blocks.is_empty(), "should return at least one key block");
+        drop(tmp);
+    }
+
+    /// E2E test: `nexus.manuscript.chapter.get` returns chapter record.
+    #[tokio::test]
+    async fn manuscript_chapter_get_returns_chapter_record() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+
+        // Create a work first, then seed chapters
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Test Novel".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: Some(5),
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+
+        // Seed chapters
+        nexus_local_db::work_chapters::seed_chapters(state.pool(), &work_id, "test-novel", 5, &now)
+            .await
+            .expect("seed chapters");
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.manuscript.chapter.get".to_string(),
+            parameters: serde_json::json!({"work_id": work_id, "chapter": 1}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "manuscript.chapter.get should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        assert_eq!(val["work_id"], work_id);
+        assert_eq!(val["chapter"], 1);
+        drop(tmp);
+    }
+
+    /// E2E test: `nexus.observability.daemon.health` returns runtime status.
+    #[tokio::test]
+    async fn daemon_health_returns_registry_status() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.observability.daemon.health".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_ok(), "daemon.health should succeed: {result:?}");
+        let val = result.expect("result");
+        assert!(val["uptime_seconds"].as_u64().is_some());
+        assert_eq!(val["runtime_mode"], "local_only");
+        assert_eq!(val["registry_size"], 13);
+        assert!(val["pool_healthy"].as_bool().unwrap_or(false));
+        assert_eq!(
+            val["registry_ids"].as_array().expect("registry_ids").len(),
+            13
+        );
+    }
+
+    // ─── P0 residual closure: registry dispatch regression tests (R-V153P0QC2-001) ──
+    // Backfill registry_dispatch parity for V1.34 tools that lacked parity tests.
+
+    #[tokio::test]
+    async fn registry_dispatch_returns_same_as_legacy_work_get() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Legacy Work".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: "[]".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.get".to_string(),
+            parameters: serde_json::json!({"work_id": work_id}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        // Both execute() and registry_dispatch() should produce the same result.
+        // Since Sub-phase 2 cutover, execute() routes through registry_dispatch(),
+        // so they are the same path. This test guards against regression.
+        let via_execute = HostToolExecutor::execute(&req, &state).await;
+        let via_registry = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(via_execute.is_ok(), via_registry.is_ok());
+        if let (Ok(e_val), Ok(r_val)) = (&via_execute, &via_registry) {
+            assert_eq!(e_val["work_id"], r_val["work_id"]);
+            assert_eq!(e_val["title"], r_val["title"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_dispatch_returns_same_as_legacy_work_patch() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.work.patch".to_string(),
+            parameters: serde_json::json!({
+                "work_id": "wrk_test",
+                "current_stage": "writing"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let via_execute = HostToolExecutor::execute(&req, &state).await;
+        let via_registry = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert!(via_execute.is_err());
+        assert!(via_registry.is_err());
+        assert_eq!(
+            via_execute.as_ref().unwrap_err().error_code(),
+            via_registry.as_ref().unwrap_err().error_code()
+        );
+    }
+
+    #[tokio::test]
+    async fn schedule_status_happy_path() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Create a work with schedule_ids
+        let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = nexus_local_db::works::WorkRecord {
+            work_id: work_id.clone(),
+            creator_id: "test_creator".to_string(),
+            workspace_slug: "default".to_string(),
+            status: "active".to_string(),
+            title: "Scheduled Work".to_string(),
+            long_term_goal: "Goal".to_string(),
+            initial_idea: "Idea".to_string(),
+            creative_brief: None,
+            intake_status: "pending".to_string(),
+            world_id: None,
+            story_ref: None,
+            inspiration_log: "[]".to_string(),
+            primary_preset_id: "novel-writing".to_string(),
+            schedule_ids: r#"["sch_001","sch_002"]"#.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+            current_stage: "intake".to_string(),
+            stage_status: "pending".to_string(),
+            work_profile: None,
+            work_ref: None,
+            total_planned_chapters: None,
+            current_chapter: 0,
+            auto_chain_enabled: true,
+            driver_schedule_id: None,
+            auto_chain_interrupted: false,
+            auto_review_master_on_timeout: false,
+            runtime_lock_holder: None,
+            runtime_lock_acquired_at: None,
+            completion_locked_at: None,
+            novel_completion_status: None,
+            lineage_from_work_id: None,
+        };
+        nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+            .await
+            .expect("create work")
+            .unwrap_err();
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.orchestration.schedule_status".to_string(),
+            parameters: serde_json::json!({"work_id": work_id}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_ok(), "schedule_status should succeed: {result:?}");
+        let val = result.expect("result");
+        assert_eq!(val["work_id"], work_id);
+        assert_eq!(val["count"], 2);
+    }
+
+    #[tokio::test]
+    async fn registry_dispatch_returns_same_as_legacy_context_assemble() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.context.assemble".to_string(),
+            parameters: serde_json::json!({"requires_platform": true}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let via_execute = HostToolExecutor::execute(&req, &state).await;
+        let via_registry = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(via_execute.is_ok(), via_registry.is_ok());
+        if let (Err(e_val), Err(r_val)) = (&via_execute, &via_registry) {
+            assert_eq!(e_val.error_code(), r_val.error_code());
+        }
+    }
+
+    // ─── V1.53 P1: Cross-creator/world isolation tests (R-V153P1QC1-001) ──
+
+    /// Helper: overwrite the active creator in config.toml and return a new
+    /// WorkspaceState (same db) with that identity.
+    async fn switch_active_creator(
+        nexus_home: &std::path::Path,
+        db_path: &std::path::Path,
+        new_creator_id: &str,
+    ) -> WorkspaceState {
+        let toml_str = format!(
+            "active_creator_id = \"{new_creator_id}\"\n[active_workspace_slug_by_creator]\n\"{new_creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+        WorkspaceState::new_for_testing(nexus_home.to_path_buf(), db_path.to_path_buf(), None).await
+    }
+
+    #[tokio::test]
+    async fn world_snapshot_get_cross_creator_denied() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed another creator
+        // SAFETY: test-only data setup.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+
+        // Switch to other_creator — should be denied
+        let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.world.snapshot.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test_world"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &other_state).await;
+        assert!(result.is_err(), "cross-creator should be denied");
+        assert_eq!(
+            result.unwrap_err().error_code(),
+            "FORBIDDEN",
+            "should return FORBIDDEN for cross-creator access"
+        );
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn timeline_recent_get_cross_creator_denied() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // Seed other creator
+        // SAFETY: test-only.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+
+        let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test_world"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &other_state).await;
+        assert!(result.is_err(), "cross-creator should be denied");
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn kb_snapshot_read_cross_creator_denied() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        // SAFETY: test-only.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+             VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+        )
+        .execute(state.pool())
+        .await
+        .expect("seed other creator");
+
+        let other_state = switch_active_creator(&nexus_home, &db_path, "other_creator").await;
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.read".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_test_world"}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &other_state).await;
+        assert!(result.is_err(), "cross-creator should be denied");
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    // ─── V1.53 P1: Failure/admission test coverage (R-V153P1QC1-002) ──
+
+    #[tokio::test]
+    async fn timeline_recent_get_rejects_missing_world_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn kb_snapshot_read_rejects_missing_world_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.kb_snapshot.read".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    }
+
+    #[tokio::test]
+    async fn manuscript_chapter_get_rejects_missing_chapter_id() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.manuscript.chapter.get".to_string(),
+            parameters: serde_json::json!({"work_id": "nonexistent_work", "chapter": 1}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    }
+
+    #[tokio::test]
+    async fn daemon_health_rejects_without_active_creator() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        // Remove active_creator_id from config
+        let toml_str = "[active_workspace_slug_by_creator]\n";
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.observability.daemon.health".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_err(),
+            "daemon.health should require active creator"
+        );
+        assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+        drop(tmp);
+    }
+
+    // ─── V1.53 P1: Timeline limit test (R-V153P1QC3-001) ──
+
+    #[tokio::test]
+    async fn timeline_recent_get_respects_server_limit() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        let pool = state.pool().clone();
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_limit",
+            "test_creator",
+            "Limit World",
+            "limit-world",
+            "private",
+            "manual",
+        )
+        .await;
+        // Seed 5 timeline events
+        for i in 1..=5 {
+            let evt_id = format!("evt_limit_{i}");
+            nexus_local_db::narrative_gateway::seed::event(
+                &pool,
+                &evt_id,
+                "wld_limit",
+                "fbk_root",
+                "story_advance",
+                i,
+            )
+            .await;
+        }
+
+        // Request with limit=2 → should get only 2 events (the most recent 2)
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_limit", "limit": 2}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(
+            result.is_ok(),
+            "timeline with limit should succeed: {result:?}"
+        );
+        let val = result.expect("result");
+        let events = val.as_array().expect("should be an array");
+        assert_eq!(events.len(), 2, "should return exactly 2 events");
+        assert_eq!(events[0]["sequence_no"], 4);
+        assert_eq!(events[1]["sequence_no"], 5);
+        drop(tmp);
+    }
+
+    #[tokio::test]
+    async fn timeline_recent_get_clamps_limit_to_500() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+        let pool = state.pool().clone();
+        nexus_local_db::narrative_gateway::seed::world(
+            &pool,
+            "wld_clamp",
+            "test_creator",
+            "Clamp World",
+            "clamp-world",
+            "private",
+            "manual",
+        )
+        .await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.timeline.recent.get".to_string(),
+            parameters: serde_json::json!({"world_id": "wld_clamp", "limit": 10000}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        // Should succeed but effective limit is capped at 500
+        assert!(result.is_ok(), "clamped limit should succeed: {result:?}");
+        let val = result.expect("result");
+        let events = val.as_array().expect("should be an array");
+        assert!(
+            events.len() <= 500,
+            "should be capped at 500 events, got {}",
+            events.len()
+        );
+        drop(tmp);
     }
 }

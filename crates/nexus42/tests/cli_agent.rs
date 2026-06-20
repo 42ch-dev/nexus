@@ -154,8 +154,7 @@ fn acp_command_group_shows_subcommands() {
         .stdout(predicate::str::contains("doctor"))
         .stdout(predicate::str::contains("probe"))
         .stdout(predicate::str::contains("registry"))
-        .stdout(predicate::str::contains("agent"))
-        .stdout(predicate::str::contains("skills"));
+        .stdout(predicate::str::contains("agent"));
 }
 
 /// Test invalid format argument produces error.
@@ -217,33 +216,6 @@ fn acp_commands_handle_missing_cache() {
         .env("HOME", tmp.path())
         .output()
         .expect("Failed to execute command");
-}
-
-/// Test `nexus42 acp skills export --help` shows usage.
-#[test]
-fn acp_skills_export_shows_help() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp")
-        .arg("skills")
-        .arg("export")
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("export"));
-}
-
-/// Test `nexus42 acp skills verify` runs successfully.
-#[test]
-fn acp_skills_verify() {
-    Command::cargo_bin("nexus42")
-        .unwrap()
-        .arg("acp")
-        .arg("skills")
-        .arg("verify")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("verified"));
 }
 
 /// Test `nexus42 acp agent use` with a valid agent ref succeeds.

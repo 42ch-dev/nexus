@@ -194,15 +194,9 @@ Skills packages let ecosystems without ACP call Nexus operations through their n
 - Skills are not a replacement for Registry + ACP handshake for ACP-capable agents
 - Skills must not claim ACP Agent status for Nexus daemon
 
-### 5.4 Export artifacts
+### 5.4 Export artifacts (retired V1.53)
 
-`nexus42 skills export` should emit:
-
-- manifest
-- tool definitions
-- docs for required user confirmations
-
-`nexus42 skills verify` checks schema + version consistency.
+V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static committed skills model and runtime sync/link behavior, but this Master no longer defines an export/verify command contract.
 
 ---
 

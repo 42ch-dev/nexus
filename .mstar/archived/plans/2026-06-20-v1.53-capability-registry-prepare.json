@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-06-20-v1.53-capability-registry-prepare",
+  "title": "P-1 — V1.53 compass + capability registry Draft overlay + DF-50 Cancelled + skills-export spec retirement",
+  "status": "Done",
+  "done_at": "2026-06-20T00:00:00Z",
+  "owner": "@project-manager",
+  "agents": [
+    "@project-manager",
+    "@architect"
+  ],
+  "task_category": "docs",
+  "working_branch": "feature/v1.53-capability-registry-prepare",
+  "merge_target": "iteration/v1.53",
+  "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
+  "created_at": "2026-06-20T00:00:00Z"
+}

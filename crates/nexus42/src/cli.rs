@@ -74,7 +74,7 @@ pub enum Commands {
         command: DaemonCommand,
     },
 
-    /// ACP capability plane (agents, registry, skills, connectivity)
+    /// ACP capability plane (agents, registry, connectivity)
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
