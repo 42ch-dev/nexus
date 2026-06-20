@@ -625,7 +625,11 @@ pub async fn reconcile_from_filesystem(
         .fetch_optional(pool)
         .await?
         .flatten();
-        if !crate::is_novel_profile(profile.as_deref()) {
+        // SAFETY: game-bible profile gate (V1.54 P1).
+        // Block reconcile for explicitly non-novel profiles (game_bible, essay).
+        // Legacy Works (work_profile IS NULL) are treated as novel for backwards
+        // compatibility — they were created before the profile system existed.
+        if profile.as_deref().is_some() && !crate::is_novel_profile(profile.as_deref()) {
             return Err(LocalDbError::Io(format!(
                 "chapter reconciliation is not supported for work_profile '{}' (work_id: {work_id}); \
                  only novel Works have chapter files under Stories/",
