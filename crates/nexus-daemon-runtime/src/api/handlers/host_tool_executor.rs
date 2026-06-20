@@ -43,6 +43,10 @@ use std::path::Path;
 // ─── V1.34 Tool IDs (spec §12.2) ──────────────────────────────────────────
 
 /// Allowlist of all V1.34 tool IDs.
+///
+/// V1.53 P0 Sub-phase 2: This allowlist is still used by `admission_pipeline()`
+/// (which `registry_dispatch()` calls). It will remain as the runtime allowlist;
+/// the registry's `CapabilityRow` records the admission gates declaratively.
 const TOOL_ALLOWLIST: &[&str] = &[
     // nexus.* tools (V1.34)
     "nexus.context.whoami",
@@ -285,46 +289,18 @@ impl HostToolExecutor {
     /// 3. Audit logging (gate 5) — written on **every** invocation path
     ///    (success + all denials/failures), per spec §4.3 gate 5 and §12.6.
     ///
+    /// V1.53 P0 Sub-phase 2: Dispatch is now routed through `CapabilityRegistry`
+    /// instead of the old `dispatch_tool()` match table. The old table is retained
+    /// but unused during Sub-phase 2, and will be removed in Sub-phase 3.
+    ///
     /// This is the single dispatch table (spec §7.1).
     pub async fn execute(
         req: &ToolExecuteRequest,
         state: &WorkspaceState,
     ) -> Result<serde_json::Value, NexusApiError> {
-        tracing::info!(
-            tool_name = %req.tool_name,
-            caller_kind = ?req.caller_kind,
-            "HostToolExecutor: executing tool"
-        );
-
-        // Gates 1–4 (no internal audit; we audit centrally below)
-        let admission_result = admission_pipeline(req, state);
-
-        let (creator_id, _workspace_slug) = match admission_result {
-            Ok(pair) => pair,
-            Err(e) => {
-                // Audit gate 1-4 denials
-                let error_code = e.error_code();
-                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
-                return Err(e);
-            }
-        };
-
-        // Dispatch
-        let dispatch_result = dispatch_tool(req, state, &creator_id).await;
-
-        match &dispatch_result {
-            Ok(_) => {
-                // Audit success
-                let _ = audit_tool_execution(req, "success", None, state).await;
-            }
-            Err(e) => {
-                // Audit handler failures
-                let error_code = e.error_code();
-                let _ = audit_tool_execution(req, "denied", Some(error_code), state).await;
-            }
-        }
-
-        dispatch_result
+        // Sub-phase 2: all dispatch routes through registry.
+        // Sub-phase 3 will remove the old dispatch_tool() entirely.
+        Self::registry_dispatch(req, state).await
     }
 
     /// Dispatch a worker upcall `agent_tool_request` through the unified registry.
@@ -513,7 +489,10 @@ impl nexus_orchestration::capability::DaemonToolDispatch for DaemonToolDispatchA
 
 /// Dispatch to the correct handler based on `tool_name`.
 ///
-/// This is the single dispatch table — no duplicate match tables elsewhere.
+/// V1.53 P0 Sub-phase 2: This function is no longer the primary dispatch path.
+/// All dispatch now routes through `CapabilityRegistry`. This function will be
+/// removed in Sub-phase 3.
+#[allow(dead_code)]
 async fn dispatch_tool(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
@@ -1591,6 +1570,54 @@ mod tests {
             assert_eq!(old_val["creator_id"], new_val["creator_id"]);
             assert_eq!(old_val["workspace_slug"], new_val["workspace_slug"]);
             assert_eq!(old_val["workspace_path"], new_val["workspace_path"]);
+        }
+    }
+
+    // ─── V1.53 P0 Sub-phase 2: Cutover verification ────────────────────────
+
+    /// Cutover test: `execute()` now routes through `registry_dispatch()`
+    /// internally, so both paths must produce identical output for every tool.
+    #[tokio::test]
+    async fn cutover_execute_equals_registry_dispatch() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        // Test with whoami (read-only, no DB setup needed)
+        let req = ToolExecuteRequest {
+            tool_name: "nexus.context.whoami".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let via_execute = HostToolExecutor::execute(&req, &state).await;
+        let via_registry = HostToolExecutor::registry_dispatch(&req, &state).await;
+        assert_eq!(via_execute.is_ok(), via_registry.is_ok());
+        if let (Ok(e_val), Ok(r_val)) = (&via_execute, &via_registry) {
+            assert_eq!(e_val, r_val, "execute() must route through registry");
+        }
+    }
+
+    /// Cutover test: `execute()` rejects unknown tools through registry.
+    #[tokio::test]
+    async fn cutover_unknown_tool_rejected_by_registry() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = ToolExecuteRequest {
+            tool_name: "nonexistent.nexus.capability".to_string(),
+            parameters: serde_json::json!({}),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = HostToolExecutor::execute(&req, &state).await;
+        assert!(result.is_err());
+        match result {
+            Err(NexusApiError::BadRequest { code, .. }) => {
+                assert_eq!(code, "NOT_SUPPORTED");
+            }
+            other => panic!("Expected BadRequest(NOT_SUPPORTED) via registry, got: {other:?}"),
         }
     }
 
