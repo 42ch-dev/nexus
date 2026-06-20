@@ -8,8 +8,6 @@
 //! - `registry inspect` — Show details for a specific agent
 //! - `agent use` — Set default agent for the workspace (persisted to TOML)
 //! - `agent list` — List available agents (alias for registry list)
-//! - `skills export` — Export ACP client capabilities
-//! - `skills verify` — Verify ACP client capabilities
 //!
 //! # Architecture
 //!
@@ -22,9 +20,7 @@
 //!     ├─► Registry(List)    ──► RegistryClient::get_registry()
 //!     ├─► Registry(Inspect) ──► RegistryClient::get_registry() + find_agent()
 //!     ├─► Agent(Use)        ──► write acp-default-agent.toml
-//!     ├─► Agent(List)       ──► RegistryClient::get_registry()
-//!     ├─► Skills(Export)    ──► List client capabilities
-//!     └─► Skills(Verify)    ──► Verify client capabilities
+//!     └─► Agent(List)       ──► RegistryClient::get_registry()
 //! ```
 //!
 pub mod permission;
@@ -98,24 +94,6 @@ pub enum AgentSubcommand {
     },
 }
 
-/// Skills subcommands
-#[derive(Debug, Subcommand)]
-pub enum SkillsCommand {
-    /// Export ACP client capabilities as JSON
-    Export {
-        /// Output format (text or json)
-        #[arg(short = 'o', long = "output", default_value = "json")]
-        output_format: String,
-    },
-
-    /// Verify ACP client capabilities are valid
-    Verify {
-        /// Show detailed information
-        #[arg(long, short)]
-        verbose: bool,
-    },
-}
-
 #[derive(Debug, Subcommand)]
 pub enum AcpCommand {
     /// Show daemon and ACP agent status
@@ -148,12 +126,6 @@ pub enum AcpCommand {
     Agent {
         #[command(subcommand)]
         command: AgentSubcommand,
-    },
-
-    /// ACP skills and capabilities management
-    Skills {
-        #[command(subcommand)]
-        command: SkillsCommand,
     },
 
     /// ACP session persistence management
@@ -218,13 +190,6 @@ pub async fn run(cmd: AcpCommand, config: &CliConfig) -> Result<()> {
                     println!("\nDefault agent: {default}");
                 }
                 result
-            }
-        },
-        AcpCommand::Skills { command } => match command {
-            SkillsCommand::Export { output_format } => cmd_skills_export(&output_format),
-            SkillsCommand::Verify { verbose } => {
-                cmd_skills_verify(verbose);
-                Ok(())
             }
         },
         AcpCommand::Session { command } => session::run(command, config),
@@ -798,96 +763,7 @@ pub(crate) fn default_agent_ref(config: &CliConfig) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
-// ── `acp skills export` ──────────────────────────────────────────────
-
-pub(super) fn cmd_skills_export(output_format: &str) -> Result<()> {
-    let capabilities = client_capabilities();
-
-    if output_format == "json" {
-        let output = serde_json::json!({
-            "capabilities": capabilities.iter().map(|(id, desc, version)| {
-                serde_json::json!({
-                    "id": id,
-                    "description": desc,
-                    "since": version,
-                })
-            }).collect::<Vec<_>>(),
-            "total": capabilities.len(),
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        println!("Available ACP Skills / Capabilities");
-        println!();
-        for (id, desc, version) in &capabilities {
-            println!("  {id} ({version}) — {desc}");
-        }
-        println!();
-        println!("Total: {} capabilities", capabilities.len());
-    }
-
-    Ok(())
-}
-
-// ── `acp skills verify` ──────────────────────────────────────────────
-
-fn cmd_skills_verify(verbose: bool) {
-    let capabilities = client_capabilities();
-
-    println!("Verifying ACP client capabilities...");
-    println!();
-
-    let mut valid = 0;
-    let mut total = 0;
-
-    for (id, desc, version) in &capabilities {
-        total += 1;
-        // All capabilities in V1.0 are considered valid
-        valid += 1;
-        if verbose {
-            println!("  ✓ {id} ({version}) — {desc}");
-        }
-    }
-
-    println!("✓ {valid}/{total} capabilities verified successfully.");
-
-    if verbose {
-        println!();
-        println!("Deferred (V1.1+): terminal.kill, terminal.wait_for_exit, slash_commands, agent_plan, session.modes");
-    }
-}
-
 // ── Shared helpers ──────────────────────────────────────────────────
-
-/// V1.0 client capabilities.
-fn client_capabilities() -> Vec<(&'static str, &'static str, &'static str)> {
-    vec![
-        (
-            "file_system.read",
-            "Client can read text files from workspace",
-            "V1.0",
-        ),
-        (
-            "file_system.write",
-            "Client can write text files to workspace",
-            "V1.0",
-        ),
-        (
-            "terminal.create",
-            "Client can create terminal sessions",
-            "V1.0",
-        ),
-        (
-            "terminal.output",
-            "Client can stream terminal output",
-            "V1.0",
-        ),
-        (
-            "terminal.release",
-            "Client can release terminal resources",
-            "V1.0",
-        ),
-    ]
-}
 
 /// Resolve the launch command from an agent's distribution metadata.
 pub(super) fn resolve_launch_command(agent: &AgentEntry) -> Result<(String, Vec<String>)> {
@@ -1463,28 +1339,6 @@ mod tests {
         };
         let desc = describe_distribution(&agent);
         assert!(desc.starts_with("binary"));
-    }
-
-    #[test]
-    fn skills_export_json_output() {
-        let result = cmd_skills_export("json");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn skills_export_text_output() {
-        let result = cmd_skills_export("text");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn skills_verify_non_verbose() {
-        cmd_skills_verify(false);
-    }
-
-    #[test]
-    fn skills_verify_verbose() {
-        cmd_skills_verify(true);
     }
 
     #[test]
