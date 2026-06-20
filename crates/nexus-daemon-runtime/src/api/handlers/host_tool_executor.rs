@@ -477,11 +477,16 @@ pub struct WorkerToolError {
 /// 1. `dispatch_tool()` → `HostToolExecutor::dispatch_for_schedule()`
 /// 2. `dispatch_for_schedule()` → `HostToolExecutor::execute()`
 /// 3. `execute()` → `HostToolExecutor::registry_dispatch()`
-/// 4. `registry_dispatch()` → `admission_pipeline()` (gates 1–4) → `CapabilityRegistry::dispatch()`
-///    → registered handler
+/// 4. `registry_dispatch()` → `admission_pipeline()` (gates 1–4) → `LazyLock<CapabilityRegistry>::dispatch()`
+///    → registered handler (via `&'static [AdmissionGate]`)
 ///
 /// Every step passes through the same admission pipeline and registry.
 /// There is no alternate execution path that bypasses gating or audit.
+///
+/// **R-V153P0-002 (V1.54 closure):** This doc comment resolves the
+/// self-reported residual requesting explicit documentation of the
+/// delegation chain to prevent future reviewers from mis-flagging
+/// this adapter as a security bypass.
 ///
 /// Holds a snapshot of [`WorkspaceState`] captured at construction time.
 /// This is safe because the daemon's workspace state is long-lived and
@@ -1370,6 +1375,14 @@ async fn execute_manuscript_chapter_get(
 }
 
 /// `nexus.observability.daemon.health` — agent-visible daemon health status.
+///
+/// **R-V153P1QC2-003 (V1.54 closure):** The `registry_ids` field exposes all
+/// tool IDs to authorized callers. This is acceptable for daemon-local
+/// observability (V1.53–V1.54) because the handler requires active creator
+/// and passes the Allowlist + PermissionPolicy admission gates. When
+/// agent-facing observability is exposed beyond daemon-local scope
+/// (V1.55+), an additional audit-level policy gate should be added and
+/// `registry_ids` may need to be stripped for low-trust callers.
 fn execute_daemon_health(
     _req: &ToolExecuteRequest,
     state: &WorkspaceState,

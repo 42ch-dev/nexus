@@ -644,6 +644,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 - `nexus42 acp status|doctor|probe`
 - `nexus42 acp registry list|inspect`
 - `nexus42 acp agent use|list`
+- *Omitted:* `nexus42 acp skills export|verify` — intentionally removed in V1.53 (DF-50 Cancelled; pre-1.0 OSS breaking-change removal).
 
 > **V1.53 intentional breaking-change removal** (pre-1.0 OSS, see `.mstar/archived/shipped-features-tracker.md` §1 row 83, DF-50 Cancelled): `nexus42 acp skills export|verify` was removed in V1.53 P-c (`2026-06-22-v1.53-skills-cli-cleanup`) because the runtime export command was redundant with the static committed `embedded-skills/` model (see §13.2). The corresponding spec `skills-export-compatibility.md` was retired to `archived/` in V1.53 P-1.
 
