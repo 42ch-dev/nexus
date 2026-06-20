@@ -135,6 +135,15 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         set_default,
     } = args;
 
+    // V1.54 P1 fix-wave (C-001): normalize CLI spelling to canonical stored value.
+    // Users may pass "--profile game-bible" (hyphen) or "--profile game_bible" (underscore).
+    // The canonical stored value is "game_bible" (matches CHECK constraint, preset gates,
+    // and profile helpers). Other profiles pass through unchanged.
+    let profile = match profile.as_str() {
+        "game-bible" => "game_bible".to_string(),
+        other => other.to_string(),
+    };
+
     let client = crate::api::DaemonClient::from_config(config);
 
     // Validate --force-gates requires --reason
@@ -293,6 +302,11 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
             "title": work_title,
             "total_planned_chapters": 1,
             "world_id": world_id,
+            // V1.54 P1 fix-wave (C-002): game-bible-init preset uses
+            // {{preset.input.creator_id}} and {{preset.input.initial_idea}};
+            // bootstrap must seed both so the capability receives them.
+            "creator_id": resolved_creator_id,
+            "initial_idea": idea,
         });
         let init_request = AddScheduleRequest {
             creator_id: resolved_creator_id.clone(),
@@ -370,7 +384,10 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
     // chaining via --chain-novel-writing which either schedules
     // directly (skip-intake) or documents the follow-up command.
     let mut novel_schedule_id: Option<String> = None;
-    if chain_novel_writing && skip_intake {
+    // V1.54 P1 fix-wave (W-001): only novel profiles chain into production
+    // scheduling. Game-bible and essay have no production preset yet;
+    // auto-chaining from a non-novel profile violates "no auto-chain" spec.
+    if chain_novel_writing && skip_intake && profile == "novel" {
         // Intake skipped → schedule novel-writing directly.
         // V1.38 P0 (T4): include chapter input for multi-chapter selection.
         // Default to chapter 1 for the bootstrap path (first run).
@@ -649,10 +666,77 @@ mod tests {
         match cli.command {
             BootstrapCmd::Bootstrap(args) => {
                 assert_eq!(args.profile, "game_bible");
-                assert!(args.init_preset.is_none(),
-                    "init_preset is not explicitly set; derived to game-bible-init in handler");
+                assert!(
+                    args.init_preset.is_none(),
+                    "init_preset is not explicitly set; derived to game-bible-init in handler"
+                );
                 assert!(!args.skip_intake);
                 assert!(!args.no_auto_chain);
+            }
+        }
+    }
+
+    // ── V1.54 P1 fix-wave regression tests ──────────────────────────────
+
+    /// C-001: CLI accepts `--profile game-bible` (hyphen spelling).
+    /// The normalization to canonical `game_bible` (underscore) happens in
+    /// `handle_bootstrap`; this test proves the CLI parser does not reject
+    /// the hyphenated form.
+    #[test]
+    fn bootstrap_profile_game_bible_hyphen_parses() {
+        let cli = BootstrapCli::try_parse_from([
+            "nexus42",
+            "bootstrap",
+            "--idea",
+            "A tabletop RPG with alien civilizations",
+            "--profile",
+            "game-bible",
+        ])
+        .expect("bootstrap --profile game-bible (hyphen) should parse");
+        match cli.command {
+            BootstrapCmd::Bootstrap(args) => {
+                assert_eq!(
+                    args.profile, "game-bible",
+                    "CLI accepts hyphen form; normalization happens in handler"
+                );
+            }
+        }
+    }
+
+    /// W-001: verify that the production-scheduling gate excludes non-novel
+    /// profiles. The gate `profile == "novel"` prevents game-bible and essay
+    /// from auto-chaining into a production preset when `--skip-intake` is set.
+    #[test]
+    fn bootstrap_game_bible_skip_intake_no_production_schedule() {
+        // This test validates the profile gate logic: for game-bible,
+        // `--skip-intake --chain-novel-writing` (default true) should NOT
+        // trigger production scheduling because `profile == "novel"` is false.
+        // The gate is: `if chain_novel_writing && skip_intake && profile == "novel"`.
+        //
+        // We verify the CLI side: game-bible profile + skip_intake parses,
+        // and chain_novel_writing defaults to true but the handler gate
+        // prevents scheduling.
+        let cli = BootstrapCli::try_parse_from([
+            "nexus42",
+            "bootstrap",
+            "--idea",
+            "A game design document",
+            "--profile",
+            "game-bible",
+            "--skip-intake",
+        ])
+        .expect("bootstrap --profile game-bible --skip-intake should parse");
+        match cli.command {
+            BootstrapCmd::Bootstrap(args) => {
+                assert_eq!(args.profile, "game-bible");
+                assert!(args.skip_intake);
+                assert!(
+                    args.chain_novel_writing,
+                    "chain_novel_writing defaults to true"
+                );
+                // Gate: handler only schedules production for novel profile.
+                // This test proves CLI arg setup is correct; handler behavior
+                // is verified via e2e test (W-004).
             }
         }
     }
