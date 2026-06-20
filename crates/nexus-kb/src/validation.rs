@@ -234,10 +234,7 @@ pub fn validate_body(
 }
 
 /// Validate novel-profile `body` semantics (V1.40 P1).
-fn validate_novel_body(
-    block_type: BlockType,
-    body: Option<&KeyBlockBody>,
-) -> Result<(), KbError> {
+fn validate_novel_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> Result<(), KbError> {
     let b = body.ok_or_else(|| {
         KbError::Validation(ValidationError {
             kind: ValidationKind::MissingBody,
@@ -330,9 +327,8 @@ fn validate_game_bible_body(
         return Err(KbError::Validation(ValidationError {
             kind: ValidationKind::InvalidNovelCategory,
             field: Some("body.attributes.novel_category".to_string()),
-            message:
-                "body.attributes.novel_category is not valid for game-bible-profile KeyBlocks"
-                    .to_string(),
+            message: "body.attributes.novel_category is not valid for game-bible-profile KeyBlocks"
+                .to_string(),
         }));
     }
 
@@ -615,8 +611,7 @@ mod tests {
     #[test]
     fn game_bible_mode_rejects_novel_category() {
         let body = make_body(Some("character")); // novel_category in game-bible mode
-        let result =
-            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        let result = validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(
@@ -632,8 +627,7 @@ mod tests {
             attributes: Some(serde_json::json!({"traits": ["ancient"]})),
             tags: None,
         };
-        let result =
-            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        let result = validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(
@@ -645,8 +639,7 @@ mod tests {
     #[test]
     fn game_bible_mode_rejects_invalid_game_bible_category() {
         let body = make_game_bible_body(Some("invalid_category"));
-        let result =
-            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        let result = validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(msg.contains("invalid game_bible_category"));
@@ -659,8 +652,7 @@ mod tests {
             attributes: Some(serde_json::json!({"game_bible_category": 42})),
             tags: None,
         };
-        let result =
-            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
+        let result = validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
         assert!(result.is_err());
         let msg = format!("{}", result.unwrap_err());
         assert!(msg.contains("must be a string"));
@@ -670,8 +662,7 @@ mod tests {
 
     #[test]
     fn game_bible_missing_body_returns_structured_kind() {
-        let err =
-            validate_body(BlockType::Species, None, ValidationMode::GameBible).unwrap_err();
+        let err = validate_body(BlockType::Species, None, ValidationMode::GameBible).unwrap_err();
         match err {
             KbError::Validation(ve) => {
                 assert_eq!(ve.kind, ValidationKind::MissingBody);
@@ -688,8 +679,7 @@ mod tests {
             tags: None,
         };
         let err =
-            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible)
-                .unwrap_err();
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible).unwrap_err();
         match err {
             KbError::Validation(ve) => {
                 assert_eq!(ve.kind, ValidationKind::MissingGameBibleCategory);
@@ -706,8 +696,7 @@ mod tests {
     fn game_bible_invalid_category_returns_structured_kind() {
         let body = make_game_bible_body(Some("bad_category"));
         let err =
-            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible)
-                .unwrap_err();
+            validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible).unwrap_err();
         match err {
             KbError::Validation(ve) => {
                 assert_eq!(ve.kind, ValidationKind::InvalidGameBibleCategory);
@@ -733,9 +722,8 @@ mod tests {
 
         for (wire_name, expected) in variants {
             let v = serde_json::Value::String(wire_name.to_string());
-            let bt: BlockType = serde_json::from_value(v).unwrap_or_else(|e| {
-                panic!("failed to deserialize '{wire_name}': {e}")
-            });
+            let bt: BlockType = serde_json::from_value(v)
+                .unwrap_or_else(|e| panic!("failed to deserialize '{wire_name}': {e}"));
             assert_eq!(
                 bt, expected,
                 "wire '{wire_name}' should deserialize to {:?}",
@@ -904,9 +892,6 @@ mod tests {
             default_block_type_for_game_bible_category("economy_tier"),
             Some(BlockType::EconomyTier)
         );
-        assert_eq!(
-            default_block_type_for_game_bible_category("unknown"),
-            None
-        );
+        assert_eq!(default_block_type_for_game_bible_category("unknown"), None);
     }
 }
