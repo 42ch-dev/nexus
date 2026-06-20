@@ -6,7 +6,7 @@ review_range: 71dc6b1d..69594902
 reviewer_index: 1
 focus: architecture/maintainability
 date: 2026-06-20
-verdict: Request Changes
+verdict: Approve with Notes
 ---
 
 # QC #1 Review — V1.53 P0 CapabilityRegistry Unification (architecture/maintainability)
@@ -65,3 +65,56 @@ However, two maintainability issues block approval against P0 acceptance. First,
 **Request Changes**
 
 The cutover itself is clean and build health is good, but P0’s core acceptance is a registry SSOT that P1 can extend without parallel-list drift. The remaining runtime allowlist and the stale, unenforced test-vector metadata undercut that maintainability goal, so this should not be approved until those two medium findings are addressed or explicitly deferred by PM/architect with a tracked residual.
+
+---
+
+## Targeted re-review (fix-wave, commit 4b2b4fdd..a248c32f)
+
+**Date**: 2026-06-20
+**Reviewer**: qc-specialist (Reviewer #1)
+**Verdict**: Approve with Notes
+
+### Fix verification
+
+#### R-V153P0QC1-001 (TOOL_ALLOWLIST / registry SSOT)
+
+The fix-wave kept `TOOL_ALLOWLIST` as the runtime admission list and added a mechanical cross-validation test rather than deriving admission directly from `CapabilityRegistry`. The test is present at `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs:1599` and builds two `HashSet<&str>` values from `reg.ids()` and `TOOL_ALLOWLIST.iter().copied()` (`:1600-1603`). It then checks both directions: every allowlist entry must have a registry row (`:1605-1612`), and every registry row must appear in the allowlist (`:1614-1621`). This is hermetic: it instantiates the in-process registry and static allowlist only, with no network, DB, workspace, or async runtime dependency.
+
+Architecturally, this is not the purest SSOT shape I originally preferred, but it is sufficient for P0 given the documented compatibility tradeoff: removing the allowlist would change the runtime error-code boundary for unknown non-`nexus.*` tools. The added bidirectional equality test would fail if P1 adds a tool to only one side, so the practical drift risk that blocked approval is now mechanically controlled. A future cleanup can still derive the allowlist from registry metadata once the error-code policy is intentionally revisited.
+
+#### R-V153P0QC1-002 (handler_test_vector stale + unenforced)
+
+The stale schedule vector is corrected at `crates/nexus-daemon-runtime/src/capability_registry.rs:372-375`: `test_fn_name` is now `"schedule_status_happy_path"`, which exists in `crates/nexus-daemon-runtime/tests/agent_tool_api.rs:282`. The new `ACCEPTED_TEST_FN_NAMES` const appears at `capability_registry.rs:518-527` and contains eight names. I verified all eight correspond to actual test functions: seven in `src/api/handlers/host_tool_executor.rs` and `schedule_status_happy_path` in the integration test file.
+
+The enforcement is mechanical, not just prose. `all_test_fn_names_accepted()` walks every registry row and fails if a row's `handler_test_vector.test_fn_name` is absent from `ACCEPTED_TEST_FN_NAMES` (`capability_registry.rs:530-540`). `all_accepted_test_fn_names_referenced()` builds the set of names referenced by registry rows and fails if the accepted list accumulates dead entries (`:543-562`). For P1’s five additional rows, this static list remains sustainable: the author must add a real test name and reference it from at least one row. It may become mildly noisy if the registry grows substantially, but at current/P1 scale it is a clear, low-complexity guard.
+
+### Verification evidence
+
+- Alignment: `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus`; `git branch --show-current` → `feature/v1.53-capability-registry-unification`.
+- Fix wave: `git log --oneline 4b2b4fdd..a248c32f` → `a248c32f fix(v1.53-p0-fixwave): qc1 mediums — registry-as-SSOT + test-vector enforcement`; `git diff --stat 4b2b4fdd..a248c32f` → 2 files, 85 insertions, 1 deletion.
+- The assignment’s three targeted `cargo test ... --lib <module> <test>` commands were invalid for Cargo because only one test filter is accepted; reran with the concrete test-name filters.
+- `cargo test -p nexus-daemon-runtime --lib tool_allowlist_matches_registry_ids` → passed, 1 test.
+- `cargo test -p nexus-daemon-runtime --lib all_test_fn_names_accepted` → passed, 1 test.
+- `cargo test -p nexus-daemon-runtime --lib all_accepted_test_fn_names_referenced` → passed, 1 test.
+- `cargo check -p nexus-daemon-runtime` → passed.
+- `cargo clippy -p nexus-daemon-runtime -- -D warnings` → passed.
+- `cargo +nightly fmt --all --check` → passed.
+- `cargo test -p nexus-daemon-runtime` → passed: 203 lib tests plus integration/doc tests passed. Cargo emitted non-failing test-target warnings for pre-existing test code, but no failures.
+
+### New findings (if any)
+
+#### Medium severity
+(none)
+
+#### Low severity
+(none)
+
+### Architectural judgment
+
+P0 is now ready to proceed from the architecture/maintainability perspective. The fix-wave converts both prior medium findings into executable drift guards, preserving current runtime behavior while making P1 additive work fail fast if registry metadata, admission allowlisting, or handler test-vector names diverge. The remaining architectural preference—deriving admission directly from the registry—is a future simplification opportunity, not a P0 blocker.
+
+### Verdict
+
+**Approve with Notes**
+
+Both prior qc1 medium findings are resolved by passing, mechanical enforcement tests; the notes are limited to future cleanup preferences, with no new blocking findings.
