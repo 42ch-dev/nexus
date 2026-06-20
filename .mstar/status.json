@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T00:00:00Z",
+  "updated_at": "2026-06-20T18:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.54-compass-and-plan-stubs",
@@ -16,14 +16,17 @@
     {
       "plan_id": "2026-06-22-v1.54-df46-write-tools",
       "title": "V1.54 P0 — DF-46 Full Spectrum Write Tools & V1.53 Residual Convergence",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "effort": "L",
       "working_branch": "feature/v1.54-df46-write-tools",
       "merge_target": "iteration/v1.54",
       "type": "implement",
       "created": "2026-06-22",
-      "qc_status": "pending"
+      "qc_status": "consolidated-approve",
+      "qa_status": "Pass",
+      "merge_commit": "88154592",
+      "done_at": "2026-06-20"
     },
     {
       "plan_id": "2026-06-22-v1.54-game-bible-scaffold",
@@ -35,7 +38,8 @@
       "merge_target": "iteration/v1.54",
       "type": "implement",
       "created": "2026-06-22",
-      "qc_status": "pending"
+      "qc_status": "pending-revalidation-final",
+      "qa_status": "pending"
     },
     {
       "plan_id": "2026-06-22-v1.54-spec-hygiene-closeout",
@@ -89,6 +93,35 @@
     }
   },
   "residual_findings": {
+    "2026-06-22-v1.54-game-bible-scaffold": [
+      {
+        "id": "R-V154P1-W001",
+        "title": "game_bible.project_scaffold not atomic — FS writes + DB PATCH not wrapped in transaction (ScaffoldTransaction deferred to V1.55+)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) W-001",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/game_bible_scaffold.rs:188-264 (FS writes + DB PATCH separate)",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.55+",
+        "target_date": "V1.55+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.54-game-bible-scaffold][R-V154P1-W001]",
+        "note": "Deferral note added at game_bible_scaffold.rs:262. novel.project_scaffold uses ScaffoldTransaction pattern (novel_scaffold.rs:763-830) — adopt same for game-bible in V1.55+.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V154P1-S002",
+        "title": "Profile gate paths (is_work_completed, reconcile_from_filesystem) lack tracing::warn! / audit observability",
+        "severity": "low",
+        "source": "qc3 S-002",
+        "scope": "crates/nexus-local-db/src/work_chapters.rs:1187-1211, 606-639",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.55+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.54-game-bible-scaffold][R-V154P1-S002]",
+        "note": "Minor observability improvement; not blocking.",
+        "lifecycle": "deferred"
+      }
+    ],
     "2026-06-13-v1.45-hygiene-and-closeout": [
       {
         "id": "R-V145B3-001",
