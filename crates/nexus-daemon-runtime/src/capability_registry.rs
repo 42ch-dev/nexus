@@ -39,7 +39,9 @@ pub type RegistryHandlerFn = for<'a> fn(
     &'a ToolExecuteRequest,
     &'a WorkspaceState,
     &'a str,
-) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>>;
+) -> Pin<
+    Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>,
+>;
 
 // ─── Field types ───────────────────────────────────────────────────────────
 
@@ -174,7 +176,11 @@ impl CapabilityRegistry {
     /// Panics if a row with the same `id` is already registered
     /// (duplicate capability ids are a programmer error).
     pub fn register(&mut self, row: CapabilityRow) {
-        assert!(!self.rows.contains_key(row.id), "duplicate capability id in registry: {}", row.id);
+        assert!(
+            !self.rows.contains_key(row.id),
+            "duplicate capability id in registry: {}",
+            row.id
+        );
         self.rows.insert(row.id, row);
     }
 
