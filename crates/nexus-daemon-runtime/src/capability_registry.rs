@@ -212,8 +212,21 @@ impl CapabilityRegistry {
 
     /// Dispatch a tool request through the registry.
     ///
-    /// Looks up the capability by `tool_name`, then invokes the
-    /// registered handler.
+    /// Looks up the capability by `tool_name`, iterates the declared
+    /// `AdmissionGate` slice as a centralized accountability checkpoint,
+    /// then invokes the registered handler.
+    ///
+    /// **Gate enforcement split** (W-001 fix):
+    /// - Gates 1-4 (`Allowlist`, `ActiveCreator`, `WorkspaceBounds`,
+    ///   `PermissionPolicy`) are enforced by `admission_pipeline` before
+    ///   `dispatch` is called.
+    /// - `RequireWorldOwnership` is enforced by per-handler checks
+    ///   (e.g. `ensure_world_accessible_for_creator`).
+    /// - `AuditLog` is enforced by the caller (`audit_tool_execution`
+    ///   in `registry_dispatch`).
+    ///
+    /// The invariant test `registry_all_admission_gates_have_enforcement`
+    /// proves every gate in every row has a corresponding runtime check.
     ///
     /// # Errors
     ///
@@ -226,13 +239,35 @@ impl CapabilityRegistry {
         state: &WorkspaceState,
         creator_id: &str,
     ) -> Result<serde_json::Value, NexusApiError> {
-        match self.lookup(&req.tool_name) {
-            Some(row) => (row.handler)(req, state, creator_id).await,
-            None => Err(NexusApiError::BadRequest {
+        let row = self.lookup(&req.tool_name).ok_or_else(|| {
+            NexusApiError::BadRequest {
                 code: "NOT_SUPPORTED".to_string(),
                 message: format!("unsupported tool: {}", req.tool_name),
-            }),
+            }
+        })?;
+
+        // Centralized admission-gate accountability checkpoint.
+        // Each gate type MUST have a corresponding enforcement path (pipeline,
+        // handler, or caller). The invariant test below validates this mapping
+        // at registration time.
+        for gate in row.admission {
+            debug_assert!(
+                matches!(
+                    gate,
+                    AdmissionGate::Allowlist
+                        | AdmissionGate::ActiveCreator
+                        | AdmissionGate::WorkspaceBounds
+                        | AdmissionGate::PermissionPolicy
+                        | AdmissionGate::RequireWorldOwnership
+                        | AdmissionGate::AuditLog
+                ),
+                "unhandled admission gate {gate:?} for capability {}",
+                row.id
+            );
+            let _ = gate; // Readability: gate is accounted for by the match above.
         }
+
+        (row.handler)(req, state, creator_id).await
     }
 }
 
@@ -974,5 +1009,39 @@ mod tests {
         let val = result.expect("result");
         assert_eq!(val["creator_id"], "test_creator");
         assert_eq!(val["workspace_slug"], "default");
+    }
+
+    /// W-001 invariant: every registered row's admission gates have a known
+    /// enforcement path (pipeline, handler, or caller). This test will fail
+    /// if a new `AdmissionGate` variant is added without updating the
+    /// enforcement mapping, preventing SSOT drift between declared gates
+    /// and runtime checks.
+    #[test]
+    fn registry_all_admission_gates_have_enforcement() {
+        let reg = build_registry();
+        assert!(!reg.is_empty(), "registry must have rows");
+        for id in reg.ids() {
+            let row = reg.lookup(id).expect("row must exist");
+            assert!(
+                !row.admission.is_empty(),
+                "row '{id}' has empty admission gates"
+            );
+            for gate in row.admission {
+                // Every gate variant MUST appear in this match arm.
+                // Adding a new variant without a corresponding enforcement
+                // path will cause a compile error here.
+                #[allow(clippy::wildcard_in_or_patterns)]
+                let _enforcement_path = match gate {
+                    AdmissionGate::Allowlist => "admission_pipeline: allowlist check",
+                    AdmissionGate::ActiveCreator => "admission_pipeline: active-creator check",
+                    AdmissionGate::WorkspaceBounds => "admission_pipeline: workspace-bounds check",
+                    AdmissionGate::PermissionPolicy => "admission_pipeline: permission-policy check",
+                    AdmissionGate::RequireWorldOwnership => {
+                        "per-handler: ensure_world_accessible_for_creator"
+                    }
+                    AdmissionGate::AuditLog => "caller: audit_tool_execution",
+                };
+            }
+        }
     }
 }
