@@ -20,6 +20,12 @@ pub enum ValidationKind {
     NonStringNovelCategory,
     /// `canonical_name` fails format/safety validation.
     InvalidCanonicalName,
+    /// `body.attributes.game_bible_category` is missing (V1.54 P1).
+    MissingGameBibleCategory,
+    /// `body.attributes.game_bible_category` is not one of the seven valid values (V1.54 P1).
+    InvalidGameBibleCategory,
+    /// `body.attributes.game_bible_category` exists but is not a string (V1.54 P1).
+    NonStringGameBibleCategory,
 }
 
 impl fmt::Display for ValidationKind {
@@ -32,6 +38,9 @@ impl fmt::Display for ValidationKind {
             Self::NonObjectAttributes => write!(f, "non_object_attributes"),
             Self::NonStringNovelCategory => write!(f, "non_string_novel_category"),
             Self::InvalidCanonicalName => write!(f, "invalid_canonical_name"),
+            Self::MissingGameBibleCategory => write!(f, "missing_game_bible_category"),
+            Self::InvalidGameBibleCategory => write!(f, "invalid_game_bible_category"),
+            Self::NonStringGameBibleCategory => write!(f, "non_string_game_bible_category"),
         }
     }
 }
