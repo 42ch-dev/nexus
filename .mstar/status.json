@@ -1828,6 +1828,120 @@
         "closure_note": "Migration 202606190004 stage_status CHECK constraint fixed (commit 4e84b7d2): restored NOT NULL + added active and failed values matching original 20260606 migration. All 5 previously-failing tests now pass.",
         "closure_evidence": "iteration/v1.52 (commit 4e84b7d2)"
       }
+    ],
+    "2026-06-20-v1.53-capability-registry-unification": [
+      {
+        "id": "R-V153P0QC2-001",
+        "title": "V1.53 P1 — Parity coverage narrow — only 2 of 8 tools have explicit parity tests (whoami, workspace.info)",
+        "severity": "medium",
+        "source": "qc2 (security/correctness) M-1",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs:1497-1616",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.53 P1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0QC2-001]",
+        "note": "P1 (DF-46 read slice) adds 5 new read-heavy nexus.* tools and should expand parity/regression coverage to all 8 existing tools in the same plan.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      },
+      {
+        "id": "R-V153P0QC2-002",
+        "title": "V1.53 P1 — Cross-validation test only checks nexus./fs/ prefix, not catalog↔registry id bijection asserted in capability-registry.md §2.1",
+        "severity": "medium",
+        "source": "qc2 (security/correctness) M-2",
+        "scope": "crates/nexus-daemon-runtime/src/capability_registry.rs:514-523 (registry_cross_validates_prefix); spec §2.1",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.53 P1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0QC2-002]",
+        "note": "P1 should add a strict catalog↔registry id bijection test (every catalog id has a registry row; every registry id has a catalog entry). Spec text already claims this invariant; test does not enforce it.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      },
+      {
+        "id": "R-V153P0QC3-001",
+        "title": "Per-dispatch CapabilityRegistry allocation on schedule hot path (registry rebuilt on every call)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) M-001; fullstack-dev self-report R-V153P0-001",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs:379; crates/nexus-daemon-runtime/src/capability_registry.rs:256 (host_tool_registry)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.53+ (post-P1 deferred optimization)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0QC3-001]",
+        "note": "Acceptable for V1.53 (≤8 tools, single-daemon). Deferred optimization: cache via once_cell::sync::Lazy<CapabilityRegistry> or std::sync::LazyLock singleton; add Criterion benchmark to measure improvement.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      },
+      {
+        "id": "R-V153P0QC2-003",
+        "title": "No concurrent dispatch / re-entrancy test for CapabilityRegistry",
+        "severity": "low",
+        "source": "qc2 (security/correctness) L-1",
+        "scope": "test modules in host_tool_executor.rs and capability_registry.rs",
+        "decision": "defer",
+        "owner": "@qa-engineer",
+        "target": "V1.53+ (future hardening)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0QC2-003]",
+        "note": "Registry dispatch is &self and handlers are fn pointers — concurrent safety assumed via existing workspace/DB isolation, not proven by new tests. Low risk for V1.53 P0.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      },
+      {
+        "id": "R-V153P0QC2-004",
+        "title": "No separate admission test for Schedule caller_kind (dispatch_for_schedule is a thin wrapper)",
+        "severity": "low",
+        "source": "qc2 (security/correctness) L-2",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor.rs:402-417 (dispatch_for_schedule)",
+        "decision": "defer",
+        "owner": "@qa-engineer",
+        "target": "V1.53+ (future hardening)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0QC2-004]",
+        "note": "By design (per R-V153P0-002); E2E in agent_tool_production_wiring covers one tool. Broader Schedule caller-kind coverage deferred.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      },
+      {
+        "id": "R-V153P0QC3-002",
+        "title": "Missing dispatch-latency benchmark for match→HashMap cutover",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) L-1",
+        "scope": "crates/nexus-daemon-runtime/ (no benches/ directory)",
+        "decision": "defer",
+        "owner": "@qa-engineer",
+        "target": "V1.53+ (same optimization plan as R-V153P0QC3-001)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0QC3-002]",
+        "note": "Add Criterion benchmark before/with the caching optimization to quantify improvement.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      },
+      {
+        "id": "R-V153P0QC3-003",
+        "title": "Admission vectors could be &'static [AdmissionGate] instead of Vec (remove per-row heap allocation)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) L-2",
+        "scope": "crates/nexus-daemon-runtime/src/capability_registry.rs:141, 256-449",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.53+ (same optimization plan)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0QC3-003]",
+        "note": "Low-risk future cleanup; gates are immutable and known at compile time.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      },
+      {
+        "id": "R-V153P0-002",
+        "title": "DaemonToolDispatchAdapter documentation — by-design delegation through dispatch_for_schedule (not a bypass)",
+        "severity": "low",
+        "source": "fullstack-dev self-report",
+        "scope": "crates/nexus-orchestration/src/host_tool_dispatch_adapter.rs (or equivalent) — adapter delegates to dispatch_for_schedule → execute → registry_dispatch by design",
+        "decision": "defer",
+        "owner": "@writing-specialist or @fullstack-dev",
+        "target": "V1.53 P1 (when P1 adds new tools) or P-last spec hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-20-v1.53-capability-registry-unification][R-V153P0-002]",
+        "note": "Add a doc comment on DaemonToolDispatchAdapter explaining it routes through dispatch_for_schedule → execute() → registry_dispatch → CapabilityRegistry, and is by design not a bypass. Prevents future reviewers from mis-flagging it as a security gap.",
+        "lifecycle": "open",
+        "_plan_id": "2026-06-20-v1.53-capability-registry-unification"
+      }
     ]
   }
 }
