@@ -317,7 +317,7 @@ pub fn host_tool_registry() -> &'static CapabilityRegistry {
     &REGISTRY
 }
 
-/// Builds the full registry (called once by LazyLock).
+/// Builds the full registry (called once by `LazyLock`).
 #[allow(clippy::too_many_lines)]
 fn build_registry() -> CapabilityRegistry {
     use crate::api::handlers::host_tool_executor as hte;

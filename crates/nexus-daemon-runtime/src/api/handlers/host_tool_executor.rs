@@ -1379,7 +1379,7 @@ async fn execute_manuscript_chapter_get(
 /// **R-V153P1QC2-003 (V1.54 closure):** The `registry_ids` field exposes all
 /// tool IDs to authorized callers. This is acceptable for daemon-local
 /// observability (V1.53–V1.54) because the handler requires active creator
-/// and passes the Allowlist + PermissionPolicy admission gates. When
+/// and passes the Allowlist + `PermissionPolicy` admission gates. When
 /// agent-facing observability is exposed beyond daemon-local scope
 /// (V1.55+), an additional audit-level policy gate should be added and
 /// `registry_ids` may need to be stripped for low-trust callers.
@@ -1662,8 +1662,7 @@ async fn execute_manuscript_chapter_update(
 
     // Update body content if provided
     let now = chrono::Utc::now().to_rfc3339();
-    let mut body_path: Option<String> = None;
-    if let Some(content) = req.parameters["content"].as_str() {
+    let body_path: Option<String> = if let Some(content) = req.parameters["content"].as_str() {
         let body_dir = state
             .workspace_path()
             .map(|p| {
@@ -1685,16 +1684,19 @@ async fn execute_manuscript_chapter_update(
             code: "FILE_WRITE_FAILED".into(),
             message: format!("failed to write chapter body: {e}"),
         })?;
-        body_path = Some(body_file.to_string_lossy().to_string());
-    }
+        Some(body_file.to_string_lossy().to_string())
+    } else {
+        None
+    };
 
     // Update chapter DB row if body_path or word count changed
     if body_path.is_some() {
         let word_count = req.parameters["content"]
             .as_str()
-            .map(|c| c.split_whitespace().count())
-            .unwrap_or(0);
+            .map_or(0, |c| c.split_whitespace().count());
         // SAFETY: dynamic SQL for chapter update — runtime fields.
+        // Word count comes from split_whitespace() and cannot exceed realistic chapter size.
+        #[allow(clippy::cast_possible_wrap)]
         sqlx::query(
             "UPDATE work_chapters SET body_path = ?, actual_word_count = ?, updated_at = ? \
              WHERE work_id = ? AND chapter = ? AND volume = ?",
@@ -1733,6 +1735,7 @@ async fn execute_manuscript_chapter_update(
 }
 
 /// `nexus.world.configure` — update world metadata.
+#[allow(clippy::useless_let_if_seq)] // three independent if-let accumulations on `updated`
 async fn execute_world_configure(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
