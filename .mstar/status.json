@@ -34,6 +34,17 @@
       "merge_target": "iteration/v1.54",
       "type": "implement",
       "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.54-spec-hygiene-closeout",
+      "title": "V1.54 P-last — Spec Hygiene, WL-A Sweep & Closeout",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "effort": "S",
+      "working_branch": "iteration/v1.54",
+      "merge_target": "iteration/v1.54",
+      "type": "closeout",
+      "created": "2026-06-22"
     }
   ],
   "metadata": {
