@@ -618,13 +618,12 @@ pub async fn reconcile_from_filesystem(
     // error rather than silently operating on a missing directory.
     {
         // SAFETY: SELECT work_profile — runtime query for profile gate.
-        let profile: Option<String> = sqlx::query_scalar(
-            "SELECT work_profile FROM works WHERE work_id = ?",
-        )
-        .bind(work_id)
-        .fetch_optional(pool)
-        .await?
-        .flatten();
+        let profile: Option<String> =
+            sqlx::query_scalar("SELECT work_profile FROM works WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(pool)
+                .await?
+                .flatten();
         // SAFETY: game-bible profile gate (V1.54 P1).
         // Block reconcile for explicitly non-novel profiles (game_bible, essay).
         // Legacy Works (work_profile IS NULL) are treated as novel for backwards

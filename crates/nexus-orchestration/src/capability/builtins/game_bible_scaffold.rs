@@ -243,11 +243,9 @@ impl Capability for GameBibleProjectScaffold {
         for tmpl in DESIGN_TEMPLATES {
             let content = render_template(tmpl);
             let path = design_dir.join(tmpl.filename);
-            tokio::fs::write(&path, &content)
-                .await
-                .map_err(|e| {
-                    CapabilityError::Internal(format!("write Design/{}: {e}", tmpl.filename))
-                })?;
+            tokio::fs::write(&path, &content).await.map_err(|e| {
+                CapabilityError::Internal(format!("write Design/{}: {e}", tmpl.filename))
+            })?;
             files_created.push(format!("Design/{}", tmpl.filename));
         }
 
