@@ -259,6 +259,7 @@ impl Capability for GameBibleProjectScaffold {
         }
 
         // PATCH works row: set work_profile and work_ref
+        // W-001(qc3): ScaffoldTransaction (FS+DB atomicity) deferred to V1.55+
         if let Some(ref pool) = self.pool {
             sqlx::query(
                 "UPDATE works SET work_profile = 'game_bible', work_ref = ? WHERE work_id = ?",
