@@ -116,7 +116,7 @@ pub enum FailureMode {
 pub struct TestVector {
     /// Human-readable description of what the test covers.
     pub description: &'static str,
-    /// Expected outcome: "success", "failure:policy_blocked", etc.
+    /// Expected outcome: "success", "`failure:policy_blocked`", etc.
     pub expected_outcome: &'static str,
     /// Name of the test function (for grep-ability).
     pub test_fn_name: &'static str,
@@ -174,9 +174,7 @@ impl CapabilityRegistry {
     /// Panics if a row with the same `id` is already registered
     /// (duplicate capability ids are a programmer error).
     pub fn register(&mut self, row: CapabilityRow) {
-        if self.rows.contains_key(row.id) {
-            panic!("duplicate capability id in registry: {}", row.id);
-        }
+        assert!(!self.rows.contains_key(row.id), "duplicate capability id in registry: {}", row.id);
         self.rows.insert(row.id, row);
     }
 
@@ -206,8 +204,13 @@ impl CapabilityRegistry {
     /// Dispatch a tool request through the registry.
     ///
     /// Looks up the capability by `tool_name`, then invokes the
-    /// registered handler. Returns `NotSupported` if the tool
-    /// is not registered.
+    /// registered handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NexusApiError::BadRequest` with code `NOT_SUPPORTED`
+    /// if the tool is not registered. Individual handlers may return
+    /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     pub async fn dispatch(
         &self,
         req: &ToolExecuteRequest,
@@ -238,7 +241,12 @@ impl Default for CapabilityRegistry {
 /// function in `host_tool_executor.rs`. The wrapper functions exist
 /// solely to bridge the existing handler implementations to the
 /// unified `RegistryHandlerFn` signature.
+///
+/// This function is intentionally long because each registration
+/// is a data declaration (not logic). Splitting would add indirection
+/// without reducing complexity.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn host_tool_registry() -> CapabilityRegistry {
     use crate::api::handlers::host_tool_executor as hte;
     let mut reg = CapabilityRegistry::new();

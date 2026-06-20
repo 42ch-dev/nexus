@@ -1149,9 +1149,8 @@ async fn audit_tool_execution(
 /// They exist so the registry can reference the same handler implementations
 /// without duplicating logic.
 ///
-/// Each wrapper uses an explicit named lifetime `'a` to satisfy the
-/// higher-ranked trait bound `for<'a> fn(&'a ..., &'a ..., &'a str) -> ...`.
-
+// Each wrapper uses an explicit named lifetime `'a` to satisfy the
+// higher-ranked trait bound `for<'a> fn(&'a ..., &'a ..., &'a str) -> ...`.
 use std::future::Future;
 use std::pin::Pin;
 
@@ -1211,7 +1210,7 @@ pub(crate) fn registry_context_assemble<'a>(
     Box::pin(execute_context_assemble(req, state, creator_id))
 }
 
-/// Registry wrapper: `fs/read_text_file` — sync → async wrapper (ignores creator_id).
+/// Registry wrapper: `fs/read_text_file` — sync → async wrapper (ignores `creator_id`).
 pub(crate) fn registry_read_file<'a>(
     req: &'a ToolExecuteRequest,
     state: &'a WorkspaceState,
@@ -1221,7 +1220,7 @@ pub(crate) fn registry_read_file<'a>(
     Box::pin(async move { result })
 }
 
-/// Registry wrapper: `fs/write_text_file` — sync → async wrapper (ignores creator_id).
+/// Registry wrapper: `fs/write_text_file` — sync → async wrapper (ignores `creator_id`).
 pub(crate) fn registry_write_file<'a>(
     req: &'a ToolExecuteRequest,
     state: &'a WorkspaceState,
