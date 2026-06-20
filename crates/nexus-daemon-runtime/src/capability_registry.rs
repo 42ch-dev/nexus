@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::LazyLock;
 
 // ─── Registry types ────────────────────────────────────────────────────────
 
@@ -139,8 +140,8 @@ pub struct CapabilityRow {
     pub id: &'static str,
     /// Access classification.
     pub access: Access,
-    /// Ordered fail-closed admission gates.
-    pub admission: Vec<AdmissionGate>,
+    /// Ordered fail-closed admission gates (&'static since V1.54 P0 T5).
+    pub admission: &'static [AdmissionGate],
     /// Handler function binding.
     pub handler: RegistryHandlerFn,
     /// ACP wire schema references.
@@ -243,19 +244,82 @@ impl Default for CapabilityRegistry {
 
 // ─── Registry constructor ──────────────────────────────────────────────────
 
-/// Create a registry pre-populated with all V1.34 + V1.53 P1 host tools.
+// ─── Registry constructor ──────────────────────────────────────────────────
+
+/// Static admission gate arrays (defined once, referenced by all 19 rows).
+const ADMISSION_READ_CONTEXT: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::ActiveCreator,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+const ADMISSION_READ_WORKSPACE: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::ActiveCreator,
+    AdmissionGate::WorkspaceBounds,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+const ADMISSION_READ_WORLD: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::ActiveCreator,
+    AdmissionGate::RequireWorldOwnership,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+const ADMISSION_WRITE_WORKSPACE: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::ActiveCreator,
+    AdmissionGate::WorkspaceBounds,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+const ADMISSION_WRITE_WORLD: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::ActiveCreator,
+    AdmissionGate::RequireWorldOwnership,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+const ADMISSION_FS_READ: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::WorkspaceBounds,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+const ADMISSION_FS_WRITE: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::WorkspaceBounds,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+const ADMISSION_POOL_WRITE: &[AdmissionGate] = &[
+    AdmissionGate::Allowlist,
+    AdmissionGate::ActiveCreator,
+    AdmissionGate::PermissionPolicy,
+    AdmissionGate::AuditLog,
+];
+
+/// Create a registry pre-populated with all 19 host tools (V1.34 + V1.53 P1 + V1.54 P0).
 ///
-/// Each handler is wired to the corresponding `pub(crate)` wrapper
-/// function in `host_tool_executor.rs`. The wrapper functions exist
-/// solely to bridge the existing handler implementations to the
-/// unified `RegistryHandlerFn` signature.
-///
-/// This function is intentionally long because each registration
-/// is a data declaration (not logic). Splitting would add indirection
-/// without reducing complexity.
+/// V1.54 P0 T5: Converted to `LazyLock` singleton to eliminate per-dispatch
+/// allocation. All admission gates are `&'static [AdmissionGate]` references.
 #[must_use]
+pub fn host_tool_registry() -> &'static CapabilityRegistry {
+    static REGISTRY: LazyLock<CapabilityRegistry> = LazyLock::new(build_registry);
+    &REGISTRY
+}
+
+/// Builds the full registry (called once by `LazyLock`).
 #[allow(clippy::too_many_lines)]
-pub fn host_tool_registry() -> CapabilityRegistry {
+fn build_registry() -> CapabilityRegistry {
     use crate::api::handlers::host_tool_executor as hte;
     let mut reg = CapabilityRegistry::new();
 
@@ -263,12 +327,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.context.whoami",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_context_whoami,
         acp_wire: AcpWire {
             request_schema_ref: "{}",
@@ -286,12 +345,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.workspace.info",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_workspace_info,
         acp_wire: AcpWire {
             request_schema_ref: "{}",
@@ -309,13 +363,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.work.get",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::WorkspaceBounds,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_work_get,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string"}"#,
@@ -333,13 +381,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.work.patch",
         access: Access::Write,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::WorkspaceBounds,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_WRITE_WORKSPACE,
         handler: hte::registry_work_patch,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","title?":"string","inspiration_log?":"array","stage_metadata?":"object"}"#,
@@ -357,13 +399,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.orchestration.schedule_status",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::WorkspaceBounds,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_schedule_status,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string"}"#,
@@ -381,12 +417,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.context.assemble",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_context_assemble,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id?":"string","requires_platform?":"bool"}"#,
@@ -405,13 +436,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.world.snapshot.get",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::RequireWorldOwnership,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_WORLD,
         handler: hte::registry_world_snapshot_get,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string"}"#,
@@ -429,13 +454,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.timeline.recent.get",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::RequireWorldOwnership,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_WORLD,
         handler: hte::registry_timeline_recent_get,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string","limit?":"int"}"#,
@@ -453,13 +472,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.kb_snapshot.read",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::RequireWorldOwnership,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_WORLD,
         handler: hte::registry_kb_snapshot_read,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string"}"#,
@@ -477,13 +490,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.manuscript.chapter.get",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::WorkspaceBounds,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_WORKSPACE,
         handler: hte::registry_manuscript_chapter_get,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int"}"#,
@@ -502,12 +509,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "nexus.observability.daemon.health",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::ActiveCreator,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_READ_CONTEXT,
         handler: hte::registry_daemon_health,
         acp_wire: AcpWire {
             request_schema_ref: "{}",
@@ -522,16 +524,120 @@ pub fn host_tool_registry() -> CapabilityRegistry {
         },
     });
 
+    // ── V1.54 P0: DF-46 write tools ──
+    reg.register(CapabilityRow {
+        id: "nexus.kb_snapshot.write",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORLD,
+        handler: hte::registry_kb_snapshot_write,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"world_id":"string","blocks":"[KeyBlock]"}"#,
+            response_schema_ref: r#"{"written":"int","world_id":"string"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "kb snapshot write upserts key blocks for owned world",
+            expected_outcome: "success",
+            test_fn_name: "kb_snapshot_write_upserts_key_blocks",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.manuscript.chapter.update",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORKSPACE,
+        handler: hte::registry_manuscript_chapter_update,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","content?":"string","block_overrides?":"object"}"#,
+            response_schema_ref: "WorkChapterRecord",
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "manuscript chapter update writes chapter content for valid work",
+            expected_outcome: "success",
+            test_fn_name: "manuscript_chapter_update_writes_content",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.world.configure",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORLD,
+        handler: hte::registry_world_configure,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"world_id":"string","title?":"string","visibility?":"string","time_policy?":"string"}"#,
+            response_schema_ref: r#"{"world_id":"string","updated":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "world configure updates world metadata for owned world",
+            expected_outcome: "success",
+            test_fn_name: "world_configure_updates_metadata",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.work.schedule.set",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORKSPACE,
+        handler: hte::registry_work_schedule_set,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string","schedule_ids":"[string]"}"#,
+            response_schema_ref: r#"{"work_id":"string","schedule_ids":"[string]"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "work schedule set links schedule ids to work",
+            expected_outcome: "success",
+            test_fn_name: "work_schedule_set_links_schedules",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.finding.resolve",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORKSPACE,
+        handler: hte::registry_finding_resolve,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"finding_id":"string","resolution?":"string"}"#,
+            response_schema_ref: r#"{"finding_id":"string","resolved":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "finding resolve marks finding as resolved",
+            expected_outcome: "success",
+            test_fn_name: "finding_resolve_marks_resolved",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.pool.entry.manage",
+        access: Access::Write,
+        admission: ADMISSION_POOL_WRITE,
+        handler: hte::registry_pool_entry_manage,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string","action":"string","priority?":"int"}"#,
+            response_schema_ref: r#"{"work_id":"string","action":"string","success":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "pool entry manage adds work to selection pool",
+            expected_outcome: "success",
+            test_fn_name: "pool_entry_manage_adds_to_pool",
+        },
+    });
+
     // ── fs/* baseline (V1.33) ──
     reg.register(CapabilityRow {
         id: "fs/read_text_file",
         access: Access::Read,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::WorkspaceBounds,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_FS_READ,
         handler: hte::registry_read_file,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"path":"string"}"#,
@@ -549,12 +655,7 @@ pub fn host_tool_registry() -> CapabilityRegistry {
     reg.register(CapabilityRow {
         id: "fs/write_text_file",
         access: Access::Write,
-        admission: vec![
-            AdmissionGate::Allowlist,
-            AdmissionGate::WorkspaceBounds,
-            AdmissionGate::PermissionPolicy,
-            AdmissionGate::AuditLog,
-        ],
+        admission: ADMISSION_FS_WRITE,
         handler: hte::registry_write_file,
         acp_wire: AcpWire {
             request_schema_ref: r#"{"path":"string","content":"string"}"#,
@@ -580,9 +681,9 @@ mod tests {
     use crate::test_utils::create_test_workspace;
 
     #[test]
-    fn registry_has_thirteen_host_tools() {
+    fn registry_has_nineteen_host_tools() {
         let reg = host_tool_registry();
-        assert_eq!(reg.len(), 13);
+        assert_eq!(reg.len(), 19);
     }
 
     #[test]
@@ -600,6 +701,12 @@ mod tests {
             "nexus.kb_snapshot.read",
             "nexus.manuscript.chapter.get",
             "nexus.observability.daemon.health",
+            "nexus.kb_snapshot.write",
+            "nexus.manuscript.chapter.update",
+            "nexus.world.configure",
+            "nexus.work.schedule.set",
+            "nexus.finding.resolve",
+            "nexus.pool.entry.manage",
             "fs/read_text_file",
             "fs/write_text_file",
         ] {
@@ -655,6 +762,12 @@ mod tests {
         "kb_snapshot_read_returns_key_blocks",
         "manuscript_chapter_get_returns_chapter_record",
         "daemon_health_returns_registry_status",
+        "kb_snapshot_write_upserts_key_blocks",
+        "manuscript_chapter_update_writes_content",
+        "world_configure_updates_metadata",
+        "work_schedule_set_links_schedules",
+        "finding_resolve_marks_resolved",
+        "pool_entry_manage_adds_to_pool",
         "execute_read_file_succeeds",
         "execute_write_file_succeeds",
     ];

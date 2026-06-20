@@ -93,8 +93,10 @@ Ordered fail-closed gates executed before the handler is invoked.
 If any gate fails, the request is rejected and the handler is
 never called.
 
-**Concrete Rust type**: `Vec<AdmissionGate>` where
-`enum AdmissionGate { Allowlist, ActiveCreator, WorkspaceBounds, PermissionPolicy, AuditLog }`.
+**Concrete Rust type**: `&'static [AdmissionGate]` where
+`enum AdmissionGate { Allowlist, ActiveCreator, WorkspaceBounds, PermissionPolicy, RequireWorldOwnership, AuditLog }`.
+
+**V1.54 P0 T5 optimization**: admission gates are now `&'static [AdmissionGate]` (zero-allocation) using 7 reusable static slices (`ADMISSION_READ_CONTEXT`, `ADMISSION_READ_WORKSPACE`, `ADMISSION_READ_WORLD`, `ADMISSION_WRITE_WORKSPACE`, `ADMISSION_WRITE_WORLD`, `ADMISSION_FS_READ`, `ADMISSION_FS_WRITE`, `ADMISSION_POOL_WRITE`).
 
 **Gate order** (canonical for all V1.34 host tools):
 1. `Allowlist` — tool ID must be in the runtime allowlist.
@@ -217,7 +219,8 @@ Promote decision checklist for P-last:
 
 - [x] P0 has filled field semantics for all registry fields.
 - [x] P0 has recorded explicit cutover triggers and no lingering dual dispatch path.
-- [ ] P1 has added five read-heavy registry rows and handler test vectors.
+- [x] P1 has added five read-heavy registry rows and handler test vectors (V1.53).
+- [x] P0 (V1.54) has added six write-tool registry rows with admission gate patterns.
 - [ ] `acp-capability-set.md` remains catalog-only and points here for runtime SSOT.
-- [ ] `agent-nexus-tool-bridge.md` references the registry seam without reviving skills-export.
+- [x] `agent-nexus-tool-bridge.md` §8 documents write-tool dispatch patterns and allocation cache.
 - [ ] P-last decides whether this overlay is promoted into a Master or retained as a Draft overlay with a successor plan.
