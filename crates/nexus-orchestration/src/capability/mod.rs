@@ -177,6 +177,9 @@ impl CapabilityRegistry {
             // V1.52 T-A P2: register essay.project_scaffold for
             // embedded preset validation.
             Box::new(builtins::EssayProjectScaffold::new()),
+            // V1.54 P1: register game_bible.project_scaffold for
+            // embedded preset validation.
+            Box::new(builtins::GameBibleProjectScaffold::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -224,7 +227,9 @@ impl CapabilityRegistry {
             Box::new(builtins::NovelProjectScaffold::with_pool(pool.clone())),
             Box::new(builtins::NovelChapterTransition::with_pool(pool.clone())),
             // V1.52 T-A P2: essay.project_scaffold with pool.
-            Box::new(builtins::EssayProjectScaffold::with_pool(pool)),
+            Box::new(builtins::EssayProjectScaffold::with_pool(pool.clone())),
+            // V1.54 P1: game_bible.project_scaffold with pool.
+            Box::new(builtins::GameBibleProjectScaffold::with_pool(pool)),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -348,6 +353,14 @@ impl CapabilityRegistry {
                         builtins::EssayProjectScaffold::with_pool(pool.clone())
                     }),
             ),
+            // V1.54 P1: game_bible.project_scaffold with runtime deps.
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::GameBibleProjectScaffold::new, |pool| {
+                        builtins::GameBibleProjectScaffold::with_pool(pool.clone())
+                    }),
+            ),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -443,6 +456,7 @@ mod tests {
             "novel.project_scaffold",
             "novel.chapter_transition",
             "essay.project_scaffold",
+            "game_bible.project_scaffold",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -461,7 +475,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 22);
+        assert_eq!(names.len(), 23);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
