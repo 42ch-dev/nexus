@@ -240,9 +240,34 @@ DF-47 row in the deferred tracker is narrowed. Full DF-46 capability matrix (all
 
 ---
 
-## 8. Capability registry direction (V1.53)
+## 8. Capability registry direction (V1.53 → V1.54)
 
 Skills-export CLI/spec work is **Cancelled** (DF-50, V1.53). Runtime `nexus.*` dispatch now converges on the [`capability-registry.md`](capability-registry.md) Draft overlay: the bridge remains the mediated external-agent tool path, while the registry becomes the handler/admission/wire/failure/test-vector SSOT.
+
+### 8.1 Write-tool dispatch patterns (V1.54 — DF-46)
+
+V1.54 adds 6 mutation-side `nexus.*` host tools through the unified registry. Write tools follow the same admission pipeline as read tools but use domain-specific admission gates:
+
+```
+client request → ACP wire → host_tool_executor::execute()
+  → admission_pipeline (5 gates)
+  → CapabilityRegistry::dispatch(capability_id, input)
+    → AdmissionGate chain (static &'static [AdmissionGate])
+    → handler(input) → response (JSON)
+    → audit_tool_execution()
+```
+
+**Write-specific admission gate patterns:**
+
+| Gate pattern | Tools | Use |
+|---|---|---|
+| `ADMISSION_WRITE_WORLD` | `nexus.kb_snapshot.write`, `nexus.world.configure` | World-scoped: Allowlist → ActiveCreator → RequireWorldOwnership → PermissionPolicy → AuditLog |
+| `ADMISSION_WRITE_WORKSPACE` | `nexus.manuscript.chapter.update`, `nexus.work.schedule.set`, `nexus.finding.resolve` | Work-scoped: Allowlist → ActiveCreator → WorkspaceBounds → PermissionPolicy → AuditLog |
+| `ADMISSION_POOL_WRITE` | `nexus.pool.entry.manage` | Creator-scoped: Allowlist → ActiveCreator → PermissionPolicy → AuditLog |
+
+**Allocation cache (V1.54 P0 T5):** The registry is now a `LazyLock<CapabilityRegistry>` singleton with `&'static [AdmissionGate]` slices. `host_tool_registry()` returns `&'static CapabilityRegistry`, eliminating per-dispatch heap allocation.
+
+**NEXUS_WRITE_TOOLS** (permission routing): All 7 write tools (6 new + `nexus.work.patch`) are routed through `is_nexus_write_granted()` in the admission pipeline's Gate 4 permission check, ensuring write operations require explicit `permissions.toml` grants distinct from read tools.
 
 ---
 
