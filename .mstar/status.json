@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-19T16:25:00Z",
+  "updated_at": "2026-06-20T00:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
@@ -129,15 +129,91 @@
       "created_at": "2026-06-19T08:30:00Z",
       "started_at": "2026-06-20T12:30:00Z",
       "done_at": "2026-06-20T12:30:00Z"
+    },
+    {
+      "plan_id": "2026-06-20-v1.53-capability-registry-prepare",
+      "title": "P-1 — V1.53 compass + capability registry Draft overlay + DF-50 Cancelled + skills-export spec retirement",
+      "status": "Done",
+      "done_at": "2026-06-20T00:00:00Z",
+      "owner": "@project-manager",
+      "agents": [
+        "@project-manager",
+        "@architect"
+      ],
+      "task_category": "docs",
+      "working_branch": "feature/v1.53-capability-registry-prepare",
+      "merge_target": "iteration/v1.53",
+      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
+      "created_at": "2026-06-20T00:00:00Z"
+    },
+    {
+      "plan_id": "2026-06-20-v1.53-capability-registry-unification",
+      "title": "P0 — CapabilityRegistry SSOT refactor (adapter-first introduce → cutover → cleanup)",
+      "status": "Pending",
+      "owner": "@fullstack-dev",
+      "agents": [
+        "@fullstack-dev",
+        "@qa-engineer"
+      ],
+      "task_category": "logic",
+      "working_branch": "feature/v1.53-capability-registry-unification",
+      "merge_target": "iteration/v1.53",
+      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
+      "created_at": "2026-06-20T00:00:00Z"
+    },
+    {
+      "plan_id": "2026-06-21-v1.53-df46-read-capability-slice",
+      "title": "P1 — First DF-46 read-heavy nexus.* capability slice",
+      "status": "Pending",
+      "owner": "@fullstack-dev-2",
+      "agents": [
+        "@fullstack-dev-2",
+        "@qa-engineer"
+      ],
+      "task_category": "logic",
+      "working_branch": "feature/v1.53-df46-read-capability-slice",
+      "merge_target": "iteration/v1.53",
+      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
+      "created_at": "2026-06-20T00:00:00Z"
+    },
+    {
+      "plan_id": "2026-06-22-v1.53-skills-cli-cleanup",
+      "title": "P-c — Remove obsolete nexus42 acp skills export|verify surface",
+      "status": "Pending",
+      "owner": "@fullstack-dev",
+      "agents": [
+        "@fullstack-dev",
+        "@qc-specialist"
+      ],
+      "task_category": "logic",
+      "working_branch": "feature/v1.53-skills-cli-cleanup",
+      "merge_target": "iteration/v1.53",
+      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
+      "created_at": "2026-06-20T00:00:00Z"
+    },
+    {
+      "plan_id": "2026-06-22-v1.53-spec-hygiene-closeout",
+      "title": "P-last — V1.53 spec hygiene, Profile B compaction, shipped snapshot",
+      "status": "Pending",
+      "owner": "@project-manager",
+      "agents": [
+        "@project-manager",
+        "@qa-engineer"
+      ],
+      "task_category": "docs",
+      "working_branch": "feature/v1.53-spec-hygiene-closeout",
+      "merge_target": "iteration/v1.53",
+      "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
+      "created_at": "2026-06-20T00:00:00Z"
     }
   ],
   "metadata": {
-    "integration_branch": "iteration/v1.52",
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.53",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.52",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
-    "latest_active_compass": "v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1",
+    "latest_active_iteration": "V1.53",
+    "latest_active_compass": "v1.53-capability-surface-completion-and-skills-cli-cleanup",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",

@@ -19,6 +19,10 @@ Related docs: nexus-platform `v1-spec/architecture.md`, [`cli-spec.md`](./cli-sp
 
 **Naming note**: CLI executable **`nexus42`**; local supervisor is the **daemon runtime** (single-binary mode via `nexus42 daemon start`, crate `nexus-daemon-runtime`). Product name **Nexus** (42ch / Creative Hub). **`nexus.*`** is the stable logical capability ID prefix; capability IDs need not match executable names.
 
+## 0.5 Runtime registry pointer (V1.53)
+
+This spec is the logical catalog for `nexus.*` capabilities. Each entry lists the capability id and a one-line description. **It is not the runtime source of truth for dispatch.** The runtime SSOT is [`capability-registry.md`](capability-registry.md) (Draft overlay, V1.53).
+
 ---
 
 ## 1. Goals and non-goals
@@ -219,7 +223,7 @@ If handshake succeeds but capability set is incomplete:
 
 - Bump `nexus.acp_contract_version` on breaking capability semantics.
 - Registry entries should pin compatible contract version ranges.
-- Skills export must embed the same capability IDs and versions.
+- V1.53 retires the skills-export CLI/spec line (DF-50 Cancelled); runtime capability dispatch consistency is governed by [`capability-registry.md`](capability-registry.md).
 
 ---
 

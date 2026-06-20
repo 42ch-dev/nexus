@@ -114,8 +114,8 @@ Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-bou
 | [acp-capability-set.md](acp-capability-set.md) | Master | Normative |
 | [agent-host.md](agent-host.md) | Master | Normative |
 | [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) | Feature line | Shipped (V1.34) |
+| [capability-registry.md](capability-registry.md) | Draft overlay | Draft (V1.53) — runtime SSOT framework for `nexus.*` dispatch |
 | [registry-integration.md](registry-integration.md) | Master | Normative |
-| [skills-export-compatibility.md](skills-export-compatibility.md) | Master | Normative |
 
 ### Feature contracts and companions
 
@@ -149,7 +149,7 @@ When specs disagree, higher row wins:
 | Top-level CLI groups | cli-spec §6.0B | cli-command-ia (Shipped V1.35 supplement) |
 | First-run / local vs platform | cli-spec §7 | creator-centric-entry-model (Shipped V1.35 supplement), compass audit appendix |
 | Work / `creator run` | [creator-run-preset-entry.md](creator-run-preset-entry.md) (V1.45 Draft) | work-experience-model, cli-spec §6.2 |
-| Novel profile / `Works/<work_ref>/` layout | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) | work-experience-model, [novel-writing/sync-contract.md](novel-writing/sync-contract.md), cli-spec §13.1 |
+| Novel profile / `Works/<work_ref>/` layout | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) | work-experience-model, [novel-writing/sync-contract.md](novel-writing/sync-contract.md), cli-spec §12.1 |
 | Creator workflow stages / chain | creator-workflow | work-experience-model, novel-writing/workflow-profile (produce) |
 | Preset YAML / loader / validator | orchestration-engine | creator-schedule § YAML additions |
 | Schedule / core_context | creator-schedule-and-core-context | orchestration-engine sessions |
@@ -167,7 +167,7 @@ When specs disagree, higher row wins:
 | --- | --- | --- |
 | **Post-V1.35 CLI changes** | Update cli-spec §6–§7 first; update shipped supplements only when rationale, acceptance, or migration history changes | V1.36-V1.40 amendments folded into Master (no follow-up merge needed yet) |
 | **FL-D compass locks implement** | Promote preset-conditional-routing; update orchestration-engine §7.5 | Deferred (FL-D still out of scope) |
-| **ACP spec hygiene plan** | Evaluate merging skills-export-compatibility into acp-client-tech-spec appendix | Backlog |
+| **V1.53 ACP capability registry hygiene** | Promote or retain `capability-registry.md` after P0/P1 registry semantics land; skills-export compatibility spec retired and DF-50 Cancelled | Active V1.53 |
 | **Novel-writing sync module removed from code** | Archive novel-writing-sync-contract | Module still shipped (V1.36+); sync contract retained |
 | **V1.40 shipped (DF-63 closed)** | Mark `entity-scope-model.md` §5.1.1 + `cli-spec.md` §6.2G + `creator-workflow.md` persist + `local-db-schema.md` §4.1.2 + `novel-writing/workflow-profile.md` §3.5.1 as Shipped V1.40 in their headers | **Done 2026-06-11** (see headers + this index) |
 | **V1.41 prep** | Decide which V1.40-tagged open residuals (`status.json.residual_findings`) to address in V1.41 hygiene; re-evaluate DF-60/61/56/47/59 targets | Pending V1.41 compass |

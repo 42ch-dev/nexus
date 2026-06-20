@@ -628,7 +628,6 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 - `nexus42 acp status|doctor|probe`
 - `nexus42 acp registry list|inspect`
 - `nexus42 acp agent use|list`
-- `nexus42 acp skills export|verify`
 
 **Embedded skills（安装 / 升级）**：实现应将 `nexus-orchestration/embedded-skills/` 同步到 `$HOME/.nexus42/skills/`，并通过 `{$workspace_dir}/.agents/skills/` 暴露/链接，使 ACP `recommended_skills` 可被首轮会话解析。
 
@@ -913,48 +912,20 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 ---
 
-## 12. Skills-second 兼容层
+## 12. 本地工作区结构
 
-### 12.1 目标
-
-为不支持 ACP 的 agent 生态输出稳定的 Nexus 能力封装。
-
-### 12.2 原则
-
-- skills 是映射层，不是主协议
-- skill 能力名应尽量与 ACP 能力面一一对应
-- skill 导出应带上能力版本
-- skills 的职责是兼容非 ACP agent 生态，而不是替代 ACP Registry + ACP 握手模型
-
-### 12.3 导出内容
-
-- manifest
-- tool / skill definitions
-- 版本号
-- 使用说明
-- 兼容性声明
-
-建议命令：
-
-- `nexus42 acp skills export --format <target>`
-- `nexus42 acp skills verify`
-
----
-
-## 13. 本地工作区结构
-
-### 13.0 分层原则
+### 12.0 分层原则
 
 - **`<workspace>/`**：仅承载**用户意图可见**的创作资料（宜纳入用户自己的 Git 或同步盘）。
 - **`$HOME/.nexus42/`**：承载**系统与 runtime** 数据（索引、SQLite、缓存、日志、IPC、机读配置），**不得**再放到每个 `<workspace>` 根下。
 - **v1-spec 内规范真源链（本地 operational + 活跃上下文）** — 定义与变更 **只认下列文件**（冲突时按 **ADR → 本节命令面 → 下钻 spec** 顺序解释）：
   1. nexus-platform `v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md`（架构决策：目录、`workspace_slug`、`creator use` / `creator workspace` 双层指针）
   2. nexus-platform `v1-spec/adr/adr-023-pre-release-cli-breaking-refactor-v1.md`、nexus-platform `v1-spec/adr/adr-024-preset-driven-workspace-acp-skills-v1.md`（CLI 面收窄、preset 产物与 ACP skills）
-  3. **本节** §0.2、§6.2B–§6.2C、§6.2C **C2**、**§13.2**（CLI 用户面与目录树）
+  3. **本节** §0.2、§6.2B–§6.2C、§6.2C **C2**、**§12.2**（CLI 用户面与目录树）
   4. [`local-db-schema.md`](./local-db-schema.md) §0（`state.db` 路径与模块边界）
   5. nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14（`WorkspaceBinding` 与本地不变量）
 
-### 13.1 用户工作区（`<workspace>/`）
+### 12.1 用户工作区（`<workspace>/`）
 
 `<workspace>` **默认不**包含固定业务子树；首次 `init` 只登记创作根与配置，**不**默认创建 `Stories/`、`References/`。用户可见目录由 **preset 产物策略** 在运行中创建。
 
@@ -997,7 +968,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 
 历史兼容叙述：规格与 ACP 能力名仍可能出现 **`manuscript`**（如 `manuscript.read_range`）；其实现路径须对齐到 **preset 声明的正文根**（上表为 **`novel-writing`** 默认）。
 
-### 13.1C `novel-writing` preset sync module contract
+### 12.1C `novel-writing` preset sync module contract
 
 `novel-writing` preset 可以声明 `sync` 子模块，用于把 preset 产物映射到既有 Nexus 同步 / 发布合同。该子模块**不**新增第二套 DTO 或 wire type；合同来源仍是本 v1-spec 与生成的 `@42ch/nexus-contracts` 类型。
 
@@ -1011,22 +982,22 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 **Outputs**：
 
 - Default `sync push` 输出既有 **Bundle / Delta**：world/key-block/timeline/reference/manuscript metadata、source anchors、idempotency key、canonical hash、audit command metadata。
-- Local packaging 可生成 preset manifest / staging records，但这些是本地实现细节；跨平台 wire 仍引用 `cli-spec` §15、`shared/domain/data-model-v1.md` 与 schema codegen 生成合同。
+- Local packaging 可生成 preset manifest / staging records，但这些是本地实现细节；跨平台 wire 仍引用 `cli-spec` §14、`shared/domain/data-model-v1.md` 与 schema codegen 生成合同。
 - `sync pull` 只回填平台结构化状态与冲突 / cursor；不得把平台内容静默覆盖到 `Works/<work_ref>/Stories/` 正文。
 
 **Publish boundary**：
 
-- **Default `nexus42 sync push` is not content publication.** 它只同步结构化 delta、摘要与引用锚点（§5.3、§15.2）。
-- 完整章节 / 故事正文跨越平台边界，只能由 **`publish.*` ACP capability** 或 preset `sync.publish_*` 等等价**显式发布动作**触发，并遵循 §17 confirmation / `--yes` 规则。
+- **Default `nexus42 sync push` is not content publication.** 它只同步结构化 delta、摘要与引用锚点（§5.3、§14.2）。
+- 完整章节 / 故事正文跨越平台边界，只能由 **`publish.*` ACP capability** 或 preset `sync.publish_*` 等等价**显式发布动作**触发，并遵循 §16 confirmation / `--yes` 规则。
 - `output_manuscript=false` 时，preset sync module 仍可同步结构化状态，但不得默认读取或上传正文文件。
 
 **Contract-source references**：
 
-- Bundle / Delta / idempotency / conflict semantics: §15.1–§15.4 and generated `@42ch/nexus-contracts` wire types.
-- Workspace binding and local state: §6.2C, §13.2, nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14.
-- Publish APIs / ACP publish capabilities: §11.6, §17, nexus-platform `v1-spec/platform/platform-api-v1.md` publish routes, and generated contracts (`PublishStoryRequest`, `PublishChapterRequest`, etc.).
+- Bundle / Delta / idempotency / conflict semantics: §14.1–§14.4 and generated `@42ch/nexus-contracts` wire types.
+- Workspace binding and local state: §6.2C, §12.2, nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14.
+- Publish APIs / ACP publish capabilities: §11.6, §16, nexus-platform `v1-spec/platform/platform-api-v1.md` publish routes, and generated contracts (`PublishStoryRequest`, `PublishChapterRequest`, etc.).
 
-### 13.1B Creator SOUL 与长期记忆
+### 12.1B Creator SOUL 与长期记忆
 
 **真源**：nexus-platform `v1-spec/platform/creator-memory-soul-lifecycle-v1.md`。
 
@@ -1035,9 +1006,9 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 - **CLI / daemon runtime**：负责 Session 收尾写入 **待回顾队列**、**定时回顾**、**经验段聚合**、以及 **发起新 ACP Session 前的 Context 终局合并**（与 `context-assembly` 平台响应组合）。  
 - **与 §6.6**：`nexus42 platform context assemble` 是 **Deferred** 的未来平台云上下文入口；当前已发货路径是 `assemble-moment`（local four-domain，single SSOT）。这些命令**不**替代 SOUL + 本地长期记忆的合并职责。
 
-### 13.1A 服务端沙箱（平台托管 Creator）
+### 12.1A 服务端沙箱（平台托管 Creator）
 
-- 平台托管 Creator 若开启 `output_manuscript=true`，其正文工作区应与 **同一 preset** 下的本地用户工作区 **同构**（默认示例与 §13.1 一致：`Works/<work_ref>/Stories/…` + 按需的 `.nexus42/references/…`）。
+- 平台托管 Creator 若开启 `output_manuscript=true`，其正文工作区应与 **同一 preset** 下的本地用户工作区 **同构**（默认示例与 §12.1 一致：`Works/<work_ref>/Stories/…` + 按需的 `.nexus42/references/…`）。
 
 ```text
 <sandbox_root>/
@@ -1056,7 +1027,7 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
 - 差异仅在**物理位置**：本地路径位于用户设备；平台路径位于服务端沙箱。
 - 关闭 `output_manuscript` 时，可不创建 `Works/<work_ref>/Stories/` 正文文件，但仍要允许 `StoryManifest.summary_text`、World KB、Timeline 正常生成。
 
-### 13.2 系统目录（`$HOME/.nexus42/`）
+### 12.2 系统目录（`$HOME/.nexus42/`）
 
 推荐目录：
 
@@ -1090,18 +1061,18 @@ $HOME/.nexus42/
 - **`run/` / `logs/`**
   - 全局或按 workspace 分子路径均可，但**根路径固定**在 `$HOME/.nexus42/`。
 
-### 13.3 默认忽略策略
+### 12.3 默认忽略策略
 
 - **`$HOME/.nexus42/`**：通常不在用户项目仓库内；无需在 `<workspace>` 的 `.gitignore` 中忽略（除非用户把 home 目录当仓库）。
 - **`<workspace>`**：**`.nexus42/`**（工作区下机读缓存与研究产出）通常宜加入 VCS ignore；`Stories/`、`.agents/skills/` 是否提交由用户与 preset 策略决定；若含密钥或大型二进制采风，可用常规 `.gitignore` 规则处理，与 Nexus operational 数据无关。
 
 ---
 
-## 14. SQLite 职责
+## 13. SQLite 职责
 
 SQLite 是本地 working state，不是平台 graph 的替代品。
 
-### 14.1 应存内容
+### 13.1 应存内容
 
 - Key Block 的本地投影
 - Timeline working copy
@@ -1111,13 +1082,13 @@ SQLite 是本地 working state，不是平台 graph 的替代品。
 - outbox
 - agent session metadata
 
-### 14.2 不应存内容
+### 13.2 不应存内容
 
 - 全量正文主存
 - 平台图数据库的完整替代结构
 - 长期密钥明文
 
-### 14.3 迁移原则
+### 13.3 迁移原则
 
 - CLI 自带 migration
 - forward-only
@@ -1125,9 +1096,9 @@ SQLite 是本地 working state，不是平台 graph 的替代品。
 
 ---
 
-## 15. 结构化同步模型
+## 14. 结构化同步模型
 
-### 15.1 基本单位
+### 14.1 基本单位
 
 同步基本单位是 Delta bundle，建议包含：
 
@@ -1139,13 +1110,13 @@ SQLite 是本地 working state，不是平台 graph 的替代品。
 - canonical hash
 - created_at
 
-### 15.2 默认模式
+### 14.2 默认模式
 
 - `sync pull` 拉取平台结构化状态
 - `sync push` 推送本地结构化变更
 - **完整正文**只有在 **`publish.*`（ACP）** 或 **preset `sync` 子模块** 定义的显式发布路径下才跨越平台边界；**不与** `sync push` 的默认结构化 delta 混为一谈
 
-### 15.3 冲突处理
+### 14.3 冲突处理
 
 v1 建议先采用显式冲突暴露：
 
@@ -1154,7 +1125,7 @@ v1 建议先采用显式冲突暴露：
 - Timeline 冲突优先转向 Fork
 - `partial` bundle 必须显示 `delta_results[]`，并仅重建剩余变更
 
-### 15.4 离线行为
+### 14.4 离线行为
 
 - 写入本地 outbox
 - 网络恢复后重试
@@ -1162,9 +1133,9 @@ v1 建议先采用显式冲突暴露：
 
 ---
 
-## 16. 失败与恢复模型
+## 15. 失败与恢复模型
 
-### 16.1 失败类型
+### 15.1 失败类型
 
 - 平台不可达
 - token 失效
@@ -1173,7 +1144,7 @@ v1 建议先采用显式冲突暴露：
 - agent 断连
 - 本地目录权限异常
 
-### 16.2 恢复命令
+### 15.2 恢复命令
 
 - `nexus42 system doctor`
 - `nexus42 sync status`
@@ -1181,7 +1152,7 @@ v1 建议先采用显式冲突暴露：
 - `nexus42 daemon restart`
 - `nexus42 system debug dump-workspace`
 
-### 16.3 保证
+### 15.3 保证
 
 v1 至少应保证：
 
@@ -1191,9 +1162,9 @@ v1 至少应保证：
 
 ---
 
-## 17. 安全与确认策略
+## 16. 安全与确认策略
 
-### 17.1 默认安全策略
+### 16.1 默认安全策略
 
 以下操作需要明确确认或 `--yes`：
 
@@ -1203,13 +1174,13 @@ v1 至少应保证：
 - 创建 fork
 - 覆盖本地生成文件
 
-### 17.2 不允许的默认行为
+### 16.2 不允许的默认行为
 
 - 静默上传全文
 - 静默重写 canon history
 - 允许 agent 越权读写任意路径
 
-### 17.3 面向普通用户的解释
+### 16.3 面向普通用户的解释
 
 用户层文案应该强调：
 
@@ -1219,7 +1190,7 @@ v1 至少应保证：
 
 ---
 
-## 18. 待决策项
+## 17. 待决策项
 
 进入实现前仍需补齐：
 
@@ -1228,7 +1199,6 @@ v1 至少应保证：
 - Nexus local API 是否需要独立暴露，以及与 ACP Client-only 拓扑的边界
 - ~~workspace 是否支持多 world 共存~~。**Closed（C2）**：支持；以 `world_id` 显式参数隔离并发；单运行时 **一个活跃 `creator_id`（`creator use`）** + 在该 Creator 下 **一个活跃 `workspace_slug`（`creator workspace use`，默认 `default`）**（见 §6.2C C2、nexus-platform `v1-spec/shared/domain/data-model-v1.md` §5.14、nexus-platform `v1-spec/adr/adr-014-local-fs-creator-workspace-layout-v1.md`）。
 - `sync` 是否允许默认后台定时拉取
-- skills export 的目标格式优先级
 
 ---
 

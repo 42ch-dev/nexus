@@ -240,9 +240,9 @@ DF-47 row in the deferred tracker is narrowed. Full DF-46 capability matrix (all
 
 ---
 
-## 8. Skills export (L1)
+## 8. Capability registry direction (V1.53)
 
-[skills-export-compatibility.md](skills-export-compatibility.md) maps logical `nexus.*` ids to host tools at **L1 Wrapped Skills**. V1.34 documents the minimal matrix in P3; full publish matrix remains **DF-50**.
+Skills-export CLI/spec work is **Cancelled** (DF-50, V1.53). Runtime `nexus.*` dispatch now converges on the [`capability-registry.md`](capability-registry.md) Draft overlay: the bridge remains the mediated external-agent tool path, while the registry becomes the handler/admission/wire/failure/test-vector SSOT.
 
 ---
 

@@ -1,13 +1,13 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.52 Active** (2026-06-19, P-1 Done; implement GO) · **V1.51 Shipped** (2026-06-19, PR #64 @ `c57b927b`) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.53 Active (P-1 Done; P0 pending)** · **V1.52 Shipped** (2026-06-19, PR #73) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.52 Active (2026-06-19) — Author Completion & Multi-Branch Preset Orchestration compass locked, P-1 Done, pre_implement_gate GO, T-A P0 ∥ T-B P0 dispatching; V1.51 Shipped (2026-06-19, PR #64 @ `c57b927b`).
+**Status**: V1.53 Active (2026-06-20) — Capability Surface Completion & Skills CLI Cleanup compass locked, P-1 Done, P0 pending; V1.52 Shipped (2026-06-19, PR #73).
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-19 (V1.52 P-1 prepare — active compass + essay/game-bible/script profile targets)
+**Last updated**: 2026-06-20 (V1.53 P-1 prepare — active compass + DF-50 cancellation)
 
 ---
 
@@ -74,7 +74,6 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.42 P3 Narrowed** | M | V1.34→V1.35→V1.36→V1.42 | V1.34 P4 shipped adapter. **V1.42 P3 shipped**: `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool (`nexus.orchestration.schedule_status`) proven E2E with 5 hermetic tests. Production caller wiring complete for minimal slice. Full DF-46 parity remains Post-V1.42. Plan: [2026-06-11-v1.42-agent-tool-production-wiring.md](../plans/2026-06-11-v1.42-agent-tool-production-wiring.md). |
 | DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
-| DF-50 | skills-export publishable L1 capability matrix | V1.34 | Post-V1.34 | M | V1.34 | Full matrix; minimal mapping in P3. |
 | DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 residual-convergence** (commits a044f94 + 71c10cc). Schema now declares `prompt_file` + `vars` with `anyOf`. Closure recorded in [`.mstar/archived/residuals/v1.32-post-qc-tech-debt.json`](../archived/residuals/v1.32-post-qc-tech-debt.json) (R-P2-01). |
 | DF-52 | Top-level `nexus42 preset` command group | V1.33 | **V1.45 Shipped** (P-last) | S | V1.33 | **Resolution path:** `creator run <preset_id>` generic entry (BL-12). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.39 P0 Shipped** | S | V1.34→V1.35→V1.36→V1.37→V1.38→V1.39 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce). V1.38 shipped multi-chapter foundation **without** auto-reenqueue. **V1.39 P0** implements full `intake → research → produce → review → persist` auto-chain (default true), chapter outer loop, side-input lane, boot recovery, `--no-auto-chain` opt-out, `creator run resume` command. Core: `nexus-orchestration::auto_chain` module with `evaluate_next_step` + 15 unit tests + 14 integration tests. Plan: [2026-06-09-v1.39-fl-e-auto-chain-engine.md](../plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md). **Tri-review + targeted re-review all Approve; final consolidated gate Approve. PR #50 merged ad9725d8.** |
@@ -281,7 +280,7 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.52** (Active 2026-06-19, P-1 Done; implement GO) — [v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md](../iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md) — Author Completion & Multi-Branch Preset Orchestration: Track A outline 五问 + KB auto-promote + CLI consolidation + Work→KeyBlock provenance + essay profile; Track B N-way GO/NOGO + branch merge semantics. 7 plans registered; integration branch `iteration/v1.52`; pre_implement_gate GO.
+- **V1.53** (Active 2026-06-20, P-1 Done; P0 pending) — [v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md](../iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md) — Capability Surface Completion & Skills CLI Cleanup: P0 registry SSOT, P1 first DF-46 read-heavy tool slice, P-c skills-export CLI/spec cleanup, P-last spec hygiene closeout. 5 plans registered; integration branch `iteration/v1.53`.
 
 **Latest shipped iteration**
 
