@@ -1,0 +1,57 @@
+# Script Init Preset — filesystem-only scaffold for script Work bootstrap
+#
+# V1.55 P3: third non-novel profile per script-profile.md
+# One-shot (work_init only); no ACP conversation turns.
+# Materializes Works/<work_ref>/ with template stubs:
+#   Scripts/script.md, Beats/beat-sheet.md, Characters/characters.md,
+#   README.md, and Logs/{write,review}/ directories.
+#
+# Input variables (passed via core_context / preset.input):
+#   work_id:       Work entity ID being initialized (required)
+#   creator_id:    Creator owning the Work (required)
+#   initial_idea:  Raw user idea text (required)
+#   work_ref:      Slug pre-derived by CLI from --idea / args (required)
+#   title:         Working title pre-collected via CLI (required)
+#   world_id:      Optional world binding (string or null)
+#
+# This preset is one-shot (work_init only); it does NOT auto-chain
+# into script-writing. After completion, the Work is in intake-started state.
+
+preset:
+  id: script-init
+  version: 1
+  kind: creator
+  description: "Filesystem scaffold: bootstrap a script Work with script templates, beat sheet, character directions, and logs directories"
+  requires_capabilities:
+    - script.project_scaffold
+  run_intents:
+    - work_init
+  initial: scaffold
+  terminal: done
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: in
+      value: [null, script]
+    - kind: work_field
+      field: workspace_slug
+      op: required
+
+states:
+  - id: scaffold
+    description: "Invoke script.project_scaffold to materialize the Work directory tree"
+    enter:
+      - kind: capability
+        name: script.project_scaffold
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          work_id: "{{preset.input.work_id}}"
+          work_ref: "{{preset.input.work_ref}}"
+          title: "{{preset.input.title}}"
+          world_id: "{{preset.input.world_id}}"
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true
