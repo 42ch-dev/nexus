@@ -2,8 +2,13 @@
 #
 # LLM-driven per-section drafting + review loop for game-bible Design/*.md
 # sections. Each run drafts one section (selected via preset input), then
-# reviews it against the design 五问 rubric. On GO, the section_status
-# frontmatter flips to 'accepted'; on NOGO, the author revises and re-runs.
+# reviews it against the design 五问 rubric. On GO the preset terminal is
+# reached; on NOGO, the author revises and re-runs.
+#
+# NOTE (R-V155P2-F002): accepted section_status frontmatter transition is
+# a MANUAL author step in V1.55. The preset does NOT atomically update the
+# Design/*.md frontmatter. A future V1.56+ capability
+# (nexus.game_bible.section_status.update) is planned for auto-transition.
 #
 # Input variables (passed via schedule/CLI input):
 #   work_id:       Work entity ID
