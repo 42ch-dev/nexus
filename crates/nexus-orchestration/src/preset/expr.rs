@@ -26,11 +26,22 @@
 //!
 //! * Expression evaluates against `graph_flow::Context` — `_context.x.y` resolves
 //!   via context key lookup then JSON pointer traversal.
-//! * Missing fields return `null`; comparisons with `null` are always `false`
-//!   (except `!= null` which is `true` when the value is non-null).
+//! * Missing fields return `null`; `null == null` → `true`, `null != "x"` → `true`,
+//!   `null > 0` → false (JSON semantics; see M-001 spec alignment).
 //! * Type mismatches (comparing string to int) produce a typed error.
+//!
+//! ## Depth limit
+//!
+//! * Expression nesting depth is bounded by [`MAX_EXPR_DEPTH`] (= 32) to prevent
+//!   stack overflow from user-installable presets with deeply-nested `when:` expressions.
+//! * Depth counter is incremented at each recursive descent (parens, binary ops, unary NOT).
+//! * Exceeding the limit returns [`ExprError::DepthExceeded`].
 
 use std::fmt;
+
+/// Maximum expression nesting depth to prevent stack overflow from deeply
+/// nested `when:` expressions in user-installable presets (V1.56 P2 fix-wave, W-003).
+pub const MAX_EXPR_DEPTH: u32 = 32;
 
 /// Expression AST node.
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +109,8 @@ pub enum ExprError {
     FieldNotFound { path: String },
     /// Type mismatch (e.g. comparing string to int).
     TypeError { message: String },
+    /// Expression exceeds maximum nesting depth (V1.56 P2 fix-wave, W-003).
+    DepthExceeded(u32),
 }
 
 impl fmt::Display for ExprError {
@@ -119,6 +132,12 @@ impl fmt::Display for ExprError {
             Self::TypeError { message } => {
                 write!(f, "type error: {message}")
             }
+            Self::DepthExceeded(depth) => {
+                write!(
+                    f,
+                    "expression exceeds maximum nesting depth ({depth} > {MAX_EXPR_DEPTH})"
+                )
+            }
         }
     }
 }
@@ -131,14 +150,16 @@ impl fmt::Display for ExprError {
 ///
 /// # Errors
 ///
-/// Returns [`ExprError::Parse`] if the input contains invalid syntax or
-/// [`ExprError::UnexpectedEnd`] if the expression is truncated.
+/// Returns [`ExprError::Parse`] if the input contains invalid syntax,
+/// [`ExprError::UnexpectedEnd`] if the expression is truncated, or
+/// [`ExprError::DepthExceeded`] if the expression exceeds [`MAX_EXPR_DEPTH`].
 pub fn parse(input: &str) -> Result<Expr, ExprError> {
     let tokens = tokenize(input);
     let mut parser = Parser {
         tokens,
         pos: 0,
         input: input.to_string(),
+        depth: 0,
     };
     let expr = parser.parse_or_expr()?;
     // Ensure we consumed all tokens.
@@ -395,9 +416,19 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     input: String,
+    depth: u32,
 }
 
 impl Parser {
+    /// Check and bump depth. Returns `Err(DepthExceeded)` if depth exceeds `MAX_EXPR_DEPTH`.
+    const fn check_depth(&mut self) -> Result<(), ExprError> {
+        self.depth += 1;
+        if self.depth > MAX_EXPR_DEPTH {
+            return Err(ExprError::DepthExceeded(self.depth));
+        }
+        Ok(())
+    }
+
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
@@ -440,6 +471,7 @@ impl Parser {
         let mut left = self.parse_and_expr()?;
         while self.is_oror() {
             self.advance();
+            self.check_depth()?;
             let right = self.parse_and_expr()?;
             left = Expr::Or(Box::new(left), Box::new(right));
         }
@@ -450,6 +482,7 @@ impl Parser {
         let mut left = self.parse_unary()?;
         while self.is_andand() {
             self.advance();
+            self.check_depth()?;
             let right = self.parse_unary()?;
             left = Expr::And(Box::new(left), Box::new(right));
         }
@@ -459,6 +492,7 @@ impl Parser {
     fn parse_unary(&mut self) -> Result<Expr, ExprError> {
         if self.is_bang() {
             self.advance();
+            self.check_depth()?;
             let inner = self.parse_unary()?;
             return Ok(Expr::Not(Box::new(inner)));
         }
@@ -469,6 +503,7 @@ impl Parser {
         match self.peek() {
             Some(Token::LParen(_)) => {
                 self.advance();
+                self.check_depth()?;
                 let expr = self.parse_or_expr()?;
                 match self.peek() {
                     Some(Token::RParen(_)) => {
@@ -1051,5 +1086,83 @@ mod tests {
         let ctx = make_ctx(&[("name", serde_json::json!("alice"))]);
         let result = evaluate_expr("_context.name == 'alice'", &ctx).unwrap();
         assert!(result);
+    }
+
+    // ── Depth limit tests (V1.56 P2 fix-wave, W-003) ─────────────────
+
+    #[test]
+    fn depth_32_succeeds() {
+        // Build an expression with depth exactly 32 (nested paren-paren).
+        // 32 parens wrap a simple field access.
+        let expr = format!("{}_context.x{}", "(".repeat(32), ")".repeat(32));
+        let result = parse(&expr);
+        assert!(
+            result.is_ok(),
+            "depth 32 should succeed, got: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn depth_33_fails() {
+        // 33 parens should exceed MAX_EXPR_DEPTH (32).
+        let expr = format!("{}_context.x{}", "(".repeat(33), ")".repeat(33));
+        let result = parse(&expr);
+        assert!(
+            matches!(result, Err(ExprError::DepthExceeded(_))),
+            "depth 33 should fail with DepthExceeded, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn depth_1000_no_panic() {
+        // Extremely deep nesting should return an error, not panic.
+        let expr = format!("{}_context.x{}", "(".repeat(1000), ")".repeat(1000));
+        let result = parse(&expr);
+        assert!(
+            result.is_err(),
+            "depth 1000 should produce an error, not panic"
+        );
+    }
+
+    // ── Null comparison semantics (V1.56 P2 fix-wave, M-001) ─────────
+
+    #[test]
+    fn null_eq_null_is_true() {
+        let ctx = make_ctx(&[]);
+        let result = evaluate_expr("_context.missing == null", &ctx).unwrap();
+        assert!(result, "null == null should be true (JSON semantics)");
+    }
+
+    #[test]
+    fn null_eq_value_is_false() {
+        let ctx = make_ctx(&[("name", serde_json::json!("alice"))]);
+        let result = evaluate_expr("_context.name == null", &ctx).unwrap();
+        assert!(!result, "non-null value == null should be false");
+    }
+
+    #[test]
+    fn null_ne_value_is_true() {
+        let ctx = make_ctx(&[("name", serde_json::json!("alice"))]);
+        let result = evaluate_expr("_context.name != null", &ctx).unwrap();
+        assert!(result, "non-null value != null should be true");
+    }
+
+    #[test]
+    fn null_gt_zero_is_false() {
+        let ctx = make_ctx(&[]);
+        let err = evaluate_expr("_context.missing > 0", &ctx).unwrap_err();
+        assert!(
+            matches!(err, ExprError::TypeError { .. }),
+            "null > 0 should be a TypeError (no numeric comparison with null)"
+        );
+    }
+
+    #[test]
+    fn null_ne_null_is_false() {
+        let ctx = make_ctx(&[]);
+        let result = evaluate_expr("_context.missing != null", &ctx).unwrap();
+        assert!(!result, "null != null should be false (JSON semantics)");
     }
 }
