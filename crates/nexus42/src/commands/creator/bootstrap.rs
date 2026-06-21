@@ -28,10 +28,11 @@ pub struct BootstrapArgs {
     #[arg(long)]
     pub idea: String,
 
-    /// Work profile: 'novel' (default), 'essay' (V1.52 T-A P2), or
-    /// 'game-bible' (V1.54 P1). Sets `work_profile` on the Work and selects
-    /// the default init preset (`novel-project-init` for novel, `essay-init`
-    /// for essay, `game-bible-init` for game-bible).
+    /// Work profile: 'novel' (default), 'essay' (V1.52 T-A P2),
+    /// 'game-bible' (V1.54 P1), or 'script' (V1.55 P3). Sets `work_profile`
+    /// on the Work and selects the default init preset
+    /// (`novel-project-init` for novel, `essay-init` for essay,
+    /// `game-bible-init` for game-bible, `script-init` for script).
     #[arg(long, default_value = "novel")]
     pub profile: String,
 
@@ -194,6 +195,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
     let primary_preset_id = preset.unwrap_or_else(|| match profile.as_str() {
         "essay" => "essay".to_string(),
         "game_bible" => "game-bible".to_string(),
+        "script" => "script".to_string(),
         _ => "novel-writing".to_string(),
     });
 
@@ -287,6 +289,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
     let effective_init_preset = init_preset.or_else(|| match profile.as_str() {
         "essay" => Some("essay-init".to_string()),
         "game_bible" => Some("game-bible-init".to_string()),
+        "script" => Some("script-init".to_string()),
         _ => None,
     });
 
