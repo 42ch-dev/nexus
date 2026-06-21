@@ -1,17 +1,17 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.56 Shipped (2026-06-22)** — Workspace & Routing Seam Closure; 7 plans all Done (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); integration branch `iteration/v1.56` retiring per `mstar-branch-worktree`. V1.55 Shipped 2026-06-22 (PR #77); V1.54 Shipped 2026-06-21 (PR #76). Platform **paused**. Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.57 Active (2026-06-22)** — DF-46 Full Parity & DF-47 Unification (T-A single axis); 7 plan stubs authored (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); integration branch `iteration/v1.57` created from main; pre-implement gate `pending` PM dispatch GO. V1.56 Shipped 2026-06-22 via PR #78 @ 8a2fb20e (Workspace & Routing Seam Closure); V1.55 Shipped 2026-06-22 (PR #77); V1.54 Shipped 2026-06-21 (PR #76). Platform **paused**. Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.56 Active (P-1 in progress 2026-06-22) — Workspace & Routing Seam Closure; 7 plan stubs authored (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); pre-implement gate pending PM review. V1.55 Shipped 2026-06-22 via PR #77 at commit 9d2893c2; integration branch `iteration/v1.55` retiring per `mstar-branch-worktree`. V1.54 shipped 2026-06-21 at commit 2fd183f0 via PR #76.
+**Status**: V1.57 Active (P-1 complete 2026-06-22; pre-implement gate pending) — DF-46 Full Parity & DF-47 Unification. **T-A single axis** (Mode 1 spec governance: bridge→Master + acp §4 roster rewrite; Option A adapter topology: 1 registry + 3 caller adapter; CLI host-call-only; 4 implement plans + P-mid + P-last in 3-wave dispatch). V1.56 Shipped 2026-06-22 via PR #78 at commit 8a2fb20e on main; integration branch `iteration/v1.56` retired per `mstar-branch-worktree`. V1.55 Shipped 2026-06-22 via PR #77 at commit 9d2893c2.
 
-**V1.56 carry-forward index (absorbed in V1.56)**: DF-29 → V1.56 P1 (`2026-06-22-v1.56-df29-registry-refresh`) — synthetic default + optional `--cdn-url` network; DF-31 + DF-42 → V1.56 P0 (`2026-06-22-v1.56-df31-df42-full-redesign`) — workspace OCC + persistent sessions + changes[] + /v1/local/* redesign; DF-56 independent sub-items (任意阶段条件 next + 表达式/规则路由 + multi-branch+merge) → V1.56 P2 (`2026-06-22-v1.56-df56-independent-slice`); DF-56 dependent sub-items (registry.refresh 条件边 + workspace.open/commit 分支输入) → V1.56 P3 (`2026-06-22-v1.56-df56-dependent-slice`); R-V155P2-F002 (game-bible design-writing section_status auto-transition) → V1.56 P-last fix-wave.
+**V1.57 carry-forward index (absorbed in V1.57)**: 3 V1.56 medium/low residuals targeted at V1.57 plan slots — `R-V156P1-M001` → V1.57 P2 (`2026-06-22-v1.57-v156-carry-forwards-and-compliance`) — schema rename `agent_count` → `capability_count`; `R-V156P1-M002` → V1.57 P1 (`2026-06-22-v1.57-daemon-refactor-and-caller-adapters`) — global `RwLock<CdnConfig>` → constructor-injected (natural coupling with god-file split); `R-V156P3-S003` → V1.57 P1 — registry_output_to_context field drops (3-caller refactor cross-cut). 32 V1.57+ residuals remain in backlog (out of V1.57 scope: R-V156P0-M001 sha2 dep + R-V156P0-M002 path canonicalize stay V1.58+ workspace concerns).
 
 **V1.55 carry-forward index (closed in V1.55)**: DF-43 → V1.55 P0 (`2026-06-22-v1.55-df43-sqlite-alignment`) — **Closed**; DF-31 → V1.55 P1 (`2026-06-22-v1.55-df31-workspace-interface`) — **Skeleton shipped**; game-bible Depth 3.5 → V1.55 P2 (`2026-06-22-v1.55-game-bible-depth-35`) — **Shipped**; Script scaffold → V1.55 P3 (`2026-06-22-v1.55-script-scaffold`) — **Shipped**; `R-V154P1-S002` → V1.55 P2 — **Resolved**; `R-V154P1-W001` → V1.55 P3 — **Resolved**.
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-22 (V1.56 Shipped via PR #78 @ 8a2fb20e on main; V1.55 ship baseline; 0 open V1.55→V1.56 carry-forwards; 35 V1.57+ residuals)
+**Last updated**: 2026-06-22 (V1.57 Active: compass + 7 plan stubs authored, integration branch `iteration/v1.57` created from main, 3 V1.56 medium/low residuals absorbed into V1.57 plan slots per V1.57 carry-forward index; V1.56 ship baseline)
 
 ---
 
@@ -122,15 +122,19 @@ See plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
-**V1.55 ship residual retargeting**: All 2 V1.54 carry-forwards closed in V1.55. `R-V154P1-S002` resolved in P2 (profile-gate observability); `R-V154P1-W001` resolved in P3 (ScaffoldTransaction). `R-V155P2-F002` (V1.55-internal; design-writing preset no durable section_status auto-transition) **absorbed into V1.56 P-last fix-wave** per compass Q7. Machine SSOT: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`.
+**V1.55 ship residual retargeting**: All 2 V1.54 carry-forwards closed in V1.55. `R-V154P1-S002` resolved in P2 (profile-gate observability); `R-V154P1-W001` resolved in P3 (ScaffoldTransaction). `R-V155P2-F002` (V1.55-internal; design-writing preset no durable section_status auto-transition) **absorbed into V1.56 P-last fix-wave** per compass Q7 → **Closed in V1.56 P-last** (no carry-forward to V1.57).
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22T21:15:00Z**; iteration state: V1.56 Shipped via PR #78 @ 8a2fb20e on main (2026-06-21T14:24:37Z), integration_branch_retired=true; pre_implement_gate=null; `latest_ship.iteration=V1.56` (`merge_commit=8a2fb20e`, `pr=78`); 0 open V1.55 carry-forwards; 35 V1.57+ residuals registered). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**V1.56 ship residual retargeting (V1.57 carry-forwards)**: 3 V1.56 medium/low residuals absorbed into V1.57 plan slots per V1.57 carry-forward index above. Lifecycle stays `deferred` until the absorbing plan ships and resolves the row. 32 V1.57+ residuals remain in backlog (out of V1.57 scope: R-V156P0-M001 sha2 dep + R-V156P0-M002 path canonicalize stay V1.58+ workspace concerns per compass §1.2).
+
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22T22:30:00Z**; iteration state: V1.57 Active; `integration_branch=iteration/v1.57` (created from main @ 329c5ff2); `integration_branch_retired=false`; `pre_implement_gate=pending`; `latest_active_iteration=V1.57`; `latest_ship.iteration=V1.56` (`merge_commit=8a2fb20e`, `pr=78`); 3 V1.57 carry-forwards registered (R-V156P1-M001→P2, R-V156P1-M002→P1, R-V156P3-S003→P1); 32 V1.57+ backlog residuals). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.55 carry-forward (V1.54 ship) | **2** | 2 low; resolved in V1.55 P2+P3 (see V1.55 carry-forward index above) |
-| V1.55 internal (V1.55 ship) | **1** | 1 low: `R-V155P2-F002` → absorbed into V1.56 P-last fix-wave per compass Q7 |
-| **Total deferred at V1.55 ship** | **1** | See `metadata.tech_debt_summary.total_deferred` (= 1; 1 low: `R-V155P2-F002` → V1.56 P-last) |
+| V1.55 carry-forward (V1.54 ship) | **0** | 2 low; both resolved in V1.55 P2+P3 (see V1.55 carry-forward index above) |
+| V1.55 internal (V1.55 ship) | **0** | 1 low: `R-V155P2-F002` → closed in V1.56 P-last fix-wave (no V1.57 carry-forward) |
+| V1.56 carry-forward (V1.56 ship) | **3** | 1 medium + 1 medium + 1 low; absorbed into V1.57 plan slots per V1.57 carry-forward index above |
+| V1.56 internal (V1.56 ship, V1.57+ backlog) | **32** | 17 medium + 15 low; in V1.57+ backlog (out of V1.57 scope per compass §1.2) |
+| **Total deferred at V1.57 active** | **35** | See `metadata.tech_debt_summary` (3 V1.57 carry-forwards + 32 V1.57+ backlog) |
 
 **Closed / historical residuals**
 
@@ -278,9 +282,13 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **None** (V1.56 Shipped 2026-06-22; integration branch retiring).
+- **V1.57 — DF-46 Full Parity & DF-47 Unification** (Active 2026-06-22; pre-implement gate pending PM dispatch GO): [v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md](../iterations/v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md) — T-A single axis: 36 catalog IDs roster-documented, 35 implemented IDs single-runtime-binding under `capability::Registry`, 3 caller entry points (CLI `host-call` / worker `agent_tool_request` / HTTP `ToolExecuteRequest`) all dispatching through registry; `agent-nexus-tool-bridge.md` Master promotion; `acp-capability-set.md` §4 roster rewrite; 3 V1.56 carry-forwards absorbed (R-V156P1-M001 → P2, R-V156P1-M002 → P1, R-V156P3-S003 → P1). 7 plan stubs authored (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); integration branch `iteration/v1.57` created from main @ 329c5ff2; 3-wave dispatch (Wave 1 parallel P0+P1, Wave 2 sequential P2, Wave 3 sequential P3). Track A canonical owner = `@fullstack-dev` (P0, P2); Track B canonical owner = `@fullstack-dev-2` (P1, P3).
 
 **Latest shipped iteration**
+
+- **V1.56** (Shipped 2026-06-21 via PR #78 @ `8a2fb20e`): [v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md](../iterations/v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md) — Workspace & Routing Seam Closure: P0 DF-31 full + DF-42 full Local API redesign (`/v1/local/*` + workspace OCC + persistent sessions + changes[] payload); P1 DF-29 `nexus.registry.refresh` capability (synthetic default + optional `--cdn-url`); P2 DF-56 independent slice (conditional `next` + expression routing + multi-branch + merge points); P3 DF-56 dependent slice (registry conditional edges + workspace branch inputs); P-mid meta tracking; P-last R-V155P2-F002 fix-wave (game-bible design-writing section_status auto-transition) + Profile B. 7 plans all Done; merged to `main` at `8a2fb20e` via PR [#78](https://github.com/42ch-dev/nexus/pull/78) on 2026-06-21. `iteration/v1.56` retired. 35 open V1.57+ residuals registered (18 medium + 17 low); 3 absorbed into V1.57 plan slots.
+
+- **V1.55** (Shipped 2026-06-21 via PR #77 @ `9d2893c2`): [v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md](../iterations/v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md) — Non-novel profile completion & infrastructure refactor: P0 DF-43 SQLite persistence alignment; P1 DF-31 workspace interface (skeleton); P2 game-bible Depth 3.5 (design-writing + 五问 + section completion + KB extraction); P3 script scaffold (Scripts/ + Beats/ + Characters/ + Logs/); P-mid meta tracking; P-last spec hygiene + Profile B. 7 plans all Done; merged to `main` at `9d2893c2` via PR #77 on 2026-06-21. `iteration/v1.55` retired.
 
 - **V1.54** (Shipped 2026-06-21 via PR #76): [v1.54-df46-completion-and-game-bible-foundation-delivery-compass-v1.md](../iterations/v1.54-df46-completion-and-game-bible-foundation-delivery-compass-v1.md) — DF-46 Completion & Game-Bible Foundation: P0 DF-46 full-spectrum write tools (6 tools) + LazyLock registry cache + 13 V1.53 residuals all converged; P1 game-bible scaffold (Depth 2: spec + 7 BlockType variants + bootstrap + 12 Design templates); P-last capability-registry.md Draft → Master + Profile B + shipped snapshot. 4 plans all Done; merged to `main` at `2fd183f0` via PR [#76](https://github.com/42ch-dev/nexus/pull/76) on 2026-06-21. `iteration/v1.54` retired. 2 open residuals (R-V154P1-W001 scaffold atomicity, R-V154P1-S002 profile-gate observability) deferred to V1.55+.
 
@@ -320,4 +328,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-14 (V1.45 P-last closeout + post-merge cleanup: §5 Related index updated to reflect V1.45 as Latest shipped; "Latest active iteration" marked None; P-1 archive backfill; Profile B layout invariant documented in [.mstar/AGENTS.md](../AGENTS.md)). Status: **V1.45 Shipped**.*
+*Last updated: 2026-06-22 (V1.57 Active: compass + 7 plan stubs authored, integration branch `iteration/v1.57` created from main, 3 V1.56 medium/low residuals absorbed into V1.57 plan slots per V1.57 carry-forward index; §3.5 Open tech-debt residuals table updated; §5 Related index updated to reflect V1.57 as Latest active + V1.56 as Latest shipped; V1.55 archive entry added for SSOT completeness). Status: **V1.57 Active**. Pre-implement gate: **pending** PM dispatch GO.*
