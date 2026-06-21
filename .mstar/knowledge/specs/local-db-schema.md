@@ -101,6 +101,8 @@ Required V1.26 columns:
 
 New code MUST write canonical body text to `content_path` on disk instead of `content`. Listing references MUST be satisfiable from registry metadata without reading full body text.
 
+**DF-43 ownership boundary (V1.55 P0)**: `nexus-local-db` is the sole production persistence owner for reference sources. The `nexus-knowledge` crate provides domain types (`ReferenceSource`), traits (`KnowledgeStore`), and adapter seams (`From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` in `nexus-local-db/src/reference_source.rs`) — it does **not** introduce its own SQLite/file-backed truth source. All production DB writes go through `nexus-local-db` DAO functions (`register`, `list`, `get_by_id`).
+
 #### 4.1.2 Narrative + World KB persistence (V1.26 draft)
 
 These tables live in the same workspace `state.db` as `reference_sources` and support the V1.26 persistent `NarrativeGateway` and `KbStore` adapters. Domain semantics remain owned by `nexus-narrative` and `nexus-kb`; `nexus-local-db` owns migration ordering and SQLite mechanics.
