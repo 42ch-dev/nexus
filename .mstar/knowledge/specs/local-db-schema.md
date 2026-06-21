@@ -4,7 +4,7 @@
 **Document class**: Master  
 **V1.40 Shipped amendments:** §4.1.2 `kb_key_blocks` validation intent — application-layer validation in `nexus-kb::validation` module (ValidationMode::Novel enforces `body.attributes.novel_category`); `narrative_worlds` rows via `creator world create` (V1.40 P0); `kb_extract_jobs` artifact locator columns (`source_kind`, `source_locator`, `profile_hint`, `work_id`) added V1.40 P3.  
 **V1.42 Draft amendment:** `work_chapters` PK migration — composite primary key `(work_id, volume, chapter)` with `volume INTEGER NOT NULL DEFAULT 1`; backfill existing rows `volume = 1`; drop legacy `(work_id, chapter)` PK. Normative detail: [novel-writing/workflow-profile.md §4.5.4](novel-writing/workflow-profile.md). Plan: [2026-06-11-v1.42-multi-volume.md](../../plans/2026-06-11-v1.42-multi-volume.md).  
-**Last updated**: 2026-06-11 — V1.42 prepare overlay  
+**Last updated**: 2026-06-22 — V1.56 P0 workspace_sessions  
 
 ## 0. 文档定位
 
@@ -301,6 +301,41 @@ Partial unique index: one row per `(creator_id, work_id)` where `work_id IS NOT 
 | `device_code_sessions` | 设备授权会话 | Daemon |
 | `acp_tool_audit_log` | ACP 工具调用审计 | Daemon |
 | `acp_sessions` | ACP 会话持久化 | Daemon |
+| `workspace_sessions` | Workspace session persistence for `workspace.open`/`workspace.commit` with file-level OCC content hashes (V1.56 P0) | Daemon |
+
+#### 4.2.1 `workspace_sessions` (V1.56 P0)
+
+Persists `workspace.open`/`workspace.commit` sessions in `SQLite`. Replaces the V1.55 in-memory `WorkspaceSessionManager`.
+
+```sql
+CREATE TABLE IF NOT EXISTS workspace_sessions (
+    session_id TEXT PRIMARY KEY CHECK (session_id LIKE 'ws_%'),
+    workspace_root TEXT NOT NULL,
+    relative_path TEXT NOT NULL,
+    existed INTEGER NOT NULL DEFAULT 0,
+    file_hashes_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    consumed INTEGER NOT NULL DEFAULT 0 CHECK (consumed IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_sessions_expires_at
+    ON workspace_sessions (expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_workspace_sessions_consumed_expires
+    ON workspace_sessions (consumed, expires_at);
+```
+
+| Column | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `session_id` | `TEXT` | yes | PK; `ws_<uuid>` format |
+| `workspace_root` | `TEXT` | yes | Absolute path to workspace creative root |
+| `relative_path` | `TEXT` | yes | Relative path within workspace |
+| `existed` | `INTEGER` | yes | Whether the target path existed at open time |
+| `file_hashes_json` | `TEXT` | yes | JSON `{relative_path: sha256_hex}` for OCC |
+| `created_at` | `TEXT` | yes | RFC 3339 creation timestamp |
+| `expires_at` | `TEXT` | yes | RFC 3339 expiry timestamp (created_at + TTL) |
+| `consumed` | `INTEGER` | yes | 0 = active, 1 = committed (consumed) |
 
 ### 4.3 版本元数据约束
 

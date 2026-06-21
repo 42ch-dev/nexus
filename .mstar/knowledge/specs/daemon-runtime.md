@@ -46,7 +46,7 @@ Platform sync and registration **must not** live in daemon-runtime. See [local-c
 | Subsystem | Owns | Does not own |
 | --- | --- | --- |
 | CLI | Parsing, one-shot commands, spawning daemon mode, user errors | Long-lived agent protocol details |
-| Daemon runtime | SQLite handles, Local API listener, orchestration/agent-host, graceful shutdown | Platform HTTP, sync outbox, creator registration |
+| Daemon runtime | `SQLite` handles, Local API listener, orchestration/agent-host, workspace session persistence (`workspace_sessions` DB table, V1.56 P0), graceful shutdown | Platform HTTP, sync outbox, creator registration |
 | Agent host | Managed agent sessions (see agent-host) | Platform HTTP |
 | Cloud sync (CLI) | Platform HTTP, legacy bundle sync (`nexus-cloud-sync`) | Daemon Local API |
 

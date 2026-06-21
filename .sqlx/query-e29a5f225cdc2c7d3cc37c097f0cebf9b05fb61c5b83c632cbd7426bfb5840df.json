@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE workspace_sessions SET consumed = 1 WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "e29a5f225cdc2c7d3cc37c097f0cebf9b05fb61c5b83c632cbd7426bfb5840df"
+}
