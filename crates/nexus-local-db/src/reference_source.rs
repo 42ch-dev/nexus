@@ -324,6 +324,46 @@ pub async fn get_by_id(
     }))
 }
 
+// ── Adapter: DB row → Domain model ────────────────────────────────────
+//
+// DF-43: This is the **only** conversion bridge between the SQLite
+// persistence row (`ReferenceSourceRow`) and the `nexus-knowledge`
+// domain model (`ReferenceSource`). The reverse direction (domain → row)
+// is handled by `register()` with `RegisterParams` — there is no
+// `From<KnowledgeReferenceSource> for ReferenceSourceRow`.
+//
+// This adapter lives in `nexus-local-db` (production persistence owner)
+// because `nexus-local-db` already depends on `nexus-knowledge`.
+
+impl From<ReferenceSourceRow> for nexus_knowledge::reference_source::ReferenceSource {
+    fn from(row: ReferenceSourceRow) -> Self {
+        let tags: Option<Vec<String>> = row.tags.map(|s| {
+            s.split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(std::string::ToString::to_string)
+                .collect()
+        });
+
+        Self {
+            // schema_version is not stored per-row in reference_sources;
+            // default to 1 (matching the nexus-knowledge domain model's
+            // register() constructor).
+            schema_version: 1,
+            reference_source_id: row.reference_source_id,
+            workspace_id: row.workspace_id,
+            source_type: row.source_type,
+            uri: row.uri,
+            title: row.title,
+            tags,
+            content_hash: row.content_hash,
+            scan_status: row.scan_status,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -557,5 +597,293 @@ mod tests {
     async fn test_get_by_id_not_found() {
         let (pool, _dir) = fresh_pool().await;
         assert!(get_by_id(&pool, "ref_ghost").await.unwrap().is_none());
+    }
+
+    // ── DF-43 adapter tests ───────────────────────────────────────────
+
+    /// Round-trip: register → get_by_id → convert to domain model.
+    #[tokio::test]
+    async fn df43_roundtrip_row_to_domain_model() {
+        let (pool, dir) = fresh_pool().await;
+        let home = dir.path();
+
+        let row = register(
+            &pool,
+            RegisterParams {
+                home,
+                creator_id: "ctr_test",
+                workspace_id: "wrk_default",
+                source_type: "url",
+                source_mutability: SourceMutability::Refreshable,
+                uri: "https://example.com/ref",
+                title: "Roundtrip Reference",
+                tags: Some("rust,async,design"),
+                body: "Roundtrip body content",
+            },
+        )
+        .await
+        .unwrap();
+
+        let fetched = get_by_id(&pool, &row.reference_source_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Convert to domain model
+        let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
+
+        assert_eq!(domain.reference_source_id, row.reference_source_id);
+        assert_eq!(domain.workspace_id, "wrk_default");
+        assert_eq!(domain.source_type, "url");
+        assert_eq!(domain.uri, "https://example.com/ref");
+        assert_eq!(domain.title, "Roundtrip Reference");
+        assert_eq!(domain.scan_status, "pending");
+        assert_eq!(domain.schema_version, 1);
+
+        // Tags are parsed from comma-separated to Vec
+        let tags = domain.tags.unwrap();
+        assert_eq!(tags, vec!["rust", "async", "design"]);
+
+        // content_hash from DB
+        assert!(domain.content_hash.is_some());
+        assert_eq!(domain.content_hash.unwrap().len(), 64);
+
+        assert!(!domain.created_at.is_empty());
+    }
+
+    /// Verify no duplicate persistence: the domain model's tags are
+    /// Vec<String>, while the DB row stores them as a serialized string.
+    /// The adapter is the only conversion path — no second SQLite truth.
+    #[tokio::test]
+    async fn df43_no_duplicate_truth_tags_are_serialized_in_db() {
+        let (pool, dir) = fresh_pool().await;
+        let home = dir.path();
+
+        let row = register(
+            &pool,
+            RegisterParams {
+                home,
+                creator_id: "ctr_test",
+                workspace_id: "wrk_default",
+                source_type: "note",
+                source_mutability: SourceMutability::Static,
+                uri: "nexus42://references/units/dup-test",
+                title: "Dup Test",
+                tags: Some("a,b,c"),
+                body: "Body",
+            },
+        )
+        .await
+        .unwrap();
+
+        let fetched = get_by_id(&pool, &row.reference_source_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // DB stores tags as a single serialized string
+        assert_eq!(fetched.tags.as_deref(), Some("a,b,c"));
+
+        // Domain model converts to Vec<String>
+        let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
+        assert_eq!(
+            domain.tags.as_deref(),
+            Some(&["a".to_string(), "b".to_string(), "c".to_string()] as &[String])
+        );
+    }
+
+    /// Source mutability and content_path are DB-only fields —
+    /// not present in the domain model. Verify they are not leaked.
+    #[tokio::test]
+    async fn df43_db_only_fields_not_in_domain_model() {
+        let (pool, dir) = fresh_pool().await;
+        let home = dir.path();
+
+        let row = register(
+            &pool,
+            RegisterParams {
+                home,
+                creator_id: "ctr_test",
+                workspace_id: "wrk_default",
+                source_type: "file",
+                source_mutability: SourceMutability::Refreshable,
+                uri: "file:///docs/ref.md",
+                title: "DB-Only Fields Test",
+                tags: None,
+                body: "Content",
+            },
+        )
+        .await
+        .unwrap();
+
+        // DB row has source_mutability and content_path
+        assert_eq!(row.source_mutability, "refreshable");
+        assert!(row.content_path.is_some());
+
+        let fetched = get_by_id(&pool, &row.reference_source_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
+
+        // Domain model does NOT expose source_mutability or content_path
+        // (verified by compile-time: the struct has no such fields)
+        assert_eq!(domain.uri, "file:///docs/ref.md");
+        assert_eq!(domain.source_type, "file");
+    }
+
+    /// Verify the adapter handles invalid enum values gracefully.
+    /// The domain model uses String for source_type/scan_status so
+    /// unknown DB values pass through without panic.
+    #[tokio::test]
+    async fn df43_unknown_enum_values_passthrough() {
+        let (pool, _dir) = fresh_pool().await;
+
+        // Direct insert with an unknown source_type and scan_status
+        let id = format!("ref_{}", uuid::Uuid::new_v4().simple());
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // SAFETY: test-only DML to exercise adapter with invalid enum strings
+        sqlx::query(
+            "INSERT INTO reference_sources \
+             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, \
+              tags, content_hash, content_path, content, scan_status, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind("wrk_test")
+        .bind("future_type_v99")
+        .bind("static")
+        .bind("nexus42://ref")
+        .bind("Future Type")
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind("unknown_status")
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let fetched = get_by_id(&pool, &id).await.unwrap().unwrap();
+
+        // Conversion should NOT panic on unknown strings
+        let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
+        assert_eq!(domain.source_type, "future_type_v99");
+        assert_eq!(domain.scan_status, "unknown_status");
+    }
+
+    /// Empty tags string should produce empty Vec, not None.
+    #[tokio::test]
+    async fn df43_empty_tags_produces_empty_vec() {
+        let (pool, _dir) = fresh_pool().await;
+
+        let id = format!("ref_{}", uuid::Uuid::new_v4().simple());
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // SAFETY: test-only DML — exercise adapter with empty tags
+        sqlx::query(
+            "INSERT INTO reference_sources \
+             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, \
+              tags, content_hash, content_path, content, scan_status, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind("wrk_test")
+        .bind("note")
+        .bind("static")
+        .bind("nexus42://ref")
+        .bind("Empty Tags")
+        .bind(Some("")) // empty string
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind("pending")
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let fetched = get_by_id(&pool, &id).await.unwrap().unwrap();
+        let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
+
+        // Empty string → Some(vec![]) after filtering empty tokens
+        assert_eq!(domain.tags.as_deref(), Some(&vec![] as &[String]));
+    }
+
+    /// Whitespace-only tags should produce empty Vec.
+    #[tokio::test]
+    async fn df43_whitespace_tags_produces_empty_vec() {
+        let (pool, _dir) = fresh_pool().await;
+
+        let id = format!("ref_{}", uuid::Uuid::new_v4().simple());
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // SAFETY: test-only DML — exercise adapter with whitespace tags
+        sqlx::query(
+            "INSERT INTO reference_sources \
+             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, \
+              tags, content_hash, content_path, content, scan_status, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind("wrk_test")
+        .bind("note")
+        .bind("static")
+        .bind("nexus42://ref")
+        .bind("Whitespace Tags")
+        .bind(Some("  ,  ,  "))
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind("pending")
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let fetched = get_by_id(&pool, &id).await.unwrap().unwrap();
+        let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
+
+        assert_eq!(domain.tags.as_deref(), Some(&vec![] as &[String]));
+    }
+
+    /// Null tags in DB should produce None in domain model.
+    #[tokio::test]
+    async fn df43_null_tags_produces_none() {
+        let (pool, _dir) = fresh_pool().await;
+
+        let id = format!("ref_{}", uuid::Uuid::new_v4().simple());
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // SAFETY: test-only DML — exercise adapter with null tags
+        sqlx::query(
+            "INSERT INTO reference_sources \
+             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, \
+              tags, content_hash, content_path, content, scan_status, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&id)
+        .bind("wrk_test")
+        .bind("note")
+        .bind("static")
+        .bind("nexus42://ref")
+        .bind("Null Tags")
+        .bind::<Option<&str>>(None) // NULL
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind::<Option<&str>>(None)
+        .bind("pending")
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let fetched = get_by_id(&pool, &id).await.unwrap().unwrap();
+        let domain: nexus_knowledge::reference_source::ReferenceSource = fetched.into();
+
+        assert!(domain.tags.is_none());
     }
 }
