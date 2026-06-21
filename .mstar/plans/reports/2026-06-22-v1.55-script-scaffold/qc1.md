@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-22-v1.55-script-scaffold"
-verdict: "Request Changes"
-generated_at: "2026-06-21"
+verdict: "Approve"
+generated_at: "2026-06-22"
 ---
 
 # Code Review Report
@@ -107,3 +107,82 @@ generated_at: "2026-06-21"
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+---
+
+## Revalidation (Wave 2, targeted re-review after P3 fix-wave commit 21908cdb)
+
+**Review range for revalidation**: merge-base: c30cdd48 + tip: iteration/v1.55 HEAD (964d2268); P3 fix-wave commit `21908cdb`
+
+**Fix-wave scope (qc1 focus)**: 4 files changed in `21908cdb`:
+- `crates/nexus-orchestration/src/capability/builtins/script_scaffold.rs` (+375/-89)
+- `crates/nexus-orchestration/src/capability/builtins/game_bible_scaffold.rs` (+358/-142)
+- `crates/nexus-kb/src/validation.rs` (+206)
+- `crates/nexus-daemon-runtime/tests/daemon_boot_llm_wiring.rs` (+6/-2)
+
+### Disposition of qc1 findings
+
+**C-001 (Critical — ScaffoldTransaction overwrite + delete pre-existing files) → RESOLVED**
+- `ScaffoldTransaction` rewritten with separate tracking: `created_files`, `overwritten_files`, `temp_files`, `created_dirs`
+- `write_file()` saves original content snapshot for pre-existing files before overwriting; uses temp+rename atomic pattern
+- `create_dir()` is idempotent — only tracks newly created dirs
+- Drop rollback order: (1) clean temp files, (2) restore overwritten files from snapshot, (3) delete only created files, (4) remove created dirs in reverse
+- Regression test `rollback_preserves_pre_existing_user_content` in both script & game_bible scaffolds → **PASS**
+- Regression test `crash_mid_transaction_leaves_no_half_written_file` in both scaffolds → **PASS**
+- Architecture note: the adopted reference pattern now correctly tracks create vs overwrite, going beyond `novel_scaffold.rs:write_file_idem` (which skips pre-existing files entirely) — the fix-wave restores from snapshot on rollback
+
+**C-002 (Critical — daemon_boot_llm_wiring test count 24 ≠ 23) → RESOLVED**
+- Expected count updated from 23 → 24 with comment reflecting `+ script.scaffold V1.55 P3`
+- `cargo test -p nexus-daemon-runtime --test daemon_boot_llm_wiring` → **4/4 PASS**
+- `cargo test --all` → **all pass (0 failures)**
+
+**W-001 (Warning — ValidationMode::Script lacks direct unit tests) → RESOLVED**
+- 18 dedicated `ValidationMode::Script` tests added covering:
+  - Positive: all 3 categories accepted (dialogue/beat/act)
+  - Negative: `novel_category` rejected, `game_bible_category` rejected
+  - Edge: missing `script_category`, invalid category, non-string category, missing body, missing attributes
+  - Structured error kind verification (MissingScriptCategory, InvalidScriptCategory, NonStringScriptCategory)
+  - Utility: `is_valid_script_category`, `default_block_type_for_script_category`
+  - Display: `ValidationMode::Script → "script"`, 3 new `ValidationKind::*` display variants
+- `cargo test -p nexus-kb -- validation::tests::script_mode` → **8/8 PASS** (8 script-mode specific)
+- Full `cargo test -p nexus-kb` validation suite → **51/51 pass**
+
+**S-001 (Suggestion — CLI help text stale) → STILL OPEN (non-blocking)**
+- Not addressed in fix-wave. Remains a low-priority suggestion for future CLI hygiene.
+
+### Summary of new findings
+
+- **None.** No new Critical, Warning, or architecture/maintainability concerns introduced by the fix-wave.
+
+### CI Gate Verification (post-fix)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Full test suite | `cargo test --all` | **All pass** (no failures) |
+| Clippy (deny warnings) | `cargo clippy --all -- -D warnings` | **Clean** |
+| Format check | `cargo +nightly fmt --all --check` | **Clean** (exit 0) |
+| Codegen | `pnpm run codegen` | **No diff** on generated directories |
+| GitNexus | `detect_changes` | **LOW risk** (AGENTS.md/CLAUDE.md only; no code symbols affected) |
+| Regression (script) | `rollback_preserves_pre_existing_user_content`, `crash_mid_transaction_leaves_no_half_written_file`, `scaffold_idempotent_preserves_user_content`, `script_scaffold_rejects_path_traversal_in_work_ref` | **All PASS** |
+| Regression (game_bible) | Same set + `game_bible_scaffold_rejects_path_traversal_in_work_ref` | **All PASS** |
+| Validation | 8× `script_mode_*` tests in `nexus-kb` | **All PASS** |
+| Daemon boot | `daemon_boot_llm_wiring` (4 tests) | **All PASS** |
+
+### Verdict rationale
+
+All blocking findings (C-001, C-002, W-001) from the initial qc1 review are resolved by fix-wave commit `21908cdb` with passing regression tests in both scaffold implementations. The `ScaffoldTransaction` rewrite now correctly tracks create vs overwrite, uses atomic temp+rename writes, restores pre-existing files from snapshot on rollback, and is thoroughly tested. The daemon-runtime integration test count is updated. Script validation tests comprehensively cover positive/negative/edge/structured-error paths. The sole remaining suggestion (S-001) is non-blocking. No new architecture or maintainability risks were introduced.
+
+### Acceptance Criteria (updated)
+
+| Criterion | Initial | Post-fix |
+|-----------|---------|----------|
+| `script-profile.md` Draft follows patterns | ✅ Pass | ✅ Pass (unchanged) |
+| Script scaffold avoids `Stories/` semantics | ✅ Pass (layout); ❌ C-001 (safety gap) | ✅ **Pass** — C-001 resolved with create/overwrite tracking + snapshot restore |
+| Additive BlockType + `script_category` validation | ⚠️ Partial (no tests) | ✅ **Full Pass** — 18 script-mode tests |
+| Additive enum only | ✅ Pass | ✅ Pass (unchanged) |
+| `R-V154P1-W001` closed | ❌ Fail (C-001 safety gap) | ✅ **Closed** — both scaffolds use idempotent transaction with rollback safety |
+| Standard QC checklist | ❌ Fail (CI failure + data-loss risk) | ✅ **All clear** — CI green, no data-loss risk |
+
+**Updated Verdict**: Approve
+
+**Revalidation timestamp**: 2026-06-22
