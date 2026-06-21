@@ -611,6 +611,32 @@ pub async fn reconcile_from_filesystem(
     now: &str,
     dry_run: bool,
 ) -> Result<ReconcileReport, LocalDbError> {
+    // SAFETY: game-bible profile gate (V1.54 P1).
+    // Chapter reconciliation reads `Works/<work_ref>/Stories/` which is
+    // novel-specific. Non-novel profiles (game-bible, essay) do not have
+    // chapter files and should not run this code path. Return a clear
+    // error rather than silently operating on a missing directory.
+    {
+        // SAFETY: SELECT work_profile — runtime query for profile gate.
+        let profile: Option<String> =
+            sqlx::query_scalar("SELECT work_profile FROM works WHERE work_id = ?")
+                .bind(work_id)
+                .fetch_optional(pool)
+                .await?
+                .flatten();
+        // SAFETY: game-bible profile gate (V1.54 P1).
+        // Block reconcile for explicitly non-novel profiles (game_bible, essay).
+        // Legacy Works (work_profile IS NULL) are treated as novel for backwards
+        // compatibility — they were created before the profile system existed.
+        if profile.as_deref().is_some() && !crate::is_novel_profile(profile.as_deref()) {
+            return Err(LocalDbError::Io(format!(
+                "chapter reconciliation is not supported for work_profile '{}' (work_id: {work_id}); \
+                 only novel Works have chapter files under Stories/",
+                profile.as_deref().unwrap_or("null")
+            )));
+        }
+    }
+
     let diff = compute_reconcile_diff(pool, work_id, work_ref, workspace_root).await?;
     if dry_run {
         return Ok(diff.to_report());
@@ -1139,7 +1165,12 @@ pub async fn seed_chapters_multi_volume_tx(
 /// `current_chapter >= total` predicate which was fragile for multi-volume Works
 /// where chapter numbers reset per volume.
 ///
-/// For **non-novel** Works (V1.36 backwards compat): returns `true` immediately
+/// For **game-bible** Works (`work_profile == 'game_bible'` — V1.54 P1): returns
+/// `false` immediately. Completion detection is deferred to V1.55+ where the
+/// daemon will evaluate `section_status` frontmatter across Design files.
+/// In V1.54, completion is manual via `creator works complete`.
+///
+/// For **other non-novel** Works (V1.36 backwards compat): returns `true` immediately
 /// if `works.status == 'completed'` — the early exit preserves legacy behaviour.
 ///
 /// Returns `false` if:
@@ -1169,9 +1200,18 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
     let status: String = row.get("status");
     let work_profile: Option<String> = row.get("work_profile");
 
+    // SAFETY: game-bible profile gate (V1.54 P1).
+    // Game-bible completion detection is deferred to V1.55+. In V1.54,
+    // the daemon does not evaluate section_status frontmatter — completion
+    // is manual via `creator works complete`. Return Ok(false) to prevent
+    // the novel chapter-completion logic from applying to game-bible Works.
+    if crate::is_game_bible_profile(work_profile.as_deref()) {
+        return Ok(false);
+    }
+
     // Non-novel Works: keep the legacy early exit (V1.36 backwards compat).
     // Novel-profile Works: always fall through to the full §6.1 check.
-    if status == "completed" && work_profile.as_deref() != Some("novel") {
+    if status == "completed" && !crate::is_novel_profile(work_profile.as_deref()) {
         return Ok(true);
     }
 
@@ -2441,6 +2481,38 @@ mod tests {
         assert_eq!(
             next2, None,
             "no next chapter after single-chapter completion"
+        );
+    }
+
+    // F-003: game_bible profile completion gate (V1.54 P1 T8).
+    // is_work_completed must return Ok(false) for game-bible Works
+    // regardless of works.status — completion detection is deferred to V1.55+.
+    #[tokio::test]
+    async fn test_is_work_completed_game_bible_returns_false() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_game_bible_001").await;
+
+        // Set work_profile to game_bible and works.status to 'completed'
+        // SAFETY: UPDATE against works — runtime query for profile gate test.
+        sqlx::query(
+            "UPDATE works SET work_profile = 'game_bible', status = 'completed', \
+             intake_status = 'complete', total_planned_chapters = 1, current_chapter = 1 \
+             WHERE work_id = ?",
+        )
+        .bind("wrk_game_bible_001")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Even with status='completed', game-bible Works should return false —
+        // the game-bible profile gate prevents the novel completion logic from
+        // applying to game-bible Works.
+        assert!(
+            !is_work_completed(&pool, "wrk_game_bible_001")
+                .await
+                .unwrap(),
+            "game-bible profile: is_work_completed must return false \
+             (completion detection deferred to V1.55+)"
         );
     }
 

@@ -10,6 +10,7 @@
 **V1.46 Shipped amendment:** §6.2E FL-E stage subcommand block deleted (superseded by V1.45 generic preset runner — see changelog). Normative CLI IA: [creator-run-preset-entry.md](creator-run-preset-entry.md).  
 **V1.51 Shipped amendments:** §6.2K `creator world kb adopt` LLM metadata surfaces; `creator kb rescan --work <work_ref>` cross-chapter reconciliation; `creator world kb pending --missing-only` (T-A P0/P1/P2).
 **V1.52 T-A P1 Draft overlay:** §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01).
+**V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
 
 ## 0. 文档定位
 
@@ -601,6 +602,21 @@ Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-li
 
 **Target (V1.41):** plans `2026-06-10-v1.41-multi-work-switch`, `2026-06-10-v1.41-selection-pool`.
 
+### 6.2M ACP host write-tool CLI mappings (V1.54 Draft — DF-46)
+
+V1.54 adds 6 mutation-capable `nexus.*` host tools to the daemon-level `CapabilityRegistry`. These are ACP-facing write tools dispatched through the unified `HostToolExecutor::registry_dispatch()` path, not standalone CLI subcommands. The following table maps each host tool to its corresponding CLI surface:
+
+| Host tool (ACP) | CLI surface | Notes |
+|---|---|---|
+| `nexus.kb_snapshot.write` | `creator world kb edit` / `creator world kb adopt` | Write/upsert KeyBlocks into a World KB; admission gate chain: Allowlist → ActiveCreator → RequireWorldOwnership → PermissionPolicy → AuditLog |
+| `nexus.world.configure` | `creator world configure` (future) | Update world metadata (title, visibility, time_policy) |
+| `nexus.manuscript.chapter.update` | (ACP-only; no standalone CLI yet) | Write chapter body content + metadata for a Work; work-scoped admission |
+| `nexus.work.schedule.set` | `creator works cron set` | Link/unlink schedule ids to a Work row |
+| `nexus.finding.resolve` | `creator findings resolve` | Resolve/close a finding entry via findings DAO |
+| `nexus.pool.entry.manage` | `creator works pool` | Add/remove/promote entries in the selection pool |
+
+All write tools route through the same admission pipeline (`Allowlist → ActiveCreator → WorkspaceBounds → PermissionPolicy → AuditLog`) and use `&'static [AdmissionGate]` slices from the `LazyLock<CapabilityRegistry>` singleton.
+
 ### 6.3A Preset management and validation surfaces
 
 **System / maintenance** (not the default user creative entry):
@@ -628,6 +644,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 - `nexus42 acp status|doctor|probe`
 - `nexus42 acp registry list|inspect`
 - `nexus42 acp agent use|list`
+- *Omitted:* `nexus42 acp skills export|verify` — intentionally removed in V1.53 (DF-50 Cancelled; pre-1.0 OSS breaking-change removal).
 
 > **V1.53 intentional breaking-change removal** (pre-1.0 OSS, see `.mstar/archived/shipped-features-tracker.md` §1 row 83, DF-50 Cancelled): `nexus42 acp skills export|verify` was removed in V1.53 P-c (`2026-06-22-v1.53-skills-cli-cleanup`) because the runtime export command was redundant with the static committed `embedded-skills/` model (see §13.2). The corresponding spec `skills-export-compatibility.md` was retired to `archived/` in V1.53 P-1.
 
@@ -969,6 +986,16 @@ Nexus runtime 在 ACP 上应扮演 ACP client 角色，至少支持：
   - 项目可读技能根（可符号链接到 **`$HOME/.nexus42/skills/`**），供 **ACP `recommended_skills`** 与会话首轮加载解析。
 
 历史兼容叙述：规格与 ACP 能力名仍可能出现 **`manuscript`**（如 `manuscript.read_range`）；其实现路径须对齐到 **preset 声明的正文根**（上表为 **`novel-writing`** 默认）。
+
+**非 novel 预设（V1.52+ essay, V1.54+ game-bible）** — `creator bootstrap --profile` 支持以下值：
+
+| `--profile` | init preset | 布局规范 | 状态 |
+| --- | --- | --- | --- |
+| `novel` (default) | `novel-project-init` (显式传入) | [novel-writing/workflow-profile.md](./novel-writing/workflow-profile.md) | Shipped V1.36 |
+| `essay` | `essay-init` (自动派生) | [essay-profile.md](./essay-profile.md) | Shipped V1.52 |
+| `game_bible` | `game-bible-init` (自动派生) | [game-bible-profile.md](./game-bible-profile.md) | Shipped V1.54 |
+
+V1.54 game-bible 布局（`works_profile: game_bible`）：`Works/<work_ref>/Design/`（12 个 section 模板），`Logs/{design,review}/`，无 `Stories/`、`Outlines/` 或 `work_chapters`。详见 [game-bible-profile.md](./game-bible-profile.md) §3。`--profile game_bible` 自动选择 `--init-preset game-bible-init`；V1.54 不自动链式推进后续预设。
 
 ### 12.1C `novel-writing` preset sync module contract
 

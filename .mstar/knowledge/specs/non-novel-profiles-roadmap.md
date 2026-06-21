@@ -1,10 +1,10 @@
 # Non-Novel Profiles Roadmap — Exploration v1
 
-**Status**: Exploration (V1.52 — no implementation authority)  
+**Status**: Exploration (V1.52 — no implementation authority). **Game-bible promoted to Draft in V1.54** per [game-bible-profile.md](game-bible-profile.md).  
 **Document class**: Exploration  
 **Created**: 2026-06-19  
-**Last updated**: 2026-06-19 (V1.52 P-1)  
-**Scope**: Future non-novel `work_profile` lines deferred beyond V1.52, specifically `game-bible` and `script`  
+**Last updated**: 2026-06-22 (V1.54 P1 — game-bible scaffold shipped; §1 marked accordingly)  
+**Scope**: Future non-novel `work_profile` lines deferred beyond V1.52, specifically `game-bible` (now shipped) and `script` (deferred)  
 **Coordinates with**:
 
 - [essay-profile.md](essay-profile.md) — first V1.52 non-novel Feature line
@@ -42,9 +42,21 @@ Unlike an essay, a game bible is a multi-section reference artifact rather than 
 - May benefit from World KB, but mechanics/economy facts need a category mapping distinct from novel's seven-category taxonomy.
 - Requires a dedicated quality rubric; novel 五问 is not applicable.
 
-### 1.5 Suggested target iteration
+### 1.5 Status
 
-V1.53+ after `essay` validates the non-novel profile path and after V1.52 preset branch/merge semantics settle.
+**P1 Scaffold Shipped V1.54** — game-bible profile scaffold delivered in [plan `2026-06-22-v1.54-game-bible-scaffold`](../../plans/2026-06-22-v1.54-game-bible-scaffold.md). Feature line spec: [game-bible-profile.md](game-bible-profile.md).
+
+| Deliverable | Status |
+| --- | --- |
+| `specs/game-bible-profile.md` Draft | ✓ |
+| 7 new `BlockType` variants in wire schema | ✓ |
+| `game-bible-init` preset | ✓ |
+| `nexus42 creator bootstrap --profile game-bible` | ✓ |
+| `ValidationMode::GameBible` | ✓ |
+| Profile gates (non-novel `work_chapters` + completion) | ✓ |
+| KB taxonomy (`game_bible_category` mapping) | ✓ |
+| `design-writing` preset (LLM-driven) | Deferred to V1.55+ |
+| Section completion detection | Deferred to V1.55+ |
 
 ---
 

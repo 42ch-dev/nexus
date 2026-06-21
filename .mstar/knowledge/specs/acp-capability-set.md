@@ -126,9 +126,17 @@ Agents must declare supported `(capability_id, major)` pairs at minimum. Clients
 | `nexus.timeline.event.append` | yes | Append new events; must not silently rewrite canon history |
 | `nexus.fork.create` | optional | Explicit branch creation when rewrite-past is intended |
 
+### 4.3A World CLI write (V1.54 — DF-46)
+
+| Capability ID | Required | Description |
+| --- | --- | --- |
+| `nexus.kb_snapshot.write` | yes | Write/update key blocks for a world (kb edit/adopt) |
+| `nexus.world.configure` | yes | Update world metadata (title, visibility, time policy) |
+
 Permission note:
 
 - Public / invited / private world access is determined by world policy, membership, and pairing state; capability presence alone does not grant private access.
+- `nexus.kb_snapshot.write` and `nexus.world.configure` require world ownership (creator-level gate).
 
 ### 4.4 Sync
 
@@ -150,6 +158,7 @@ Platform credentials remain in Nexus runtime, not exported to the agent process 
 | `nexus.manuscript.write` | yes | Write only within whitelist paths and size quotas |
 | `nexus.manuscript.phase.get` | yes | Read current manuscript phase |
 | `nexus.manuscript.phase.set` | optional | Move between brainstorm / draft / review / finalize with runtime checks |
+| `nexus.manuscript.chapter.update` | yes | Update chapter content and block metadata for a work (V1.54 DF-46) |
 
 Runtime note:
 
@@ -174,6 +183,14 @@ Runtime note:
 | --- | --- | --- |
 | `nexus.trace.correlation` | yes | Propagate correlation IDs across tool calls |
 | `nexus.runtime.health` | yes | Agent-visible health, registry reachability, sync state |
+
+### 4.8 Work & orchestration write (V1.54 — DF-46)
+
+| Capability ID | Required | Description |
+| --- | --- | --- |
+| `nexus.work.schedule.set` | optional | Link/unlink schedules to a work (schedule DAO write) |
+| `nexus.finding.resolve` | optional | Resolve/close a finding entry (findings DAO write) |
+| `nexus.pool.entry.manage` | optional | Add/remove entries from the selection pool (pool DAO write) |
 
 ---
 

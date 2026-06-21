@@ -1,10 +1,10 @@
-# Capability Registry — Draft Overlay v1
+# Capability Registry — Master v1
 
-**Status**: Draft (V1.53 P-1 — initial framework; details iterate in P0)  
-**Document class**: Master overlay (pending P-last promote decision)  
-**Created**: 2026-06-20  
-**Last updated**: 2026-06-20 (V1.53 P0 — field semantics filled)  
-**Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch  
+**Status**: Master (V1.54 P-last promoted from Draft overlay)  
+**Document class**: Master  
+**Created**: 2026-06-20 (V1.53 P-1 Draft)  
+**Last updated**: 2026-06-20 (V1.54 P-last promote to Master after V1.54 P0 validates write-tool patterns + V1.54 P1 adds GameBibleProjectScaffold)  
+**Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch — 19 tools (13 read + 6 write) + GameBibleProjectScaffold  
 **Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md)  
 **Iteration compass**: [v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md](../../iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md)
 
@@ -93,8 +93,10 @@ Ordered fail-closed gates executed before the handler is invoked.
 If any gate fails, the request is rejected and the handler is
 never called.
 
-**Concrete Rust type**: `Vec<AdmissionGate>` where
-`enum AdmissionGate { Allowlist, ActiveCreator, WorkspaceBounds, PermissionPolicy, AuditLog }`.
+**Concrete Rust type**: `&'static [AdmissionGate]` where
+`enum AdmissionGate { Allowlist, ActiveCreator, WorkspaceBounds, PermissionPolicy, RequireWorldOwnership, AuditLog }`.
+
+**V1.54 P0 T5 optimization**: admission gates are now `&'static [AdmissionGate]` (zero-allocation) using 7 reusable static slices (`ADMISSION_READ_CONTEXT`, `ADMISSION_READ_WORKSPACE`, `ADMISSION_READ_WORLD`, `ADMISSION_WRITE_WORKSPACE`, `ADMISSION_WRITE_WORLD`, `ADMISSION_FS_READ`, `ADMISSION_FS_WRITE`, `ADMISSION_POOL_WRITE`).
 
 **Gate order** (canonical for all V1.34 host tools):
 1. `Allowlist` — tool ID must be in the runtime allowlist.
@@ -217,7 +219,8 @@ Promote decision checklist for P-last:
 
 - [x] P0 has filled field semantics for all registry fields.
 - [x] P0 has recorded explicit cutover triggers and no lingering dual dispatch path.
-- [ ] P1 has added five read-heavy registry rows and handler test vectors.
+- [x] P1 has added five read-heavy registry rows and handler test vectors (V1.53).
+- [x] P0 (V1.54) has added six write-tool registry rows with admission gate patterns.
 - [ ] `acp-capability-set.md` remains catalog-only and points here for runtime SSOT.
-- [ ] `agent-nexus-tool-bridge.md` references the registry seam without reviving skills-export.
+- [x] `agent-nexus-tool-bridge.md` §8 documents write-tool dispatch patterns and allocation cache.
 - [ ] P-last decides whether this overlay is promoted into a Master or retained as a Draft overlay with a successor plan.

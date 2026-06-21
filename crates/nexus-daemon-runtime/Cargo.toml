@@ -56,6 +56,11 @@ axum-test = "15"
 graph-flow = "=0.2.3"
 nexus-orchestration = { path = "../nexus-orchestration" }
 serial_test = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "dispatch_latency"
+harness = false
 
 [features]
 test-support = []
