@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-22-v1.55-df31-workspace-interface"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-21"
+revalidated_at: "2026-06-22"
 ---
 
 # Code Review Report
@@ -85,3 +86,67 @@ generated_at: "2026-06-21"
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+**Targeted re-review (Wave 2, qc1 — P1 fix-wave)**: Re-check of F-001 (Critical: concurrent consume_session race) and architectural coherence of the fix-wave changes.
+
+### Evidence Verification
+
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus`
+- **Working branch (verified)**: `iteration/v1.55`
+- **plan_id (verified)**: `2026-06-22-v1.55-df31-workspace-interface`
+- **Review range / Diff basis (verified)**: `merge-base: 9b3d70ce` + `tip: iteration/v1.55 HEAD` (964d2268)
+- **Fix-wave commits**: `5da1ec08` (atomic consume + SessionError + poison recovery + concurrent test) merged at `376ef43a`
+- **HEAD at review time**: `964d2268`
+
+### F-001 (Critical — concurrent consume_session race) — RESOLVED
+
+| Criterion | Evidence |
+|-----------|----------|
+| Atomic single-lock validate+consume | `consume_session` now holds `Mutex<HashMap>` for the entire sequence: cleanup → lookup → consumed check → expiry check → mark consumed. No lock release between get and set. |
+| Concurrent regression test | `concurrent_consume_only_one_succeeds` (N=10, `std::thread`, `Arc<WorkspaceSessionManager>`): exactly 1 `Ok`, 9 `SessionError::AlreadyCommitted`, 0 other errors. Passes. |
+| Typed error matching | `SessionError` enum (`NotFound`, `AlreadyCommitted`, `Expired`) replaces string-based matching in handler. Handler matches on variant, not `err_msg.contains(...)`. |
+| Handler code | `commit_workspace` in `workspace.rs:254-281` matches on `SessionError::NotFound`, `SessionError::AlreadyCommitted`, `SessionError::Expired` — no string matching. |
+
+### Architecture & Maintainability Assessment
+
+| Concern | Assessment |
+|---------|-----------|
+| `SessionError` enum design | Well-typed. `Display` impl provides human-readable messages. Each variant carries the `SessionId` for context. Derives `Debug`, `Clone`, `PartialEq`, `Eq`. |
+| Poison recovery | All 5 `.expect("session manager mutex poisoned")` replaced with `.unwrap_or_else(|p| { tracing::warn!; p.into_inner() })` — consistent with crate policy in `workspace/mod.rs:3-9`. |
+| Lock strategy documentation | Module-level rustdoc now explains the single-Mutex strategy, O(10) expected ceiling, O(n) cleanup cost, and future DashMap/background-task upgrade path. |
+| Handler separation of concerns | Handler remains thin: deserialize → validate → call session manager → map result. `SessionError` mapping is a single `match` arm, no business logic leak. |
+| Capability count | `daemon_boot_llm_wiring` assertion updated from 23→24 (V1.55 P3 addition). Minimal single-line change, no architectural impact. |
+| No scope creep | Fix-wave touches only the 3 files needed: `session.rs` (core fix + test), `workspace.rs` (handler mapping), `daemon_boot_llm_wiring.rs` (count). Surgical. |
+
+### CI Gates
+
+| Gate | Result |
+|------|--------|
+| `cargo test -p nexus-daemon-runtime -- concurrent_consume_only_one_succeeds` | **PASS** — 1 passed, 0 failed |
+| `cargo test --all` | **PASS** — all 762 lib tests + all integration tests pass, 0 failures |
+| `cargo clippy --all -- -D warnings` | **PASS** — clean (0 warnings, 0 errors) |
+| `cargo +nightly fmt --all --check` | **PASS** — clean |
+
+### Acceptance Criteria Re-check
+
+- `workspace.commit` skeleton rejects stale/conflicting commits rather than silently overwriting: **Pass** (was Fail in Wave 1). The atomic `consume_session` now guarantees single-consumer semantics under concurrent load. The sequential and concurrent regression tests both pass.
+- All other ACs unchanged from Wave 1: **Pass** (open skeleton, path bounds, no redesign, documented expansion).
+
+### Standard QC Checklist (Revalidation)
+
+- [x] **F-001 fixed**: `consume_session` is atomic (single lock acquisition); concurrent regression test exists (N=10 → 1 success, 9 conflict).
+- [x] **SessionError enum** is well-typed; handler matches on variant, not string.
+- [x] **Architecture coherent**: Single Mutex is appropriate for O(10) sessions; upgrade path documented. No new architectural debt introduced.
+- [x] **Surgical scope**: Fix-wave touches only the 3 files directly related to findings.
+- [x] **No regression introduced**: Test suite clean, clippy clean, format clean.
+- [x] **Original suggestion S-001**: Still open (path guard comment) — non-blocking, residual.
+
+### Verdict Update
+
+From **Request Changes** to **Approve**.
+
+**Rationale**: F-001 is fully resolved with an atomic validate+consume critical section under a single Mutex acquisition. The fix includes a concurrent regression test (N=10) that deterministically asserts exactly one success. `SessionError` enum provides a well-typed error model. Poison recovery is consistent with crate policy. No new architectural risk is introduced. The architecture remains coherent for the DF-31 skeleton scope.
+
+**Residual**: S-001 (document `..` rejection intent) remains a low-priority suggestion — non-blocking, suitable for DF-42 or routine maintenance.
