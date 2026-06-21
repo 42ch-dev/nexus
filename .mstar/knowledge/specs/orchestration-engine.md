@@ -610,11 +610,30 @@ Suggest ten concrete research directions, each as a bullet with a one-line justi
   - `preset.input.<key>` — read-only; provided by B-track Schedule at start
   - `creator.memory.<key>` — bridged via `creator.read_memory` capability; cached with TTL
 
-### 7.5 Conditional `next` (optional, deferred semantics)
+### 7.5 Conditional `next` + Converge State Kinds
 
-**Long-term SSOT (exploration):** [preset-conditional-routing.md](preset-conditional-routing.md) — Status **Exploration**; not loadable until a future implement compass ships. When normative, this subsection defers to that document for schema and validation rules.
+**Normative SSOT:** [preset-conditional-routing.md](preset-conditional-routing.md) — Status **Draft (V1.56 P2 shipped)**. This subsection is a cross-reference; the full conditional schema, expression grammar, multi-branch routing, and merge semantics live in that document.
 
-Simple linear `next: <state-id>` covers the first release. Conditional form (future):
+**Converge (merge-point) state kind** (V1.56 P2 fix-wave, H-001/W-002): states may declare a `converge` config with a `strategy` field to act as explicit join points for multiple incoming edges:
+
+```yaml
+states:
+  - id: merged
+    converge:
+      strategy: wait_for_all   # default
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+```
+
+Converge strategies:
+  - **`wait_for_all`** (default): all incoming edges must arrive before advancing
+  - **`first_completed`**: advance on first arrival
+  - **`any`**: idempotent first-arrival advance
+
+Runtime enforcement lives in `StateCompositeTask::run()` via the converge gate. Predecessor tracking is populated at graph build time. Source states record arrivals via `_converge_arrivals_{target_id}` in context.
+
+**Expression depth limit** (V1.56 P2 fix-wave, W-003): `MAX_EXPR_DEPTH = 32` bounds parsing depth to prevent stack overflow from user-installable presets.
 
 ```yaml
 next:
@@ -623,11 +642,9 @@ next:
     - when: "{{state.brainstorming.output | length > 2000}}"
       to: outlining
     - when: "{{state.brainstorming.output | contains 'unclear'}}"
-      to: gathering               # allow re-entry
+      to: gathering
   default: outlining
 ```
-
-A-track ships only the linear form; conditional form is a Phase 3 stretch / V1.5 work.
 
 ### 7.6 Validation
 

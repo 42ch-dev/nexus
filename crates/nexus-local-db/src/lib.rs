@@ -31,6 +31,7 @@ pub mod runtime_lock;
 pub mod soul_meta;
 pub mod work_chapters;
 pub mod works;
+pub mod workspace_session;
 pub mod world_stories;
 
 mod error;
@@ -164,6 +165,12 @@ pub use force_gates_audit::{
 pub use runtime_lock::{
     acquire_runtime_lock, clear_stale_lock, cli_holder, is_lock_stale, release_runtime_lock,
     schedule_holder, ttl_from_env, AcquireResult, DEFAULT_RUNTIME_LOCK_TTL_SECS,
+};
+
+// Re-export workspace_session types (V1.56 P0 DF-31)
+pub use workspace_session::{
+    cleanup_expired_sessions, consume_session, count_active_sessions, create_session, get_session,
+    ConsumeResult, CreateSessionParams, WorkspaceSessionRow,
 };
 
 /// Runtime role for database initialization

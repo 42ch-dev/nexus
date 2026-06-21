@@ -1,0 +1,18 @@
+{
+  "plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+  "title": "V1.56 P-last — Hygiene, Spec Consolidation & Closeout (incl. R-V155P2-F002 fix-wave)",
+  "status": "Done",
+  "type": "closeout",
+  "owner": "@project-manager",
+  "effort": "L",
+  "working_branch": "feature/v1.56-hygiene-and-closeout",
+  "merge_target": "iteration/v1.56",
+  "created": "2026-06-22",
+  "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+  "qc_strategy": "Report-only QA by @qa-engineer",
+  "depends_on": [
+    "All 4 implement plans (P0–P3) integrated + accepted"
+  ],
+  "done_at": "2026-06-22",
+  "done_note": "P-last closeout. R-V155P2-F002 fix-wave done (game_bible.section_status.update capability + design-writing preset auto-transition + 24 new tests). Profile B compaction T5. shipped-features-tracker V1.56 snapshot T6. deferred-features-tracker V1.56 ship line T7. tech-debt rollup T8. report-only QA by @qa-engineer N=1. Result: zero open carry-forwards from V1.55→V1.56 boundary."
+}

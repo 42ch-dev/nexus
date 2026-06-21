@@ -177,12 +177,69 @@ Runtime note:
 | --- | --- | --- |
 | `nexus.research.query` | optional | Query local-only `ReferenceSource` index / excerpts without syncing source material |
 
+### 4.7B Game-Bible (V1.56 P-last)
+
+| Capability ID | Required | Description |
+| --- | --- | --- |
+| `game_bible.section_status.update` | yes | Atomically update the `section_status` field in a game-bible `Design/*.md` YAML frontmatter; validates transition (draft → reviewed → accepted) and writes via temp+rename for durability |
+
+**Invocation contract**:
+
+- **Input**: `{ work_ref: string, section_path: string, new_status: "draft" | "reviewed" | "accepted", reason?: string, works_root?: string }`
+- **Output**: `{ updated: bool, new_section_status: string, section_path: string }`
+- **Transition rules**:
+  - `draft → reviewed` — auto-transition after design-writing review pass (GO)
+  - `reviewed → accepted` — explicit author accept
+  - No skipping (`draft → accepted` rejected with `InputInvalid`)
+  - No backwards (`accepted → draft` / `accepted → reviewed` rejected with `InputInvalid`)
+  - No self-transition (same-status rejected)
+- **Atomicity**: writes to `{tmp}` then renames over the target; no half-written file survives a crash
+- **Field preservation**: updates `section_status` and `last_updated` (if present); all other frontmatter fields (`section_weight`, etc.) are preserved unchanged
+- **Errors**:
+  - `InputInvalid` — invalid transition, unknown status, section not found, missing frontmatter
+  - `Internal` — I/O errors, write failures
+
+**Preset integration**: The `design-writing` preset (V1.56 P-last) invokes this capability automatically after a review pass (GO) to transition `draft → reviewed`. The `requires_capabilities` gate ensures the capability is registered before the preset can be loaded.
+
 ### 4.7 Observability
 
 | Capability ID | Required | Description |
 | --- | --- | --- |
 | `nexus.trace.correlation` | yes | Propagate correlation IDs across tool calls |
 | `nexus.runtime.health` | yes | Agent-visible health, registry reachability, sync state |
+
+### 4.7A Registry
+
+| Capability ID | Required | Description |
+| --- | --- | --- |
+| `nexus.registry.refresh` | optional | Refresh agent capability registry from embedded snapshot or optional CDN; returns synthetic output by default (sandbox/air-gap safe) with snapshot version, capability count, and source metadata. When `--cdn-url` is configured at daemon start, fetches from CDN with configurable timeout (default 10s) and retry (default 3); falls back to synthetic on network failure. |
+
+#### 4.7A.1 Security contract (V1.56 P1 fix-wave)
+
+`nexus.registry.refresh` enforces the following security invariants regardless of configuration:
+
+- **HTTPS-only**: `--cdn-url` MUST use `https://` scheme. `http://` is rejected at CLI parse time and at runtime `fetch_from_cdn` with `CdnError::InsecureScheme`.
+- **No open redirects**: `reqwest::redirect::Policy::limited(0)` — zero redirect hops allowed. Exceeded redirects return `CdnError::TooManyRedirects`.
+- **Private-IP / metadata block**: rejected hosts include `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (including AWS metadata endpoint `169.254.169.254`), `fc00::/7`, `::1`, and IPv4-mapped IPv6 in private ranges. Enforced at CLI parse (DNS resolution) and at runtime `fetch_from_cdn` with `CdnError::BlockedHost`.
+- **Body size cap**: 8 MiB max response body. Exceeded returns `CdnError::BodyTooLarge` (streaming read with byte counter).
+- **Typed errors**: failures carry `CdnError` enum variants (`InsecureScheme`, `BlockedHost`, `TooManyRedirects`, `BodyTooLarge`, `Timeout`, `ServerStatus(u16)`, `Parse`, `Io`, `EmptyUrl`, `UrlParse`, `Other`) — not raw strings. `RegistryRefreshOutput.fallback_reason` is a stringified `CdnError` variant, never a raw reqwest error message.
+- **Sandbox/air-gap guarantee**: when `--cdn-url` is absent at daemon start, the capability makes zero network calls; `source` field in output is `synthetic`. Network mode is opt-in via the boot-time flag only; runtime-mutable CDN URL is not supported.
+
+#### 4.7A.2 Negative test coverage (V1.56 P1 fix-wave)
+
+Eleven negative tests cover the rejection classes:
+
+- `c_fetch_from_cdn_rejects_http_scheme`
+- `c_fetch_from_cdn_rejects_https_with_private_ip` (RFC 5737 docs IP)
+- `c_fetch_from_cdn_rejects_https_with_localhost`
+- `c_fetch_from_cdn_rejects_https_with_metadata_ip_169_254_169_254`
+- `c_fetch_from_cdn_rejects_too_many_redirects`
+- `c_fetch_from_cdn_rejects_body_too_large`
+- `c_set_cdn_config_rejects_empty_url`
+- `c_set_cdn_config_rejects_whitespace_url`
+- `c_set_cdn_config_rejects_http_scheme`
+- `c_set_cdn_config_rejects_private_ip_at_parse`
+- `c_fallback_reason_carries_typed_error`
 
 ### 4.8 Work & orchestration write (V1.54 — DF-46)
 

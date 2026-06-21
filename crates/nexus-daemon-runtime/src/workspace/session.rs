@@ -1,14 +1,18 @@
-//! Workspace session management (DF-31 skeleton).
+//! Workspace session management (DF-31 full, V1.56 P0).
 //!
-//! In-memory session store for `workspace.open` / `workspace.commit`.
-//! Sessions are daemon-scoped and expire after a configurable TTL.
+//! DB-backed session store for `workspace.open` / `workspace.commit` with
+//! file-level optimistic concurrency control (content hash) and changes[] manifest validation.
+//! `SQLite`, survive daemon restarts, and expire per TTL.
 
-use std::collections::HashMap;
 use std::fmt;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::path::Path;
+use std::sync::Arc;
 
+use nexus_local_db as db;
+use sqlx::SqlitePool;
 use tracing;
+
+// ── Public types ────────────────────────────────────────────────────────────
 
 /// A workspace session identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -23,8 +27,8 @@ impl SessionId {
     }
 }
 
-impl std::fmt::Display for SessionId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for SessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -36,9 +40,6 @@ impl Default for SessionId {
 }
 
 /// Typed error for session operations.
-///
-/// Replaces string-based error matching so the HTTP handler can map
-/// errors to status codes by variant rather than by substring search.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionError {
     /// The requested session ID does not exist in the session store.
@@ -47,6 +48,17 @@ pub enum SessionError {
     AlreadyCommitted(SessionId),
     /// The session has exceeded its time-to-live.
     Expired(SessionId),
+    /// The changes[] manifest does not match the session snapshot (OCC conflict).
+    HashConflict {
+        session_id: SessionId,
+        path: String,
+        expected_hash: String,
+        actual_hash: String,
+    },
+    /// A database error occurred during session operations.
+    Database(String),
+    /// An I/O error occurred during file operations.
+    Io(String),
 }
 
 impl fmt::Display for SessionError {
@@ -57,363 +69,482 @@ impl fmt::Display for SessionError {
                 write!(f, "session {id} has already been committed (stale session)")
             }
             Self::Expired(id) => write!(f, "session {id} has expired"),
+            Self::HashConflict {
+                session_id,
+                path,
+                expected_hash,
+                actual_hash,
+            } => {
+                write!(
+                    f,
+                    "content hash conflict for {path} in session {session_id}: \
+                     expected {expected_hash}, got {actual_hash}"
+                )
+            }
+            Self::Database(msg) => write!(f, "session database error: {msg}"),
+            Self::Io(msg) => write!(f, "session I/O error: {msg}"),
         }
     }
 }
 
-/// Snapshot of the workspace state at session open time.
-///
-/// # Future expansion (DF-31 → DF-42)
-///
-/// Currently contains only the workspace root and resolved path.
-/// Future iterations may add:
-/// - File listing with hashes (for conflict detection)
-/// - Git tree-ish reference
-/// - Manifest version
-#[derive(Debug, Clone)]
-pub struct WorkspaceSnapshot {
-    /// Absolute path to the workspace creative root.
-    pub workspace_root: String,
-    /// Relative path within the workspace that was opened.
-    pub relative_path: String,
-    /// Whether the target path already existed.
-    pub existed: bool,
+/// Operation type for a change in the commit manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeOp {
+    Create,
+    Modify,
+    Delete,
 }
 
-/// Information about an active workspace session.
-#[derive(Debug, Clone)]
-pub struct SessionInfo {
-    /// The resolved workspace path.
-    pub workspace_path: String,
-    /// Snapshot of workspace state at open time.
-    pub snapshot: WorkspaceSnapshot,
-    /// When this session was created.
-    pub created_at: Instant,
-    /// Whether the session has been consumed (committed) and is now stale.
-    pub consumed: bool,
+/// A single change entry in the `changes[]` manifest.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeEntry {
+    /// Relative path within the workspace for this change.
+    pub path: String,
+    /// SHA-256 hex digest of the file content *before* the change.
+    pub content_hash: String,
+    /// Operation type.
+    pub op: ChangeOp,
 }
 
-impl SessionInfo {
-    /// Whether this session has expired (older than `ttl`).
-    #[must_use]
-    fn is_expired(&self, ttl: Duration) -> bool {
-        self.created_at.elapsed() > ttl
+/// Snapshot of files at session open time, keyed by relative path → SHA-256 hex.
+#[derive(Debug, Clone, Default)]
+pub struct FileSnapshots {
+    pub hashes: std::collections::HashMap<String, String>,
+}
+
+// ── Content hashing ─────────────────────────────────────────────────────────
+
+/// Compute SHA-256 content hashes for all regular files under `root`.
+///
+/// Walks the directory tree and returns a map of relative path → hex digest.
+/// Symlinks, directories, and non-regular files are skipped.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Io`] if file I/O operations fail (e.g., permission denied).
+pub fn compute_content_hashes(root: &Path) -> Result<FileSnapshots, SessionError> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut hashes = std::collections::HashMap::new();
+    if !root.exists() {
+        return Ok(FileSnapshots { hashes });
     }
+
+    let entries = std::fs::read_dir(root).map_err(|e| SessionError::Io(e.to_string()))?;
+
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+
+        let path = entry.path();
+        let relative = match path.strip_prefix(root) {
+            Ok(r) => r.to_string_lossy().to_string(),
+            Err(_) => continue,
+        };
+
+        if path.is_dir() {
+            // Recurse into subdirectories
+            let sub_hashes = compute_content_hashes(&path)?;
+            for (sub_path, hash) in sub_hashes.hashes {
+                let full_relative = format!("{relative}/{sub_path}");
+                hashes.insert(full_relative, hash);
+            }
+        } else if path.is_file() {
+            // Compute SHA-256 for regular files
+            let mut file =
+                std::fs::File::open(&path).map_err(|e| SessionError::Io(e.to_string()))?;
+            let mut sha = Sha256::new();
+            let mut buffer = [0u8; 8192];
+            loop {
+                let n = file
+                    .read(&mut buffer)
+                    .map_err(|e| SessionError::Io(e.to_string()))?;
+                if n == 0 {
+                    break;
+                }
+                sha.update(&buffer[..n]);
+            }
+            let digest = sha.finalize();
+            hashes.insert(relative, format!("{digest:x}"));
+        }
+    }
+
+    Ok(FileSnapshots { hashes })
 }
 
-/// In-memory workspace session manager.
+// ── Workspace session manager (DB-backed) ───────────────────────────────────
+
+/// DB-backed workspace session manager.
 ///
-/// Manages the lifecycle of workspace sessions:
-/// - **open**: Create a new session with a snapshot of workspace state.
-/// - **validate**: Check that a session exists, is not consumed, and is not expired.
-/// - **consume**: Mark a session as consumed after a successful commit.
-/// - **cleanup**: Remove expired sessions.
+/// Replaces the V1.55 in-memory `WorkspaceSessionManager`.
+/// Sessions are persisted in `SQLite`, survive daemon restart, and expire per TTL.
 ///
-/// # Conflict model (DF-31 skeleton)
+/// # Conflict model (DF-31 full OCC)
 ///
-/// - Each `workspace.open` creates a **new** session with a unique `session_id`.
-/// - A `workspace.commit` references a `session_id`. If the session has already
-///   been consumed (committed), the commit is **rejected** with a stale-session
-///   error rather than silently overwriting.
-/// - Expired sessions are rejected on both open and commit paths.
-///
-/// # Lock strategy (DF-31 skeleton)
-///
-/// This manager uses a single global `Mutex<HashMap<…>>` for simplicity.
-/// The `consume_session` method holds the lock for the entire validate+mark
-/// sequence to guarantee atomic single-consumer semantics. Expired-session
-/// cleanup runs inline under the same lock.
-///
-/// **Worst-case latency**: O(n) where n = number of active sessions.
-/// In normal daemon usage (single user, local-only tool), the session table
-/// is expected to hold O(10) entries. If this grows to O(1000+) in future
-/// multi-tenant scenarios, consider replacing with `DashMap` for per-session
-/// locking or moving cleanup to a background `tokio::time::interval` task.
-///
-/// # Future expansion (DF-31 → DF-42)
-///
-/// The current skeleton uses simple in-memory sessions without file-level
-/// conflict detection. Future iterations may add:
-/// - File-level checksums in the snapshot for true OCC (optimistic concurrency)
-/// - Persistent session storage
-/// - Cross-daemon session negotiation
-/// - Branch/merge session semantics
+/// - `workspace.open`: Scans files in the workspace scope, computes SHA-256 content
+///   hashes for each file, stores them as part of the session snapshot in the DB.
+/// - `workspace.commit`: Validates the `changes[]` manifest against the session
+///   snapshot. Each change entry must reference a file whose current content hash
+///   matches the hash stored in the session. On mismatch, rejects with
+///   [`SessionError::HashConflict`].
+/// - The session is atomically consumed (marked `consumed = 1`) only if all
+///   change entries validate. This guarantees single-consumer semantics.
 pub struct WorkspaceSessionManager {
-    sessions: Mutex<HashMap<SessionId, SessionInfo>>,
-    /// Default session TTL.
-    ttl: Duration,
+    pool: Arc<SqlitePool>,
 }
 
 impl WorkspaceSessionManager {
     /// Default session TTL (5 minutes).
-    pub const DEFAULT_TTL: Duration = Duration::from_mins(5);
+    pub const DEFAULT_TTL_SECS: i64 = 300;
 
-    /// Create a new session manager with the default TTL.
+    /// Create a new session manager backed by the given database pool.
     #[must_use]
-    pub fn new() -> Self {
-        Self {
-            sessions: Mutex::new(HashMap::new()),
-            ttl: Self::DEFAULT_TTL,
-        }
+    pub const fn new(pool: Arc<SqlitePool>) -> Self {
+        Self { pool }
     }
 
     /// Open a new workspace session.
     ///
-    /// Creates a session with a unique ID and a snapshot of the given
-    /// workspace path. The caller is responsible for validating the path
-    /// before calling this method.
-    pub fn open_session(
+    /// Scans files under the target directory and computes SHA-256 content hashes.
+    /// Creates a session row in the database with the snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SessionError` if file I/O or database operations fail.
+    pub async fn open_session(
         &self,
         workspace_root: &str,
         relative_path: &str,
         existed: bool,
-    ) -> SessionId {
-        cleanup_expired(&self.sessions, self.ttl);
+    ) -> Result<SessionId, SessionError> {
+        // Cleanup expired sessions first
+        let _ = db::cleanup_expired_sessions(&self.pool).await;
+
+        // Compute content hashes if the path exists
+        let target_path = Path::new(workspace_root).join(relative_path);
+        let file_hashes = if existed && target_path.exists() && target_path.is_dir() {
+            compute_content_hashes(&target_path)?
+        } else {
+            FileSnapshots::default()
+        };
+
+        let file_hashes_json =
+            serde_json::to_string(&file_hashes.hashes).unwrap_or_else(|_| "{}".to_string());
+
         let session_id = SessionId::new();
-        let info = SessionInfo {
-            workspace_path: relative_path.to_string(),
-            snapshot: WorkspaceSnapshot {
+
+        db::create_session(
+            &self.pool,
+            &db::CreateSessionParams {
+                session_id: session_id.to_string(),
                 workspace_root: workspace_root.to_string(),
                 relative_path: relative_path.to_string(),
                 existed,
+                file_hashes_json,
+                ttl_secs: Self::DEFAULT_TTL_SECS,
             },
-            created_at: Instant::now(),
-            consumed: false,
-        };
-        self.sessions
-            .lock()
-            .unwrap_or_else(|poisoned| {
-                tracing::warn!("session manager mutex poisoned, recovering");
-                poisoned.into_inner()
-            })
-            .insert(session_id.clone(), info);
-        session_id
+        )
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?;
+
+        tracing::info!(
+            session_id = %session_id,
+            workspace_root = %workspace_root,
+            relative_path = %relative_path,
+            "Workspace session opened (DB-backed)"
+        );
+
+        Ok(session_id)
     }
 
     /// Validate that a session exists and is usable.
     ///
-    /// Returns `Ok(&SessionInfo)` if the session exists, is not consumed,
-    /// and is not expired. Returns an error string otherwise.
-    ///
     /// # Errors
     ///
-    /// Returns an error string if:
-    /// - The session ID is not found in the session store
-    /// - The session has already been consumed (committed)
-    /// - The session has exceeded its TTL
-    pub fn validate_session(&self, session_id: &SessionId) -> Result<SessionInfo, String> {
-        cleanup_expired(&self.sessions, self.ttl);
-        let info = {
-            let sessions = self.sessions.lock().unwrap_or_else(|poisoned| {
-                tracing::warn!("session manager mutex poisoned, recovering");
-                poisoned.into_inner()
-            });
-            sessions.get(session_id).cloned()
-        };
-        let info = info.ok_or_else(|| format!("session {session_id} not found"))?;
-        if info.consumed {
-            return Err(format!(
-                "session {session_id} has already been committed (stale session)"
-            ));
-        }
-        if info.is_expired(self.ttl) {
-            return Err(format!("session {session_id} has expired"));
-        }
-        Ok(info)
-    }
-
-    /// Mark a session as consumed after a successful commit.
-    ///
-    /// Validates and consumes the session in a single atomic critical section.
-    /// Two concurrent calls with the same `session_id` cannot both succeed —
-    /// the first one marks `consumed = true` under the lock, and the second
-    /// observes `consumed == true` and returns [`SessionError::AlreadyCommitted`].
-    ///
-    /// Returns the session info if successful.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`SessionError`] if:
-    /// - The session ID is not found in the session store
-    /// - The session has already been consumed (committed)
-    /// - The session has exceeded its TTL
-    ///
-    /// # Panics
-    ///
-    /// Panics if the mutex is poisoned and recovery via [`Mutex::into_inner`]
-    /// fails. In practice, this only occurs if the inner data is also
-    /// poisoned, which requires a simultaneous panic during session cleanup.
-    pub fn consume_session(&self, session_id: &SessionId) -> Result<SessionInfo, SessionError> {
-        let mut sessions = self.sessions.lock().unwrap_or_else(|poisoned| {
-            tracing::warn!("session manager mutex poisoned, recovering");
-            poisoned.into_inner()
-        });
-
-        // Cleanup expired sessions inline (same lock acquisition).
-        sessions.retain(|_id, info| !info.is_expired(self.ttl));
-
-        let info = sessions
-            .get(session_id)
+    /// Returns `SessionError` if the session is not found, consumed, or expired.
+    pub async fn validate_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<db::WorkspaceSessionRow, SessionError> {
+        let row = db::get_session(&self.pool, &session_id.to_string())
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?
             .ok_or_else(|| SessionError::NotFound(session_id.clone()))?;
 
-        if info.consumed {
+        if row.consumed {
             return Err(SessionError::AlreadyCommitted(session_id.clone()));
         }
-        if info.is_expired(self.ttl) {
+
+        // Use `SQLite` datetime comparison to check expiry — avoids timezone
+        // format mismatch between chrono::Utc and `SQLite` datetime strings.
+        // SAFETY: compile-time checked — simple COUNT query with parameters.
+        let sid = session_id.to_string();
+        let active = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM workspace_sessions \
+             WHERE session_id = ? AND consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+            sid
+        )
+        .fetch_one(self.pool.as_ref())
+        .await
+        .map_err(|e| SessionError::Database(e.to_string()))?;
+
+        if active == 0 {
             return Err(SessionError::Expired(session_id.clone()));
         }
 
-        // Mark consumed atomically — same lock held since the get above.
-        // SAFETY: we just verified the entry exists and is unconsumed.
-        let entry = sessions
-            .get_mut(session_id)
-            .expect("entry must exist: validated above");
-        entry.consumed = true;
-        let info = entry.clone();
-        drop(sessions);
-        Ok(info)
+        Ok(row)
+    }
+
+    /// Validate a `changes[]` manifest against the session snapshot.
+    ///
+    /// For each change entry with `op: Modify`, verifies that the file's current
+    /// content hash matches the hash stored in the session snapshot. For `Create`,
+    /// the file must not exist in the snapshot. For `Delete`, the file must exist
+    /// in the snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SessionError::HashConflict` if any validation fails.
+    pub async fn validate_changes_manifest(
+        &self,
+        session_id: &SessionId,
+        changes: &[ChangeEntry],
+        workspace_root: &str,
+    ) -> Result<(), SessionError> {
+        let row = self.validate_session(session_id).await?;
+
+        // Parse stored file hashes
+        let stored_hashes: std::collections::HashMap<String, String> =
+            serde_json::from_str(&row.file_hashes_json).unwrap_or_default();
+
+        for change in changes {
+            let file_path = Path::new(workspace_root).join(&change.path);
+
+            match change.op {
+                ChangeOp::Modify => {
+                    // File must exist in the snapshot
+                    let stored_hash = stored_hashes.get(&change.path).ok_or_else(|| {
+                        SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "present-in-snapshot".to_string(),
+                            actual_hash: "not-in-snapshot".to_string(),
+                        }
+                    })?;
+
+                    // Verify the current file hash matches the stored hash
+                    if !file_path.exists() {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: stored_hash.clone(),
+                            actual_hash: "file-not-found".to_string(),
+                        });
+                    }
+
+                    let current_hash = compute_single_file_hash(&file_path)?;
+                    if current_hash != *stored_hash {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: stored_hash.clone(),
+                            actual_hash: current_hash,
+                        });
+                    }
+
+                    // Verify the provided content_hash matches
+                    if change.content_hash != *stored_hash {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: stored_hash.clone(),
+                            actual_hash: change.content_hash.clone(),
+                        });
+                    }
+                }
+                ChangeOp::Create => {
+                    // File must NOT exist in the snapshot
+                    if stored_hashes.contains_key(&change.path) {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "not-in-snapshot".to_string(),
+                            actual_hash: "already-tracked".to_string(),
+                        });
+                    }
+                }
+                ChangeOp::Delete => {
+                    // File must exist in the snapshot
+                    if !stored_hashes.contains_key(&change.path) {
+                        return Err(SessionError::HashConflict {
+                            session_id: session_id.clone(),
+                            path: change.path.clone(),
+                            expected_hash: "present-in-snapshot".to_string(),
+                            actual_hash: "not-in-snapshot".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Consume a session — mark it as committed.
+    ///
+    /// Atomically validates and consumes the session. Two concurrent calls
+    /// with the same session ID cannot both succeed — `SQLite`'s UPDATE WHERE
+    /// guarantees single-consumer semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SessionError` if the session is not found, consumed, or expired.
+    pub async fn consume_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<db::WorkspaceSessionRow, SessionError> {
+        let result = db::consume_session(&self.pool, &session_id.to_string())
+            .await
+            .map_err(|e| SessionError::Database(e.to_string()))?;
+
+        match result {
+            db::ConsumeResult::Consumed(row) => {
+                tracing::info!(session_id = %session_id, "Session consumed (committed)");
+                Ok(row)
+            }
+            db::ConsumeResult::NotFound => Err(SessionError::NotFound(session_id.clone())),
+            db::ConsumeResult::AlreadyConsumed => {
+                Err(SessionError::AlreadyCommitted(session_id.clone()))
+            }
+            db::ConsumeResult::Expired => Err(SessionError::Expired(session_id.clone())),
+        }
+    }
+
+    /// Get the underlying database pool.
+    #[must_use]
+    pub fn pool(&self) -> Arc<SqlitePool> {
+        Arc::clone(&self.pool)
     }
 }
 
-impl Default for WorkspaceSessionManager {
-    fn default() -> Self {
-        Self::new()
+/// Compute SHA-256 hash for a single file.
+fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path).map_err(|e| SessionError::Io(e.to_string()))?;
+    let mut sha = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let n = file
+            .read(&mut buffer)
+            .map_err(|e| SessionError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        sha.update(&buffer[..n]);
     }
+    Ok(format!("{:x}", sha.finalize()))
 }
 
-/// Remove sessions that have exceeded the TTL.
-fn cleanup_expired(sessions: &Mutex<HashMap<SessionId, SessionInfo>>, ttl: Duration) {
-    let mut guard = sessions.lock().unwrap_or_else(|poisoned| {
-        tracing::warn!("session manager mutex poisoned during cleanup, recovering");
-        poisoned.into_inner()
-    });
-    guard.retain(|_id, info| !info.is_expired(ttl));
-}
+// ── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
 
     #[test]
-    fn open_session_returns_unique_ids() {
-        let mgr = WorkspaceSessionManager::new();
-        let id1 = mgr.open_session("/ws", "path1", true);
-        let id2 = mgr.open_session("/ws", "path2", false);
+    fn session_id_uniqueness() {
+        let id1 = SessionId::new();
+        let id2 = SessionId::new();
         assert_ne!(id1.0, id2.0);
+        assert!(id1.0.starts_with("ws_"));
     }
 
     #[test]
-    fn validate_session_succeeds_for_fresh_session() {
-        let mgr = WorkspaceSessionManager::new();
-        let id = mgr.open_session("/ws", "test", true);
-        let result = mgr.validate_session(&id);
-        assert!(result.is_ok(), "expected Ok, got {result:?}");
+    fn compute_content_hashes_empty_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let result = compute_content_hashes(dir.path()).expect("compute");
+        assert!(result.hashes.is_empty());
     }
 
     #[test]
-    fn validate_session_fails_for_unknown_id() {
-        let mgr = WorkspaceSessionManager::new();
-        let fake_id = SessionId("ws_nonexistent".to_string());
-        let result = mgr.validate_session(&fake_id);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not found"));
+    fn compute_content_hashes_single_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("test.txt");
+        std::fs::write(&file_path, b"hello world").expect("write");
+
+        let result = compute_content_hashes(dir.path()).expect("compute");
+        assert_eq!(result.hashes.len(), 1);
+        assert!(result.hashes.contains_key("test.txt"));
+
+        // Verify SHA-256: "hello world" → b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
+        let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        assert_eq!(result.hashes.get("test.txt").unwrap(), expected);
     }
 
     #[test]
-    fn consume_session_marks_session_as_consumed() {
-        let mgr = WorkspaceSessionManager::new();
-        let id = mgr.open_session("/ws", "test", true);
-        let result = mgr.consume_session(&id);
-        assert!(result.is_ok(), "first consume should succeed");
+    fn compute_content_hashes_nested_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("sub")).expect("mkdir");
+        std::fs::write(dir.path().join("a.txt"), b"aaa").expect("write");
+        std::fs::write(dir.path().join("sub").join("b.txt"), b"bbb").expect("write");
 
-        // Second consume should fail with AlreadyCommitted
-        let result2 = mgr.consume_session(&id);
-        assert!(
-            matches!(result2, Err(SessionError::AlreadyCommitted(_))),
-            "expected AlreadyCommitted, got {result2:?}"
+        let result = compute_content_hashes(dir.path()).expect("compute");
+        assert_eq!(result.hashes.len(), 2);
+        assert!(result.hashes.contains_key("a.txt"));
+        assert!(result.hashes.contains_key("sub/b.txt"));
+    }
+
+    #[test]
+    fn compute_content_hashes_different_content_different_hash() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("a.txt"), b"content A").expect("write");
+        let result_a = compute_content_hashes(dir.path()).expect("compute");
+
+        // Rewrite with different content
+        std::fs::write(dir.path().join("a.txt"), b"content B").expect("write");
+        let result_b = compute_content_hashes(dir.path()).expect("compute");
+
+        assert_ne!(
+            result_a.hashes.get("a.txt").unwrap(),
+            result_b.hashes.get("a.txt").unwrap(),
+            "different content must produce different hashes"
         );
     }
 
     #[test]
-    fn concurrent_consume_only_one_succeeds() {
-        use std::sync::Arc;
-        use std::thread;
+    fn session_error_display() {
+        let id = SessionId("ws_test".to_string());
+        let err = SessionError::NotFound(id.clone());
+        assert!(err.to_string().contains("not found"));
 
-        let mgr = Arc::new(WorkspaceSessionManager::new());
-        let id = mgr.open_session("/ws", "test", true);
+        let err = SessionError::AlreadyCommitted(id.clone());
+        assert!(err.to_string().contains("already been committed"));
 
-        // Spawn N threads, each trying to consume the same session.
-        // Exactly one must succeed; all others must get AlreadyCommitted.
-        let n = 10;
-        let handles: Vec<_> = (0..n)
-            .map(|_| {
-                let mgr = Arc::clone(&mgr);
-                let id = id.clone();
-                thread::spawn(move || mgr.consume_session(&id))
-            })
-            .collect();
+        let err = SessionError::Expired(id.clone());
+        assert!(err.to_string().contains("expired"));
 
-        let mut successes = 0usize;
-        let mut already_committed = 0usize;
-        let mut other_errors = 0usize;
-
-        for h in handles {
-            match h.join().expect("thread should not panic") {
-                Ok(_) => successes += 1,
-                Err(SessionError::AlreadyCommitted(_)) => already_committed += 1,
-                Err(_) => other_errors += 1,
-            }
-        }
-
-        assert_eq!(
-            successes, 1,
-            "exactly one concurrent consume should succeed"
-        );
-        assert_eq!(
-            already_committed,
-            n - 1,
-            "all other concurrent consumes should get AlreadyCommitted"
-        );
-        assert_eq!(other_errors, 0, "no unexpected errors");
-    }
-
-    #[test]
-    fn validate_after_consume_fails() {
-        let mgr = WorkspaceSessionManager::new();
-        let id = mgr.open_session("/ws", "test", true);
-        mgr.consume_session(&id).unwrap();
-
-        let result = mgr.validate_session(&id);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already been committed"));
-    }
-
-    #[test]
-    fn session_snapshot_preserves_path_info() {
-        let mgr = WorkspaceSessionManager::new();
-        let id = mgr.open_session("/home/user/workspace", "Works/my-novel", true);
-        let info = mgr.validate_session(&id).unwrap();
-        assert_eq!(info.snapshot.workspace_root, "/home/user/workspace");
-        assert_eq!(info.snapshot.relative_path, "Works/my-novel");
-        assert!(info.snapshot.existed);
-    }
-
-    #[test]
-    fn expired_sessions_are_cleaned_up() {
-        // Create a session manager with a very short TTL
-        let mgr = WorkspaceSessionManager {
-            sessions: Mutex::new(HashMap::new()),
-            ttl: Duration::from_millis(1),
+        let err = SessionError::HashConflict {
+            session_id: id,
+            path: "test.txt".to_string(),
+            expected_hash: "abc".to_string(),
+            actual_hash: "def".to_string(),
         };
-        let id = mgr.open_session("/ws", "test", true);
+        assert!(err.to_string().contains("content hash conflict"));
+        assert!(err.to_string().contains("test.txt"));
+    }
 
-        // Wait for expiration
-        thread::sleep(Duration::from_millis(10));
-
-        // Session should be cleaned up — validate should fail
-        let result = mgr.validate_session(&id);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not found"));
+    #[test]
+    fn change_entry_deserialization() {
+        let json = r#"{"path":"test.txt","contentHash":"abc123","op":"modify"}"#;
+        let entry: ChangeEntry = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(entry.path, "test.txt");
+        assert_eq!(entry.content_hash, "abc123");
+        assert!(matches!(entry.op, ChangeOp::Modify));
     }
 }

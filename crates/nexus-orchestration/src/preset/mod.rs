@@ -40,6 +40,7 @@ use include_dir::include_dir;
 use include_dir::Dir;
 use std::path::Path;
 
+pub mod expr;
 pub mod loader;
 pub mod manifest;
 pub mod validation;

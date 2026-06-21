@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T18:00:00Z",
+  "updated_at": "2026-06-22T20:30:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.55 (retiring)",
+    "integration_branch": "iteration/v1.56 (retiring)",
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.54",
+    "last_integration_branch": "iteration/v1.55",
     "integration_merge_target": "main",
     "latest_active_iteration": null,
     "latest_active_compass": null,
@@ -14,58 +14,73 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.55",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor",
-      "shipped_at": "2026-06-22T00:00:00Z",
-      "plan_count": 5,
-      "plan_count_done": 5,
+      "iteration": "V1.56",
+      "compass": "v1.56-workspace-and-routing-seam-closure",
+      "shipped_at": "2026-06-22T20:30:00Z",
+      "plan_count": 7,
+      "plan_count_done": 7,
       "open_at_ship": 0,
-      "deferred_to_next": 1,
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "Additive enum only (script BlockType `dialogue`/`beat`/`act`); per project convention additive enum counts as wire_contracts_changed: false",
+      "deferred_to_next": 36,
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "New /v1/local/{world,work,kb,schedule,workspace,findings} scope + new nexus.registry.refresh + nexus.game_bible.section_status.update capability IDs + new conditional routing primitives (multi-branch expression grammar, merge-point converge state kind) + workspace session schema (workspace_sessions table + content_hash + changes[] manifest). All crossing additive-enum threshold per project convention.",
       "profile_b_compaction": "done",
-      "spec_promotions": [
-        "game-bible-profile.md: Draft → Master (V1.55 P2 Depth 3.5 shipped)"
-      ],
+      "spec_promotions": [],
       "plan_ids": [
-        "2026-06-22-v1.55-compass-and-plan-stubs",
-        "2026-06-22-v1.55-df43-sqlite-alignment",
-        "2026-06-22-v1.55-df31-workspace-interface",
-        "2026-06-22-v1.55-game-bible-depth-35",
-        "2026-06-22-v1.55-script-scaffold"
+        "2026-06-22-v1.56-compass-and-plan-stubs",
+        "2026-06-22-v1.56-df31-df42-full-redesign",
+        "2026-06-22-v1.56-df29-registry-refresh",
+        "2026-06-22-v1.56-df56-independent-slice",
+        "2026-06-22-v1.56-df56-dependent-slice",
+        "2026-06-22-v1.56-mid-qc-and-fix-waves",
+        "2026-06-22-v1.56-hygiene-and-closeout"
       ],
       "highlights": {
-        "P0_DF43": "Closed: adapter From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource in nexus-local-db; nexus-knowledge crate docs locked to model/adapter-seam only; local-db-schema.md §4.1.1 ownership boundary text; round-trip + duplicate-truth prevention tests",
-        "P1_DF31": "Shipped interface skeleton: path validation (nexus-home-layout), WorkspaceSessionManager with atomic consume_session + SessionError enum + poison recovery + typed errors; 2 Local API routes (POST /v1/local/workspace/open, POST /v1/local/workspace/commit); no broad DF-42 Local API redesign",
-        "P2_game_bible_depth_35": "Shipped Depth 3.5: design-writing preset (LLM-driven per-section drafting) + design 五问 quality rubric (design-pillars/mechanics/continuity/playability/clarity) + section completion detection (is_game_bible_design_complete checks overview.md/pillars.md/mechanics.md + intake_status) + KB extraction (candidate_from_llm_json_for_profile wired into run_llm_extract + LlmExtractTask with production-path test); R-V154P1-S002 closed (profile-gate tracing/audit)",
-        "P3_script_scaffold": "Shipped V1.54-style scaffold (Scripts/ + Beats/ + Characters/ + Logs/); additive BlockType variants `dialogue`/`beat`/`act` + `script_category` validation; ValidationMode::Script; R-V154P1-W001 closed (ScaffoldTransaction applied to BOTH game-bible and script scaffolds with create/overwrite tracking + temp+rename atomic + validate_work_ref)",
-        "P_last": "game-bible-profile.md Draft → Master; Profile B compaction (5 plans archived); deferred-features tracker V1.55 ship snapshot; shipped-features tracker V1.55 snapshot; integration branch iteration/v1.55 retiring; R-V155P2-F002 registered (deferred to V1.56+)"
+        "P-1": "compass + 7 plan stubs + status.json + tracker activation; integration branch iteration/v1.56 created from main; pre_implement_gate flipped to GO after 7 grill decisions locked (Q1-Q7)",
+        "P0_DF31_DF42": "workspace OCC (SHA-256 content hash) + DB-backed persistent sessions + changes[] payload + Local API redesign /v1/local/{world,work,kb,schedule,workspace,findings} + 4 spec amends; pre-QC .sqlx/ cache fix-wave (R-V156P0-CACHE-01)",
+        "P1_DF29": "nexus.registry.refresh capability: synthetic output default (sandbox/air-gap) + optional --cdn-url daemon flag with timeout/retry; qc2 Request Changes (SSRF) → fix-wave added HTTPS-only + redirect policy + private-IP block + 8MiB body cap + typed CdnError enum + CLI/boot URL validation; 11 new negative tests",
+        "P2_DF56_independent": "arbitrary stage-level conditional next + expression grammar (Form B branches/default + MAX_EXPR_DEPTH=32) + multi-branch graphs + merge-point converge state kind with wait_for_all/first_completed/any strategies; 2 fix-waves (H-001 converge runtime gap + C-NEW-001 dedup bug both closed); 821 lib tests + 11 converge e2e + 20 new P3 tests",
+        "P3_DF56_dependent": "registry.refresh conditional edges + workspace branch inputs in expression routing engine; entity-scope-model.md §5.5.8 PM amend; qc1+qc2 Approve + qc3 Request Changes consolidated to Approve via PM override",
+        "P-mid": "meta tracking across 3 waves; 12 QC reports + 4 mid-QA + 3 targeted re-reviews + 1 closeout QA; wave rhythm complete",
+        "P-last": "R-V155P2-F002 fix-wave closed: game_bible.section_status.update capability + design-writing preset auto-transition + 24 new tests; Profile B compaction; shipped-features-tracker V1.56 snapshot; deferred-features-tracker V1.56 ship line; tech-debt rollup"
       },
       "residual_lifecycle": {
-        "archived_in_v155": [
-          "R-V154P1-S002 (resolved in P2 profile-gate observability)",
-          "R-V154P1-W001 (resolved in P3 ScaffoldTransaction)"
+        "archived_in_v156": [
+          "R-V156P0-CACHE-01 (sqlx cache miss; PM pre-QC fix)",
+          "R-V156P2-CACHE-01 (engine test bypass; PM-process lesson)",
+          "R-V155P2-F002 (game-bible section_status auto-transition; closed in P-last fix-wave)"
         ],
-        "open_v156_carry_forward": [
-          "R-V155P2-F002 (deferred to V1.56+: design-writing preset no durable section_status auto-transition; manual author step for V1.55)"
-        ],
-        "open_v156_count": 1
+        "open_v157_carry_forward_count": 36,
+        "open_v157_distribution": {
+          "medium": 13,
+          "low": 23
+        },
+        "key_archived_residuals": [
+          "R-V156P0-M001..M006 (P0 qc findings: sha2 dep, path boundary, no OCC race test, sync I/O, TOCTOU, no metrics)",
+          "R-V156P1-M001..M005 + L001..L007 (P1 qc findings: schema rename, global state, force param, tracing, reqwest reuse, etc.)",
+          "R-V156P2-M001..M003 + L001..L004 (P2 qc findings: null semantics, converge fan-in, expr routing tests, AST cache)",
+          "R-V156P3-W001..W002 + S001..S004 (P3 qc findings: workspace tracing, registry instrumentation, synthetic fallback ambiguity, throttle-path yield, field drops, workspace_state hook)",
+          "R-V156-MIDQA-01 (mid-QA Gate 4 fmt drift)",
+          "R-V156-PROCESS-01 (sqlx hygiene protocol)"
+        ]
       },
-      "wire_contract_changes": "None (per compass §0.1; additive enum only — script BlockType `dialogue`/`beat`/`act` are additive to V1.54's 15-variant BlockType)",
-      "qc_tri_review_outcome": "P0: 3/3 Approve. P1: initial 3/3 Request Changes → 1 fix-wave (consume_session race + SessionError + typed errors) → 3/3 Approve. P2: initial qc1 Request Changes + qc3 Request Changes → 2 fix-waves (profile-aware extraction + section_status narrowing + production-path test) → 3/3 Approve. P3: initial qc1+qc2 Request Changes → 1 fix-wave (ScaffoldTransaction + validate_work_ref + temp+rename + ValidationMode tests + daemon boot count) → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies (2 mid-QA per wave).",
-      "note": "V1.55 ship pending PR to main (user authorization required for push). Integration branch iteration/v1.55 retiring per mstar-branch-worktree."
+      "wire_contract_changes": "New /v1/local/* scope + new capability IDs (registry.refresh, game_bible.section_status.update) + new conditional routing primitives (expression grammar, converge state kind) + workspace session schema",
+      "qc_tri_review_outcome": "Wave 1 (P0+P1): P0 3/3 Approve; P1 1× Request Changes → fix-wave → 3/3 Approve. Wave 2 (P2): 3× Request Changes → fix-wave → qc2 Approve + qc3 revalidation → qc3 revalidation-2 Approve. Wave 3 (P3): qc1 Approve + qc2 Approve + qc3 Request Changes (warnings only) → PM consolidated Approve via override. Total: 12 QC reports + 4 targeted re-reviews + 1 closeout QA + 1 mid-QA across 3 waves.",
+      "note": "V1.56 Shipped via PR (pending merge commit). integration/v1.56 retired per mstar-branch-worktree.",
+      "merge_commit": "pending (PR open at integration/v1.56)",
+      "pr": "pending",
+      "pr_url": "pending"
     },
     "tech_debt_summary": {
-      "total_open": 1,
+      "total_open": 35,
       "total_deferred": 1,
-      "total_resolved": 14,
-      "total_archived": 4,
+      "total_resolved": 16,
+      "total_archived": 5,
       "by_severity_active": {
-        "medium": 0,
-        "low": 1
+        "medium": 18,
+        "low": 17
       },
       "by_target_active": {
-        "V1.56+": 1
+        "V1.57+": 35
       }
     }
   },
@@ -2030,9 +2045,506 @@
         "scope": "crates/nexus-orchestration/embedded-presets/design-writing/preset.yaml",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target": "V1.56+",
+        "target": "V1.56 P-last",
+        "target_date": "V1.56 P-last fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.55-game-bible-depth-35][R-V155P2-F002]",
-        "note": "Option B: preset/spec comments narrowed to state accepted frontmatter is manual step. Option A (nexus.game_bible.section_status.update capability) deferred to V1.56+. See preset.yaml line 7-10 for inline note.",
+        "note": "Option B: preset/spec comments narrowed to state accepted frontmatter is manual step. Option A (nexus.game_bible.section_status.update capability) deferred to V1.56 P-last fix-wave per V1.56 compass Q7. See preset.yaml line 7-10 for inline note.",
+        "lifecycle": "resolved",
+        "v156_absorption": {
+          "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+          "absorbing_plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+          "decision": "Folded into V1.56 P-last fix-wave per compass Q7; close V1.55 ship residual line to leave zero carry-forwards at V1.56 ship"
+        },
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.56 P-last fix-wave closed R-V155P2-F002: new `nexus.game_bible.section_status.update` capability with transition validation (draft→reviewed→accepted, no skipping/backwards) + atomic write via temp+rename + frontmatter field preservation. design-writing preset updated with auto_update_status state invoking the capability after review pass. 24 new tests cover all transitions + extraction + replacement + atomic write + capability run paths + preserves_fields + section_not_found. Spec amendments applied to acp-capability-set.md §4.7B and game-bible-profile.md §4.1. V1.55→V1.56 carry-forward closure complete.",
+        "closure_evidence": "feature/v1.56-r-v155p2-f002 branch → iteration/v1.56 merge 248e3ead; commit 638cc9bc feature",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+          "commit": "248e3ead"
+        }
+      }
+    ],
+    "2026-06-22-v1.56-df31-df42-full-redesign": [
+      {
+        "id": "R-V156P0-CACHE-01",
+        "title": "P0 self-verification missed cargo check --workspace; nexus42 sqlx query! macro cache stale after workspace_sessions migration (PM pre-QC build blocker)",
+        "severity": "medium",
+        "source": "PM pre-QC verification (cargo check -p nexus42)",
+        "scope": "crates/nexus42/src/commands/creator/mod.rs:1595 (creators INSERT) + crates/nexus42/src/commands/system/db.rs:85 (sqlite_master SELECT) — both query! macros fail to compile against .sqlx/ cache after P0 added workspace_sessions table migration 202606220002",
+        "decision": "fix",
+        "owner": "@fullstack-dev (P0 implementer oversight)",
+        "target": "V1.56",
+        "target_date": "V1.56 Wave 1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-CACHE-01]",
+        "note": "Root cause: P0 added new table + queries in nexus-local-db; regenerated .sqlx/ cache for nexus-local-db-only macros but missed consumer crate macros (nexus42 imports nexus-local-db and uses query! macros on creators + sqlite_master tables). P0 self-verification ran cargo test -p nexus-local-db and cargo test -p nexus-daemon-runtime but did NOT run cargo check --workspace. Architectural lesson: any plan touching nexus-local-db migrations or new tables MUST run cargo check --workspace (or cargo test --workspace) in self-verification, not just the touched crate. PM will enforce this rule in future plan AC items (e.g. V1.56 P2/P3/P-last if they touch nexus-local-db).",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "PM regenerated .sqlx/ cache via cargo sqlx prepare --workspace against a freshly-migrated SQLite DB. 2 new cache files added: .sqlx/query-24310e7f662c7c50c6821804d03720afb0651412952ed063ef25cdb87e43de73.json (creators INSERT) and .sqlx/query-3b17cf38385b3fc0e9cf25cbbc4f903bc9ab5d04aeeb2bdc10a7df73b50dacdd.json (sqlite_master SELECT). No existing cache files modified. cargo check --workspace clean post-fix.",
+        "closure_evidence": "iteration/v1.56 @ 8809f0b5 (pre-QC fix-wave PM commit)",
+        "resolution": {
+          "plan_id": "pre-qc-fix-wave-pm",
+          "commit": "8809f0b5"
+        }
+      },
+      {
+        "id": "R-V156P0-M001",
+        "title": "sha2 dependency not workspace-managed — added directly in nexus-daemon-runtime/Cargo.toml instead of workspace inheritance",
+        "severity": "medium",
+        "source": "qc1 W-001 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M001]",
+        "note": "Deferrable medium; surfaced by qc1 W-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M002",
+        "title": "Path boundary remains syntactic only — no canonicalize/symlink/prefix enforcement on workspace.open + hash walk (inherited from V1.55; not regressed in P0)",
+        "severity": "medium",
+        "source": "qc2 W-001 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M002]",
+        "note": "Deferrable medium; surfaced by qc2 W-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M003",
+        "title": "No concurrent integration test exercising DB-backed OCC + atomic consume under load (stale-session / hash-conflict / expiry races); unit tests cover happy path only",
+        "severity": "medium",
+        "source": "qc2 W-002 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M003]",
+        "note": "Deferrable medium; surfaced by qc2 W-002. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M004",
+        "title": "Blocking sync I/O in async handler (std::fs::read_to_string in async path) — acceptable pre-1.0; future spawn_blocking",
+        "severity": "medium",
+        "source": "qc3 W-QC3-001 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M004]",
+        "note": "Deferrable medium; surfaced by qc3 W-QC3-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M005",
+        "title": "TOCTOU window on read-modify-write session model — known OCC relaxation per spec; low practical risk for single-daemon",
+        "severity": "medium",
+        "source": "qc3 W-QC3-002 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M005]",
+        "note": "Deferrable medium; surfaced by qc3 W-QC3-002. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M006",
+        "title": "No metrics/tracing spans at OCC conflict path / session expiry / commit latency — observability gap; recommend #[tracing::instrument] spans",
+        "severity": "medium",
+        "source": "qc3 W-QC3-003 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M006]",
+        "note": "Deferrable medium; surfaced by qc3 W-QC3-003. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.56-df29-registry-refresh": [
+      {
+        "id": "R-V156P1-M001",
+        "title": "Breaking output schema rename (`agent_count` → `capability_count`) — verify downstream consumers (CLI, agents, tests) match the new field name",
+        "severity": "medium",
+        "source": "qc1 F-101 (architecture) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M001]",
+        "note": "Deferrable medium; surfaced by qc1 F-101 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M002",
+        "title": "Global mutable state pattern (static RwLock for `CdnConfig`) — recommend constructor-injected for testability and concurrent safety",
+        "severity": "medium",
+        "source": "qc1 F-102 (architecture) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M002]",
+        "note": "Deferrable medium; surfaced by qc1 F-102 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M003",
+        "title": "`force` parameter ignored in host handler — dead code or incomplete implementation; clarify intent",
+        "severity": "medium",
+        "source": "qc1 F-103 (architecture) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M003]",
+        "note": "Deferrable medium; surfaced by qc1 F-103 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M004",
+        "title": "No tracing instrumentation in capability handler — observability gap; recommend `#[tracing::instrument]`",
+        "severity": "medium",
+        "source": "qc3 F-001 (performance/reliability) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M004]",
+        "note": "Deferrable medium; surfaced by qc3 F-001 (performance/reliability). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M005",
+        "title": "`reqwest::Client` per invocation, no connection reuse — efficiency concern under repeated invocations",
+        "severity": "medium",
+        "source": "qc3 F-002 (performance/reliability) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M005]",
+        "note": "Deferrable medium; surfaced by qc3 F-002 (performance/reliability). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L001",
+        "title": "Help text `--cdn-url` description should explicitly state \"must be HTTPS, must be a public CDN\"",
+        "severity": "low",
+        "source": "qc2-revalidation cosmetic Suggestion #1 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L001]",
+        "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #1. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L002",
+        "title": "Add body-size hammer test (sustained stream >8 MiB; not just one-shot >cap)",
+        "severity": "low",
+        "source": "qc2-revalidation cosmetic Suggestion #2 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L002]",
+        "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #2. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L003",
+        "title": "Naming prefix consistency: `c_*` vs other test naming conventions in the file",
+        "severity": "low",
+        "source": "qc2-revalidation cosmetic Suggestion #3 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L003]",
+        "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #3. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L004",
+        "title": "Deterministic retry backoff without jitter — minor reliability concern",
+        "severity": "low",
+        "source": "qc3 F-003 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L004]",
+        "note": "Deferrable low; surfaced by qc3 F-003. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L005",
+        "title": "No latency benchmark asserting <50ms for synthetic path",
+        "severity": "low",
+        "source": "qc3 F-004 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L005]",
+        "note": "Deferrable low; surfaced by qc3 F-004. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L006",
+        "title": "`generated_at` prevents full hash determinism — minor test brittleness",
+        "severity": "low",
+        "source": "qc3 F-005 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L006]",
+        "note": "Deferrable low; surfaced by qc3 F-005. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L007",
+        "title": "No structured metrics (latency histogram, fallback rate counter)",
+        "severity": "low",
+        "source": "qc3 F-006 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L007]",
+        "note": "Deferrable low; surfaced by qc3 F-006. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-CACHE-01",
+        "title": "PM-followup: `.sqlx/` cache missed test query! macros; test compile failed mid-QA. PM regenerated via `cargo sqlx prepare --workspace -- --tests` (10 new cache files). Future plans touching test queries must run sqlx prepare with --tests flag.",
+        "severity": "medium",
+        "source": "PM mid-QA Gate 2 fail (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-CACHE-01]",
+        "note": "Deferrable medium; surfaced by PM mid-QA Gate 2 fail. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156-MIDQA-01",
+        "title": "Mid-QA Gate 4 fmt drift on integration branch (cargo +nightly fmt --all applied by PM). Future plans must run `cargo +nightly fmt --all -- --check` before reporting Done.",
+        "severity": "low",
+        "source": "PM mid-QA Gate 4 fail (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "PM + implementer (process)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156-MIDQA-01]",
+        "note": "Deferrable low; surfaced by PM mid-QA Gate 4 fail. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156-PROCESS-01",
+        "title": "`.sqlx/` cache hygiene protocol: `cargo sqlx prepare --workspace -- --tests` must be run after any nexus-local-db migration or new query! macro. Add to AC items for future plans touching sqlx.",
+        "severity": "low",
+        "source": "PM pre-QC + mid-QA hygiene (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "PM + implementer (process)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156-PROCESS-01]",
+        "note": "Deferrable low; surfaced by PM pre-QC + mid-QA hygiene. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.56-df56-independent-slice": [
+      {
+        "id": "R-V156P2-M001",
+        "title": "Null comparison semantics: spec §3.3 updated to JSON equality (null == null → true); ensure downstream doc snippets in cli-spec or other docs reflect same",
+        "severity": "medium",
+        "source": "qc1 W-003 / qc2 revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M001]",
+        "note": "Deferrable medium; surfaced by qc1 W-003 / qc2 revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-M002",
+        "title": "Converge fan-in validation: 0-predecessor converge — runtime skip implemented but spec claims loader error; minor doc/impl alignment",
+        "severity": "medium",
+        "source": "qc2-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M002]",
+        "note": "Deferrable medium; surfaced by qc2-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-M003",
+        "title": "resolve_expression_target routing tests (M-005): pre-existing Warning, no integration tests for expression routing through Task::run()",
+        "severity": "medium",
+        "source": "qc3-revalidation pre-existing (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M003]",
+        "note": "Deferrable medium; surfaced by qc3-revalidation pre-existing. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-CACHE-01",
+        "title": "PM-process hygiene: convergence runtime tests bypass real `record_converge_arrival` initially exposed by qc-specialist-3 (C-NEW-001); future engine tests must go through real runtime paths; PM lesson captured",
+        "severity": "medium",
+        "source": "qc3-revalidation C-NEW-001 (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "PM + implementer",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-CACHE-01]",
+        "note": "Deferrable medium; surfaced by qc3-revalidation C-NEW-001. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L001",
+        "title": "No latency benchmark asserting expression eval <1ms target",
+        "severity": "low",
+        "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L001]",
+        "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L002",
+        "title": "Expression eval tracing/metrics at convergence gate",
+        "severity": "low",
+        "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L002]",
+        "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L003",
+        "title": "Converge strategy timeout (wait_for_all unbounded); add bounded timeout for stuck predecessors",
+        "severity": "low",
+        "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L003]",
+        "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L004",
+        "title": "Loader: 0-predecessor converge should be hard error (not skip) per spec; doc/impl alignment",
+        "severity": "low",
+        "source": "qc3 M-002 (residual nuance) (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L004]",
+        "note": "Deferrable low; surfaced by qc3 M-002 (residual nuance). No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.56-df56-dependent-slice": [
+      {
+        "id": "R-V156P3-W001",
+        "title": "inject_workspace_context() zero tracing — silent default fallback masks production misconfiguration",
+        "severity": "medium",
+        "source": "qc3 W-001 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-W001]",
+        "note": "Deferrable medium; surfaced by qc3 W-001. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-W002",
+        "title": "No invocation latency / failure-rate instrumentation at registry.refresh capability boundary",
+        "severity": "medium",
+        "source": "qc3 W-002 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-W002]",
+        "note": "Deferrable medium; surfaced by qc3 W-002. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S001",
+        "title": "Synthetic fallback source field ambiguous — cannot distinguish emergency fallback from designed synthetic",
+        "severity": "low",
+        "source": "qc3 S-001 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S001]",
+        "note": "Deferrable low; surfaced by qc3 S-001. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S002",
+        "title": "Throttle-path .await adds scheduling yield (marginal; guarded by dep flags)",
+        "severity": "low",
+        "source": "qc3 S-002 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S002]",
+        "note": "Deferrable low; surfaced by qc3 S-002. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S003",
+        "title": "registry_output_to_context silently drops 4 of 9 synthetic output fields",
+        "severity": "low",
+        "source": "qc3 S-003 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S003]",
+        "note": "Deferrable low; surfaced by qc3 S-003. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S004",
+        "title": "with_workspace_state() hook exists; activation depends on P0 engine code outside P3 diff — PM/P-last to verify before final signoff",
+        "severity": "low",
+        "source": "qc1 S-004 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S004]",
+        "note": "Deferrable low; surfaced by qc1 S-004. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
         "lifecycle": "deferred"
       }
     ]

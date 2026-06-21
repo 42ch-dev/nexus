@@ -94,6 +94,7 @@ The Local API is the **codegen-ready** internal contract between CLI, daemon, an
 | `GET /v1/local/runtime/status` | Active | Unguarded diagnostic route. |
 | `GET /v1/local/daemon/status` | Active | Unguarded daemon lifecycle snapshot. |
 | `GET /v1/local/workspace`, `POST /v1/local/workspace/init` | Active | Legacy single-workspace info/init routes. |
+| `POST /v1/local/workspace/open`, `POST /v1/local/workspace/commit` | **Active (V1.56 P0)** | Workspace session open/commit with file-level OCC (SHA-256 content hash). Sessions persisted in `SQLite` `workspace_sessions` table; survive daemon restart; expire per TTL (default 5 min). `open` returns file hashes for all tracked files. `commit` validates `changes[]` manifest against session snapshot; rejects on hash mismatch (409 HASH_CONFLICT). See `concurrency.md` §OCC. |
 | `GET|POST /v1/local/workspaces`, `GET|PUT /v1/local/workspaces/active` | Active | Workspace list/create and active workspace selection. |
 | `GET /v1/local/creators`, `GET /v1/local/creators/{creator_id}`, `GET|PUT /v1/local/creators/active`, `POST /v1/local/creators/{creator_id}:logout` | Active | Local creator status/selection/logout only; registration remains CLI/cloud-line. |
 | `GET /v1/local/references` | Active | Local reference list via `nexus-local-db`; not `nexus-knowledge` persistence. |

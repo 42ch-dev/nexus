@@ -1,11 +1,11 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; full DF-56 roadmap in deferred tracker §3.6.3)  
-**Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics)  
+**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; V1.56 P2 — 2026-06-22; arbitrary stage conditional + expression routing + converge nodes; V1.56 P3 — 2026-06-22; registry.refresh conditional edges + workspace branch inputs)  
+**Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics → full expression routing → data-source integration)  
 **Created**: 2026-06-06  
-**Last updated**: 2026-06-19 (V1.52 T-B P1: merge semantics shipped, §3.2 added)
+**Last updated**: 2026-06-22 (V1.56 P3: registry + workspace context fields shipped, §3.4 added)
 **Tracker**: DF-56 (conditional routing / branching engine)  
-**Scope**: Preset `next.kind: conditional` loader + runtime evaluator (future iteration)  
+**Scope**: Preset `next.kind: conditional` loader + runtime evaluator (shipped)  
 **Coordinates with**:
 
 - [orchestration-engine.md](orchestration-engine.md) §7.5 — current linear-only contract; this doc is the future normative target when conditional routing ships
@@ -158,6 +158,160 @@ Violations produce `DiagnosticCategory::MergeIntegrity` errors and block preset 
 - States without `merge:` field default to `wait-all`.
 - Existing binary `GoNogo` + N-way `Labeled` presets continue to work without modification — the `merge:` field is additive.
 - `GoNogo` edges are also counted as incoming labeled edges for merge node purposes (labels `"go"` and `"nogo"`).
+
+### 3.3 Arbitrary stage-level conditional `next` + expression routing (Draft V1.56 P2 — shipped in plan `2026-06-22-v1.56-df56-independent-slice`)
+
+**Status**: Draft (V1.56 P2 shipped)
+**Authoring plan**: `2026-06-22-v1.56-df56-independent-slice`
+**Promotes to Normative**: P-last of V1.56
+
+Extends the conditional routing engine from `llm_judge`-only to **arbitrary state kinds**, adds a simple expression grammar for rule-based routing, and defines explicit converge (merge-point) state nodes.
+
+#### §3.3.1 Arbitrary stage-level conditional `next`
+
+Any state kind (`produce`, `review`, `manual`, `rule`, `timer`, `graph_complete`, custom states) can now declare a conditional `next` using either the legacy `kind: conditional` form or the new expression-based `branches` form. The loader no longer restricts conditional routing to `llm_judge` states.
+
+**Loader validation**: target state IDs in all branches and the default must reference valid states. The runtime evaluator reads `_state_result` or user-set context values for non-judge states.
+
+#### §3.3.2 Expression / rule-based routing (Form B)
+
+In addition to the legacy `kind: conditional` form (Form A, preserved), presets may use the new **Form B** multi-branch expression routing:
+
+```yaml
+next:
+  branches:
+    - when: "_context.score > 80"
+      target: approved
+    - when: "_context.status == 'review'"
+      target: review_queue
+  default: rejected
+```
+
+**Expression grammar**:
+  - **Comparisons**: `==`, `!=`, `>`, `<`, `>=`, `<=`
+  - **Boolean**: `&&`, `||`, `!`, parens
+  - **Field access**: `_context.<dotted.path>` resolves against `graph_flow::Context` JSON values (e.g. `_context.score`, `_context.data.x`)
+  - **Literals**: numbers (integer/float), single/double-quoted strings, `true`/`false`, `null`
+  - **Truthy check**: bare field references (e.g. `_context.flag`) evaluate as truthy (non-null, non-false, non-zero, non-empty)
+
+**Evaluation**: first-match semantics — branches are evaluated in declaration order; the first branch with a `when` expression that evaluates to `true` wins. If no branch matches, the `default` target is used. Missing context fields resolve to `null`.
+
+**Null comparison semantics** (V1.56 P2 fix-wave, M-001): follows JSON equality semantics:
+  - `null == null` → `true`
+  - `null != "x"` → `true` (non-null value not equal to null)
+  - `null > 0` → type error (no numeric comparison with null)
+  - Bare `null` reference → falsey
+
+**Depth limit** (V1.56 P2 fix-wave, W-003): expression nesting depth is bounded by `MAX_EXPR_DEPTH = 32` to prevent stack overflow from deeply-nested `when:` expressions in user-installable presets. Exceeding the depth returns `ExprError::DepthExceeded`. Depth=32 succeeds; depth=33 returns an error; depth=1000 does not panic.
+
+**Expression caching** (V1.56 P2 fix-wave, M-004): compiled expression ASTs are cached per task at construction time and reused across transitions. Parsing happens once per preset load, not once per transition.
+
+**Error propagation** (V1.56 P2 fix-wave, M-006): expression evaluation errors are propagated as `TaskExecutionFailed` (not silently swallowed). Runtime failures surface to the caller instead of skipping the branch.
+
+**Safety**: expressions are locally evaluated in-process; no code injection, no scripting engine, no external service calls.
+
+#### §3.3.3 Multi-branch graphs with merge points
+
+States may declare a `converge` config to act as a dedicated **merge-point (converge) node** that explicitly accepts multiple incoming edges:
+
+```yaml
+states:
+  - id: merged
+    converge:
+      strategy: wait_for_all   # default
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+```
+
+**Converge strategies**:
+  - **`wait_for_all`** (default): wait for all incoming edges to arrive before advancing
+  - **`first_completed`**: advance on first arrival; subsequent arrivals are ignored
+  - **`any`**: idempotent — advance on first arrival; re-run after gate pass continues immediately
+
+**Runtime enforcement** (V1.56 P2 fix-wave, H-001/W-002): the convergence gate runs in `StateCompositeTask::run()` after the merge node gate. Arrivals are tracked via the `_converge_arrivals_{state_id}` context key, populated by source states when they route to a converge target. The converge gate check:
+  1. Reads the arrivals from the converge key
+  2. Compares against the number of known predecessors
+  3. For `wait_for_all`: all predecessors must have arrived
+  4. For `first_completed` / `any`: at least one predecessor must have arrived
+  5. If unsatisfied: returns `NextAction::WaitForInput`
+  6. If satisfied: clears the key and advances to enter actions
+
+**Predecessor tracking** (V1.56 P2 fix-wave): converge predecessors are discovered at graph build time by scanning all states' `next` targets. States that are converge targets have their predecessor sets populated in `StateCompositeTask::converge_predecessors`. Source states call `record_converge_arrival()` when routing to a converge target via `resolve_expression_target()` or `resolve_labeled_target()`.
+
+**Loader validation** (V1.56 P2 fix-wave, M-002):
+  - Converge states must not be terminal
+  - Converge states with 0 predecessors produce a validation error (orphan)
+  - Converge states with 1 predecessor produce a warning (consider linear transition)
+
+**DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
+
+### 3.4 Registry and workspace context fields (Draft V1.56 P3 — shipped in plan `2026-06-22-v1.56-df56-dependent-slice`)
+
+**Status**: Draft (V1.56 P3 shipped)
+**Authoring plan**: `2026-06-22-v1.56-df56-dependent-slice`
+**Promotes to Normative**: P-last of V1.56
+
+Extends the expression grammar's context namespace with two new sub-objects — `registry_refresh` and `workspace` — enabling conditional routing decisions driven by capability registry output and workspace session state.
+
+#### §3.4.1 `registry_refresh` context fields
+
+When a state's conditional `next` references `_context.registry_refresh.*`, the runtime invokes the `nexus.registry.refresh` capability (shipped in V1.56 P1) and feeds its output into the expression context as a nested `registry_refresh` object with these fields:
+
+| Context field | Type | Source | Description |
+|---|---|---|---|
+| `_context.registry_refresh.source` | `String` | `RegistryRefreshOutput.source` | `"synthetic"`, `"cdn"`, or `"synthetic_fallback"` |
+| `_context.registry_refresh.snapshot_version` | `String` | `RegistryRefreshOutput.snapshotVersion` | e.g. `"2026-06-22.v1"` |
+| `_context.registry_refresh.capability_count` | `Number` | `RegistryRefreshOutput.capabilityCount` | Number of registered capabilities in the snapshot |
+| `_context.registry_refresh.fallback_reason` | `String` | `RegistryRefreshOutput.fallbackReason` | Empty on success; typed `CdnError` variant string when fallback occurred |
+| `_context.registry_refresh.retry_count` | `Number` | `RegistryRefreshOutput.retryCount` | Retries actually attempted (0 for synthetic, up to `maxRetries` for CDN) |
+
+**Invocation rule**: the runtime invokes the `registry.refresh` capability once, before evaluating the first branch expression for a state. The result is stored in the context for the duration of the state transition and re-read on subsequent re-entries. If the capability registry is unavailable, the runtime injects a minimal synthetic default (`source: "synthetic"`, `capability_count: 31`, `retry_count: 0`, `fallback_reason: ""`).
+
+**Field naming**: capability output uses camelCase JSON fields (`capabilityCount`, `snapshotVersion`); the expression context maps these to `snake_case` for consistency with the expression grammar (`capability_count`, `snapshot_version`).
+
+**Example**:
+```yaml
+next:
+  branches:
+    - when: "_context.registry_refresh.source == 'synthetic'"
+      target: synthetic_handling_state
+    - when: "_context.registry_refresh.capability_count > 50"
+      target: high_capability_state
+  default: standard_state
+```
+
+#### §3.4.2 `workspace` context fields
+
+When a state's conditional `next` references `_context.workspace.*`, the runtime queries the workspace session state and injects it into the expression context as a nested `workspace` object with these fields:
+
+| Context field | Type | Source | Description |
+|---|---|---|---|
+| `_context.workspace.session_id` | `String` | Active workspace session ID | `"ws_<uuid>"` or `""` when no session is active |
+| `_context.workspace.conflict_detected` | `Bool` | OCC hash conflict status | `true` when the last commit attempt detected a content hash mismatch |
+| `_context.workspace.changes_applied` | `Number` | Count of changes in the session | Number of `ChangeEntry` items applied in the current workspace session |
+| `_context.workspace.workspace_root` | `String` | Canonical workspace root path | Absolute path to the workspace creative root |
+
+**Invocation rule**: the runtime reads the workspace session state from the active workspace context. If no explicit workspace state has been set (e.g., in test harnesses), a minimal default is injected (`session_id: ""`, `conflict_detected: false`, `changes_applied: 0`, `workspace_root: ""`). In production, the orchestration engine populates these fields from the `WorkspaceSessionManager` before evaluating branches.
+
+**OCC semantics**: `conflict_detected` is `true` when a `workspace.commit` operation encountered a `SessionError::HashConflict`. This allows presets to route to conflict-resolution states after a failed commit attempt.
+
+**Example**:
+```yaml
+next:
+  branches:
+    - when: "_context.workspace.conflict_detected"
+      target: resolve_conflict_state
+    - when: "_context.workspace.changes_applied > 3"
+      target: review_large_change
+  default: continue_state
+```
+
+#### §3.4.3 Context dependency scanning
+
+The runtime scans compiled expression ASTs for `registry_refresh` and `workspace` field accesses at construction time (in `build_expr_cache`). The dependency flags (`needs_registry_refresh`, `needs_workspace`) control whether the corresponding capability or session query is invoked before branch evaluation. Expressions that reference neither sub-object skip the invocation entirely — no unnecessary I/O.
+
+**Precedence**: when both `registry_refresh` and `workspace` fields are referenced in the same expression, both are injected. Field name collisions within each sub-object are detected at expression parse time; the expression grammar treats them as distinct nested paths.
 
 ---
 

@@ -1,0 +1,35 @@
+{
+  "plan_id": "2026-06-22-v1.56-df29-registry-refresh",
+  "title": "V1.56 P1 — DF-29 registry.refresh",
+  "status": "Done",
+  "type": "implement",
+  "track": "Track B / Wave 1",
+  "owner": "@fullstack-dev-2",
+  "effort": "M",
+  "working_branch": "feature/v1.56-df29-registry-refresh",
+  "merge_target": "iteration/v1.56",
+  "created": "2026-06-22",
+  "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+  "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
+  "depends_on": [
+    "P-1 PM signoff"
+  ],
+  "qc_status": "tri-review done — qc1+qc3 Approve with comments; qc2 Request Changes (Critical SSRF C-001 + High H-001 typed errors + H-002 URL validation) — fix-wave dispatched to @fullstack-dev-2",
+  "qa_status": "mid-QA Pass with comments — Gate 6 (residuals) + Gate 7 (security contract docs) PM-fixed; fix-wave C-001/H-001/H-002 closed by @fullstack-dev-2 and approved by qc-specialist-2 re-review",
+  "qc_completed_at": "2026-06-22",
+  "fix_wave": {
+    "trigger": "qc2 Request Changes",
+    "blocking_findings": [
+      "C-001 SSRF (CDN URL injection)",
+      "H-001 stringly-typed network errors",
+      "H-002 no --cdn-url validation"
+    ],
+    "owner": "@fullstack-dev-2",
+    "status": "dispatched",
+    "re_review_seats": [
+      "qc-specialist-2"
+    ]
+  },
+  "done_at": "2026-06-22",
+  "done_note": "Tri-review Request Changes → fix-wave → targeted re-review Approve → mid-QA Pass with comments → PM completed residual registration + docs contract. 13 P1 residuals registered (5 medium, 8 low incl. process hygiene)."
+}

@@ -104,7 +104,9 @@ inner_graphs:
 }
 
 #[test]
-fn reject_conditional_next_not_yet_supported() {
+fn accept_conditional_next_on_any_state_kind() {
+    // V1.56 P2: conditional next is now accepted on any state kind,
+    // not just llm_judge. The loader no longer rejects this form.
     let yaml = r#"
 preset:
   id: cond-test
@@ -131,14 +133,12 @@ states:
   - id: c
     terminal: true
 "#;
-    let err = load_preset_from_str(yaml, &test_capability_registry()).unwrap_err();
-    assert!(
-        err.problems()
-            .iter()
-            .any(|p| p.error.contains("ConditionalNotYetSupported")),
-        "expected 'ConditionalNotYetSupported' problem: {:?}",
-        err.problems()
-    );
+    let loaded = load_preset_from_str(yaml, &test_capability_registry()).unwrap();
+    assert_eq!(loaded.id, "cond-test");
+    // Verify the graph has all 3 states
+    assert!(loaded.outer_graph.get_task("a").is_some());
+    assert!(loaded.outer_graph.get_task("b").is_some());
+    assert!(loaded.outer_graph.get_task("c").is_some());
 }
 
 #[test]
