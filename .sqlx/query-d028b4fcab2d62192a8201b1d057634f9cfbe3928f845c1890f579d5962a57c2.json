@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) as count FROM workspace_sessions WHERE consumed = 0 AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+  "describe": {
+    "columns": [
+      {
+        "name": "count",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d028b4fcab2d62192a8201b1d057634f9cfbe3928f845c1890f579d5962a57c2"
+}

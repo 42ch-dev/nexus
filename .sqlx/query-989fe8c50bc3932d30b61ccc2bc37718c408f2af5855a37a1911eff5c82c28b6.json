@@ -1,62 +1,62 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT work_profile, work_ref, workspace_slug, intake_status, world_id, status, current_stage, total_planned_chapters FROM works WHERE work_id = ? AND creator_id = ?",
+  "query": "SELECT session_id, workspace_root, relative_path, existed, file_hashes_json, created_at, expires_at, consumed FROM workspace_sessions WHERE session_id = ?",
   "describe": {
     "columns": [
       {
-        "name": "work_profile",
+        "name": "session_id",
         "ordinal": 0,
         "type_info": "Text"
       },
       {
-        "name": "work_ref",
+        "name": "workspace_root",
         "ordinal": 1,
         "type_info": "Text"
       },
       {
-        "name": "workspace_slug",
+        "name": "relative_path",
         "ordinal": 2,
         "type_info": "Text"
       },
       {
-        "name": "intake_status",
+        "name": "existed",
         "ordinal": 3,
-        "type_info": "Text"
+        "type_info": "Integer"
       },
       {
-        "name": "world_id",
+        "name": "file_hashes_json",
         "ordinal": 4,
         "type_info": "Text"
       },
       {
-        "name": "status",
+        "name": "created_at",
         "ordinal": 5,
         "type_info": "Text"
       },
       {
-        "name": "current_stage",
+        "name": "expires_at",
         "ordinal": 6,
         "type_info": "Text"
       },
       {
-        "name": "total_planned_chapters",
+        "name": "consumed",
         "ordinal": 7,
         "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       true,
-      true,
       false,
       false,
-      true,
       false,
-      true,
-      true
+      false,
+      false,
+      false,
+      false
     ]
   },
-  "hash": "e74479e2742963dc9c426191ddb1a23e6f7bbe836f86ef23a7ca3aa615a3c087"
+  "hash": "989fe8c50bc3932d30b61ccc2bc37718c408f2af5855a37a1911eff5c82c28b6"
 }

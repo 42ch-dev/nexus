@@ -98,13 +98,9 @@ pub struct WorkspaceOpenResponse {
 
 /// Workspace state snapshot returned by `workspace.open`.
 ///
-/// # Future expansion (DF-31 → DF-42)
-///
-/// Currently contains only the workspace root and resolved path.
-/// Future iterations may add:
-/// - `files[]` listing with per-file checksums for OCC
-/// - `manifest_version` for version-aware conflict detection
-/// - `branch` reference for git-backed workspaces
+/// Contains file hashes for optimistic concurrency control (OCC).
+/// Each file tracked in the workspace scope is represented by its
+/// relative path and SHA-256 content hash.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenSnapshot {
@@ -114,6 +110,10 @@ pub struct OpenSnapshot {
     pub path: String,
     /// Whether the target path already existed on disk.
     pub existed: bool,
+    /// Map of relative path → SHA-256 hex digest for all tracked files.
+    /// Empty if the path did not exist or contained no regular files.
+    #[serde(default)]
+    pub file_hashes: std::collections::HashMap<String, String>,
 }
 
 /// `POST /v1/local/workspace/open`
@@ -152,11 +152,34 @@ pub async fn open_workspace(
     let existed = target_path.exists();
     debug!(?target_path, existed, "Resolved workspace target path");
 
-    // Open session
+    // Open session (async, DB-backed with content hashes)
     let session_mgr = state.session_manager();
-    let session_id = session_mgr.open_session(&workspace_root, &req.path, existed);
+    let session_id = session_mgr
+        .open_session(&workspace_root, &req.path, existed)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "SESSION_OPEN_FAILED".into(),
+            message: e.to_string(),
+        })?;
 
-    info!(session_id = %session_id, "Workspace session opened");
+    // Read back the session to get file hashes
+    let session_row = session_mgr
+        .validate_session(&session_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "SESSION_READ_FAILED".into(),
+            message: e.to_string(),
+        })?;
+
+    // Parse file hashes from stored JSON
+    let file_hashes: std::collections::HashMap<String, String> =
+        serde_json::from_str(&session_row.file_hashes_json).unwrap_or_default();
+
+    info!(
+        session_id = %session_id,
+        file_count = file_hashes.len(),
+        "Workspace session opened"
+    );
 
     Ok(Json(WorkspaceOpenResponse {
         session_id: session_id.to_string(),
@@ -164,30 +187,23 @@ pub async fn open_workspace(
             workspace_root,
             path: req.path,
             existed,
+            file_hashes,
         },
     }))
 }
 
 /// Request body for `POST /v1/local/workspace/commit`.
 ///
-/// Commits changes to a workspace session.
-///
-/// # Future expansion (DF-31 → DF-42)
-///
-/// The current skeleton accepts only `session_id` and an empty `changes`
-/// array. Future iterations may add:
-/// - `changes[]` with file-level diffs or full content
-/// - `message` for commit metadata
-/// - `rollback_on_conflict` flag
+/// Commits changes against a workspace session. The `changes[]` manifest
+/// is validated against the session snapshot for OCC conflicts.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceCommitRequest {
     /// The session ID returned by `workspace.open`.
     pub session_id: String,
-    /// Placeholder for future change payloads.
-    /// Currently always empty in the skeleton.
+    /// Manifest of changes to commit, each with path, content hash, and operation.
     #[serde(default)]
-    pub changes: Vec<serde_json::Value>,
+    pub changes: Vec<crate::workspace::session::ChangeEntry>,
 }
 
 /// Response for `workspace.commit`.
@@ -202,16 +218,18 @@ pub struct WorkspaceCommitResponse {
 
 /// `POST /v1/local/workspace/commit`
 ///
-/// Commits changes against a workspace session. Validates that the session
-/// exists, is active, and has not been consumed. Rejects stale or conflicting
-/// sessions rather than silently overwriting.
+/// Commits changes against a workspace session. Validates the `changes[]` manifest
+/// against the session snapshot. Rejects on hash mismatch (OCC conflict), stale
+/// sessions, expired sessions, or missing sessions.
 ///
 /// # Error semantics (conflict model)
 ///
+/// - **OCC conflict**: If any change entry's `content_hash` does not match the
+///   session snapshot, returns 409 CONFLICT with `HASH_CONFLICT`.
 /// - **Stale session**: If the session has already been committed, returns
-///   409 CONFLICT with `STALE_SESSION`. This prevents double-commit bugs.
+///   409 CONFLICT with `STALE_SESSION`.
 /// - **Expired session**: If the session has exceeded its TTL, returns
-///   409 CONFLICT with `SESSION_EXPIRED`. Callers must re-open.
+///   409 CONFLICT with `SESSION_EXPIRED`.
 /// - **Missing session**: If the session ID is not found, returns
 ///   404 `NOT_FOUND` with `SESSION_NOT_FOUND`.
 ///
@@ -220,14 +238,18 @@ pub struct WorkspaceCommitResponse {
 /// Returns:
 /// - 400 if `session_id` is empty
 /// - 404 if the session is not found
-/// - 409 if the session is stale or expired
+/// - 409 if the session is stale, expired, or has OCC conflicts
 /// - 500 on internal errors
 pub async fn commit_workspace(
     State(state): State<WorkspaceState>,
     Json(req): Json<WorkspaceCommitRequest>,
 ) -> Result<Json<WorkspaceCommitResponse>, NexusApiError> {
     info!("Handling workspace.commit request");
-    debug!(session_id = %req.session_id, "Committing workspace session");
+    debug!(
+        session_id = %req.session_id,
+        change_count = req.changes.len(),
+        "Committing workspace session"
+    );
 
     // Validate session_id is not empty
     if req.session_id.trim().is_empty() {
@@ -238,15 +260,56 @@ pub async fn commit_workspace(
     }
 
     let session_mgr = state.session_manager();
-    let session_id = crate::workspace::session::SessionId(req.session_id);
+    let session_id = crate::workspace::session::SessionId(req.session_id.clone());
 
-    // Validate and consume the session — this rejects stale/expired/missing sessions
-    match session_mgr.consume_session(&session_id) {
+    // Get workspace root for path resolution
+    let Some(workspace_root) = state.workspace_path() else {
+        return Err(NexusApiError::Uninitialized);
+    };
+
+    // Step 1: Validate changes[] manifest against session snapshot (OCC)
+    if !req.changes.is_empty() {
+        match session_mgr
+            .validate_changes_manifest(&session_id, &req.changes, &workspace_root)
+            .await
+        {
+            Ok(()) => {
+                debug!(
+                    session_id = %session_id,
+                    "Changes manifest validated successfully"
+                );
+            }
+            Err(SessionError::HashConflict {
+                path,
+                expected_hash,
+                actual_hash,
+                ..
+            }) => {
+                debug!(
+                    session_id = %session_id,
+                    %path,
+                    %expected_hash,
+                    %actual_hash,
+                    "OCC hash conflict"
+                );
+                return Err(NexusApiError::Conflict(format!(
+                    "content hash conflict for {path}: expected {expected_hash}, got {actual_hash}"
+                )));
+            }
+            Err(e) => {
+                return Err(map_session_error(&session_id, e));
+            }
+        }
+    }
+
+    // Step 2: Consume the session (atomically marks as committed)
+    match session_mgr.consume_session(&session_id).await {
         Ok(_info) => {
             let revision = format!("rev_{}", uuid::Uuid::new_v4());
             info!(
                 session_id = %session_id,
                 %revision,
+                change_count = req.changes.len(),
                 "Workspace commit accepted"
             );
             Ok(Json(WorkspaceCommitResponse {
@@ -254,29 +317,41 @@ pub async fn commit_workspace(
                 committed: true,
             }))
         }
-        Err(err) => {
-            // Map typed session errors to appropriate HTTP status codes
-            match err {
-                SessionError::NotFound(_) => {
-                    debug!(session_id = %session_id, "Session not found");
-                    Err(NexusApiError::NotFound(format!(
-                        "session {session_id} not found"
-                    )))
-                }
-                SessionError::AlreadyCommitted(_) => {
-                    debug!(session_id = %session_id, "Stale session");
-                    Err(NexusApiError::Conflict(format!(
-                        "session {session_id} is stale (already committed)"
-                    )))
-                }
-                SessionError::Expired(_) => {
-                    debug!(session_id = %session_id, "Session expired");
-                    Err(NexusApiError::Conflict(format!(
-                        "session {session_id} has expired"
-                    )))
-                }
-            }
+        Err(err) => Err(map_session_error(&session_id, err)),
+    }
+}
+
+/// Map a [`SessionError`] to the appropriate [`NexusApiError`] variant.
+fn map_session_error(session_id: &crate::workspace::session::SessionId, err: SessionError) -> NexusApiError {
+    match err {
+        SessionError::NotFound(_) => {
+            debug!(session_id = %session_id, "Session not found");
+            NexusApiError::NotFound(format!("session {session_id} not found"))
         }
+        SessionError::AlreadyCommitted(_) => {
+            debug!(session_id = %session_id, "Stale session");
+            NexusApiError::Conflict(format!(
+                "session {session_id} is stale (already committed)"
+            ))
+        }
+        SessionError::Expired(_) => {
+            debug!(session_id = %session_id, "Session expired");
+            NexusApiError::Conflict(format!("session {session_id} has expired"))
+        }
+        SessionError::HashConflict {
+            path,
+            expected_hash,
+            actual_hash,
+            ..
+        } => {
+            NexusApiError::Conflict(format!(
+                "content hash conflict for {path}: expected {expected_hash}, got {actual_hash}"
+            ))
+        }
+        SessionError::Database(msg) | SessionError::Io(msg) => NexusApiError::Internal {
+            code: "SESSION_ERROR".into(),
+            message: msg,
+        },
     }
 }
 
