@@ -321,8 +321,8 @@ impl nexus_orchestration::capability::DaemonToolDispatch for DaemonToolDispatchA
 // `use crate::api::handlers::host_tool_executor as hte`
 // and calls `hte::registry_*`. These re-exports preserve backward compat.
 
-pub(crate) use super::host_tool_handlers::registry_context_whoami;
 pub(crate) use super::host_tool_handlers::registry_context_assemble;
+pub(crate) use super::host_tool_handlers::registry_context_whoami;
 pub(crate) use super::host_tool_handlers::registry_daemon_health;
 pub(crate) use super::host_tool_handlers::registry_finding_resolve;
 pub(crate) use super::host_tool_handlers::registry_kb_snapshot_read;

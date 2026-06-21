@@ -243,12 +243,13 @@ pub struct RegistryRefresh {
 impl RegistryRefresh {
     /// Create a new `RegistryRefresh` capability (synthetic-only, no CDN).
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { cdn_config: None }
     }
 
     /// Create a new `RegistryRefresh` with CDN fetch capability.
     #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn with_cdn(config: CdnConfig) -> Self {
         Self {
             cdn_config: Some(config),
