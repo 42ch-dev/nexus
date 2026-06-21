@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-06-22-v1.55-compass-and-plan-stubs",
       "title": "V1.55 P-1 — Compass & Plan Stubs",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "effort": "M",
       "working_branch": "iteration/v1.55",
@@ -14,12 +14,14 @@
       "created": "2026-06-22",
       "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
       "qc_status": "skipped (PM whitelist — Prepare-phase plan authoring)",
-      "qa_status": "n/a"
+      "qa_status": "n/a",
+      "merge_commit": "4ef17268 (P-1 signoff) + 626ba878 (track-ownership fix) + a3d0daee (compass + plan stubs baseline)",
+      "done_at": "2026-06-21"
     },
     {
       "plan_id": "2026-06-22-v1.55-df43-sqlite-alignment",
       "title": "V1.55 P0 — DF-43 SQLite Persistence / Crate-Model Alignment",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "effort": "M",
       "working_branch": "feature/v1.55-df43-sqlite-alignment",
@@ -30,7 +32,11 @@
       "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
       "dependencies": [
         "2026-06-22-v1.55-compass-and-plan-stubs"
-      ]
+      ],
+      "qc_status": "Approve — qc1/qc2/qc3 (commits 7306102a / 21c4b28a / 85406d1c)",
+      "qa_status": "mid-QA pending (P0 verify by @qa-engineer)",
+      "merge_commit": "fa2f28d5 (P0 merge) + 4c768b78 (plan notes)",
+      "done_at": "2026-06-21"
     },
     {
       "plan_id": "2026-06-22-v1.55-df31-workspace-interface",
@@ -51,8 +57,8 @@
     {
       "plan_id": "2026-06-22-v1.55-game-bible-depth-35",
       "title": "V1.55 P2 — Game-Bible Depth 3.5",
-      "status": "Todo",
-      "owner": "@fullstack-dev",
+      "status": "InReview",
+      "owner": "@fullstack-dev-2",
       "effort": "L",
       "working_branch": "feature/v1.55-game-bible-depth-35",
       "merge_target": "iteration/v1.55",
@@ -62,7 +68,10 @@
       "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
       "dependencies": [
         "2026-06-22-v1.55-compass-and-plan-stubs"
-      ]
+      ],
+      "qc_status": "qc1 Approve (initial Request Changes → fix-wave → targeted re-review pending); qc2 Approve; qc3 Approve (initial Request Changes → fix-wave → targeted re-review pending)",
+      "qa_status": "mid-QA pending (P2 verify by @qa-engineer after targeted re-review)",
+      "merge_commit": "0718a6fe (P2 base) + 798c47a0 (P2 fix-wave) + fc9c1e54 (fix-wave merge)"
     },
     {
       "plan_id": "2026-06-22-v1.55-script-scaffold",
@@ -150,14 +159,15 @@
     "tech_debt_summary": {
       "total_open": 2,
       "total_deferred": 2,
-      "total_resolved": 13,
+      "total_resolved": 14,
       "total_archived": 4,
       "by_severity_active": {
         "medium": 0,
         "low": 2
       },
       "by_target_active": {
-        "V1.55+": 2
+        "V1.55 P3": 1,
+        "V1.56+": 1
       }
     }
   },
@@ -188,9 +198,13 @@
         "target": "V1.55+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.54-game-bible-scaffold][R-V154P1-S002]",
         "note": "Minor observability improvement; not blocking.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-21",
+        "closure_note": "V1.55 P2 closed: tracing/audit added to is_work_completed (info! when bypassing novel completion) and reconcile_from_filesystem (warn! on non-novel profile gate); per-section tracing in is_game_bible_design_complete at debug level per fix-wave W-1. P2 base commit fb298429 + fix-wave commit 798c47a0.",
+        "closure_evidence": "iteration/v1.55 @ fc9c1e54 (P2 fix-wave merge)",
         "resolution": {
-          "commit": "9d2e22cd0901"
+          "plan_id": "2026-06-22-v1.55-game-bible-depth-35",
+          "commit": "fc9c1e54"
         }
       }
     ],
