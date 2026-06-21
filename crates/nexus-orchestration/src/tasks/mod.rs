@@ -1224,6 +1224,9 @@ fn registry_output_to_context(output: &serde_json::Value) -> serde_json::Value {
         return serde_json::Value::Null;
     };
 
+    // R-V156P3-S003 fix: map all 9 RegistryRefreshOutput fields (previously
+    // only 5 were mapped; cache_age_ms, generated_at, fetch_timeout_ms,
+    // and max_retries were silently dropped).
     let source = obj
         .get("source")
         .cloned()
@@ -1244,6 +1247,22 @@ fn registry_output_to_context(output: &serde_json::Value) -> serde_json::Value {
         .get("retryCount")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    let cache_age_ms = obj
+        .get("cacheAgeMs")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let generated_at = obj
+        .get("generatedAt")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let fetch_timeout_ms = obj
+        .get("fetchTimeoutMs")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let max_retries = obj
+        .get("maxRetries")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
     serde_json::json!({
         "source": source,
@@ -1251,6 +1270,10 @@ fn registry_output_to_context(output: &serde_json::Value) -> serde_json::Value {
         "capability_count": capability_count,
         "fallback_reason": fallback_reason,
         "retry_count": retry_count,
+        "cache_age_ms": cache_age_ms,
+        "generated_at": generated_at,
+        "fetch_timeout_ms": fetch_timeout_ms,
+        "max_retries": max_retries,
     })
 }
 

@@ -1,7 +1,7 @@
 # Agent Nexus Tool Bridge — Normative Specification v1
 
-**Status**: Shipped (V1.34 — 2026-06-05)  
-**Document class**: Feature line  
+**Status**: Master (V1.57 P-last promote draft; body content Master-ready; header rename in P-last)  
+**Document class**: Master  
 **Created**: 2026-06-04
 **Scope**: How **external ACP Agents** invoke selected **Nexus logical capabilities** (`nexus.*`) through the **daemon** — parallel to, not replacing, preset orchestration  
 **Coordinates with**:

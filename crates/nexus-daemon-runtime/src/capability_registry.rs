@@ -908,36 +908,21 @@ mod tests {
     /// to be in the catalog is missing, and vice versa for catalog ids that
     /// are implemented as host tools.
     ///
-    /// P1 note: V1.53 P1 adds 5 new tools. Two of them (`nexus.manuscript.chapter.get`
-    /// and `nexus.observability.daemon.health`) are not yet in the catalog because
-    /// the catalog is frozen for P1 per plan constraints. The test acknowledges
-    /// these as known gaps. Once the catalog is updated in a future iteration,
-    /// the known-gaps list should be emptied.
+    /// V1.57 P0: Catalog updated with full roster (§4 Capability roster).
+    /// Only `fs/*` tools remain as known gaps (they are not ACP-facing
+    /// `nexus.*` capabilities and use the V1.33 baseline prefix).
     #[test]
-    fn registry_ids_have_catalog_rows() {
+    fn catalog_registry_invariant_all_ids_present() {
         use std::collections::HashSet;
 
         let reg = host_tool_registry();
         let registry_ids: HashSet<&str> = reg.ids().collect();
 
-        // Known gaps: registry ids not yet in the frozen catalog.
-        // These are daemon host tools added in V1.33/V1.34/V1.53 that are
-        // not part of the logical ACP capability catalog (fs/* tools are
-        // not ACP-facing; work.* and orchestration.* were added as host
-        // extensions; P1 tools pre-date catalog updates).
-        // Remove entries when acp-capability-set.md is updated.
-        let known_catalog_gaps: HashSet<&str> = [
-            "fs/read_text_file",
-            "fs/write_text_file",
-            "nexus.work.get",
-            "nexus.work.patch",
-            "nexus.orchestration.schedule_status",
-            "nexus.manuscript.chapter.get",
-            "nexus.observability.daemon.health",
-        ]
-        .iter()
-        .copied()
-        .collect();
+        // Known gaps: `fs/*` tools are V1.33 baseline, not ACP-facing.
+        let known_catalog_gaps: HashSet<&str> = ["fs/read_text_file", "fs/write_text_file"]
+            .iter()
+            .copied()
+            .collect();
 
         // Parse capability IDs from acp-capability-set.md tables
         let catalog_path = concat!(
