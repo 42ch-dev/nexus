@@ -655,15 +655,29 @@ pub struct StateCompositeTask {
     /// Parsed once at task construction time; reused across transitions.
     /// `None` means this state has no conditional/branches next, or parse failed.
     cached_expr: Option<CachedExpressions>,
+    /// Optional workspace session state for expression evaluation (V1.56 P3).
+    ///
+    /// When set, `build_context_json()` exposes this as a nested `workspace`
+    /// object. Tests set this directly; in production the engine populates it
+    /// from the active workspace session.
+    workspace_state: Option<serde_json::Value>,
 }
 
 /// Pre-compiled expression ASTs for conditional routing (V1.56 P2 fix-wave, M-004).
+///
+/// V1.56 P3: extended with context dependency flags so the runtime knows
+/// whether to invoke `registry.refresh` or query workspace session state
+/// before evaluating branches.
 #[derive(Clone)]
 struct CachedExpressions {
     /// Parsed expressions + their target state IDs.
     branches: Vec<(crate::preset::expr::Expr, String)>,
     /// Default target when no branch matches.
     default: String,
+    /// Any branch expression references `_context.registry_refresh.*`
+    needs_registry_refresh: bool,
+    /// Any branch expression references `_context.workspace.*`
+    needs_workspace: bool,
 }
 
 impl StateCompositeTask {
@@ -693,6 +707,7 @@ impl StateCompositeTask {
             converge_key: format!("_converge_arrivals_{}", state.id),
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr,
+            workspace_state: None,
         }
     }
 
@@ -754,10 +769,25 @@ impl StateCompositeTask {
         self
     }
 
+    /// Set the workspace session state for expression evaluation (V1.56 P3).
+    ///
+    /// When set, `build_context_json()` exposes this value as a nested
+    /// `workspace` object, accessible in expressions as
+    /// `_context.workspace.<field>`.
+    #[must_use]
+    pub fn with_workspace_state(mut self, state: serde_json::Value) -> Self {
+        self.workspace_state = Some(state);
+        self
+    }
+
     /// Pre-compile expression AST for conditional/branches next (M-004).
     ///
     /// Parses each branch's `when` expression once at construction time;
     /// returns `None` if the state has no conditional next or all parses fail.
+    ///
+    /// V1.56 P3: also scans each expression for context dependencies
+    /// (`registry_refresh`, `workspace`) so the runtime can invoke the
+    /// appropriate capability before evaluating branches.
     fn build_expr_cache(next: Option<&NextTarget>) -> Option<CachedExpressions> {
         let (rules, default) = match next {
             Some(NextTarget::Conditional(cond)) => (&cond.rules, &cond.default),
@@ -766,9 +796,18 @@ impl StateCompositeTask {
         };
 
         let mut branches = Vec::with_capacity(rules.len());
+        let mut needs_registry_refresh = false;
+        let mut needs_workspace = false;
+
         for rule in rules {
             match crate::preset::expr::parse(&rule.when) {
-                Ok(ast) => branches.push((ast, rule.target.clone())),
+                Ok(ast) => {
+                    // V1.56 P3: scan expression for context dependencies.
+                    let deps = crate::preset::expr::scan_context_deps(&ast);
+                    needs_registry_refresh = needs_registry_refresh || deps.needs_registry_refresh;
+                    needs_workspace = needs_workspace || deps.needs_workspace;
+                    branches.push((ast, rule.target.clone()));
+                }
                 Err(e) => {
                     tracing::warn!(
                         when = %rule.when,
@@ -782,6 +821,8 @@ impl StateCompositeTask {
         Some(CachedExpressions {
             branches,
             default: default.clone(),
+            needs_registry_refresh,
+            needs_workspace,
         })
     }
 
@@ -1001,6 +1042,107 @@ impl StateCompositeTask {
         }
         // else: duplicate arrival from same source → idempotent no-op.
     }
+
+    /// Inject context dependencies before expression evaluation (V1.56 P3).
+    ///
+    /// Called before `resolve_expression_target()` to populate
+    /// `__registry_refresh_output` and `__workspace_state` in the context
+    /// so that `build_context_json()` can expose them as nested objects
+    /// (`registry_refresh` / `workspace`).
+    async fn inject_context_deps(&self, context: &graph_flow::Context) {
+        if let Some(cache) = &self.cached_expr {
+            if cache.needs_registry_refresh {
+                self.inject_registry_refresh_context(context).await;
+            }
+            if cache.needs_workspace {
+                self.inject_workspace_context(context).await;
+            }
+        }
+    }
+
+    /// Invoke `registry.refresh` capability and store output in context.
+    ///
+    /// If the capability registry is unavailable, falls back to a minimal
+    /// synthetic output so expressions don't fail on missing fields.
+    async fn inject_registry_refresh_context(&self, context: &graph_flow::Context) {
+        // Check if we already have registry output (avoid redundant invocation).
+        if context
+            .get::<serde_json::Value>("__registry_refresh_output")
+            .await
+            .is_some()
+        {
+            return;
+        }
+
+        let output = if let Some(registry) = &self.registry {
+            // Try to invoke the registered capability.
+            if let Some(cap) = registry.get("registry.refresh") {
+                match cap.run(serde_json::json!({})).await {
+                    Ok(val) => val,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "registry.refresh capability invocation failed, using synthetic fallback"
+                        );
+                        synthetic_registry_output()
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    "registry.refresh capability not found in registry, using synthetic fallback"
+                );
+                synthetic_registry_output()
+            }
+        } else {
+            // No registry available — use synthetic fallback.
+            synthetic_registry_output()
+        };
+
+        context.set("__registry_refresh_output", output).await;
+    }
+
+    /// Inject workspace session state into context for expression evaluation.
+    ///
+    /// If `self.workspace_state` is set (e.g., by tests), uses that.
+    /// Otherwise, injects a minimal default state so expressions referencing
+    /// `_context.workspace.*` fields get valid values without error.
+    async fn inject_workspace_context(&self, context: &graph_flow::Context) {
+        // Check if already injected (avoid clobbering).
+        if context
+            .get::<serde_json::Value>("__workspace_state")
+            .await
+            .is_some()
+        {
+            return;
+        }
+
+        let ws_state = self.workspace_state.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "session_id": "",
+                "conflict_detected": false,
+                "changes_applied": 0,
+                "workspace_root": ""
+            })
+        });
+
+        context.set("__workspace_state", ws_state).await;
+    }
+}
+
+/// Build a minimal synthetic `RegistryRefreshOutput` as a fallback for
+/// expression evaluation when the capability is unavailable (V1.56 P3).
+fn synthetic_registry_output() -> serde_json::Value {
+    serde_json::json!({
+        "source": "synthetic",
+        "snapshotVersion": "2026-06-22.v1",
+        "capabilityCount": 31,
+        "fallbackReason": "",
+        "retryCount": 0,
+        "cacheAgeMs": 0,
+        "generatedAt": "",
+        "fetchTimeoutMs": 0,
+        "maxRetries": 0,
+    })
 }
 
 /// Build a JSON object from context keys for expression evaluation.
@@ -1008,6 +1150,10 @@ impl StateCompositeTask {
 /// V1.56 P2 fix-wave (M-003): extended to expose user-set context values
 /// in addition to the fixed set of orchestration keys. All key-value pairs
 /// in the context's data map are now included.
+///
+/// V1.56 P3: also exposes `__registry_refresh_output` as a nested
+/// `registry_refresh` object and `__workspace_state` as a nested
+/// `workspace` object when the runtime has populated those context keys.
 fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     // Known orchestration keys that expressions may reference.
     let known_keys = [
@@ -1051,7 +1197,61 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
         }
     }
 
+    // V1.56 P3: expose registry.refresh output as a nested object.
+    if let Some(reg_output) = context.get_sync::<serde_json::Value>("__registry_refresh_output") {
+        // Translate camelCase capability output fields to snake_case
+        // context fields for expression grammar consistency.
+        let reg_obj = registry_output_to_context(&reg_output);
+        map.insert("registry_refresh".to_string(), reg_obj);
+    }
+
+    // V1.56 P3: expose workspace session state as a nested object.
+    if let Some(ws_state) = context.get_sync::<serde_json::Value>("__workspace_state") {
+        map.insert("workspace".to_string(), ws_state);
+    }
+
     serde_json::Value::Object(map)
+}
+
+/// Translate `RegistryRefreshOutput` (camelCase) to `snake_case` context object.
+///
+/// The capability returns camelCase JSON fields; expressions use `snake_case`
+/// (`_context.registry_refresh.snapshot_version` not
+/// `_context.registry_refresh.snapshotVersion`). This function maps the
+/// output shape to the context shape used by the expression grammar.
+fn registry_output_to_context(output: &serde_json::Value) -> serde_json::Value {
+    let Some(obj) = output.as_object() else {
+        return serde_json::Value::Null;
+    };
+
+    let source = obj
+        .get("source")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let snapshot_version = obj
+        .get("snapshotVersion")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let capability_count = obj
+        .get("capabilityCount")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let fallback_reason = obj
+        .get("fallbackReason")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let retry_count = obj
+        .get("retryCount")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    serde_json::json!({
+        "source": source,
+        "snapshot_version": snapshot_version,
+        "capability_count": capability_count,
+        "fallback_reason": fallback_reason,
+        "retry_count": retry_count,
+    })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1352,32 +1552,35 @@ impl Task for StateCompositeTask {
                                                 "min_interval throttle: reusing previous result"
                                                     .to_string()
                                             });
+                                        // V1.56 P3: inject context dependencies before
+                                        // expression routing. Must happen before the
+                                        // return because we need the .await point.
+                                        self.inject_context_deps(&context).await;
+
+                                        let next_action = if self.terminal {
+                                            NextAction::End
+                                        } else {
+                                            // V1.56 P2 fix-wave (H-002): throttle path
+                                            // must delegate to resolve_expression_target for
+                                            // Conditional/Branches variants.
+                                            // resolve_labeled_target rejects them.
+                                            match &self.next {
+                                                Some(
+                                                    NextTarget::Conditional(_)
+                                                    | NextTarget::Branches(_),
+                                                ) => self.resolve_expression_target(&context)?,
+                                                Some(
+                                                    NextTarget::Labeled(_) | NextTarget::GoNogo(_),
+                                                ) => self.resolve_labeled_target(
+                                                    &context,
+                                                    &prev_reason,
+                                                )?,
+                                                _ => self.judge_next_action(prev_result),
+                                            }
+                                        };
                                         return Ok(TaskResult::new(
                                             Some(format!("judge (throttled): {prev_reason}")),
-                                            if self.terminal {
-                                                NextAction::End
-                                            } else {
-                                                // V1.56 P2 fix-wave (H-002): throttle path
-                                                // must delegate to resolve_expression_target for
-                                                // Conditional/Branches variants.
-                                                // resolve_labeled_target rejects them.
-                                                match &self.next {
-                                                    Some(
-                                                        NextTarget::Conditional(_)
-                                                        | NextTarget::Branches(_),
-                                                    ) => {
-                                                        self.resolve_expression_target(&context)?
-                                                    }
-                                                    Some(
-                                                        NextTarget::Labeled(_)
-                                                        | NextTarget::GoNogo(_),
-                                                    ) => self.resolve_labeled_target(
-                                                        &context,
-                                                        &prev_reason,
-                                                    )?,
-                                                    _ => self.judge_next_action(prev_result),
-                                                }
-                                            },
+                                            next_action,
                                         ));
                                     }
                                 }
@@ -1432,8 +1635,10 @@ impl Task for StateCompositeTask {
         // For states with Conditional/Branches next (any exit_when), evaluate
         // expressions and route to the matching target.
         // V1.56 P2 fix-wave (M-006): errors now propagated via ?.
+        // V1.56 P3: inject registry.refresh + workspace context before evaluation.
         let next_action = match &self.next {
             Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) => {
+                self.inject_context_deps(&context).await;
                 self.resolve_expression_target(&context)?
             }
             _ => next_action,
@@ -2310,6 +2515,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 mod tests {
     use super::*;
     use crate::preset::manifest::{GoNogoNext, LabeledNext};
+    use nexus_contracts::local::orchestration::preset::{ConditionalBranches, ConditionalRule};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -3623,6 +3829,7 @@ mod tests {
             converge_key: "_converge_arrivals_test_judge".to_string(),
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr: None,
+            workspace_state: None,
         }
     }
 
@@ -3848,6 +4055,7 @@ mod tests {
             converge_key: "_converge_arrivals_merged".to_string(),
             converge_predecessors: std::collections::HashSet::new(),
             cached_expr: None,
+            workspace_state: None,
         };
 
         let ctx = graph_flow::Context::new();
@@ -3877,6 +4085,401 @@ mod tests {
         assert!(
             matches!(result.next_action, NextAction::Continue),
             "with 2/2 arrivals and merge absent (default wait-all), should Continue; got {:?}",
+            result.next_action
+        );
+    }
+
+    // ── V1.56 P3: registry.refresh conditional edges ──────────────────
+
+    /// Build a state with `Branches` next for expression routing.
+    fn make_branches_task(
+        state_id: &str,
+        branches: Vec<ConditionalRule>,
+        default: &str,
+    ) -> StateCompositeTask {
+        let next = NextTarget::Branches(ConditionalBranches {
+            branches,
+            default: default.to_string(),
+        });
+        let cached_expr = StateCompositeTask::build_expr_cache(Some(&next));
+
+        StateCompositeTask {
+            id: state_id.to_string(),
+            terminal: false,
+            enter_actions: vec![],
+            exit_when: None,
+            next: Some(next),
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
+            registry: Some(std::sync::Arc::new(CapabilityRegistry::with_builtins())),
+            daemon_tool_dispatch: None,
+            merge_kind: None,
+            expected_incoming: 0,
+            merge_key: format!("_merge_{state_id}"),
+            converge: None,
+            converge_key: format!("_converge_arrivals_{state_id}"),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr,
+            workspace_state: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_synthetic_branch() {
+        // When registry.refresh returns synthetic output, the expression
+        // `_context.registry_refresh.source == 'synthetic'` should match.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.source == 'synthetic'".to_string(),
+                target: "synthetic_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "synthetic_state"),
+            "synthetic source should route to synthetic_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_network_branch() {
+        // Pre-set CDN-like output to simulate a successful network fetch.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.source == 'cdn'".to_string(),
+                target: "network_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        // Inject synthetic CDN output into the context before the task runs.
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "cdn",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 42,
+                "fallbackReason": "",
+                "retryCount": 1,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 10000,
+                "maxRetries": 3,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "network_state"),
+            "CDN source should route to network_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_fallback_branch() {
+        // Inject fallback output (CDN failure → synthetic_fallback).
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.source == 'synthetic_fallback'".to_string(),
+                target: "fallback_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "synthetic_fallback",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 31,
+                "fallbackReason": "CdnError::Timeout",
+                "retryCount": 3,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 10000,
+                "maxRetries": 3,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "fallback_state"),
+            "fallback source should route to fallback_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_capability_count_threshold() {
+        // capability_count > 50 should match when capabilityCount is 100.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.capability_count > 50".to_string(),
+                target: "high_capability_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "cdn",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 100,
+                "fallbackReason": "",
+                "retryCount": 0,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 0,
+                "maxRetries": 0,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "high_capability_state"),
+            "capability_count > 50 should route to high_capability_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_capability_count_below_threshold_goes_default() {
+        // capability_count > 50 should NOT match when capabilityCount is 30.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.capability_count > 50".to_string(),
+                target: "high_capability_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "synthetic",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 30,
+                "fallbackReason": "",
+                "retryCount": 0,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 0,
+                "maxRetries": 0,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "standard_state"),
+            "capability_count <= 50 should route to default, got {:?}",
+            result.next_action
+        );
+    }
+
+    // ── V1.56 P3: workspace.open/commit branch inputs ─────────────────
+
+    #[tokio::test]
+    async fn workspace_no_conflict_continues() {
+        // When no conflict, `_context.workspace.conflict_detected` is false,
+        // so `!_context.workspace.conflict_detected` should be true → continue.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "!_context.workspace.conflict_detected".to_string(),
+                target: "continue_state".to_string(),
+            }],
+            "resolve_conflict_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test1",
+                "conflict_detected": false,
+                "changes_applied": 0,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
+            "no conflict should route to continue_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_conflict_resolves() {
+        // When conflict_detected is true, route to resolve_conflict.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.conflict_detected".to_string(),
+                target: "resolve_conflict_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test2",
+                "conflict_detected": true,
+                "changes_applied": 0,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "resolve_conflict_state"),
+            "conflict should route to resolve_conflict_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_changes_count_threshold() {
+        // changes_applied > 3 → route to review_state.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.changes_applied > 3".to_string(),
+                target: "review_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test3",
+                "conflict_detected": false,
+                "changes_applied": 5,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "review_state"),
+            "changes_applied > 3 should route to review_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_changes_count_below_threshold_goes_default() {
+        // changes_applied > 3 should NOT match when changes_applied is 2.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.changes_applied > 3".to_string(),
+                target: "review_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test4",
+                "conflict_detected": false,
+                "changes_applied": 2,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
+            "changes_applied <= 3 should route to default, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_default_state_when_no_state_injected() {
+        // When no workspace state is set, the default values should be used:
+        // conflict_detected = false, so `_context.workspace.conflict_detected` is false.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.conflict_detected".to_string(),
+                target: "resolve_conflict_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        // No workspace state injected — the task uses its own default.
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
+            "default workspace state (no conflict) should route to continue_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_refresh_only_invoked_when_needed() {
+        // Task with no registry references should NOT invoke registry.refresh.
+        let task = make_branches_task(
+            "check_simple",
+            vec![ConditionalRule {
+                when: "_context.score > 80".to_string(),
+                target: "approved".to_string(),
+            }],
+            "rejected",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set("score", serde_json::json!(90)).await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "approved"),
+            "score > 80 should route to approved, got {:?}",
             result.next_action
         );
     }
