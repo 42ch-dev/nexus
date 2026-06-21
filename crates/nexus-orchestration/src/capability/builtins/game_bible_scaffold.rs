@@ -12,12 +12,10 @@
 //!    is in flight at any time.
 //! 2. No external process is mutating `Works/<work_ref>/` while this runs.
 //!
-//! # Deferred (W-005)
+//! # `ScaffoldTransaction` (V1.55 P3 / R-V154P1-W001)
 //!
-//! The current implementation creates FS artifacts and updates the DB row
-//! in separate steps (TOCTOU window). The same issue applies to essay scaffold.
-//! Should adopt `ScaffoldTransaction` with Drop-based FS rollback before
-//! production use with concurrent presets.
+//! Wraps FS writes + DB PATCH in a `ScaffoldTransaction` with Drop-based FS
+//! rollback. Pattern adopted from `novel.project_scaffold` (novel_scaffold.rs:763-830).
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -212,8 +210,7 @@ impl Capability for GameBibleProjectScaffold {
         let logs_design_dir = logs_dir.join("design");
         let logs_review_dir = logs_dir.join("review");
 
-        let mut files_created = Vec::new();
-        let mut dirs_created = Vec::new();
+        let mut tx = ScaffoldTransaction::new();
 
         // Create directory structure
         for dir in [
@@ -224,15 +221,10 @@ impl Capability for GameBibleProjectScaffold {
             &logs_review_dir,
         ] {
             if !dir.exists() {
-                tokio::fs::create_dir_all(dir).await.map_err(|e| {
+                std::fs::create_dir_all(dir).map_err(|e| {
                     CapabilityError::Internal(format!("mkdir {}: {e}", dir.display()))
                 })?;
-                dirs_created.push(
-                    dir.strip_prefix(&self.works_root)
-                        .unwrap_or(dir.as_path())
-                        .display()
-                        .to_string(),
-                );
+                tx.dirs_created.push(dir.clone());
             }
         }
 
@@ -243,23 +235,21 @@ impl Capability for GameBibleProjectScaffold {
             title = inp.title,
             work_id = inp.work_id,
         );
-        tokio::fs::write(&readme_path, &readme_content)
-            .await
+        std::fs::write(&readme_path, &readme_content)
             .map_err(|e| CapabilityError::Internal(format!("write README.md: {e}")))?;
-        files_created.push("README.md".to_string());
+        tx.files_created.push(readme_path.clone());
 
         // Write 12 Design/*.md template files
         for tmpl in DESIGN_TEMPLATES {
             let content = render_template(tmpl);
             let path = design_dir.join(tmpl.filename);
-            tokio::fs::write(&path, &content).await.map_err(|e| {
+            std::fs::write(&path, &content).map_err(|e| {
                 CapabilityError::Internal(format!("write Design/{}: {e}", tmpl.filename))
             })?;
-            files_created.push(format!("Design/{}", tmpl.filename));
+            tx.files_created.push(path);
         }
 
         // PATCH works row: set work_profile and work_ref
-        // W-001(qc3): ScaffoldTransaction (FS+DB atomicity) deferred to V1.55+
         if let Some(ref pool) = self.pool {
             sqlx::query(
                 "UPDATE works SET work_profile = 'game_bible', work_ref = ? WHERE work_id = ?",
@@ -270,6 +260,20 @@ impl Capability for GameBibleProjectScaffold {
             .await
             .map_err(|e| CapabilityError::Internal(format!("patch works row: {e}")))?;
         }
+
+        // All FS + DB writes succeeded — commit the transaction guard
+        tx.commit();
+
+        let files_created: Vec<String> = tx
+            .files_created
+            .iter()
+            .map(|p| p.strip_prefix(&work_dir).unwrap_or(p).display().to_string())
+            .collect();
+        let dirs_created: Vec<String> = tx
+            .dirs_created
+            .iter()
+            .map(|d| d.strip_prefix(&work_dir).unwrap_or(d).display().to_string())
+            .collect();
 
         let output = ScaffoldOutput {
             scaffold_root: work_dir.display().to_string(),
@@ -286,6 +290,59 @@ impl Capability for GameBibleProjectScaffold {
         serde_json::to_value(output).map_err(|e| {
             CapabilityError::Internal(format!("game_bible.project_scaffold output: {e}"))
         })
+    }
+}
+
+// ── ScaffoldTransaction (V1.55 P3 / R-V154P1-W001) ─────────────────────────
+
+struct ScaffoldTransaction {
+    files_created: Vec<PathBuf>,
+    dirs_created: Vec<PathBuf>,
+    committed: bool,
+}
+
+impl ScaffoldTransaction {
+    const fn new() -> Self {
+        Self {
+            files_created: Vec::new(),
+            dirs_created: Vec::new(),
+            committed: false,
+        }
+    }
+
+    const fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for ScaffoldTransaction {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        for f in &self.files_created {
+            if let Err(e) = std::fs::remove_file(f) {
+                tracing::warn!(
+                    path = %f.display(),
+                    error = %e,
+                    "ScaffoldTransaction rollback: remove_file failed"
+                );
+            }
+        }
+        for d in self.dirs_created.iter().rev() {
+            if let Err(e) = std::fs::remove_dir(d) {
+                tracing::warn!(
+                    path = %d.display(),
+                    error = %e,
+                    "ScaffoldTransaction rollback: remove_dir failed (likely non-empty — expected)"
+                );
+            }
+        }
+        tracing::warn!(
+            files = self.files_created.len(),
+            dirs = self.dirs_created.len(),
+            "game_bible.project_scaffold: rolled back filesystem state"
+        );
     }
 }
 
@@ -332,5 +389,52 @@ mod tests {
     fn game_bible_capability_name() {
         let cap = GameBibleProjectScaffold::new();
         assert_eq!(cap.name(), "game_bible.project_scaffold");
+    }
+
+    // ── ScaffoldTransaction tests (V1.55 P3 / R-V154P1-W001) ──────────
+
+    #[test]
+    fn scaffold_transaction_rollback_cleans_up_files() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let work_dir = root.join("rollback-test-gb");
+
+        std::fs::create_dir_all(&work_dir).expect("mkdir");
+        let file_path = work_dir.join("test.txt");
+        std::fs::write(&file_path, "data").expect("write");
+        let sub_dir = work_dir.join("subdir");
+        std::fs::create_dir_all(&sub_dir).expect("mkdir subdir");
+
+        let mut tx = ScaffoldTransaction::new();
+        tx.files_created.push(file_path.clone());
+        tx.dirs_created.push(sub_dir.clone());
+        // NOT committed → Drop should clean up
+
+        drop(tx);
+
+        assert!(!file_path.exists(), "file should be removed by rollback");
+        assert!(!sub_dir.exists(), "subdir should be removed by rollback");
+    }
+
+    #[test]
+    fn scaffold_transaction_commit_no_rollback() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().expect("tmpdir");
+        let root = tmp.path().join("Works");
+        let work_dir = root.join("commit-test-gb");
+
+        std::fs::create_dir_all(&work_dir).expect("mkdir");
+        let file_path = work_dir.join("keep.txt");
+        std::fs::write(&file_path, "keep").expect("write");
+
+        let mut tx = ScaffoldTransaction::new();
+        tx.files_created.push(file_path.clone());
+        tx.dirs_created.push(work_dir.clone());
+        tx.commit(); // committed → Drop is no-op
+
+        drop(tx);
+
+        assert!(file_path.exists(), "file should remain after commit");
     }
 }
