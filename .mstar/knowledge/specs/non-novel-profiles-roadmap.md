@@ -1,9 +1,9 @@
 # Non-Novel Profiles Roadmap — Exploration v1
 
-**Status**: Exploration (V1.52 — no implementation authority). **Game-bible promoted to Draft in V1.54; V1.55 P2 Depth 3.5 in progress** per [game-bible-profile.md](game-bible-profile.md).  
+**Status**: Exploration (V1.52 — no implementation authority). **Game-bible promoted to Master in V1.55 P-last after P2 Depth 3.5 ship; script scaffold shipped in V1.55 P3** per [game-bible-profile.md](game-bible-profile.md) and [script-profile.md](script-profile.md).
 **Document class**: Exploration  
 **Created**: 2026-06-19  
-**Last updated**: 2026-06-22 (V1.55 P-1 — game-bible Depth 3.5 and script target activated)  
+**Last updated**: 2026-06-22 (V1.55 P-last — game-bible promoted to Master; script scaffold shipped in V1.55 P3)  
 **Scope**: Future non-novel `work_profile` lines. **V1.55 status**: game-bible (V1.54 scaffold shipped, V1.55 P2 Depth 3.5 in progress) and script (V1.55 P3 scaffold in progress). Pre-V1.55 backlog (V1.36 V2.0+) is preserved in deferred tracker §3.3.  
 **Coordinates with**:
 

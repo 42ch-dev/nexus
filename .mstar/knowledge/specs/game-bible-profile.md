@@ -1,6 +1,6 @@
-# Game-Bible Profile — Draft Specification V1.54
+# Game-Bible Profile — Master Specification V1.55
 
-**Status**: Draft (V1.55 P2 in progress)  
+**Status**: Master (V1.55 P2 shipped; Depth 3.5 complete: design-writing preset + design 五问 quality rubric + section completion detection + KB extraction + R-V154P1-S002 observability closure)  
 **Document class**: Feature line  
 **Created**: 2026-06-22  
 **Scope**: `work_profile: game_bible` on generic **Work** — artifact layout under `Works/<work_ref>/Design/`, section status model, stage chain, KB taxonomy, completion semantics  

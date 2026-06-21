@@ -1,15 +1,15 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.54 Shipped** (2026-06-21, PR #76 merged to main) · **V1.55 Active (P-1 in progress)** — [V1.55 compass](../iterations/v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.55 Shipped** (2026-06-22, all 4 implement plans Done) · V1.54 Shipped (2026-06-21, PR #76) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.55 Active (P-1 in progress on `iteration/v1.55`) — Non-Novel Profile Completion & Infrastructure Refactor; seven plans registered (P-1, P0, P1, P2, P3, P-mid, P-last); pre-implement gate pending PM review. V1.54 shipped 2026-06-21 at commit 2fd183f0 via PR #76; integration branch `iteration/v1.54` retired per `mstar-branch-worktree`.
+**Status**: V1.55 Shipped (2026-06-22) — Non-Novel Profile Completion & Infrastructure Refactor; 7 plans all Done (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); integration branch `iteration/v1.55` retiring per `mstar-branch-worktree`. V1.54 shipped 2026-06-21 at commit 2fd183f0 via PR #76.
 
-**V1.55 carry-forward index**: DF-43 → V1.55 P0 (`2026-06-22-v1.55-df43-sqlite-alignment`); DF-31 → V1.55 P1 (`2026-06-22-v1.55-df31-workspace-interface`); game-bible Depth 3.5 → V1.55 P2 (`2026-06-22-v1.55-game-bible-depth-35`); Script scaffold → V1.55 P3 (`2026-06-22-v1.55-script-scaffold`); `R-V154P1-S002` → V1.55 P2; `R-V154P1-W001` → V1.55 P3.
+**V1.55 carry-forward index (closed in V1.55)**: DF-43 → V1.55 P0 (`2026-06-22-v1.55-df43-sqlite-alignment`) — **Closed**; DF-31 → V1.55 P1 (`2026-06-22-v1.55-df31-workspace-interface`) — **Skeleton shipped**; game-bible Depth 3.5 → V1.55 P2 (`2026-06-22-v1.55-game-bible-depth-35`) — **Shipped**; Script scaffold → V1.55 P3 (`2026-06-22-v1.55-script-scaffold`) — **Shipped**; `R-V154P1-S002` → V1.55 P2 — **Resolved**; `R-V154P1-W001` → V1.55 P3 — **Resolved**.
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-22 (V1.55 P-1 activation)
+**Last updated**: 2026-06-22 (V1.55 ship)
 
 ---
 
@@ -95,8 +95,8 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | ~~BL-12~~ | `creator run` hardcoded subcommands vs preset-generic entry | V1.44 ship | **V1.45 Shipped** (P0+P1+P2) | L | V1.45 | V1.44 shipped `audit-chapter` / `review-master` as new enum variants — anti-pattern. V1.45: generic `creator run <preset_id>` + delete bespoke subcommands. Plan: [2026-06-13-v1.45-creator-run-generic-runner.md](../plans/2026-06-13-v1.45-creator-run-generic-runner.md). Spec: [creator-run-preset-entry.md](specs/creator-run-preset-entry.md) (Shipped V1.45). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 | ~~BL-13~~ | `STAGE_PRESET_ALLOWLIST` references `memory-review` without embedded preset | V1.34 | **V1.45 Shipped** (P1 T4) | S | V1.34 | Allowlist drift in `validation.rs`; no `embedded-presets/memory-review/`. P1: removed allowlist entry (implement decision). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 | PF-ESSAY | `essay` Work profile | V1.52 lock | V1.52 | M | V1.52 lock + spec authoring | First non-novel Feature line: [essay-profile.md](specs/essay-profile.md). |
-| PF-GAME-BIBLE | `game-bible` Work profile | V1.52 lock | **V1.55 P2** | L | V1.52 Exploration → V1.54 Scaffold → V1.55 Depth 3.5 | V1.54 shipped scaffold + Draft spec; V1.55 P2 targets `design-writing`, design 五问, section completion detection, and KB extraction. Spec: [game-bible-profile.md](specs/game-bible-profile.md). |
-| PF-SCRIPT | `script` Work profile | V1.52 lock | **V1.55 P3** | L | V1.52 Exploration → V1.55 scaffold | V1.55 P3 authors `script-profile.md` Draft and V1.54-style scaffold, including additive `dialogue`/`beat`/`act` taxonomy. |
+| PF-GAME-BIBLE | `game-bible` Work profile | V1.52 lock | **V1.55 P2 (Depth 3.5 shipped; Master spec)** | L | V1.52 Exploration → V1.54 Scaffold → V1.55 Depth 3.5 | V1.54 shipped scaffold + Draft spec; V1.55 P2 shipped `design-writing` + design 五问 + section completion detection + KB extraction (profile-aware via `candidate_from_llm_json_for_profile`). R-V154P1-S002 observability closed. Spec promoted to Master at V1.55 P-last. Spec: [game-bible-profile.md](specs/game-bible-profile.md). |
+| PF-SCRIPT | `script` Work profile | V1.52 lock | **V1.55 P3 (scaffold shipped; Draft spec)** | L | V1.52 Exploration → V1.55 scaffold | V1.55 P3 shipped `script-profile.md` Draft + V1.54-style scaffold (Scripts/ + Beats/ + Characters/ + Logs/); additive `dialogue`/`beat`/`act` BlockType + `script_category` validation. R-V154P1-W001 ScaffoldTransaction applied to BOTH game-bible and script scaffolds. Spec: [script-profile.md](specs/script-profile.md). |
 
 #### DF-43 decision note — Reference sources persistence
 
@@ -124,15 +124,14 @@ See plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
-**V1.55 active residual retargeting (V1.54 carry-forward)**: 2 low residuals deferred from V1.54 ship. `R-V154P1-S002` (profile-gate observability) is assigned to V1.55 P2; `R-V154P1-W001` (game-bible scaffold atomicity / `ScaffoldTransaction`) is assigned to V1.55 P3. Machine SSOT remains [`status.json`](../status.json).
+**V1.55 ship residual retargeting**: All 2 V1.54 carry-forwards closed in V1.55. `R-V154P1-S002` resolved in P2 (profile-gate observability); `R-V154P1-W001` resolved in P3 (ScaffoldTransaction). New V1.55-internal residual `R-V155P2-F002` (deferred to V1.56+; design-writing preset no durable section_status auto-transition; manual author step for V1.55) registered in `status.json`. Machine SSOT: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`.
 
-
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22**; integration_branch=`iteration/v1.55`; pre_implement_gate=`GO — V1.55 P-1 Done 2026-06-22`; 2 open residuals target V1.55). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22**; integration_branch=`iteration/v1.55` (P-last retiring); pre_implement_gate=`GO — V1.55 P-1 Done 2026-06-22` (retired post-ship); 1 open residual (`R-V155P2-F002` deferred to V1.56+). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
 | V1.55 carry-forward (V1.54 ship) | **2** | 2 low; see V1.55 carry-forward index above |
-| **Total deferred at V1.55 activation** | **2** | See `metadata.tech_debt_summary.total_deferred` (= 2; 2 low) |
+| **Total deferred at V1.55 ship** | **1** | See `metadata.tech_debt_summary.total_deferred` (= 1; 1 low: `R-V155P2-F002` → V1.56+) |
 
 **Closed / historical residuals**
 
