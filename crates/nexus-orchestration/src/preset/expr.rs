@@ -731,6 +731,55 @@ fn compare(lhs: &serde_json::Value, op: CmpOp, rhs: &serde_json::Value) -> Resul
     }
 }
 
+// ---------------------------------------------------------------------------
+// Context dependency scanning (V1.56 P3 — DF-56 dependent slice)
+// ---------------------------------------------------------------------------
+
+/// What external context data a conditional expression depends on.
+///
+/// Used by the orchestration runtime to decide whether to invoke
+/// `registry.refresh` or query workspace session state before evaluating
+/// branches.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContextDeps {
+    /// Expression references `_context.registry_refresh.*`
+    pub needs_registry_refresh: bool,
+    /// Expression references `_context.workspace.*`
+    pub needs_workspace: bool,
+}
+
+/// Scan an expression AST for context field dependencies.
+///
+/// Walks the tree recursively, collecting any `FieldAccess` paths whose first
+/// segment is `registry_refresh` or `workspace`.
+#[must_use]
+pub fn scan_context_deps(expr: &Expr) -> ContextDeps {
+    let mut deps = ContextDeps::default();
+    scan_expr(expr, &mut deps);
+    deps
+}
+
+/// Recursively scan an expression node, OR-ing dependencies into `deps`.
+fn scan_expr(expr: &Expr, deps: &mut ContextDeps) {
+    match expr {
+        Expr::FieldAccess { path } => {
+            if let Some(first) = path.first() {
+                match first.as_str() {
+                    "registry_refresh" => deps.needs_registry_refresh = true,
+                    "workspace" => deps.needs_workspace = true,
+                    _ => {}
+                }
+            }
+        }
+        Expr::Comparison { lhs, op: _, rhs } | Expr::And(lhs, rhs) | Expr::Or(lhs, rhs) => {
+            scan_expr(lhs, deps);
+            scan_expr(rhs, deps);
+        }
+        Expr::Not(inner) => scan_expr(inner, deps),
+        Expr::Bool(_) | Expr::Number(_) | Expr::Str(_) | Expr::Null => {}
+    }
+}
+
 fn json_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
     match (a, b) {
         (serde_json::Value::Null, serde_json::Value::Null) => true,
@@ -1164,5 +1213,83 @@ mod tests {
         let ctx = make_ctx(&[]);
         let result = evaluate_expr("_context.missing != null", &ctx).unwrap();
         assert!(!result, "null != null should be false (JSON semantics)");
+    }
+
+    // ── Context dependency scanning tests (V1.56 P3) ─────────────────
+
+    #[test]
+    fn scan_registry_source_ref() {
+        let ast = parse("_context.registry_refresh.source == 'synthetic'").unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(deps.needs_registry_refresh);
+        assert!(!deps.needs_workspace);
+    }
+
+    #[test]
+    fn scan_registry_capability_count() {
+        let ast = parse("_context.registry_refresh.capability_count > 50").unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(deps.needs_registry_refresh);
+        assert!(!deps.needs_workspace);
+    }
+
+    #[test]
+    fn scan_registry_fallback_reason() {
+        let ast = parse("_context.registry_refresh.fallback_reason != ''").unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(deps.needs_registry_refresh);
+        assert!(!deps.needs_workspace);
+    }
+
+    #[test]
+    fn scan_workspace_conflict() {
+        let ast = parse("_context.workspace.conflict_detected").unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(deps.needs_workspace);
+        assert!(!deps.needs_registry_refresh);
+    }
+
+    #[test]
+    fn scan_workspace_changes_count() {
+        let ast = parse("_context.workspace.changes_applied > 0").unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(deps.needs_workspace);
+        assert!(!deps.needs_registry_refresh);
+    }
+
+    #[test]
+    fn scan_both_registry_and_workspace() {
+        let ast = parse(
+            "_context.registry_refresh.source == 'cdn' && _context.workspace.conflict_detected",
+        )
+        .unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(deps.needs_registry_refresh);
+        assert!(deps.needs_workspace);
+    }
+
+    #[test]
+    fn scan_no_deps_for_plain_expression() {
+        let ast = parse("_context.score > 80").unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(!deps.needs_registry_refresh);
+        assert!(!deps.needs_workspace);
+    }
+
+    #[test]
+    fn scan_no_deps_for_simple_literal() {
+        let ast = parse("true").unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(!deps.needs_registry_refresh);
+        assert!(!deps.needs_workspace);
+    }
+
+    #[test]
+    fn scan_registry_in_nested_or() {
+        let ast = parse("_context.score > 80 || _context.registry_refresh.capability_count > 100")
+            .unwrap();
+        let deps = scan_context_deps(&ast);
+        assert!(deps.needs_registry_refresh);
+        assert!(!deps.needs_workspace);
     }
 }
