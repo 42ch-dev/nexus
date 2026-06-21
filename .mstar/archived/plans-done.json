@@ -236,7 +236,9 @@
     "2026-06-22-v1.55-df43-sqlite-alignment",
     "2026-06-22-v1.55-df31-workspace-interface",
     "2026-06-22-v1.55-game-bible-depth-35",
-    "2026-06-22-v1.55-script-scaffold"
+    "2026-06-22-v1.55-script-scaffold",
+    "2026-06-22-v1.55-mid-qc-and-fix-waves",
+    "2026-06-22-v1.55-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

@@ -1,46 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-06-22T18:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-22-v1.55-mid-qc-and-fix-waves",
-      "title": "V1.55 P-mid — Mid-QC Checkpoints & Fix Waves",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "effort": "M",
-      "working_branch": "iteration/v1.55",
-      "merge_target": "iteration/v1.55",
-      "type": "meta",
-      "created": "2026-06-22",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
-      "dependencies": [
-        "2026-06-22-v1.55-df43-sqlite-alignment",
-        "2026-06-22-v1.55-df31-workspace-interface",
-        "2026-06-22-v1.55-game-bible-depth-35",
-        "2026-06-22-v1.55-script-scaffold"
-      ]
-    },
-    {
-      "plan_id": "2026-06-22-v1.55-hygiene-and-closeout",
-      "title": "V1.55 P-last — Hygiene, Spec Promotion & Closeout",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "effort": "M",
-      "working_branch": "feature/v1.55-hygiene-and-closeout",
-      "merge_target": "iteration/v1.55",
-      "type": "closeout",
-      "created": "2026-06-22",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
-      "review": "report-only QA",
-      "dependencies": [
-        "2026-06-22-v1.55-df43-sqlite-alignment",
-        "2026-06-22-v1.55-df31-workspace-interface",
-        "2026-06-22-v1.55-game-bible-depth-35",
-        "2026-06-22-v1.55-script-scaffold",
-        "2026-06-22-v1.55-mid-qc-and-fix-waves"
-      ]
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.55 (retiring)",
     "integration_branch_retired": true,
