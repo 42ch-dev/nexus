@@ -194,7 +194,19 @@ next:
   - **Literals**: numbers (integer/float), single/double-quoted strings, `true`/`false`, `null`
   - **Truthy check**: bare field references (e.g. `_context.flag`) evaluate as truthy (non-null, non-false, non-zero, non-empty)
 
-**Evaluation**: first-match semantics — branches are evaluated in declaration order; the first branch with a `when` expression that evaluates to `true` wins. If no branch matches, the `default` target is used. Missing context fields resolve to `null` (comparison with `null` is always `false` except `!= null`). Type mismatches (e.g. comparing string to int) produce typed errors that skip the branch.
+**Evaluation**: first-match semantics — branches are evaluated in declaration order; the first branch with a `when` expression that evaluates to `true` wins. If no branch matches, the `default` target is used. Missing context fields resolve to `null`.
+
+**Null comparison semantics** (V1.56 P2 fix-wave, M-001): follows JSON equality semantics:
+  - `null == null` → `true`
+  - `null != "x"` → `true` (non-null value not equal to null)
+  - `null > 0` → type error (no numeric comparison with null)
+  - Bare `null` reference → falsey
+
+**Depth limit** (V1.56 P2 fix-wave, W-003): expression nesting depth is bounded by `MAX_EXPR_DEPTH = 32` to prevent stack overflow from deeply-nested `when:` expressions in user-installable presets. Exceeding the depth returns `ExprError::DepthExceeded`. Depth=32 succeeds; depth=33 returns an error; depth=1000 does not panic.
+
+**Expression caching** (V1.56 P2 fix-wave, M-004): compiled expression ASTs are cached per task at construction time and reused across transitions. Parsing happens once per preset load, not once per transition.
+
+**Error propagation** (V1.56 P2 fix-wave, M-006): expression evaluation errors are propagated as `TaskExecutionFailed` (not silently swallowed). Runtime failures surface to the caller instead of skipping the branch.
 
 **Safety**: expressions are locally evaluated in-process; no code injection, no scripting engine, no external service calls.
 
@@ -214,12 +226,25 @@ states:
 
 **Converge strategies**:
   - **`wait_for_all`** (default): wait for all incoming edges to arrive before advancing
-  - **`first_completed`**: advance on first arrival; other pending branches are cancelled
-  - **`any`**: idempotent — already-completed merges are no-ops; advance on first arrival
+  - **`first_completed`**: advance on first arrival; subsequent arrivals are ignored
+  - **`any`**: idempotent — advance on first arrival; re-run after gate pass continues immediately
 
-**DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed. Orphan converge nodes (single incoming edge) produce warnings, not errors.
+**Runtime enforcement** (V1.56 P2 fix-wave, H-001/W-002): the convergence gate runs in `StateCompositeTask::run()` after the merge node gate. Arrivals are tracked via the `_converge_arrivals_{state_id}` context key, populated by source states when they route to a converge target. The converge gate check:
+  1. Reads the arrivals from the converge key
+  2. Compares against the number of known predecessors
+  3. For `wait_for_all`: all predecessors must have arrived
+  4. For `first_completed` / `any`: at least one predecessor must have arrived
+  5. If unsatisfied: returns `NextAction::WaitForInput`
+  6. If satisfied: clears the key and advances to enter actions
 
-**Reachability**: the validator traverses all conditional branches (both `Conditional` and `Branches` forms) during BFS from the initial state, ensuring every branch target is reachable.
+**Predecessor tracking** (V1.56 P2 fix-wave): converge predecessors are discovered at graph build time by scanning all states' `next` targets. States that are converge targets have their predecessor sets populated in `StateCompositeTask::converge_predecessors`. Source states call `record_converge_arrival()` when routing to a converge target via `resolve_expression_target()` or `resolve_labeled_target()`.
+
+**Loader validation** (V1.56 P2 fix-wave, M-002):
+  - Converge states must not be terminal
+  - Converge states with 0 predecessors produce a validation error (orphan)
+  - Converge states with 1 predecessor produce a warning (consider linear transition)
+
+**DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
 
 ---
 

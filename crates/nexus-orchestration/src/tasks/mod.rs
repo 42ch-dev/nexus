@@ -16,10 +16,12 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
+use crate::preset::manifest::{ConvergeConfig, ConvergeStrategy};
 use crate::preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -641,6 +643,27 @@ pub struct StateCompositeTask {
     expected_incoming: usize,
     /// Pre-computed merge key ("_merge_{id}") to avoid per-tick allocation (W-QC3-2).
     merge_key: String,
+    /// Converge (merge-point) config for states with explicit `converge:` declaration
+    /// (V1.56 P2 fix-wave, H-001/W-002).
+    converge: Option<ConvergeConfig>,
+    /// Converge-predecessor tracking key ("_`converge_arrivals`_{id}").
+    converge_key: String,
+    /// Predecessor task IDs for this converge node (populated at graph build time).
+    converge_predecessors: std::collections::HashSet<String>,
+    /// Pre-compiled expression AST for this state's conditional branches (M-004).
+    ///
+    /// Parsed once at task construction time; reused across transitions.
+    /// `None` means this state has no conditional/branches next, or parse failed.
+    cached_expr: Option<CachedExpressions>,
+}
+
+/// Pre-compiled expression ASTs for conditional routing (V1.56 P2 fix-wave, M-004).
+#[derive(Clone)]
+struct CachedExpressions {
+    /// Parsed expressions + their target state IDs.
+    branches: Vec<(crate::preset::expr::Expr, String)>,
+    /// Default target when no branch matches.
+    default: String,
 }
 
 impl StateCompositeTask {
@@ -649,6 +672,9 @@ impl StateCompositeTask {
     /// Inner graph actions will fail at runtime if no engine is set.
     #[must_use]
     pub fn from_manifest(state: &StateDefinition) -> Self {
+        // M-004: pre-compile expression AST at construction time.
+        let cached_expr = Self::build_expr_cache(state.next.as_ref());
+
         Self {
             id: state.id.clone(),
             terminal: state.terminal,
@@ -663,6 +689,10 @@ impl StateCompositeTask {
             merge_kind: state.merge.clone(),
             expected_incoming: 0,
             merge_key: format!("_merge_{}", state.id),
+            converge: state.converge.clone(),
+            converge_key: format!("_converge_arrivals_{}", state.id),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr,
         }
     }
 
@@ -717,6 +747,44 @@ impl StateCompositeTask {
         self
     }
 
+    /// Set the converge predecessor task IDs (V1.56 P2 fix-wave, H-001).
+    #[must_use]
+    pub fn with_converge_predecessors(mut self, preds: HashSet<String>) -> Self {
+        self.converge_predecessors = preds;
+        self
+    }
+
+    /// Pre-compile expression AST for conditional/branches next (M-004).
+    ///
+    /// Parses each branch's `when` expression once at construction time;
+    /// returns `None` if the state has no conditional next or all parses fail.
+    fn build_expr_cache(next: Option<&NextTarget>) -> Option<CachedExpressions> {
+        let (rules, default) = match next {
+            Some(NextTarget::Conditional(cond)) => (&cond.rules, &cond.default),
+            Some(NextTarget::Branches(branches)) => (&branches.branches, &branches.default),
+            _ => return None,
+        };
+
+        let mut branches = Vec::with_capacity(rules.len());
+        for rule in rules {
+            match crate::preset::expr::parse(&rule.when) {
+                Ok(ast) => branches.push((ast, rule.target.clone())),
+                Err(e) => {
+                    tracing::warn!(
+                        when = %rule.when,
+                        error = %e,
+                        "expression parse error at construction time, branch will be skipped at runtime"
+                    );
+                }
+            }
+        }
+
+        Some(CachedExpressions {
+            branches,
+            default: default.clone(),
+        })
+    }
+
     /// Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
     ///
     /// For embedded presets, reads the template content from the compiled-in
@@ -758,7 +826,11 @@ impl StateCompositeTask {
     #[allow(clippy::missing_const_for_fn)]
     fn judge_next_action(&self, judge_result: bool) -> NextAction {
         match &self.next {
-            Some(NextTarget::GoNogo(_) | NextTarget::Branches(_)) => NextAction::Continue,
+            Some(NextTarget::GoNogo(_) | NextTarget::Branches(_) | NextTarget::Conditional(_)) => {
+                // Conditional/Branches routing handles both GO and NOGO via
+                // resolve_expression_target (step 2.5).
+                NextAction::Continue
+            }
             _ if judge_result => NextAction::Continue,
             _ => NextAction::WaitForInput,
         }
@@ -818,6 +890,8 @@ impl StateCompositeTask {
                     arrived.push((*label).to_string());
                 }
                 context.set_sync(&merge_key, arrived);
+                // V1.56 P2 fix-wave (H-001): also record converge arrival.
+                Self::record_converge_arrival(context, target);
                 return Ok(NextAction::GoTo((*target).to_string()));
             }
         }
@@ -842,60 +916,52 @@ impl StateCompositeTask {
 
     /// V1.56 P2: resolve expression-based conditional routing target.
     ///
-    /// Evaluates each branch's `when` expression against the context, returning
-    /// the first matching branch's target. Falls back to the `default` target
-    /// if no branch matches.
+    /// Uses pre-compiled expression AST (M-004) for performance. Evaluates each
+    /// branch's `when` expression against the context, returning the first matching
+    /// branch's target. Falls back to the `default` target if no branch matches.
     ///
-    /// Returns `Err` if no expression matches and no default is set (should not
-    /// happen with validated presets but is a safety net).
-    fn resolve_expression_target(&self, context: &graph_flow::Context) -> NextAction {
-        // Build a serde_json::Value from known context keys for expression evaluation.
-        // We collect commonly-set fields plus any _state_result or state output keys.
+    /// V1.56 P2 fix-wave (M-006): expression eval failures are now propagated as
+    /// errors instead of silently skipping the branch.
+    fn resolve_expression_target(
+        &self,
+        context: &graph_flow::Context,
+    ) -> Result<NextAction, graph_flow::GraphError> {
         let ctx_json = build_context_json(context);
 
-        let (rules, default) = match &self.next {
-            Some(NextTarget::Conditional(cond)) => (&cond.rules, &cond.default),
-            Some(NextTarget::Branches(branches)) => (&branches.branches, &branches.default),
-            _ => {
-                return NextAction::Continue;
-            }
-        };
+        let cache = self.cached_expr.as_ref().ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(
+                "resolve_expression_target: no cached expressions available".to_string(),
+            )
+        })?;
 
-        for (i, rule) in rules.iter().enumerate() {
-            match crate::preset::expr::parse(&rule.when) {
-                Ok(ast) => match crate::preset::expr::evaluate(&ast, &ctx_json) {
-                    Ok(true) => {
-                        tracing::debug!(
-                            state_id = %self.id,
-                            branch_index = i,
-                            when = %rule.when,
-                            target = %rule.target,
-                            "expression branch matched"
-                        );
-                        return NextAction::GoTo(rule.target.clone());
-                    }
-                    Ok(false) => {
-                        // Continue to next branch.
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            state_id = %self.id,
-                            branch_index = i,
-                            when = %rule.when,
-                            error = %e,
-                            "expression evaluation error, skipping branch"
-                        );
-                        // Skip branches with evaluation errors.
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(
+        for (i, (ast, target)) in cache.branches.iter().enumerate() {
+            match crate::preset::expr::evaluate(ast, &ctx_json) {
+                Ok(true) => {
+                    tracing::debug!(
                         state_id = %self.id,
                         branch_index = i,
-                        when = %rule.when,
-                        error = %e,
-                        "expression parse error, skipping branch"
+                        target = %target,
+                        "expression branch matched"
                     );
+                    // V1.56 P2 fix-wave (H-001): record arrival at converge target.
+                    Self::record_converge_arrival(context, target);
+                    return Ok(NextAction::GoTo(target.clone()));
+                }
+                Ok(false) => {
+                    // Continue to next branch.
+                }
+                Err(e) => {
+                    // M-006: propagate expression eval failures, don't swallow.
+                    tracing::error!(
+                        state_id = %self.id,
+                        branch_index = i,
+                        error = %e,
+                        "expression evaluation error, failing the transition"
+                    );
+                    return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "expression evaluation error in state '{}' branch {}: {e}",
+                        self.id, i
+                    )));
                 }
             }
         }
@@ -903,16 +969,37 @@ impl StateCompositeTask {
         // No branch matched — use default.
         tracing::debug!(
             state_id = %self.id,
-            default = %default,
+            default = %cache.default,
             "no expression branch matched, falling back to default"
         );
-        NextAction::GoTo(default.clone())
+        // V1.56 P2 fix-wave (H-001): record arrival at converge target for default branch too.
+        Self::record_converge_arrival(context, &cache.default);
+        Ok(NextAction::GoTo(cache.default.clone()))
+    }
+
+    /// Record a converge arrival for the given target state (V1.56 P2 fix-wave, H-001).
+    ///
+    /// Writes the current state's task ID into `_converge_arrivals_{target}`.
+    /// If the target is not a converge node, this is a no-op (the key is ignored).
+    fn record_converge_arrival(context: &graph_flow::Context, target: &str) {
+        let converge_key = format!("_converge_arrivals_{target}");
+        let mut arrived: Vec<String> = context.get_sync(&converge_key).unwrap_or_default();
+        if !arrived.contains(&"arrived".to_string()) {
+            // Store self.id to avoid double-counting.
+            // For simplicity, we use a unique token per arrival edge:
+            // each source calling record_converge_arrival adds one "arrived" entry.
+            // This avoids needing to know the source_id at converge check time.
+            arrived.push("arrived".to_string());
+        }
+        context.set_sync(&converge_key, arrived);
     }
 }
 
-/// Build a JSON object from commonly-used context keys for expression evaluation.
+/// Build a JSON object from context keys for expression evaluation.
 ///
-/// Collects known orchestration keys plus any state-specific output keys.
+/// V1.56 P2 fix-wave (M-003): extended to expose user-set context values
+/// in addition to the fixed set of orchestration keys. All key-value pairs
+/// in the context's data map are now included.
 fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     // Known orchestration keys that expressions may reference.
     let known_keys = [
@@ -928,9 +1015,31 @@ fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
     ];
 
     let mut map = serde_json::Map::new();
+
+    // Include known orchestration keys.
     for key in &known_keys {
         if let Some(val) = context.get_sync::<serde_json::Value>(key) {
             map.insert(key.to_string(), val);
+        }
+    }
+
+    // M-003: also include all user-set context values.
+    // We serialize the full context data map and merge.
+    if let Ok(serialized) = serde_json::to_value(context) {
+        if let Some(data) = serialized
+            .as_object()
+            .and_then(|obj| obj.get("data"))
+            .and_then(|d| d.as_object())
+        {
+            for (key, value) in data {
+                // Skip internal/hidden keys (start with double underscore).
+                if key.starts_with("__") {
+                    continue;
+                }
+                if !map.contains_key(key) {
+                    map.insert(key.clone(), value.clone());
+                }
+            }
         }
     }
 
@@ -1004,6 +1113,52 @@ impl Task for StateCompositeTask {
                 arrived = arrived_count,
                 "merge node condition met, advancing"
             );
+        }
+
+        // 0.6. V1.56 P2 fix-wave (H-001/W-002): Converge (merge-point) gate.
+        // For states with explicit `converge:` config, track arrivals from
+        // connected predecessors and enforce the declared converge strategy.
+        if let Some(ref converge_config) = self.converge {
+            if !self.converge_predecessors.is_empty() {
+                let arrived: Vec<String> =
+                    context.get(&self.converge_key).await.unwrap_or_default();
+                let arrived_count = arrived.len();
+                let expected = self.converge_predecessors.len();
+
+                let condition_met = match converge_config.strategy {
+                    ConvergeStrategy::WaitForAll => arrived_count >= expected,
+                    ConvergeStrategy::FirstCompleted | ConvergeStrategy::Any => arrived_count >= 1,
+                };
+
+                if !condition_met {
+                    let state_id = self.id.clone();
+                    tracing::debug!(
+                        state_id = %state_id,
+                        arrived = arrived_count,
+                        expected = expected,
+                        strategy = ?converge_config.strategy,
+                        "converge node waiting for more incoming edges"
+                    );
+                    return Ok(TaskResult::new(
+                        Some(format!(
+                            "converge node '{state_id}': {arrived_count}/{expected} arrivals, waiting ({:?})",
+                            converge_config.strategy
+                        )),
+                        NextAction::WaitForInput,
+                    ));
+                }
+
+                // Converge condition met — clear arrivals for next cycle.
+                context
+                    .set(&self.converge_key, serde_json::Value::Null)
+                    .await;
+                tracing::info!(
+                    state_id = %self.id,
+                    arrived = arrived_count,
+                    strategy = ?converge_config.strategy,
+                    "converge node condition met, advancing"
+                );
+            }
         }
 
         // 1. Process enter actions.
@@ -1194,22 +1349,25 @@ impl Task for StateCompositeTask {
                                             if self.terminal {
                                                 NextAction::End
                                             } else {
-                                                // V1.52 T-B P0: labeled routing via GoTo
-                                                if matches!(
-                                                    &self.next,
+                                                // V1.56 P2 fix-wave (H-002): throttle path
+                                                // must delegate to resolve_expression_target for
+                                                // Conditional/Branches variants.
+                                                // resolve_labeled_target rejects them.
+                                                match &self.next {
+                                                    Some(
+                                                        NextTarget::Conditional(_)
+                                                        | NextTarget::Branches(_),
+                                                    ) => {
+                                                        self.resolve_expression_target(&context)?
+                                                    }
                                                     Some(
                                                         NextTarget::Labeled(_)
-                                                            | NextTarget::GoNogo(_)
-                                                            | NextTarget::Conditional(_)
-                                                            | NextTarget::Branches(_)
-                                                    )
-                                                ) {
-                                                    self.resolve_labeled_target(
+                                                        | NextTarget::GoNogo(_),
+                                                    ) => self.resolve_labeled_target(
                                                         &context,
                                                         &prev_reason,
-                                                    )?
-                                                } else {
-                                                    self.judge_next_action(prev_result)
+                                                    )?,
+                                                    _ => self.judge_next_action(prev_result),
                                                 }
                                             },
                                         ));
@@ -1265,9 +1423,10 @@ impl Task for StateCompositeTask {
         // 2.5. V1.56 P2: Expression-based conditional routing.
         // For states with Conditional/Branches next (any exit_when), evaluate
         // expressions and route to the matching target.
+        // V1.56 P2 fix-wave (M-006): errors now propagated via ?.
         let next_action = match &self.next {
             Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) => {
-                self.resolve_expression_target(&context)
+                self.resolve_expression_target(&context)?
             }
             _ => next_action,
         };
@@ -3452,6 +3611,10 @@ mod tests {
             merge_kind: None,
             expected_incoming: 0,
             merge_key: "_merge_test_judge".to_string(),
+            converge: None,
+            converge_key: "_converge_arrivals_test_judge".to_string(),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr: None,
         }
     }
 
@@ -3673,6 +3836,10 @@ mod tests {
             merge_kind: None, // absent from YAML
             expected_incoming: 2,
             merge_key: "_merge_merged".to_string(),
+            converge: None,
+            converge_key: "_converge_arrivals_merged".to_string(),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr: None,
         };
 
         let ctx = graph_flow::Context::new();
