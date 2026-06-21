@@ -29,6 +29,12 @@ pub enum DaemonCommand {
         /// When set, enables fetching the ACP registry from a CDN
         /// with built-in timeout (10s) and retry (3 attempts).
         /// When absent (default), registry.refresh returns synthetic output only.
+        ///
+        /// # Security
+        ///
+        /// Must be a public HTTPS CDN URL. Non-HTTPS schemes, private IPs
+        /// (e.g. 10.x.x.x, 192.168.x.x, 127.0.0.1), loopback, link-local,
+        /// and metadata endpoints (169.254.x.x) are rejected at startup.
         #[arg(long)]
         cdn_url: Option<String>,
     },
@@ -51,6 +57,7 @@ pub enum DaemonCommand {
         foreground: bool,
 
         /// Optional CDN URL for registry.refresh network mode.
+        /// Must be a public HTTPS CDN URL. Private/loopback IPs are rejected.
         #[arg(long)]
         cdn_url: Option<String>,
     },
@@ -147,6 +154,11 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
         // --- Foreground mode: run runtime directly in this process ---
         println!("Starting daemon (foreground) on port {port}...");
 
+        // Validate CDN URL before boot (H-002).
+        if let Some(ref url) = cdn_url {
+            validate_cdn_url(url)?;
+        }
+
         // Write PID file for this process
         let pid = std::process::id();
         write_pid_file(pid)?;
@@ -171,6 +183,11 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
     } else {
         // --- Background mode: self-spawn into __internal daemon-run ---
         println!("Starting daemon on port {port}...");
+
+        // Validate CDN URL before self-spawn (H-002).
+        if let Some(ref url) = cdn_url {
+            validate_cdn_url(url)?;
+        }
 
         let exe = std::env::current_exe().map_err(|e| CliError::Daemon {
             message: format!("Cannot determine current executable: {e}"),
@@ -733,6 +750,19 @@ async fn daemon_doctor(port: u16) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Validate a `--cdn-url` value against security constraints.
+///
+/// Delegates to `nexus_orchestration::capability::builtins::validate_cdn_url_static`
+/// and maps the typed error to a user-facing `CliError`.
+fn validate_cdn_url(url: &str) -> Result<()> {
+    nexus_orchestration::capability::builtins::validate_cdn_url_static(url).map_err(|e| {
+        CliError::Config(format!(
+            "--cdn-url must be a public HTTPS CDN URL (https://...); \
+             got {url:?}: {e}"
+        ))
+    })
 }
 
 #[cfg(test)]

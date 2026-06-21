@@ -123,6 +123,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // Must be set before the capability registry is constructed so the
     // RegistryRefresh capability can read it at invocation time.
     if let Some(ref cdn_url) = config.cdn_url {
+        // H-002: validate URL before passing to capability layer.
+        if let Err(e) = nexus_orchestration::capability::builtins::validate_cdn_url_static(cdn_url)
+        {
+            anyhow::bail!("--cdn-url is invalid: {e}");
+        }
         tracing::info!(%cdn_url, "CDN URL configured for registry.refresh network mode");
         nexus_orchestration::capability::builtins::set_cdn_config(Some(
             nexus_orchestration::capability::builtins::CdnConfig {
