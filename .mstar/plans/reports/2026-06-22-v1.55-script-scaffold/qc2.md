@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-22-v1.55-script-scaffold"
-verdict: "Request Changes"
-generated_at: "2026-06-22"
+verdict: "Approve"
+generated_at: "2026-06-21"
 ---
 
 # Code Review Report
@@ -80,11 +80,11 @@ generated_at: "2026-06-22"
 ## Summary
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 1 |
-| 🟡 Warning | 2 |
+| 🔴 Critical | 0 (1 resolved in fix-wave) |
+| 🟡 Warning | 0 (2 resolved in fix-wave) |
 | 🟢 Suggestion | 3 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
 ## Evidence Summary (per assignment)
 - cwd + branch + commit range: verified via `git rev-parse --show-toplevel`, `--abbrev-ref HEAD`, `merge-base origin/main iteration/v1.55`, `git log ... | head` (P3 commits only).
@@ -95,17 +95,85 @@ generated_at: "2026-06-22"
 
 ---
 
+## Revalidation (Wave 2, targeted re-review after P3 fix-wave commit 21908cdb)
+
+**Review range for revalidation**: merge-base: c30cdd48 + tip: iteration/v1.55 HEAD (post-fix 21908cdb + 376ef43a merge)
+
+**Fix-wave commit under review**: `21908cdb` — "fix(v1.55-P3): P3 fix-wave — ScaffoldTransaction safety, path validation, Script tests, daemon boot count"
+
+### Revalidation Scope (qc2 focus per assignment)
+- C-001: `validate_work_ref` call in `script.project_scaffold` + traversal regression test (`../etc/passwd`)
+- W-001: `ValidationMode::Script` direct unit tests (positive + 2+ negative + edge cases)
+- W-002: `ScaffoldTransaction` temp+rename atomic pattern + crash-mid-transaction regression test
+- All original findings disposition
+
+### Evidence from fix-wave (21908cdb)
+
+**C-001 (Critical — path validation) → RESOLVED**
+- `script_scaffold.rs:28`: `use super::novel_scaffold_sanitize::validate_work_ref;`
+- `script_scaffold.rs:310`: `let work_ref = validate_work_ref(&inp.work_ref)?;` (before any path join)
+- Same pattern applied to `game_bible_scaffold.rs:330`
+- Regression test: `script_scaffold_rejects_path_traversal_in_work_ref` (L549-578) — passes `"../etc/passwd"`, asserts `is_err()` + error contains `path-traversal` / `invalid character` / `must start with`
+- Verified execution: `cargo test -p nexus-orchestration --lib script_scaffold_rejects_path_traversal_in_work_ref` → **PASS**
+- Identical test exists for game_bible (symmetry)
+
+**W-001 (Warning — ValidationMode::Script tests) → RESOLVED**
+- `validation.rs` now contains 8 dedicated `script_mode_*` tests (L1049-1167+):
+  - Positive: `script_mode_accepts_all_three_categories` (Dialogue/Beat/Act + script_category)
+  - Negative (cross-profile leakage): `script_mode_rejects_novel_category`, `script_mode_rejects_game_bible_category`
+  - Negative (missing/invalid): `script_mode_rejects_missing_script_category`, `script_mode_rejects_invalid_script_category`, `script_mode_rejects_non_string_script_category`
+  - Edge: `script_mode_rejects_missing_body`, `script_mode_rejects_missing_attributes`
+  - Structured error verification: `script_missing_body_returns_structured_kind`, `script_missing_category_returns_structured_kind`
+  - Utility + display tests also added for `is_valid_script_category`, `default_block_type_for_script_category`, `ValidationMode::Script` + `ValidationKind` variants
+- Verified execution: `cargo test -p nexus-kb -- validation::tests::script_mode` → **8 passed**
+
+**W-002 (Warning — atomic writes) → RESOLVED**
+- `ScaffoldTransaction` rewritten (L95-247):
+  - `create_dir` / `write_file` helpers track create vs overwrite
+  - `write_file` uses temp+rename: writes `<path>.tmp`, then `std::fs::rename` to final path
+  - `temp_files`, `created_files`, `overwritten_files`, `created_dirs` tracked separately
+- Drop rollback (L196-246):
+  - Cleans `temp_files` (partial writes)
+  - Restores `overwritten_files` from snapshot
+  - Deletes only `created_files`
+  - Removes `created_dirs` in reverse order
+- Regression test: `crash_mid_transaction_leaves_no_half_written_file` (L583-616) — simulates temp file present without rename, asserts temp cleaned + final path never created
+- Verified execution: `cargo test -p nexus-orchestration --lib crash_mid_transaction_leaves_no_half_written_file` → **PASS** (both script + game_bible)
+- Additional regression: `rollback_preserves_pre_existing_user_content` (L510-545) — pre-creates user README, scaffold overwrites, rollback restores original
+- Verified: `cargo test -p nexus-orchestration --lib rollback_preserves_pre_existing_user_content` → **PASS**
+
+### Revalidation verdict per finding
+- C-001: **Resolved** — `validate_work_ref` called before path join; `../etc/passwd` regression test passes and executes.
+- W-001: **Resolved** — 8 direct `ValidationMode::Script` tests (positive + negative cross-profile + edge + structured error kinds) present and passing.
+- W-002: **Resolved** — temp+rename atomic write + explicit crash-mid-transaction regression test present and passing; pre-existing content preservation also covered.
+
+### Standard checklist re-check (post-fix)
+- Path traversal self-defense now present in scaffold capability itself (defense-in-depth).
+- ValidationMode::Script negative tests cover novel/game_bible leakage explicitly.
+- File write atomicity via temp+rename + rollback tracking implemented; crash safety tested.
+- No behavior change to commit paths on success (atomic rename is transparent).
+- All prior CI gates re-verified in scope (nexus-kb validation, nexus-orchestration lib tests).
+
+### Disposition
+All blocking findings (C-001, W-001, W-002) from initial qc2 review are resolved by fix-wave 21908cdb with passing regression tests. Suggestions (S-001..S-003) remain non-blocking (maintainability).
+
+**Updated Verdict**: Approve
+
+**Revalidation timestamp**: 2026-06-21 (post-fix 21908cdb on iteration/v1.55 @ 376ef43a)
+
+---
+
 ## Completion Report v2
 
 **Agent**: qc-specialist-2  
-**Task**: QC tri-review (security/correctness) for V1.55 P3 — script scaffold  
+**Task**: QC targeted re-review (security/correctness) Wave 2 — V1.55 P3 script scaffold (fix-wave 21908cdb)  
 **Status**: Done  
-**Scope Delivered**: Full review of P3 diff range on iteration/v1.55 (c30cdd48); focused on path validation, no-novel-leakage, ValidationMode::Script, ScaffoldTransaction atomicity, file write safety.  
-**Artifacts**: `.mstar/plans/reports/2026-06-22-v1.55-script-scaffold/qc2.md` (this file)  
-**Validation**: cwd/branch/range verified; cargo tests + checks executed; GitNexus impact attempted; spec + code cross-checked against ACs.  
-**Issues/Risks**: C-001 (path validation missing in scaffold capability) is blocking per AC and security focus. W-001/W-002 are high/medium correctness gaps.  
+**Scope Delivered**: Revalidation of fix-wave 21908cdb on iteration/v1.55 (merge-base c30cdd48). Verified C-001 (validate_work_ref + traversal test), W-001 (ValidationMode::Script positive + 2+ negative + edge tests), W-002 (temp+rename atomic + crash-mid-transaction test). All original blocking findings resolved.  
+**Artifacts**: `.mstar/plans/reports/2026-06-22-v1.55-script-scaffold/qc2.md` (updated in-place; same file as wave 1)  
+**Validation**: cwd/branch/range verified; regression tests executed and passing (`script_scaffold_rejects_path_traversal_in_work_ref`, 8× `script_mode_*` tests, `crash_mid_transaction_leaves_no_half_written_file`, `rollback_preserves_pre_existing_user_content`); GitNexus not re-run (no new symbols); code + docs cross-checked against fix diff.  
+**Issues/Risks**: None blocking for qc2 focus. All critical/warning items from initial review resolved with evidence. Suggestions remain open for future maintainability work.  
 **Plan Update**: N/A (reviewer; no plan edits).  
-**Handoff**: PM to address C-001 (add validate_work_ref) + strengthen Script-mode negative tests + document atomicity choice before re-review or consolidated decision.  
-**Git**: (to be executed after write)
+**Handoff**: qc2 re-review complete. Approve. PM may proceed to consolidated decision.  
+**Git**: 74d06ee6 qc(v1.55-p3): qc2 revalidation — C-001/W-001/W-002 resolved in fix-wave 21908cdb; Approve
 
-**Reviewer alignment note**: Review performed in strict leaf-executor mode per mstar-dispatch-gates + qc-specialist-shared. No subagent dispatch, no code changes, no status.json writes. Report only under `{PLAN_DIR}/reports/.../qc2.md`.
+**Reviewer alignment note**: Review performed in strict leaf-executor mode per mstar-dispatch-gates + qc-specialist-shared. No subagent dispatch, no code changes, no status.json writes. Report only under `{PLAN_DIR}/reports/.../qc2.md`. Targeted re-review updates same file (no `-rev2`).
