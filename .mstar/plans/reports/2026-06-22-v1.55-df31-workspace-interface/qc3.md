@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-22-v1.55-df31-workspace-interface"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-21"
+revalidated_at: "2026-06-22"
 ---
 
 # Code Review Report — V1.55 P1 DF-31 Workspace Interface Skeleton
@@ -157,3 +158,108 @@ generated_at: "2026-06-21"
 **Verdict**: Request Changes
 
 **Rationale**: C-001 is a merge-blocking correctness defect in the session conflict model. W-001, W-002, and W-003 directly contradict the stated acceptance criteria for TTL documentation/cleanup, bounded memory, and lock-contention reliability. W-005 makes the crate-level test suite red on the integration branch and must be resolved before merge (even though the code change originates in P3, the assertion lives in the touched crate). Once C-001 is fixed and W-001/W-002/W-003/W-005 are addressed or explicitly accepted as tracked residuals, this review can move to Approve.
+
+---
+
+## Revalidation
+
+**Targeted re-review (Wave 2, qc3)**: P1 fix-wave for C-001/W-001/W-003/W-004/W-005 (performance/reliability focus).
+
+### Review Context (verified)
+
+| Field | Value |
+|-------|-------|
+| cwd | `/Users/bibi/workspace/organizations/42ch/nexus` |
+| Working branch | `iteration/v1.55` |
+| plan_id | `2026-06-22-v1.55-df31-workspace-interface` |
+| Review range / Diff basis | `merge-base: 9b3d70ce` + `tip: iteration/v1.55 HEAD` (964d2268) |
+| Fix-wave commits | `5da1ec08` (atomic consume + SessionError + poison recovery + concurrent test + cap count) merged at `376ef43a` |
+| Files changed in fix-wave | `session.rs`, `workspace.rs` (handler), `daemon_boot_llm_wiring.rs` (3 files, 162 insertions, 71 deletions) |
+
+### Per-Finding Disposition
+
+#### C-001: `consume_session` race condition — **RESOLVED**
+
+- **Evidence**: `consume_session` rewritten to hold a single `Mutex` lock for the entire validate+mark sequence (lookup → consumed check → expiry check → set `consumed = true`). Two concurrent callers on the same `session_id` cannot both observe `consumed == false`. The old split-lock pattern (clone outside lock, re-acquire to write) is completely removed.
+- **Regression test**: `concurrent_consume_only_one_succeeds` (std::thread, N=10, Arc<WorkspaceSessionManager>): exactly 1 `Ok`, 9 `Err(SessionError::AlreadyCommitted)`, 0 other errors. Passes in full suite (264 lib tests).
+- **Code location**: `session.rs:224-253` — single `sessions.lock()` at entry, all checks and the mark performed before `drop(sessions)`.
+- **Acceptance criterion met**: "workspace.commit rejects stale/conflicting commits rather than silently overwriting" is now race-free for the DF-31 skeleton under concurrent load.
+- **Verdict**: Resolved. No regression risk.
+
+#### W-001: Lock strategy undocumented — **RESOLVED**
+
+- **Evidence**: `WorkspaceSessionManager` struct-level doc now includes a **"Lock strategy (DF-31 skeleton)"** section documenting: (a) single global `Mutex<HashMap>` for simplicity; (b) `consume_session` holds lock for full validate+mark sequence; (c) expired cleanup runs inline under the same lock; (d) worst-case O(n) latency where n = active sessions; (e) expected O(10) in single-user local daemon; (f) future notes for `DashMap` per-session locking and background `tokio::time::interval` cleanup if session count grows to O(1000+).
+- **Code location**: `session.rs:120-135` (lock strategy doc block).
+- **Acceptance criterion met**: "Lock contention risk is documented" — worst-case latency and scaling ceiling are now explicit.
+- **Verdict**: Resolved.
+
+#### W-002: Expired sessions accumulate during idle periods — **NOT ADDRESSED (residual)**
+
+- **Evidence**: The P1 fix-wave did not introduce a background cleanup task. Expired entries are still only removed inline when another session operation triggers `cleanup_expired`. This was not included in the fix-wave scope.
+- **Mitigation**: In the current DF-31 skeleton (single-user local daemon, O(10) sessions, 5-minute TTL), the practical impact is negligible — sessions expire within 5 minutes and are cleaned on the next operation. Memory accumulation is bounded by session creation rate × TTL.
+- **Disposition**: Accepted as documented residual. A background `tokio::time::interval` cleanup task (or time-bucketed expiry structure) should be implemented when DF-42 introduces persistent sessions or multi-tenant scenarios. The 5-minute TTL and inline cleanup on every operation provide adequate garbage collection for the skeleton's operational profile.
+- **Severity**: Downgraded from `high` to `medium` (machine `medium`) given the bounded scope of the skeleton and documented mitigation.
+
+#### W-003: Mutex poisoning policy inconsistency — **RESOLVED**
+
+- **Evidence**: All 5 `.expect("session manager mutex poisoned")` sites replaced with `.unwrap_or_else(|poisoned| { tracing::warn!("session manager mutex poisoned, recovering"); poisoned.into_inner() })`. Consistent with the crate policy documented in `workspace/mod.rs:3-9`.
+- **Locations fixed**: `open_session` (line 182), `validate_session` (line 201), `consume_session` (line 225), `cleanup_expired` (line 283). The `consume_session` call site was previously two separate `.expect()` calls — now unified under one `unwrap_or_else`.
+- **Panic safety**: A poisoned mutex no longer causes cascading panics in all subsequent session operations. A `warn!` log is emitted and the inner state is recovered via `Mutex::into_inner`.
+- **Verdict**: Resolved.
+
+#### W-004: HTTP error mapping via string matching — **RESOLVED**
+
+- **Evidence**: `SessionError` enum introduced with variants `NotFound(SessionId)`, `AlreadyCommitted(SessionId)`, `Expired(SessionId)`, implementing `Display` and `PartialEq`. The `commit_workspace` handler now matches on `SessionError` variants instead of `err_msg.contains("not found")`, `err_msg.contains("already been committed")`, and `err_msg.contains("expired")`.
+- **Code location**: `session.rs:38-68` (enum + Display impl); `workspace.rs:257-280` (typed match handler).
+- **Refactor safety**: Future rewording of error messages no longer changes HTTP semantics — the variant identity is the contract, not the display string.
+- **Verdict**: Resolved.
+
+#### W-005: `daemon_boot_llm_wiring` integration test failure — **RESOLVED**
+
+- **Evidence**: Capability count assertion updated from 23 → 24 in `crates/nexus-daemon-runtime/tests/daemon_boot_llm_wiring.rs:225-228`. Comment updated to cite `script.project_scaffold` from V1.55 P3 as the new capability.
+- **Test result**: `with_runtime_deps_registers_all_llm_capabilities ... ok` (1 passed, 0 failed). Full daemon-runtime test suite: 264 lib + all integration tests pass.
+- **Verdict**: Resolved.
+
+### Other Findings (Suggestions)
+
+- **S-001** (promote debug→warn for degraded session paths): Not addressed. Low severity; does not block Approve.
+- **S-002** (concurrent open/commit stress test): Partially addressed by `concurrent_consume_only_one_succeeds` regression test. The new test exercises 10-way concurrent session consumption. Additional open+commit stress test remains a suggestion.
+- **S-003** (tighten path normalization edge cases): Not addressed. DF-42 scope.
+- **S-004** (document 5-minute TTL in spec surface): Not addressed. Low severity.
+
+### CI Gate Verification (re-run at re-review time)
+
+```
+cargo test -p nexus-daemon-runtime --lib          → 264/264 pass (incl. concurrent_consume_only_one_succeeds)
+cargo test -p nexus-daemon-runtime --test daemon_boot_llm_wiring → 4/4 pass (capability count 24)
+cargo test -p nexus-home-layout                    → 60/60 pass
+cargo test -p nexus-daemon-runtime                 → 264 lib + all integration pass (0 failures)
+cargo clippy -p nexus-daemon-runtime -p nexus-home-layout -- -D warnings → clean
+cargo +nightly fmt --all --check                   → clean
+```
+
+### Standard qc3 Checklist (re-checked)
+
+- [x] C-001: single-lock atomic consume; concurrent regression test passes
+- [x] W-001: lock strategy documented (O(n), O(10) expected, future DashMap note)
+- [x] W-003: poison recovery consistent across all 5 lock sites
+- [x] W-004: `SessionError` enum; typed match in handler (no string matching)
+- [x] W-005: capability count 24; `daemon_boot_llm_wiring` test passes
+- [x] Hot path avoids avoidable overhead — single lock held for O(n) scan, documented ceiling
+- [x] Resource lifecycle: mutex poison policy now consistent
+- [x] Degradation behavior: poison recovery emits `warn!`; error mapping is type-safe
+- [x] Concurrent test present for the primary race condition
+- [x] No new Critical or Warning introduced by fix-wave
+- [x] CI gates clean on touched crates
+
+### Revised Verdict
+
+**Approve**. All Critical and Warning findings assigned to qc3 scope in the P1 fix-wave are resolved:
+- C-001: fixed (atomic consume_session + concurrent regression test)
+- W-001: fixed (lock strategy documented)
+- W-003: fixed (poison recovery consistent)
+- W-004: fixed (SessionError enum + typed matching)
+- W-005: fixed (capability count 24)
+- W-002: residualized (inline cleanup adequate for DF-31 skeleton; background task deferred to DF-42)
+
+No merge-blocking Critical or Warning remains for this plan from the performance/reliability perspective. Suggestions (S-001 through S-004) are non-blocking.
