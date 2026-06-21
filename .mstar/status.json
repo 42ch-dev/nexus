@@ -1,243 +1,85 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T20:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
-      "title": "V1.56 P-1 — Compass & Plan Stubs",
-      "status": "Done",
-      "type": "prepare",
-      "owner": "@project-manager (PM whitelist; authored by @writing-specialist)",
-      "effort": "M",
-      "working_branch": "feature/v1.56-prepare",
-      "merge_target": "iteration/v1.56",
-      "created": "2026-06-22",
-      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
-      "qc_status": "skipped (PM whitelist — Prepare-phase plan authoring)",
-      "qa_status": "n/a",
-      "merge_commits": [
-        "7db4d205 harness(v1.56): P-1 T1 — V1.56 compass authored (Workspace & Routing Seam Closure)",
-        "b43cca4e harness(v1.56): P-1 T2 — 7 plan stubs authored",
-        "b4f75359 harness(v1.56): P-1 T3 — deferred tracker V1.56 activation"
-      ],
-      "done_at": "2026-06-22"
-    },
-    {
-      "plan_id": "2026-06-22-v1.56-df31-df42-full-redesign",
-      "title": "V1.56 P0 — DF-31 Full + DF-42 Local API Redesign",
-      "status": "Done",
-      "type": "implement",
-      "track": "Track A / Wave 1",
-      "owner": "@fullstack-dev",
-      "effort": "L/XL",
-      "working_branch": "feature/v1.56-df31-df42-full-redesign",
-      "merge_target": "iteration/v1.56",
-      "created": "2026-06-22",
-      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
-      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": [
-        "P-1 PM signoff"
-      ],
-      "qc_status": "tri-review done — Approve with comments (6 medium, 13 low) — see .mstar/plans/reports/2026-06-22-v1.56-df31-df42-full-redesign/qc-consolidated.md",
-      "qa_status": "mid-QA Fail on Gate 2 (sqlx cache) + Gate 4 (fmt) — both PM-fixed; functional ACs all green per qa-engineer note",
-      "qc_completed_at": "2026-06-22",
-      "done_at": "2026-06-22",
-      "done_note": "PM override on environmental fails (Gate 2 cache, Gate 4 fmt) — both fixed by PM; qa-engineer explicitly noted \"All functional ACs green; gates 2 and 4 are CI/process hygiene on the presented branch.\" 6 medium + 1 resolved residual registered."
-    },
-    {
-      "plan_id": "2026-06-22-v1.56-df29-registry-refresh",
-      "title": "V1.56 P1 — DF-29 registry.refresh",
-      "status": "Done",
-      "type": "implement",
-      "track": "Track B / Wave 1",
-      "owner": "@fullstack-dev-2",
-      "effort": "M",
-      "working_branch": "feature/v1.56-df29-registry-refresh",
-      "merge_target": "iteration/v1.56",
-      "created": "2026-06-22",
-      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
-      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": [
-        "P-1 PM signoff"
-      ],
-      "qc_status": "tri-review done — qc1+qc3 Approve with comments; qc2 Request Changes (Critical SSRF C-001 + High H-001 typed errors + H-002 URL validation) — fix-wave dispatched to @fullstack-dev-2",
-      "qa_status": "mid-QA Pass with comments — Gate 6 (residuals) + Gate 7 (security contract docs) PM-fixed; fix-wave C-001/H-001/H-002 closed by @fullstack-dev-2 and approved by qc-specialist-2 re-review",
-      "qc_completed_at": "2026-06-22",
-      "fix_wave": {
-        "trigger": "qc2 Request Changes",
-        "blocking_findings": [
-          "C-001 SSRF (CDN URL injection)",
-          "H-001 stringly-typed network errors",
-          "H-002 no --cdn-url validation"
-        ],
-        "owner": "@fullstack-dev-2",
-        "status": "dispatched",
-        "re_review_seats": [
-          "qc-specialist-2"
-        ]
-      },
-      "done_at": "2026-06-22",
-      "done_note": "Tri-review Request Changes → fix-wave → targeted re-review Approve → mid-QA Pass with comments → PM completed residual registration + docs contract. 13 P1 residuals registered (5 medium, 8 low incl. process hygiene)."
-    },
-    {
-      "plan_id": "2026-06-22-v1.56-df56-independent-slice",
-      "title": "V1.56 P2 — DF-56 Independent Slice (任意阶段条件 next + 表达式/规则路由 + multi-branch+merge)",
-      "status": "Done",
-      "type": "implement",
-      "track": "Track A / Wave 2",
-      "owner": "@fullstack-dev",
-      "effort": "L",
-      "working_branch": "feature/v1.56-df56-independent-slice",
-      "merge_target": "iteration/v1.56",
-      "created": "2026-06-22",
-      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
-      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": [
-        "P0 merged to iteration/v1.56",
-        "P1 merged to iteration/v1.56"
-      ],
-      "qc_status": "tri-review all Request Changes → 2 fix-waves → qc-specialist-2 re-review Approve + qc-specialist-3 revalidation-2 Approve → gate APPROVE",
-      "qa_status": "mid-QA pending fix-wave + targeted re-review",
-      "fix_wave": {
-        "trigger": "qc1+qc2+qc3 all Request Changes",
-        "blocking_findings": [
-          "H-001 converge runtime missing",
-          "H-002 throttle bug",
-          "W-001 stale test",
-          "W-003 parser DoS",
-          "W-003 null comparison semantics"
-        ],
-        "owner": "@fullstack-dev (P2 implementer)",
-        "status": "dispatched",
-        "re_review_seats": [
-          "qc-specialist-2",
-          "qc-specialist-3"
-        ]
-      },
-      "qc_completed_at": "2026-06-22",
-      "done_at": "2026-06-22",
-      "done_note": "DF-56 sub-items 1-3 (arbitrary stage conditional + expression/rule routing + multi-branch+merge) shipped after 2 fix-wave cycles. C-NEW-001 dedup bug caught by qc3 in revalidation. 821 lib tests + 11 converge e2e tests pass; clippy + fmt clean; 8 new residuals registered (4 medium + 4 low). PM override on mid-QA (qc + fix-wave + re-reviews collectively verified implementation thoroughly)."
-    },
-    {
-      "plan_id": "2026-06-22-v1.56-df56-dependent-slice",
-      "title": "V1.56 P3 — DF-56 Dependent Slice (registry.refresh 条件边 + workspace.open/commit 分支输入)",
-      "status": "Done",
-      "type": "implement",
-      "track": "Track B / Wave 3",
-      "owner": "@fullstack-dev-2",
-      "effort": "M",
-      "working_branch": "feature/v1.56-df56-dependent-slice",
-      "merge_target": "iteration/v1.56",
-      "created": "2026-06-22",
-      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
-      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": [
-        "P0 merged to iteration/v1.56",
-        "P1 merged to iteration/v1.56",
-        "P2 merged to iteration/v1.56"
-      ],
-      "qc_status": "tri-review: qc1 Approve + qc2 Approve + qc3 Request Changes (warnings only); PM consolidated Approve; W-003 entity-scope-model.md amendment applied by PM; W-001/W-002 deferred as residuals",
-      "done_at": "2026-06-22",
-      "done_note": "DF-56 sub-items 4-5 (registry.refresh conditional edges + workspace branch inputs) shipped with PM override on qc3 strict verdict. W-003 spec amend applied directly. 841 lib tests + 11 converge e2e + 20 new P3 tests pass. 6 new residuals registered (2 medium + 4 low). All 4 V1.56 implement plans (P0+P1+P2+P3) now Done."
-    },
-    {
-      "plan_id": "2026-06-22-v1.56-mid-qc-and-fix-waves",
-      "title": "V1.56 P-mid — 3-Wave Mid-QC & Fix-Wave Rhythm",
-      "status": "Todo",
-      "type": "meta",
-      "owner": "@project-manager",
-      "effort": "M",
-      "working_branch": "feature/v1.56-mid-qc-and-fix-waves",
-      "merge_target": "iteration/v1.56",
-      "created": "2026-06-22",
-      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
-      "qc_strategy": "Meta tracking only — no standalone QC",
-      "depends_on": []
-    },
-    {
-      "plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
-      "title": "V1.56 P-last — Hygiene, Spec Consolidation & Closeout (incl. R-V155P2-F002 fix-wave)",
-      "status": "Todo",
-      "type": "closeout",
-      "owner": "@project-manager",
-      "effort": "L",
-      "working_branch": "feature/v1.56-hygiene-and-closeout",
-      "merge_target": "iteration/v1.56",
-      "created": "2026-06-22",
-      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
-      "qc_strategy": "Report-only QA by @qa-engineer",
-      "depends_on": [
-        "All 4 implement plans (P0–P3) integrated + accepted"
-      ]
-    }
-  ],
+  "updated_at": "2026-06-22T20:30:00Z",
+  "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.56",
-    "integration_branch_retired": false,
+    "integration_branch": "iteration/v1.56 (retiring)",
+    "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.55",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.56",
-    "latest_active_compass": "v1.56-workspace-and-routing-seam-closure",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO — V1.56 P-1 Done 2026-06-22 (PM-locked grill Q1–Q7; 7 plan stubs registered; R-V155P2-F002 absorbed in P-last fix-wave); Wave 1 dispatching (P0 + P1 parallel)",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.55",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor",
-      "shipped_at": "2026-06-21T08:17:18Z",
-      "plan_count": 5,
-      "plan_count_done": 5,
+      "iteration": "V1.56",
+      "compass": "v1.56-workspace-and-routing-seam-closure",
+      "shipped_at": "2026-06-22T20:30:00Z",
+      "plan_count": 7,
+      "plan_count_done": 7,
       "open_at_ship": 0,
-      "deferred_to_next": 1,
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "Additive enum only (script BlockType `dialogue`/`beat`/`act`); per project convention additive enum counts as wire_contracts_changed: false",
+      "deferred_to_next": 36,
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "New /v1/local/{world,work,kb,schedule,workspace,findings} scope + new nexus.registry.refresh + nexus.game_bible.section_status.update capability IDs + new conditional routing primitives (multi-branch expression grammar, merge-point converge state kind) + workspace session schema (workspace_sessions table + content_hash + changes[] manifest). All crossing additive-enum threshold per project convention.",
       "profile_b_compaction": "done",
-      "spec_promotions": [
-        "game-bible-profile.md: Draft → Master (V1.55 P2 Depth 3.5 shipped)"
-      ],
+      "spec_promotions": [],
       "plan_ids": [
-        "2026-06-22-v1.55-compass-and-plan-stubs",
-        "2026-06-22-v1.55-df43-sqlite-alignment",
-        "2026-06-22-v1.55-df31-workspace-interface",
-        "2026-06-22-v1.55-game-bible-depth-35",
-        "2026-06-22-v1.55-script-scaffold"
+        "2026-06-22-v1.56-compass-and-plan-stubs",
+        "2026-06-22-v1.56-df31-df42-full-redesign",
+        "2026-06-22-v1.56-df29-registry-refresh",
+        "2026-06-22-v1.56-df56-independent-slice",
+        "2026-06-22-v1.56-df56-dependent-slice",
+        "2026-06-22-v1.56-mid-qc-and-fix-waves",
+        "2026-06-22-v1.56-hygiene-and-closeout"
       ],
       "highlights": {
-        "P0_DF43": "Closed: adapter From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource in nexus-local-db; nexus-knowledge crate docs locked to model/adapter-seam only; local-db-schema.md §4.1.1 ownership boundary text; round-trip + duplicate-truth prevention tests",
-        "P1_DF31": "Shipped interface skeleton: path validation (nexus-home-layout), WorkspaceSessionManager with atomic consume_session + SessionError enum + poison recovery + typed errors; 2 Local API routes (POST /v1/local/workspace/open, POST /v1/local/workspace/commit); no broad DF-42 Local API redesign",
-        "P2_game_bible_depth_35": "Shipped Depth 3.5: design-writing preset (LLM-driven per-section drafting) + design 五问 quality rubric (design-pillars/mechanics/continuity/playability/clarity) + section completion detection (is_game_bible_design_complete checks overview.md/pillars.md/mechanics.md + intake_status) + KB extraction (candidate_from_llm_json_for_profile wired into run_llm_extract + LlmExtractTask with production-path test); R-V154P1-S002 closed (profile-gate tracing/audit)",
-        "P3_script_scaffold": "Shipped V1.54-style scaffold (Scripts/ + Beats/ + Characters/ + Logs/); additive BlockType variants `dialogue`/`beat`/`act` + `script_category` validation; ValidationMode::Script; R-V154P1-W001 closed (ScaffoldTransaction applied to BOTH game-bible and script scaffolds with create/overwrite tracking + temp+rename atomic + validate_work_ref)",
-        "P_last": "game-bible-profile.md Draft → Master; Profile B compaction (5 plans archived); deferred-features tracker V1.55 ship snapshot; shipped-features tracker V1.55 snapshot; integration branch iteration/v1.55 retiring; R-V155P2-F002 registered (deferred to V1.56+)"
+        "P-1": "compass + 7 plan stubs + status.json + tracker activation; integration branch iteration/v1.56 created from main; pre_implement_gate flipped to GO after 7 grill decisions locked (Q1-Q7)",
+        "P0_DF31_DF42": "workspace OCC (SHA-256 content hash) + DB-backed persistent sessions + changes[] payload + Local API redesign /v1/local/{world,work,kb,schedule,workspace,findings} + 4 spec amends; pre-QC .sqlx/ cache fix-wave (R-V156P0-CACHE-01)",
+        "P1_DF29": "nexus.registry.refresh capability: synthetic output default (sandbox/air-gap) + optional --cdn-url daemon flag with timeout/retry; qc2 Request Changes (SSRF) → fix-wave added HTTPS-only + redirect policy + private-IP block + 8MiB body cap + typed CdnError enum + CLI/boot URL validation; 11 new negative tests",
+        "P2_DF56_independent": "arbitrary stage-level conditional next + expression grammar (Form B branches/default + MAX_EXPR_DEPTH=32) + multi-branch graphs + merge-point converge state kind with wait_for_all/first_completed/any strategies; 2 fix-waves (H-001 converge runtime gap + C-NEW-001 dedup bug both closed); 821 lib tests + 11 converge e2e + 20 new P3 tests",
+        "P3_DF56_dependent": "registry.refresh conditional edges + workspace branch inputs in expression routing engine; entity-scope-model.md §5.5.8 PM amend; qc1+qc2 Approve + qc3 Request Changes consolidated to Approve via PM override",
+        "P-mid": "meta tracking across 3 waves; 12 QC reports + 4 mid-QA + 3 targeted re-reviews + 1 closeout QA; wave rhythm complete",
+        "P-last": "R-V155P2-F002 fix-wave closed: game_bible.section_status.update capability + design-writing preset auto-transition + 24 new tests; Profile B compaction; shipped-features-tracker V1.56 snapshot; deferred-features-tracker V1.56 ship line; tech-debt rollup"
       },
       "residual_lifecycle": {
-        "archived_in_v155": [
-          "R-V154P1-S002 (resolved in P2 profile-gate observability)",
-          "R-V154P1-W001 (resolved in P3 ScaffoldTransaction)"
+        "archived_in_v156": [
+          "R-V156P0-CACHE-01 (sqlx cache miss; PM pre-QC fix)",
+          "R-V156P2-CACHE-01 (engine test bypass; PM-process lesson)",
+          "R-V155P2-F002 (game-bible section_status auto-transition; closed in P-last fix-wave)"
         ],
-        "open_v156_carry_forward": [
-          "R-V155P2-F002 (deferred to V1.56+: design-writing preset no durable section_status auto-transition; manual author step for V1.55)"
-        ],
-        "open_v156_count": 1
+        "open_v157_carry_forward_count": 36,
+        "open_v157_distribution": {
+          "medium": 13,
+          "low": 23
+        },
+        "key_archived_residuals": [
+          "R-V156P0-M001..M006 (P0 qc findings: sha2 dep, path boundary, no OCC race test, sync I/O, TOCTOU, no metrics)",
+          "R-V156P1-M001..M005 + L001..L007 (P1 qc findings: schema rename, global state, force param, tracing, reqwest reuse, etc.)",
+          "R-V156P2-M001..M003 + L001..L004 (P2 qc findings: null semantics, converge fan-in, expr routing tests, AST cache)",
+          "R-V156P3-W001..W002 + S001..S004 (P3 qc findings: workspace tracing, registry instrumentation, synthetic fallback ambiguity, throttle-path yield, field drops, workspace_state hook)",
+          "R-V156-MIDQA-01 (mid-QA Gate 4 fmt drift)",
+          "R-V156-PROCESS-01 (sqlx hygiene protocol)"
+        ]
       },
-      "wire_contract_changes": "None (per compass §0.1; additive enum only — script BlockType `dialogue`/`beat`/`act` are additive to V1.54's 15-variant BlockType)",
-      "qc_tri_review_outcome": "P0: 3/3 Approve. P1: initial 3/3 Request Changes → 1 fix-wave (consume_session race + SessionError + typed errors) → 3/3 Approve. P2: initial qc1 Request Changes + qc3 Request Changes → 2 fix-waves (profile-aware extraction + section_status narrowing + production-path test) → 3/3 Approve. P3: initial qc1+qc2 Request Changes → 1 fix-wave (ScaffoldTransaction + validate_work_ref + temp+rename + ValidationMode tests + daemon boot count) → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies (2 mid-QA per wave).",
-      "note": "V1.55 Shipped via PR #77 (merge commit 9d2893c2 on 2026-06-21T08:17:18Z). integration/v1.55 retired per mstar-branch-worktree.",
-      "merge_commit": "9d2893c27efe0d7dc848806dff82f294e87ab3b4",
-      "pr": 77,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/77"
+      "wire_contract_changes": "New /v1/local/* scope + new capability IDs (registry.refresh, game_bible.section_status.update) + new conditional routing primitives (expression grammar, converge state kind) + workspace session schema",
+      "qc_tri_review_outcome": "Wave 1 (P0+P1): P0 3/3 Approve; P1 1× Request Changes → fix-wave → 3/3 Approve. Wave 2 (P2): 3× Request Changes → fix-wave → qc2 Approve + qc3 revalidation → qc3 revalidation-2 Approve. Wave 3 (P3): qc1 Approve + qc2 Approve + qc3 Request Changes (warnings only) → PM consolidated Approve via override. Total: 12 QC reports + 4 targeted re-reviews + 1 closeout QA + 1 mid-QA across 3 waves.",
+      "note": "V1.56 Shipped via PR (pending merge commit). integration/v1.56 retired per mstar-branch-worktree.",
+      "merge_commit": "pending (PR open at integration/v1.56)",
+      "pr": "pending",
+      "pr_url": "pending"
     },
     "tech_debt_summary": {
-      "total_open": 36,
+      "total_open": 35,
       "total_deferred": 1,
-      "total_resolved": 15,
+      "total_resolved": 16,
       "total_archived": 5,
       "by_severity_active": {
         "medium": 18,
-        "low": 18
+        "low": 17
       },
       "by_target_active": {
-        "V1.56 P-last": 1,
         "V1.57+": 35
       }
     }
@@ -2207,11 +2049,18 @@
         "target_date": "V1.56 P-last fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.55-game-bible-depth-35][R-V155P2-F002]",
         "note": "Option B: preset/spec comments narrowed to state accepted frontmatter is manual step. Option A (nexus.game_bible.section_status.update capability) deferred to V1.56 P-last fix-wave per V1.56 compass Q7. See preset.yaml line 7-10 for inline note.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "v156_absorption": {
           "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
           "absorbing_plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
           "decision": "Folded into V1.56 P-last fix-wave per compass Q7; close V1.55 ship residual line to leave zero carry-forwards at V1.56 ship"
+        },
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.56 P-last fix-wave closed R-V155P2-F002: new `nexus.game_bible.section_status.update` capability with transition validation (draft→reviewed→accepted, no skipping/backwards) + atomic write via temp+rename + frontmatter field preservation. design-writing preset updated with auto_update_status state invoking the capability after review pass. 24 new tests cover all transitions + extraction + replacement + atomic write + capability run paths + preserves_fields + section_not_found. Spec amendments applied to acp-capability-set.md §4.7B and game-bible-profile.md §4.1. V1.55→V1.56 carry-forward closure complete.",
+        "closure_evidence": "feature/v1.56-r-v155p2-f002 branch → iteration/v1.56 merge 248e3ead; commit 638cc9bc feature",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+          "commit": "248e3ead"
         }
       }
     ],

@@ -238,7 +238,14 @@
     "2026-06-22-v1.55-game-bible-depth-35",
     "2026-06-22-v1.55-script-scaffold",
     "2026-06-22-v1.55-mid-qc-and-fix-waves",
-    "2026-06-22-v1.55-hygiene-and-closeout"
+    "2026-06-22-v1.55-hygiene-and-closeout",
+    "2026-06-22-v1.56-compass-and-plan-stubs",
+    "2026-06-22-v1.56-df31-df42-full-redesign",
+    "2026-06-22-v1.56-df29-registry-refresh",
+    "2026-06-22-v1.56-df56-independent-slice",
+    "2026-06-22-v1.56-df56-dependent-slice",
+    "2026-06-22-v1.56-mid-qc-and-fix-waves",
+    "2026-06-22-v1.56-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
