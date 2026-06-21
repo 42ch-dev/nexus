@@ -239,12 +239,12 @@ impl CapabilityRegistry {
         state: &WorkspaceState,
         creator_id: &str,
     ) -> Result<serde_json::Value, NexusApiError> {
-        let row = self.lookup(&req.tool_name).ok_or_else(|| {
-            NexusApiError::BadRequest {
+        let row = self
+            .lookup(&req.tool_name)
+            .ok_or_else(|| NexusApiError::BadRequest {
                 code: "NOT_SUPPORTED".to_string(),
                 message: format!("unsupported tool: {}", req.tool_name),
-            }
-        })?;
+            })?;
 
         // Centralized admission-gate accountability checkpoint.
         // Each gate type MUST have a corresponding enforcement path (pipeline,
@@ -1038,7 +1038,9 @@ mod tests {
                     AdmissionGate::Allowlist => "admission_pipeline: allowlist check",
                     AdmissionGate::ActiveCreator => "admission_pipeline: active-creator check",
                     AdmissionGate::WorkspaceBounds => "admission_pipeline: workspace-bounds check",
-                    AdmissionGate::PermissionPolicy => "admission_pipeline: permission-policy check",
+                    AdmissionGate::PermissionPolicy => {
+                        "admission_pipeline: permission-policy check"
+                    }
                     AdmissionGate::RequireWorldOwnership => {
                         "per-handler: ensure_world_accessible_for_creator"
                     }

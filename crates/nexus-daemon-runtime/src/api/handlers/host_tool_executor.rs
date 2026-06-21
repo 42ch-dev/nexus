@@ -1554,13 +1554,13 @@ async fn execute_kb_snapshot_write(
 
     ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
 
-    let blocks = req
-        .parameters["blocks"]
-        .as_array()
-        .ok_or_else(|| NexusApiError::InvalidInput {
-            field: "parameters.blocks".into(),
-            reason: "must be an array of key blocks".into(),
-        })?;
+    let blocks =
+        req.parameters["blocks"]
+            .as_array()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.blocks".into(),
+                reason: "must be an array of key blocks".into(),
+            })?;
 
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(state.pool().clone());
     let mut written: usize = 0;
@@ -1600,12 +1600,10 @@ async fn execute_kb_snapshot_write(
         written += 1;
     }
 
-    tx.commit()
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
 
     Ok(serde_json::json!({
         "written": written,
@@ -1760,22 +1758,18 @@ async fn execute_manuscript_chapter_update(
             message: format!("chapter update: {e}"),
         })?;
         // Atomically rename temp → final (after DB update succeeds inside tx).
-        tokio::fs::rename(&abs_tmp, &abs_body)
-            .await
-            .map_err(|e| {
-                // Best-effort cleanup: remove temp file on rename failure.
-                let _ = std::fs::remove_file(&abs_tmp);
-                NexusApiError::Internal {
-                    code: "FILE_RENAME_FAILED".into(),
-                    message: format!("failed to finalize chapter file: {e}"),
-                }
-            })?;
-        tx.commit()
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("chapter update tx commit: {e}"),
-            })?;
+        tokio::fs::rename(&abs_tmp, &abs_body).await.map_err(|e| {
+            // Best-effort cleanup: remove temp file on rename failure.
+            let _ = std::fs::remove_file(&abs_tmp);
+            NexusApiError::Internal {
+                code: "FILE_RENAME_FAILED".into(),
+                message: format!("failed to finalize chapter file: {e}"),
+            }
+        })?;
+        tx.commit().await.map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("chapter update tx commit: {e}"),
+        })?;
     }
 
     // Read back updated chapter
@@ -1788,11 +1782,7 @@ async fn execute_manuscript_chapter_update(
             })?;
 
     updated.map_or_else(
-        || {
-            Err(NexusApiError::NotFound(format!(
-                "{work_id}/ch{chapter}"
-            )))
-        },
+        || Err(NexusApiError::NotFound(format!("{work_id}/ch{chapter}"))),
         |ch| Ok(serde_json::to_value(&ch).unwrap_or_else(|_| serde_json::json!({}))),
     )
 }
@@ -2002,8 +1992,7 @@ async fn execute_finding_resolve(
                 reason: "must be a string".into(),
             })?;
 
-    let resolution = req
-        .parameters["resolution"]
+    let resolution = req.parameters["resolution"]
         .as_str()
         .unwrap_or("resolved via tool");
 
@@ -2013,9 +2002,7 @@ async fn execute_finding_resolve(
         status: Some("resolved".to_string()),
         severity: None,
         title: None,
-        description: Some(format!(
-            "Resolved via tool: {resolution}"
-        )),
+        description: Some(format!("Resolved via tool: {resolution}")),
         target_executor: None,
         kind: None,
         rule_suggestion: None,
@@ -2050,9 +2037,7 @@ async fn execute_finding_resolve(
 
     // W-002: check the returned bool — false means no row was updated.
     if !updated {
-        return Err(NexusApiError::NotFound(format!(
-            "finding {finding_id}"
-        )));
+        return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
     }
 
     Ok(serde_json::json!({
@@ -2118,9 +2103,7 @@ async fn execute_pool_entry_manage(
                 code: "POOL_ERROR".to_string(),
                 message: e.to_string(),
             })?
-            .ok_or_else(|| NexusApiError::NotFound(format!(
-                "pool entry for {work_id}"
-            )))?;
+            .ok_or_else(|| NexusApiError::NotFound(format!("pool entry for {work_id}")))?;
 
             nexus_local_db::novel_pool_entries::archive_pool_entry(
                 state.pool(),
@@ -2209,8 +2192,8 @@ pub(crate) fn registry_pool_entry_manage<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::create_test_workspace;
     use crate::test_utils::create_initialized_test_workspace;
+    use crate::test_utils::create_test_workspace;
     use crate::workspace::WorkspaceState;
 
     #[tokio::test]
@@ -3490,9 +3473,13 @@ mod tests {
 
     #[tokio::test]
     async fn manuscript_chapter_update_writes_content() {
-        let (tmp, nexus_home, db_path, workspace_dir) =
-            create_initialized_test_workspace().await;
-        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, Some(workspace_dir.to_string_lossy().to_string())).await;
+        let (tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(
+            nexus_home.clone(),
+            db_path,
+            Some(workspace_dir.to_string_lossy().to_string()),
+        )
+        .await;
 
         // Create a work and seed chapters
         let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
@@ -3594,8 +3581,7 @@ mod tests {
             .await
             .expect("file should exist on disk");
         assert_eq!(
-            on_disk,
-            "Updated chapter content for testing.",
+            on_disk, "Updated chapter content for testing.",
             "file content should match what was written"
         );
         drop(tmp);
@@ -3655,10 +3641,7 @@ mod tests {
             caller_kind: None,
         };
         let result = HostToolExecutor::execute(&req, &state).await;
-        assert!(
-            result.is_ok(),
-            "world.configure should succeed: {result:?}"
-        );
+        assert!(result.is_ok(), "world.configure should succeed: {result:?}");
         let val = result.expect("result");
         assert_eq!(val["world_id"], "wld_test_world");
         assert_eq!(val["updated"], true);
@@ -3887,10 +3870,7 @@ mod tests {
             caller_kind: None,
         };
         let result = HostToolExecutor::execute(&req, &state).await;
-        assert!(
-            result.is_ok(),
-            "finding.resolve should succeed: {result:?}"
-        );
+        assert!(result.is_ok(), "finding.resolve should succeed: {result:?}");
         let val = result.expect("result");
         assert_eq!(val["finding_id"], finding_id);
         assert_eq!(val["resolved"], true);
@@ -4092,7 +4072,10 @@ mod tests {
 
         for handle in handles {
             let result = handle.await.expect("no panic");
-            assert!(result.is_ok(), "concurrent dispatch should succeed: {result:?}");
+            assert!(
+                result.is_ok(),
+                "concurrent dispatch should succeed: {result:?}"
+            );
             let val = result.expect("result");
             assert_eq!(val["creator_id"], "test_creator");
         }
