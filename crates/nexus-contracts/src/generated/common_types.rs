@@ -114,7 +114,7 @@ pub enum Visibility {
     Public,
 }
 
-/// `KeyBlock` content type (data-model-v1.md §5.5). `V1`.54 `P1`: added game-bible variants (species, faction, `magic_system`, technology, deity, level, `economy_tier`).
+/// `KeyBlock` content type (data-model-v1.md §5.5). `V1`.54 `P1`: added game-bible variants (species, faction, `magic_system`, technology, deity, level, `economy_tier`). `V1`.55 `P3`: added script variants (dialogue, beat, act).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockType {
@@ -134,6 +134,9 @@ pub enum BlockType {
     Deity,
     Level,
     EconomyTier,
+    Dialogue,
+    Beat,
+    Act,
 }
 
 /// `MemoryItem` type (data-model-v1.md §5.8)

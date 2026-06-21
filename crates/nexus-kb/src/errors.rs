@@ -26,6 +26,12 @@ pub enum ValidationKind {
     InvalidGameBibleCategory,
     /// `body.attributes.game_bible_category` exists but is not a string (V1.54 P1).
     NonStringGameBibleCategory,
+    /// `body.attributes.script_category` is missing (V1.55 P3).
+    MissingScriptCategory,
+    /// `body.attributes.script_category` is not one of the three valid values (V1.55 P3).
+    InvalidScriptCategory,
+    /// `body.attributes.script_category` exists but is not a string (V1.55 P3).
+    NonStringScriptCategory,
 }
 
 impl fmt::Display for ValidationKind {
@@ -41,6 +47,9 @@ impl fmt::Display for ValidationKind {
             Self::MissingGameBibleCategory => write!(f, "missing_game_bible_category"),
             Self::InvalidGameBibleCategory => write!(f, "invalid_game_bible_category"),
             Self::NonStringGameBibleCategory => write!(f, "non_string_game_bible_category"),
+            Self::MissingScriptCategory => write!(f, "missing_script_category"),
+            Self::InvalidScriptCategory => write!(f, "invalid_script_category"),
+            Self::NonStringScriptCategory => write!(f, "non_string_script_category"),
         }
     }
 }
