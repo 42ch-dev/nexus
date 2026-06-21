@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-20 (V1.54 closeout: 4 plans all Done — P-1 prepare + P0 DF-46 full-spectrum write tools (6 tools + LazyLock cache + 13 V1.53 residuals all converged) + P1 game-bible profile scaffold (Depth 2: spec + 7 BlockType variants + bootstrap + 12 Design templates) + P-last spec hygiene (capability-registry.md Draft → Master + Profile B + shipped snapshot); 2 open residuals deferred to V1.55+; wire contracts unchanged)
+**Last updated**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
 When a version ships, append new closed rows here and remove them from the active tracker open tables.
 
@@ -657,6 +657,29 @@ When a version ships, append new closed rows here and remove them from the activ
   - R-V154P1-S002 (low): profile-gate paths (is_work_completed, reconcile_from_filesystem) lack tracing::warn! / audit observability
 
 **Note**: V1.53 P-last retroactively added V1.52 delivery snapshot. V1.54 P-last added V1.54 delivery snapshot directly (no retroactive needed since P-last ran normally).
+
+### V1.55 delivery snapshot (Shipped 2026-06-22)
+
+| Aspect | Detail |
+|---|---|
+| **PR / Merge** | Pending user push authorization; `iteration/v1.55` → `main`; merge commit TBD at PR time |
+| **Plans** | 5/5 Done (P-1 prepare, P0 DF-43 SQLite alignment, P1 DF-31 workspace interface, P2 game-bible Depth 3.5, P3 Script scaffold) + P-mid + P-last closeout |
+| **P0 — DF-43 SQLite persistence / crate-model alignment** | `From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` adapter in `nexus-local-db`; `nexus-knowledge` crate docs locked to model/adapter-seam only; `local-db-schema.md` §4.1.1 ownership boundary text; 7 round-trip + duplicate-truth + DB-only-field-isolation + invalid-enum-passthrough + tag-edge tests in `nexus-local-db/src/reference_source.rs` |
+| **P1 — DF-31 workspace interface skeleton** | `validate_workspace_path_safe()` in `nexus-home-layout` (6 unit tests); `WorkspaceSessionManager` with atomic `consume_session` (concurrent test: 1 success / 9 conflict for N=10) + `SessionError` enum + poison recovery + typed errors; 2 Local API routes (`POST /v1/local/workspace/open`, `POST /v1/local/workspace/commit`); 9 handler tests + 7 session tests; no broad DF-42 Local API redesign |
+| **P2 — Game-bible Depth 3.5** | `design-writing` embedded preset (LLM-driven per-section drafting with section-aware prompts); `design_five_q_check` rubric (design-pillars / mechanics / continuity / playability / clarity — NOT novel-prose 五问); `is_game_bible_design_complete` section detection (overview + pillars + mechanics + intake_status); `candidate_from_llm_json_for_profile` (profile-aware materializer) wired into `run_llm_extract` + `extract_via_llm` + `LlmExtractTask::evaluate` with production-path test (`llm_extract_task_with_game_bible_profile_produces_game_bible_candidate`); tracing additions on `is_work_completed` + `reconcile_from_filesystem` (R-V154P1-S002 closure) |
+| **P3 — Script profile scaffold** | `script-profile.md` Draft (Scripts/ + Beats/ + Characters/ + Logs/ layout); additive BlockType variants `dialogue` + `beat` + `act`; `script_category` validation; `ValidationMode::Script`; 18 direct unit tests for Script mode validation; `script.project_scaffold` capability (ScaffoldTransaction applied to BOTH game-bible and script scaffolds with create/overwrite tracking + temp+rename atomic + `validate_work_ref` + crash-mid-transaction regression test); `nexus42 creator bootstrap --profile script` CLI |
+| **P-mid** | Mid-QC rhythm: 6 QC tri-reviews (3 per plan × 2 plans) per wave; 4 mid-QA verifies (2 per wave); 2 fix-waves on P2 (qc1/qc3 → F-001 production-path coverage; qc1 2nd re-review → Approve); 1 fix-wave on P1 (qc1/qc2/qc3 → consume_session race); 1 fix-wave on P3 (qc1/qc2 → ScaffoldTransaction + validate_work_ref) |
+| **P-last** | `game-bible-profile.md` Draft → Master (after V1.55 P2 Depth 3.5 evidence); `non-novel-profiles-roadmap.md` §1 + §2 status updated; Profile B compaction (5 plans archived to `.mstar/archived/plans/<plan-id>.json`; `plans-done.json` index + v1.55 iteration_summaries entry; layout invariant verified); tracker V1.55 ship snapshot (all 6 carry-forwards closed); shipped-features-tracker V1.55 snapshot; tech-debt rollup (`total_open: 1`, `total_resolved: 14`); `metadata.latest_ship` + `integration_branch_retired` updated; R-V155P2-F002 registered (deferred to V1.56+: design-writing preset no durable section_status auto-transition; manual author step for V1.55) |
+| **Spec promotions** | `game-bible-profile.md` Draft → Master; `script-profile.md` new Draft (Feature line) |
+| **Spec amends** | `entity-scope-model.md` §5.1.1 (script BlockType variants + `script_category` mapping); `cli-spec.md` §6.2 (script bootstrap profile + workspace interface user-facing stubs); `local-db-schema.md` §4.1.1 (DF-43 ownership boundary text); `non-novel-profiles-roadmap.md` §1.5 + §2.5 (V1.55 status); `orchestration-engine.md` (design-writing / script preset semantics) |
+| **QC outcomes** | P0: 3/3 Approve. P1: 3/3 Request Changes → 1 fix-wave (atomic consume_session + SessionError + poison recovery + typed errors + capability count) → 3/3 Approve. P2: qc1+qc3 Request Changes → 2 fix-waves (profile-aware extraction + section_status narrowing + production-path test) → 3/3 Approve. P3: qc1+qc2 Request Changes → 1 fix-wave (ScaffoldTransaction + validate_work_ref + temp+rename + ValidationMode tests + daemon boot count) → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies |
+| **CI gate** | `cargo +nightly fmt --all --check` clean; `cargo clippy --all -- -D warnings` clean; `cargo test --all` 0 failures (post-fix-wave); `pnpm run codegen` no diff on generated |
+| **Wire contracts** | Unchanged (additive enum only: `dialogue` + `beat` + `act` BlockType variants; per project convention `wire_contracts_changed: false`) |
+| **Open at ship / deferred to V1.56+** | 1 carry-over: R-V155P2-F002 (low: design-writing preset no durable `section_status` auto-transition; manual author step for V1.55) |
+| **Residuals closed in V1.55** | R-V154P1-S002 (P2 profile-gate observability); R-V154P1-W001 (P3 ScaffoldTransaction on BOTH non-novel scaffolds); DF-43 (P0 crate-model alignment); DF-31 (P1 interface skeleton shipped) |
+| **Branch topology** | `iteration/v1.55` (retiring) + per-plan `feature/v1.55-df43-sqlite-alignment` + `feature/v1.55-df31-workspace-interface` + `feature/v1.55-game-bible-depth-35` + `feature/v1.55-script-scaffold` (peak 2 worktrees during Wave 1+2; all feature branches merged into integration before tri-review) |
+
+**Note**: V1.55 P-last added V1.55 delivery snapshot directly. PR to `main` pending user push authorization.
 
 ---
 
