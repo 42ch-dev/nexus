@@ -437,6 +437,12 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
 ///
 /// # Errors
 ///
+/// Currently invoked only for `novel-review-master` schedules (preset-gated by
+/// [`load_review_context`]); the extraction pathway (`extract_via_llm` →
+/// [`run_llm_extract`]) is profile-aware via [`ChapterContext::work_profile`]
+/// so game-bible review-time hooks (V1.56+) can reuse this function unchanged
+/// once the preset gate is widened.
+///
 /// Returns `AutoChainError::Database` if the schedule/Work lookup or a
 /// candidate INSERT fails.
 pub async fn extract_kb_candidates_for_review(
@@ -662,11 +668,12 @@ pub(crate) async fn run_llm_extract(
     LlmExtractOutcome::Candidates(candidates)
 }
 
-/// Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter
-/// with the novel `work_profile`.
+/// Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter.
 ///
 /// Thin wrapper around [`run_llm_extract`] that supplies the review-time hook's
 /// default extraction prompt and identity fields from [`ChapterContext`].
+/// The `work_profile` carried by [`ChapterContext`] controls whether candidates
+/// carry `novel_category` or `game_bible_category` attributes (V1.55 P2 F-001).
 async fn extract_via_llm(
     registry: Option<&CapabilityRegistry>,
     ctx: &ChapterContext,
@@ -682,7 +689,7 @@ async fn extract_via_llm(
         &ctx.prose,
         &ctx.creator_id,
         "",
-        "novel",
+        &ctx.work_profile,
     )
     .await
 }
@@ -877,6 +884,10 @@ struct ChapterContext {
     /// Human-readable Work slug for on-disk paths (`work_ref`, falling back to
     /// `story_ref`). `None` in hermetic DB-only tests where no workspace exists.
     work_ref: Option<String>,
+    /// Work profile (e.g. `"novel"`, `"game_bible"`) for profile-aware
+    /// KB extraction payloads. Defaults to `"novel"` when the Work row carries
+    /// `work_profile = NULL` (backward compatibility with pre-V1.36 Works).
+    work_profile: String,
     prose: String,
 }
 
@@ -989,6 +1000,14 @@ async fn load_context_for_preset(
 
     let workspace_id = resolve_workspace_id(pool, &creator_id).await;
     let work_ref = work.work_ref.clone().or_else(|| work.story_ref.clone());
+    // V1.55 P2 fix-wave (F-001): read work_profile from the Work row so the
+    // extraction hook produces profile-aware KB candidates. Defaults to "novel"
+    // for Works created before V1.36 (work_profile = NULL).
+    let work_profile = work
+        .work_profile
+        .clone()
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| "novel".to_string());
     let Some(prose) =
         load_chapter_prose(pool, schedule_id, &work_id, work.current_chapter, ws_dir).await?
     else {
@@ -1002,6 +1021,7 @@ async fn load_context_for_preset(
         chapter: work.current_chapter,
         workspace_id,
         work_ref,
+        work_profile,
         prose,
     }))
 }
