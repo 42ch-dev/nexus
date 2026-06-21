@@ -1,16 +1,129 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T21:15:00Z",
-  "plans": [],
+  "updated_at": "2026-06-22T22:30:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-06-22-v1.57-compass-and-plan-stubs",
+      "title": "V1.57 Compass & Plan Stubs (P-1)",
+      "iteration": "V1.57",
+      "track": "prepare",
+      "wave": null,
+      "effort": "M",
+      "owner": "@project-manager",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.57-compass-and-plan-stubs.md",
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.57-spec-governance-and-registry",
+      "title": "Spec Governance & Capability::Registry Consolidation (P0)",
+      "iteration": "V1.57",
+      "track": "Track A",
+      "wave": "Wave 1",
+      "effort": "L",
+      "owner": "@fullstack-dev",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.57-spec-governance-and-registry.md",
+      "working_branch": "feature/v1.57-spec-governance-and-registry",
+      "merge_target": "iteration/v1.57",
+      "depends_on": ["2026-06-22-v1.57-compass-and-plan-stubs"],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+      "title": "Daemon Refactor & 3-Caller Adapters (P1)",
+      "iteration": "V1.57",
+      "track": "Track B",
+      "wave": "Wave 1",
+      "effort": "XL",
+      "owner": "@fullstack-dev-2",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.57-daemon-refactor-and-caller-adapters.md",
+      "working_branch": "feature/v1.57-daemon-refactor-and-caller-adapters",
+      "merge_target": "iteration/v1.57",
+      "depends_on": ["2026-06-22-v1.57-compass-and-plan-stubs"],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
+      "title": "V1.56 Carry-Forwards & Wire Compliance (P2)",
+      "iteration": "V1.57",
+      "track": "Track A",
+      "wave": "Wave 2",
+      "effort": "M",
+      "owner": "@fullstack-dev",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.57-v156-carry-forwards-and-compliance.md",
+      "working_branch": "feature/v1.57-v156-carry-forwards-and-compliance",
+      "merge_target": "iteration/v1.57",
+      "depends_on": [
+        "2026-06-22-v1.57-spec-governance-and-registry",
+        "2026-06-22-v1.57-daemon-refactor-and-caller-adapters"
+      ],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e",
+      "title": "Worker IPC & Cross-Caller E2E (P3)",
+      "iteration": "V1.57",
+      "track": "Track B",
+      "wave": "Wave 3",
+      "effort": "M",
+      "owner": "@fullstack-dev-2",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e.md",
+      "working_branch": "feature/v1.57-worker-ipc-and-cross-caller-e2e",
+      "merge_target": "iteration/v1.57",
+      "depends_on": [
+        "2026-06-22-v1.57-spec-governance-and-registry",
+        "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+        "2026-06-22-v1.57-v156-carry-forwards-and-compliance"
+      ],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.57-mid-qc-and-fix-waves",
+      "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
+      "iteration": "V1.57",
+      "track": "meta",
+      "wave": "Across all 3 waves",
+      "effort": "M",
+      "owner": "@project-manager",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.57-mid-qc-and-fix-waves.md",
+      "depends_on": null,
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.57-hygiene-and-closeout",
+      "title": "Hygiene & Closeout (P-last)",
+      "iteration": "V1.57",
+      "track": "closeout",
+      "wave": "After Wave 3",
+      "effort": "M",
+      "owner": "@project-manager",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.57-hygiene-and-closeout.md",
+      "working_branch": "feature/v1.57-hygiene-and-closeout",
+      "merge_target": "iteration/v1.57",
+      "depends_on": [
+        "2026-06-22-v1.57-spec-governance-and-registry",
+        "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+        "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
+        "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e"
+      ],
+      "created": "2026-06-22"
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.56 (retiring)",
-    "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.55",
+    "integration_branch": "iteration/v1.57",
+    "integration_branch_retired": false,
+    "last_integration_branch": "iteration/v1.56",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.57",
+    "latest_active_compass": "v1.57-df46-df47-full-parity-and-adapter-unification",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "pending",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -72,7 +185,7 @@
     },
     "tech_debt_summary": {
       "total_open": 35,
-      "total_deferred": 1,
+      "total_deferred": 3,
       "total_resolved": 16,
       "total_archived": 5,
       "by_severity_active": {
@@ -80,8 +193,17 @@
         "low": 17
       },
       "by_target_active": {
-        "V1.57+": 35
+        "V1.57-P0": 1,
+        "V1.57-P1": 2,
+        "V1.57-P2": 1,
+        "V1.57+": 31
       }
+    },
+    "v1_57_carry_forward_index": {
+      "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. Lifecycle stays 'deferred' until the absorbing plan ships and resolves the row. Note: V1.56 metadata reported total_deferred=1 for R-V155P2-F002, but that R# was closed in V1.56 P-last fix-wave (see latest_ship.residual_lifecycle.archived_in_v156) so V1.57 active state resets total_deferred to the new 3 carry-forwards.",
+      "R-V156P1-M001": "P2 — schema rename: capability_count (mechanical, post-registry)",
+      "R-V156P1-M002": "P1 — global state → constructor injection for CdnConfig (god-file refactor cross-cut)",
+      "R-V156P3-S003": "P1 — field drops in caller adapter surfaces (3-caller refactor cross-cut)"
     }
   },
   "residual_findings": {
@@ -2174,9 +2296,11 @@
         "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
         "decision": "accept (defer to post-V1.56 hardening)",
         "owner": "@fullstack-dev-2 (P1 implementer)",
-        "target": "V1.57+",
+        "target": "V1.57",
+        "target_plan": "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
+        "target_date": "V1.57 P2 (Wave 2)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M001]",
-        "note": "Deferrable medium; surfaced by qc1 F-101 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "note": "Deferrable medium; surfaced by qc1 F-101 (architecture). No blocking — V1.56 P1 marked Approve. **V1.57 P2 absorbs**: mechanical rename + deprecation shim + reproducer test. See compass §5.1 carry-forward absorption.",
         "lifecycle": "deferred"
       },
       {
@@ -2187,9 +2311,11 @@
         "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
         "decision": "accept (defer to post-V1.56 hardening)",
         "owner": "@fullstack-dev-2 (P1 implementer)",
-        "target": "V1.57+",
+        "target": "V1.57",
+        "target_plan": "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+        "target_date": "V1.57 P1 (Wave 1)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M002]",
-        "note": "Deferrable medium; surfaced by qc1 F-102 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "note": "Deferrable medium; surfaced by qc1 F-102 (architecture). No blocking — V1.56 P1 marked Approve. **V1.57 P1 absorbs**: replace global `RwLock<Option<CdnConfig>>` with constructor-injected config; natural coupling with god-file split. See compass §5.1 carry-forward absorption.",
         "lifecycle": "deferred"
       },
       {
@@ -2529,9 +2655,11 @@
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
         "decision": "accept (defer to post-V1.56 hardening)",
         "owner": "@fullstack-dev-2 (P3 implementer)",
-        "target": "V1.57+",
+        "target": "V1.57",
+        "target_plan": "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+        "target_date": "V1.57 P1 (Wave 1)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S003]",
-        "note": "Deferrable low; surfaced by qc3 S-003. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "note": "Deferrable low; surfaced by qc3 S-003. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict. **V1.57 P1 absorbs**: remove unused capability fields in caller adapter surfaces during god-file split. See compass §5.1 carry-forward absorption.",
         "lifecycle": "deferred"
       },
       {
