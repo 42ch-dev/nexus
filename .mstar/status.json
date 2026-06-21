@@ -121,63 +121,6 @@
       "pr": null,
       "pr_url": null
     },
-    "latest_ship": {
-      "iteration": "V1.56",
-      "compass": "v1.56-workspace-and-routing-seam-closure",
-      "shipped_at": "2026-06-22T20:30:00Z",
-      "plan_count": 7,
-      "plan_count_done": 7,
-      "open_at_ship": 0,
-      "deferred_to_next": 36,
-      "wire_contracts_changed": true,
-      "wire_contracts_note": "New /v1/local/{world,work,kb,schedule,workspace,findings} scope + new nexus.registry.refresh + nexus.game_bible.section_status.update capability IDs + new conditional routing primitives (multi-branch expression grammar, merge-point converge state kind) + workspace session schema (workspace_sessions table + content_hash + changes[] manifest). All crossing additive-enum threshold per project convention.",
-      "profile_b_compaction": "done",
-      "spec_promotions": [],
-      "plan_ids": [
-        "2026-06-22-v1.56-compass-and-plan-stubs",
-        "2026-06-22-v1.56-df31-df42-full-redesign",
-        "2026-06-22-v1.56-df29-registry-refresh",
-        "2026-06-22-v1.56-df56-independent-slice",
-        "2026-06-22-v1.56-df56-dependent-slice",
-        "2026-06-22-v1.56-mid-qc-and-fix-waves",
-        "2026-06-22-v1.56-hygiene-and-closeout"
-      ],
-      "highlights": {
-        "P-1": "compass + 7 plan stubs + status.json + tracker activation; integration branch iteration/v1.56 created from main; pre_implement_gate flipped to GO after 7 grill decisions locked (Q1-Q7)",
-        "P0_DF31_DF42": "workspace OCC (SHA-256 content hash) + DB-backed persistent sessions + changes[] payload + Local API redesign /v1/local/{world,work,kb,schedule,workspace,findings} + 4 spec amends; pre-QC .sqlx/ cache fix-wave (R-V156P0-CACHE-01)",
-        "P1_DF29": "nexus.registry.refresh capability: synthetic output default (sandbox/air-gap) + optional --cdn-url daemon flag with timeout/retry; qc2 Request Changes (SSRF) → fix-wave added HTTPS-only + redirect policy + private-IP block + 8MiB body cap + typed CdnError enum + CLI/boot URL validation; 11 new negative tests",
-        "P2_DF56_independent": "arbitrary stage-level conditional next + expression grammar (Form B branches/default + MAX_EXPR_DEPTH=32) + multi-branch graphs + merge-point converge state kind with wait_for_all/first_completed/any strategies; 2 fix-waves (H-001 converge runtime gap + C-NEW-001 dedup bug both closed); 821 lib tests + 11 converge e2e + 20 new P3 tests",
-        "P3_DF56_dependent": "registry.refresh conditional edges + workspace branch inputs in expression routing engine; entity-scope-model.md §5.5.8 PM amend; qc1+qc2 Approve + qc3 Request Changes consolidated to Approve via PM override",
-        "P-mid": "meta tracking across 3 waves; 12 QC reports + 4 mid-QA + 3 targeted re-reviews + 1 closeout QA; wave rhythm complete",
-        "P-last": "R-V155P2-F002 fix-wave closed: game_bible.section_status.update capability + design-writing preset auto-transition + 24 new tests; Profile B compaction; shipped-features-tracker V1.56 snapshot; deferred-features-tracker V1.56 ship line; tech-debt rollup"
-      },
-      "residual_lifecycle": {
-        "archived_in_v156": [
-          "R-V156P0-CACHE-01 (sqlx cache miss; PM pre-QC fix)",
-          "R-V156P2-CACHE-01 (engine test bypass; PM-process lesson)",
-          "R-V155P2-F002 (game-bible section_status auto-transition; closed in P-last fix-wave)"
-        ],
-        "open_v157_carry_forward_count": 36,
-        "open_v157_distribution": {
-          "medium": 13,
-          "low": 23
-        },
-        "key_archived_residuals": [
-          "R-V156P0-M001..M006 (P0 qc findings: sha2 dep, path boundary, no OCC race test, sync I/O, TOCTOU, no metrics)",
-          "R-V156P1-M001..M005 + L001..L007 (P1 qc findings: schema rename, global state, force param, tracing, reqwest reuse, etc.)",
-          "R-V156P2-M001..M003 + L001..L004 (P2 qc findings: null semantics, converge fan-in, expr routing tests, AST cache)",
-          "R-V156P3-W001..W002 + S001..S004 (P3 qc findings: workspace tracing, registry instrumentation, synthetic fallback ambiguity, throttle-path yield, field drops, workspace_state hook)",
-          "R-V156-MIDQA-01 (mid-QA Gate 4 fmt drift)",
-          "R-V156-PROCESS-01 (sqlx hygiene protocol)"
-        ]
-      },
-      "wire_contract_changes": "New /v1/local/* scope + new capability IDs (registry.refresh, game_bible.section_status.update) + new conditional routing primitives (expression grammar, converge state kind) + workspace session schema",
-      "qc_tri_review_outcome": "Wave 1 (P0+P1): P0 3/3 Approve; P1 1× Request Changes → fix-wave → 3/3 Approve. Wave 2 (P2): 3× Request Changes → fix-wave → qc2 Approve + qc3 revalidation → qc3 revalidation-2 Approve. Wave 3 (P3): qc1 Approve + qc2 Approve + qc3 Request Changes (warnings only) → PM consolidated Approve via override. Total: 12 QC reports + 4 targeted re-reviews + 1 closeout QA + 1 mid-QA across 3 waves.",
-      "note": "V1.56 Shipped via PR #78 (merge commit 8a2fb20e on 2026-06-21T14:24:37Z, merged by @auto-wood). integration/v1.56 retired per mstar-branch-worktree. 0 open V1.55→V1.56 carry-forwards (DF-29/31/42/56 + R-V155P2-F002 all closed); 35 V1.57+ residuals registered (18 medium + 17 low).",
-      "merge_commit": "8a2fb20e42fe85638e0c3c8994f514d92c57ad65",
-      "pr": 78,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/78"
-    },
     "tech_debt_summary": {
       "total_open": 35,
       "total_deferred": 3,
