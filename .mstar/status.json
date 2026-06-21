@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T17:15:00Z",
+  "updated_at": "2026-06-22T17:45:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
@@ -25,7 +25,7 @@
     {
       "plan_id": "2026-06-22-v1.56-df31-df42-full-redesign",
       "title": "V1.56 P0 — DF-31 Full + DF-42 Local API Redesign",
-      "status": "Todo",
+      "status": "InReview",
       "type": "implement",
       "track": "Track A / Wave 1",
       "owner": "@fullstack-dev",
@@ -37,12 +37,15 @@
       "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
       "depends_on": [
         "P-1 PM signoff"
-      ]
+      ],
+      "qc_status": "tri-review done — Approve with comments (6 medium, 13 low) — see .mstar/plans/reports/2026-06-22-v1.56-df31-df42-full-redesign/qc-consolidated.md",
+      "qa_status": "mid-QA pending",
+      "qc_completed_at": "2026-06-22"
     },
     {
       "plan_id": "2026-06-22-v1.56-df29-registry-refresh",
       "title": "V1.56 P1 — DF-29 registry.refresh",
-      "status": "Todo",
+      "status": "InReview",
       "type": "implement",
       "track": "Track B / Wave 1",
       "owner": "@fullstack-dev-2",
@@ -54,7 +57,23 @@
       "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
       "depends_on": [
         "P-1 PM signoff"
-      ]
+      ],
+      "qc_status": "tri-review done — qc1+qc3 Approve with comments; qc2 Request Changes (Critical SSRF C-001 + High H-001 typed errors + H-002 URL validation) — fix-wave dispatched to @fullstack-dev-2",
+      "qa_status": "mid-QA pending fix-wave + targeted re-review",
+      "qc_completed_at": "2026-06-22",
+      "fix_wave": {
+        "trigger": "qc2 Request Changes",
+        "blocking_findings": [
+          "C-001 SSRF (CDN URL injection)",
+          "H-001 stringly-typed network errors",
+          "H-002 no --cdn-url validation"
+        ],
+        "owner": "@fullstack-dev-2",
+        "status": "dispatched",
+        "re_review_seats": [
+          "qc-specialist-2"
+        ]
+      }
     },
     {
       "plan_id": "2026-06-22-v1.56-df56-independent-slice",
@@ -181,16 +200,17 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/77"
     },
     "tech_debt_summary": {
-      "total_open": 1,
+      "total_open": 7,
       "total_deferred": 1,
       "total_resolved": 15,
       "total_archived": 5,
       "by_severity_active": {
-        "medium": 0,
+        "medium": 6,
         "low": 1
       },
       "by_target_active": {
-        "V1.56 P-last": 1
+        "V1.56 P-last": 1,
+        "V1.57+": 6
       }
     }
   },
@@ -2188,6 +2208,84 @@
           "plan_id": "pre-qc-fix-wave-pm",
           "commit": "8809f0b5"
         }
+      },
+      {
+        "id": "R-V156P0-M001",
+        "title": "sha2 dependency not workspace-managed — added directly in nexus-daemon-runtime/Cargo.toml instead of workspace inheritance",
+        "severity": "medium",
+        "source": "qc1 W-001 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M001]",
+        "note": "Deferrable medium; surfaced by qc1 W-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M002",
+        "title": "Path boundary remains syntactic only — no canonicalize/symlink/prefix enforcement on workspace.open + hash walk (inherited from V1.55; not regressed in P0)",
+        "severity": "medium",
+        "source": "qc2 W-001 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M002]",
+        "note": "Deferrable medium; surfaced by qc2 W-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M003",
+        "title": "No concurrent integration test exercising DB-backed OCC + atomic consume under load (stale-session / hash-conflict / expiry races); unit tests cover happy path only",
+        "severity": "medium",
+        "source": "qc2 W-002 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M003]",
+        "note": "Deferrable medium; surfaced by qc2 W-002. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M004",
+        "title": "Blocking sync I/O in async handler (std::fs::read_to_string in async path) — acceptable pre-1.0; future spawn_blocking",
+        "severity": "medium",
+        "source": "qc3 W-QC3-001 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M004]",
+        "note": "Deferrable medium; surfaced by qc3 W-QC3-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M005",
+        "title": "TOCTOU window on read-modify-write session model — known OCC relaxation per spec; low practical risk for single-daemon",
+        "severity": "medium",
+        "source": "qc3 W-QC3-002 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M005]",
+        "note": "Deferrable medium; surfaced by qc3 W-QC3-002. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P0-M006",
+        "title": "No metrics/tracing spans at OCC conflict path / session expiry / commit latency — observability gap; recommend #[tracing::instrument] spans",
+        "severity": "medium",
+        "source": "qc3 W-QC3-003 (V1.56 P0 tri-review consolidated)",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P0 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M006]",
+        "note": "Deferrable medium; surfaced by qc3 W-QC3-003. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
       }
     ]
   }
