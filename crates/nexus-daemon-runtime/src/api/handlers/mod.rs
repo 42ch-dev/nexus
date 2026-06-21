@@ -5,6 +5,7 @@ pub mod agent_host;
 pub mod creators;
 pub mod findings;
 pub mod host_tool_executor;
+pub mod host_tool_handlers;
 pub mod kb;
 pub mod memory;
 pub mod monitoring;

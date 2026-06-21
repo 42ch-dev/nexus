@@ -6,7 +6,8 @@
 
 use crate::commands::{
     acp::AcpCommand, acp_worker::AcpWorkerArgs, creator::CreatorCommand, daemon::DaemonCommand,
-    daemon_run::DaemonRunArgs, platform::PlatformCommand, sync::SyncCommand, system::SystemCommand,
+    daemon_run::DaemonRunArgs, host_call::HostCallArgs, platform::PlatformCommand,
+    sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -107,6 +108,16 @@ pub enum Commands {
     /// Hidden: Internal daemon-run entry point (self-spawned by daemon start)
     #[command(hide = true)]
     DaemonRun(DaemonRunArgs),
+
+    /// Debug-only: invoke a host tool through the daemon registry
+    ///
+    /// Low-level debugging entry. Sends a raw tool execution request to the
+    /// daemon's host tool executor. Admission gates apply identically as for
+    /// HTTP and worker caller paths.
+    ///
+    /// --args accepts a `JSON` string (e.g. `'{"work_id":"wrk_abc"}'`).
+    /// Exit codes: 0=success, 1=admission denied, 2=tool error/failure.
+    HostCall(HostCallArgs),
 }
 
 /// Build the full `nexus42` clap `Command` for completion generation.
