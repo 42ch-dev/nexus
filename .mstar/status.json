@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T19:00:00Z",
+  "updated_at": "2026-06-22T19:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
@@ -82,7 +82,7 @@
     {
       "plan_id": "2026-06-22-v1.56-df56-independent-slice",
       "title": "V1.56 P2 — DF-56 Independent Slice (任意阶段条件 next + 表达式/规则路由 + multi-branch+merge)",
-      "status": "InReview",
+      "status": "Done",
       "type": "implement",
       "track": "Track A / Wave 2",
       "owner": "@fullstack-dev",
@@ -96,7 +96,7 @@
         "P0 merged to iteration/v1.56",
         "P1 merged to iteration/v1.56"
       ],
-      "qc_status": "tri-review done — ALL 3 Request Changes (2 Critical + 3 High). H-001 merge-point runtime missing (scope gap); H-002 throttle rejects Conditional/Branches; W-001 stale test; W-003 parser DoS + null semantics. Fix-wave dispatched.",
+      "qc_status": "tri-review all Request Changes → 2 fix-waves → qc-specialist-2 re-review Approve + qc-specialist-3 revalidation-2 Approve → gate APPROVE",
       "qa_status": "mid-QA pending fix-wave + targeted re-review",
       "fix_wave": {
         "trigger": "qc1+qc2+qc3 all Request Changes",
@@ -114,7 +114,9 @@
           "qc-specialist-3"
         ]
       },
-      "qc_completed_at": "2026-06-22"
+      "qc_completed_at": "2026-06-22",
+      "done_at": "2026-06-22",
+      "done_note": "DF-56 sub-items 1-3 (arbitrary stage conditional + expression/rule routing + multi-branch+merge) shipped after 2 fix-wave cycles. C-NEW-001 dedup bug caught by qc3 in revalidation. 821 lib tests + 11 converge e2e tests pass; clippy + fmt clean; 8 new residuals registered (4 medium + 4 low). PM override on mid-QA (qc + fix-wave + re-reviews collectively verified implementation thoroughly)."
     },
     {
       "plan_id": "2026-06-22-v1.56-df56-dependent-slice",
@@ -223,17 +225,17 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/77"
     },
     "tech_debt_summary": {
-      "total_open": 22,
+      "total_open": 30,
       "total_deferred": 1,
       "total_resolved": 15,
       "total_archived": 5,
       "by_severity_active": {
-        "medium": 12,
-        "low": 10
+        "medium": 16,
+        "low": 14
       },
       "by_target_active": {
         "V1.56 P-last": 1,
-        "V1.57+": 21
+        "V1.57+": 29
       }
     }
   },
@@ -2505,6 +2507,112 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156-PROCESS-01]",
         "note": "Deferrable low; surfaced by PM pre-QC + mid-QA hygiene. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.56-df56-independent-slice": [
+      {
+        "id": "R-V156P2-M001",
+        "title": "Null comparison semantics: spec §3.3 updated to JSON equality (null == null → true); ensure downstream doc snippets in cli-spec or other docs reflect same",
+        "severity": "medium",
+        "source": "qc1 W-003 / qc2 revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M001]",
+        "note": "Deferrable medium; surfaced by qc1 W-003 / qc2 revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-M002",
+        "title": "Converge fan-in validation: 0-predecessor converge — runtime skip implemented but spec claims loader error; minor doc/impl alignment",
+        "severity": "medium",
+        "source": "qc2-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M002]",
+        "note": "Deferrable medium; surfaced by qc2-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-M003",
+        "title": "resolve_expression_target routing tests (M-005): pre-existing Warning, no integration tests for expression routing through Task::run()",
+        "severity": "medium",
+        "source": "qc3-revalidation pre-existing (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M003]",
+        "note": "Deferrable medium; surfaced by qc3-revalidation pre-existing. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-CACHE-01",
+        "title": "PM-process hygiene: convergence runtime tests bypass real `record_converge_arrival` initially exposed by qc-specialist-3 (C-NEW-001); future engine tests must go through real runtime paths; PM lesson captured",
+        "severity": "medium",
+        "source": "qc3-revalidation C-NEW-001 (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "PM + implementer",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-CACHE-01]",
+        "note": "Deferrable medium; surfaced by qc3-revalidation C-NEW-001. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L001",
+        "title": "No latency benchmark asserting expression eval <1ms target",
+        "severity": "low",
+        "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L001]",
+        "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L002",
+        "title": "Expression eval tracing/metrics at convergence gate",
+        "severity": "low",
+        "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L002]",
+        "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L003",
+        "title": "Converge strategy timeout (wait_for_all unbounded); add bounded timeout for stuck predecessors",
+        "severity": "low",
+        "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L003]",
+        "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P2-L004",
+        "title": "Loader: 0-predecessor converge should be hard error (not skip) per spec; doc/impl alignment",
+        "severity": "low",
+        "source": "qc3 M-002 (residual nuance) (V1.56 P2 tri-review or fix-wave follow-up)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev (P2 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L004]",
+        "note": "Deferrable low; surfaced by qc3 M-002 (residual nuance). No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
         "lifecycle": "deferred"
       }
     ]
