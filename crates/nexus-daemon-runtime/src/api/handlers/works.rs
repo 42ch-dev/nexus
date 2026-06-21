@@ -653,6 +653,9 @@ pub async fn list_works(
 /// - `404 NotFound` if the work id is unknown for the active creator.
 /// - `401 AuthRequired` if no active creator is configured.
 /// - `500 Internal` on database error.
+// V1.55 P2: game-bible auto-promotion adds ~15 lines; still a single-concept
+// handler (completion promotion for two profiles), not a god function.
+#[allow(clippy::too_many_lines)]
 pub async fn get_work(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -711,6 +714,61 @@ pub async fn get_work(
                     error = %e,
                     "Failed to check work completion status"
                 );
+            }
+        }
+    }
+
+    // V1.55 P2: auto-promote game-bible works.status to 'completed' when all
+    // critical Design/*.md sections are accepted per game-bible-profile.md §8.
+    if record.status != "completed" && record.work_profile.as_deref() == Some("game_bible") {
+        let workspace_path = state.workspace_path().unwrap_or_default();
+        if !workspace_path.is_empty() {
+            let workspace_dir = std::path::Path::new(&workspace_path);
+            match nexus_local_db::work_chapters::is_game_bible_design_complete(
+                state.pool(),
+                &work_id,
+                workspace_dir,
+            )
+            .await
+            {
+                Ok(true) => {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let patch = WorkPatch {
+                        status: Some("completed".to_string()),
+                        ..Default::default()
+                    };
+                    match works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now).await
+                    {
+                        Ok(updated) => {
+                            tracing::info!(
+                                target: "completion",
+                                work_id = %work_id,
+                                creator_id = %creator_id,
+                                work_ref = ?updated.work_ref,
+                                "game-bible: Auto-promoted work to 'completed' \
+                                 (all critical Design sections accepted)"
+                            );
+                            record = updated;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "completion",
+                                work_id = %work_id,
+                                error = %e,
+                                "game-bible: Failed to auto-promote work to 'completed'"
+                            );
+                        }
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        target: "completion",
+                        work_id = %work_id,
+                        error = %e,
+                        "game-bible: Failed to check design completion status"
+                    );
+                }
             }
         }
     }
