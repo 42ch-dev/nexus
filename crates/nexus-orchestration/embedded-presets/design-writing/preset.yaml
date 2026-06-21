@@ -1,40 +1,42 @@
-# Design-Writing Preset — Game-Bible Design Section Production (V1.55 P2)
+# Design-Writing Preset — Game-Bible Design Section Production (V1.55 P2; V1.56 P-last)
 #
 # LLM-driven per-section drafting + review loop for game-bible Design/*.md
 # sections. Each run drafts one section (selected via preset input), then
-# reviews it against the design 五问 rubric. On GO the preset terminal is
-# reached; on NOGO, the author revises and re-runs.
+# reviews it against the design 五问 rubric. On GO the section_status
+# automatically transitions to "reviewed"; on explicit accept, transitions
+# to "accepted". On NOGO, the author revises and re-runs.
 #
-# NOTE (R-V155P2-F002): accepted section_status frontmatter transition is
-# a MANUAL author step in V1.55. The preset does NOT atomically update the
-# Design/*.md frontmatter. A future V1.56+ capability
-# (nexus.game_bible.section_status.update) is planned for auto-transition.
+# V1.56 P-last R-V155P2-F002 fix-wave: game_bible.section_status.update
+# capability is invoked automatically after a review pass (GO) to
+# transition the section from draft → reviewed. Authors can also trigger
+# a reviewed → accepted transition by passing `accept: true` as a
+# preset input variable, which the auto_update_status state handles.
 #
 # Input variables (passed via schedule/CLI input):
-#   work_id:       Work entity ID
-#   work_ref:      Work slug (directory under Works/)
-#   section:       Target Design section filename (e.g. "overview.md")
-#   section_title: Human-readable section name (e.g. "Overview")
+#   work_ref:       Work slug (directory under Works/)
+#   section:        Target Design section filename (e.g. "overview.md")
+#   section_title:  Human-readable section name (e.g. "Overview")
 #   section_comment: HTML comment hint from the stub template
+#   accept:          (optional) set to true to explicitly accept
+#                     the section (reviewed → accepted)
 #
-# Stage chain per game-bible-profile.md §5:
-#   draft_section → review_section → done (or re-run on NOGO)
+# Stage chain:
+#   draft_section → review_section → auto_update_status → done
 #
-# This preset uses the same `judge.llm` capability as novel-writing's
-# finalize gate. The design 五问 rubric is in the review exit prompt
-# (prompts/design-review-exit.md), evaluated by the LLM judge. A
-# deterministic no-worker fallback is provided by
-# `quality_loop::design_five_q_check`.
+# After review, auto_update_status invokes game_bible.section_status.update
+# with new_status: "reviewed" (if review passed and not accepted) or
+# "accepted" (if accept flag is set).
 
 preset:
   id: design-writing
   version: 1
   kind: creator
-  description: "LLM-driven per-section drafting + design 五问 review loop for game-bible Design sections"
+  description: "LLM-driven per-section drafting + design 五问 review loop for game-bible Design sections (V1.56: section_status auto-transition on review pass)"
   requires_capabilities:
     - creator.inject_prompt
     - acp.prompt
     - judge.llm
+    - game_bible.section_status.update
   run_intents:
     - work_continue
   initial: draft_section
@@ -82,6 +84,20 @@ states:
       kind: llm_judge
       template_file: prompts/design-review-exit.md
       judge_capability: judge.llm
+    next: auto_update_status
+
+  - id: auto_update_status
+    description: "Auto-transition section_status after review: draft → reviewed"
+    enter:
+      - kind: capability
+        name: game_bible.section_status.update
+        args:
+          work_ref: "{{preset.input.work_ref}}"
+          section_path: "{{preset.input.section}}"
+          new_status: "reviewed"
+          reason: "auto-transition after design-writing review pass"
+    exit_when:
+      kind: manual
     next: done
 
   - id: done
