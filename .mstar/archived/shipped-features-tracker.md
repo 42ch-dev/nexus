@@ -633,11 +633,11 @@ When a version ships, append new closed rows here and remove them from the activ
 | **DF-50 disposition** | **Cancelled** — `nexus42 acp skills export\|verify` CLI surface removed (P-c); `skills-export-compatibility.md` retired to `archived/` (P-1); tracker DF-50 row moved to Cancelled archive. Static `embedded-skills/` model remains the only non-ACP integration path. |
 | **Profile B compaction** | **Done (V1.53 P-last + V1.52 retro)**: 12 plan JSON files in `.mstar/archived/plans/2026-06-{19-v1.52,20-v1.53}-*.json` (7 V1.52 retro + 5 V1.53); plans-done.json layout invariant verified (all 230 entries are strings); tech_debt_summary normalized (13 open: 4 medium + 9 low; 0 critical/high). |
 
-### V1.54 delivery snapshot (Shipped 2026-06-20)
+### V1.54 delivery snapshot (Shipped 2026-06-21)
 
 | Aspect | Detail |
 |---|---|
-| **PR / Merge** | TBD (P-last in progress at iteration/v1.54 HEAD; PR pending); merge target `main` |
+| **PR / Merge** | PR [#76](https://github.com/42ch-dev/nexus/pull/76) (iteration/v1.54 → main); merge commit `2fd183f059e898fd7f9fa0466653985364af7287`; merged 2026-06-21T02:22:34Z |
 | **Plans** | 4/4 Done (P-1 prepare, P0 DF-46 write tools, P1 game-bible scaffold, P-last spec hygiene) |
 | **P0 — DF-46 write tools** | 6 new mutation-side tools (kb_snapshot.write, manuscript.chapter.update, world.configure, work.schedule.set, finding.resolve, pool.entry.manage); LazyLock<CapabilityRegistry> cache + &'_static [AdmissionGate] conversion; Criterion dispatch_latency benchmark; 13 V1.53 residuals (4 medium + 9 low) all converged |
 | **P1 — Game-bible scaffold (Depth 2)** | specs/game-bible-profile.md Draft + 7 new BlockType variants (species, faction, magic_system, technology, deity, level, economy_tier) + ValidationMode::GameBible + game-bible-init preset + GameBibleProjectScaffold capability + 12 Design templates + profile gates (is_novel_profile / is_game_bible_profile) + bootstrap --profile game-bible |

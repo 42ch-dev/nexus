@@ -31,8 +31,8 @@
   ],
   "metadata": {
     "integration_branch": "iteration/v1.54",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.53",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.54",
     "integration_merge_target": "main",
     "latest_active_iteration": null,
     "latest_active_compass": null,
@@ -43,7 +43,7 @@
     "latest_ship": {
       "iteration": "V1.54",
       "compass": "v1.54-df46-completion-and-game-bible-foundation",
-      "shipped_at": "2026-06-20T18:00:00Z",
+      "shipped_at": "2026-06-21T02:22:34Z",
       "plan_count": 4,
       "plan_count_done": 4,
       "open_at_ship": 0,
@@ -51,9 +51,9 @@
       "wire_contracts_changed": false,
       "profile_b_compaction": "done",
       "spec_promotions": ["capability-registry.md: Draft → Master"],
-      "merge_commit": "TBD (PR pending; integration HEAD ready)",
-      "pr": null,
-      "pr_url": null
+      "merge_commit": "2fd183f059e898fd7f9fa0466653985364af7287",
+      "pr": 76,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/76"
     },
     "tech_debt_summary": {
       "total_open": 2,
