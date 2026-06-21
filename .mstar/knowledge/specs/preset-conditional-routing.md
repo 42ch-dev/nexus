@@ -1,11 +1,11 @@
 # Preset Conditional Routing — Specification
 
-**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; full DF-56 roadmap in deferred tracker §3.6.3)  
-**Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics)  
+**Status**: Shipped (V1.42 P2 — 2026-06-12; `llm_judge` GO/NOGO → two `next` edges; V1.52 T-B P0 — 2026-06-19; N-way labeled routing; V1.52 T-B P1 — 2026-06-19; multi-branch merge semantics; V1.56 P2 — 2026-06-22; arbitrary stage conditional + expression routing + converge nodes; V1.56 P3 — 2026-06-22; registry.refresh conditional edges + workspace branch inputs)  
+**Document class**: Feature line (conditional routing — minimal slice → N-way labeled → merge semantics → full expression routing → data-source integration)  
 **Created**: 2026-06-06  
-**Last updated**: 2026-06-19 (V1.52 T-B P1: merge semantics shipped, §3.2 added)
+**Last updated**: 2026-06-22 (V1.56 P3: registry + workspace context fields shipped, §3.4 added)
 **Tracker**: DF-56 (conditional routing / branching engine)  
-**Scope**: Preset `next.kind: conditional` loader + runtime evaluator (future iteration)  
+**Scope**: Preset `next.kind: conditional` loader + runtime evaluator (shipped)  
 **Coordinates with**:
 
 - [orchestration-engine.md](orchestration-engine.md) §7.5 — current linear-only contract; this doc is the future normative target when conditional routing ships
@@ -245,6 +245,73 @@ states:
   - Converge states with 1 predecessor produce a warning (consider linear transition)
 
 **DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
+
+### 3.4 Registry and workspace context fields (Draft V1.56 P3 — shipped in plan `2026-06-22-v1.56-df56-dependent-slice`)
+
+**Status**: Draft (V1.56 P3 shipped)
+**Authoring plan**: `2026-06-22-v1.56-df56-dependent-slice`
+**Promotes to Normative**: P-last of V1.56
+
+Extends the expression grammar's context namespace with two new sub-objects — `registry_refresh` and `workspace` — enabling conditional routing decisions driven by capability registry output and workspace session state.
+
+#### §3.4.1 `registry_refresh` context fields
+
+When a state's conditional `next` references `_context.registry_refresh.*`, the runtime invokes the `nexus.registry.refresh` capability (shipped in V1.56 P1) and feeds its output into the expression context as a nested `registry_refresh` object with these fields:
+
+| Context field | Type | Source | Description |
+|---|---|---|---|
+| `_context.registry_refresh.source` | `String` | `RegistryRefreshOutput.source` | `"synthetic"`, `"cdn"`, or `"synthetic_fallback"` |
+| `_context.registry_refresh.snapshot_version` | `String` | `RegistryRefreshOutput.snapshotVersion` | e.g. `"2026-06-22.v1"` |
+| `_context.registry_refresh.capability_count` | `Number` | `RegistryRefreshOutput.capabilityCount` | Number of registered capabilities in the snapshot |
+| `_context.registry_refresh.fallback_reason` | `String` | `RegistryRefreshOutput.fallbackReason` | Empty on success; typed `CdnError` variant string when fallback occurred |
+| `_context.registry_refresh.retry_count` | `Number` | `RegistryRefreshOutput.retryCount` | Retries actually attempted (0 for synthetic, up to `maxRetries` for CDN) |
+
+**Invocation rule**: the runtime invokes the `registry.refresh` capability once, before evaluating the first branch expression for a state. The result is stored in the context for the duration of the state transition and re-read on subsequent re-entries. If the capability registry is unavailable, the runtime injects a minimal synthetic default (`source: "synthetic"`, `capability_count: 31`, `retry_count: 0`, `fallback_reason: ""`).
+
+**Field naming**: capability output uses camelCase JSON fields (`capabilityCount`, `snapshotVersion`); the expression context maps these to `snake_case` for consistency with the expression grammar (`capability_count`, `snapshot_version`).
+
+**Example**:
+```yaml
+next:
+  branches:
+    - when: "_context.registry_refresh.source == 'synthetic'"
+      target: synthetic_handling_state
+    - when: "_context.registry_refresh.capability_count > 50"
+      target: high_capability_state
+  default: standard_state
+```
+
+#### §3.4.2 `workspace` context fields
+
+When a state's conditional `next` references `_context.workspace.*`, the runtime queries the workspace session state and injects it into the expression context as a nested `workspace` object with these fields:
+
+| Context field | Type | Source | Description |
+|---|---|---|---|
+| `_context.workspace.session_id` | `String` | Active workspace session ID | `"ws_<uuid>"` or `""` when no session is active |
+| `_context.workspace.conflict_detected` | `Bool` | OCC hash conflict status | `true` when the last commit attempt detected a content hash mismatch |
+| `_context.workspace.changes_applied` | `Number` | Count of changes in the session | Number of `ChangeEntry` items applied in the current workspace session |
+| `_context.workspace.workspace_root` | `String` | Canonical workspace root path | Absolute path to the workspace creative root |
+
+**Invocation rule**: the runtime reads the workspace session state from the active workspace context. If no explicit workspace state has been set (e.g., in test harnesses), a minimal default is injected (`session_id: ""`, `conflict_detected: false`, `changes_applied: 0`, `workspace_root: ""`). In production, the orchestration engine populates these fields from the `WorkspaceSessionManager` before evaluating branches.
+
+**OCC semantics**: `conflict_detected` is `true` when a `workspace.commit` operation encountered a `SessionError::HashConflict`. This allows presets to route to conflict-resolution states after a failed commit attempt.
+
+**Example**:
+```yaml
+next:
+  branches:
+    - when: "_context.workspace.conflict_detected"
+      target: resolve_conflict_state
+    - when: "_context.workspace.changes_applied > 3"
+      target: review_large_change
+  default: continue_state
+```
+
+#### §3.4.3 Context dependency scanning
+
+The runtime scans compiled expression ASTs for `registry_refresh` and `workspace` field accesses at construction time (in `build_expr_cache`). The dependency flags (`needs_registry_refresh`, `needs_workspace`) control whether the corresponding capability or session query is invoked before branch evaluation. Expressions that reference neither sub-object skip the invocation entirely — no unnecessary I/O.
+
+**Precedence**: when both `registry_refresh` and `workspace` fields are referenced in the same expression, both are injected. Field name collisions within each sub-object are detected at expression parse time; the expression grammar treats them as distinct nested paths.
 
 ---
 
