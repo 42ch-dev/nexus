@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T18:30:00Z",
+  "updated_at": "2026-06-22T19:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
@@ -82,7 +82,7 @@
     {
       "plan_id": "2026-06-22-v1.56-df56-independent-slice",
       "title": "V1.56 P2 — DF-56 Independent Slice (任意阶段条件 next + 表达式/规则路由 + multi-branch+merge)",
-      "status": "Todo",
+      "status": "InReview",
       "type": "implement",
       "track": "Track A / Wave 2",
       "owner": "@fullstack-dev",
@@ -95,7 +95,26 @@
       "depends_on": [
         "P0 merged to iteration/v1.56",
         "P1 merged to iteration/v1.56"
-      ]
+      ],
+      "qc_status": "tri-review done — ALL 3 Request Changes (2 Critical + 3 High). H-001 merge-point runtime missing (scope gap); H-002 throttle rejects Conditional/Branches; W-001 stale test; W-003 parser DoS + null semantics. Fix-wave dispatched.",
+      "qa_status": "mid-QA pending fix-wave + targeted re-review",
+      "fix_wave": {
+        "trigger": "qc1+qc2+qc3 all Request Changes",
+        "blocking_findings": [
+          "H-001 converge runtime missing",
+          "H-002 throttle bug",
+          "W-001 stale test",
+          "W-003 parser DoS",
+          "W-003 null comparison semantics"
+        ],
+        "owner": "@fullstack-dev (P2 implementer)",
+        "status": "dispatched",
+        "re_review_seats": [
+          "qc-specialist-2",
+          "qc-specialist-3"
+        ]
+      },
+      "qc_completed_at": "2026-06-22"
     },
     {
       "plan_id": "2026-06-22-v1.56-df56-dependent-slice",
