@@ -50,6 +50,7 @@ futures-util = { workspace = true }
 tokio-stream = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 axum-test = "15"
