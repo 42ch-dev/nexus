@@ -148,3 +148,21 @@ through the same `CapabilityRegistry::dispatch(tool_id, input)` call.
   registry-bound `host_tool_handlers` module
 - `CdnConfig` constructor-injected (no global `RwLock`)
 
+### V1.57 P3: Worker IPC allowlist — dynamic derivation
+
+**Status**: Shipped (V1.57 P3)
+**Plan**: `2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e`
+
+The admission pipeline's Gate 1 (tool ID allowlist) now uses
+`CapabilityRegistry::lookup()` as its dynamic SSOT instead of the static
+`TOOL_ALLOWLIST` constant (see `host_tool_handlers.rs::admission_pipeline`).
+This means the worker `agent_tool_request` IPC path — which normalizes
+through `HostToolExecutor::dispatch_from_worker()` → `execute()` →
+`admission_pipeline()` — derives its allowlist from the same registry as
+CLI and HTTP entry points. All 18 shipped `nexus.*` host tool IDs are
+dispatchable via worker IPC; unknown IDs return `NOT_SUPPORTED`.
+
+Cross-caller E2E test: `crates/nexus-daemon-runtime/tests/cross_caller_e2e.rs`
+verifies dispatch equivalence across all 3 caller paths for all 18 IDs
+(54 invocation cases).
+

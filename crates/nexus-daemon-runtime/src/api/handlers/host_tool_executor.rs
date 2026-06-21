@@ -24,7 +24,13 @@ use super::host_tool_handlers::{admission_pipeline, audit_tool_execution};
 
 // ─── V1.34 Tool IDs (spec §12.2) ──────────────────────────────────────────
 
-/// Allowlist of all V1.34 + V1.53 P1 tool IDs.
+/// Allowlist of all V1.34 + V1.53 P1 + V1.54 P0 + V1.56 P1 tool IDs.
+///
+/// V1.57 P3: The runtime allowlist check now uses `CapabilityRegistry::lookup()`
+/// (see `admission_pipeline` in `host_tool_handlers.rs`). This constant is kept for:
+/// - Test consistency (`tool_allowlist_matches_registry_ids`)
+/// - Documentation (the canonical list of dispatched host tool IDs)
+#[allow(dead_code)] // Used in #[cfg(test)] modules only
 pub(crate) const TOOL_ALLOWLIST: &[&str] = &[
     // nexus.* tools (V1.34)
     "nexus.context.whoami",

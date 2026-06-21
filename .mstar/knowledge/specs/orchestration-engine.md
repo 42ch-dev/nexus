@@ -455,8 +455,11 @@ The orchestration engine's schedule executor additionally calls
 `HostToolExecutor::dispatch_for_schedule()` (an in-process path with
 `HostToolCallerKind::Schedule`) which feeds into the same dispatch path.
 
-20 registered host tools (nexus.* + fs/*) are dispatchable through all
-three caller paths. Worker IPC extension to 35 IDs is planned for V1.57 P3.
+20 registered host tools (18 `nexus.*` + 2 `fs/*`) are dispatchable through all
+three caller paths. Worker IPC extension to all 18 shipped `nexus.*` IDs is
+**complete in V1.57 P3** (see plan `2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e`).
+The worker `agent_tool_request` path now uses `CapabilityRegistry::lookup()` as
+its dynamic allowlist (V1.57 P3); unknown IDs return `NOT_SUPPORTED`.
 
 ### 6.5 Tool policy (connection to permission policy engine)
 
