@@ -1,16 +1,125 @@
 {
   "version": 1,
-  "updated_at": "2026-06-21T08:17:18Z",
-  "plans": [],
+  "updated_at": "2026-06-22T16:30:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
+      "title": "V1.56 P-1 — Compass & Plan Stubs",
+      "status": "Done",
+      "type": "prepare",
+      "owner": "@project-manager (PM whitelist; authored by @writing-specialist)",
+      "effort": "M",
+      "working_branch": "feature/v1.56-prepare",
+      "merge_target": "iteration/v1.56",
+      "created": "2026-06-22",
+      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+      "qc_status": "skipped (PM whitelist — Prepare-phase plan authoring)",
+      "qa_status": "n/a",
+      "merge_commits": [
+        "7db4d205 harness(v1.56): P-1 T1 — V1.56 compass authored (Workspace & Routing Seam Closure)",
+        "b43cca4e harness(v1.56): P-1 T2 — 7 plan stubs authored",
+        "b4f75359 harness(v1.56): P-1 T3 — deferred tracker V1.56 activation"
+      ],
+      "done_at": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.56-df31-df42-full-redesign",
+      "title": "V1.56 P0 — DF-31 Full + DF-42 Local API Redesign",
+      "status": "Todo",
+      "type": "implement",
+      "track": "Track A / Wave 1",
+      "owner": "@fullstack-dev",
+      "effort": "L/XL",
+      "working_branch": "feature/v1.56-df31-df42-full-redesign",
+      "merge_target": "iteration/v1.56",
+      "created": "2026-06-22",
+      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
+      "depends_on": ["P-1 PM signoff"]
+    },
+    {
+      "plan_id": "2026-06-22-v1.56-df29-registry-refresh",
+      "title": "V1.56 P1 — DF-29 registry.refresh",
+      "status": "Todo",
+      "type": "implement",
+      "track": "Track B / Wave 1",
+      "owner": "@fullstack-dev-2",
+      "effort": "M",
+      "working_branch": "feature/v1.56-df29-registry-refresh",
+      "merge_target": "iteration/v1.56",
+      "created": "2026-06-22",
+      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
+      "depends_on": ["P-1 PM signoff"]
+    },
+    {
+      "plan_id": "2026-06-22-v1.56-df56-independent-slice",
+      "title": "V1.56 P2 — DF-56 Independent Slice (任意阶段条件 next + 表达式/规则路由 + multi-branch+merge)",
+      "status": "Todo",
+      "type": "implement",
+      "track": "Track A / Wave 2",
+      "owner": "@fullstack-dev",
+      "effort": "L",
+      "working_branch": "feature/v1.56-df56-independent-slice",
+      "merge_target": "iteration/v1.56",
+      "created": "2026-06-22",
+      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
+      "depends_on": ["P0 merged to iteration/v1.56", "P1 merged to iteration/v1.56"]
+    },
+    {
+      "plan_id": "2026-06-22-v1.56-df56-dependent-slice",
+      "title": "V1.56 P3 — DF-56 Dependent Slice (registry.refresh 条件边 + workspace.open/commit 分支输入)",
+      "status": "Todo",
+      "type": "implement",
+      "track": "Track B / Wave 3",
+      "owner": "@fullstack-dev-2",
+      "effort": "M",
+      "working_branch": "feature/v1.56-df56-dependent-slice",
+      "merge_target": "iteration/v1.56",
+      "created": "2026-06-22",
+      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+      "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
+      "depends_on": ["P0 merged to iteration/v1.56", "P1 merged to iteration/v1.56", "P2 merged to iteration/v1.56"]
+    },
+    {
+      "plan_id": "2026-06-22-v1.56-mid-qc-and-fix-waves",
+      "title": "V1.56 P-mid — 3-Wave Mid-QC & Fix-Wave Rhythm",
+      "status": "Todo",
+      "type": "meta",
+      "owner": "@project-manager",
+      "effort": "M",
+      "working_branch": "feature/v1.56-mid-qc-and-fix-waves",
+      "merge_target": "iteration/v1.56",
+      "created": "2026-06-22",
+      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+      "qc_strategy": "Meta tracking only — no standalone QC",
+      "depends_on": []
+    },
+    {
+      "plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+      "title": "V1.56 P-last — Hygiene, Spec Consolidation & Closeout (incl. R-V155P2-F002 fix-wave)",
+      "status": "Todo",
+      "type": "closeout",
+      "owner": "@project-manager",
+      "effort": "L",
+      "working_branch": "feature/v1.56-hygiene-and-closeout",
+      "merge_target": "iteration/v1.56",
+      "created": "2026-06-22",
+      "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+      "qc_strategy": "Report-only QA by @qa-engineer",
+      "depends_on": ["All 4 implement plans (P0–P3) integrated + accepted"]
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.55 (retiring)",
-    "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.54",
+    "integration_branch": "iteration/v1.56",
+    "integration_branch_retired": false,
+    "last_integration_branch": "iteration/v1.55",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.56",
+    "latest_active_compass": "v1.56-workspace-and-routing-seam-closure",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "pending — V1.56 P-1 prepared 2026-06-22; awaiting PM review before Wave 1 dispatch",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -68,7 +177,7 @@
         "low": 1
       },
       "by_target_active": {
-        "V1.56+": 1
+        "V1.56 P-last": 1
       }
     }
   },
@@ -2033,10 +2142,16 @@
         "scope": "crates/nexus-orchestration/embedded-presets/design-writing/preset.yaml",
         "decision": "defer",
         "owner": "@fullstack-dev-2",
-        "target": "V1.56+",
+        "target": "V1.56 P-last",
+        "target_date": "V1.56 P-last fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.55-game-bible-depth-35][R-V155P2-F002]",
-        "note": "Option B: preset/spec comments narrowed to state accepted frontmatter is manual step. Option A (nexus.game_bible.section_status.update capability) deferred to V1.56+. See preset.yaml line 7-10 for inline note.",
-        "lifecycle": "deferred"
+        "note": "Option B: preset/spec comments narrowed to state accepted frontmatter is manual step. Option A (nexus.game_bible.section_status.update capability) deferred to V1.56 P-last fix-wave per V1.56 compass Q7. See preset.yaml line 7-10 for inline note.",
+        "lifecycle": "deferred",
+        "v156_absorption": {
+          "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+          "absorbing_plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+          "decision": "Folded into V1.56 P-last fix-wave per compass Q7; close V1.55 ship residual line to leave zero carry-forwards at V1.56 ship"
+        }
       }
     ]
   }
