@@ -1,15 +1,17 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.55 Shipped** (2026-06-22, all 4 implement plans Done) · V1.54 Shipped (2026-06-21, PR #76) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.56 Active (P-1 in progress; pre-implement gate pending PM review)** · V1.55 Shipped (2026-06-22, PR #77) · V1.54 Shipped (2026-06-21, PR #76) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.55 Shipped (2026-06-22) — Non-Novel Profile Completion & Infrastructure Refactor; 7 plans all Done (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); integration branch `iteration/v1.55` retiring per `mstar-branch-worktree`. V1.54 shipped 2026-06-21 at commit 2fd183f0 via PR #76.
+**Status**: V1.56 Active (P-1 in progress 2026-06-22) — Workspace & Routing Seam Closure; 7 plan stubs authored (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); pre-implement gate pending PM review. V1.55 Shipped 2026-06-22 via PR #77 at commit 9d2893c2; integration branch `iteration/v1.55` retiring per `mstar-branch-worktree`. V1.54 shipped 2026-06-21 at commit 2fd183f0 via PR #76.
+
+**V1.56 carry-forward index (absorbed in V1.56)**: DF-29 → V1.56 P1 (`2026-06-22-v1.56-df29-registry-refresh`) — synthetic default + optional `--cdn-url` network; DF-31 + DF-42 → V1.56 P0 (`2026-06-22-v1.56-df31-df42-full-redesign`) — workspace OCC + persistent sessions + changes[] + /v1/local/* redesign; DF-56 independent sub-items (任意阶段条件 next + 表达式/规则路由 + multi-branch+merge) → V1.56 P2 (`2026-06-22-v1.56-df56-independent-slice`); DF-56 dependent sub-items (registry.refresh 条件边 + workspace.open/commit 分支输入) → V1.56 P3 (`2026-06-22-v1.56-df56-dependent-slice`); R-V155P2-F002 (game-bible design-writing section_status auto-transition) → V1.56 P-last fix-wave.
 
 **V1.55 carry-forward index (closed in V1.55)**: DF-43 → V1.55 P0 (`2026-06-22-v1.55-df43-sqlite-alignment`) — **Closed**; DF-31 → V1.55 P1 (`2026-06-22-v1.55-df31-workspace-interface`) — **Skeleton shipped**; game-bible Depth 3.5 → V1.55 P2 (`2026-06-22-v1.55-game-bible-depth-35`) — **Shipped**; Script scaffold → V1.55 P3 (`2026-06-22-v1.55-script-scaffold`) — **Shipped**; `R-V154P1-S002` → V1.55 P2 — **Resolved**; `R-V154P1-W001` → V1.55 P3 — **Resolved**.
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-22 (V1.55 ship)
+**Last updated**: 2026-06-22 (V1.56 P-1 activation; V1.55 ship baseline)
 
 ---
 
@@ -65,11 +67,11 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 | Knowledge: `dual-outbox-architecture.md` (archived). Single-writer follow-up. |
 | DF-13 | Entitlements API consumption | V1.3 | V2.0+ | M | V1.3 | Platform API dependency. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2→V1.3 | ADR-011/012/013. Platform dependency. |
-| DF-29 | `registry.refresh` (synthetic output) | V1.21 audit | Any future | M | V1.21 | **Out of V1.31/V1.32** — needs network/CDN. `builtins/registry.rs`. |
-| DF-31 | `workspace.open` / `workspace.commit` stubs | V1.21 audit | **V1.55 P1 (skeleton shipped)** | M | V1.21→V1.55 | **V1.55 P1 delivered**: interface skeleton for `workspace.open` (path validation, session_id + snapshot) and `workspace.commit` (session validation, stale/conflict rejection) via Local API endpoints `POST /v1/local/workspace/open` and `POST /v1/local/workspace/commit`. Session manager with in-memory store, TTL expiry, and path-safety guards in `nexus-home-layout`. Full production implementation (file-level OCC, persistent sessions, changes[] payload, DF-42 Local API redesign) remains deferred. Plan: [2026-06-22-v1.55-df31-workspace-interface.md](../plans/2026-06-22-v1.55-df31-workspace-interface.md). |
+| DF-29 | `registry.refresh` (synthetic output) | V1.21 audit | **V1.56 P1** | M | V1.21→V1.56 | **Absorbed in V1.56 P1** (`2026-06-22-v1.56-df29-registry-refresh`) — synthetic output as default (embedded registry snapshot), optional `--cdn-url <url>` daemon start option with timeout/retry, sandbox/air-gap compatibility. Will be closed once V1.56 ships. |
+| DF-31 | `workspace.open` / `workspace.commit` (full production) | V1.21 audit | **V1.56 P0** | L/XL | V1.21→V1.55 skeleton→V1.56 P0 | **V1.55 P1 delivered skeleton** (path validation, in-memory session, 2 API routes). **V1.56 P0 absorbs the remaining scope**: file-level OCC (content hash), persistent sessions (DB-backed), changes[] payload (manifest path/hash/op), plus DF-42 full Local API redesign. Absorbing plan: [2026-06-22-v1.56-df31-df42-full-redesign.md](../plans/2026-06-22-v1.56-df31-df42-full-redesign.md). |
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | **Converged via DF-68 (V1.39 P0 Shipped)** | S | V1.21→V1.39 | `daemon-runtime/lifecycle/actions.rs`. V1.39 P0 conditional boot auto-resume for checkpointed auto-chain drivers supersedes blanket pause-only recovery for those schedules. DF-68 implemented: `find_resumable_works` + boot logging in `boot.rs`. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
-| DF-42 | Full Local API redesign for World/User KB | V1.24 (KCA-003) | Any future | L | V1.24 | `/v1/local/kb/*` full scoping redesign. |
+| DF-42 | Full Local API redesign for World/User KB | V1.24 (KCA-003) | **V1.56 P0** | L (absorbed into DF-31 L/XL) | V1.24→V1.56 | **Absorbed in V1.56 P0** (`2026-06-22-v1.56-df31-df42-full-redesign`) — `/v1/local/{world,work,kb,schedule,workspace,findings}` full scope redesign; co-delivered with DF-31 full production implementation per PM Q5. |
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | **Closed V1.55 P0** | M | V1.26–28 partial→V1.55 P0 | **Closed**: adapter `From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` added in `nexus-local-db`; `nexus-knowledge` crate docs locked to model/adapter-seam only; spec `local-db-schema.md` §4.1.1 ownership boundary text added; round-trip + duplicate-truth prevention tests in `nexus-local-db/src/reference_source.rs`. Plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-df43-sqlite-alignment.md). |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
@@ -81,7 +83,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.39 P0 Shipped** | S | V1.34→V1.35→V1.36→V1.37→V1.38→V1.39 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce). V1.38 shipped multi-chapter foundation **without** auto-reenqueue. **V1.39 P0** implements full `intake → research → produce → review → persist` auto-chain (default true), chapter outer loop, side-input lane, boot recovery, `--no-auto-chain` opt-out, `creator run resume` command. Core: `nexus-orchestration::auto_chain` module with `evaluate_next_step` + 15 unit tests + 14 integration tests. Plan: [2026-06-09-v1.39-fl-e-auto-chain-engine.md](../plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md). **Tri-review + targeted re-review all Approve; final consolidated gate Approve. PR #50 merged ad9725d8.** |
 | DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
-| DF-56 | Conditional routing / branching engine | V1.33 | **V1.42 P2 Shipped** | L | V1.33→V1.34→V1.42 | **V1.42 P2 shipped**: `llm_judge` GO/NOGO → two `next` edges (commits `5467eaa2` T1, `e81412e6` T2, `c8b1cb5c` T3, `3153a7bd` T4). Plan: [2026-06-11-v1.42-conditional-routing.md](../plans/2026-06-11-v1.42-conditional-routing.md). Spec: [preset-conditional-routing.md](specs/preset-conditional-routing.md). **Post-V1.42 full roadmap**: see §3.6.3. |
+| DF-56 | Conditional routing / branching engine | V1.33 | **V1.56 P2+P3** | L | V1.33→V1.34→V1.42 minimal slice→V1.56 P2+P3 | **V1.42 P2 shipped**: `llm_judge` GO/NOGO → two `next` edges. **V1.56 absorbs remaining 4 sub-items**: P2 (`2026-06-22-v1.56-df56-independent-slice`) — 任意阶段条件 next + 表达式/规则路由 + multi-branch+merge; P3 (`2026-06-22-v1.56-df56-dependent-slice`) — registry.refresh 条件边 + workspace.open/commit 分支输入. Will be closed once V1.56 ships. Spec: [preset-conditional-routing.md](specs/preset-conditional-routing.md). **Post-V1.42 full roadmap**: see §3.6.3. |
 | DF-57 | **Closed in V1.36 P2** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-58 | **Closed in V1.36 P1** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-59 | Platform publish integration for novel正文 | V1.36 prepare | **Backlog** | L | V1.36 | Explicit OUT of V1.36 short-term scope; user may publish manually. See compass §1.2 non-goals |
@@ -124,14 +126,15 @@ See plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
-**V1.55 ship residual retargeting**: All 2 V1.54 carry-forwards closed in V1.55. `R-V154P1-S002` resolved in P2 (profile-gate observability); `R-V154P1-W001` resolved in P3 (ScaffoldTransaction). New V1.55-internal residual `R-V155P2-F002` (deferred to V1.56+; design-writing preset no durable section_status auto-transition; manual author step for V1.55) registered in `status.json`. Machine SSOT: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`.
+**V1.55 ship residual retargeting**: All 2 V1.54 carry-forwards closed in V1.55. `R-V154P1-S002` resolved in P2 (profile-gate observability); `R-V154P1-W001` resolved in P3 (ScaffoldTransaction). `R-V155P2-F002` (V1.55-internal; design-writing preset no durable section_status auto-transition) **absorbed into V1.56 P-last fix-wave** per compass Q7. Machine SSOT: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`.
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22**; integration_branch=`iteration/v1.55` (P-last retiring); pre_implement_gate=`GO — V1.55 P-1 Done 2026-06-22` (retired post-ship); 1 open residual (`R-V155P2-F002` deferred to V1.56+). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22**; iteration state: V1.55 retired, V1.56 P-1 in progress; pre_implement_gate pending PM review; 1 open residual `R-V155P2-F002` absorbed into V1.56 P-last fix-wave per compass Q7, still open at status.json pending V1.56 plan registration by PM). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.55 carry-forward (V1.54 ship) | **2** | 2 low; see V1.55 carry-forward index above |
-| **Total deferred at V1.55 ship** | **1** | See `metadata.tech_debt_summary.total_deferred` (= 1; 1 low: `R-V155P2-F002` → V1.56+) |
+| V1.55 carry-forward (V1.54 ship) | **2** | 2 low; resolved in V1.55 P2+P3 (see V1.55 carry-forward index above) |
+| V1.55 internal (V1.55 ship) | **1** | 1 low: `R-V155P2-F002` → absorbed into V1.56 P-last fix-wave per compass Q7 |
+| **Total deferred at V1.55 ship** | **1** | See `metadata.tech_debt_summary.total_deferred` (= 1; 1 low: `R-V155P2-F002` → V1.56 P-last) |
 
 **Closed / historical residuals**
 
@@ -279,7 +282,7 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- **V1.55 Active** (P-1 in progress): [v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md](../iterations/v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md) — Non-Novel Profile Completion & Infrastructure Refactor; pre-implement gate pending PM review.
+- **V1.56 Active** (P-1 in progress): [v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md](../iterations/v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md) — Workspace & Routing Seam Closure; 7 plan stubs authored; pre-implement gate pending PM review.
 
 **Latest shipped iteration**
 
