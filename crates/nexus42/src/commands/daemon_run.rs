@@ -38,6 +38,11 @@ pub struct DaemonRunArgs {
     /// When set, enables fetching the ACP registry from a CDN
     /// with built-in timeout and retry (10s timeout, 3 retries).
     /// When absent, registry.refresh returns synthetic output only.
+    ///
+    /// # Security
+    ///
+    /// Must be a public HTTPS CDN URL. Non-HTTPS schemes, private IPs,
+    /// loopback, link-local, and metadata endpoints are rejected.
     #[arg(long)]
     pub cdn_url: Option<String>,
 }
@@ -48,6 +53,11 @@ pub struct DaemonRunArgs {
 ///
 /// Propagates any error from the daemon runtime.
 pub async fn run(args: DaemonRunArgs) -> Result<()> {
+    // Validate CDN URL before boot (H-002).
+    if let Some(ref url) = args.cdn_url {
+        validate_cdn_url(url)?;
+    }
+
     let config = nexus_daemon_runtime::boot::DaemonConfig {
         port: args.port,
         host: args.host,
@@ -62,4 +72,14 @@ pub async fn run(args: DaemonRunArgs) -> Result<()> {
         .map_err(|e| crate::errors::CliError::Daemon {
             message: format!("Daemon runtime error: {e}"),
         })
+}
+
+/// Validate a `--cdn-url` value against security constraints.
+fn validate_cdn_url(url: &str) -> Result<()> {
+    nexus_orchestration::capability::builtins::validate_cdn_url_static(url).map_err(|e| {
+        crate::errors::CliError::Config(format!(
+            "--cdn-url must be a public HTTPS CDN URL (https://...); \
+             got {url:?}: {e}"
+        ))
+    })
 }
