@@ -88,9 +88,22 @@ A script Work is closer to novel than essay because it has ordered scenes, but i
 - World KB can supply characters/locations, but script-specific scene continuity requires a separate scene index.
 - Should not reuse `work_chapters` without a clear migration to generic `work_units` or profile-specific scene rows.
 
-### 2.5 Suggested target iteration
+### 2.5 Status
 
-V1.55 P3. V1.55 plans a V1.54-style scaffold (Draft `script-profile.md`, init scaffold, additive `dialogue` / `beat` / `act` BlockType variants, and `script_category` taxonomy). Full script-writing run-loop and export/formatting remain future scope unless the P3 plan explicitly narrows them.
+**P3 Scaffold Implemented V1.55** — script profile scaffold delivered in [plan `2026-06-22-v1.55-script-scaffold`](../../plans/2026-06-22-v1.55-script-scaffold.md). Feature line spec: [script-profile.md](script-profile.md) (Draft V1.55).
+
+| Deliverable | Status |
+| --- | --- |
+| `specs/script-profile.md` Draft | ✓ |
+| 3 new `BlockType` variants in wire schema (`dialogue`, `beat`, `act`) | ✓ |
+| `script-init` preset | ✓ |
+| `nexus42 creator bootstrap --profile script` | ✓ |
+| `ValidationMode::Script` | ✓ |
+| `script_category` taxonomy mapping | ✓ |
+| `ScaffoldTransaction` pattern applied (R-V154P1-W001 closed) | ✓ |
+| Full script-writing run-loop (`script-writing` preset) | V1.56+ |
+| Script screenplay export / formatting normalization | V1.56+ |
+| KB extraction for script | V1.56+ |
 
 ---
 

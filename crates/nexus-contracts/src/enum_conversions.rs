@@ -84,7 +84,7 @@ impl SubscriptionTier {
     }
 }
 
-// V1.54 P1: BlockType as_str — supports both novel and game-bible variants.
+// V1.54 P1: BlockType as_str — supports novel, game-bible, and script (V1.55 P3) variants.
 impl BlockType {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
@@ -104,6 +104,10 @@ impl BlockType {
             Self::Deity => "deity",
             Self::Level => "level",
             Self::EconomyTier => "economy_tier",
+            // V1.55 P3: script taxonomy
+            Self::Dialogue => "dialogue",
+            Self::Beat => "beat",
+            Self::Act => "act",
         }
     }
 }

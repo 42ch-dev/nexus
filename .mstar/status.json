@@ -186,7 +186,14 @@
         "target_date": "V1.55+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.54-game-bible-scaffold][R-V154P1-W001]",
         "note": "Deferral note added at game_bible_scaffold.rs:262. novel.project_scaffold uses ScaffoldTransaction pattern (novel_scaffold.rs:763-830) — adopt same for game-bible in V1.55+.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.55 P3 closed: ScaffoldTransaction applied to game_bible_scaffold.rs (V1.55 P3); script_scaffold.rs also uses ScaffoldTransaction from creation. Both non-novel scaffold paths now wrap FS writes + DB PATCH in atomic transaction with Drop-based FS rollback. Transaction tests cover rollback + commit behavior for both game-bible and script scaffolds.",
+        "closure_evidence": "feature/v1.55-script-scaffold branch; game_bible_scaffold.rs: ScaffoldTransaction struct + rollback/commit tests; script_scaffold.rs: ScaffoldTransaction struct + rollback/commit tests",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.55-script-scaffold",
+          "commit": "feature/v1.55-script-scaffold"
+        }
       },
       {
         "id": "R-V154P1-S002",
