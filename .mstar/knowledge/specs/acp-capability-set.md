@@ -177,6 +177,30 @@ Runtime note:
 | --- | --- | --- |
 | `nexus.research.query` | optional | Query local-only `ReferenceSource` index / excerpts without syncing source material |
 
+### 4.7B Game-Bible (V1.56 P-last)
+
+| Capability ID | Required | Description |
+| --- | --- | --- |
+| `game_bible.section_status.update` | yes | Atomically update the `section_status` field in a game-bible `Design/*.md` YAML frontmatter; validates transition (draft → reviewed → accepted) and writes via temp+rename for durability |
+
+**Invocation contract**:
+
+- **Input**: `{ work_ref: string, section_path: string, new_status: "draft" | "reviewed" | "accepted", reason?: string, works_root?: string }`
+- **Output**: `{ updated: bool, new_section_status: string, section_path: string }`
+- **Transition rules**:
+  - `draft → reviewed` — auto-transition after design-writing review pass (GO)
+  - `reviewed → accepted` — explicit author accept
+  - No skipping (`draft → accepted` rejected with `InputInvalid`)
+  - No backwards (`accepted → draft` / `accepted → reviewed` rejected with `InputInvalid`)
+  - No self-transition (same-status rejected)
+- **Atomicity**: writes to `{tmp}` then renames over the target; no half-written file survives a crash
+- **Field preservation**: updates `section_status` and `last_updated` (if present); all other frontmatter fields (`section_weight`, etc.) are preserved unchanged
+- **Errors**:
+  - `InputInvalid` — invalid transition, unknown status, section not found, missing frontmatter
+  - `Internal` — I/O errors, write failures
+
+**Preset integration**: The `design-writing` preset (V1.56 P-last) invokes this capability automatically after a review pass (GO) to transition `draft → reviewed`. The `requires_capabilities` gate ensures the capability is registered before the preset can be loaded.
+
 ### 4.7 Observability
 
 | Capability ID | Required | Description |

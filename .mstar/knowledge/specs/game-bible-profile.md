@@ -1,8 +1,9 @@
-# Game-Bible Profile — Master Specification V1.55
+# Game-Bible Profile — Master Specification V1.56
 
-**Status**: Master (V1.55 P2 shipped; Depth 3.5 complete: design-writing preset + design 五问 quality rubric + section completion detection + KB extraction + R-V154P1-S002 observability closure)  
+**Status**: Master (V1.56 P-last: R-V155P2-F002 closed — `design-writing` preset `section_status` auto-transition via `game_bible.section_status.update` capability; V1.55 P2 shipped: Depth 3.5 complete — design-writing preset + design 五问 quality rubric + section completion detection + KB extraction + R-V154P1-S002 observability closure)  
 **Document class**: Feature line  
 **Created**: 2026-06-22  
+**Last updated**: 2026-06-22 (V1.56 P-last: §4.1 section lifecycle auto-transition)
 **Scope**: `work_profile: game_bible` on generic **Work** — artifact layout under `Works/<work_ref>/Design/`, section status model, stage chain, KB taxonomy, completion semantics  
 **Coordinates with**:
 
@@ -110,6 +111,18 @@ last_updated: <ISO 8601 datetime>
 | `section_status` | `draft`, `reviewed`, `accepted` | Per-section maturity — analogous to chapter status but for design documents |
 | `section_weight` | `critical`, `important`, `nice_to_have` | Priority tier — `critical` sections gate completion |
 | `last_updated` | ISO 8601 datetime | Last substantive edit timestamp |
+
+**Section lifecycle (V1.56 P-last R-V155P2-F002)**:
+
+```
+draft → reviewed → accepted
+```
+
+- **`draft → reviewed`**: Auto-transition by the `design-writing` preset after a review pass (GO). The `game_bible.section_status.update` capability writes the new frontmatter atomically via temp+rename.
+- **`reviewed → accepted`**: Explicit author accept — invoked manually or via preset input flag.
+- **No skipping**: `draft → accepted` is rejected.
+- **No backwards**: `accepted → reviewed` / `accepted → draft` are rejected.
+- **Atomicity**: Frontmatter writes use temp+rename; no half-written file survives a crash. All other frontmatter fields (`section_weight`, etc.) and body content are preserved.
 
 ### 4.2 Template Stubs (V1.54 init)
 
@@ -383,11 +396,11 @@ Game-bible uses `work_profile = "game_bible"` (TEXT column, consistent with `"no
 
 | Feature | Description | Depends on |
 | --- | --- | --- |
-| `design-writing` preset | LLM-driven per-section drafting with review loop | V1.54 scaffold |
-| Section completion detection | Daemon evaluates `section_status` frontmatter across all Design files | V1.54 section model |
-| KB extraction for game-bible | LLM extracts design facts into World KB with `game_bible_category` | V1.54 BlockType + ValidationMode |
+| `design-writing` preset | LLM-driven per-section drafting with review loop + auto section_status transition (V1.55 P2 shipped; V1.56 P-last R-V155P2-F002 closed) | V1.54 scaffold |
+| Section completion detection | Daemon evaluates `section_status` frontmatter across all Design files (V1.55 P2 shipped) | V1.54 section model |
+| KB extraction for game-bible | LLM extracts design facts into World KB with `game_bible_category` (V1.55 P2 shipped) | V1.54 BlockType + ValidationMode |
 | Game-bible auto-chain | Optional stage sequencing for multi-section production | V1.54 preset stubs |
-| Script profile scaffold | Follow game-bible pattern for script/dialogue Works | V1.54 pattern validated |
+| Script profile scaffold | Follow game-bible pattern for script/dialogue Works (V1.55 P3 shipped) | V1.54 pattern validated |
 
 ---
 
