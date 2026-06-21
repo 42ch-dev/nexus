@@ -14,10 +14,11 @@ async fn registry_has_twenty_one_builtins() {
     // V1.36 P1 added `novel.project_scaffold` (18→19);
     // P3 added `novel.chapter_transition` (19→20);
     // V1.51 T-A P0 added `nexus.llm.extract` (20→21);
-    // V1.52 T-A P2 added `essay.project_scaffold` (21→22).
+    // V1.52 T-A P2 added `essay.project_scaffold` (21→22);
+    // V1.54 P1 added `game_bible.project_scaffold` (22→23).
     // UPDATE THIS TEST when adding a new builtin.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 22);
+    assert_eq!(reg.len(), 23);
 }
 
 #[tokio::test]

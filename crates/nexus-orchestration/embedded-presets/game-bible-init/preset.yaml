@@ -1,0 +1,56 @@
+# Game-Bible Init Preset — filesystem-only scaffold for game_bible Work bootstrap
+#
+# V1.54 P1: second non-novel profile per game-bible-profile.md
+# One-shot (work_init only); no ACP conversation turns.
+# Materializes Works/<work_ref>/Design/ with 12 template stubs,
+# README.md, and Logs/{design,review}/ directories.
+#
+# Input variables (passed via core_context / preset.input):
+#   work_id:       Work entity ID being initialized (required)
+#   creator_id:    Creator owning the Work (required)
+#   initial_idea:  Raw user idea text (required)
+#   work_ref:      Slug pre-derived by CLI from --idea / args (required)
+#   title:         Working title pre-collected via CLI (required)
+#   world_id:      Optional world binding (string or null)
+#
+# This preset is one-shot (work_init only); it does NOT auto-chain
+# into design-writing. After completion, the Work is in intake-started state.
+
+preset:
+  id: game-bible-init
+  version: 1
+  kind: creator
+  description: "Filesystem scaffold: bootstrap a game-bible Work with 12 Design templates, README, and logs directories"
+  requires_capabilities:
+    - game_bible.project_scaffold
+  run_intents:
+    - work_init
+  initial: scaffold
+  terminal: done
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: in
+      value: [null, game_bible]
+    - kind: work_field
+      field: workspace_slug
+      op: required
+
+states:
+  - id: scaffold
+    description: "Invoke game_bible.project_scaffold to materialize the Work directory tree"
+    enter:
+      - kind: capability
+        name: game_bible.project_scaffold
+        args:
+          creator_id: "{{preset.input.creator_id}}"
+          work_id: "{{preset.input.work_id}}"
+          work_ref: "{{preset.input.work_ref}}"
+          title: "{{preset.input.title}}"
+          world_id: "{{preset.input.world_id}}"
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true

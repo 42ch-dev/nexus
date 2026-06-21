@@ -296,6 +296,14 @@ fn parse_block_type(s: &str) -> Result<BlockType, KbStoreError> {
         "Conflict" => Ok(BlockType::Conflict),
         "InfoPoint" => Ok(BlockType::InfoPoint),
         "Event" => Ok(BlockType::Event),
+        // V1.54 P1: game-bible BlockType variants (legacy PascalCase fallback)
+        "Species" => Ok(BlockType::Species),
+        "Faction" => Ok(BlockType::Faction),
+        "MagicSystem" => Ok(BlockType::MagicSystem),
+        "Technology" => Ok(BlockType::Technology),
+        "Deity" => Ok(BlockType::Deity),
+        "Level" => Ok(BlockType::Level),
+        "EconomyTier" => Ok(BlockType::EconomyTier),
         _ => Err(KbStoreError::Storage(format!("unknown block_type: {s}"))),
     }
 }
