@@ -34,7 +34,7 @@
         "2026-06-22-v1.55-compass-and-plan-stubs"
       ],
       "qc_status": "Approve — qc1/qc2/qc3 (commits 7306102a / 21c4b28a / 85406d1c)",
-      "qa_status": "mid-QA pending (P0 verify by @qa-engineer)",
+      "qa_status": "Pass — @qa-engineer mid-QA (commit 24122d26; 8/8 AC; CI gates re-run clean)",
       "merge_commit": "fa2f28d5 (P0 merge) + 4c768b78 (plan notes)",
       "done_at": "2026-06-21"
     },
@@ -57,7 +57,7 @@
     {
       "plan_id": "2026-06-22-v1.55-game-bible-depth-35",
       "title": "V1.55 P2 — Game-Bible Depth 3.5",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev-2",
       "effort": "L",
       "working_branch": "feature/v1.55-game-bible-depth-35",
@@ -69,9 +69,10 @@
       "dependencies": [
         "2026-06-22-v1.55-compass-and-plan-stubs"
       ],
-      "qc_status": "qc1 Approve (initial Request Changes → fix-wave → targeted re-review pending); qc2 Approve; qc3 Approve (initial Request Changes → fix-wave → targeted re-review pending)",
-      "qa_status": "mid-QA pending (P2 verify by @qa-engineer after targeted re-review)",
-      "merge_commit": "0718a6fe (P2 base) + 798c47a0 (P2 fix-wave) + fc9c1e54 (fix-wave merge)"
+      "qc_status": "qc1 Approve (after 2 fix-waves; commits ea351a75 + 35772299); qc2 Approve (commit 53efe06f); qc3 Approve (after 1 fix-wave; commit 8fe08564)",
+      "qa_status": "Pass — @qa-engineer mid-QA (commit de1eb1d9; 7/7 AC; CI gates re-run clean; R-V154P1-S002 resolved; R-V155P2-F002 registered)",
+      "merge_commit": "0718a6fe (P2 base) + 798c47a0 (P2 1st fix-wave) + af987571 (P2 2nd fix-wave) + d5f5f8dd + b37d19e5 + f3cec4e6 (commits incl. plan stub updates)",
+      "done_at": "2026-06-21"
     },
     {
       "plan_id": "2026-06-22-v1.55-script-scaffold",
