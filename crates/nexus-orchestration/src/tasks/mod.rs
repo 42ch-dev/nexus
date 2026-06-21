@@ -570,10 +570,17 @@ impl LlmExtractTask {
             self.template.clone()
         });
 
-        // 2. Read chapter prose and identity from the context.
+        // 2. Read chapter prose, identity, and work_profile from the context.
         let chapter_prose: String = context.get("chapter_prose").await.unwrap_or_default();
         let creator_id: String = context.get("_creator_id").await.unwrap_or_default();
         let session_id: String = context.get("_session_id").await.unwrap_or_default();
+        // V1.55 P2 fix-wave (F-001): read work_profile from context so the
+        // extraction path produces profile-aware payloads. Defaults to "novel"
+        // for backward compatibility with existing callers.
+        let work_profile: String = context
+            .get("work_profile")
+            .await
+            .unwrap_or_else(|| "novel".to_string());
 
         // 3. Use the shared extraction path (closes R-V151Q3-W001).
         Ok(crate::quality_loop::run_llm_extract(
@@ -583,6 +590,7 @@ impl LlmExtractTask {
             &chapter_prose,
             &creator_id,
             &session_id,
+            &work_profile,
         )
         .await)
     }
