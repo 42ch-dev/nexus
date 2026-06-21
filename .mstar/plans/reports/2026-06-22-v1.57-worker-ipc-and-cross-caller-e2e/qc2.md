@@ -149,4 +149,4 @@ The single Warning is a documentation/clarification item about the E2E's scope (
 **Issues/Risks**: None blocking. One Warning (E2E scope documentation) and one Suggestion (adapter naming) recorded for traceability; neither indicates a correctness or security defect.
 **Plan Update**: None required from reviewer side (report only).
 **Handoff**: Report written and will be committed. PM to consolidate with qc1/qc3.
-**Git**: (will be appended after `git add` + `git commit`)
+**Git**: `cca86a5a qc(v1.57-p3): qc2 report — Approve`
