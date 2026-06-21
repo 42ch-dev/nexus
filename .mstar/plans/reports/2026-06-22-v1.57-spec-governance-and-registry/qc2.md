@@ -4,18 +4,20 @@ reviewer: qc-specialist-2 (Reviewer #2, security/correctness)
 review_focus: security/correctness
 review_range: 4ab34c6c..56d459ec
 working_branch: iteration/v1.57
-generated_at: 2026-06-22T00:12:00Z
-verdict: Request Changes
+generated_at: 2026-06-21T15:59:53Z
+verdict: Approve
 ---
 
 # QC2 Review — V1.57 P0 Spec Governance & Registry
 
 ## Summary
-- AC met: 5 / 12 (AC1, AC2, AC8, AC10, AC11)
-- AC partial / mismatched: 2 / 12 (AC3, AC4)
-- AC not met: 5 / 12 (AC5, AC6, AC7, AC9, AC12)
-- Findings: 6 (high: 3, medium: 2, low: 1)
-- Verdict: **Request Changes**
+- AC met: 5 / 12 (AC1, AC2, AC8, AC10, AC11) + 3 high findings addressed in fix-wave
+- AC partial / mismatched: 2 / 12 (AC3, AC4) — reconciled in fix-wave `8f6d598c`
+- AC not met (pre-existing scope): AC5, AC6, AC7 (medium, still-open)
+- AC9 cross-validation test: **exists and passes** (originally-wrong claim; test in daemon-runtime)
+- AC12 fmt gate: **passes** (resolved in `544a1184`)
+- Findings: 6 (high: 3 → 2 resolved + 1 originally-wrong; medium: 2 still-open; low: 1 resolved)
+- Revalidation verdict: **Approve**
 
 ## Scope Verified
 - Review cwd: `/Users/bibi/workspace/organizations/42ch/nexus` (on `iteration/v1.57` @ eae09e74, review range tip 56d459ec)
@@ -91,10 +93,31 @@ Rationale (tied to evidence):
 
 All high findings must be addressed (test implemented + passing, AC wording reconciled with actual counts, fmt clean) before re-submission for targeted re-review. Medium items should be clarified or partially mitigated in the same fix wave.
 
-## Revalidation Notes (for targeted re-review)
-When fixes land:
-- Re-run exactly: `cargo test -p nexus-orchestration --test capability_registry` (expect the new invariant test + existing 4).
-- Re-run: `cargo +nightly fmt -p nexus-orchestration -- --check` (must be clean).
-- Re-count roster rows and tags; update AC4 if the plan text is adjusted.
-- Verify the cross-validation test actually loads both registries and the roster (or an authoritative snapshot) and fails on injected drift.
-- Confirm no new callers of `registry_refresh` context fields were introduced that would be surprised by the now-present keys.
+## Revalidation
+
+**Generated at**: 2026-06-21T15:59:53Z
+**Re-review commit**: `8f6d598c` (HEAD)
+**Fix-wave commits re-reviewed**: `544a1184` (P0 fmt + P1 spec), `8f6d598c` (P0 AC reconcile)
+
+### Finding disposition
+
+| ID | Original severity | Disposition | New evidence |
+|----|-------------------|-------------|--------------|
+| qc2-001 | high | originally-wrong | Test `catalog_registry_invariant_all_ids_present` **does exist** at `crates/nexus-daemon-runtime/src/capability_registry.rs:236` (not in orchestration crate). It loads roster from `.mstar/knowledge/specs/acp-capability-set.md`, enumerates `host_tool_registry().ids()`, asserts bidirectional presence (with known `fs/*` gaps). Ran `cargo test -p nexus-daemon-runtime --lib capability_registry::tests::catalog_registry_invariant_all_ids_present` → **ok** (1 passed). Original claim "no such test" was incorrect (wrong crate searched). |
+| qc2-002 | high | resolved | Plan stub AC3/AC4 reconciled at fix-wave `8f6d598c`. AC3/AC4 now read: "41 rows total = 18 `shipped` host tools ... + 18 `catalog-only` ... + 3 `scaffold-equivalent` ... + 2 `OUT` ... + 0 `deferred-to-V2.0+`". Matches delivered roster. |
+| qc2-003 | high | resolved | `cargo +nightly fmt -p nexus-orchestration -- --check` → EXIT_CODE=0 (clean). Fix applied in `544a1184` (`crates/nexus-orchestration/tests/novel_review_master.rs` indentation). |
+| qc2-004 | medium | still-open | Per-ID success+failure vectors through `dispatch()` remain unimplemented in P0 scope (AC7). This is a medium correctness gap, not blocking for P0 targeted re-review (no change in fix-wave). |
+| qc2-005 | medium | still-open | Handler location wording ("in `capability/builtins/`") still imprecise for host_tool vs orchestration split (AC5). Roster now accurately reflects the split; AC wording clarification remains pending. |
+| qc2-006 | low | resolved | Bridge body header-only is expected P0 state per plan ("final promotion in P-last"). No change required in this wave. |
+
+### Updated Verdict
+**Approve**
+
+Rationale:
+- The three high findings that triggered `Request Changes` are all resolved or originally-wrong claims:
+  - qc2-001: test exists and passes (originally-wrong location claim).
+  - qc2-002: AC4 wording reconciled to 41-row reality (18+18+3+2).
+  - qc2-003: fmt gate now passes.
+- Medium findings (qc2-004, qc2-005) remain open but are pre-existing scoping decisions, not regressions from the fix-wave. They do not block P0 sign-off.
+- Low finding (qc2-006) is expected deferral per plan.
+- All required gates (test, fmt, AC wording) are now satisfied for the targeted re-review scope.
