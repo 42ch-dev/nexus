@@ -208,6 +208,13 @@ pub struct StateDefinition {
     /// `wait-all`. States with ≤1 incoming labeled edge are not merge nodes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge: Option<MergeKind>,
+    /// Merge-point convergence config (V1.56 P2).
+    ///
+    /// When present, this state acts as a dedicated converge (merge-point) node
+    /// that accepts multiple incoming edges from conditional branches. The
+    /// [`ConvergeStrategy`] controls join behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub converge: Option<ConvergeConfig>,
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -343,8 +350,20 @@ pub enum NextTarget {
     ///     target: gathering
     /// ```
     Labeled(Vec<LabeledNext>),
-    /// Expression-based conditional transition (post-V1.42; loader rejects).
+    /// Legacy `kind: conditional` form with `rules` field (V1.42-era shape;
+    /// accepted for backward compat but new presets should use `Branches` form).
     Conditional(NextConditional),
+    /// Expression-based conditional transition (V1.56 P2: Form B — expression/rule-based multi-branch).
+    ///
+    /// YAML form:
+    /// ```yaml
+    /// next:
+    ///   branches:
+    ///     - when: "_context.field == 'value'"
+    ///       target: some_state
+    ///   default: fallback
+    /// ```
+    Branches(ConditionalBranches),
 }
 
 /// GO/NOGO next form for `llm_judge` states (V1.42 P2 minimal slice).
@@ -427,25 +446,100 @@ pub enum MergeKind {
     },
 }
 
-/// Conditional next form — post-V1.42; loader still rejects.
+/// Merge-point convergence strategy for the `converge` state kind (V1.56 P2).
+///
+/// A converge state explicitly accepts multiple incoming edges and acts as a
+/// deterministic join point. Unlike the `merge:` field on regular states (which
+/// controls labeled-edge merge), `converge` is a dedicated state kind with its
+/// own strategies.
+///
+/// YAML forms:
+/// ```yaml
+/// converge:
+///   strategy: wait_for_all     # default — wait for all incoming edges
+/// converge:
+///   strategy: first_completed  # advance on first arrival, cancel others
+/// converge:
+///   strategy: any              # idempotent — already-completed merges are no-ops
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConvergeConfig {
+    /// Merge-point convergence strategy.
+    #[serde(default)]
+    pub strategy: ConvergeStrategy,
+}
+
+impl Default for ConvergeConfig {
+    fn default() -> Self {
+        Self {
+            strategy: ConvergeStrategy::WaitForAll,
+        }
+    }
+}
+
+/// Strategies for converge (merge-point) state kinds (V1.56 P2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConvergeStrategy {
+    /// Wait for ALL incoming edges before advancing (default).
+    #[default]
+    #[serde(alias = "wait_for_all")]
+    WaitForAll,
+    /// Advance on FIRST arrival, cancel others.
+    #[serde(alias = "first_completed")]
+    FirstCompleted,
+    /// Idempotent — already-completed merges are no-ops; advance on first arrival.
+    Any,
+}
+
+/// Conditional next form (V1.56 P2: Form B — multi-branch expression routing).
+///
+/// YAML form:
+/// ```yaml
+/// next:
+///   branches:
+///     - when: "_context.field == 'value'"
+///       target: some_state
+///   default: fallback
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConditionalBranches {
+    /// Ordered list of conditional branches (first-match semantics).
+    #[serde(default)]
+    pub branches: Vec<ConditionalRule>,
+    /// Default target state if no branch matches.
+    pub default: String,
+}
+
+/// Legacy `kind: conditional` form with `rules` field (V1.42-era shape; preserved
+/// for backward compat — new presets should use `Branches` form with expression grammar).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NextConditional {
     /// Must be `"conditional"`.
     pub kind: String,
-    /// Ordered list of conditional rules.
-    #[serde(default)]
+    /// Ordered list of conditional rules (legacy field name; alias for `branches`).
+    #[serde(default, alias = "branches")]
     pub rules: Vec<ConditionalRule>,
     /// Default target state if no rule matches.
     pub default: String,
 }
 
-/// A single conditional rule.
+/// A single conditional rule (expression → target edge).
+///
+/// YAML form:
+/// ```yaml
+/// - when: "_context.score > 80"
+///   target: approved
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConditionalRule {
-    /// Handlebars-style when-condition expression.
+    /// Simple expression to evaluate against `graph_flow::Context` JSON values.
+    /// Supports: comparisons (`==`, `!=`, `>`, `<`, `>=`, `<=`), boolean ops
+    /// (`&&`, `||`, `!`), parens, field access (`_context.<path>`), and literals.
     pub when: String,
-    /// Target state ID if the condition matches.
-    pub to: String,
+    /// Target state ID if the expression evaluates to `true`.
+    #[serde(alias = "to")]
+    pub target: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -1231,6 +1325,7 @@ states:
                     terminal: false,
                     context_update: None,
                     merge: None,
+                    converge: None,
                 },
                 StateDefinition {
                     id: "b".into(),
@@ -1241,6 +1336,7 @@ states:
                     terminal: true,
                     context_update: None,
                     merge: None,
+                    converge: None,
                 },
             ],
             inner_graphs: None,
