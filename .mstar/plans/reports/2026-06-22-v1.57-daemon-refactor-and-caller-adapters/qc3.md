@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-22-v1.57-daemon-refactor-and-caller-adapters"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-21"
 ---
 
@@ -29,9 +29,9 @@ generated_at: "2026-06-21"
 
 ## Summary
 
-- **AC met**: 14 / 18
-- **Findings**: 3 (1 Critical, 0 Warning, 2 Suggestion)
-- **Verdict**: Request Changes
+- **AC met**: 18 / 18 (post fix-wave revalidation)
+- **Findings**: 3 (0 Critical, 0 Warning, 2 Suggestion)
+- **Verdict**: Approve
 
 ## Acceptance Criteria Checklist
 
@@ -183,6 +183,23 @@ At theoretical 1000 RPS through 3 paths, the only bottleneck is `load_permission
 
 ## Verdict
 
-**Request Changes** — F-001 (Critical): ACs 7–10 (spec amendments for `cli-spec.md` §6.2M, `daemon-runtime.md`, `local-runtime-boundary.md`, `orchestration-engine.md` §6.4) are not delivered. Zero `.md` files changed in the review range despite the plan requiring these amendments in T6. The implementation code is clean and passes all tests, but the spec SSOT is out of sync with the refactored code. Amend the 4 spec files in a fix-wave commit before re-review.
+**Approve** — Revalidated 2026-06-21 after fix-wave `544a1184`. All 4 spec amendments now delivered. See `## Revalidation` below for per-finding disposition and evidence. No unresolved Critical or Warning findings remain. Two pre-existing Suggestions (F-002, F-003) are open but non-blocking — they are out of P1 scope and already documented as low-severity residuals.
 
-All 14 other ACs are met. No performance regressions detected. No flaky tests. CdnConfig constructor injection removes a global-lock panic surface. Test isolation improved (no more `reset_cdn_config()` calls). The god-file refactor to 349 lines is surgical and well-structured.
+---
+
+## Revalidation
+
+**Generated at**: 2026-06-21T23:59:00Z
+**Re-review commit**: `8f6d598c` (HEAD)
+**Fix-wave commits re-reviewed**: `544a1184` (P0 fmt fix + P1 spec amendments)
+
+### Finding disposition
+
+| ID | Original severity | Disposition | New evidence |
+|----|-------------------|-------------|--------------|
+| qc3-F-001 | critical | **resolved** | 4 spec amendments delivered in `544a1184`: (1) `cli-spec.md` §6.2M +35 lines at L1266–1300: `## V1.57 P1 Draft overlay: §6.2M 'host-call' subcommand` — Status: Draft (V1.57 P1), Plan: `2026-06-22-v1.57-daemon-refactor-and-caller-adapters`, field table, exit codes, debug-only intent, wiring path; (2) `daemon-runtime.md` 3-caller +28 lines at L123–150: `## V1.57 P1 Draft overlay: Host tool executor — 3-caller entry points` — Status: Draft (V1.57 P1), Plan: correct, dispatch topology table, refactor summary; (3) `local-runtime-boundary.md` +44 lines at L247–290: `## V1.57 P1 Draft overlay: 3-caller adapter topology` — Status: Draft (V1.57 P1), Plan: correct, ASCII topology diagram, single dispatch invariant, host-call + CdnConfig notes; (4) `orchestration-engine.md` §6.4 +18 lines at L443–460: `#### V1.57 P1 update: 3-caller adapter pattern` — Status: Draft (V1.57 P1), 3-caller entry points, single dispatch table invariant, schedule executor path. Minor format note: `orchestration-engine.md` overlay is a `####`-level subsection (embedded within §6 Worker Model) rather than a standalone `##` section — semantically sound in context. All four overlays have proper Status: Draft headers and semantic bodies consistent with the implementation. |
+| qc3-F-002 | suggestion | **open** | Pre-existing `load_permission_policy` filesystem I/O per call; out of P1 scope. Track as low-severity residual. |
+| qc3-F-003 | suggestion | **open** | Pre-existing unused import `HostToolCallerKind` in `tests/agent_tool_api.rs:27`; out of P1 scope. |
+
+### Updated Verdict
+**Approve** — All 4 spec amendments (ACs 7–10) now delivered as well-formed Draft overlays. Implementation code was already passing all tests and lint gates (ACs 15–18 confirmed in original review). No performance regressions. Two pre-existing Suggestions remain open but are non-blocking per the review baseline. PM may file as low-severity residuals in `status.json`.
