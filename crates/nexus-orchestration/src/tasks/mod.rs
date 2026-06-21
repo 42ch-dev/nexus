@@ -2620,7 +2620,7 @@ mod tests {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockGoProvider)),
             daemon_tool_dispatch: None,
-        cdn_config: None,
+            cdn_config: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -2660,7 +2660,7 @@ mod tests {
             pool: None,
             worker_provider: Some(std::sync::Arc::new(MockNogoProvider)),
             daemon_tool_dispatch: None,
-        cdn_config: None,
+            cdn_config: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -2976,7 +2976,7 @@ mod tests {
             pool: None,
             worker_provider: Some(provider),
             daemon_tool_dispatch: None,
-        cdn_config: None,
+            cdn_config: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 
@@ -3025,7 +3025,7 @@ mod tests {
             pool: None,
             worker_provider: Some(provider),
             daemon_tool_dispatch: None,
-        cdn_config: None,
+            cdn_config: None,
         };
         let registry = Arc::new(CapabilityRegistry::with_runtime_deps(&deps));
 

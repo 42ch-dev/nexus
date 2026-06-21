@@ -172,7 +172,7 @@ fn registry_with_mock_worker() -> CapabilityRegistry {
         pool: None,
         worker_provider: Some(std::sync::Arc::new(MockLlmExtractWorker)),
         daemon_tool_dispatch: None,
-            cdn_config: None,
+        cdn_config: None,
     };
     CapabilityRegistry::with_runtime_deps(&deps)
 }
