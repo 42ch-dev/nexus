@@ -891,7 +891,7 @@ impl StateCompositeTask {
                 }
                 context.set_sync(&merge_key, arrived);
                 // V1.56 P2 fix-wave (H-001): also record converge arrival.
-                Self::record_converge_arrival(context, target);
+                Self::record_converge_arrival(context, target, &self.id);
                 return Ok(NextAction::GoTo((*target).to_string()));
             }
         }
@@ -944,7 +944,7 @@ impl StateCompositeTask {
                         "expression branch matched"
                     );
                     // V1.56 P2 fix-wave (H-001): record arrival at converge target.
-                    Self::record_converge_arrival(context, target);
+                    Self::record_converge_arrival(context, target, &self.id);
                     return Ok(NextAction::GoTo(target.clone()));
                 }
                 Ok(false) => {
@@ -973,25 +973,33 @@ impl StateCompositeTask {
             "no expression branch matched, falling back to default"
         );
         // V1.56 P2 fix-wave (H-001): record arrival at converge target for default branch too.
-        Self::record_converge_arrival(context, &cache.default);
+        Self::record_converge_arrival(context, &cache.default, &self.id);
         Ok(NextAction::GoTo(cache.default.clone()))
     }
 
     /// Record a converge arrival for the given target state (V1.56 P2 fix-wave, H-001).
     ///
-    /// Writes the current state's task ID into `_converge_arrivals_{target}`.
+    /// Writes `source_id` into `_converge_arrivals_{target}` (per-source tracking via
+    /// `HashSet` for automatic dedup). Each distinct predecessor's `source_id` is
+    /// recorded exactly once; repeated arrivals from the same source are idempotent.
     /// If the target is not a converge node, this is a no-op (the key is ignored).
-    fn record_converge_arrival(context: &graph_flow::Context, target: &str) {
+    ///
+    /// # Source ID semantics
+    ///
+    /// `source_id` is the task ID (`self.id`) of the predecessor that is arriving
+    /// at the converge target.  This aligns with `converge_predecessors` (a
+    /// `HashSet<String>` of predecessor task IDs populated at graph build time),
+    /// so the converge gate check `arrived_sources.len() == expected_predecessor_count`
+    /// correctly gates on per-predecessor arrival.
+    pub fn record_converge_arrival(context: &graph_flow::Context, target: &str, source_id: &str) {
         let converge_key = format!("_converge_arrivals_{target}");
-        let mut arrived: Vec<String> = context.get_sync(&converge_key).unwrap_or_default();
-        if !arrived.contains(&"arrived".to_string()) {
-            // Store self.id to avoid double-counting.
-            // For simplicity, we use a unique token per arrival edge:
-            // each source calling record_converge_arrival adds one "arrived" entry.
-            // This avoids needing to know the source_id at converge check time.
-            arrived.push("arrived".to_string());
+        let mut arrived: std::collections::HashSet<String> =
+            context.get_sync(&converge_key).unwrap_or_default();
+        if arrived.insert(source_id.to_string()) {
+            // New predecessor arrival — persist the updated set.
+            context.set_sync(&converge_key, arrived);
         }
-        context.set_sync(&converge_key, arrived);
+        // else: duplicate arrival from same source → idempotent no-op.
     }
 }
 
@@ -1120,7 +1128,7 @@ impl Task for StateCompositeTask {
         // connected predecessors and enforce the declared converge strategy.
         if let Some(ref converge_config) = self.converge {
             if !self.converge_predecessors.is_empty() {
-                let arrived: Vec<String> =
+                let arrived: std::collections::HashSet<String> =
                     context.get(&self.converge_key).await.unwrap_or_default();
                 let arrived_count = arrived.len();
                 let expected = self.converge_predecessors.len();
