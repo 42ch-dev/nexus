@@ -2101,6 +2101,21 @@
         "closure_commit": "4702bc1f",
         "closure_plan": "2026-06-22-v1.54-df46-write-tools"
       }
+    ],
+    "2026-06-22-v1.55-game-bible-depth-35": [
+      {
+        "id": "R-V155P2-F002",
+        "title": "design-writing preset has no durable section_status auto-transition; accepted frontmatter remains manual author step for V1.55",
+        "severity": "low",
+        "source": "qc1 F-002 (V1.55 P2 fix-wave Option B)",
+        "scope": "crates/nexus-orchestration/embedded-presets/design-writing/preset.yaml",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.56+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.55-game-bible-depth-35][R-V155P2-F002]",
+        "note": "Option B: preset/spec comments narrowed to state accepted frontmatter is manual step. Option A (nexus.game_bible.section_status.update capability) deferred to V1.56+. See preset.yaml line 7-10 for inline note.",
+        "lifecycle": "deferred"
+      }
     ]
   }
 }

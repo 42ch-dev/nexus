@@ -600,11 +600,15 @@ pub(crate) enum LlmExtractOutcome {
 ///
 /// Resolves the capability from `registry`, builds the canonical input shape
 /// `{ prompt, chapter_prose, _creator_id, _session_id }`, and parses the
-/// `candidates` array through [`candidate_from_llm_json`].
+/// `candidates` array through [`candidate_from_llm_json_for_profile`] scoped
+/// to `work_profile`.
 ///
 /// Returns [`LlmExtractOutcome::WorkerUnavailable`] when no worker IPC is
 /// available, so callers can distinguish "no worker" from "zero candidates"
 /// (closes R-V151Q3-W002).
+///
+/// V1.55 P2 fix-wave (F-001): added `work_profile` parameter so game-bible
+/// callers produce `game_bible_category` payloads instead of `novel_category`.
 pub(crate) async fn run_llm_extract(
     registry: Option<&CapabilityRegistry>,
     capability_name: &str,
@@ -612,6 +616,7 @@ pub(crate) async fn run_llm_extract(
     chapter_prose: &str,
     creator_id: &str,
     session_id: &str,
+    work_profile: &str,
 ) -> LlmExtractOutcome {
     let Some(registry) = registry else {
         return LlmExtractOutcome::WorkerUnavailable;
@@ -651,13 +656,14 @@ pub(crate) async fn run_llm_extract(
         .unwrap_or_default();
     let candidates: Vec<KbCandidate> = candidates_json
         .iter()
-        .filter_map(candidate_from_llm_json)
+        .filter_map(|c| candidate_from_llm_json_for_profile(c, work_profile))
         .take(MAX_CANDIDATES_PER_PASS)
         .collect();
     LlmExtractOutcome::Candidates(candidates)
 }
 
-/// Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter.
+/// Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter
+/// with the novel `work_profile`.
 ///
 /// Thin wrapper around [`run_llm_extract`] that supplies the review-time hook's
 /// default extraction prompt and identity fields from [`ChapterContext`].
@@ -676,23 +682,54 @@ async fn extract_via_llm(
         &ctx.prose,
         &ctx.creator_id,
         "",
+        "novel",
     )
     .await
 }
 
-/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object.
+/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
+/// scoped to the novel `work_profile`.
 ///
-/// Returns `None` when `canonical_name` is missing/empty (no point persisting
-/// a nameless candidate). Fills `proposed_payload` with a novel-profile
-/// `KeyBlockBody` JSON whose `novel_category` is derived from the LLM-judged
-/// `block_type` (entity-scope-model §5.1.1 mapping) so adopt-time
-/// `ValidationMode::Novel` passes. The payload also carries the four LLM keys
-/// so the adopt CLI can read them from either the dedicated columns or the
-/// JSON (llm-extract.md §3.1).
+/// Convenience wrapper around [`candidate_from_llm_json_for_profile`] with
+/// `work_profile = "novel"`. Kept for backward compatibility with existing
+/// novel-only callers that don't carry a work-profile parameter, and for
+/// `#[cfg(test)]` usage validating the novel path unchanged.
 ///
 /// `pub(crate)`: reused by `tasks::LlmExtractTask` so there is a single
 /// LLM→KbCandidate mapping across the review-time hook and the task.
+// V1.55 P2 fix-wave (F-001): production callers now use
+// candidate_from_llm_json_for_profile directly; this wrapper remains for
+// tests and backward compatibility. lib dead_code warning suppressed.
+#[allow(dead_code)]
 pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandidate> {
+    candidate_from_llm_json_for_profile(c, "novel")
+}
+
+/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
+/// producing a `proposed_payload` shaped for the given `work_profile`.
+///
+/// Returns `None` when `canonical_name` is missing/empty (no point persisting
+/// a nameless candidate).
+///
+/// ## Profile-specific payload shape
+///
+/// | `work_profile` | category attribute | tags | `ValidationMode` |
+/// |---|---|---|---|
+/// | `"novel"` | `attributes.novel_category` via [`block_type_to_novel_category`] | `["novel", "llm-extracted"]` | `Novel` |
+/// | `"game_bible"` | `attributes.game_bible_category` via [`block_type_to_game_bible_category`] | `["game-bible", "llm-extracted"]` | `GameBible` |
+/// | other / unknown | `attributes.novel_category` (novel default) | `["novel", "llm-extracted"]` | `Novel` |
+///
+/// The payload also carries the four LLK keys (`block_type`, `canonical_name`,
+/// `source_quote`, `confidence`) so the adopt CLI can read them from either the
+/// dedicated columns or the JSON (llm-extract.md §3.1).
+///
+/// V1.55 P2 fix-wave (F-001): extracted from the body of the former
+/// `candidate_from_llm_json` so game-bible extraction paths can call this
+/// with `work_profile = "game_bible"`.
+pub(crate) fn candidate_from_llm_json_for_profile(
+    c: &serde_json::Value,
+    work_profile: &str,
+) -> Option<KbCandidate> {
     let canonical_name = c
         .get("canonical_name")
         .and_then(|v| v.as_str())
@@ -717,15 +754,28 @@ pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandida
         .get("source_quote")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let novel_category = block_type_to_novel_category(&block_type);
+
+    let (category_key, category_value, tags) = if work_profile == "game_bible" {
+        (
+            "game_bible_category",
+            block_type_to_game_bible_category(&block_type),
+            vec!["game-bible", "llm-extracted"],
+        )
+    } else {
+        (
+            "novel_category",
+            block_type_to_novel_category(&block_type),
+            vec!["novel", "llm-extracted"],
+        )
+    };
 
     let mut payload = serde_json::json!({
         "summary": summary.clone().unwrap_or_else(|| format!("LLM-extracted entity: {canonical_name}")),
         "attributes": {
-            "novel_category": novel_category,
+            category_key: category_value,
             "aliases": [canonical_name.as_str()],
         },
-        "tags": ["novel", "llm-extracted"],
+        "tags": tags,
         "block_type": block_type,
         "canonical_name": canonical_name,
         "source_quote": source_quote.clone().unwrap_or_default(),
@@ -1735,6 +1785,109 @@ mod tests {
         assert_eq!(built.block_type, "character");
         assert_eq!(built.confidence, None);
         assert_eq!(built.source_quote, None);
+    }
+
+    // ── V1.55 P2 fix-wave (F-001): profile-aware candidate materialization ──
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_produces_game_bible_category() {
+        let c = serde_json::json!({
+            "canonical_name": "Eldritch Species",
+            "block_type": "species",
+            "summary": "An ancient species",
+            "confidence": 0.88,
+            "source_quote": "the Eldritch emerged from the void",
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+
+        // game-bible payload MUST have game_bible_category, NOT novel_category.
+        assert_eq!(
+            payload["attributes"]["game_bible_category"], "species",
+            "game-bible profile: species block_type → game_bible_category species"
+        );
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "game-bible profile: must NOT emit novel_category"
+        );
+        // Tags must be game-bible scoped.
+        assert_eq!(payload["tags"][0], "game-bible");
+        assert_eq!(payload["tags"][1], "llm-extracted");
+        // LLM keys still present.
+        assert_eq!(payload["block_type"], "species");
+        assert_eq!(payload["canonical_name"], "Eldritch Species");
+        assert_eq!(payload["confidence"], 0.88);
+        assert_eq!(
+            payload["source_quote"],
+            "the Eldritch emerged from the void"
+        );
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_cross_domain_maps_character_to_species() {
+        // Cross-domain: character BlockType → species game_bible_category.
+        let c = serde_json::json!({
+            "canonical_name": "Hero",
+            "block_type": "character",
+            "confidence": 0.9,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["game_bible_category"], "species");
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "game-bible profile: must NOT emit novel_category for cross-domain block_type"
+        );
+        assert_eq!(payload["tags"][0], "game-bible");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_cross_domain_item_to_technology() {
+        let c = serde_json::json!({
+            "canonical_name": "Plasma Rifle",
+            "block_type": "item",
+            "confidence": 0.85,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["game_bible_category"], "technology");
+        assert_eq!(payload["tags"][0], "game-bible");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_unknown_defaults_species() {
+        // Unknown block_type defaults to species per the mapping.
+        let c = serde_json::json!({
+            "canonical_name": "???",
+            "block_type": "goblin_king",
+            "confidence": 0.5,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["game_bible_category"], "species");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_novel_profile_still_works() {
+        // Regression: the novel wrapper must produce novel_category as before.
+        let c = serde_json::json!({
+            "canonical_name": "Azure Gate",
+            "block_type": "scene",
+            "confidence": 0.92,
+        });
+        let built = candidate_from_llm_json(&c).expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["novel_category"], "location");
+        assert!(
+            payload["attributes"].get("game_bible_category").is_none(),
+            "novel profile: must NOT emit game_bible_category"
+        );
+        assert_eq!(payload["tags"][0], "novel");
+        assert_eq!(payload["tags"][1], "llm-extracted");
     }
 
     // ── V1.51 T-A P1: cross-chapter aggregation ───────────────────────────
