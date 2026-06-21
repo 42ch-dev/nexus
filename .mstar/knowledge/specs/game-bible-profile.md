@@ -1,6 +1,6 @@
 # Game-Bible Profile — Draft Specification V1.54
 
-**Status**: Draft (V1.54 — scaffold authored in plan `2026-06-22-v1.54-game-bible-scaffold`)  
+**Status**: Draft (V1.55 P2 in progress)  
 **Document class**: Feature line  
 **Created**: 2026-06-22  
 **Scope**: `work_profile: game_bible` on generic **Work** — artifact layout under `Works/<work_ref>/Design/`, section status model, stage chain, KB taxonomy, completion semantics  
