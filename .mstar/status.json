@@ -119,7 +119,7 @@
     "latest_active_iteration": "v1.55",
     "latest_active_compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor",
     "platform_integration": "paused \u2014 local-only until further notice",
-    "pre_implement_gate": "pending",
+    "pre_implement_gate": "GO — V1.55 P-1 Done 2026-06-22",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {

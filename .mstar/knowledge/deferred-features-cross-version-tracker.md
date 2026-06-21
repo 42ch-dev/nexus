@@ -126,7 +126,7 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 **V1.55 active residual retargeting (V1.54 carry-forward)**: 2 low residuals deferred from V1.54 ship. `R-V154P1-S002` (profile-gate observability) is assigned to V1.55 P2; `R-V154P1-W001` (game-bible scaffold atomicity / `ScaffoldTransaction`) is assigned to V1.55 P3. Machine SSOT remains [`status.json`](../status.json).
 
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-21**; integration_branch=`iteration/v1.55`; pre_implement_gate=`pending`; 2 open residuals target V1.55). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22**; integration_branch=`iteration/v1.55`; pre_implement_gate=`GO — V1.55 P-1 Done 2026-06-22`; 2 open residuals target V1.55). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
