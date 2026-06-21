@@ -3,6 +3,7 @@
 //! Workspace handlers
 
 use crate::api::errors::NexusApiError;
+use crate::workspace::session::SessionError;
 use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
@@ -253,28 +254,27 @@ pub async fn commit_workspace(
                 committed: true,
             }))
         }
-        Err(err_msg) => {
-            // Map session errors to appropriate HTTP codes
-            if err_msg.contains("not found") {
-                debug!(session_id = %session_id, "Session not found");
-                Err(NexusApiError::NotFound(format!(
-                    "session {session_id} not found"
-                )))
-            } else if err_msg.contains("already been committed") {
-                debug!(session_id = %session_id, "Stale session");
-                Err(NexusApiError::Conflict(format!(
-                    "session {session_id} is stale (already committed)"
-                )))
-            } else if err_msg.contains("expired") {
-                debug!(session_id = %session_id, "Session expired");
-                Err(NexusApiError::Conflict(format!(
-                    "session {session_id} has expired"
-                )))
-            } else {
-                Err(NexusApiError::Internal {
-                    code: "SESSION_ERROR".into(),
-                    message: err_msg,
-                })
+        Err(err) => {
+            // Map typed session errors to appropriate HTTP status codes
+            match err {
+                SessionError::NotFound(_) => {
+                    debug!(session_id = %session_id, "Session not found");
+                    Err(NexusApiError::NotFound(format!(
+                        "session {session_id} not found"
+                    )))
+                }
+                SessionError::AlreadyCommitted(_) => {
+                    debug!(session_id = %session_id, "Stale session");
+                    Err(NexusApiError::Conflict(format!(
+                        "session {session_id} is stale (already committed)"
+                    )))
+                }
+                SessionError::Expired(_) => {
+                    debug!(session_id = %session_id, "Session expired");
+                    Err(NexusApiError::Conflict(format!(
+                        "session {session_id} has expired"
+                    )))
+                }
             }
         }
     }

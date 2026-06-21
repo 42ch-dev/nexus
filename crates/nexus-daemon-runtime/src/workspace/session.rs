@@ -4,8 +4,11 @@
 //! Sessions are daemon-scoped and expire after a configurable TTL.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use tracing;
 
 /// A workspace session identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -29,6 +32,32 @@ impl std::fmt::Display for SessionId {
 impl Default for SessionId {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Typed error for session operations.
+///
+/// Replaces string-based error matching so the HTTP handler can map
+/// errors to status codes by variant rather than by substring search.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionError {
+    /// The requested session ID does not exist in the session store.
+    NotFound(SessionId),
+    /// The session has already been consumed (committed) and is now stale.
+    AlreadyCommitted(SessionId),
+    /// The session has exceeded its time-to-live.
+    Expired(SessionId),
+}
+
+impl fmt::Display for SessionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(id) => write!(f, "session {id} not found"),
+            Self::AlreadyCommitted(id) => {
+                write!(f, "session {id} has already been committed (stale session)")
+            }
+            Self::Expired(id) => write!(f, "session {id} has expired"),
+        }
     }
 }
 
@@ -88,6 +117,19 @@ impl SessionInfo {
 ///   error rather than silently overwriting.
 /// - Expired sessions are rejected on both open and commit paths.
 ///
+/// # Lock strategy (DF-31 skeleton)
+///
+/// This manager uses a single global `Mutex<HashMap<…>>` for simplicity.
+/// The `consume_session` method holds the lock for the entire validate+mark
+/// sequence to guarantee atomic single-consumer semantics. Expired-session
+/// cleanup runs inline under the same lock.
+///
+/// **Worst-case latency**: O(n) where n = number of active sessions.
+/// In normal daemon usage (single user, local-only tool), the session table
+/// is expected to hold O(10) entries. If this grows to O(1000+) in future
+/// multi-tenant scenarios, consider replacing with `DashMap` for per-session
+/// locking or moving cleanup to a background `tokio::time::interval` task.
+///
 /// # Future expansion (DF-31 → DF-42)
 ///
 /// The current skeleton uses simple in-memory sessions without file-level
@@ -120,10 +162,6 @@ impl WorkspaceSessionManager {
     /// Creates a session with a unique ID and a snapshot of the given
     /// workspace path. The caller is responsible for validating the path
     /// before calling this method.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the mutex is poisoned.
     pub fn open_session(
         &self,
         workspace_root: &str,
@@ -144,7 +182,10 @@ impl WorkspaceSessionManager {
         };
         self.sessions
             .lock()
-            .expect("session manager mutex poisoned")
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("session manager mutex poisoned, recovering");
+                poisoned.into_inner()
+            })
             .insert(session_id.clone(), info);
         session_id
     }
@@ -160,17 +201,13 @@ impl WorkspaceSessionManager {
     /// - The session ID is not found in the session store
     /// - The session has already been consumed (committed)
     /// - The session has exceeded its TTL
-    ///
-    /// # Panics
-    ///
-    /// Panics if the mutex is poisoned.
     pub fn validate_session(&self, session_id: &SessionId) -> Result<SessionInfo, String> {
         cleanup_expired(&self.sessions, self.ttl);
         let info = {
-            let sessions = self
-                .sessions
-                .lock()
-                .expect("session manager mutex poisoned");
+            let sessions = self.sessions.lock().unwrap_or_else(|poisoned| {
+                tracing::warn!("session manager mutex poisoned, recovering");
+                poisoned.into_inner()
+            });
             sessions.get(session_id).cloned()
         };
         let info = info.ok_or_else(|| format!("session {session_id} not found"))?;
@@ -187,47 +224,53 @@ impl WorkspaceSessionManager {
 
     /// Mark a session as consumed after a successful commit.
     ///
-    /// Returns the session info if successful, or an error if the session
-    /// was already consumed or not found.
+    /// Validates and consumes the session in a single atomic critical section.
+    /// Two concurrent calls with the same `session_id` cannot both succeed —
+    /// the first one marks `consumed = true` under the lock, and the second
+    /// observes `consumed == true` and returns [`SessionError::AlreadyCommitted`].
+    ///
+    /// Returns the session info if successful.
     ///
     /// # Errors
     ///
-    /// Returns an error string if:
+    /// Returns a [`SessionError`] if:
     /// - The session ID is not found in the session store
     /// - The session has already been consumed (committed)
     /// - The session has exceeded its TTL
     ///
     /// # Panics
     ///
-    /// Panics if the mutex is poisoned.
-    pub fn consume_session(&self, session_id: &SessionId) -> Result<SessionInfo, String> {
-        cleanup_expired(&self.sessions, self.ttl);
-        let info = {
-            let sessions = self
-                .sessions
-                .lock()
-                .expect("session manager mutex poisoned");
-            sessions.get(session_id).cloned()
-        };
-        let info = info.ok_or_else(|| format!("session {session_id} not found"))?;
+    /// Panics if the mutex is poisoned and recovery via [`Mutex::into_inner`]
+    /// fails. In practice, this only occurs if the inner data is also
+    /// poisoned, which requires a simultaneous panic during session cleanup.
+    pub fn consume_session(&self, session_id: &SessionId) -> Result<SessionInfo, SessionError> {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("session manager mutex poisoned, recovering");
+            poisoned.into_inner()
+        });
+
+        // Cleanup expired sessions inline (same lock acquisition).
+        sessions.retain(|_id, info| !info.is_expired(self.ttl));
+
+        let info = sessions
+            .get(session_id)
+            .ok_or_else(|| SessionError::NotFound(session_id.clone()))?;
+
         if info.consumed {
-            return Err(format!(
-                "session {session_id} has already been committed (stale session)"
-            ));
+            return Err(SessionError::AlreadyCommitted(session_id.clone()));
         }
         if info.is_expired(self.ttl) {
-            return Err(format!("session {session_id} has expired"));
+            return Err(SessionError::Expired(session_id.clone()));
         }
-        // Mark consumed in a separate lock acquisition
-        {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .expect("session manager mutex poisoned");
-            if let Some(entry) = sessions.get_mut(session_id) {
-                entry.consumed = true;
-            }
-        }
+
+        // Mark consumed atomically — same lock held since the get above.
+        // SAFETY: we just verified the entry exists and is unconsumed.
+        let entry = sessions
+            .get_mut(session_id)
+            .expect("entry must exist: validated above");
+        entry.consumed = true;
+        let info = entry.clone();
+        drop(sessions);
         Ok(info)
     }
 }
@@ -240,7 +283,10 @@ impl Default for WorkspaceSessionManager {
 
 /// Remove sessions that have exceeded the TTL.
 fn cleanup_expired(sessions: &Mutex<HashMap<SessionId, SessionInfo>>, ttl: Duration) {
-    let mut guard = sessions.lock().expect("session manager mutex poisoned");
+    let mut guard = sessions.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!("session manager mutex poisoned during cleanup, recovering");
+        poisoned.into_inner()
+    });
     guard.retain(|_id, info| !info.is_expired(ttl));
 }
 
@@ -279,12 +325,57 @@ mod tests {
         let mgr = WorkspaceSessionManager::new();
         let id = mgr.open_session("/ws", "test", true);
         let result = mgr.consume_session(&id);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "first consume should succeed");
 
-        // Second consume should fail
+        // Second consume should fail with AlreadyCommitted
         let result2 = mgr.consume_session(&id);
-        assert!(result2.is_err());
-        assert!(result2.unwrap_err().contains("already been committed"));
+        assert!(
+            matches!(result2, Err(SessionError::AlreadyCommitted(_))),
+            "expected AlreadyCommitted, got {result2:?}"
+        );
+    }
+
+    #[test]
+    fn concurrent_consume_only_one_succeeds() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let mgr = Arc::new(WorkspaceSessionManager::new());
+        let id = mgr.open_session("/ws", "test", true);
+
+        // Spawn N threads, each trying to consume the same session.
+        // Exactly one must succeed; all others must get AlreadyCommitted.
+        let n = 10;
+        let handles: Vec<_> = (0..n)
+            .map(|_| {
+                let mgr = Arc::clone(&mgr);
+                let id = id.clone();
+                thread::spawn(move || mgr.consume_session(&id))
+            })
+            .collect();
+
+        let mut successes = 0usize;
+        let mut already_committed = 0usize;
+        let mut other_errors = 0usize;
+
+        for h in handles {
+            match h.join().expect("thread should not panic") {
+                Ok(_) => successes += 1,
+                Err(SessionError::AlreadyCommitted(_)) => already_committed += 1,
+                Err(_) => other_errors += 1,
+            }
+        }
+
+        assert_eq!(
+            successes, 1,
+            "exactly one concurrent consume should succeed"
+        );
+        assert_eq!(
+            already_committed,
+            n - 1,
+            "all other concurrent consumes should get AlreadyCommitted"
+        );
+        assert_eq!(other_errors, 0, "no unexpected errors");
     }
 
     #[test]
