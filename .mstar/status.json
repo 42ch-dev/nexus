@@ -10,9 +10,25 @@
       "wave": null,
       "effort": "M",
       "owner": "@project-manager",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.57-compass-and-plan-stubs.md",
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "closed_at": "2026-06-22",
+      "resolution": {
+        "compass_path": ".mstar/iterations/v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md",
+        "plan_stubs": [
+          "2026-06-22-v1.57-spec-governance-and-registry",
+          "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+          "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
+          "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e",
+          "2026-06-22-v1.57-mid-qc-and-fix-waves",
+          "2026-06-22-v1.57-hygiene-and-closeout"
+        ],
+        "integration_branch": "iteration/v1.57",
+        "base_commit": "329c5ff2 (V1.56 final on main)",
+        "commit": "750ec0b5 (merge(v1.57): prepare)",
+        "pm_signoff": "Compass + 7 plan stubs reviewed and approved; 5 grill-locked decisions (Q1-Q5) verbatim in §0; 10 acceptance criteria met; pre-implement gate flipped to GO; Wave 1 dispatch cleared."
+      }
     },
     {
       "plan_id": "2026-06-22-v1.57-spec-governance-and-registry",
@@ -123,7 +139,7 @@
     "latest_active_iteration": "V1.57",
     "latest_active_compass": "v1.57-df46-df47-full-parity-and-adapter-unification",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending",
+    "pre_implement_gate": "go",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
