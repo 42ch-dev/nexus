@@ -41,7 +41,7 @@
     {
 "plan_id": "2026-06-22-v1.55-df31-workspace-interface",
       "title": "V1.55 P1 — DF-31 Workspace Open / Commit Interface Skeleton",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "effort": "M",
       "working_branch": "feature/v1.55-df31-workspace-interface",
@@ -54,8 +54,9 @@
         "2026-06-22-v1.55-compass-and-plan-stubs"
       ],
       "qc_status": "qc1 Approve (commit 39d96204); qc2 Approve (commit 20ac1978); qc3 Approve (commit 8533a1b5); all after 1 fix-wave (5da1ec08) addressing consume_session race + SessionError enum + poison recovery + typed errors + capability count",
-      "qa_status": "mid-QA pending (P1 verify by @qa-engineer)",
-      "merge_commit": "9b3d70ce (P1 base) + 5da1ec08 (P1 fix-wave) + 376ef43a (P1 fix-wave merge)"
+      "qa_status": "Pass — @qa-engineer mid-QA (commit 3197e14c; 7/7 AC; CI gates re-run clean; DF-31 skeleton confirmed)",
+      "merge_commit": "9b3d70ce (P1 base) + 5da1ec08 (P1 fix-wave) + 376ef43a (P1 fix-wave merge)",
+      "done_at": "2026-06-21"
     },
     {
       "plan_id": "2026-06-22-v1.55-game-bible-depth-35",
@@ -80,7 +81,7 @@
     {
       "plan_id": "2026-06-22-v1.55-script-scaffold",
       "title": "V1.55 P3 — Script Profile Scaffold",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev-2",
       "effort": "M",
       "working_branch": "feature/v1.55-script-scaffold",
@@ -93,8 +94,9 @@
         "2026-06-22-v1.55-game-bible-depth-35"
       ],
       "qc_status": "qc1 Approve (commit 7018b8e4); qc2 Approve (commit 964d2268); qc3 Approve (initial review commit 82e6fdd4); all after 1 fix-wave (21908cdb) addressing ScaffoldTransaction overwrites + validate_work_ref + temp+rename atomic + ValidationMode::Script tests + daemon boot count",
-      "qa_status": "mid-QA pending (P3 verify by @qa-engineer)",
-      "merge_commit": "c30cdd48 (P3 base) + 21908cdb (P3 fix-wave) — R-V154P1-W001 ScaffoldTransaction closure applied to BOTH game-bible and script scaffolds"
+      "qa_status": "Pass — @qa-engineer mid-QA (commit 16bcf48b; 7/7 AC; CI gates re-run clean; R-V154P1-W001 resolved; additive BlockType verified)",
+      "merge_commit": "c30cdd48 (P3 base) + 21908cdb (P3 fix-wave) — R-V154P1-W001 ScaffoldTransaction closure applied to BOTH game-bible and script scaffolds",
+      "done_at": "2026-06-21"
     },
     {
       "plan_id": "2026-06-22-v1.55-mid-qc-and-fix-waves",
