@@ -1,10 +1,10 @@
 # Non-Novel Profiles Roadmap — Exploration v1
 
-**Status**: Exploration (V1.52 — no implementation authority). **Game-bible promoted to Draft in V1.54** per [game-bible-profile.md](game-bible-profile.md).  
+**Status**: Exploration (V1.52 — no implementation authority). **Game-bible promoted to Master in V1.55 P-last after P2 Depth 3.5 ship; script scaffold shipped in V1.55 P3** per [game-bible-profile.md](game-bible-profile.md) and [script-profile.md](script-profile.md).
 **Document class**: Exploration  
 **Created**: 2026-06-19  
-**Last updated**: 2026-06-22 (V1.54 P1 — game-bible scaffold shipped; §1 marked accordingly)  
-**Scope**: Future non-novel `work_profile` lines deferred beyond V1.52, specifically `game-bible` (now shipped) and `script` (deferred)  
+**Last updated**: 2026-06-22 (V1.55 P-last — game-bible promoted to Master; script scaffold shipped in V1.55 P3)  
+**Scope**: Future non-novel `work_profile` lines. **V1.55 status**: game-bible (V1.54 scaffold shipped, V1.55 P2 Depth 3.5 in progress) and script (V1.55 P3 scaffold in progress). Pre-V1.55 backlog (V1.36 V2.0+) is preserved in deferred tracker §3.3.  
 **Coordinates with**:
 
 - [essay-profile.md](essay-profile.md) — first V1.52 non-novel Feature line
@@ -44,7 +44,7 @@ Unlike an essay, a game bible is a multi-section reference artifact rather than 
 
 ### 1.5 Status
 
-**P1 Scaffold Shipped V1.54** — game-bible profile scaffold delivered in [plan `2026-06-22-v1.54-game-bible-scaffold`](../../plans/2026-06-22-v1.54-game-bible-scaffold.md). Feature line spec: [game-bible-profile.md](game-bible-profile.md).
+**P1 Scaffold Shipped V1.54; V1.55 P2 Depth 3.5 in progress** — game-bible profile scaffold delivered in [plan `2026-06-22-v1.54-game-bible-scaffold`](../../plans/2026-06-22-v1.54-game-bible-scaffold.md). V1.55 P2 targets `design-writing`, design 五问 quality rubric, section completion detection, and KB extraction in [plan `2026-06-22-v1.55-game-bible-depth-35`](../../plans/2026-06-22-v1.55-game-bible-depth-35.md). Feature line spec: [game-bible-profile.md](game-bible-profile.md).
 
 | Deliverable | Status |
 | --- | --- |
@@ -55,8 +55,10 @@ Unlike an essay, a game bible is a multi-section reference artifact rather than 
 | `ValidationMode::GameBible` | ✓ |
 | Profile gates (non-novel `work_chapters` + completion) | ✓ |
 | KB taxonomy (`game_bible_category` mapping) | ✓ |
-| `design-writing` preset (LLM-driven) | Deferred to V1.55+ |
-| Section completion detection | Deferred to V1.55+ |
+| `design-writing` preset (LLM-driven) | V1.55 P2 in progress |
+| Design 五问 quality rubric | V1.55 P2 in progress |
+| Section completion detection | V1.55 P2 in progress |
+| KB extraction for game-bible | V1.55 P2 in progress |
 
 ---
 
@@ -86,9 +88,22 @@ A script Work is closer to novel than essay because it has ordered scenes, but i
 - World KB can supply characters/locations, but script-specific scene continuity requires a separate scene index.
 - Should not reuse `work_chapters` without a clear migration to generic `work_units` or profile-specific scene rows.
 
-### 2.5 Suggested target iteration
+### 2.5 Status
 
-V1.53+ or later. Prefer after game-bible if the next priority is structured reference, or before game-bible if user-facing screenplay output becomes the next product target.
+**P3 Scaffold Implemented V1.55** — script profile scaffold delivered in [plan `2026-06-22-v1.55-script-scaffold`](../../plans/2026-06-22-v1.55-script-scaffold.md). Feature line spec: [script-profile.md](script-profile.md) (Draft V1.55).
+
+| Deliverable | Status |
+| --- | --- |
+| `specs/script-profile.md` Draft | ✓ |
+| 3 new `BlockType` variants in wire schema (`dialogue`, `beat`, `act`) | ✓ |
+| `script-init` preset | ✓ |
+| `nexus42 creator bootstrap --profile script` | ✓ |
+| `ValidationMode::Script` | ✓ |
+| `script_category` taxonomy mapping | ✓ |
+| `ScaffoldTransaction` pattern applied (R-V154P1-W001 closed) | ✓ |
+| Full script-writing run-loop (`script-writing` preset) | V1.56+ |
+| Script screenplay export / formatting normalization | V1.56+ |
+| KB extraction for script | V1.56+ |
 
 ---
 

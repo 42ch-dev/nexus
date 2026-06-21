@@ -1,13 +1,15 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.54 Shipped** (2026-06-21, PR #76 merged to main) · V1.53 Shipped (2026-06-20, PR #74) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.55 Shipped** (2026-06-22, all 4 implement plans Done) · V1.54 Shipped (2026-06-21, PR #76) · Platform **paused** · Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.54 Shipped (2026-06-21, merged at commit 2fd183f0 via PR #76) — DF-46 Completion & Game-Bible Foundation; 4 plans all Done (P-1 + P0 + P1 + P-last); integration branch `iteration/v1.54` retired per `mstar-branch-worktree`; 2 residuals carry-forward to V1.55+ (R-V154P1-W001, R-V154P1-S002).
+**Status**: V1.55 Shipped (2026-06-22) — Non-Novel Profile Completion & Infrastructure Refactor; 7 plans all Done (P-1 + P0 + P1 + P2 + P3 + P-mid + P-last); integration branch `iteration/v1.55` retiring per `mstar-branch-worktree`. V1.54 shipped 2026-06-21 at commit 2fd183f0 via PR #76.
+
+**V1.55 carry-forward index (closed in V1.55)**: DF-43 → V1.55 P0 (`2026-06-22-v1.55-df43-sqlite-alignment`) — **Closed**; DF-31 → V1.55 P1 (`2026-06-22-v1.55-df31-workspace-interface`) — **Skeleton shipped**; game-bible Depth 3.5 → V1.55 P2 (`2026-06-22-v1.55-game-bible-depth-35`) — **Shipped**; Script scaffold → V1.55 P3 (`2026-06-22-v1.55-script-scaffold`) — **Shipped**; `R-V154P1-S002` → V1.55 P2 — **Resolved**; `R-V154P1-W001` → V1.55 P3 — **Resolved**.
 **Purpose**: Single source of truth for **open** and **backlog** features/tech-debt deferred from delivery compasses. Closed/shipped history lives in [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-20 (V1.53 ship metadata finalization)
+**Last updated**: 2026-06-22 (V1.55 ship)
 
 ---
 
@@ -64,11 +66,11 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-13 | Entitlements API consumption | V1.3 | V2.0+ | M | V1.3 | Platform API dependency. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2→V1.3 | ADR-011/012/013. Platform dependency. |
 | DF-29 | `registry.refresh` (synthetic output) | V1.21 audit | Any future | M | V1.21 | **Out of V1.31/V1.32** — needs network/CDN. `builtins/registry.rs`. |
-| DF-31 | `workspace.open` / `workspace.commit` stubs | V1.21 audit | Any future | M | V1.21 | **Out of V1.31/V1.32** — `nexus-home-layout` wiring deferred. |
+| DF-31 | `workspace.open` / `workspace.commit` stubs | V1.21 audit | **V1.55 P1 (skeleton shipped)** | M | V1.21→V1.55 | **V1.55 P1 delivered**: interface skeleton for `workspace.open` (path validation, session_id + snapshot) and `workspace.commit` (session validation, stale/conflict rejection) via Local API endpoints `POST /v1/local/workspace/open` and `POST /v1/local/workspace/commit`. Session manager with in-memory store, TTL expiry, and path-safety guards in `nexus-home-layout`. Full production implementation (file-level OCC, persistent sessions, changes[] payload, DF-42 Local API redesign) remains deferred. Plan: [2026-06-22-v1.55-df31-workspace-interface.md](../plans/2026-06-22-v1.55-df31-workspace-interface.md). |
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | **Converged via DF-68 (V1.39 P0 Shipped)** | S | V1.21→V1.39 | `daemon-runtime/lifecycle/actions.rs`. V1.39 P0 conditional boot auto-resume for checkpointed auto-chain drivers supersedes blanket pause-only recovery for those schedules. DF-68 implemented: `find_resumable_works` + boot logging in `boot.rs`. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
 | DF-42 | Full Local API redesign for World/User KB | V1.24 (KCA-003) | Any future | L | V1.24 | `/v1/local/kb/*` full scoping redesign. |
-| DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | Any future | M | V1.26–28 partial | Production owner = `nexus-local-db`; see decision note below. |
+| DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | **Closed V1.55 P0** | M | V1.26–28 partial→V1.55 P0 | **Closed**: adapter `From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` added in `nexus-local-db`; `nexus-knowledge` crate docs locked to model/adapter-seam only; spec `local-db-schema.md` §4.1.1 ownership boundary text added; round-trip + duplicate-truth prevention tests in `nexus-local-db/src/reference_source.rs`. Plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-df43-sqlite-alignment.md). |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.42 P3 Narrowed** | M | V1.34→V1.35→V1.36→V1.42 | V1.34 P4 shipped adapter. **V1.42 P3 shipped**: `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool (`nexus.orchestration.schedule_status`) proven E2E with 5 hermetic tests. Production caller wiring complete for minimal slice. Full DF-46 parity remains Post-V1.42. Plan: [2026-06-11-v1.42-agent-tool-production-wiring.md](../plans/2026-06-11-v1.42-agent-tool-production-wiring.md). |
@@ -93,17 +95,18 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | ~~BL-12~~ | `creator run` hardcoded subcommands vs preset-generic entry | V1.44 ship | **V1.45 Shipped** (P0+P1+P2) | L | V1.45 | V1.44 shipped `audit-chapter` / `review-master` as new enum variants — anti-pattern. V1.45: generic `creator run <preset_id>` + delete bespoke subcommands. Plan: [2026-06-13-v1.45-creator-run-generic-runner.md](../plans/2026-06-13-v1.45-creator-run-generic-runner.md). Spec: [creator-run-preset-entry.md](specs/creator-run-preset-entry.md) (Shipped V1.45). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 | ~~BL-13~~ | `STAGE_PRESET_ALLOWLIST` references `memory-review` without embedded preset | V1.34 | **V1.45 Shipped** (P1 T4) | S | V1.34 | Allowlist drift in `validation.rs`; no `embedded-presets/memory-review/`. P1: removed allowlist entry (implement decision). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 | PF-ESSAY | `essay` Work profile | V1.52 lock | V1.52 | M | V1.52 lock + spec authoring | First non-novel Feature line: [essay-profile.md](specs/essay-profile.md). |
-| PF-GAME-BIBLE | `game-bible` Work profile | V1.52 lock | V1.53+ | L | V1.52 Exploration only; no implementation | Roadmap only in [non-novel-profiles-roadmap.md](specs/non-novel-profiles-roadmap.md). |
-| PF-SCRIPT | `script` Work profile | V1.52 lock | V1.53+ | L | V1.52 Exploration only; no implementation | Roadmap only in [non-novel-profiles-roadmap.md](specs/non-novel-profiles-roadmap.md). |
+| PF-GAME-BIBLE | `game-bible` Work profile | V1.52 lock | **V1.55 P2 (Depth 3.5 shipped; Master spec)** | L | V1.52 Exploration → V1.54 Scaffold → V1.55 Depth 3.5 | V1.54 shipped scaffold + Draft spec; V1.55 P2 shipped `design-writing` + design 五问 + section completion detection + KB extraction (profile-aware via `candidate_from_llm_json_for_profile`). R-V154P1-S002 observability closed. Spec promoted to Master at V1.55 P-last. Spec: [game-bible-profile.md](specs/game-bible-profile.md). |
+| PF-SCRIPT | `script` Work profile | V1.52 lock | **V1.55 P3 (scaffold shipped; Draft spec)** | L | V1.52 Exploration → V1.55 scaffold | V1.55 P3 shipped `script-profile.md` Draft + V1.54-style scaffold (Scripts/ + Beats/ + Characters/ + Logs/); additive `dialogue`/`beat`/`act` BlockType + `script_category` validation. R-V154P1-W001 ScaffoldTransaction applied to BOTH game-bible and script scaffolds. Spec: [script-profile.md](specs/script-profile.md). |
 
 #### DF-43 decision note — Reference sources persistence
 
-**Status:** Production persistence owner decided (V1.25 Theme C); crate-model alignment **remains open**.
+**Status:** **Closed in V1.55 P0** (2026-06-22).
 
-1. **`nexus-local-db`** owns production `reference_sources` in `state.db`.
-2. **`nexus-knowledge::ReferenceSource`** remains in-memory crate model until a follow-up adapter plan.
+1. **`nexus-local-db`** owns production `reference_sources` in `state.db` — confirmed sole persistence owner.
+2. **`nexus-knowledge::ReferenceSource`** remains as domain model / adapter seam. `From<ReferenceSourceRow>` adapter lives in `nexus-local-db`.
+3. `nexus-knowledge` crate docs and AGENTS.md explicitly state no second SQLite/file-backed truth source.
 
-See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md). Re-evaluate when `nexus-knowledge` proposes a SQLite/file-backed adapter with migration plan.
+See plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-df43-sqlite-alignment.md).
 
 ### 3.4 Backlog (no committed target version)
 
@@ -121,15 +124,14 @@ See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-referenc
 
 ### 3.5 Open tech-debt residuals (SSOT pointer)
 
-**V1.53 active residual retargeting (V1.54+ carry-forward)**: 13 open residuals (4 medium + 9 low) deferred from V1.53 ship. See [`shipped-features-tracker.md`](../archived/shipped-features-tracker.md) §2 V1.54+ carry-forward index. Medium items: R-V153P1QC2-003 (daemon.health registry_ids exposure), R-V153P0QC2-001 (P1 parity coverage expansion), R-V153P0QC2-002 (catalog↔registry bijection test), R-V153P0QC3-001 (per-dispatch registry allocation on schedule hot path). Machine SSOT remains [`status.json`](../status.json).
+**V1.55 ship residual retargeting**: All 2 V1.54 carry-forwards closed in V1.55. `R-V154P1-S002` resolved in P2 (profile-gate observability); `R-V154P1-W001` resolved in P3 (ScaffoldTransaction). New V1.55-internal residual `R-V155P2-F002` (deferred to V1.56+; design-writing preset no durable section_status auto-transition; manual author step for V1.55) registered in `status.json`. Machine SSOT: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`.
 
-
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-20**; integration_branch_retired=true; V1.53 Shipped 2026-06-20; PR #74 merged; 13 open residuals target V1.54+). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22**; integration_branch=`iteration/v1.55` (P-last retiring); pre_implement_gate=`GO — V1.55 P-1 Done 2026-06-22` (retired post-ship); 1 open residual (`R-V155P2-F002` deferred to V1.56+). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
-| V1.54+ carry-forward (V1.53 ship) | **13** | 4 medium + 9 low; see shipped-features-tracker.md V1.54+ index |
-| **Total deferred at V1.53 ship** | **13** | See `metadata.tech_debt_summary.total_deferred` (= 13; 4 medium + 9 low) |
+| V1.55 carry-forward (V1.54 ship) | **2** | 2 low; see V1.55 carry-forward index above |
+| **Total deferred at V1.55 ship** | **1** | See `metadata.tech_debt_summary.total_deferred` (= 1; 1 low: `R-V155P2-F002` → V1.56+) |
 
 **Closed / historical residuals**
 
@@ -277,7 +279,7 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 
 **Latest active iteration**
 
-- *(none — between iterations; V1.54 Shipped 2026-06-21 via PR #76; next compass TBD)*
+- **V1.55 Active** (P-1 in progress): [v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md](../iterations/v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md) — Non-Novel Profile Completion & Infrastructure Refactor; pre-implement gate pending PM review.
 
 **Latest shipped iteration**
 

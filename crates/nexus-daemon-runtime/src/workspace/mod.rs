@@ -9,10 +9,12 @@
 //! preferable to a hard crash.
 
 pub mod manager;
+pub mod session;
 
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
+use crate::workspace::session::WorkspaceSessionManager;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_orchestration::{
     engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
@@ -59,6 +61,9 @@ pub struct WorkspaceState {
     /// Daemon-side tool dispatch for nexus.* tools (DF-47, V1.42 P3).
     /// Set at daemon boot so schedule-executed `HostToolCallTask` can invoke tools.
     daemon_tool_dispatch: Arc<Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>>,
+    /// Workspace session manager (DF-31 skeleton).
+    /// In-memory session store for workspace.open / workspace.commit.
+    session_manager: Arc<WorkspaceSessionManager>,
 }
 
 impl WorkspaceState {
@@ -96,6 +101,7 @@ impl WorkspaceState {
             narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
             daemon_tool_dispatch: Arc::new(None),
+            session_manager: Arc::new(WorkspaceSessionManager::new()),
         }
     }
 
@@ -150,6 +156,7 @@ impl WorkspaceState {
             narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
             daemon_tool_dispatch: Arc::new(None),
+            session_manager: Arc::new(WorkspaceSessionManager::new()),
         })
     }
 
@@ -336,6 +343,12 @@ impl WorkspaceState {
     #[must_use]
     pub const fn started_at(&self) -> chrono::DateTime<chrono::Utc> {
         self.started_at_wall
+    }
+
+    /// Workspace session manager (DF-31 skeleton).
+    #[must_use]
+    pub fn session_manager(&self) -> Arc<WorkspaceSessionManager> {
+        Arc::clone(&self.session_manager)
     }
 
     /// Current runtime mode (from CLI config at startup).

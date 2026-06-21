@@ -222,12 +222,12 @@ async fn with_runtime_deps_registers_all_llm_capabilities() {
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
-    // 23 builtins: 21 V1.51 + essay.scaffold from V1.52 T-A P2 + game_bible.scaffold from V1.54 P1.
+    // 24 builtins: 21 V1.51 + essay.scaffold from V1.52 T-A P2 + game_bible.scaffold from V1.54 P1 + script.scaffold from V1.55 P3.
     // Drop-in replacement for the production registry construction.
     assert_eq!(
         registry.len(),
-        23,
-        "registry should have 23 builtins (21 V1.51 + essay.scaffold V1.52 + game_bible.scaffold V1.54 P1)"
+        24,
+        "registry should have 24 builtins (21 V1.51 + essay.scaffold V1.52 + game_bible.scaffold V1.54 P1 + script.scaffold V1.55 P3)"
     );
 
     // LLM-backed caps must all be present.

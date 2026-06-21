@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-06-22-v1.55-compass-and-plan-stubs",
+  "title": "V1.55 P-1 — Compass & Plan Stubs",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "M",
+  "working_branch": "iteration/v1.55",
+  "merge_target": "iteration/v1.55",
+  "type": "prepare",
+  "created": "2026-06-22",
+  "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
+  "qc_status": "skipped (PM whitelist — Prepare-phase plan authoring)",
+  "qa_status": "n/a",
+  "merge_commit": "4ef17268 (P-1 signoff) + 626ba878 (track-ownership fix) + a3d0daee (compass + plan stubs baseline)",
+  "done_at": "2026-06-21"
+}

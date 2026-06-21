@@ -628,7 +628,17 @@ pub async fn reconcile_from_filesystem(
         // Block reconcile for explicitly non-novel profiles (game_bible, essay).
         // Legacy Works (work_profile IS NULL) are treated as novel for backwards
         // compatibility — they were created before the profile system existed.
+        // R-V154P1-S002: warn!-level audit trace when reconcile is blocked by
+        // profile gate, so operators can see why reconcile is not running.
         if profile.as_deref().is_some() && !crate::is_novel_profile(profile.as_deref()) {
+            tracing::warn!(
+                target: "reconcile",
+                work_id,
+                work_ref,
+                work_profile = ?profile.as_deref(),
+                "chapter reconciliation blocked: work_profile is not novel; \
+                 only novel Works have chapter files under Stories/"
+            );
             return Err(LocalDbError::Io(format!(
                 "chapter reconciliation is not supported for work_profile '{}' (work_id: {work_id}); \
                  only novel Works have chapter files under Stories/",
@@ -1200,12 +1210,22 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
     let status: String = row.get("status");
     let work_profile: Option<String> = row.get("work_profile");
 
-    // SAFETY: game-bible profile gate (V1.54 P1).
-    // Game-bible completion detection is deferred to V1.55+. In V1.54,
-    // the daemon does not evaluate section_status frontmatter — completion
-    // is manual via `creator works complete`. Return Ok(false) to prevent
-    // the novel chapter-completion logic from applying to game-bible Works.
+    // SAFETY: game-bible profile gate (V1.54 P1; V1.55 P2 completion).
+    // V1.54: game-bible completion detection was deferred. V1.55 P2 enables
+    // section-level evaluation via [is_game_bible_design_complete].
+    // The novel chapter-completion logic must never apply to game-bible Works.
+    // R-V154P1-S002: info!-level trace on this guard path so operators can
+    // audit when the novel-completion logic is bypassed per-profile.
     if crate::is_game_bible_profile(work_profile.as_deref()) {
+        tracing::info!(
+            target: "completion",
+            work_id,
+            "game-bible profile: bypassing novel chapter-completion; \
+             design-section evaluation handled by is_game_bible_design_complete"
+        );
+        // V1.55 P2: game-bible completion is now evaluated by the caller
+        // (e.g., get_work handler) via is_game_bible_design_complete,
+        // which inspects Design/*.md frontmatter.
         return Ok(false);
     }
 
@@ -1248,6 +1268,143 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
     // §6.1: row count must match total_planned_chapters and ALL must be finalized.
     let expected = i64::from(total);
     Ok(total_rows == expected && finalized_rows == expected)
+}
+
+/// V1.55 P2 — Game-bible design section completion check.
+///
+/// Evaluates `section_status` frontmatter across all critical `Design/*.md` files
+/// in `Works/<work_ref>/Design/`. A game-bible Work is design-complete when:
+///
+/// 1. Every critical section (`overview.md`, `pillars.md`, `mechanics.md`) has
+///    `section_status: accepted` in its YAML frontmatter.
+/// 2. The Work's `intake_status == 'complete'`.
+///
+/// Returns `Ok(false)` when:
+/// - Any critical section is missing from the filesystem
+/// - Any critical section's `section_status` is not `accepted`
+/// - `intake_status` is not `'complete'`
+///
+/// This function reads files from the workspace filesystem. It is designed to
+/// be called from the daemon handler layer (which has access to `workspace_dir`)
+/// rather than from the pure-DB `is_work_completed` function.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Io` if the Design directory or a critical file
+/// cannot be read.
+///
+/// # Tracing (R-V154P1-S002)
+///
+/// Logging level intent (V1.55 P2 fix-wave W-1):
+/// - `info!` at meaningful gate transitions (intake not complete; all critical
+///   sections accepted) — operators need these decisions without verbose logging.
+/// - `debug!` for per-section evaluations — fine-grained detail for debugging
+///   but too noisy at `info!` level on the `get_work` hot path.
+/// - `warn!` for unexpected states (e.g. missing rows).
+pub async fn is_game_bible_design_complete(
+    pool: &SqlitePool,
+    work_id: &str,
+    workspace_dir: &std::path::Path,
+) -> Result<bool, LocalDbError> {
+    // Critical Design sections per game-bible-profile.md §8.
+    const CRITICAL_SECTIONS: &[(&str, &str)] = &[
+        ("overview.md", "overview"),
+        ("pillars.md", "pillars"),
+        ("mechanics.md", "mechanics"),
+    ];
+
+    // Resolve work_ref from the works table.
+    // SAFETY: SELECT work_ref, intake_status — runtime query.
+    let row = sqlx::query("SELECT work_ref, intake_status FROM works WHERE work_id = ?")
+        .bind(work_id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(row) = row else {
+        tracing::warn!(work_id, "is_game_bible_design_complete: work not found");
+        return Ok(false);
+    };
+
+    let intake_status: String = row.get("intake_status");
+    if intake_status != "complete" {
+        tracing::info!(
+            target: "completion",
+            work_id,
+            intake_status,
+            "game-bible: intake_status is not complete; design not complete"
+        );
+        return Ok(false);
+    }
+
+    let work_ref: Option<String> = row.get("work_ref");
+    let Some(ref work_ref) = work_ref else {
+        tracing::debug!(work_id, "is_game_bible_design_complete: work_ref is NULL");
+        return Ok(false);
+    };
+
+    let design_dir = workspace_dir.join("Works").join(work_ref).join("Design");
+
+    if !design_dir.is_dir() {
+        tracing::debug!(
+            target = "completion",
+            work_id,
+            work_ref,
+            design_dir = %design_dir.display(),
+            "game-bible: Design/ directory missing; design not complete"
+        );
+        return Ok(false);
+    }
+
+    // V1.55 P2 fix-wave W-2: use tokio::fs for async file I/O on the
+    // get_work hot path (previously std::fs::read_to_string).
+    for (filename, label) in CRITICAL_SECTIONS {
+        let path = design_dir.join(filename);
+        let content = match tokio::fs::read_to_string(&path).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!(
+                    target = "completion",
+                    work_id,
+                    work_ref,
+                    section = label,
+                    error = %e,
+                    "game-bible: critical section file unreadable"
+                );
+                return Ok(false);
+            }
+        };
+        let fm = parse_frontmatter(&content);
+        let status = fm.get("section_status").map_or("draft", String::as_str);
+        // Per-section evaluation at debug level (not info — hot path).
+        tracing::debug!(
+            target = "completion",
+            work_id,
+            work_ref,
+            section = label,
+            section_status = status,
+            "game-bible: critical section evaluated"
+        );
+        if status != "accepted" {
+            // First non-accepted section is a meaningful gate: keep at info.
+            tracing::info!(
+                target = "completion",
+                work_id,
+                work_ref,
+                section = label,
+                section_status = status,
+                "game-bible: critical section not yet accepted; design not complete"
+            );
+            return Ok(false);
+        }
+    }
+
+    tracing::info!(
+        target = "completion",
+        work_id,
+        work_ref,
+        "game-bible: all critical Design sections accepted + intake complete; design complete"
+    );
+    Ok(true)
 }
 
 /// Parse chapter number from a filename like `ch01-introduction.md`.
@@ -2512,7 +2669,138 @@ mod tests {
                 .await
                 .unwrap(),
             "game-bible profile: is_work_completed must return false \
-             (completion detection deferred to V1.55+)"
+             (novel completion bypassed; design completion via is_game_bible_design_complete)"
+        );
+    }
+
+    // V1.55 P2: is_game_bible_design_complete tests
+    #[tokio::test]
+    async fn test_is_game_bible_design_complete_all_accepted() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_gb_comp_001").await;
+
+        // SAFETY: UPDATE — runtime query.
+        sqlx::query(
+            "UPDATE works SET work_profile = 'game_bible', work_ref = 'my-game', \
+             intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("wrk_gb_comp_001")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let design_dir = dir.path().join("Works").join("my-game").join("Design");
+        std::fs::create_dir_all(&design_dir).unwrap();
+        for filename in ["overview.md", "pillars.md", "mechanics.md"] {
+            std::fs::write(
+                design_dir.join(filename),
+                "---\nsection_status: accepted\nsection_weight: critical\n---\n\n# Content\n",
+            )
+            .unwrap();
+        }
+
+        assert!(
+            is_game_bible_design_complete(&pool, "wrk_gb_comp_001", dir.path())
+                .await
+                .unwrap(),
+            "all critical sections accepted → design complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_game_bible_design_complete_one_draft() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_gb_comp_002").await;
+
+        sqlx::query(
+            "UPDATE works SET work_profile = 'game_bible', work_ref = 'my-game-2', \
+             intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("wrk_gb_comp_002")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let design_dir = dir.path().join("Works").join("my-game-2").join("Design");
+        std::fs::create_dir_all(&design_dir).unwrap();
+        for (filename, status) in [
+            ("overview.md", "accepted"),
+            ("pillars.md", "draft"),
+            ("mechanics.md", "accepted"),
+        ] {
+            std::fs::write(
+                design_dir.join(filename),
+                format!(
+                    "---\nsection_status: {status}\nsection_weight: critical\n---\n\n# Content\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        assert!(
+            !is_game_bible_design_complete(&pool, "wrk_gb_comp_002", dir.path())
+                .await
+                .unwrap(),
+            "pillars is draft → design NOT complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_game_bible_design_complete_missing_files() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_gb_comp_003").await;
+
+        sqlx::query(
+            "UPDATE works SET work_profile = 'game_bible', work_ref = 'my-game-3', \
+             intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("wrk_gb_comp_003")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Design dir empty — no critical files
+        let design_dir = dir.path().join("Works").join("my-game-3").join("Design");
+        std::fs::create_dir_all(&design_dir).unwrap();
+
+        assert!(
+            !is_game_bible_design_complete(&pool, "wrk_gb_comp_003", dir.path())
+                .await
+                .unwrap(),
+            "missing critical files → design NOT complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_game_bible_design_complete_intake_pending() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_gb_comp_004").await;
+
+        // intake_status is pending
+        sqlx::query(
+            "UPDATE works SET work_profile = 'game_bible', work_ref = 'my-game-4', \
+             intake_status = 'pending' WHERE work_id = ?",
+        )
+        .bind("wrk_gb_comp_004")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let design_dir = dir.path().join("Works").join("my-game-4").join("Design");
+        std::fs::create_dir_all(&design_dir).unwrap();
+        for filename in ["overview.md", "pillars.md", "mechanics.md"] {
+            std::fs::write(
+                design_dir.join(filename),
+                "---\nsection_status: accepted\nsection_weight: critical\n---\n\n# Content\n",
+            )
+            .unwrap();
+        }
+
+        assert!(
+            !is_game_bible_design_complete(&pool, "wrk_gb_comp_004", dir.path())
+                .await
+                .unwrap(),
+            "intake is pending → design NOT complete"
         );
     }
 

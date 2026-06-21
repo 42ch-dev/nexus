@@ -178,6 +178,15 @@ fn workspace_routes() -> Router<WorkspaceState> {
             "/v1/local/workspace/init",
             post(handlers::workspace::init_workspace),
         )
+        // DF-31 skeleton: workspace session open/commit
+        .route(
+            "/v1/local/workspace/open",
+            post(handlers::workspace::open_workspace),
+        )
+        .route(
+            "/v1/local/workspace/commit",
+            post(handlers::workspace::commit_workspace),
+        )
         .route(
             "/v1/local/workspaces",
             get(handlers::workspaces::list_workspaces).post(handlers::workspaces::create_workspace),

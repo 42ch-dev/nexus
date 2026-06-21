@@ -1,6 +1,6 @@
-# Game-Bible Profile — Draft Specification V1.54
+# Game-Bible Profile — Master Specification V1.55
 
-**Status**: Draft (V1.54 — scaffold authored in plan `2026-06-22-v1.54-game-bible-scaffold`)  
+**Status**: Master (V1.55 P2 shipped; Depth 3.5 complete: design-writing preset + design 五问 quality rubric + section completion detection + KB extraction + R-V154P1-S002 observability closure)  
 **Document class**: Feature line  
 **Created**: 2026-06-22  
 **Scope**: `work_profile: game_bible` on generic **Work** — artifact layout under `Works/<work_ref>/Design/`, section status model, stage chain, KB taxonomy, completion semantics  
@@ -297,7 +297,7 @@ Seven new `BlockType` wire enum variants are added to `schemas/common/common.sch
 | `level` | `level` | Required |
 | `economy_tier` | `economy_tier` | Required |
 
-Existing `BlockType` variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`) are reused for cross-domain concepts. For example, a game character can use `BlockType::Character` with `game_bible_category: "character"`.
+Existing `BlockType` variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`) are reused for cross-domain concepts. Each non-game-bible `BlockType` is **mapped** to the closest `game_bible_category` value (one of the seven valid literals: `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`). For example, `BlockType::Character` maps to `game_bible_category: "species"` — not to a literal `"character"` category value (which is not a valid `game_bible_category`). See `quality_loop::block_type_to_game_bible_category` for the canonical mapping table.
 
 ### 7.3 ValidationMode::GameBible
 

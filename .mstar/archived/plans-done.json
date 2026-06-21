@@ -231,7 +231,14 @@
     "2026-06-22-v1.53-skills-cli-cleanup",
     "2026-06-22-v1.53-spec-hygiene-closeout",
     "2026-06-22-v1.54-df46-write-tools",
-    "2026-06-22-v1.54-game-bible-scaffold"
+    "2026-06-22-v1.54-game-bible-scaffold",
+    "2026-06-22-v1.55-compass-and-plan-stubs",
+    "2026-06-22-v1.55-df43-sqlite-alignment",
+    "2026-06-22-v1.55-df31-workspace-interface",
+    "2026-06-22-v1.55-game-bible-depth-35",
+    "2026-06-22-v1.55-script-scaffold",
+    "2026-06-22-v1.55-mid-qc-and-fix-waves",
+    "2026-06-22-v1.55-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -449,6 +456,39 @@
       ],
       "code_smoke": "3970+ tests passing; cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all --check clean on P1 files (P0 carry-over files clean per f665e1c2); 2 carry-over residuals registered",
       "note": "P-last in progress at 2026-06-20. Integration branch iteration/v1.54 to be retired post-merge per mstar-branch-worktree."
+    },
+    "v1.55": {
+      "version": "v1.55",
+      "name": "Non-Novel Profile Completion & Infrastructure Refactor",
+      "compass": ".mstar/iterations/v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
+      "shipped_at": "2026-06-22T00:00:00Z",
+      "plan_ids": [
+        "2026-06-22-v1.55-compass-and-plan-stubs",
+        "2026-06-22-v1.55-df43-sqlite-alignment",
+        "2026-06-22-v1.55-df31-workspace-interface",
+        "2026-06-22-v1.55-game-bible-depth-35",
+        "2026-06-22-v1.55-script-scaffold"
+      ],
+      "highlights": {
+        "P0_DF43": "Closed: adapter From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource; nexus-knowledge locked to model/adapter-seam; local-db-schema.md §4.1.1 ownership boundary text; round-trip + duplicate-truth tests",
+        "P1_DF31": "Interface skeleton shipped: WorkspaceSessionManager (atomic consume_session + SessionError + poison recovery + typed errors); 2 Local API routes; no broad DF-42 Local API redesign",
+        "P2_game_bible_depth_35": "Depth 3.5: design-writing + design 五问 rubric + section completion detection + profile-aware KB extraction (candidate_from_llm_json_for_profile); R-V154P1-S002 closed",
+        "P3_script_scaffold": "V1.54-style scaffold + additive BlockType dialogue/beat/act + script_category + ValidationMode::Script; R-V154P1-W001 closed (ScaffoldTransaction on BOTH game-bible + script)",
+        "P_last": "game-bible-profile.md Draft → Master; Profile B compaction; tracker V1.55 ship snapshot; integration branch retiring; R-V155P2-F002 registered (V1.56+)"
+      },
+      "residual_lifecycle": {
+        "archived_in_v155": [
+          "R-V154P1-S002 (P2)",
+          "R-V154P1-W001 (P3)"
+        ],
+        "open_v156_carry_forward": [
+          "R-V155P2-F002"
+        ],
+        "open_v156_count": 1
+      },
+      "wire_contract_changes": "None (per compass §0.1; additive enum only — script BlockType dialogue/beat/act)",
+      "qc_tri_review_outcome": "P0: 3/3 Approve. P1: 3/3 Request Changes → 1 fix-wave → 3/3 Approve. P2: qc1+qc3 Request Changes → 2 fix-waves → 3/3 Approve. P3: qc1+qc2 Request Changes → 1 fix-wave → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies.",
+      "note": "V1.55 ship pending PR to main (user authorization required for push). Integration branch iteration/v1.55 retiring per mstar-branch-worktree."
     }
   },
   "metadata": {

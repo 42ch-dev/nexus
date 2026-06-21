@@ -437,6 +437,12 @@ fn inject_source_chapters(base_payload: &str, chapters: &[i32]) -> String {
 ///
 /// # Errors
 ///
+/// Currently invoked only for `novel-review-master` schedules (preset-gated by
+/// [`load_review_context`]); the extraction pathway (`extract_via_llm` →
+/// [`run_llm_extract`]) is profile-aware via [`ChapterContext::work_profile`]
+/// so game-bible review-time hooks (V1.56+) can reuse this function unchanged
+/// once the preset gate is widened.
+///
 /// Returns `AutoChainError::Database` if the schedule/Work lookup or a
 /// candidate INSERT fails.
 pub async fn extract_kb_candidates_for_review(
@@ -600,11 +606,15 @@ pub(crate) enum LlmExtractOutcome {
 ///
 /// Resolves the capability from `registry`, builds the canonical input shape
 /// `{ prompt, chapter_prose, _creator_id, _session_id }`, and parses the
-/// `candidates` array through [`candidate_from_llm_json`].
+/// `candidates` array through [`candidate_from_llm_json_for_profile`] scoped
+/// to `work_profile`.
 ///
 /// Returns [`LlmExtractOutcome::WorkerUnavailable`] when no worker IPC is
 /// available, so callers can distinguish "no worker" from "zero candidates"
 /// (closes R-V151Q3-W002).
+///
+/// V1.55 P2 fix-wave (F-001): added `work_profile` parameter so game-bible
+/// callers produce `game_bible_category` payloads instead of `novel_category`.
 pub(crate) async fn run_llm_extract(
     registry: Option<&CapabilityRegistry>,
     capability_name: &str,
@@ -612,6 +622,7 @@ pub(crate) async fn run_llm_extract(
     chapter_prose: &str,
     creator_id: &str,
     session_id: &str,
+    work_profile: &str,
 ) -> LlmExtractOutcome {
     let Some(registry) = registry else {
         return LlmExtractOutcome::WorkerUnavailable;
@@ -651,7 +662,7 @@ pub(crate) async fn run_llm_extract(
         .unwrap_or_default();
     let candidates: Vec<KbCandidate> = candidates_json
         .iter()
-        .filter_map(candidate_from_llm_json)
+        .filter_map(|c| candidate_from_llm_json_for_profile(c, work_profile))
         .take(MAX_CANDIDATES_PER_PASS)
         .collect();
     LlmExtractOutcome::Candidates(candidates)
@@ -661,6 +672,8 @@ pub(crate) async fn run_llm_extract(
 ///
 /// Thin wrapper around [`run_llm_extract`] that supplies the review-time hook's
 /// default extraction prompt and identity fields from [`ChapterContext`].
+/// The `work_profile` carried by [`ChapterContext`] controls whether candidates
+/// carry `novel_category` or `game_bible_category` attributes (V1.55 P2 F-001).
 async fn extract_via_llm(
     registry: Option<&CapabilityRegistry>,
     ctx: &ChapterContext,
@@ -676,23 +689,54 @@ async fn extract_via_llm(
         &ctx.prose,
         &ctx.creator_id,
         "",
+        &ctx.work_profile,
     )
     .await
 }
 
-/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object.
+/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
+/// scoped to the novel `work_profile`.
 ///
-/// Returns `None` when `canonical_name` is missing/empty (no point persisting
-/// a nameless candidate). Fills `proposed_payload` with a novel-profile
-/// `KeyBlockBody` JSON whose `novel_category` is derived from the LLM-judged
-/// `block_type` (entity-scope-model §5.1.1 mapping) so adopt-time
-/// `ValidationMode::Novel` passes. The payload also carries the four LLM keys
-/// so the adopt CLI can read them from either the dedicated columns or the
-/// JSON (llm-extract.md §3.1).
+/// Convenience wrapper around [`candidate_from_llm_json_for_profile`] with
+/// `work_profile = "novel"`. Kept for backward compatibility with existing
+/// novel-only callers that don't carry a work-profile parameter, and for
+/// `#[cfg(test)]` usage validating the novel path unchanged.
 ///
 /// `pub(crate)`: reused by `tasks::LlmExtractTask` so there is a single
 /// LLM→KbCandidate mapping across the review-time hook and the task.
+// V1.55 P2 fix-wave (F-001): production callers now use
+// candidate_from_llm_json_for_profile directly; this wrapper remains for
+// tests and backward compatibility. lib dead_code warning suppressed.
+#[allow(dead_code)]
 pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandidate> {
+    candidate_from_llm_json_for_profile(c, "novel")
+}
+
+/// Build a [`KbCandidate`] from one LLM-returned candidate JSON object,
+/// producing a `proposed_payload` shaped for the given `work_profile`.
+///
+/// Returns `None` when `canonical_name` is missing/empty (no point persisting
+/// a nameless candidate).
+///
+/// ## Profile-specific payload shape
+///
+/// | `work_profile` | category attribute | tags | `ValidationMode` |
+/// |---|---|---|---|
+/// | `"novel"` | `attributes.novel_category` via [`block_type_to_novel_category`] | `["novel", "llm-extracted"]` | `Novel` |
+/// | `"game_bible"` | `attributes.game_bible_category` via [`block_type_to_game_bible_category`] | `["game-bible", "llm-extracted"]` | `GameBible` |
+/// | other / unknown | `attributes.novel_category` (novel default) | `["novel", "llm-extracted"]` | `Novel` |
+///
+/// The payload also carries the four LLK keys (`block_type`, `canonical_name`,
+/// `source_quote`, `confidence`) so the adopt CLI can read them from either the
+/// dedicated columns or the JSON (llm-extract.md §3.1).
+///
+/// V1.55 P2 fix-wave (F-001): extracted from the body of the former
+/// `candidate_from_llm_json` so game-bible extraction paths can call this
+/// with `work_profile = "game_bible"`.
+pub(crate) fn candidate_from_llm_json_for_profile(
+    c: &serde_json::Value,
+    work_profile: &str,
+) -> Option<KbCandidate> {
     let canonical_name = c
         .get("canonical_name")
         .and_then(|v| v.as_str())
@@ -717,15 +761,28 @@ pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandida
         .get("source_quote")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let novel_category = block_type_to_novel_category(&block_type);
+
+    let (category_key, category_value, tags) = if work_profile == "game_bible" {
+        (
+            "game_bible_category",
+            block_type_to_game_bible_category(&block_type),
+            vec!["game-bible", "llm-extracted"],
+        )
+    } else {
+        (
+            "novel_category",
+            block_type_to_novel_category(&block_type),
+            vec!["novel", "llm-extracted"],
+        )
+    };
 
     let mut payload = serde_json::json!({
         "summary": summary.clone().unwrap_or_else(|| format!("LLM-extracted entity: {canonical_name}")),
         "attributes": {
-            "novel_category": novel_category,
+            category_key: category_value,
             "aliases": [canonical_name.as_str()],
         },
-        "tags": ["novel", "llm-extracted"],
+        "tags": tags,
         "block_type": block_type,
         "canonical_name": canonical_name,
         "source_quote": source_quote.clone().unwrap_or_default(),
@@ -770,6 +827,49 @@ fn block_type_to_novel_category(block_type: &str) -> &'static str {
     }
 }
 
+/// Map a wire `block_type` (`snake_case`) to the game-bible `game_bible_category`
+/// body attribute (game-bible-profile.md §7.2 mapping).
+///
+/// V1.55 P2: used when constructing the `proposed_payload` for game-bible
+/// KB extraction so adopt-time `ValidationMode::GameBible` validates.
+/// The seven valid categories are: `species`, `faction`, `magic_system`,
+/// `technology`, `deity`, `level`, `economy_tier`. Existing cross-domain types
+/// map to the closest game-bible category per §7.2 table.
+///
+/// Unknown `block_types` default to `species` — the most generic game-bible
+/// category — and emit a `tracing::debug!` so operators can see unclassified
+/// candidates.
+// Direct-mapping arms and cross-domain fallback arms may produce the same
+// string value, but the semantics differ (identity mapping vs. best-guess).
+#[allow(clippy::match_same_arms)]
+#[must_use]
+pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
+    match block_type {
+        // V1.54 new game-bible BlockTypes: direct mapping.
+        "species" => "species",
+        "faction" => "faction",
+        "magic_system" => "magic_system",
+        "technology" => "technology",
+        "deity" => "deity",
+        "level" => "level",
+        "economy_tier" => "economy_tier",
+        // Cross-domain reuse: existing BlockType → closest game_bible_category.
+        "character" => "species", // Characters → species (biological/cultural)
+        "ability" => "magic_system", // Abilities → magic/superpower system
+        "scene" => "level",       // Scenes → levels
+        "organization" | "conflict" => "faction", // Organizations/Conflicts → faction dynamics
+        "item" => "technology",   // Items → technology/artifacts
+        "info_point" | "event" => "deity", // Info points/Events → deity (lore)
+        _ => {
+            tracing::debug!(
+                block_type,
+                "block_type_to_game_bible_category: unknown block_type; defaulting to species"
+            );
+            "species"
+        }
+    }
+}
+
 /// Loaded chapter context: schedule → work → chapter prose.
 ///
 /// Returned by [`load_review_context`] and [`load_finalize_context`] when all
@@ -784,6 +884,10 @@ struct ChapterContext {
     /// Human-readable Work slug for on-disk paths (`work_ref`, falling back to
     /// `story_ref`). `None` in hermetic DB-only tests where no workspace exists.
     work_ref: Option<String>,
+    /// Work profile (e.g. `"novel"`, `"game_bible"`) for profile-aware
+    /// KB extraction payloads. Defaults to `"novel"` when the Work row carries
+    /// `work_profile = NULL` (backward compatibility with pre-V1.36 Works).
+    work_profile: String,
     prose: String,
 }
 
@@ -896,6 +1000,14 @@ async fn load_context_for_preset(
 
     let workspace_id = resolve_workspace_id(pool, &creator_id).await;
     let work_ref = work.work_ref.clone().or_else(|| work.story_ref.clone());
+    // V1.55 P2 fix-wave (F-001): read work_profile from the Work row so the
+    // extraction hook produces profile-aware KB candidates. Defaults to "novel"
+    // for Works created before V1.36 (work_profile = NULL).
+    let work_profile = work
+        .work_profile
+        .clone()
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| "novel".to_string());
     let Some(prose) =
         load_chapter_prose(pool, schedule_id, &work_id, work.current_chapter, ws_dir).await?
     else {
@@ -909,6 +1021,7 @@ async fn load_context_for_preset(
         chapter: work.current_chapter,
         workspace_id,
         work_ref,
+        work_profile,
         prose,
     }))
 }
@@ -1332,6 +1445,180 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// V1.55 P2 — Game-bible design 五问 quality rubric
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Per-dimension results of the game-bible design 五问 rubric.
+///
+/// Unlike the novel outline/finalize gates, this rubric evaluates
+/// **design documents** — not prose chapters. The five dimensions are:
+///
+/// 1. **Pillars**: every design claim traces back to a stated pillar or constraint.
+/// 2. **Mechanics**: gameplay mechanics are concrete, specific, and testable.
+/// 3. **Continuity**: the section is internally consistent with other Design sections.
+/// 4. **Playability**: a reader can visualize how a player would experience it.
+/// 5. **Clarity**: the section avoids placeholder language and stubs.
+// The five boolean dimensions are a natural DTO for the gate result.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DesignFiveQDimensions {
+    pub pillars: bool,
+    pub mechanics: bool,
+    pub continuity: bool,
+    pub playability: bool,
+    pub clarity: bool,
+}
+
+/// Verdict returned by [`design_five_q_check`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesignFiveQVerdict {
+    pub go: bool,
+    pub dimensions: DesignFiveQDimensions,
+    pub reason: String,
+}
+
+/// Pure heuristic evaluation of a game-bible design section against the
+/// design 五问 rubric (V1.55 P2).
+///
+/// Deterministic / no-worker complement to the `llm_judge` gate for the
+/// `design-writing` preset. The rubric is intentionally stricter than the
+/// novel outline 五問 because design documents serve as **reference artifacts**
+/// for a whole game.
+// Five-dimension check naturally exceeds default line-count ceiling; the
+// function is a single concept (quality gate), not a god function.
+#[allow(clippy::too_many_lines)]
+#[must_use]
+pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
+    let trimmed = section_body.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let non_empty_lines: Vec<&str> = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    // 1. pillars: section references a design pillar or constraint.
+    let pillar_signals = [
+        "pillar",
+        "constraint",
+        "principle",
+        "non-goal",
+        "because",
+        "therefore",
+        "rule",
+        "must",
+        "must not",
+        "should",
+        "should not",
+    ];
+    let pillars = pillar_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 5;
+
+    // 2. mechanics: concrete gameplay mechanics.
+    let mechanics_signals = [
+        "damage", "health", "mana", "currency", "resource", "costs", "requires", "grants", "loop",
+        "feedback", "cycle", "phase", "turn", "per", "level", "unlock", "skill", "craft", "trade",
+        "build", "shoot", "jump",
+    ];
+    let mechanics =
+        mechanics_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 8;
+
+    // 3. continuity: cross-references and relational language.
+    let continuity_signals = [
+        "see also",
+        "above",
+        "below",
+        "relates to",
+        "depends on",
+        "conflicts with",
+        "consistent with",
+        "aligns with",
+        "because",
+        "therefore",
+        "however",
+    ];
+    let continuity = continuity_signals.iter().any(|s| lower.contains(s))
+        || char_count_range(trimmed, 200, 10_000);
+
+    // 4. playability: player experience signals.
+    let playability_signals = [
+        "player",
+        "players",
+        "experience",
+        "feel",
+        "feels",
+        "imagine",
+        "encounter",
+        "discover",
+        "explore",
+        "moment",
+        "puzzle",
+        "challenge",
+        "reward",
+        "fun",
+        "engaging",
+        "immersive",
+    ];
+    let playability =
+        playability_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 5;
+
+    // 5. clarity: no TBD/placeholder, not a stub.
+    let placeholder_signals = [
+        "tbd",
+        "todo",
+        "to be determined",
+        "placeholder",
+        "to be decided",
+        "tk",
+        "???",
+    ];
+    let has_placeholders = placeholder_signals.iter().any(|s| lower.contains(s));
+    let is_stub = char_count_range(trimmed, 0, 80);
+    let clarity = !has_placeholders && !is_stub;
+
+    let dimensions = DesignFiveQDimensions {
+        pillars,
+        mechanics,
+        continuity,
+        playability,
+        clarity,
+    };
+    let go = pillars && mechanics && continuity && playability && clarity;
+    let reason = if go {
+        "design 五问: all dimensions pass (pillars, mechanics, continuity, playability, clarity)"
+            .to_string()
+    } else {
+        let mut failed = Vec::new();
+        if !pillars {
+            failed.push("pillars");
+        }
+        if !mechanics {
+            failed.push("mechanics");
+        }
+        if !continuity {
+            failed.push("continuity");
+        }
+        if !playability {
+            failed.push("playability");
+        }
+        if !clarity {
+            failed.push("clarity");
+        }
+        format!("design 五问: failed on {}", failed.join(", "))
+    };
+    DesignFiveQVerdict {
+        go,
+        dimensions,
+        reason,
+    }
+}
+
+/// Check whether the character count of `text` falls within `[min, max]`.
+fn char_count_range(text: &str, min: usize, max: usize) -> bool {
+    let count = text.chars().count();
+    count >= min && count <= max
+}
+
 /// Best-effort `workspace_id` resolution for the `kb_extract_jobs` row.
 ///
 /// Falls back to the `creator_id` when no workspace is registered (the column
@@ -1518,6 +1805,109 @@ mod tests {
         assert_eq!(built.block_type, "character");
         assert_eq!(built.confidence, None);
         assert_eq!(built.source_quote, None);
+    }
+
+    // ── V1.55 P2 fix-wave (F-001): profile-aware candidate materialization ──
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_produces_game_bible_category() {
+        let c = serde_json::json!({
+            "canonical_name": "Eldritch Species",
+            "block_type": "species",
+            "summary": "An ancient species",
+            "confidence": 0.88,
+            "source_quote": "the Eldritch emerged from the void",
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+
+        // game-bible payload MUST have game_bible_category, NOT novel_category.
+        assert_eq!(
+            payload["attributes"]["game_bible_category"], "species",
+            "game-bible profile: species block_type → game_bible_category species"
+        );
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "game-bible profile: must NOT emit novel_category"
+        );
+        // Tags must be game-bible scoped.
+        assert_eq!(payload["tags"][0], "game-bible");
+        assert_eq!(payload["tags"][1], "llm-extracted");
+        // LLM keys still present.
+        assert_eq!(payload["block_type"], "species");
+        assert_eq!(payload["canonical_name"], "Eldritch Species");
+        assert_eq!(payload["confidence"], 0.88);
+        assert_eq!(
+            payload["source_quote"],
+            "the Eldritch emerged from the void"
+        );
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_cross_domain_maps_character_to_species() {
+        // Cross-domain: character BlockType → species game_bible_category.
+        let c = serde_json::json!({
+            "canonical_name": "Hero",
+            "block_type": "character",
+            "confidence": 0.9,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["game_bible_category"], "species");
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "game-bible profile: must NOT emit novel_category for cross-domain block_type"
+        );
+        assert_eq!(payload["tags"][0], "game-bible");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_cross_domain_item_to_technology() {
+        let c = serde_json::json!({
+            "canonical_name": "Plasma Rifle",
+            "block_type": "item",
+            "confidence": 0.85,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["game_bible_category"], "technology");
+        assert_eq!(payload["tags"][0], "game-bible");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_game_bible_unknown_defaults_species() {
+        // Unknown block_type defaults to species per the mapping.
+        let c = serde_json::json!({
+            "canonical_name": "???",
+            "block_type": "goblin_king",
+            "confidence": 0.5,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "game_bible").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["game_bible_category"], "species");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_novel_profile_still_works() {
+        // Regression: the novel wrapper must produce novel_category as before.
+        let c = serde_json::json!({
+            "canonical_name": "Azure Gate",
+            "block_type": "scene",
+            "confidence": 0.92,
+        });
+        let built = candidate_from_llm_json(&c).expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["novel_category"], "location");
+        assert!(
+            payload["attributes"].get("game_bible_category").is_none(),
+            "novel profile: must NOT emit game_bible_category"
+        );
+        assert_eq!(payload["tags"][0], "novel");
+        assert_eq!(payload["tags"][1], "llm-extracted");
     }
 
     // ── V1.51 T-A P1: cross-chapter aggregation ───────────────────────────
@@ -1714,5 +2104,95 @@ mod tests {
         let outline = "## Beat 1\n- Kael must steal the map before dawn.\n- He plants a promise that the guard will return.\n## Beat 2\n- Will he make it out alive?";
         let verdict = outline_five_q_check(outline);
         assert!(verdict.go, "expected GO, got: {verdict:?}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // V1.55 P2 — Game-bible design 五问 rubric + category mapping tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn design_five_q_passes_on_good_design_section() {
+        let section = "# Combat System\n\n\
+            ## Core Pillars\n\
+            Combat must serve the Momentum Pillar.\n\n\
+            ## Mechanics\n\
+            - Initiative uses deck-building: 5-card hand, draw 2 per turn.\n\
+            - Damage is flat (3 base + weapon modifier). No dice.\n\
+            - Stagger at 5 stacks loses next action.\n\n\
+            ## Player Experience\n\
+            The player feels tactical pressure: each card spent is a resource.\n\
+            This creates a push-your-luck feeling.\n\n\
+            ## Continuity\n\
+            Aligns with technology level in Design/technology.md.\n";
+        let verdict = design_five_q_check(section);
+        assert!(verdict.go, "expected GO, got: {verdict:?}");
+        assert!(verdict.dimensions.pillars);
+        assert!(verdict.dimensions.mechanics);
+        assert!(verdict.dimensions.continuity);
+        assert!(verdict.dimensions.playability);
+        assert!(verdict.dimensions.clarity);
+    }
+
+    #[test]
+    fn design_five_q_fails_on_empty_stub() {
+        let verdict = design_five_q_check("");
+        assert!(!verdict.go);
+        assert!(!verdict.dimensions.pillars);
+        assert!(!verdict.dimensions.mechanics);
+        assert!(!verdict.dimensions.clarity);
+    }
+
+    #[test]
+    fn design_five_q_fails_on_tbd() {
+        let section = "# Magic System\n\nTBD - will be decided later. TODO: add more.";
+        let verdict = design_five_q_check(section);
+        assert!(!verdict.go);
+        assert!(!verdict.dimensions.clarity);
+        assert!(verdict.reason.contains("clarity"));
+    }
+
+    #[test]
+    fn design_five_q_is_deterministic() {
+        let section = "# Economy\n\n\
+            ## Currency\n- Gold pieces (GP) as primary currency.\n\
+            - Players craft items from raw materials at a 20% discount.\n";
+        let v1 = design_five_q_check(section);
+        let v2 = design_five_q_check(section);
+        assert_eq!(v1.go, v2.go);
+        assert_eq!(v1.reason, v2.reason);
+    }
+
+    #[test]
+    fn block_type_to_game_bible_category_direct() {
+        assert_eq!(block_type_to_game_bible_category("species"), "species");
+        assert_eq!(block_type_to_game_bible_category("faction"), "faction");
+        assert_eq!(
+            block_type_to_game_bible_category("magic_system"),
+            "magic_system"
+        );
+        assert_eq!(
+            block_type_to_game_bible_category("technology"),
+            "technology"
+        );
+        assert_eq!(block_type_to_game_bible_category("deity"), "deity");
+        assert_eq!(block_type_to_game_bible_category("level"), "level");
+        assert_eq!(
+            block_type_to_game_bible_category("economy_tier"),
+            "economy_tier"
+        );
+    }
+
+    #[test]
+    fn block_type_to_game_bible_category_cross_domain() {
+        assert_eq!(block_type_to_game_bible_category("character"), "species");
+        assert_eq!(block_type_to_game_bible_category("organization"), "faction");
+        assert_eq!(block_type_to_game_bible_category("item"), "technology");
+        assert_eq!(block_type_to_game_bible_category("ability"), "magic_system");
+        assert_eq!(block_type_to_game_bible_category("conflict"), "faction");
+    }
+
+    #[test]
+    fn block_type_to_game_bible_category_unknown_defaults_species() {
+        assert_eq!(block_type_to_game_bible_category("nonsense"), "species");
     }
 }
