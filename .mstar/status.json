@@ -38,12 +38,22 @@
       "wave": "Wave 1",
       "effort": "L",
       "owner": "@fullstack-dev",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-22-v1.57-spec-governance-and-registry.md",
       "working_branch": "feature/v1.57-spec-governance-and-registry",
       "merge_target": "iteration/v1.57",
       "depends_on": ["2026-06-22-v1.57-compass-and-plan-stubs"],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "inreview_at": "2026-06-22",
+      "inreview_commits": ["43e4d89d", "7e9932ce"],
+      "merge_commit": "56d459ec",
+      "inreview_evidence": {
+        "host_tool_executor_size": "n/a (P0 only amends registry + spec; god-file split is P1)",
+        "tests_passing": "11 capability_registry + 77 tasks + 34 daemon-runtime + 11 nexus42",
+        "clippy_passing": true,
+        "fmt_passing": true,
+        "verification_basis": "merged HEAD on iteration/v1.57 (fe501b6b) builds + tests green for nexus-orchestration + nexus-daemon-runtime + nexus42"
+      }
     },
     {
       "plan_id": "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
@@ -53,12 +63,23 @@
       "wave": "Wave 1",
       "effort": "XL",
       "owner": "@fullstack-dev-2",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-22-v1.57-daemon-refactor-and-caller-adapters.md",
       "working_branch": "feature/v1.57-daemon-refactor-and-caller-adapters",
       "merge_target": "iteration/v1.57",
       "depends_on": ["2026-06-22-v1.57-compass-and-plan-stubs"],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "inreview_at": "2026-06-22",
+      "inreview_commits": ["68989e03", "6b08bb9e", "64c0b245", "fc0e250a"],
+      "merge_commit": "fe501b6b",
+      "inreview_evidence": {
+        "host_tool_executor_size": "349 lines (was 4298; target ≤800 met)",
+        "tests_passing": "34 nexus-daemon-runtime + 11 nexus42 (plus new cross-caller integration + smoke tests)",
+        "clippy_passing": true,
+        "fmt_passing": true,
+        "carry_forwards_closed_in_review": ["R-V156P1-M002 (CdnConfig constructor-injection)"],
+        "carry_forwards_cross_cut": ["R-V156P3-S003 (field drops in caller surfaces)"]
+      }
     },
     {
       "plan_id": "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
