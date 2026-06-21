@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T20:30:00Z",
+  "updated_at": "2026-06-22T21:15:00Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.56 (retiring)",
@@ -65,10 +65,10 @@
       },
       "wire_contract_changes": "New /v1/local/* scope + new capability IDs (registry.refresh, game_bible.section_status.update) + new conditional routing primitives (expression grammar, converge state kind) + workspace session schema",
       "qc_tri_review_outcome": "Wave 1 (P0+P1): P0 3/3 Approve; P1 1× Request Changes → fix-wave → 3/3 Approve. Wave 2 (P2): 3× Request Changes → fix-wave → qc2 Approve + qc3 revalidation → qc3 revalidation-2 Approve. Wave 3 (P3): qc1 Approve + qc2 Approve + qc3 Request Changes (warnings only) → PM consolidated Approve via override. Total: 12 QC reports + 4 targeted re-reviews + 1 closeout QA + 1 mid-QA across 3 waves.",
-      "note": "V1.56 Shipped via PR (pending merge commit). integration/v1.56 retired per mstar-branch-worktree.",
-      "merge_commit": "pending (PR open at integration/v1.56)",
-      "pr": "pending",
-      "pr_url": "pending"
+      "note": "V1.56 Shipped via PR #78 (merge commit 8a2fb20e on 2026-06-21T14:24:37Z, merged by @auto-wood). integration/v1.56 retired per mstar-branch-worktree. 0 open V1.55→V1.56 carry-forwards (DF-29/31/42/56 + R-V155P2-F002 all closed); 35 V1.57+ residuals registered (18 medium + 17 low).",
+      "merge_commit": "8a2fb20e42fe85638e0c3c8994f514d92c57ad65",
+      "pr": 78,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/78"
     },
     "tech_debt_summary": {
       "total_open": 35,

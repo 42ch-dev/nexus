@@ -11,7 +11,7 @@
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-22 (V1.56 ship; V1.55 ship baseline)
+**Last updated**: 2026-06-22 (V1.56 Shipped via PR #78 @ 8a2fb20e on main; V1.55 ship baseline; 0 open V1.55→V1.56 carry-forwards; 35 V1.57+ residuals)
 
 ---
 
@@ -124,7 +124,7 @@ See plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-
 
 **V1.55 ship residual retargeting**: All 2 V1.54 carry-forwards closed in V1.55. `R-V154P1-S002` resolved in P2 (profile-gate observability); `R-V154P1-W001` resolved in P3 (ScaffoldTransaction). `R-V155P2-F002` (V1.55-internal; design-writing preset no durable section_status auto-transition) **absorbed into V1.56 P-last fix-wave** per compass Q7. Machine SSOT: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`.
 
-**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22**; iteration state: V1.56 Shipped, integration_branch_retired=true; pre_implement_gate=null; `latest_ship.iteration=V1.56`; 0 open V1.55 carry-forwards; 35 V1.57+ residuals registered). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
+**Machine state**: [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary` (`status.json.updated_at` **2026-06-22T21:15:00Z**; iteration state: V1.56 Shipped via PR #78 @ 8a2fb20e on main (2026-06-21T14:24:37Z), integration_branch_retired=true; pre_implement_gate=null; `latest_ship.iteration=V1.56` (`merge_commit=8a2fb20e`, `pr=78`); 0 open V1.55 carry-forwards; 35 V1.57+ residuals registered). Do **not** mirror full rows here — JSON wins on conflict. Closed/historical rows: `.mstar/archived/residuals/<plan-id>.json`.
 
 | Bucket | Open count | `residual_findings` key |
 |--------|------------|-------------------------|
