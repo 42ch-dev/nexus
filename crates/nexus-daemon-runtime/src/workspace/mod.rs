@@ -84,8 +84,7 @@ impl WorkspaceState {
             .await
             .expect("Failed to create test database pool");
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-        let session_manager =
-            Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
         Self {
             db,
             nexus_home,
@@ -141,8 +140,7 @@ impl WorkspaceState {
 
         tracing::info!("Workspace state.db at {:?}", db_path);
 
-        let session_manager =
-            Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
         Ok(Self {
             db,
             nexus_home,

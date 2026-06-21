@@ -322,7 +322,10 @@ pub async fn commit_workspace(
 }
 
 /// Map a [`SessionError`] to the appropriate [`NexusApiError`] variant.
-fn map_session_error(session_id: &crate::workspace::session::SessionId, err: SessionError) -> NexusApiError {
+fn map_session_error(
+    session_id: &crate::workspace::session::SessionId,
+    err: SessionError,
+) -> NexusApiError {
     match err {
         SessionError::NotFound(_) => {
             debug!(session_id = %session_id, "Session not found");
@@ -330,9 +333,7 @@ fn map_session_error(session_id: &crate::workspace::session::SessionId, err: Ses
         }
         SessionError::AlreadyCommitted(_) => {
             debug!(session_id = %session_id, "Stale session");
-            NexusApiError::Conflict(format!(
-                "session {session_id} is stale (already committed)"
-            ))
+            NexusApiError::Conflict(format!("session {session_id} is stale (already committed)"))
         }
         SessionError::Expired(_) => {
             debug!(session_id = %session_id, "Session expired");
@@ -343,11 +344,9 @@ fn map_session_error(session_id: &crate::workspace::session::SessionId, err: Ses
             expected_hash,
             actual_hash,
             ..
-        } => {
-            NexusApiError::Conflict(format!(
-                "content hash conflict for {path}: expected {expected_hash}, got {actual_hash}"
-            ))
-        }
+        } => NexusApiError::Conflict(format!(
+            "content hash conflict for {path}: expected {expected_hash}, got {actual_hash}"
+        )),
         SessionError::Database(msg) | SessionError::Io(msg) => NexusApiError::Internal {
             code: "SESSION_ERROR".into(),
             message: msg,

@@ -136,7 +136,9 @@ pub fn compute_content_hashes(root: &Path) -> Result<FileSnapshots, SessionError
     let entries = std::fs::read_dir(root).map_err(|e| SessionError::Io(e.to_string()))?;
 
     for entry in entries {
-        let Ok(entry) = entry else { continue; };
+        let Ok(entry) = entry else {
+            continue;
+        };
 
         let path = entry.path();
         let relative = match path.strip_prefix(root) {
@@ -481,8 +483,7 @@ mod tests {
         assert!(result.hashes.contains_key("test.txt"));
 
         // Verify SHA-256: "hello world" → b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
-        let expected =
-            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+        let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
         assert_eq!(result.hashes.get("test.txt").unwrap(), expected);
     }
 

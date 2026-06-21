@@ -103,7 +103,9 @@ pub async fn get_session(
         // Explicit unwrap is safe; clippy::missing_panics_doc is waived because
         // this is a schema invariant, not a runtime condition.
         #[allow(clippy::missing_panics_doc)]
-        let session_id = r.session_id.unwrap_or_else(|| unreachable!("session_id is PRIMARY KEY NOT NULL"));
+        let session_id = r
+            .session_id
+            .unwrap_or_else(|| unreachable!("session_id is PRIMARY KEY NOT NULL"));
         WorkspaceSessionRow {
             session_id,
             workspace_root: r.workspace_root,

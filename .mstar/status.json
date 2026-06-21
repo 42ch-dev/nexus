@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T17:45:00Z",
+  "updated_at": "2026-06-22T18:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
@@ -25,7 +25,7 @@
     {
       "plan_id": "2026-06-22-v1.56-df31-df42-full-redesign",
       "title": "V1.56 P0 — DF-31 Full + DF-42 Local API Redesign",
-      "status": "InReview",
+      "status": "Done",
       "type": "implement",
       "track": "Track A / Wave 1",
       "owner": "@fullstack-dev",
@@ -39,13 +39,15 @@
         "P-1 PM signoff"
       ],
       "qc_status": "tri-review done — Approve with comments (6 medium, 13 low) — see .mstar/plans/reports/2026-06-22-v1.56-df31-df42-full-redesign/qc-consolidated.md",
-      "qa_status": "mid-QA pending",
-      "qc_completed_at": "2026-06-22"
+      "qa_status": "mid-QA Fail on Gate 2 (sqlx cache) + Gate 4 (fmt) — both PM-fixed; functional ACs all green per qa-engineer note",
+      "qc_completed_at": "2026-06-22",
+      "done_at": "2026-06-22",
+      "done_note": "PM override on environmental fails (Gate 2 cache, Gate 4 fmt) — both fixed by PM; qa-engineer explicitly noted \"All functional ACs green; gates 2 and 4 are CI/process hygiene on the presented branch.\" 6 medium + 1 resolved residual registered."
     },
     {
       "plan_id": "2026-06-22-v1.56-df29-registry-refresh",
       "title": "V1.56 P1 — DF-29 registry.refresh",
-      "status": "InReview",
+      "status": "Done",
       "type": "implement",
       "track": "Track B / Wave 1",
       "owner": "@fullstack-dev-2",
@@ -59,7 +61,7 @@
         "P-1 PM signoff"
       ],
       "qc_status": "tri-review done — qc1+qc3 Approve with comments; qc2 Request Changes (Critical SSRF C-001 + High H-001 typed errors + H-002 URL validation) — fix-wave dispatched to @fullstack-dev-2",
-      "qa_status": "mid-QA pending fix-wave + targeted re-review",
+      "qa_status": "mid-QA Pass with comments — Gate 6 (residuals) + Gate 7 (security contract docs) PM-fixed; fix-wave C-001/H-001/H-002 closed by @fullstack-dev-2 and approved by qc-specialist-2 re-review",
       "qc_completed_at": "2026-06-22",
       "fix_wave": {
         "trigger": "qc2 Request Changes",
@@ -73,7 +75,9 @@
         "re_review_seats": [
           "qc-specialist-2"
         ]
-      }
+      },
+      "done_at": "2026-06-22",
+      "done_note": "Tri-review Request Changes → fix-wave → targeted re-review Approve → mid-QA Pass with comments → PM completed residual registration + docs contract. 13 P1 residuals registered (5 medium, 8 low incl. process hygiene)."
     },
     {
       "plan_id": "2026-06-22-v1.56-df56-independent-slice",
@@ -200,17 +204,17 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/77"
     },
     "tech_debt_summary": {
-      "total_open": 7,
+      "total_open": 22,
       "total_deferred": 1,
       "total_resolved": 15,
       "total_archived": 5,
       "by_severity_active": {
-        "medium": 6,
-        "low": 1
+        "medium": 12,
+        "low": 10
       },
       "by_target_active": {
         "V1.56 P-last": 1,
-        "V1.57+": 6
+        "V1.57+": 21
       }
     }
   },
@@ -2285,6 +2289,203 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M006]",
         "note": "Deferrable medium; surfaced by qc3 W-QC3-003. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.56-df29-registry-refresh": [
+      {
+        "id": "R-V156P1-M001",
+        "title": "Breaking output schema rename (`agent_count` → `capability_count`) — verify downstream consumers (CLI, agents, tests) match the new field name",
+        "severity": "medium",
+        "source": "qc1 F-101 (architecture) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M001]",
+        "note": "Deferrable medium; surfaced by qc1 F-101 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M002",
+        "title": "Global mutable state pattern (static RwLock for `CdnConfig`) — recommend constructor-injected for testability and concurrent safety",
+        "severity": "medium",
+        "source": "qc1 F-102 (architecture) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M002]",
+        "note": "Deferrable medium; surfaced by qc1 F-102 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M003",
+        "title": "`force` parameter ignored in host handler — dead code or incomplete implementation; clarify intent",
+        "severity": "medium",
+        "source": "qc1 F-103 (architecture) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M003]",
+        "note": "Deferrable medium; surfaced by qc1 F-103 (architecture). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M004",
+        "title": "No tracing instrumentation in capability handler — observability gap; recommend `#[tracing::instrument]`",
+        "severity": "medium",
+        "source": "qc3 F-001 (performance/reliability) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M004]",
+        "note": "Deferrable medium; surfaced by qc3 F-001 (performance/reliability). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-M005",
+        "title": "`reqwest::Client` per invocation, no connection reuse — efficiency concern under repeated invocations",
+        "severity": "medium",
+        "source": "qc3 F-002 (performance/reliability) (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M005]",
+        "note": "Deferrable medium; surfaced by qc3 F-002 (performance/reliability). No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L001",
+        "title": "Help text `--cdn-url` description should explicitly state \"must be HTTPS, must be a public CDN\"",
+        "severity": "low",
+        "source": "qc2-revalidation cosmetic Suggestion #1 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L001]",
+        "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #1. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L002",
+        "title": "Add body-size hammer test (sustained stream >8 MiB; not just one-shot >cap)",
+        "severity": "low",
+        "source": "qc2-revalidation cosmetic Suggestion #2 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L002]",
+        "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #2. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L003",
+        "title": "Naming prefix consistency: `c_*` vs other test naming conventions in the file",
+        "severity": "low",
+        "source": "qc2-revalidation cosmetic Suggestion #3 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L003]",
+        "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #3. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L004",
+        "title": "Deterministic retry backoff without jitter — minor reliability concern",
+        "severity": "low",
+        "source": "qc3 F-003 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L004]",
+        "note": "Deferrable low; surfaced by qc3 F-003. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L005",
+        "title": "No latency benchmark asserting <50ms for synthetic path",
+        "severity": "low",
+        "source": "qc3 F-004 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L005]",
+        "note": "Deferrable low; surfaced by qc3 F-004. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L006",
+        "title": "`generated_at` prevents full hash determinism — minor test brittleness",
+        "severity": "low",
+        "source": "qc3 F-005 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L006]",
+        "note": "Deferrable low; surfaced by qc3 F-005. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-L007",
+        "title": "No structured metrics (latency histogram, fallback rate counter)",
+        "severity": "low",
+        "source": "qc3 F-006 (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L007]",
+        "note": "Deferrable low; surfaced by qc3 F-006. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P1-CACHE-01",
+        "title": "PM-followup: `.sqlx/` cache missed test query! macros; test compile failed mid-QA. PM regenerated via `cargo sqlx prepare --workspace -- --tests` (10 new cache files). Future plans touching test queries must run sqlx prepare with --tests flag.",
+        "severity": "medium",
+        "source": "PM mid-QA Gate 2 fail (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P1 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-CACHE-01]",
+        "note": "Deferrable medium; surfaced by PM mid-QA Gate 2 fail. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156-MIDQA-01",
+        "title": "Mid-QA Gate 4 fmt drift on integration branch (cargo +nightly fmt --all applied by PM). Future plans must run `cargo +nightly fmt --all -- --check` before reporting Done.",
+        "severity": "low",
+        "source": "PM mid-QA Gate 4 fail (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "PM + implementer (process)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156-MIDQA-01]",
+        "note": "Deferrable low; surfaced by PM mid-QA Gate 4 fail. No blocking — V1.56 P1 marked Approve.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156-PROCESS-01",
+        "title": "`.sqlx/` cache hygiene protocol: `cargo sqlx prepare --workspace -- --tests` must be run after any nexus-local-db migration or new query! macro. Add to AC items for future plans touching sqlx.",
+        "severity": "low",
+        "source": "PM pre-QC + mid-QA hygiene (V1.56 P1 tri-review or PM mid-QA follow-up)",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/registry.rs + nexus-daemon-runtime/src/boot.rs + nexus42/src/commands/daemon/{mod.rs,daemon_run.rs} + .sqlx/ test query cache",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "PM + implementer (process)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156-PROCESS-01]",
+        "note": "Deferrable low; surfaced by PM pre-QC + mid-QA hygiene. No blocking — V1.56 P1 marked Approve.",
         "lifecycle": "deferred"
       }
     ]
