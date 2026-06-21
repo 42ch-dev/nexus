@@ -78,6 +78,7 @@ async fn with_runtime_deps_wiring_makes_llm_extract_run() {
         pool: None,
         worker_provider: Some(provider),
         daemon_tool_dispatch: None,
+            cdn_config: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
@@ -135,6 +136,7 @@ async fn production_provider_dispatches_ipc_to_real_worker() {
         pool: None,
         worker_provider: Some(Arc::new(provider)),
         daemon_tool_dispatch: None,
+            cdn_config: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
@@ -185,6 +187,7 @@ async fn production_provider_returns_unavailable_without_worker() {
         pool: None,
         worker_provider: Some(Arc::new(provider)),
         daemon_tool_dispatch: None,
+            cdn_config: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
@@ -219,6 +222,7 @@ async fn with_runtime_deps_registers_all_llm_capabilities() {
         pool: None,
         worker_provider: Some(provider),
         daemon_tool_dispatch: None,
+            cdn_config: None,
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
