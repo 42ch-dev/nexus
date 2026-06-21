@@ -115,7 +115,7 @@ pub enum Commands {
     /// daemon's host tool executor. Admission gates apply identically as for
     /// HTTP and worker caller paths.
     ///
-    /// --args accepts a JSON string (e.g. '{"work_id":"wrk_abc"}').
+    /// --args accepts a `JSON` string (e.g. `'{"work_id":"wrk_abc"}'`).
     /// Exit codes: 0=success, 1=admission denied, 2=tool error/failure.
     HostCall(HostCallArgs),
 }

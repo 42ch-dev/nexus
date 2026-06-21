@@ -18,8 +18,8 @@ use std::pin::Pin;
 
 // Re-import from parent module
 use super::host_tool_executor::{
-    ToolExecuteRequest, TOOL_ALLOWLIST,
-    PATCH_ALLOWED_FIELDS, PATCH_REJECTED_FIELDS, STAGE_METADATA_ALLOWED_KEYS,
+    ToolExecuteRequest, PATCH_ALLOWED_FIELDS, PATCH_REJECTED_FIELDS, STAGE_METADATA_ALLOWED_KEYS,
+    TOOL_ALLOWLIST,
 };
 
 // ─── Admission pipeline (spec §4.3) ───────────────────────────────────────
@@ -586,7 +586,6 @@ fn execute_write_file(
     }))
 }
 
-
 // ─── Permission / path helpers ────────────────────────────────────────────
 // ─── Permission / path helpers ────────────────────────────────────────────
 
@@ -812,7 +811,6 @@ pub(crate) async fn audit_tool_execution(
     Ok(())
 }
 
-
 // ─── V1.53 P1: DF-46 read-heavy nexus.* handlers ─────────────────────────
 // ─── V1.53 P1: DF-46 read-heavy nexus.* handlers ─────────────────────────
 
@@ -1029,12 +1027,12 @@ fn execute_daemon_health(
 }
 
 // ─── Registry handler wrappers (V1.53 P0) ─────────────────────────────────
-///
-/// These `pub(crate)` wrappers adapt the existing private handler functions
-/// to the `RegistryHandlerFn` signature used by `CapabilityRegistry`.
-/// They exist so the registry can reference the same handler implementations
-/// without duplicating logic.
-///
+//
+// These `pub(crate)` wrappers adapt the existing private handler functions
+// to the `RegistryHandlerFn` signature used by `CapabilityRegistry`.
+// They exist so the registry can reference the same handler implementations
+// without duplicating logic.
+//
 // Each wrapper uses an explicit named lifetime `'a` to satisfy the
 // higher-ranked trait bound `for<'a> fn(&'a ..., &'a ..., &'a str) -> ...`.
 
@@ -1183,7 +1181,7 @@ pub(crate) fn registry_registry_refresh<'a>(
     req: &'a ToolExecuteRequest,
     state: &'a WorkspaceState,
 
-// ─── V1.56 P1 + V1.54 P0: registry.refresh + write tools ─────────────────
+    // ─── V1.56 P1 + V1.54 P0: registry.refresh + write tools ─────────────────
     creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
     Box::pin(execute_registry_refresh(req, state, creator_id))

@@ -1,7 +1,7 @@
 //! `nexus42 host-call` — low-level debugging entry for host tool execution.
 //!
 //! V1.57 P1: Adds a single debugging subcommand that walks the daemon
-//! host_tool path: CLI → daemon IPC → `CapabilityRegistry::dispatch` → response.
+//! `host_tool` path: CLI → daemon IPC → `CapabilityRegistry::dispatch` → response.
 //!
 //! # Intent (debug-only)
 //!
@@ -13,7 +13,7 @@
 //! # Exit codes
 //!
 //! - `0`: tool executed successfully
-//! - `1`: admission denied (NOT_SUPPORTED, FORBIDDEN, POLICY_BLOCKED)
+//! - `1`: admission denied (`NOT_SUPPORTED`, `FORBIDDEN`, `POLICY_BLOCKED`)
 //! - `2`: tool error or internal failure
 
 use crate::api::daemon_client::DaemonClient;
@@ -25,10 +25,10 @@ use std::process;
 /// Host-call args — debug-only raw tool dispatch.
 #[derive(Debug, Args)]
 pub struct HostCallArgs {
-    /// Tool ID to invoke (e.g. "nexus.context.whoami", "nexus.work.get")
+    /// Tool ID to invoke (e.g. `"nexus.context.whoami"`, `"nexus.work.get"`)
     pub tool_id: String,
 
-    /// Tool arguments as a JSON string (e.g. '{"work_id":"wrk_abc"}')
+    /// Tool arguments as a `JSON` string (e.g. `'{"work_id":"wrk_abc"}'`)
     #[arg(short, long, default_value = "{}")]
     pub args: String,
 }
@@ -42,9 +42,8 @@ pub struct HostCallArgs {
 /// - The daemon is unreachable
 /// - The tool request is denied or fails
 pub async fn run(args: HostCallArgs, config: &CliConfig) -> Result<()> {
-    let params: serde_json::Value = serde_json::from_str(&args.args).map_err(|e| {
-        CliError::Other(format!("--args must be valid JSON: {e}"))
-    })?;
+    let params: serde_json::Value = serde_json::from_str(&args.args)
+        .map_err(|e| CliError::Other(format!("--args must be valid JSON: {e}")))?;
 
     let client = DaemonClient::from_config(config);
 
@@ -54,21 +53,19 @@ pub async fn run(args: HostCallArgs, config: &CliConfig) -> Result<()> {
         "parameters": params,
     });
 
-    let response: serde_json::Value =
-        client
-            .post("/v1/local/agent-host/internal/tool-executions", &request_body)
-            .await
-            .map_err(|e| {
-                CliError::Other(format!(
-                    "host-call failed for tool '{}': {e}",
-                    args.tool_id
-                ))
-            })?;
+    let response: serde_json::Value = client
+        .post(
+            "/v1/local/agent-host/internal/tool-executions",
+            &request_body,
+        )
+        .await
+        .map_err(|e| {
+            CliError::Other(format!("host-call failed for tool '{}': {e}", args.tool_id))
+        })?;
 
     // Print result as JSON
-    let output = serde_json::to_string_pretty(&response).map_err(|e| {
-        CliError::Other(format!("failed to serialize response: {e}"))
-    })?;
+    let output = serde_json::to_string_pretty(&response)
+        .map_err(|e| CliError::Other(format!("failed to serialize response: {e}")))?;
 
     println!("{output}");
     Ok(())
@@ -88,7 +85,7 @@ pub async fn run_or_exit(args: HostCallArgs, config: &CliConfig) {
             } else {
                 2
             };
-            eprintln!("{}", e);
+            eprintln!("{e}");
             process::exit(code);
         }
     }

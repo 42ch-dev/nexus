@@ -296,10 +296,10 @@ impl CapabilityRegistry {
             });
 
         // V1.57 P1: cdn_config is constructor-injected (no global state).
-        let registry_refresh = match &deps.cdn_config {
-            Some(cdn) => builtins::RegistryRefresh::with_cdn(cdn.clone()),
-            None => builtins::RegistryRefresh::new(),
-        };
+        let registry_refresh = deps.cdn_config.as_ref().map_or_else(
+            builtins::RegistryRefresh::new,
+            |cdn| builtins::RegistryRefresh::with_cdn(cdn.clone()),
+        );
 
         let creator_store = deps.pool.as_ref().map(|pool| {
             std::sync::Arc::new(builtins::CreatorCapabilityStore::from_arc(
