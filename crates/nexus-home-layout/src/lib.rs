@@ -349,6 +349,55 @@ pub fn acp_run_trace_file(home: &Path, run_id: &str) -> PathBuf {
     acp_run_dir(home, run_id).join("trace.jsonl")
 }
 
+// ── Workspace path validation (DF-31 skeleton) ─────────────────────────
+
+/// Validate that a workspace-relative `path` is safe to use.
+///
+/// Rejects:
+/// - Empty strings
+/// - Absolute paths (starting with `/` or `\`)
+/// - Path traversal sequences (`..`)
+/// - Control characters
+///
+/// This is a **local path-safety guard** for the DF-31 workspace.open /
+/// workspace.commit skeleton. It does NOT check whether the path exists
+/// on disk — callers must do that separately.
+///
+/// # Errors
+///
+/// Returns `Err` with a human-readable reason if validation fails.
+///
+/// # Future expansion (DF-31 → DF-42)
+///
+/// The current skeleton only validates path-safety. Future iterations
+/// (DF-42 full Local API redesign) may add:
+/// - Workspace root boundary enforcement (canonicalize + prefix check)
+/// - Wildcard / glob pattern support
+/// - Symlink resolution
+/// - Whitelist-based path allowlisting
+pub fn validate_workspace_path_safe(path: &str) -> std::result::Result<(), String> {
+    if path.is_empty() {
+        return Err("workspace path must not be empty".to_string());
+    }
+    // Reject absolute paths — workspace.open only accepts relative paths
+    if path.starts_with('/') || path.starts_with('\\') {
+        return Err(format!(
+            "workspace path must be relative, got absolute path: {path:?} — rejected for safety"
+        ));
+    }
+    if path.contains("..") {
+        return Err(format!(
+            "workspace path contains '..': {path:?} — rejected for safety"
+        ));
+    }
+    if path.chars().any(char::is_control) {
+        return Err(format!(
+            "workspace path contains control characters: {path:?} — rejected for safety"
+        ));
+    }
+    Ok(())
+}
+
 /// Validate that a user-supplied run/capability-call ID is safe to use in a file path.
 ///
 /// Rejects empty strings, path separators (`/`, `\`), traversal sequences (`..`),
@@ -810,6 +859,45 @@ mod tests {
     #[test]
     fn validate_reference_id_safe_rejects_control_chars() {
         let err = validate_reference_id_safe("ref_\x01ctrl").unwrap_err();
+        assert!(err.contains("control characters"));
+    }
+
+    // ── Workspace path validation (DF-31 skeleton) ────────────────────────
+
+    #[test]
+    fn validate_workspace_path_safe_accepts_valid() {
+        assert!(validate_workspace_path_safe("Works/my-novel").is_ok());
+        assert!(validate_workspace_path_safe("data/config.json").is_ok());
+        assert!(validate_workspace_path_safe("subdir").is_ok());
+    }
+
+    #[test]
+    fn validate_workspace_path_safe_rejects_empty() {
+        let err = validate_workspace_path_safe("").unwrap_err();
+        assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_workspace_path_safe_rejects_absolute() {
+        let err = validate_workspace_path_safe("/etc/passwd").unwrap_err();
+        assert!(err.contains("absolute path"));
+    }
+
+    #[test]
+    fn validate_workspace_path_safe_rejects_absolute_backslash() {
+        let err = validate_workspace_path_safe("\\windows\\system32").unwrap_err();
+        assert!(err.contains("absolute path"));
+    }
+
+    #[test]
+    fn validate_workspace_path_safe_rejects_dotdot() {
+        let err = validate_workspace_path_safe("../../etc/passwd").unwrap_err();
+        assert!(err.contains("'..'"));
+    }
+
+    #[test]
+    fn validate_workspace_path_safe_rejects_control_chars() {
+        let err = validate_workspace_path_safe("path_\x00null").unwrap_err();
         assert!(err.contains("control characters"));
     }
 
