@@ -70,7 +70,7 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 | DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | **Converged via DF-68 (V1.39 P0 Shipped)** | S | V1.21→V1.39 | `daemon-runtime/lifecycle/actions.rs`. V1.39 P0 conditional boot auto-resume for checkpointed auto-chain drivers supersedes blanket pause-only recovery for those schedules. DF-68 implemented: `find_resumable_works` + boot logging in `boot.rs`. |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
 | DF-42 | Full Local API redesign for World/User KB | V1.24 (KCA-003) | Any future | L | V1.24 | `/v1/local/kb/*` full scoping redesign. |
-| DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | **V1.55 P0** | M | V1.26–28 partial→V1.55 | Production owner = `nexus-local-db`; V1.55 closes/narrows crate-model adapter seam. Plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-df43-sqlite-alignment.md). |
+| DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | **Closed V1.55 P0** | M | V1.26–28 partial→V1.55 P0 | **Closed**: adapter `From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` added in `nexus-local-db`; `nexus-knowledge` crate docs locked to model/adapter-seam only; spec `local-db-schema.md` §4.1.1 ownership boundary text added; round-trip + duplicate-truth prevention tests in `nexus-local-db/src/reference_source.rs`. Plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-df43-sqlite-alignment.md). |
 | DF-44 | Reference body externalization — refreshable scan pipeline | V1.26 | Any future | M | V1.26 | Static registration shipped; auto-refresh Open. |
 | DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | Post-V1.34 | L | V1.34 | V1.34 ships minimal host tools only; see [agent-nexus-tool-bridge.md](specs/agent-nexus-tool-bridge.md). |
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.42 P3 Narrowed** | M | V1.34→V1.35→V1.36→V1.42 | V1.34 P4 shipped adapter. **V1.42 P3 shipped**: `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool (`nexus.orchestration.schedule_status`) proven E2E with 5 hermetic tests. Production caller wiring complete for minimal slice. Full DF-46 parity remains Post-V1.42. Plan: [2026-06-11-v1.42-agent-tool-production-wiring.md](../plans/2026-06-11-v1.42-agent-tool-production-wiring.md). |
@@ -100,12 +100,13 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 
 #### DF-43 decision note — Reference sources persistence
 
-**Status:** Production persistence owner decided (V1.25 Theme C); crate-model alignment **remains open**.
+**Status:** **Closed in V1.55 P0** (2026-06-22).
 
-1. **`nexus-local-db`** owns production `reference_sources` in `state.db`.
-2. **`nexus-knowledge::ReferenceSource`** remains in-memory crate model until a follow-up adapter plan.
+1. **`nexus-local-db`** owns production `reference_sources` in `state.db` — confirmed sole persistence owner.
+2. **`nexus-knowledge::ReferenceSource`** remains as domain model / adapter seam. `From<ReferenceSourceRow>` adapter lives in `nexus-local-db`.
+3. `nexus-knowledge` crate docs and AGENTS.md explicitly state no second SQLite/file-backed truth source.
 
-See [2026-05-23-v1.26-reference-store-layout](../plans/2026-05-23-v1.26-reference-store-layout.md). Re-evaluate when `nexus-knowledge` proposes a SQLite/file-backed adapter with migration plan.
+See plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-df43-sqlite-alignment.md).
 
 ### 3.4 Backlog (no committed target version)
 
