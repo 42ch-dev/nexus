@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Shipped**: §5.5 World KB promotion state machine (T-B P1); promotion row promoted Draft → Normative at V1.50 P-last when the `kb_extract_jobs` migration landed and review-time extraction is verified end-to-end. **V1.51 Shipped**: §5.5.6 LLM pathway subsection (T-A P0) — `nexus.llm.extract` wire `BlockType` → `novel_category` mapping documented as SSOT. **V1.54 Shipped**: §5.1.1 game-bible taxonomy — 7 new `BlockType` variants (`species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`) registered in wire schema; `game_bible_category` body-layer field + `ValidationMode::GameBible` wired. |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Shipped**: §5.5 World KB promotion state machine (T-B P1); promotion row promoted Draft → Normative at V1.50 P-last when the `kb_extract_jobs` migration landed and review-time extraction is verified end-to-end. **V1.51 Shipped**: §5.5.6 LLM pathway subsection (T-A P0) — `nexus.llm.extract` wire `BlockType` → `novel_category` mapping documented as SSOT. **V1.54 Shipped**: §5.1.1 game-bible taxonomy — 7 new `BlockType` variants (`species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`) registered in wire schema; `game_bible_category` body-layer field + `ValidationMode::GameBible` wired. **V1.55 P3**: §5.1.1 script taxonomy — 3 new `BlockType` variants (`dialogue`, `beat`, `act`) registered in wire schema; `script_category` body-layer field + `ValidationMode::Script` wired. |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-06-22 — V1.54 §5.1.1 game-bible BlockType taxonomy + `ValidationMode::GameBible` (P1 closeout) |
+| **Last updated** | 2026-06-22 — V1.55 P3 §5.1.1 script BlockType taxonomy + `ValidationMode::Script` (P3 implement) |
 | **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
@@ -231,6 +231,48 @@ Minimum common `body` shape for game-bible items:
     "traits": ["..."]
   },
   "tags": ["game_bible"]
+}
+```
+
+**Script profile semantics (body layer — V1.55 P3):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KeyBlock.body.attributes`). It does **not** replace wire `block_type`.
+
+Shipped `BlockType` values (snake_case on wire) extended with:
+
+| Wire `block_type` | UI label | `script_category` | Primary section |
+| --- | --- | --- | --- |
+| `dialogue` | Dialogue | `dialogue` | `Scripts/script.md` |
+| `beat` | Beat | `beat` | `Beats/beat-sheet.md` |
+| `act` | Act | `act` | `Beats/beat-sheet.md` |
+
+Existing variants (`character`, `scene`, `organization`, `event`, etc.) are reused for cross-domain concepts (e.g., a script character uses `BlockType::Character` with `script_category: "dialogue"`).
+
+**V1.55 P3 implementation:** `nexus-kb::validation` adds `ValidationMode::Script` that requires `script_category` in `body.attributes` when active and rejects `novel_category` and `game_bible_category`. The script category validation mirrors the novel/game-bible pattern: three valid categories, structured (`ValidationKind`) errors, advisory warnings on `script_category` ↔ `block_type` mismatch. `canonical_name` validation is identical across all modes.
+
+Valid `script_category` values:
+
+```
+dialogue, beat, act
+```
+
+Default mapping from `script_category` to `BlockType`:
+
+| `script_category` | Default wire `block_type` |
+| --- | --- |
+| `dialogue` | `dialogue` |
+| `beat` | `beat` |
+| `act` | `act` |
+
+Minimum common `body` shape for script items:
+
+```json
+{
+  "summary": "One-line prompt descriptor",
+  "attributes": {
+    "script_category": "dialogue",
+    "characters": ["Alice", "Bob"],
+    "traits": ["..."]
+  },
+  "tags": ["script"]
 }
 ```
 
