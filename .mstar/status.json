@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T18:00:00Z",
+  "updated_at": "2026-06-21T08:17:18Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.55 (retiring)",
@@ -16,7 +16,7 @@
     "latest_ship": {
       "iteration": "V1.55",
       "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor",
-      "shipped_at": "2026-06-22T00:00:00Z",
+      "shipped_at": "2026-06-21T08:17:18Z",
       "plan_count": 5,
       "plan_count_done": 5,
       "open_at_ship": 0,
@@ -53,7 +53,10 @@
       },
       "wire_contract_changes": "None (per compass §0.1; additive enum only — script BlockType `dialogue`/`beat`/`act` are additive to V1.54's 15-variant BlockType)",
       "qc_tri_review_outcome": "P0: 3/3 Approve. P1: initial 3/3 Request Changes → 1 fix-wave (consume_session race + SessionError + typed errors) → 3/3 Approve. P2: initial qc1 Request Changes + qc3 Request Changes → 2 fix-waves (profile-aware extraction + section_status narrowing + production-path test) → 3/3 Approve. P3: initial qc1+qc2 Request Changes → 1 fix-wave (ScaffoldTransaction + validate_work_ref + temp+rename + ValidationMode tests + daemon boot count) → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies (2 mid-QA per wave).",
-      "note": "V1.55 ship pending PR to main (user authorization required for push). Integration branch iteration/v1.55 retiring per mstar-branch-worktree."
+      "note": "V1.55 Shipped via PR #77 (merge commit 9d2893c2 on 2026-06-21T08:17:18Z). integration/v1.55 retired per mstar-branch-worktree.",
+      "merge_commit": "9d2893c27efe0d7dc848806dff82f294e87ab3b4",
+      "pr": 77,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/77"
     },
     "tech_debt_summary": {
       "total_open": 1,
