@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T19:30:00Z",
+  "updated_at": "2026-06-22T20:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
@@ -121,7 +121,7 @@
     {
       "plan_id": "2026-06-22-v1.56-df56-dependent-slice",
       "title": "V1.56 P3 — DF-56 Dependent Slice (registry.refresh 条件边 + workspace.open/commit 分支输入)",
-      "status": "Todo",
+      "status": "Done",
       "type": "implement",
       "track": "Track B / Wave 3",
       "owner": "@fullstack-dev-2",
@@ -135,7 +135,10 @@
         "P0 merged to iteration/v1.56",
         "P1 merged to iteration/v1.56",
         "P2 merged to iteration/v1.56"
-      ]
+      ],
+      "qc_status": "tri-review: qc1 Approve + qc2 Approve + qc3 Request Changes (warnings only); PM consolidated Approve; W-003 entity-scope-model.md amendment applied by PM; W-001/W-002 deferred as residuals",
+      "done_at": "2026-06-22",
+      "done_note": "DF-56 sub-items 4-5 (registry.refresh conditional edges + workspace branch inputs) shipped with PM override on qc3 strict verdict. W-003 spec amend applied directly. 841 lib tests + 11 converge e2e + 20 new P3 tests pass. 6 new residuals registered (2 medium + 4 low). All 4 V1.56 implement plans (P0+P1+P2+P3) now Done."
     },
     {
       "plan_id": "2026-06-22-v1.56-mid-qc-and-fix-waves",
@@ -225,17 +228,17 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/77"
     },
     "tech_debt_summary": {
-      "total_open": 30,
+      "total_open": 36,
       "total_deferred": 1,
       "total_resolved": 15,
       "total_archived": 5,
       "by_severity_active": {
-        "medium": 16,
-        "low": 14
+        "medium": 18,
+        "low": 18
       },
       "by_target_active": {
         "V1.56 P-last": 1,
-        "V1.57+": 29
+        "V1.57+": 35
       }
     }
   },
@@ -2613,6 +2616,86 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L004]",
         "note": "Deferrable low; surfaced by qc3 M-002 (residual nuance). No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.56-df56-dependent-slice": [
+      {
+        "id": "R-V156P3-W001",
+        "title": "inject_workspace_context() zero tracing — silent default fallback masks production misconfiguration",
+        "severity": "medium",
+        "source": "qc3 W-001 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-W001]",
+        "note": "Deferrable medium; surfaced by qc3 W-001. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-W002",
+        "title": "No invocation latency / failure-rate instrumentation at registry.refresh capability boundary",
+        "severity": "medium",
+        "source": "qc3 W-002 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-W002]",
+        "note": "Deferrable medium; surfaced by qc3 W-002. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S001",
+        "title": "Synthetic fallback source field ambiguous — cannot distinguish emergency fallback from designed synthetic",
+        "severity": "low",
+        "source": "qc3 S-001 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S001]",
+        "note": "Deferrable low; surfaced by qc3 S-001. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S002",
+        "title": "Throttle-path .await adds scheduling yield (marginal; guarded by dep flags)",
+        "severity": "low",
+        "source": "qc3 S-002 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S002]",
+        "note": "Deferrable low; surfaced by qc3 S-002. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S003",
+        "title": "registry_output_to_context silently drops 4 of 9 synthetic output fields",
+        "severity": "low",
+        "source": "qc3 S-003 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S003]",
+        "note": "Deferrable low; surfaced by qc3 S-003. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V156P3-S004",
+        "title": "with_workspace_state() hook exists; activation depends on P0 engine code outside P3 diff — PM/P-last to verify before final signoff",
+        "severity": "low",
+        "source": "qc1 S-004 (V1.56 P3 tri-review)",
+        "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
+        "decision": "accept (defer to post-V1.56 hardening)",
+        "owner": "@fullstack-dev-2 (P3 implementer)",
+        "target": "V1.57+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S004]",
+        "note": "Deferrable low; surfaced by qc1 S-004. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
         "lifecycle": "deferred"
       }
     ]

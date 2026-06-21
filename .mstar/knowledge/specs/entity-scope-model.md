@@ -128,6 +128,20 @@ explicitly declares uniqueness.
 | `nexus-moment-context-assembly` | `Moment` | Owns session-start moment context aggregation. It runs before a session begins and aggregates relevant local domains: Creator memory, narrative state, World KB assets, and User knowledge. Optional `cloud-stage` may merge platform context, but daemon default remains local Stage-0. |
 | `nexus-daemon-runtime` | Runtime host, not entity owner | Hosts local APIs, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. |
 | `nexus-orchestration` | Execution sessions/schedules, not hierarchy owner | Owns presets, schedules, workers, and capability registry. It carries `creator_id`/workspace/world references as execution context, but it does not redefine entity ownership. |
+
+#### 5.5.8 Conditional routing branch input visibility (V1.56 P3 amendment)
+
+When the conditional routing engine (DF-56) evaluates a state's `next: { kind: conditional, branches: [...] }` expression, the engine may invoke capabilities and read workspace state to populate the expression context. Branch decision inputs are **read-only projections** of underlying entity state:
+
+- **`_context.registry_refresh.*`** — fields projected from the `nexus.registry.refresh` capability output (which is itself an entity-scope snapshot of the capability registry). Fields include `source` (`synthetic` | `network` | `synthetic_fallback`), `snapshot_version`, `capability_count`, `fallback_reason` (CdnError variant stringified per V1.56 P1 fix-wave), `retry_count`. The branch input is read-only; the capability invocation does not mutate the registry.
+- **`_context.workspace.*`** — fields projected from the active workspace session (V1.56 P0 OCC + persistent session). Fields include `session_id`, `conflict_detected` (bool; OCC outcome of last commit), `changes_applied` (count of paths committed), `workspace_root` (canonical path). The branch input is read-only; expression evaluation does not invoke `workspace.commit` itself.
+
+Branch inputs do **not** redefine entity ownership. The expression evaluator reads through existing API surfaces:
+
+- Registry refresh input: `nexus-orchestration::tasks::inject_registry_refresh_context()` → reads `nexus.registry.refresh` capability output via existing capability registry machinery.
+- Workspace input: `nexus-orchestration::tasks::inject_workspace_context()` → reads active workspace session via existing `nexus-daemon-runtime` workspace handlers.
+
+This amendment exists to clarify that DF-56 conditional routing branch inputs are **derived from**, not **owners of**, the entity scope. The entity ownership hierarchy (Creator > World > Timeline > Event > Moment) is unchanged; routing inputs are projections.
 | `nexus42` | CLI surface | Owns user-facing command routing and wording. It invokes the owning crates; it MUST NOT become a second domain implementation for scope rules. |
 
 ---
