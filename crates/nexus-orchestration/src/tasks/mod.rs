@@ -2361,6 +2361,68 @@ mod tests {
         assert_eq!(payload["block_type"], "scene");
     }
 
+    /// V1.55 P2 fix-wave (F-001): production-path coverage — `LlmExtractTask`
+    /// with `work_profile = "game_bible"` must produce a game-bible-shaped
+    /// candidate (game_bible_category set, novel_category absent, tags include
+    /// `"game-bible"`). This exercises the full production path through
+    /// `LlmExtractTask::evaluate` → `run_llm_extract` →
+    /// `candidate_from_llm_json_for_profile`, not a helper-level test.
+    #[tokio::test]
+    async fn llm_extract_task_with_game_bible_profile_produces_game_bible_candidate() {
+        let registry = extract_registry_with_mock(
+            r#"{"candidates":[{"canonical_name":"Ironfang Legion","block_type":"faction","summary":"A ruthless mercenary company","confidence":0.93,"source_quote":"The Ironfang Legion marched through the gates at dawn."}]}"#,
+        );
+        let task = LlmExtractTask::new(
+            "Extract entities.".to_string(),
+            "nexus.llm.extract".to_string(),
+            registry,
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "chapter_prose".to_string(),
+            "The Ironfang Legion marched through the gates at dawn.".to_string(),
+        )
+        .await;
+        ctx.set("work_profile".to_string(), "game_bible".to_string())
+            .await;
+
+        let outcome = task.evaluate(&ctx).await.unwrap();
+        let candidates = match outcome {
+            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            other => panic!("expected Candidates, got: {other:?}"),
+        };
+        assert_eq!(candidates.len(), 1, "expected 1 candidate");
+        assert_eq!(candidates[0].canonical_name_guess, "Ironfang Legion");
+        assert_eq!(candidates[0].block_type, "faction");
+
+        let payload: serde_json::Value =
+            serde_json::from_str(&candidates[0].proposed_payload).unwrap();
+        // game_bible_category must be set (faction → faction in direct mapping)
+        assert_eq!(
+            payload["attributes"]["game_bible_category"], "faction",
+            "game_bible_category should be 'faction' for block_type=faction"
+        );
+        // novel_category must NOT be present
+        assert!(
+            payload["attributes"]["novel_category"].is_null(),
+            "novel_category must be absent from game-bible candidate"
+        );
+        // Tags must include "game-bible" and "llm-extracted"
+        let tags = payload["tags"].as_array().expect("tags should be an array");
+        let tag_strings: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
+        assert!(
+            tag_strings.contains(&"game-bible"),
+            "tags should include 'game-bible': {tag_strings:?}"
+        );
+        assert!(
+            tag_strings.contains(&"llm-extracted"),
+            "tags should include 'llm-extracted': {tag_strings:?}"
+        );
+        // block_type in payload matches
+        assert_eq!(payload["block_type"], "faction");
+    }
+
     // ── T5: StateCompositeTask integration — llm_judge GO/NOGO ────────
 
     /// Mock worker provider whose response is controlled at runtime.
