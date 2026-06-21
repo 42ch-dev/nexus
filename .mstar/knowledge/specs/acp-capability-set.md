@@ -184,6 +184,12 @@ Runtime note:
 | `nexus.trace.correlation` | yes | Propagate correlation IDs across tool calls |
 | `nexus.runtime.health` | yes | Agent-visible health, registry reachability, sync state |
 
+### 4.7A Registry
+
+| Capability ID | Required | Description |
+| --- | --- | --- |
+| `nexus.registry.refresh` | optional | Refresh agent capability registry from embedded snapshot or optional CDN; returns synthetic output by default (sandbox/air-gap safe) with snapshot version, capability count, and source metadata. When `--cdn-url` is configured at daemon start, fetches from CDN with configurable timeout (default 10s) and retry (default 3); falls back to synthetic on network failure.
+
 ### 4.8 Work & orchestration write (V1.54 — DF-46)
 
 | Capability ID | Required | Description |

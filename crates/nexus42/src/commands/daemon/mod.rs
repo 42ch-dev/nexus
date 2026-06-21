@@ -24,6 +24,13 @@ pub enum DaemonCommand {
         /// Run daemon in foreground (do not detach)
         #[arg(long)]
         foreground: bool,
+
+        /// Optional CDN URL for registry.refresh network mode.
+        /// When set, enables fetching the ACP registry from a CDN
+        /// with built-in timeout (10s) and retry (3 attempts).
+        /// When absent (default), registry.refresh returns synthetic output only.
+        #[arg(long)]
+        cdn_url: Option<String>,
     },
 
     /// Stop the running daemon
@@ -42,6 +49,10 @@ pub enum DaemonCommand {
         /// Run daemon in foreground (do not detach)
         #[arg(long)]
         foreground: bool,
+
+        /// Optional CDN URL for registry.refresh network mode.
+        #[arg(long)]
+        cdn_url: Option<String>,
     },
 
     /// Check daemon status / health
@@ -86,9 +97,17 @@ pub enum DaemonCommand {
 /// - PID file operations fail
 pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
     match cmd {
-        DaemonCommand::Start { port, foreground } => start_daemon(port, foreground).await,
+        DaemonCommand::Start {
+            port,
+            foreground,
+            cdn_url,
+        } => start_daemon(port, foreground, cdn_url).await,
         DaemonCommand::Stop { port } => stop_daemon(port).await,
-        DaemonCommand::Restart { port, foreground } => restart_daemon(port, foreground).await,
+        DaemonCommand::Restart {
+            port,
+            foreground,
+            cdn_url,
+        } => restart_daemon(port, foreground, cdn_url).await,
         DaemonCommand::Status { port } => daemon_status(port, config).await,
         DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
         DaemonCommand::Doctor { port } => daemon_doctor(port).await,
@@ -116,7 +135,7 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
 /// - Self-spawn fails
 /// - PID file operations fail
 #[allow(clippy::too_many_lines)]
-async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
+async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> Result<()> {
     // Check if already running
     let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
     if client.health_check().await? {
@@ -138,6 +157,7 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
             socket_path: None,
             verbose: false,
             shutdown_grace_ms: 20_000,
+            cdn_url,
         };
 
         let result = nexus_daemon_runtime::boot::run_daemon(config).await;
@@ -163,6 +183,10 @@ async fn start_daemon(port: u16, foreground: bool) -> Result<()> {
             .arg(port.to_string())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
+
+        if let Some(ref url) = cdn_url {
+            cmd.arg("--cdn-url").arg(url);
+        }
 
         // Detach the process so it outlives the CLI
         #[cfg(unix)]
@@ -471,7 +495,7 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
 /// First attempts a normal stop. If no PID file is found, uses port-based
 /// lsof to discover and kill the process. Polls with health check to
 /// confirm the old daemon is fully dead before starting the new one.
-async fn restart_daemon(port: u16, foreground: bool) -> Result<()> {
+async fn restart_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> Result<()> {
     println!("Restarting daemon...");
 
     // Stop the old daemon
@@ -539,7 +563,7 @@ async fn restart_daemon(port: u16, foreground: bool) -> Result<()> {
         }
     }
 
-    start_daemon(port, foreground).await
+    start_daemon(port, foreground, cdn_url).await
 }
 
 /// Read the last `n` lines from a file without loading the entire file.

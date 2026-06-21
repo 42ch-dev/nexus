@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn registry_has_twenty_four_builtins() {
         // 24 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
-        // + script.scaffold (V1.55 P3)
+        // + script.scaffold (V1.55 P3). V1.56 P1 does not add or remove builtins.
         let reg = CapabilityRegistry::with_builtins();
         assert_eq!(reg.len(), 24);
     }
@@ -491,7 +491,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.len(), 24); // unchanged by V1.56 P1
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));

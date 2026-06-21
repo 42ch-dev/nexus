@@ -353,6 +353,15 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 - **Session control ownership:** `daemon schedule ...` is the primary orchestration CLI surface. It exercises the full sessions control plane through schedule operations: `current_session_id` points at the active orchestration session, and schedule signals cascade through the supervisor to the active session as described in [`creator-schedule-and-core-context.md`](./creator-schedule-and-core-context.md) §3.3.
 - **Removed:** `daemon orchestrate ...` is not a shipped compatibility surface. Do not document `daemon orchestrate run` in new plans or runbooks; use `daemon schedule ...` for shipped orchestration control unless a future plan intentionally introduces a new session-control wrapper.
 
+**V1.56 P1 amendment:** `daemon start` and `daemon restart` gain an optional `--cdn-url <url>` flag:
+
+| Flag | Purpose |
+| --- | --- |
+| `nexus42 daemon start --cdn-url <url>` | When set, `nexus.registry.refresh` fetches the ACP registry from the given CDN URL (configurable 10s timeout, 3 retries with exponential backoff). When absent (default), returns synthetic output from an embedded snapshot — zero network calls, sandbox / air-gap compatible. |
+| `nexus42 daemon restart --cdn-url <url>` | Passes the CDN URL through daemon restart to the new daemon process. |
+
+The flag is passed to the hidden internal `__internal daemon-run` command (same flag name). Timeout and retry counts are not individually configurable via CLI flags (post-V1.56 concern).
+
 ### 6.2D `nexus42 creator run` (Work experience — V1.33 target, V1.45 generic runner)
 
 > **Authoritative surface**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Shipped Master, V1.45). The detail below is kept for cli-spec continuity; on any divergence the Master wins.

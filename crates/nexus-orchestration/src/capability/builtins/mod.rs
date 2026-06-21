@@ -41,7 +41,10 @@ pub use llm_extract::LlmExtract;
 pub use novel_chapter_transition::NovelChapterTransition;
 pub use novel_scaffold::NovelProjectScaffold;
 pub use outbox::{OutboxCompact, OutboxFlush};
-pub use registry::RegistryRefresh;
+pub use registry::{
+    embedded_snapshot_capabilities, embedded_snapshot_version, set_cdn_config, CdnConfig,
+    RegistryRefresh,
+};
 pub use script_scaffold::ScriptProjectScaffold;
 pub use soul_experience_aggregate::SoulExperienceAggregate;
 pub use sync::{SyncPull, SyncPush};

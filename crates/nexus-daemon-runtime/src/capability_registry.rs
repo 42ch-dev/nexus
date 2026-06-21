@@ -671,6 +671,25 @@ pub fn build_registry() -> CapabilityRegistry {
         },
     });
 
+    // ── V1.56 P1: nexus.registry.refresh ──
+    reg.register(CapabilityRow {
+        id: "nexus.registry.refresh",
+        access: Access::Read,
+        admission: ADMISSION_READ_CONTEXT,
+        handler: hte::registry_registry_refresh,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"force?":"bool"}"#,
+            response_schema_ref: r#"{"cacheAgeMs":"int","capabilityCount":"int","source":"string","snapshotVersion":"string","generatedAt":"string","fetchTimeoutMs":"int","maxRetries":"int","retryCount":"int","fallbackReason":"string"}"#,
+            error_schema_ref: r#"{"code":"NOT_SUPPORTED|INTERNAL"}"#,
+        },
+        failure_mode: FailureMode::NotSupported,
+        handler_test_vector: TestVector {
+            description: "registry refresh returns synthetic output by default",
+            expected_outcome: "success",
+            test_fn_name: "registry_refresh_synthetic_smoke",
+        },
+    });
+
     // ── fs/* baseline (V1.33) ──
     reg.register(CapabilityRow {
         id: "fs/read_text_file",
@@ -719,9 +738,9 @@ mod tests {
     use crate::test_utils::create_test_workspace;
 
     #[test]
-    fn registry_has_nineteen_host_tools() {
+    fn registry_has_twenty_host_tools() {
         let reg = host_tool_registry();
-        assert_eq!(reg.len(), 19);
+        assert_eq!(reg.len(), 20);
     }
 
     #[test]
@@ -739,6 +758,7 @@ mod tests {
             "nexus.kb_snapshot.read",
             "nexus.manuscript.chapter.get",
             "nexus.observability.daemon.health",
+            "nexus.registry.refresh",
             "nexus.kb_snapshot.write",
             "nexus.manuscript.chapter.update",
             "nexus.world.configure",
@@ -808,6 +828,7 @@ mod tests {
         "pool_entry_manage_adds_to_pool",
         "execute_read_file_succeeds",
         "execute_write_file_succeeds",
+        "registry_refresh_synthetic_smoke",
     ];
 
     #[test]

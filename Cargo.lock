@@ -2512,6 +2512,7 @@ dependencies = [
  "nexus-local-db",
  "nix 0.29.0",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",

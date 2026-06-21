@@ -33,6 +33,13 @@ pub struct DaemonRunArgs {
     /// Shutdown grace period in milliseconds (default: 20000)
     #[arg(long, default_value_t = 20000)]
     pub shutdown_grace_ms: u64,
+
+    /// Optional CDN URL for registry.refresh network mode.
+    /// When set, enables fetching the ACP registry from a CDN
+    /// with built-in timeout and retry (10s timeout, 3 retries).
+    /// When absent, registry.refresh returns synthetic output only.
+    #[arg(long)]
+    pub cdn_url: Option<String>,
 }
 
 /// Execute the internal daemon-run command.
@@ -47,6 +54,7 @@ pub async fn run(args: DaemonRunArgs) -> Result<()> {
         socket_path: args.socket_path,
         verbose: args.verbose,
         shutdown_grace_ms: args.shutdown_grace_ms,
+        cdn_url: args.cdn_url,
     };
 
     nexus_daemon_runtime::boot::run_daemon(config)
