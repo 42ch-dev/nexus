@@ -15,7 +15,7 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["rt", "macros", "fs"] }
 uuid = { workspace = true }
 blake3 = { workspace = true }
 tracing = { workspace = true }

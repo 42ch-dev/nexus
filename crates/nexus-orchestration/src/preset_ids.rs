@@ -75,11 +75,23 @@ pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
 /// role→preset mapping.
 pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
 
+/// Game-bible design-writing preset id — `design-writing` (V1.55 P2).
+///
+/// LLM-driven per-section drafting + design 五问 review loop for game-bible
+/// `Design/*.md` sections. Registered as a `work_continue` preset.
+///
+/// Consumed by:
+/// - [`crate::preset::validation::STAGE_PRESET_ALLOWLIST`] (produce stage)
+/// - Schedule supervisor (terminal guard for completion hooks)
+///
+/// See `.mstar/knowledge/specs/game-bible-profile.md` §5 for the stage chain.
+pub const DESIGN_WRITING_PRESET_ID: &str = "design-writing";
+
 #[cfg(test)]
 mod tests {
     use super::{
-        NOVEL_BRAINSTORM_PRESET_ID, NOVEL_CHAPTER_REVIEW_PRESET_ID, NOVEL_REVIEW_MASTER_PRESET_ID,
-        NOVEL_WRITE_PRESET_ID, NOVEL_WRITING_PRESET_ID,
+        DESIGN_WRITING_PRESET_ID, NOVEL_BRAINSTORM_PRESET_ID, NOVEL_CHAPTER_REVIEW_PRESET_ID,
+        NOVEL_REVIEW_MASTER_PRESET_ID, NOVEL_WRITE_PRESET_ID, NOVEL_WRITING_PRESET_ID,
     };
 
     /// Guard against accidental rename: the wire value is part of the
@@ -109,5 +121,10 @@ mod tests {
     #[test]
     fn novel_review_master_preset_id_value_is_frozen() {
         assert_eq!(NOVEL_REVIEW_MASTER_PRESET_ID, "novel-review-master");
+    }
+
+    #[test]
+    fn design_writing_preset_id_value_is_frozen() {
+        assert_eq!(DESIGN_WRITING_PRESET_ID, "design-writing");
     }
 }
