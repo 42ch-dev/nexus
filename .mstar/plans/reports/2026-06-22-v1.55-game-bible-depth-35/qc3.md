@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-22-v1.55-game-bible-depth-35"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-21"
 ---
 
@@ -119,3 +119,93 @@ $ cargo test -p nexus-daemon-runtime --lib
 running 247 tests
 ... ok
 ```
+
+## Revalidation
+
+### Revalidation Scope
+- **Targeted re-review of**: qc3 findings W-1, W-2, W-3 after P2 fix-wave.
+- **Fix-wave commit**: `798c47a0d6a383cf829aa5aa3a3de6a08f861aa0`
+- **Merge commit**: `fc9c1e54ffd39022f9306dc1d8f5b0313270ea8a`
+- **HEAD at review**: `e003363b71d7a5d835e434c083c7db1af4d315d0`
+- **Review cwd / branch verified**:
+  ```text
+  /Users/bibi/workspace/organizations/42ch/nexus
+  iteration/v1.55
+  e003363b71d7a5d835e434c083c7db1af4d315d0
+  ```
+- **Diff basis**: `merge-base: 4ef17268a13987bfa6a32d6a5d5e26015e6c7945` (`fb298429^`) + `tip: iteration/v1.55 HEAD` (`e003363b`); code changes concentrated in fix-wave `798c47a0`.
+
+### Per-Finding Disposition
+
+#### W-1: tracing level downgrade — RESOLVED
+- **Verification**: `is_game_bible_design_complete` doc comment now documents logging-level intent.
+- **Per-section evaluations**: changed from `tracing::info!` to `tracing::debug!` (lines 1378-1386).
+- **Meaningful-state info events preserved**: intake-not-complete (line 1330) and first non-accepted section (line 1389) remain `info!`; all-critical-accepted success event (line 1401) remains `info!`.
+- **Unexpected states**: work-not-found promoted from `debug!` to `warn!` (line 1324).
+- **Acceptance**: per-section `info!` events no longer emitted on the `get_work` hot path.
+
+#### W-2: sync → async file I/O — RESOLVED
+- **Verification**: `std::fs::read_to_string` replaced with `tokio::fs::read_to_string(&path).await` (line 1362).
+- **Feature flag**: `nexus-local-db/Cargo.toml` adds `fs` to tokio features.
+- **Acceptance**: no blocking filesystem I/O remains on the `get_work` hot path for game-bible design completion checks.
+
+#### W-3: profile-aware candidate materialization wired into production paths — RESOLVED (per PM-scoped F-001 closure)
+- **Verification**:
+  - `candidate_from_llm_json_for_profile(work_profile)` introduced; game-bible profile emits `game_bible_category` via `block_type_to_game_bible_category` with tags `["game-bible", "llm-extracted"]`.
+  - `run_llm_extract` now accepts and forwards `work_profile`.
+  - `LlmExtractTask::evaluate` reads `work_profile` from context (defaults to `"novel"`).
+  - Five regression/unit tests added covering direct, cross-domain, unknown-default, and novel-profile cases.
+- **Acceptance**: the materialization helper is no longer dead code; it is reachable through the shared `run_llm_extract` → `LlmExtractTask` production path. (Whether any schedule actually injects `work_profile = "game_bible"` into context is a wiring completeness question scoped to F-001 and tracked separately; the perf/reli path concern—helper not being called—is closed.)
+
+### Performance / Reliability Checklist (qc-specialist-3)
+
+- [x] Hot paths avoided avoidable overhead — per-section `info!` removed; profile check is a single `&str` comparison per candidate.
+- [x] Resource lifecycle handled correctly — file handles managed by `tokio::fs`; no manual open/close.
+- [x] Unbounded operation risks handled — still bounded to three critical-section reads; no new unbounded loops or allocations.
+- [x] Degradation and failure behavior observable — `warn!` for missing rows, `debug!` for missing files/per-section detail, `info!` for gate transitions.
+- [x] Rubric evaluation cost acceptable — no additional parsing or LLM calls; same frontmatter parser reused.
+- [x] KB extraction throughput not regressed — V1.51 extraction path unchanged except for profile-aware payload shaping.
+- [x] New dependency/feature justified — tokio `fs` feature is required for async file reads; minimal, already-transitive dependency.
+
+### GitNexus Impact (post-reindex)
+
+| Symbol | Risk | Direct Callers | Notes |
+|--------|------|----------------|-------|
+| `is_game_bible_design_complete` | LOW | `get_work` handler only | Confirms isolated hot-path impact. |
+| `run_llm_extract` | LOW | `extract_via_llm`, `LlmExtractTask::evaluate` | Existing extraction paths; signature change propagated. |
+| `candidate_from_llm_json_for_profile` | HIGH (blast radius) | `run_llm_extract`, `candidate_from_llm_json`, 5 new tests | Risk is test/compat surface; production path is single and backward-compatible. |
+
+### CI Gates (re-run on fix-wave HEAD)
+
+```text
+$ cargo clippy -p nexus-local-db -p nexus-orchestration -p nexus-daemon-runtime -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.79s
+
+$ cargo test -p nexus-local-db -p nexus-orchestration -p nexus-daemon-runtime --lib
+running 734 tests
+test result: ok. 734 passed; 0 failed; 1 ignored
+
+$ cargo test -p nexus-orchestration --test game_bible_scaffold_e2e
+running 4 tests
+test result: ok. 4 passed; 0 failed
+
+$ cargo test -p nexus-local-db -p nexus-orchestration -p nexus-daemon-runtime --lib -- game_bible design_five_q block_type_to_game_bible_category design_writing_preset_id candidate_from_llm_json_for_profile is_game_bible_design_complete
+running 22 tests
+test result: ok. 22 passed; 0 failed
+```
+
+### Residual Notes
+
+- qc1 F-002 was resolved by Option B: `design-writing` preset comments now state accepted frontmatter is a manual V1.55 step. Residual `R-V155P2-F002` is registered in `.mstar/status.json` (`severity: low`, `lifecycle: deferred`, target V1.56+). This is outside qc3 scope but provides context that the preset is intentionally not auto-transitioning section status yet.
+
+### Updated Summary
+
+| Severity | Count | Disposition |
+|----------|-------|-------------|
+| 🔴 Critical | 0 | — |
+| 🟡 Warning | 0 | W-1, W-2, W-3 resolved |
+| 🟢 Suggestion | 0 | S-1/S-2/S-3 from wave 1 remain suggestions; no new findings |
+
+**Verdict**: Approve
+
+Rationale: All qc3 blockers (W-1, W-2, W-3) are addressed in the fix-wave. The `get_work` hot path no longer emits per-section `info!` tracing and no longer performs synchronous blocking I/O. Profile-aware candidate materialization is wired into the shared extraction path with backward-compatible defaults and regression tests. CI gates are clean and GitNexus impact is contained to expected callers.
