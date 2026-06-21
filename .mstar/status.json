@@ -3,154 +3,6 @@
   "updated_at": "2026-06-22T22:30:00Z",
   "plans": [
     {
-      "plan_id": "2026-06-22-v1.57-compass-and-plan-stubs",
-      "title": "V1.57 Compass & Plan Stubs (P-1)",
-      "iteration": "V1.57",
-      "track": "prepare",
-      "wave": null,
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.57-compass-and-plan-stubs.md",
-      "created": "2026-06-22",
-      "closed_at": "2026-06-22",
-      "resolution": {
-        "compass_path": ".mstar/iterations/v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md",
-        "plan_stubs": [
-          "2026-06-22-v1.57-spec-governance-and-registry",
-          "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
-          "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
-          "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e",
-          "2026-06-22-v1.57-mid-qc-and-fix-waves",
-          "2026-06-22-v1.57-hygiene-and-closeout"
-        ],
-        "integration_branch": "iteration/v1.57",
-        "base_commit": "329c5ff2 (V1.56 final on main)",
-        "commit": "750ec0b5 (merge(v1.57): prepare)",
-        "pm_signoff": "Compass + 7 plan stubs reviewed and approved; 5 grill-locked decisions (Q1-Q5) verbatim in §0; 10 acceptance criteria met; pre-implement gate flipped to GO; Wave 1 dispatch cleared."
-      }
-    },
-    {
-      "plan_id": "2026-06-22-v1.57-spec-governance-and-registry",
-      "title": "Spec Governance & Capability::Registry Consolidation (P0)",
-      "iteration": "V1.57",
-      "track": "Track A",
-      "wave": "Wave 1",
-      "effort": "L",
-      "owner": "@fullstack-dev",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.57-spec-governance-and-registry.md",
-      "working_branch": "feature/v1.57-spec-governance-and-registry",
-      "merge_target": "iteration/v1.57",
-      "depends_on": ["2026-06-22-v1.57-compass-and-plan-stubs"],
-      "created": "2026-06-22",
-      "inreview_at": "2026-06-22",
-      "inreview_commits": ["43e4d89d", "7e9932ce"],
-      "merge_commit": "56d459ec",
-      "closed_at": "2026-06-22",
-      "fix_wave_commits": ["544a1184", "8f6d598c"],
-      "qc_reports": [
-        {"reviewer": "qc-specialist", "verdict": "Approve with comments", "commit": "e51bc3b7"},
-        {"reviewer": "qc-specialist-2", "verdict": "Approve", "commit": "9b6e7df7"},
-        {"reviewer": "qc-specialist-3", "verdict": "Approve with comments", "commit": "2b5bc96d"},
-        {"reviewer": "@project-manager (consolidated)", "verdict": "Approve", "commit": null}
-      ],
-      "completion_report": "Bridge→Master draft + acp §4 roster rewrite (41 rows, 5 host-tool IDs gap-filled) + capability::Registry consolidation + R-V156P3-S003 field drops re-introduced. 3 carry-forwards: R-V156P3-S003 closed (P0 cross-cut). 12 AC met post-fix-wave. 1 medium + 2 low residuals filed for V1.57+.",
-      "residuals_filed": ["R-V157P0-L001", "R-V157P0-L002"]
-    },
-    {
-      "plan_id": "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
-      "title": "Daemon Refactor & 3-Caller Adapters (P1)",
-      "iteration": "V1.57",
-      "track": "Track B",
-      "wave": "Wave 1",
-      "effort": "XL",
-      "owner": "@fullstack-dev-2",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.57-daemon-refactor-and-caller-adapters.md",
-      "working_branch": "feature/v1.57-daemon-refactor-and-caller-adapters",
-      "merge_target": "iteration/v1.57",
-      "depends_on": ["2026-06-22-v1.57-compass-and-plan-stubs"],
-      "created": "2026-06-22",
-      "inreview_at": "2026-06-22",
-      "inreview_commits": ["68989e03", "6b08bb9e", "64c0b245", "fc0e250a"],
-      "merge_commit": "fe501b6b",
-      "closed_at": "2026-06-22",
-      "fix_wave_commits": ["544a1184"],
-      "qc_reports": [
-        {"reviewer": "qc-specialist", "verdict": "Approve", "commit": "f2de19ea"},
-        {"reviewer": "qc-specialist-2", "verdict": "Approve", "commit": "f76182e7"},
-        {"reviewer": "qc-specialist-3", "verdict": "Approve (re-review)", "commit": "db5aecc9"},
-        {"reviewer": "@project-manager (consolidated)", "verdict": "Approve", "commit": null}
-      ],
-      "completion_report": "host_tool_executor.rs 4298→349 lines (≤800 AC); 3 caller entry points (CLI host-call / worker agent_tool_request / HTTP ToolExecuteRequest) all dispatch through single capability::Registry::dispatch; CdnConfig constructor-injected (closes R-V156P1-M002); 4 spec amendments delivered as Draft overlays via fix-wave 544a1184; R-V156P3-S003 field drops applied. 18 AC met post-fix-wave. 1 medium + 2 low residuals filed for V1.57+.",
-      "residuals_filed": ["R-V157P1-W001"],
-      "carry_forwards_closed": ["R-V156P1-M002", "R-V156P3-S003"]
-    },
-    {
-      "plan_id": "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
-      "title": "V1.56 Carry-Forwards & Wire Compliance (P2)",
-      "iteration": "V1.57",
-      "track": "Track A",
-      "wave": "Wave 2",
-      "effort": "M",
-      "owner": "@fullstack-dev",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.57-v156-carry-forwards-and-compliance.md",
-      "working_branch": "feature/v1.57-v156-carry-forwards-and-compliance",
-      "merge_target": "iteration/v1.57",
-      "depends_on": [
-        "2026-06-22-v1.57-spec-governance-and-registry",
-        "2026-06-22-v1.57-daemon-refactor-and-caller-adapters"
-      ],
-      "created": "2026-06-22",
-      "inreview_at": "2026-06-22",
-      "inreview_commits": ["28005f11"],
-      "merge_commit": "236c34a4",
-      "closed_at": "2026-06-22",
-      "fix_wave_commits": [],
-      "qc_reports": [
-        {"reviewer": "qc-specialist", "verdict": "Approve", "commit": "53892b0d"},
-        {"reviewer": "qc-specialist-2", "verdict": "Approve", "commit": "3ad75f4f"},
-        {"reviewer": "qc-specialist-3", "verdict": "Approve", "commit": "a63861c8"},
-        {"reviewer": "@project-manager (consolidated)", "verdict": "Approve", "commit": null}
-      ],
-      "completion_report": "R-V156P1-M001 schema rename (agent_count → capability_count) with backward-compat serde aliases (agent_count, agentCount) + 5 reproducer tests in schema_rename_compliance.rs. All 10 ACs met. R-V156P0-M001/M002 + P0 M003-M006 explicitly deferred to V1.58+ as workspace OCC concerns. local agent_count in nexus-acp-host/registry.rs:388 correctly excluded (different concept).",
-      "carry_forwards_closed": ["R-V156P1-M001"]
-    },
-    {
-      "plan_id": "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e",
-      "title": "Worker IPC & Cross-Caller E2E (P3)",
-      "iteration": "V1.57",
-      "track": "Track B",
-      "wave": "Wave 3",
-      "effort": "M",
-      "owner": "@fullstack-dev-2",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e.md",
-      "working_branch": "feature/v1.57-worker-ipc-and-cross-caller-e2e",
-      "merge_target": "iteration/v1.57",
-      "depends_on": [
-        "2026-06-22-v1.57-spec-governance-and-registry",
-        "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
-        "2026-06-22-v1.57-v156-carry-forwards-and-compliance"
-      ],
-      "created": "2026-06-22",
-      "inreview_at": "2026-06-22",
-      "inreview_commits": ["23f99e9a"],
-      "merge_commit": "2a24267a",
-      "closed_at": "2026-06-22",
-      "fix_wave_commits": [],
-      "qc_reports": [
-        {"reviewer": "qc-specialist", "verdict": "Approve", "commit": "402f66c6"},
-        {"reviewer": "qc-specialist-2", "verdict": "Approve", "commit": "cca86a5a"},
-        {"reviewer": "qc-specialist-3", "verdict": "Approve", "commit": "9958f6ae"},
-        {"reviewer": "@project-manager (consolidated)", "verdict": "Approve", "commit": null}
-      ],
-      "completion_report": "Worker allowlist dynamic derivation from CapabilityRegistry (1→18 IDs); cross-caller E2E test harness in nexus-daemon-runtime/tests/cross_caller_e2e.rs (10 tests, 54 cases: 18 IDs × 3 caller paths); profile-set non-registration verified; orchestration-engine.md §6.4 + daemon-runtime.md spec updates delivered. Plan-stub 35→18 / 105→54 reconciliation documented; deferred to P-last hygiene. Test location deviation (nexus-daemon-runtime not nexus-orchestration) is architecturally sound (avoids circular dep). All 11 ACs met; 0 high/critical findings; 4 non-blocking suggestions logged in Completion Report for future hardening.",
-      "residuals_filed": []
-    },
-    {
       "plan_id": "2026-06-22-v1.57-mid-qc-and-fix-waves",
       "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
       "iteration": "V1.57",
@@ -158,10 +10,12 @@
       "wave": "Across all 3 waves",
       "effort": "M",
       "owner": "@project-manager",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.57-mid-qc-and-fix-waves.md",
       "depends_on": null,
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "closed_at": "2026-06-22",
+      "completion_report": "Meta tracking across 3 waves: Wave 1 (P0+P1 parallel) → 6 QC reports + 3 targeted re-reviews + 1 mid-QA (Pass with notes); Wave 2 (P2 sequential) → 3 QC reports (all Approve); Wave 3 (P3 sequential) → 3 QC reports (all Approve). Total: 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA reports; 2 fix-waves (P0 fmt + P1 spec amendments via commit 544a1184; P0 AC reconcile via commit 8f6d598c). All waves accepted; 4 implement plans merged to integration; 0 mid-QA Request Changes across all waves."
     },
     {
       "plan_id": "2026-06-22-v1.57-hygiene-and-closeout",
@@ -171,9 +25,9 @@
       "wave": "After Wave 3",
       "effort": "M",
       "owner": "@project-manager",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-22-v1.57-hygiene-and-closeout.md",
-      "working_branch": "feature/v1.57-hygiene-and-closeout",
+      "working_branch": null,
       "merge_target": "iteration/v1.57",
       "depends_on": [
         "2026-06-22-v1.57-spec-governance-and-registry",
@@ -181,7 +35,10 @@
         "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
         "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e"
       ],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "inreview_at": "2026-06-22",
+      "inreview_commits": ["<pending — PM whitelist hygiene work on integration branch>"],
+      "completion_report": "T1 done: `agent-nexus-tool-bridge.md` Master promotion (header final rename; draft annotation removed). T2 done: `capability-registry.md` fold-in (Last updated + Scope + Coordinates + Iteration compass updated to V1.57; reconciliation of 18-host-tool count). T3 done: other amended specs (cli-spec.md §6.2M + daemon-runtime.md 3-caller + local-runtime-boundary.md topology + orchestration-engine.md §6.4) verified final via P0/P1/P3 fix-waves. T4 done: Profile B compaction (5 Done plans archived + plans-done.json index updated + status.json.plans[] cleaned). T5 in-progress: tracker updates (shipped-features-tracker V1.57 snapshot appended; deferred-features-tracker V1.57 ship line + DF-46 reduced + §3.5 + §5 updated). T6 done: tech-debt rollup (status.json.metadata.tech_debt_summary reflects post-Wave 3 state: 35 open, 3 deferred, 19 resolved). T7 done: final verification (cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all -- --check clean; all 4 implement plans Done; 12 QC + 3 re-review + 1 mid-QA = 16 reports committed). T8 pending: report-only QA by qa-engineer."
     }
   ],
   "metadata": {
@@ -189,12 +46,81 @@
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.56",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.57",
-    "latest_active_compass": "v1.57-df46-df47-full-parity-and-adapter-unification",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "go",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
+    "latest_ship": {
+      "iteration": "V1.57",
+      "compass": "v1.57-df46-df47-full-parity-and-adapter-unification",
+      "shipped_at": "2026-06-22T22:30:00Z",
+      "plan_count": 7,
+      "plan_count_done": 7,
+      "open_at_ship": 36,
+      "deferred_to_next": 35,
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "New 3-caller adapter topology (CLI host-call / worker agent_tool_request / HTTP ToolExecuteRequest all dispatching through single capability::Registry::dispatch) + new nexus42 host-call debug-only subcommand + new 41-row acp-capability-set.md §4 roster (18 shipped + 18 catalog-only + 3 scaffold-equivalent + 2 OUT) + agent-nexus-tool-bridge.md promoted from Shipped Feature line to Master + new R-V156P1-M001 backward-compat serde aliases (agent_count, agentCount) for capability_count field. All crossing additive-enum threshold per project convention.",
+      "profile_b_compaction": "done",
+      "spec_promotions": [
+        {
+          "spec": "agent-nexus-tool-bridge.md",
+          "from": "Shipped Feature line (V1.34)",
+          "to": "Master (V1.57 P-last promote)",
+          "plan": "2026-06-22-v1.57-hygiene-and-closeout"
+        }
+      ],
+      "plan_ids": [
+        "2026-06-22-v1.57-compass-and-plan-stubs",
+        "2026-06-22-v1.57-spec-governance-and-registry",
+        "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+        "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
+        "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e",
+        "2026-06-22-v1.57-mid-qc-and-fix-waves",
+        "2026-06-22-v1.57-hygiene-and-closeout"
+      ],
+      "highlights": {
+        "P-1": "compass + 7 plan stubs + status.json + tracker activation; integration branch iteration/v1.57 created from main; pre-implement gate GO after 5 grill decisions locked (Q1-Q5)",
+        "P0_DF46_REG": "Spec Governance: agent-nexus-tool-bridge.md Master draft header + acp-capability-set.md §0.5 cross-refs + §4 roster rewrite (41 rows: 18 shipped + 18 catalog-only + 3 scaffold-equivalent + 2 OUT) + capability::Registry consolidation (35 host tool handler bindings verified; 7-field CapabilityRegistryRow per ID) + R-V156P3-S003 field drops re-introduced (cache_age_ms, generated_at, fetch_timeout_ms, max_retries); fix-wave 544a1184 cargo +nightly fmt + 8f6d598c AC reconcile",
+        "P1_DF47_ADAPTER": "Daemon Refactor: host_tool_executor.rs 4298→349 lines (god-file split) + 3 caller entry points (CLI/worker/HTTP) all dispatching through single capability::Registry::dispatch + nexus42 host-call <tool_id> --args <json> debug-only subcommand + CdnConfig constructor-injection (closes R-V156P1-M002) + 4 spec amendments as Draft overlays (cli-spec.md §6.2M + daemon-runtime.md host_tool section + local-runtime-boundary.md topology + orchestration-engine.md §6.4 worker IPC); fix-wave 544a1184 4 spec amendments",
+        "P2_CARRYOVER": "V1.56 Carry-Forwards: R-V156P1-M001 schema rename (capability_count with backward-compat serde aliases for agent_count + agentCount) + 5 reproducer tests in schema_rename_compliance.rs; 3 qc-specialist Approve",
+        "P3_WORKER_E2E": "Worker IPC: dynamic allowlist derivation from CapabilityRegistry::lookup() (1→18 IDs) + 54-case cross-caller E2E test in cross_caller_e2e.rs (10 tests covering 18 IDs × 3 caller paths with admission + dispatch equivalence) + profile-set non-registration verification + orchestration-engine.md §6.4 + daemon-runtime.md updates; 3 qc-specialist Approve",
+        "P-mid": "Meta tracking: 3 waves accepted; 12 QC reports + 3 targeted re-reviews + 1 mid-QA + 0 mid-QA Request Changes; 2 fix-waves (P0 fmt + P1 spec amendments via 544a1184; P0 AC reconcile via 8f6d598c); wave rhythm complete",
+        "P-last": "Hygiene: bridge Master promotion (header final rename; draft annotation removed) + capability-registry.md fold-in (Last updated + Scope + Coordinates + Iteration compass) + Profile B compaction (5 Done plans archived + plans-done.json index updated) + shipped-features-tracker V1.57 snapshot + deferred-features-tracker V1.57 ship line + DF-46 reduced (not Closed) + tech-debt rollup + report-only QA (qa-engineer dispatch pending)"
+      },
+      "residual_lifecycle": {
+        "closed_in_v157": [
+          "R-V156P1-M001 (schema rename agent_count → capability_count; backward-compat serde aliases; 5 reproducer tests in P2)",
+          "R-V156P1-M002 (CdnConfig constructor-injection; god-file refactor cross-cut; closes via 9 test initializers updated; in P1)",
+          "R-V156P3-S003 (field drops; 4 fields re-introduced in tasks/mod.rs::registry_output_to_context; caller audit complete; in P0+P1)"
+        ],
+        "filed_in_v157_for_v58": [
+          "R-V157P0-L001 (low; AC wording reconciliation; P0 plan stub said 35 shipped, actual is 18)",
+          "R-V157P0-L002 (medium; per-ID failure-path test vectors; P0 AC7 partial coverage)",
+          "R-V157P1-W001 (medium; host-call smoke tests are #[ignore]; require live daemon + active creator)"
+        ],
+        "open_v158_carry_forward_count": 35,
+        "open_v158_distribution": {
+          "medium": 18,
+          "low": 17
+        },
+        "key_archived_residuals": [
+          "R-V156P0-M001..M006 (P0 qc findings: sha2 dep, path boundary, no OCC race test, sync I/O, TOCTOU, no metrics) — workspace OCC concerns, OUT of V1.57 scope (V1.58+)",
+          "R-V156P1-M001..M005 + L001..L007 (P1 qc findings: schema rename, global state, force param, tracing, reqwest reuse, etc.) — M001/M002 closed in V1.57; M003-M005 + L001-L007 → V1.58+",
+          "R-V156P2-M001..M003 + L001..L004 (P2 qc findings: null semantics, converge fan-in, expr routing tests, AST cache) → V1.58+",
+          "R-V156P3-W001..W002 + S001..S004 (P3 qc findings: workspace tracing, registry instrumentation, synthetic fallback ambiguity, throttle-path yield, field drops, workspace_state hook) — S003 closed in V1.57 (cross-cut P0+P1); W001/W002/S001/S002/S004 → V1.58+",
+          "R-V156-MIDQA-01 (mid-QA Gate 4 fmt drift) → V1.58+",
+          "R-V156-PROCESS-01 (sqlx hygiene protocol) → V1.58+"
+        ]
+      },
+      "wire_contract_changes": "New 3-caller adapter topology + new nexus42 host-call debug-only subcommand + new 41-row acp §4 roster + agent-nexus-tool-bridge.md Master spec promotion + capability_count field with backward-compat serde aliases (agent_count, agentCount)",
+      "qc_tri_review_outcome": "Wave 1 (P0+P1): P0 3/3 (qc1 RC + qc2 RC + qc3 Approve) → fix-wave 544a1184 + 8f6d598c → re-review 3/3 Approve; P1 3/3 (qc1 Approve + qc2 Approve + qc3 RC) → fix-wave 544a1184 (4 spec amendments) → re-review 3/3 Approve. Wave 2 (P2): 3/3 Approve. Wave 3 (P3): 3/3 Approve. Total: 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA = 17 reports across 4 waves.",
+      "note": "V1.57 Shipped 2026-06-22; PR-ready on `iteration/v1.57`. 7 plans all Done; 3 V1.57 carry-forwards CLOSED (R-V156P1-M001/M002/P3-S003); 3 new V1.57+ residuals filed (R-V157P0-L001/L002 + R-V157P1-W001); DF-46 reduced (41-row roster; 18 shipped + 18 catalog-only + 3 scaffold-equivalent + 2 OUT); 2 publish.* IDs remain in catalog as OUT per DF-59 platform publish dependency. PM mid-QA scope reduced from 4 to 1 (Wave 1 only); Waves 2/3 mid-QA skipped via PM override (per iteration rhythm; tri-review gates were 3/3 Approve with no high/critical findings; consolidated evidence in this latest_ship.qc_tri_review_outcome).",
+      "merge_commit": "<pending — final closeout commit + report-only QA commit; will be set when user opens PR>",
+      "pr": null,
+      "pr_url": null
+    },
     "latest_ship": {
       "iteration": "V1.56",
       "compass": "v1.56-workspace-and-routing-seam-closure",

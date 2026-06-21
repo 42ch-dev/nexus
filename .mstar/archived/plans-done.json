@@ -245,7 +245,12 @@
     "2026-06-22-v1.56-df56-independent-slice",
     "2026-06-22-v1.56-df56-dependent-slice",
     "2026-06-22-v1.56-mid-qc-and-fix-waves",
-    "2026-06-22-v1.56-hygiene-and-closeout"
+    "2026-06-22-v1.56-hygiene-and-closeout",
+    "2026-06-22-v1.57-compass-and-plan-stubs",
+    "2026-06-22-v1.57-spec-governance-and-registry",
+    "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+    "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
+    "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e"
   ],
   "iteration_summaries": {
     "v1.45": {
