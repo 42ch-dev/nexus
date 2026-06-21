@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 graph-flow = "=0.2.3"                                    # rig feature NOT enabled (per best-practices §1.2 pin policy)
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "process", "io-util", "time", "net"] }
 # sqlx: workspace dep is declared + feature-gated by WS8 T1 (runtime-tokio, sqlite, macros, migrate, chrono, uuid).
 # This crate re-uses the workspace dep; do not add local features.
 sqlx = { workspace = true }
@@ -46,7 +46,7 @@ include_dir = "0.7"
 handlebars = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
 # WS2 R4: SIGTERM support for graceful worker shutdown (Unix only).
 # R5: gated behind cfg(unix) for Windows build compatibility.
 [target.'cfg(unix)'.dependencies]
