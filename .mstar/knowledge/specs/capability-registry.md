@@ -206,7 +206,7 @@ verifies that all 7 fields are populated for every registered row.
 | Existing spec | Boundary |
 | --- | --- |
 | `acp-capability-set.md` | Logical catalog only; no runtime dispatch authority. |
-| `agent-nexus-tool-bridge.md` | Entrypoint/admission history and V1.34 minimal bridge; V1.53 registry can become the shared runtime SSOT underneath it. |
+| `agent-nexus-tool-bridge.md` | Master spec (promoted V1.57 P-last). Entrypoint/admission history and mediated external-agent tool invocation; registry is the shared runtime SSOT underneath it. |
 | `acp-client-tech-spec.md` | ACP client behavior and handshake; registry rows may reference wire details but do not redefine ACP. |
 | `orchestration-engine.md` | Schedules and worker tool requests; registry may serve schedule-initiated tool dispatch but does not replace preset grammar. |
 | `cli-spec.md` | User-visible commands; capability registry is not a CLI command tree. |
