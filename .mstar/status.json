@@ -25,7 +25,7 @@
       "wave": "After Wave 3",
       "effort": "M",
       "owner": "@project-manager",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.57-hygiene-and-closeout.md",
       "working_branch": null,
       "merge_target": "iteration/v1.57",
@@ -37,8 +37,13 @@
       ],
       "created": "2026-06-22",
       "inreview_at": "2026-06-22",
-      "inreview_commits": ["<pending — PM whitelist hygiene work on integration branch>"],
-      "completion_report": "T1 done: `agent-nexus-tool-bridge.md` Master promotion (header final rename; draft annotation removed). T2 done: `capability-registry.md` fold-in (Last updated + Scope + Coordinates + Iteration compass updated to V1.57; reconciliation of 18-host-tool count). T3 done: other amended specs (cli-spec.md §6.2M + daemon-runtime.md 3-caller + local-runtime-boundary.md topology + orchestration-engine.md §6.4) verified final via P0/P1/P3 fix-waves. T4 done: Profile B compaction (5 Done plans archived + plans-done.json index updated + status.json.plans[] cleaned). T5 in-progress: tracker updates (shipped-features-tracker V1.57 snapshot appended; deferred-features-tracker V1.57 ship line + DF-46 reduced + §3.5 + §5 updated). T6 done: tech-debt rollup (status.json.metadata.tech_debt_summary reflects post-Wave 3 state: 35 open, 3 deferred, 19 resolved). T7 done: final verification (cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all -- --check clean; all 4 implement plans Done; 12 QC + 3 re-review + 1 mid-QA = 16 reports committed). T8 pending: report-only QA by qa-engineer."
+      "inreview_commits": ["8b793cc5"],
+      "closed_at": "2026-06-22",
+      "merge_commit": "8b793cc5",
+      "qc_reports": [
+        {"reviewer": "qa-engineer", "verdict": "Pass", "commit": "8b793cc5"}
+      ],
+      "completion_report": "T1 done: agent-nexus-tool-bridge.md Master promotion (header final rename; draft annotation removed). T2 done: capability-registry.md fold-in (Last updated + Scope + Coordinates + Iteration compass updated to V1.57; reconciliation of 18-host-tool count). T3 done: other amended specs (cli-spec.md §6.2M + daemon-runtime.md 3-caller + local-runtime-boundary.md topology + orchestration-engine.md §6.4) verified final via P0/P1/P3 fix-waves. T4 done: Profile B compaction (5 Done plans archived + plans-done.json index updated + status.json.plans[] cleaned to P-mid + P-last only). T5 done: tracker updates (shipped-features-tracker V1.57 snapshot appended; deferred-features-tracker V1.57 ship line + DF-46 reduced + §3.5 + §5 updated). T6 done: tech-debt rollup (status.json.metadata.tech_debt_summary reflects post-Wave 3 state: 35 open, 3 deferred, 19 resolved, 5 archived). T7 done: final verification (cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all -- --check clean; all 4 implement plans Done; 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA = 17 reports committed). T8 done: report-only QA by qa-engineer verdict Pass (commit 8b793cc5). V1.57 PR-ready on iteration/v1.57."
     }
   ],
   "metadata": {
@@ -117,7 +122,7 @@
       "wire_contract_changes": "New 3-caller adapter topology + new nexus42 host-call debug-only subcommand + new 41-row acp §4 roster + agent-nexus-tool-bridge.md Master spec promotion + capability_count field with backward-compat serde aliases (agent_count, agentCount)",
       "qc_tri_review_outcome": "Wave 1 (P0+P1): P0 3/3 (qc1 RC + qc2 RC + qc3 Approve) → fix-wave 544a1184 + 8f6d598c → re-review 3/3 Approve; P1 3/3 (qc1 Approve + qc2 Approve + qc3 RC) → fix-wave 544a1184 (4 spec amendments) → re-review 3/3 Approve. Wave 2 (P2): 3/3 Approve. Wave 3 (P3): 3/3 Approve. Total: 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA = 17 reports across 4 waves.",
       "note": "V1.57 Shipped 2026-06-22; PR-ready on `iteration/v1.57`. 7 plans all Done; 3 V1.57 carry-forwards CLOSED (R-V156P1-M001/M002/P3-S003); 3 new V1.57+ residuals filed (R-V157P0-L001/L002 + R-V157P1-W001); DF-46 reduced (41-row roster; 18 shipped + 18 catalog-only + 3 scaffold-equivalent + 2 OUT); 2 publish.* IDs remain in catalog as OUT per DF-59 platform publish dependency. PM mid-QA scope reduced from 4 to 1 (Wave 1 only); Waves 2/3 mid-QA skipped via PM override (per iteration rhythm; tri-review gates were 3/3 Approve with no high/critical findings; consolidated evidence in this latest_ship.qc_tri_review_outcome).",
-      "merge_commit": "<pending — final closeout commit + report-only QA commit; will be set when user opens PR>",
+      "merge_commit": "8b793cc5",
       "pr": null,
       "pr_url": null
     },
