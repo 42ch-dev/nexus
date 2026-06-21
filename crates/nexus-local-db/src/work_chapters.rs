@@ -1295,9 +1295,12 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
 ///
 /// # Tracing (R-V154P1-S002)
 ///
-/// Emits `info!`-level events for each critical section evaluation and a
-/// summary `info!` event with the completion verdict, so operators can audit
-/// game-bible completion decisions without reading frontmatter by hand.
+/// Logging level intent (V1.55 P2 fix-wave W-1):
+/// - `info!` at meaningful gate transitions (intake not complete; all critical
+///   sections accepted) — operators need these decisions without verbose logging.
+/// - `debug!` for per-section evaluations — fine-grained detail for debugging
+///   but too noisy at `info!` level on the `get_work` hot path.
+/// - `warn!` for unexpected states (e.g. missing rows).
 pub async fn is_game_bible_design_complete(
     pool: &SqlitePool,
     work_id: &str,
@@ -1318,7 +1321,7 @@ pub async fn is_game_bible_design_complete(
         .await?;
 
     let Some(row) = row else {
-        tracing::debug!(work_id, "is_game_bible_design_complete: work not found");
+        tracing::warn!(work_id, "is_game_bible_design_complete: work not found");
         return Ok(false);
     };
 
@@ -1352,9 +1355,11 @@ pub async fn is_game_bible_design_complete(
         return Ok(false);
     }
 
+    // V1.55 P2 fix-wave W-2: use tokio::fs for async file I/O on the
+    // get_work hot path (previously std::fs::read_to_string).
     for (filename, label) in CRITICAL_SECTIONS {
         let path = design_dir.join(filename);
-        let content = match std::fs::read_to_string(&path) {
+        let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => {
                 tracing::debug!(
@@ -1370,7 +1375,8 @@ pub async fn is_game_bible_design_complete(
         };
         let fm = parse_frontmatter(&content);
         let status = fm.get("section_status").map_or("draft", String::as_str);
-        tracing::info!(
+        // Per-section evaluation at debug level (not info — hot path).
+        tracing::debug!(
             target = "completion",
             work_id,
             work_ref,
@@ -1379,6 +1385,7 @@ pub async fn is_game_bible_design_complete(
             "game-bible: critical section evaluated"
         );
         if status != "accepted" {
+            // First non-accepted section is a meaningful gate: keep at info.
             tracing::info!(
                 target = "completion",
                 work_id,
