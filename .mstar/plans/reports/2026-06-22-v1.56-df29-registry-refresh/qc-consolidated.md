@@ -42,18 +42,31 @@ Low-severity (S-001..S-014): help text lacks security warning, snapshot version 
 
 **REQUEST CHANGES** — V1.56 P1 implementation **NOT accepted as-is**. qc2 identified Critical SSRF surface + 2 High URL validation/typed-errors issues. Per mstar-review-qc verdict rules, an unresolved Critical requires `Request Changes`.
 
+## Fix-Wave Outcome (2026-06-22)
+
+**Fix-wave dispatched** to `@fullstack-dev-2`. Implementation: `b887ce57` + merge `27bc1b09`.
+
+**Targeted re-review** by `@qc-specialist-2` only (N=1) → **Approve** (see `qc2-revalidation.md`).
+
+| Blocking finding | Closure status |
+|---|---|
+| C-001 SSRF | ✅ closed (HTTPS-only + redirect policy `limited(0)` + private-IP block + 8 MiB body cap + post-DNS enforcement; 6+ negative tests) |
+| H-001 typed errors | ✅ closed (`CdnError` enum with 11 variants; `Display`+`Error` impls; `fetch_from_cdn` returns `Result<_, CdnError>`; `fallback_reason` = typed) |
+| H-002 URL validation | ✅ closed (early `validate_cdn_url_static` in `daemon/mod.rs` (foreground + background), `daemon_run.rs`, `boot.rs`; rejects empty/whitespace/non-HTTPS/private-IP at parse) |
+
+**Re-review introduced**: 3 cosmetic Suggestions (body-size hammer test, redirect injection test, naming prefix consistency) — register as low residuals, not fix-wave blockers.
+
+## Updated PM Gate Verdict (post-fix-wave)
+
+**APPROVE** — V1.56 P1 implementation now accepted. All blocking findings closed. Medium findings + re-review Suggestions deferred as residuals. Ready for mid-QA dispatch.
+
 ## Action Items (in order)
 
-1. **PM dispatches P1 fix-wave** to `@fullstack-dev-2` (P1 implementer):
-   - Fix C-001: HTTPS-only enforcement + redirect policy + private-IP/localhost/metadata block + body size limit on `reqwest::Client`
-   - Fix H-001: typed `CdnError` enum (`Timeout`, `ServerError(status)`, `ParseError`, `BodyTooLarge`, etc.) instead of stringly-typed errors
-   - Fix H-002: CLI/boot URL validation: reject empty, whitespace-only, non-HTTPS, private/loopback/link-local IPs, metadata endpoints
-   - Negative tests for each rejection class
-   - Update help text + spec amendments to document security contract
-2. After fix-wave complete: **targeted re-review** by qc-specialist-2 only (N=1 invocation). Re-review scope: did the C-001 / H-001 / H-002 fixes land correctly?
-3. If targeted re-review `Approve`: dispatch mid-QA for P1.
-4. After mid-QA Pass: mark P1 plan status as `Done`.
-5. If re-review still has Critical/High: re-dispatch fix-wave (not re-review of medium/low; full tri-review only on `qc-consolidated` change).
+1. ~~PM dispatches P1 fix-wave~~ ✅ done (commits `b887ce57` + `27bc1b09`)
+2. ~~Targeted re-review by qc-specialist-2 only~~ ✅ done (`qc2-revalidation.md` Approve)
+3. Register 3 re-review Suggestions as low residuals in `status.json`.
+4. Dispatch **mid-QA** for P1 (verify AC mapping + 7-key gate against `iteration/v1.56` HEAD `27bc1b09`).
+5. After mid-QA Pass: mark P1 plan status as `Done`.
 
 ## Handoff
 
