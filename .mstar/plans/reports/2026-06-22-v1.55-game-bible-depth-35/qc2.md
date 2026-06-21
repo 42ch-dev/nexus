@@ -87,7 +87,7 @@ generated_at: "2026-06-21"
 **Issues/Risks**: None blocking. 3 low/nit suggestions recorded (non-mandatory).
 **Plan Update**: N/A (review-only; PM owns status/residual consolidation).
 **Handoff**: To @project-manager for tri-consolidation + mid-QA scheduling. No residual registration required from this reviewer (no Critical/mandatory Warning).
-**Git**: (report commit will be recorded here post-`git commit`)
+**Git**: 53efe06f qc(v1.55-p2): qc2 security/correctness review — Approve (rubric determinism, world_id isolation, completion missing-files, profile gates, preset non-bypass)
 
 ---
 
