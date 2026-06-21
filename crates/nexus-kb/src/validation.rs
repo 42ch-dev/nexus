@@ -86,6 +86,17 @@ pub const GAME_BIBLE_CATEGORIES: &[&str] = &[
     "economy_tier",
 ];
 
+/// Valid `script_category` values (V1.55 P3).
+///
+/// Per entity-scope-model.md §5.1.1 script taxonomy:
+///
+/// | `script_category` | Default wire `block_type` |
+/// |-------------------|---------------------------|
+/// | `dialogue`        | `dialogue`                |
+/// | `beat`            | `beat`                    |
+/// | `act`             | `act`                     |
+pub const SCRIPT_CATEGORIES: &[&str] = &["dialogue", "beat", "act"];
+
 /// Validation mode controlling how strictly `body` is checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationMode {
@@ -98,6 +109,10 @@ pub enum ValidationMode {
     /// in `body.attributes` and validates it against the mapping table.
     /// Rejects `novel_category` when active.
     GameBible,
+    /// Script profile validation (V1.55 P3) — requires `script_category`
+    /// in `body.attributes` and validates it against the mapping table.
+    /// Rejects `novel_category` and `game_bible_category` when active.
+    Script,
 }
 
 impl fmt::Display for ValidationMode {
@@ -106,6 +121,7 @@ impl fmt::Display for ValidationMode {
             Self::Generic => write!(f, "generic"),
             Self::Novel => write!(f, "novel"),
             Self::GameBible => write!(f, "game_bible"),
+            Self::Script => write!(f, "script"),
         }
     }
 }
@@ -126,6 +142,23 @@ pub fn default_block_type_for_game_bible_category(category: &str) -> Option<Bloc
         "deity" => Some(BlockType::Deity),
         "level" => Some(BlockType::Level),
         "economy_tier" => Some(BlockType::EconomyTier),
+        _ => None,
+    }
+}
+
+/// Check whether a string is a valid `script_category` (V1.55 P3).
+#[must_use]
+pub fn is_valid_script_category(category: &str) -> bool {
+    SCRIPT_CATEGORIES.contains(&category)
+}
+
+/// Default mapping from `script_category` to `BlockType` (V1.55 P3).
+#[must_use]
+pub fn default_block_type_for_script_category(category: &str) -> Option<BlockType> {
+    match category {
+        "dialogue" => Some(BlockType::Dialogue),
+        "beat" => Some(BlockType::Beat),
+        "act" => Some(BlockType::Act),
         _ => None,
     }
 }
@@ -230,6 +263,7 @@ pub fn validate_body(
         ValidationMode::Generic => Ok(()),
         ValidationMode::Novel => validate_novel_body(block_type, body),
         ValidationMode::GameBible => validate_game_bible_body(block_type, body),
+        ValidationMode::Script => validate_script_body(block_type, body),
     }
 }
 
@@ -369,6 +403,94 @@ fn validate_game_bible_body(
                 provided_block_type = ?block_type,
                 default_block_type = ?default_bt,
                 "game_bible_category '{}' does not map to default block_type {:?} \
+                 (provided {:?}); this is advisory, not an error",
+                category,
+                default_bt,
+                block_type
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate script profile `body` semantics (V1.55 P3).
+///
+/// Requires `script_category` in `body.attributes` and validates it
+/// against the three valid values. Rejects `novel_category` and
+/// `game_bible_category` if present.
+fn validate_script_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> Result<(), KbError> {
+    let b = body.ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingBody,
+            field: Some("body".to_string()),
+            message: "body is required for script-profile KeyBlocks".to_string(),
+        })
+    })?;
+
+    let attrs = b.attributes.as_ref().ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingAttributes,
+            field: Some("body.attributes".to_string()),
+            message: "body.attributes is required for script-profile KeyBlocks".to_string(),
+        })
+    })?;
+
+    // Reject novel_category and game_bible_category in script mode — profile categories must not leak
+    if attrs.get("novel_category").is_some() {
+        return Err(KbError::Validation(ValidationError {
+            kind: ValidationKind::InvalidNovelCategory,
+            field: Some("body.attributes.novel_category".to_string()),
+            message: "body.attributes.novel_category is not valid for script-profile KeyBlocks"
+                .to_string(),
+        }));
+    }
+    if attrs.get("game_bible_category").is_some() {
+        return Err(KbError::Validation(ValidationError {
+            kind: ValidationKind::InvalidGameBibleCategory,
+            field: Some("body.attributes.game_bible_category".to_string()),
+            message:
+                "body.attributes.game_bible_category is not valid for script-profile KeyBlocks"
+                    .to_string(),
+        }));
+    }
+
+    let category_value = attrs.get("script_category").ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingScriptCategory,
+            field: Some("body.attributes.script_category".to_string()),
+            message: "body.attributes.script_category is required for script-profile KeyBlocks"
+                .to_string(),
+        })
+    })?;
+
+    let category = category_value.as_str().ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::NonStringScriptCategory,
+            field: Some("body.attributes.script_category".to_string()),
+            message: "body.attributes.script_category must be a string".to_string(),
+        })
+    })?;
+
+    if !is_valid_script_category(category) {
+        return Err(KbError::Validation(ValidationError {
+            kind: ValidationKind::InvalidScriptCategory,
+            field: Some("body.attributes.script_category".to_string()),
+            message: format!(
+                "invalid script_category '{}': must be one of {:?}",
+                category, SCRIPT_CATEGORIES
+            ),
+        }));
+    }
+
+    // Advisory: warn if the script_category doesn't map to the default block_type.
+    if let Some(default_bt) = default_block_type_for_script_category(category) {
+        if block_type != default_bt {
+            tracing::warn!(
+                script_category = category,
+                provided_block_type = ?block_type,
+                default_block_type = ?default_bt,
+                "script_category '{}' does not map to default block_type {:?} \
                  (provided {:?}); this is advisory, not an error",
                 category,
                 default_bt,
