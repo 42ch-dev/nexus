@@ -90,3 +90,104 @@ generated_at: "2026-06-21"
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+### Revalidation Metadata
+- Reviewer: @qc-specialist
+- Runtime Agent ID: qc-specialist
+- Runtime Model: openai/gpt-5.5
+- Review Perspective: Architecture coherence and maintainability risk
+- Report Timestamp: 2026-06-21T00:00:00Z
+
+### Revalidation Scope
+- plan_id: `2026-06-22-v1.55-game-bible-depth-35`
+- Review range / Diff basis: `merge-base: fb298429^` + `tip: iteration/v1.55 HEAD` (assignment tip `e003363b`; local HEAD during re-review `8fe08564`, qc3 report-only commit on top of `e003363b`)
+- Working branch (verified): `iteration/v1.55`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+- Fix-wave commits reviewed: `798c47a0` (P2 fix-wave) and merge `fc9c1e54`; also checked `e003363b` for `R-V155P2-F002` residual registration and `8fe08564` as qc3 report-only context.
+- Local dirty state before report edit: pre-existing unstaged changes in `AGENTS.md`, `CLAUDE.md`, and `qc2.md`; this re-review modifies and commits only this `qc1.md` report.
+
+### Fix-Wave Commit Range Log
+```text
+8fe08564 qc(v1.55-p2): qc3 revalidation — W-1/W-2/W-3 resolved, Approve
+e003363b harness(v1.55): Wave 1 — P0/P2 done + R-V154P1-S002 resolved + R-V155P2-F002 registered
+fc9c1e54 Merge branch 'feature/v1.55-game-bible-depth-35' into iteration/v1.55
+798c47a0 fix(v1.55): P2 fix-wave — F-001 profile-aware extraction, F-002 preset narrowing, W-1/W-2 tracing/async, S-001 spec reconcile
+```
+
+### GitNexus Impact Evidence
+| Symbol | Risk | Direct / notable upstream callers | Revalidation use |
+| --- | --- | --- | --- |
+| `candidate_from_llm_json_for_profile` | HIGH | Direct: `run_llm_extract`, `candidate_from_llm_json`, 4 helper tests; transitive: `extract_via_llm`, `extract_kb_candidates_for_review`, `detect_missing_kb_on_finalize` | Confirms the helper is now called by `run_llm_extract`, but also shows most game-bible coverage is helper-level rather than a production extraction task/hook test. |
+| `run_llm_extract` | LOW | Direct: `extract_via_llm`; transitive review/finalize hooks and tests | Confirms signature propagation to the shared extraction core. |
+| `extract_via_llm` | LOW | Direct: `extract_kb_candidates_for_review`, `detect_missing_kb_on_finalize` | Confirms the review-time/finalize hooks still call a wrapper that hard-codes `work_profile = "novel"`. |
+| `LlmExtractTask` | LOW / ambiguous symbol resolved via Struct+Impl UIDs | No graph upstream callers reported; tests instantiate it directly | Confirms limited graph visibility for task wiring; manual source review remains required. |
+
+### Per-Finding Disposition
+
+#### F-001 (`severity: critical`) — PARTIALLY RESOLVED, still open
+- **What is resolved**:
+  - `run_llm_extract` now accepts `work_profile: &str` and calls `candidate_from_llm_json_for_profile(c, work_profile)` (`quality_loop.rs:612-663`).
+  - `candidate_from_llm_json_for_profile` emits `attributes.game_bible_category`, `tags: ["game-bible", "llm-extracted"]`, and omits `novel_category` for `work_profile == "game_bible"` (`quality_loop.rs:729-799`).
+  - `block_type_to_game_bible_category` is now used by the candidate materializer and maps direct plus cross-domain BlockTypes (`quality_loop.rs:839-864`).
+  - `LlmExtractTask::evaluate` reads `work_profile` from the graph context with a novel-compatible default and forwards it into `run_llm_extract` (`tasks/mod.rs:573-595`).
+- **What remains unresolved**:
+  - `extract_via_llm` still hard-codes `"novel"` when invoking `run_llm_extract` (`quality_loop.rs:678-686`). Its callers remain `extract_kb_candidates_for_review` and `detect_missing_kb_on_finalize`, both of which are novel review/finalize hooks today. There is no game-bible review-time hook or schedule path in this diff that passes `work_profile = "game_bible"` into that production hook layer.
+  - The new game-bible assertions are helper-only tests in `quality_loop.rs` (`candidate_from_llm_json_for_profile_*`). Existing `LlmExtractTask` tests in `tasks/mod.rs` still exercise the default novel payload only; no test sets graph context `work_profile = "game_bible"` and verifies the production task path returns a game-bible-shaped candidate.
+  - Therefore the assignment acceptance criterion “tests cover the production path (not only the helper)” is not met for F-001. The fix establishes the core materializer and one task parameter, but does not yet prove that game-bible Works produce game-bible-shaped KB candidates through an actual extraction task/hook path.
+- **Required follow-up**: Add a production-path regression test (minimum: `LlmExtractTask` with mock worker + `work_profile = "game_bible"` context asserting `game_bible_category` and absence of `novel_category`; stronger: a game-bible extraction/review hook test once that hook exists). If P2 intends to defer game-bible review-time hook wiring, record that as a residual rather than claiming F-001 closed.
+
+#### F-002 (`severity: high`) — RESOLVED by Option B
+- `design-writing/preset.yaml` now explicitly states that accepted `section_status` frontmatter transition is a manual author step in V1.55 and that the preset does not atomically update `Design/*.md` frontmatter (`preset.yaml:8-11`).
+- `R-V155P2-F002` is present in `.mstar/status.json` under root `residual_findings["2026-06-22-v1.55-game-bible-depth-35"]` with machine severity `low`, decision `defer`, owner `@fullstack-dev-2`, target `V1.56+`, and lifecycle `deferred` (`status.json:2119-2132`).
+- This satisfies the requested Option B architecture contract: P2 no longer documents an unimplemented durable transition as if it were preset-owned, and the future auto-transition capability is trackable.
+
+#### S-001 (`severity: low`) — RESOLVED
+- `game-bible-profile.md` §7.2 now states cross-domain `BlockType` variants are **mapped** to one of the seven valid `game_bible_category` literals and explicitly says `BlockType::Character` maps to `"species"`, not a literal `"character"` category (`game-bible-profile.md:300`).
+
+### Standard QC Checklist Revalidation
+- [x] Naming remains clear and consistent for the new helper and mapping functions.
+- [x] Responsibilities are improved in the core materializer, but production-path ownership remains incomplete for game-bible extraction; see F-001.
+- [x] Error handling remains explicit in `run_llm_extract` (`WorkerUnavailable` vs `CapabilityError`).
+- [x] Comments now document intent for F-002 and the profile-aware extraction change; one note: the review-time wrapper comment still describes novel-only extraction and matches the actual code.
+- [x] Input/boundary handling is unchanged or tightened: missing canonical names are dropped; confidence remains clamped; unknown game-bible BlockTypes default to `species` with debug trace.
+- [x] No new injection/path traversal/privileged-operation surface found in the F-001/F-002/S-001 fix-wave.
+- [x] State-transition architecture is coherent after F-002 Option B because the manual accepted-frontmatter step is explicit and residualized.
+- [x] Maintainability risk remains in F-001 because helper-level tests can pass while the production task/hook path still lacks a game-bible regression.
+
+### CI Gates Re-run on Current Tree
+Command run from `/Users/bibi/workspace/organizations/42ch/nexus` on `iteration/v1.55`:
+
+```text
+$ cargo +nightly fmt --all --check && cargo clippy --all -- -D warnings && cargo test --all
+exit 0
+```
+
+Evidence notes:
+- `cargo +nightly fmt --all --check`: passed (no output in chained command before clippy).
+- `cargo clippy --all -- -D warnings`: passed (`Finished dev profile ...`).
+- `cargo test --all`: passed; final observed summaries include `nexus42` unit tests `762 passed`, CLI/integration test binaries passed, and doc-tests passed. `cargo test` emitted non-fatal rustc warnings in existing test files, but exited 0.
+- Additional whitespace check: `git diff --check fb298429^..HEAD` reports pre-existing trailing whitespace in the P2 plan Completion Notes lines 89-90. This is markdown-only and outside the targeted F-001/F-002/S-001 fix criteria, but should be cleaned by the owning PM/dev path before final merge hygiene.
+
+### Updated Findings
+
+#### 🔴 Critical
+- **F-001 (`severity: critical`) remains open — production-path coverage/wiring for game-bible extraction is incomplete.** The core helper and `run_llm_extract` are profile-aware, but `extract_via_llm` still passes `"novel"`, no game-bible review-time hook is present, and tests verify only the helper rather than a game-bible production extraction path such as `LlmExtractTask` with `work_profile = "game_bible"`.
+
+#### 🟡 Warning
+- (none new). F-002 is resolved and residualized as `R-V155P2-F002` with machine severity `low`.
+
+#### 🟢 Suggestion
+- (none new). S-001 is resolved.
+
+### Revalidation Summary
+| Severity | Count | Disposition |
+|----------|-------|-------------|
+| 🔴 Critical | 1 | F-001 still open |
+| 🟡 Warning | 0 | F-002 resolved |
+| 🟢 Suggestion | 0 | S-001 resolved |
+
+**Verdict**: Request Changes
+
+Rationale: The fix-wave resolves F-002 and S-001, and it materially improves F-001 by adding profile-aware candidate shaping to the shared extraction core. However, the required production-path test/wiring for game-bible extraction is still missing: the only game-bible assertions exercise `candidate_from_llm_json_for_profile` directly, while the actual task/hook path either defaults to novel or lacks a game-bible regression. Under `mstar-review-qc`, an unresolved Critical cannot be approved.
