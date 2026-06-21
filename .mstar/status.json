@@ -95,7 +95,7 @@
       "wave": "Wave 2",
       "effort": "M",
       "owner": "@fullstack-dev",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.57-v156-carry-forwards-and-compliance.md",
       "working_branch": "feature/v1.57-v156-carry-forwards-and-compliance",
       "merge_target": "iteration/v1.57",
@@ -103,7 +103,20 @@
         "2026-06-22-v1.57-spec-governance-and-registry",
         "2026-06-22-v1.57-daemon-refactor-and-caller-adapters"
       ],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "inreview_at": "2026-06-22",
+      "inreview_commits": ["28005f11"],
+      "merge_commit": "236c34a4",
+      "closed_at": "2026-06-22",
+      "fix_wave_commits": [],
+      "qc_reports": [
+        {"reviewer": "qc-specialist", "verdict": "Approve", "commit": "53892b0d"},
+        {"reviewer": "qc-specialist-2", "verdict": "Approve", "commit": "3ad75f4f"},
+        {"reviewer": "qc-specialist-3", "verdict": "Approve", "commit": "a63861c8"},
+        {"reviewer": "@project-manager (consolidated)", "verdict": "Approve", "commit": null}
+      ],
+      "completion_report": "R-V156P1-M001 schema rename (agent_count → capability_count) with backward-compat serde aliases (agent_count, agentCount) + 5 reproducer tests in schema_rename_compliance.rs. All 10 ACs met. R-V156P0-M001/M002 + P0 M003-M006 explicitly deferred to V1.58+ as workspace OCC concerns. local agent_count in nexus-acp-host/registry.rs:388 correctly excluded (different concept).",
+      "carry_forwards_closed": ["R-V156P1-M001"]
     },
     {
       "plan_id": "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e",
@@ -227,25 +240,24 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/78"
     },
     "tech_debt_summary": {
-      "total_open": 36,
-      "total_deferred": 4,
-      "total_resolved": 18,
+      "total_open": 35,
+      "total_deferred": 3,
+      "total_resolved": 19,
       "total_archived": 5,
       "by_severity_active": {
-        "medium": 19,
+        "medium": 18,
         "low": 17
       },
       "by_target_active": {
-        "V1.57-P2": 1,
         "V1.57+": 32,
         "V1.58+": 3
       }
     },
     "v1_57_carry_forward_index": {
-      "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. After Wave 1: 2 of 3 carry-forwards CLOSED in P0+P1 (R-V156P1-M002 + R-V156P3-S003). R-V156P1-M001 still deferred to V1.57 P2 (Wave 2). 3 new V1.57+ residuals filed post-Wave 1: R-V157P0-L001 (low; AC wording reconciliation), R-V157P0-L002 (medium; per-ID test vectors), R-V157P1-W001 (medium; host-call smoke `#[ignore]`).",
-      "R-V156P1-M001": "P2 — schema rename: capability_count (mechanical, post-registry) — STILL DEFERRED",
-      "R-V156P1-M002": "P1 — global state → constructor injection for CdnConfig (god-file refactor cross-cut) — CLOSED in P1 (commit 64c0b245)",
-      "R-V156P3-S003": "P0+P1 — field drops (P0 re-introduced 4 fields; P1 caller audit) — CLOSED in P0+P1 (commits 7e9932ce + fc0e250a)"
+      "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. After Wave 2: ALL 3 V1.57 carry-forwards CLOSED (R-V156P1-M001 in P2 commit 28005f11; R-V156P1-M002 in P1 commit 64c0b245; R-V156P3-S003 in P0+P1 commits 7e9932ce + fc0e250a). 3 new V1.57+ residuals filed post-Wave 1: R-V157P0-L001 (low; AC wording), R-V157P0-L002 (medium; per-ID test vectors), R-V157P1-W001 (medium; host-call smoke `#[ignore]`). Wave 3 (P3) adds more V1.57+ residuals if surfaced.",
+      "R-V156P1-M001": "P2 — schema rename: capability_count — CLOSED in P2 (commit 28005f11) with backward-compat serde aliases",
+      "R-V156P1-M002": "P1 — global state → constructor injection for CdnConfig — CLOSED in P1 (commit 64c0b245)",
+      "R-V156P3-S003": "P0+P1 — field drops — CLOSED in P0+P1 (commits 7e9932ce + fc0e250a)"
     }
   },
   "residual_findings": {
@@ -2343,7 +2355,14 @@
         "target_date": "V1.57 P2 (Wave 2)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M001]",
         "note": "Deferrable medium; surfaced by qc1 F-101 (architecture). No blocking — V1.56 P1 marked Approve. **V1.57 P2 absorbs**: mechanical rename + deprecation shim + reproducer test. See compass §5.1 carry-forward absorption.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.57 P2 closes: added `#[serde(alias = \"agent_count\", alias = \"agentCount\")]` on the `capability_count` field for backward-compat (canonical name was already capability_count from V1.56 P1; aliases ensure old consumers keep working). 5 reproducer tests in `schema_rename_compliance.rs` cover new-name + old-snake + old-camel + canonical-serialization + ambiguous-duplicate rejection. All 3 qc-specialist reviews Approve.",
+        "closure_evidence": "feature/v1.57-v156-carry-forwards-and-compliance commit 28005f11 + integration merge 236c34a4 + qc1 (53892b0d) + qc2 (3ad75f4f) + qc3 (a63861c8) all Approve",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
+          "commit": "28005f11 on feature/v1.57-v156-carry-forwards-and-compliance"
+        }
       },
       {
         "id": "R-V156P1-M002",
