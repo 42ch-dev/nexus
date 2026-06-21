@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T16:45:00Z",
+  "updated_at": "2026-06-22T17:15:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.56-compass-and-plan-stubs",
@@ -35,7 +35,9 @@
       "created": "2026-06-22",
       "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
       "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": ["P-1 PM signoff"]
+      "depends_on": [
+        "P-1 PM signoff"
+      ]
     },
     {
       "plan_id": "2026-06-22-v1.56-df29-registry-refresh",
@@ -50,7 +52,9 @@
       "created": "2026-06-22",
       "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
       "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": ["P-1 PM signoff"]
+      "depends_on": [
+        "P-1 PM signoff"
+      ]
     },
     {
       "plan_id": "2026-06-22-v1.56-df56-independent-slice",
@@ -65,7 +69,10 @@
       "created": "2026-06-22",
       "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
       "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": ["P0 merged to iteration/v1.56", "P1 merged to iteration/v1.56"]
+      "depends_on": [
+        "P0 merged to iteration/v1.56",
+        "P1 merged to iteration/v1.56"
+      ]
     },
     {
       "plan_id": "2026-06-22-v1.56-df56-dependent-slice",
@@ -80,7 +87,11 @@
       "created": "2026-06-22",
       "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
       "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
-      "depends_on": ["P0 merged to iteration/v1.56", "P1 merged to iteration/v1.56", "P2 merged to iteration/v1.56"]
+      "depends_on": [
+        "P0 merged to iteration/v1.56",
+        "P1 merged to iteration/v1.56",
+        "P2 merged to iteration/v1.56"
+      ]
     },
     {
       "plan_id": "2026-06-22-v1.56-mid-qc-and-fix-waves",
@@ -108,7 +119,9 @@
       "created": "2026-06-22",
       "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
       "qc_strategy": "Report-only QA by @qa-engineer",
-      "depends_on": ["All 4 implement plans (P0–P3) integrated + accepted"]
+      "depends_on": [
+        "All 4 implement plans (P0–P3) integrated + accepted"
+      ]
     }
   ],
   "metadata": {
@@ -170,8 +183,8 @@
     "tech_debt_summary": {
       "total_open": 1,
       "total_deferred": 1,
-      "total_resolved": 14,
-      "total_archived": 4,
+      "total_resolved": 15,
+      "total_archived": 5,
       "by_severity_active": {
         "medium": 0,
         "low": 1
@@ -2151,6 +2164,29 @@
           "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
           "absorbing_plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
           "decision": "Folded into V1.56 P-last fix-wave per compass Q7; close V1.55 ship residual line to leave zero carry-forwards at V1.56 ship"
+        }
+      }
+    ],
+    "2026-06-22-v1.56-df31-df42-full-redesign": [
+      {
+        "id": "R-V156P0-CACHE-01",
+        "title": "P0 self-verification missed cargo check --workspace; nexus42 sqlx query! macro cache stale after workspace_sessions migration (PM pre-QC build blocker)",
+        "severity": "medium",
+        "source": "PM pre-QC verification (cargo check -p nexus42)",
+        "scope": "crates/nexus42/src/commands/creator/mod.rs:1595 (creators INSERT) + crates/nexus42/src/commands/system/db.rs:85 (sqlite_master SELECT) — both query! macros fail to compile against .sqlx/ cache after P0 added workspace_sessions table migration 202606220002",
+        "decision": "fix",
+        "owner": "@fullstack-dev (P0 implementer oversight)",
+        "target": "V1.56",
+        "target_date": "V1.56 Wave 1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-CACHE-01]",
+        "note": "Root cause: P0 added new table + queries in nexus-local-db; regenerated .sqlx/ cache for nexus-local-db-only macros but missed consumer crate macros (nexus42 imports nexus-local-db and uses query! macros on creators + sqlite_master tables). P0 self-verification ran cargo test -p nexus-local-db and cargo test -p nexus-daemon-runtime but did NOT run cargo check --workspace. Architectural lesson: any plan touching nexus-local-db migrations or new tables MUST run cargo check --workspace (or cargo test --workspace) in self-verification, not just the touched crate. PM will enforce this rule in future plan AC items (e.g. V1.56 P2/P3/P-last if they touch nexus-local-db).",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "PM regenerated .sqlx/ cache via cargo sqlx prepare --workspace against a freshly-migrated SQLite DB. 2 new cache files added: .sqlx/query-24310e7f662c7c50c6821804d03720afb0651412952ed063ef25cdb87e43de73.json (creators INSERT) and .sqlx/query-3b17cf38385b3fc0e9cf25cbbc4f903bc9ab5d04aeeb2bdc10a7df73b50dacdd.json (sqlite_master SELECT). No existing cache files modified. cargo check --workspace clean post-fix.",
+        "closure_evidence": "iteration/v1.56 @ 8809f0b5 (pre-QC fix-wave PM commit)",
+        "resolution": {
+          "plan_id": "pre-qc-fix-wave-pm",
+          "commit": "8809f0b5"
         }
       }
     ]
