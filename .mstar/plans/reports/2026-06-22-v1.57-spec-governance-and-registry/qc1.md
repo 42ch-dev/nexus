@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-22-v1.57-spec-governance-and-registry"
-verdict: "Request Changes"
+verdict: "Approve with comments"
 generated_at: "2026-06-22"
+re_review_at: "2026-06-22"
 ---
 
 # QC1 Review — V1.57 P0 Spec Governance & Registry
@@ -148,3 +149,35 @@ Recommended correction path:
 4. Update `specs/README.md` bridge status (resolves qc1-005).
 
 After these corrections, targeted re-review of qc1-001 and qc1-002 is sufficient — full tri-review not required.
+
+---
+
+## Revalidation
+
+**Generated at**: 2026-06-21T23:58:00+08:00
+**Re-review commit**: `8f6d598c` (HEAD)
+**Fix-wave commits re-reviewed**: `544a1184` (P0 fmt fix + P1 spec amendments), `8f6d598c` (P0 AC3/AC4 reconciliation)
+
+### Finding disposition
+
+| ID | Original severity | Disposition | New evidence |
+|----|-------------------|-------------|--------------|
+| qc1-001 | high | **resolved** | `cargo +nightly fmt -p nexus-orchestration -- --check` now passes (exit code 0). Fix-wave `544a1184` reformatted 5 Rust files: `capability/builtins/mod.rs` (import wrapping), `capability/builtins/registry.rs` (blank line), `capability/mod.rs` (chained method `map_or_else`), `tasks/mod.rs` (4x `cdn_config: None` indent), `tests/novel_review_master.rs` (1x `cdn_config: None` indent). |
+| qc1-002 | high | **resolved** | Fix-wave `8f6d598c` reconciled plan stub AC3/AC4 lines 49-50. AC3 now reads: "41 rows total = 18 shipped host tools (audit found 5 host tool IDs previously missing from catalog and added) + 18 catalog-only + 3 scaffold-equivalent + 2 OUT + 0 deferred-to-V2.0+". AC4: "Roster status tags match the 4 buckets above (reconciled at fix-wave)." The "catalog-only" tag is now acknowledged as a valid status category. Plan explicitly notes its original 36/35 estimates were inaccurate. |
+| qc1-003 | medium | **resolved** | Reconciled as part of AC3 fix-wave (`8f6d598c`). The 41-row reality is now explicit in the plan stub; the "catalog-only" tag is acknowledged. |
+| qc1-004 | medium | **still open** | Not addressed in either fix-wave commit. `544a1184` only touches fmt + P1 spec amendments; `8f6d598c` only touches plan stub AC text. No new failure-path tests added. Per original report, recommended: add ≥1 failure test per ID dispatched through `dispatch()`. |
+| qc1-005 | low | **still open** | Not addressed. `specs/README.md` line 116 still lists bridge as "Feature line | Shipped (V1.34)". Not in P0 scope per compass §2 (README updates are P-last hygiene). |
+| qc1-006 | low | **still open** | Not addressed. No plan stub updates to AC5 text reflecting daemon-runtime `CapabilityRegistry` as the P0 binding target (vs. `capability/builtins/` as originally described). Deferred to P1 god-file split. |
+
+### Updated Verdict
+
+**Approve with comments**
+
+Both high-severity findings (qc1-001 fmt, qc1-002 AC4 tag mismatch) are cleanly resolved by the fix-wave:
+
+1. **qc1-001**: `cargo +nightly fmt -p nexus-orchestration -- --check` now passes — the 5 Rust files with formatting issues have been corrected in `544a1184`.
+2. **qc1-002**: Plan stub AC3/AC4 now accurately describes the 41-row, 5-tag roster (18 shipped + 18 catalog-only + 3 scaffold-equivalent + 2 OUT + 0 deferred), reconciling the plan estimate with the delivered implementation in `8f6d598c`.
+
+Medium/low findings (qc1-004 test coverage, qc1-005 README stale reference, qc1-006 handler binding location) remain open but were outside the fix-wave scope and are not blocking. These are known items deferred to P1 (test vectors) and P-last (README hygiene, god-file split).
+
+**Re-review scope**: Fix-wave commits only (`56d459ec..8f6d598c`). No re-verification performed on ACs that were already passing in the original review.
