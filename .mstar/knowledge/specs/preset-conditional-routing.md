@@ -159,6 +159,68 @@ Violations produce `DiagnosticCategory::MergeIntegrity` errors and block preset 
 - Existing binary `GoNogo` + N-way `Labeled` presets continue to work without modification — the `merge:` field is additive.
 - `GoNogo` edges are also counted as incoming labeled edges for merge node purposes (labels `"go"` and `"nogo"`).
 
+### 3.3 Arbitrary stage-level conditional `next` + expression routing (Draft V1.56 P2 — shipped in plan `2026-06-22-v1.56-df56-independent-slice`)
+
+**Status**: Draft (V1.56 P2 shipped)
+**Authoring plan**: `2026-06-22-v1.56-df56-independent-slice`
+**Promotes to Normative**: P-last of V1.56
+
+Extends the conditional routing engine from `llm_judge`-only to **arbitrary state kinds**, adds a simple expression grammar for rule-based routing, and defines explicit converge (merge-point) state nodes.
+
+#### §3.3.1 Arbitrary stage-level conditional `next`
+
+Any state kind (`produce`, `review`, `manual`, `rule`, `timer`, `graph_complete`, custom states) can now declare a conditional `next` using either the legacy `kind: conditional` form or the new expression-based `branches` form. The loader no longer restricts conditional routing to `llm_judge` states.
+
+**Loader validation**: target state IDs in all branches and the default must reference valid states. The runtime evaluator reads `_state_result` or user-set context values for non-judge states.
+
+#### §3.3.2 Expression / rule-based routing (Form B)
+
+In addition to the legacy `kind: conditional` form (Form A, preserved), presets may use the new **Form B** multi-branch expression routing:
+
+```yaml
+next:
+  branches:
+    - when: "_context.score > 80"
+      target: approved
+    - when: "_context.status == 'review'"
+      target: review_queue
+  default: rejected
+```
+
+**Expression grammar**:
+  - **Comparisons**: `==`, `!=`, `>`, `<`, `>=`, `<=`
+  - **Boolean**: `&&`, `||`, `!`, parens
+  - **Field access**: `_context.<dotted.path>` resolves against `graph_flow::Context` JSON values (e.g. `_context.score`, `_context.data.x`)
+  - **Literals**: numbers (integer/float), single/double-quoted strings, `true`/`false`, `null`
+  - **Truthy check**: bare field references (e.g. `_context.flag`) evaluate as truthy (non-null, non-false, non-zero, non-empty)
+
+**Evaluation**: first-match semantics — branches are evaluated in declaration order; the first branch with a `when` expression that evaluates to `true` wins. If no branch matches, the `default` target is used. Missing context fields resolve to `null` (comparison with `null` is always `false` except `!= null`). Type mismatches (e.g. comparing string to int) produce typed errors that skip the branch.
+
+**Safety**: expressions are locally evaluated in-process; no code injection, no scripting engine, no external service calls.
+
+#### §3.3.3 Multi-branch graphs with merge points
+
+States may declare a `converge` config to act as a dedicated **merge-point (converge) node** that explicitly accepts multiple incoming edges:
+
+```yaml
+states:
+  - id: merged
+    converge:
+      strategy: wait_for_all   # default
+    enter: []
+    exit_when: { kind: manual }
+    next: done
+```
+
+**Converge strategies**:
+  - **`wait_for_all`** (default): wait for all incoming edges to arrive before advancing
+  - **`first_completed`**: advance on first arrival; other pending branches are cancelled
+  - **`any`**: idempotent — already-completed merges are no-ops; advance on first arrival
+
+**DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed. Orphan converge nodes (single incoming edge) produce warnings, not errors.
+
+**Reachability**: the validator traverses all conditional branches (both `Conditional` and `Branches` forms) during BFS from the initial state, ensuring every branch target is reachable.
+
 ---
 
 ## 4. Design axes (unlocked — future grill required)

@@ -758,7 +758,7 @@ impl StateCompositeTask {
     #[allow(clippy::missing_const_for_fn)]
     fn judge_next_action(&self, judge_result: bool) -> NextAction {
         match &self.next {
-            Some(NextTarget::GoNogo(_)) => NextAction::Continue,
+            Some(NextTarget::GoNogo(_) | NextTarget::Branches(_)) => NextAction::Continue,
             _ if judge_result => NextAction::Continue,
             _ => NextAction::WaitForInput,
         }
@@ -795,6 +795,11 @@ impl StateCompositeTask {
             Some(NextTarget::GoNogo(go_nogo)) => {
                 // W-QC3-2: binary→Labeled auto-conversion.
                 vec![("go", go_nogo.go.as_str()), ("nogo", go_nogo.nogo.as_str())]
+            }
+            Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "resolve_labeled_target: Conditional/Branches routing requires expression evaluation, not label matching".to_string(),
+                ));
             }
             _ => return Ok(NextAction::WaitForInput),
         };
@@ -834,6 +839,102 @@ impl StateCompositeTask {
             "Labeled routing: no label matched judge output. Known labels: {known_labels:?}. Judge output excerpt: {excerpt}"
         )))
     }
+
+    /// V1.56 P2: resolve expression-based conditional routing target.
+    ///
+    /// Evaluates each branch's `when` expression against the context, returning
+    /// the first matching branch's target. Falls back to the `default` target
+    /// if no branch matches.
+    ///
+    /// Returns `Err` if no expression matches and no default is set (should not
+    /// happen with validated presets but is a safety net).
+    fn resolve_expression_target(&self, context: &graph_flow::Context) -> NextAction {
+        // Build a serde_json::Value from known context keys for expression evaluation.
+        // We collect commonly-set fields plus any _state_result or state output keys.
+        let ctx_json = build_context_json(context);
+
+        let (rules, default) = match &self.next {
+            Some(NextTarget::Conditional(cond)) => (&cond.rules, &cond.default),
+            Some(NextTarget::Branches(branches)) => (&branches.branches, &branches.default),
+            _ => {
+                return NextAction::Continue;
+            }
+        };
+
+        for (i, rule) in rules.iter().enumerate() {
+            match crate::preset::expr::parse(&rule.when) {
+                Ok(ast) => match crate::preset::expr::evaluate(&ast, &ctx_json) {
+                    Ok(true) => {
+                        tracing::debug!(
+                            state_id = %self.id,
+                            branch_index = i,
+                            when = %rule.when,
+                            target = %rule.target,
+                            "expression branch matched"
+                        );
+                        return NextAction::GoTo(rule.target.clone());
+                    }
+                    Ok(false) => {
+                        // Continue to next branch.
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            state_id = %self.id,
+                            branch_index = i,
+                            when = %rule.when,
+                            error = %e,
+                            "expression evaluation error, skipping branch"
+                        );
+                        // Skip branches with evaluation errors.
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        state_id = %self.id,
+                        branch_index = i,
+                        when = %rule.when,
+                        error = %e,
+                        "expression parse error, skipping branch"
+                    );
+                }
+            }
+        }
+
+        // No branch matched — use default.
+        tracing::debug!(
+            state_id = %self.id,
+            default = %default,
+            "no expression branch matched, falling back to default"
+        );
+        NextAction::GoTo(default.clone())
+    }
+}
+
+/// Build a JSON object from commonly-used context keys for expression evaluation.
+///
+/// Collects known orchestration keys plus any state-specific output keys.
+fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
+    // Known orchestration keys that expressions may reference.
+    let known_keys = [
+        "_judge_result",
+        "_judge_reason",
+        "_judge_label",
+        "_state_result",
+        "_run_id",
+        "output",
+        "result",
+        "status",
+        "score",
+    ];
+
+    let mut map = serde_json::Map::new();
+    for key in &known_keys {
+        if let Some(val) = context.get_sync::<serde_json::Value>(key) {
+            map.insert(key.to_string(), val);
+        }
+    }
+
+    serde_json::Value::Object(map)
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1099,6 +1200,8 @@ impl Task for StateCompositeTask {
                                                     Some(
                                                         NextTarget::Labeled(_)
                                                             | NextTarget::GoNogo(_)
+                                                            | NextTarget::Conditional(_)
+                                                            | NextTarget::Branches(_)
                                                     )
                                                 ) {
                                                     self.resolve_labeled_target(
@@ -1157,6 +1260,16 @@ impl Task for StateCompositeTask {
                 context.set(resume_key, true).await;
                 NextAction::WaitForInput
             }
+        };
+
+        // 2.5. V1.56 P2: Expression-based conditional routing.
+        // For states with Conditional/Branches next (any exit_when), evaluate
+        // expressions and route to the matching target.
+        let next_action = match &self.next {
+            Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) => {
+                self.resolve_expression_target(&context)
+            }
+            _ => next_action,
         };
 
         // 3. Terminal override — always End regardless of exit_when.
@@ -2482,6 +2595,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2529,6 +2643,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2565,6 +2680,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2598,6 +2714,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2630,6 +2747,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task =
@@ -2678,6 +2796,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3049,6 +3168,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3104,6 +3224,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3151,6 +3272,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3259,6 +3381,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
