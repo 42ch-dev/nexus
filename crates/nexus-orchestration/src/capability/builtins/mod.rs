@@ -10,6 +10,7 @@ mod context_summarize;
 mod creator;
 mod essay_scaffold;
 mod game_bible_scaffold;
+mod game_bible_section_status;
 mod judge_llm;
 mod judge_rule;
 mod kb_extract_work;
@@ -34,6 +35,7 @@ pub use creator::{
 };
 pub use essay_scaffold::EssayProjectScaffold;
 pub use game_bible_scaffold::GameBibleProjectScaffold;
+pub use game_bible_section_status::GameBibleSectionStatusUpdate;
 pub use judge_llm::JudgeLlm;
 pub use judge_rule::JudgeRule;
 pub use kb_extract_work::KbExtractWork;
