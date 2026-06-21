@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-22-v1.55-game-bible-depth-35"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-21"
 ---
 
@@ -191,3 +191,98 @@ Evidence notes:
 **Verdict**: Request Changes
 
 Rationale: The fix-wave resolves F-002 and S-001, and it materially improves F-001 by adding profile-aware candidate shaping to the shared extraction core. However, the required production-path test/wiring for game-bible extraction is still missing: the only game-bible assertions exercise `candidate_from_llm_json_for_profile` directly, while the actual task/hook path either defaults to novel or lacks a game-bible regression. Under `mstar-review-qc`, an unresolved Critical cannot be approved.
+
+## Revalidation
+
+### 2nd Revalidation Metadata
+- Reviewer: @qc-specialist
+- Runtime Agent ID: qc-specialist
+- Runtime Model: openai/gpt-5.5
+- Review Perspective: Architecture coherence and maintainability risk
+- Report Timestamp: 2026-06-21T05:11:07Z
+
+### 2nd Revalidation Scope
+- plan_id: `2026-06-22-v1.55-game-bible-depth-35`
+- Review range / Diff basis: `merge-base: 798c47a0` + `tip: iteration/v1.55 HEAD` (`f3cec4e6`); PM-narrowed to 2nd fix-wave commits `af987571`, merge `d5f5f8dd`, plan stub addendum `b37d19e5`, merge `f3cec4e6`.
+- Working branch (verified): `iteration/v1.55`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+- HEAD verified: `f3cec4e6` (`merge(v1.55): plan stub addendum for 2nd fix-wave (b37d19e5)`)
+- Local dirty state before this report edit: pre-existing unstaged changes in `AGENTS.md`, `CLAUDE.md`, and `qc2.md`; this re-review modifies and commits only this `qc1.md` report.
+
+### 2nd Fix-Wave Commit Range Log
+```text
+f3cec4e6 merge(v1.55): plan stub addendum for 2nd fix-wave (b37d19e5)
+b37d19e5 docs(v1.55): plan stub addendum — 2nd fix-wave F-001 completion notes
+d5f5f8dd merge(v1.55): F-001 2nd fix-wave — production-path coverage (af987571)
+af987571 fix(v1.55): F-001 2nd fix-wave — production-path coverage for game-bible extraction
+```
+
+### GitNexus Impact Evidence (post-fix)
+| Symbol | Risk | Direct / notable upstream callers | Revalidation use |
+| --- | --- | --- | --- |
+| `extract_via_llm` | LOW | Direct: `extract_kb_candidates_for_review`, `detect_missing_kb_on_finalize`; transitive tests in `missing_kb_detection`, `novel_review_master`, `review_cron_e2e`, `review_time_extraction` | Confirms only two direct production callers; both flow through `ChapterContext`, so the new `work_profile` field is the single pass-through point for review/finalize hooks. |
+| `run_llm_extract` | LOW | Direct: `extract_via_llm`; transitive: same review/finalize hooks and tests | Confirms the shared extraction core remains narrowly reused and the signature propagation is contained. Manual source review additionally verified `LlmExtractTask::evaluate` calls it with context `work_profile`. |
+
+### F-001 2nd Revalidation — RESOLVED
+- `extract_via_llm` no longer hard-codes `"novel"`: it calls `run_llm_extract(..., &ctx.work_profile)` (`quality_loop.rs:685-693`).
+- `ChapterContext` now carries `work_profile: String` with documented default-to-`"novel"` behavior for legacy NULL rows (`quality_loop.rs:873-891`).
+- The shared context loader reads the actual Work row via `nexus_local_db::works::get_work` and derives `work.work_profile.filter(|p| !p.is_empty()).unwrap_or_else(|| "novel".to_string())` before constructing `ChapterContext` (`quality_loop.rs:984-1025`). This means both `extract_kb_candidates_for_review` and `detect_missing_kb_on_finalize` pass the actual Work profile through their common `load_context_for_preset` → `extract_via_llm` path rather than a constant.
+- `run_llm_extract` remains profile-aware and materializes candidates via `candidate_from_llm_json_for_profile(c, work_profile)` (`quality_loop.rs:618-668`). For `work_profile == "game_bible"`, that materializer emits `attributes.game_bible_category`, `tags: ["game-bible", "llm-extracted"]`, and no `novel_category` (`quality_loop.rs:736-806`).
+- New production-path test `tasks::tests::llm_extract_task_with_game_bible_profile_produces_game_bible_candidate` exercises `LlmExtractTask::evaluate` with context `work_profile = "game_bible"`; it does **not** directly call `candidate_from_llm_json_for_profile` (`tasks/mod.rs:2364-2424`). Assertions cover `attributes.game_bible_category == "faction"`, absent `novel_category`, and tags containing `"game-bible"` and `"llm-extracted"`.
+- Architecture/maintainability assessment: the fix keeps one shared candidate materialization path (`run_llm_extract` → `candidate_from_llm_json_for_profile`) and one Work-derived profile source (`ChapterContext::work_profile`). This closes the production-path coverage gap without introducing a parallel game-bible extraction pipeline.
+
+### Production-Path Test Invocation
+```text
+$ cargo test -p nexus-orchestration --lib llm_extract_task_with_game_bible_profile_produces_game_bible_candidate -- --nocapture
+running 1 test
+test tasks::tests::llm_extract_task_with_game_bible_profile_produces_game_bible_candidate ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 735 filtered out; finished in 0.00s
+```
+
+### CI Gates Re-run on Current Tree
+Commands run from `/Users/bibi/workspace/organizations/42ch/nexus` on `iteration/v1.55` at HEAD `f3cec4e6`:
+
+```text
+$ cargo +nightly fmt --all --check
+exit 0
+
+$ cargo clippy --all -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 14.41s
+
+$ cargo test --all
+test result: ok. 762 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.49s
+Doc-tests also completed successfully; examples include nexus42 integration suites and crate doc-tests with ignored tests only where marked ignored.
+```
+
+### Standard QC Checklist Revalidation
+- [x] Naming remains clear and consistent (`work_profile`, `ChapterContext::work_profile`, `candidate_from_llm_json_for_profile`).
+- [x] Responsibilities stay separated: Work/profile loading is in the shared context loader; LLM invocation stays in `run_llm_extract`; profile-specific payload shaping stays in the candidate materializer.
+- [x] Error handling remains explicit (`WorkerUnavailable` vs `CapabilityError`; DB/load failures flow through existing `AutoChainError`).
+- [x] Comments explain intent and compatibility defaults rather than incidental implementation details.
+- [x] Input/boundary handling is coherent: empty/NULL work profiles default to novel; unknown game-bible block types default to `species` with trace; candidate cap is unchanged.
+- [x] No new injection/path traversal/privileged-operation surface found in the 2nd fix-wave.
+- [x] LLM/agent boundary remains unchanged: untrusted LLM JSON is parsed into bounded candidate rows; the fix only selects payload schema by trusted Work/context profile.
+- [x] Hot-path and resource behavior are unchanged from the first fix-wave; no new unbounded operations introduced.
+- [x] Maintainability improves because production hooks and task extraction share the same profile-aware materializer instead of maintaining parallel novel/game-bible code paths.
+
+### Updated Findings (2nd Revalidation)
+
+#### 🔴 Critical
+- (none). Prior F-001 (`severity: critical`) is resolved by production-path profile pass-through plus `LlmExtractTask::evaluate` game-bible regression coverage.
+
+#### 🟡 Warning
+- (none new). Prior F-002 remains resolved/residualized as `R-V155P2-F002` with machine severity `low`.
+
+#### 🟢 Suggestion
+- (none new). Prior S-001 remains resolved.
+
+### 2nd Revalidation Summary
+| Severity | Count | Disposition |
+|----------|-------|-------------|
+| 🔴 Critical | 0 | F-001 resolved |
+| 🟡 Warning | 0 | No new warnings |
+| 🟢 Suggestion | 0 | No new suggestions |
+
+**Verdict**: Approve
+
+Rationale: The 2nd fix-wave addresses the remaining F-001 blocker. `extract_via_llm` now forwards the Work-derived `work_profile`, both existing callers use that shared context path, and the new `LlmExtractTask::evaluate` regression proves a real extraction task with `work_profile = "game_bible"` yields a game-bible-shaped candidate (`game_bible_category`, no `novel_category`, `game-bible` tag). Required CI gates are clean on the reviewed tree, and no architecture/maintainability blocker remains for qc1 scope.
