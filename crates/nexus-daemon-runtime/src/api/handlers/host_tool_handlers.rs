@@ -8,6 +8,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug, WorkApiDto};
+use crate::capability_registry::host_tool_registry;
 use crate::workspace::WorkspaceState;
 use nexus_kb::KbStore;
 use nexus_local_db::works;
@@ -19,14 +20,13 @@ use std::pin::Pin;
 // Re-import from parent module
 use super::host_tool_executor::{
     ToolExecuteRequest, PATCH_ALLOWED_FIELDS, PATCH_REJECTED_FIELDS, STAGE_METADATA_ALLOWED_KEYS,
-    TOOL_ALLOWLIST,
 };
 
 // ─── Admission pipeline (spec §4.3) ───────────────────────────────────────
 /// Run the five-gate admission pipeline.
 ///
 /// Gates:
-/// 1. Tool ID allowlist
+/// 1. Tool ID allowlist (derived dynamically from `CapabilityRegistry`; V1.57 P3)
 /// 2. Active creator (for `nexus.*` tools)
 /// 3. Workspace bounds
 /// 4. `permissions.toml` / policy
@@ -37,8 +37,11 @@ pub(crate) fn admission_pipeline(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
 ) -> Result<(String, String), NexusApiError> {
-    // Gate 1: tool id allowlist
-    if !TOOL_ALLOWLIST.contains(&req.tool_name.as_str()) {
+    // Gate 1: tool id allowlist — derived dynamically from CapabilityRegistry (V1.57 P3).
+    // Previously used the static TOOL_ALLOWLIST const; now the registry is the SSOT.
+    // Unknown IDs return NOT_SUPPORTED.
+    let reg = host_tool_registry();
+    if reg.lookup(&req.tool_name).is_none() {
         return Err(NexusApiError::BadRequest {
             code: "NOT_SUPPORTED".to_string(),
             message: format!("unsupported tool: {}", req.tool_name),
