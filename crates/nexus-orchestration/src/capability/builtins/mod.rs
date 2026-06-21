@@ -44,7 +44,7 @@ pub use novel_chapter_transition::NovelChapterTransition;
 pub use novel_scaffold::NovelProjectScaffold;
 pub use outbox::{OutboxCompact, OutboxFlush};
 pub use registry::{
-    embedded_snapshot_capabilities, embedded_snapshot_version, set_cdn_config,
+    embedded_snapshot_capabilities, embedded_snapshot_version,
     validate_cdn_url_static, CdnConfig, CdnError, RegistryRefresh,
 };
 pub use script_scaffold::ScriptProjectScaffold;
