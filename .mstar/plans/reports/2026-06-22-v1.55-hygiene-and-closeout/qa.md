@@ -185,9 +185,11 @@ All closeout artifacts are present, consistent, and match the documented V1.55 s
 **Issues/Risks**: None blocking. Single open residual (R-V155P2-F002) correctly carried to V1.56+ per status.json.  
 **Plan Update**: N/A (report-only; PM owns Done + PR)  
 **Handoff**: Report committed locally. Real git hash will be provided post-commit. Ready for PM review / push authorization.  
-**Git**: (see post-commit log below)
+**Git**: 981ff623 qa(v1.55): report-only P-last closeout verification (Pass)
+  1 file changed, 193 insertions(+)
+  create mode 100644 .mstar/plans/reports/2026-06-22-v1.55-hygiene-and-closeout/qa.md
 
 ---
 
-**Post-commit Git hash** (to be filled after `git commit` + `git log -1`):
-(Executed below)
+**Post-commit Git hash**: `981ff6232815185133d4ace7f1a50aa324dfa50d`
+(real `git log -1 --oneline` after local commit on `iteration/v1.55`)
