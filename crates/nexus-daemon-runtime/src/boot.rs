@@ -42,6 +42,11 @@ pub struct DaemonConfig {
     pub verbose: bool,
     /// Shutdown grace period in milliseconds.
     pub shutdown_grace_ms: u64,
+    /// Optional CDN URL for `registry.refresh` network mode.
+    /// When set, enables fetching the ACP registry from a CDN
+    /// with built-in timeout and retry. When absent (default),
+    /// `registry.refresh` returns synthetic output only.
+    pub cdn_url: Option<String>,
 }
 
 impl DaemonConfig {
@@ -113,6 +118,22 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         .init();
 
     tracing::info!("Starting daemon-runtime v{}", env!("CARGO_PKG_VERSION"));
+
+    // --- Section 1.5: Initialize CDN config for registry.refresh ---
+    // Must be set before the capability registry is constructed so the
+    // RegistryRefresh capability can read it at invocation time.
+    if let Some(ref cdn_url) = config.cdn_url {
+        tracing::info!(%cdn_url, "CDN URL configured for registry.refresh network mode");
+        nexus_orchestration::capability::builtins::set_cdn_config(Some(
+            nexus_orchestration::capability::builtins::CdnConfig {
+                url: cdn_url.clone(),
+                timeout_ms: 10_000, // default fetch timeout
+                max_retries: 3,     // default retry count
+            },
+        ));
+    } else {
+        tracing::info!("No CDN URL configured — registry.refresh will use synthetic output only");
+    }
 
     // --- Section 2: Workspace initialization ---
     // Initialize workspace state (database only; no cloud-sync outbox on daemon).
@@ -801,6 +822,7 @@ mod tests {
             socket_path: None,
             verbose: false,
             shutdown_grace_ms: 20000,
+            cdn_url: None,
         };
 
         std::env::remove_var("NEXUS_DAEMON_SOCKET_PATH");
@@ -823,6 +845,7 @@ mod tests {
             socket_path: Some(PathBuf::from("/tmp/test.sock")),
             verbose: false,
             shutdown_grace_ms: 20000,
+            cdn_url: None,
         };
 
         let transport = config.resolve_transport();
@@ -842,6 +865,7 @@ mod tests {
             socket_path: None,
             verbose: false,
             shutdown_grace_ms: 20000,
+            cdn_url: None,
         };
 
         std::env::remove_var("NEXUS_DAEMON_SOCKET_PATH");

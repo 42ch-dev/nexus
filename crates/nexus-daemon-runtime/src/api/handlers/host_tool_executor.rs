@@ -70,6 +70,8 @@ const TOOL_ALLOWLIST: &[&str] = &[
     "nexus.work.schedule.set",
     "nexus.finding.resolve",
     "nexus.pool.entry.manage",
+    // nexus.* tools (V1.56 P1: DF-29 registry.refresh)
+    "nexus.registry.refresh",
     // fs/* baseline (V1.33)
     "fs/read_text_file",
     "fs/write_text_file",
@@ -1536,6 +1538,31 @@ pub(crate) fn registry_daemon_health<'a>(
     Box::pin(async move { Ok(result) })
 }
 
+// ─── V1.56 P1: nexus.registry.refresh ──────────────────────────────────────
+
+/// `nexus.registry.refresh` — return the registry snapshot (synthetic or CDN).
+async fn execute_registry_refresh(
+    _req: &ToolExecuteRequest,
+    _state: &WorkspaceState,
+    _creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    use nexus_orchestration::capability::Capability;
+    let cap = nexus_orchestration::capability::builtins::RegistryRefresh::new();
+    let input = serde_json::json!({"force": false});
+    cap.run(input).await.map_err(|e| NexusApiError::Internal {
+        code: "REGISTRY_REFRESH_FAILED".to_string(),
+        message: format!("registry.refresh failed: {e}"),
+    })
+}
+
+pub(crate) fn registry_registry_refresh<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_registry_refresh(req, state, creator_id))
+}
+
 // ─── V1.54 P0: DF-46 write tool handlers ──────────────────────────────────
 
 /// `nexus.kb_snapshot.write` — upsert key blocks for a world.
@@ -2838,11 +2865,11 @@ mod tests {
         let val = result.expect("result");
         assert!(val["uptime_seconds"].as_u64().is_some());
         assert_eq!(val["runtime_mode"], "local_only");
-        assert_eq!(val["registry_size"], 19);
+        assert_eq!(val["registry_size"], 20);
         assert!(val["pool_healthy"].as_bool().unwrap_or(false));
         assert_eq!(
             val["registry_ids"].as_array().expect("registry_ids").len(),
-            19
+            20
         );
     }
 
