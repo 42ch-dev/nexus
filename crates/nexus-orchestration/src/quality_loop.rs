@@ -770,6 +770,49 @@ fn block_type_to_novel_category(block_type: &str) -> &'static str {
     }
 }
 
+/// Map a wire `block_type` (`snake_case`) to the game-bible `game_bible_category`
+/// body attribute (game-bible-profile.md §7.2 mapping).
+///
+/// V1.55 P2: used when constructing the `proposed_payload` for game-bible
+/// KB extraction so adopt-time `ValidationMode::GameBible` validates.
+/// The seven valid categories are: `species`, `faction`, `magic_system`,
+/// `technology`, `deity`, `level`, `economy_tier`. Existing cross-domain types
+/// map to the closest game-bible category per §7.2 table.
+///
+/// Unknown `block_types` default to `species` — the most generic game-bible
+/// category — and emit a `tracing::debug!` so operators can see unclassified
+/// candidates.
+// Direct-mapping arms and cross-domain fallback arms may produce the same
+// string value, but the semantics differ (identity mapping vs. best-guess).
+#[allow(clippy::match_same_arms)]
+#[must_use]
+pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
+    match block_type {
+        // V1.54 new game-bible BlockTypes: direct mapping.
+        "species" => "species",
+        "faction" => "faction",
+        "magic_system" => "magic_system",
+        "technology" => "technology",
+        "deity" => "deity",
+        "level" => "level",
+        "economy_tier" => "economy_tier",
+        // Cross-domain reuse: existing BlockType → closest game_bible_category.
+        "character" => "species", // Characters → species (biological/cultural)
+        "ability" => "magic_system", // Abilities → magic/superpower system
+        "scene" => "level",       // Scenes → levels
+        "organization" | "conflict" => "faction", // Organizations/Conflicts → faction dynamics
+        "item" => "technology",   // Items → technology/artifacts
+        "info_point" | "event" => "deity", // Info points/Events → deity (lore)
+        _ => {
+            tracing::debug!(
+                block_type,
+                "block_type_to_game_bible_category: unknown block_type; defaulting to species"
+            );
+            "species"
+        }
+    }
+}
+
 /// Loaded chapter context: schedule → work → chapter prose.
 ///
 /// Returned by [`load_review_context`] and [`load_finalize_context`] when all
@@ -1332,6 +1375,180 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// V1.55 P2 — Game-bible design 五问 quality rubric
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Per-dimension results of the game-bible design 五问 rubric.
+///
+/// Unlike the novel outline/finalize gates, this rubric evaluates
+/// **design documents** — not prose chapters. The five dimensions are:
+///
+/// 1. **Pillars**: every design claim traces back to a stated pillar or constraint.
+/// 2. **Mechanics**: gameplay mechanics are concrete, specific, and testable.
+/// 3. **Continuity**: the section is internally consistent with other Design sections.
+/// 4. **Playability**: a reader can visualize how a player would experience it.
+/// 5. **Clarity**: the section avoids placeholder language and stubs.
+// The five boolean dimensions are a natural DTO for the gate result.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DesignFiveQDimensions {
+    pub pillars: bool,
+    pub mechanics: bool,
+    pub continuity: bool,
+    pub playability: bool,
+    pub clarity: bool,
+}
+
+/// Verdict returned by [`design_five_q_check`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesignFiveQVerdict {
+    pub go: bool,
+    pub dimensions: DesignFiveQDimensions,
+    pub reason: String,
+}
+
+/// Pure heuristic evaluation of a game-bible design section against the
+/// design 五问 rubric (V1.55 P2).
+///
+/// Deterministic / no-worker complement to the `llm_judge` gate for the
+/// `design-writing` preset. The rubric is intentionally stricter than the
+/// novel outline 五問 because design documents serve as **reference artifacts**
+/// for a whole game.
+// Five-dimension check naturally exceeds default line-count ceiling; the
+// function is a single concept (quality gate), not a god function.
+#[allow(clippy::too_many_lines)]
+#[must_use]
+pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
+    let trimmed = section_body.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let non_empty_lines: Vec<&str> = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    // 1. pillars: section references a design pillar or constraint.
+    let pillar_signals = [
+        "pillar",
+        "constraint",
+        "principle",
+        "non-goal",
+        "because",
+        "therefore",
+        "rule",
+        "must",
+        "must not",
+        "should",
+        "should not",
+    ];
+    let pillars = pillar_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 5;
+
+    // 2. mechanics: concrete gameplay mechanics.
+    let mechanics_signals = [
+        "damage", "health", "mana", "currency", "resource", "costs", "requires", "grants", "loop",
+        "feedback", "cycle", "phase", "turn", "per", "level", "unlock", "skill", "craft", "trade",
+        "build", "shoot", "jump",
+    ];
+    let mechanics =
+        mechanics_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 8;
+
+    // 3. continuity: cross-references and relational language.
+    let continuity_signals = [
+        "see also",
+        "above",
+        "below",
+        "relates to",
+        "depends on",
+        "conflicts with",
+        "consistent with",
+        "aligns with",
+        "because",
+        "therefore",
+        "however",
+    ];
+    let continuity = continuity_signals.iter().any(|s| lower.contains(s))
+        || char_count_range(trimmed, 200, 10_000);
+
+    // 4. playability: player experience signals.
+    let playability_signals = [
+        "player",
+        "players",
+        "experience",
+        "feel",
+        "feels",
+        "imagine",
+        "encounter",
+        "discover",
+        "explore",
+        "moment",
+        "puzzle",
+        "challenge",
+        "reward",
+        "fun",
+        "engaging",
+        "immersive",
+    ];
+    let playability =
+        playability_signals.iter().any(|s| lower.contains(s)) || non_empty_lines.len() >= 5;
+
+    // 5. clarity: no TBD/placeholder, not a stub.
+    let placeholder_signals = [
+        "tbd",
+        "todo",
+        "to be determined",
+        "placeholder",
+        "to be decided",
+        "tk",
+        "???",
+    ];
+    let has_placeholders = placeholder_signals.iter().any(|s| lower.contains(s));
+    let is_stub = char_count_range(trimmed, 0, 80);
+    let clarity = !has_placeholders && !is_stub;
+
+    let dimensions = DesignFiveQDimensions {
+        pillars,
+        mechanics,
+        continuity,
+        playability,
+        clarity,
+    };
+    let go = pillars && mechanics && continuity && playability && clarity;
+    let reason = if go {
+        "design 五问: all dimensions pass (pillars, mechanics, continuity, playability, clarity)"
+            .to_string()
+    } else {
+        let mut failed = Vec::new();
+        if !pillars {
+            failed.push("pillars");
+        }
+        if !mechanics {
+            failed.push("mechanics");
+        }
+        if !continuity {
+            failed.push("continuity");
+        }
+        if !playability {
+            failed.push("playability");
+        }
+        if !clarity {
+            failed.push("clarity");
+        }
+        format!("design 五问: failed on {}", failed.join(", "))
+    };
+    DesignFiveQVerdict {
+        go,
+        dimensions,
+        reason,
+    }
+}
+
+/// Check whether the character count of `text` falls within `[min, max]`.
+fn char_count_range(text: &str, min: usize, max: usize) -> bool {
+    let count = text.chars().count();
+    count >= min && count <= max
+}
+
 /// Best-effort `workspace_id` resolution for the `kb_extract_jobs` row.
 ///
 /// Falls back to the `creator_id` when no workspace is registered (the column
@@ -1714,5 +1931,95 @@ mod tests {
         let outline = "## Beat 1\n- Kael must steal the map before dawn.\n- He plants a promise that the guard will return.\n## Beat 2\n- Will he make it out alive?";
         let verdict = outline_five_q_check(outline);
         assert!(verdict.go, "expected GO, got: {verdict:?}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // V1.55 P2 — Game-bible design 五问 rubric + category mapping tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn design_five_q_passes_on_good_design_section() {
+        let section = "# Combat System\n\n\
+            ## Core Pillars\n\
+            Combat must serve the Momentum Pillar.\n\n\
+            ## Mechanics\n\
+            - Initiative uses deck-building: 5-card hand, draw 2 per turn.\n\
+            - Damage is flat (3 base + weapon modifier). No dice.\n\
+            - Stagger at 5 stacks loses next action.\n\n\
+            ## Player Experience\n\
+            The player feels tactical pressure: each card spent is a resource.\n\
+            This creates a push-your-luck feeling.\n\n\
+            ## Continuity\n\
+            Aligns with technology level in Design/technology.md.\n";
+        let verdict = design_five_q_check(section);
+        assert!(verdict.go, "expected GO, got: {verdict:?}");
+        assert!(verdict.dimensions.pillars);
+        assert!(verdict.dimensions.mechanics);
+        assert!(verdict.dimensions.continuity);
+        assert!(verdict.dimensions.playability);
+        assert!(verdict.dimensions.clarity);
+    }
+
+    #[test]
+    fn design_five_q_fails_on_empty_stub() {
+        let verdict = design_five_q_check("");
+        assert!(!verdict.go);
+        assert!(!verdict.dimensions.pillars);
+        assert!(!verdict.dimensions.mechanics);
+        assert!(!verdict.dimensions.clarity);
+    }
+
+    #[test]
+    fn design_five_q_fails_on_tbd() {
+        let section = "# Magic System\n\nTBD - will be decided later. TODO: add more.";
+        let verdict = design_five_q_check(section);
+        assert!(!verdict.go);
+        assert!(!verdict.dimensions.clarity);
+        assert!(verdict.reason.contains("clarity"));
+    }
+
+    #[test]
+    fn design_five_q_is_deterministic() {
+        let section = "# Economy\n\n\
+            ## Currency\n- Gold pieces (GP) as primary currency.\n\
+            - Players craft items from raw materials at a 20% discount.\n";
+        let v1 = design_five_q_check(section);
+        let v2 = design_five_q_check(section);
+        assert_eq!(v1.go, v2.go);
+        assert_eq!(v1.reason, v2.reason);
+    }
+
+    #[test]
+    fn block_type_to_game_bible_category_direct() {
+        assert_eq!(block_type_to_game_bible_category("species"), "species");
+        assert_eq!(block_type_to_game_bible_category("faction"), "faction");
+        assert_eq!(
+            block_type_to_game_bible_category("magic_system"),
+            "magic_system"
+        );
+        assert_eq!(
+            block_type_to_game_bible_category("technology"),
+            "technology"
+        );
+        assert_eq!(block_type_to_game_bible_category("deity"), "deity");
+        assert_eq!(block_type_to_game_bible_category("level"), "level");
+        assert_eq!(
+            block_type_to_game_bible_category("economy_tier"),
+            "economy_tier"
+        );
+    }
+
+    #[test]
+    fn block_type_to_game_bible_category_cross_domain() {
+        assert_eq!(block_type_to_game_bible_category("character"), "species");
+        assert_eq!(block_type_to_game_bible_category("organization"), "faction");
+        assert_eq!(block_type_to_game_bible_category("item"), "technology");
+        assert_eq!(block_type_to_game_bible_category("ability"), "magic_system");
+        assert_eq!(block_type_to_game_bible_category("conflict"), "faction");
+    }
+
+    #[test]
+    fn block_type_to_game_bible_category_unknown_defaults_species() {
+        assert_eq!(block_type_to_game_bible_category("nonsense"), "species");
     }
 }

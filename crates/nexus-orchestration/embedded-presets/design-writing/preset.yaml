@@ -1,0 +1,83 @@
+# Design-Writing Preset — Game-Bible Design Section Production (V1.55 P2)
+#
+# LLM-driven per-section drafting + review loop for game-bible Design/*.md
+# sections. Each run drafts one section (selected via preset input), then
+# reviews it against the design 五问 rubric. On GO, the section_status
+# frontmatter flips to 'accepted'; on NOGO, the author revises and re-runs.
+#
+# Input variables (passed via schedule/CLI input):
+#   work_id:       Work entity ID
+#   work_ref:      Work slug (directory under Works/)
+#   section:       Target Design section filename (e.g. "overview.md")
+#   section_title: Human-readable section name (e.g. "Overview")
+#   section_comment: HTML comment hint from the stub template
+#
+# Stage chain per game-bible-profile.md §5:
+#   draft_section → review_section → done (or re-run on NOGO)
+#
+# This preset uses the same `judge.llm` capability as novel-writing's
+# finalize gate. The design 五问 rubric is in the review exit prompt
+# (prompts/design-review-exit.md), evaluated by the LLM judge. A
+# deterministic no-worker fallback is provided by
+# `quality_loop::design_five_q_check`.
+
+preset:
+  id: design-writing
+  version: 1
+  kind: creator
+  description: "LLM-driven per-section drafting + design 五问 review loop for game-bible Design sections"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - judge.llm
+  run_intents:
+    - work_continue
+  initial: draft_section
+  terminal: done
+  # Preset gates — enforced at enqueue time.
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: game_bible
+    - kind: work_field
+      field: work_ref
+      op: required
+    - kind: work_field
+      field: intake_status
+      op: equals
+      value: complete
+    - kind: filesystem
+      path: "Works/{{work_ref}}/Design/"
+      must_exist: true
+
+states:
+  - id: draft_section
+    description: "Draft the selected Design section with an LLM-driven ACP prompt"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/design-section.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            section: "{{preset.input.section}}"
+            section_title: "{{preset.input.section_title}}"
+            section_comment: "{{preset.input.section_comment}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/design-review-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: review_section
+
+  - id: review_section
+    description: "Design 五问 review: the LLM judge evaluates the drafted section against the design rubric"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/design-review-exit.md
+      judge_capability: judge.llm
+    next: done
+
+  - id: done
+    terminal: true
