@@ -542,7 +542,6 @@ pub const fn embedded_snapshot_capabilities() -> &'static [&'static str] {
 mod tests {
     use super::*;
 
-
     // ── Synthetic mode tests (air-gap / default) ───────────────────────────
 
     #[tokio::test]

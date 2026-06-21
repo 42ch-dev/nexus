@@ -1260,3 +1260,41 @@ v1 至少应保证：
 **Superseded by**: [creator-run-preset-entry.md](./creator-run-preset-entry.md) (Shipped Master V1.45). The §6.2D/E `creator run` preset-entry table, FL-E stage advance mapping, preset-id examples, and global flags on `creator run` are now part of the canonical Master body.
 
 > **Note on §6.2D/E body**: The §6.2D/E body now defers to the Shipped Master [creator-run-preset-entry.md](./creator-run-preset-entry.md) (V1.45) for the canonical `creator run` surface — see the authoritative-surface pointer at the top of §6.2D and the supersession note in §6.2E. The V1.33–V1.44 bespoke subcommand table was replaced by the generic dispatch entry in commit `4aa5aa53` (V1.45 P-last); the stale `creator run stage` section was deleted in V1.46 P1. Closes residual `R-V145B3-001`.
+
+---
+
+## V1.57 P1 Draft overlay: §6.2M `host-call` subcommand
+
+**Status**: Draft (V1.57 P1)  
+**Plan**: `2026-06-22-v1.57-daemon-refactor-and-caller-adapters`
+
+### §6.2M `nexus42 host-call <tool_id> --args <json>`
+
+A debug-only, low-level CLI entry point that sends a raw host tool execution
+request through the daemon's `CapabilityRegistry::dispatch` path. Admission
+gates (allowlist, active creator, workspace bounds, permissions.toml, audit)
+apply identically as for HTTP and worker caller paths.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tool_id` | string (positional) | yes | Host tool ID, e.g. `nexus.context.whoami`, `nexus.work.get` |
+| `--args` / `-a` | string (JSON) | no (default `{}`) | Tool parameters as a JSON string, e.g. `'{"work_id":"wrk_abc"}'` |
+
+**Exit codes**:
+- `0` — tool executed successfully; result printed as JSON
+- `1` — admission denied (NOT_SUPPORTED, FORBIDDEN, POLICY_BLOCKED)
+- `2` — tool error or internal failure (network, I/O, DB)
+
+**Debug-only intent**: This subcommand bypasses normal CLI UX layers (creator
+selection, workspace, preset runner). It exists for ad-hoc developer
+testing and troubleshooting of individual `nexus.*` / `fs/*` host tools.
+CLI `--help` text documents this intent.
+
+**Wiring**: `nexus42 host-call` → `DaemonClient::post` → daemon
+`POST /v1/local/agent-host/internal/tool-executions` →
+`HostToolExecutor::execute()` → `admission_pipeline()` →
+`CapabilityRegistry::dispatch()` → tool handler → response.
+
+**No per-`nexus.*` subcommands**: Per Q4 (compass §0), there is exactly one
+`host-call` entry, not per-tool subcommands. All 20 registered host tools are
+callable through this single entry point.

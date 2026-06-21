@@ -118,3 +118,33 @@ Daemon runtime is a **local supervisor**. It is **not** an ACP Agent or ACP Serv
 
 - Unify user-facing wording and logs; finalize reliability edge cases
 
+---
+
+## V1.57 P1 Draft overlay: Host tool executor — 3-caller entry points
+
+**Status**: Draft (V1.57 P1)  
+**Plan**: `2026-06-22-v1.57-daemon-refactor-and-caller-adapters`
+
+### Host tool dispatch topology
+
+The host tool executor (`host_tool_executor.rs`) provides three caller entry
+points, all dispatching through the same `CapabilityRegistry::dispatch` path:
+
+| Entry point | Caller | Normalization | Dispatch |
+|-------------|--------|---------------|----------|
+| `HostToolExecutor::execute()` | CLI `host-call` + HTTP `POST /v1/local/agent-host/internal/tool-executions` | `ToolExecuteRequest` → admission pipeline | `CapabilityRegistry::dispatch` |
+| `HostToolExecutor::dispatch_from_worker()` | Worker `agent_tool_request` IPC | `{tool_name, args, request_id}` → `ToolExecuteRequest` | Same path |
+| `HostToolExecutor::dispatch_for_schedule()` | Schedule executor (in-process) | `{tool_name, args, request_id}` → `ToolExecuteRequest` with `HostToolCallerKind::Schedule` | Same path |
+
+All three entry points share a single admission pipeline (5 gates: allowlist,
+active creator, workspace bounds, permissions.toml, audit log) and dispatch
+through the same `CapabilityRegistry::dispatch(tool_id, input)` call.
+
+### V1.57 P1 refactor
+
+- `host_tool_executor.rs` reduced from 4298→349 lines (handlers extracted to
+  `host_tool_handlers.rs`; tests to `host_tool_executor_tests.rs`)
+- Previously-duplicated `execute_X` functions removed; handlers live in the
+  registry-bound `host_tool_handlers` module
+- `CdnConfig` constructor-injected (no global `RwLock`)
+
