@@ -243,6 +243,32 @@ fn check_initial_to_terminal_reachability(
                     }
                 }
             }
+            Some(crate::preset::manifest::NextTarget::Conditional(next_cond)) => {
+                // V1.56 P2: legacy conditional edges — all rules + default are reachable.
+                for rule in &next_cond.rules {
+                    if state_ids.contains(rule.target.as_str()) {
+                        adj.entry(&state.id).or_default().push(rule.target.as_str());
+                    }
+                }
+                if state_ids.contains(next_cond.default.as_str()) {
+                    adj.entry(&state.id)
+                        .or_default()
+                        .push(next_cond.default.as_str());
+                }
+            }
+            Some(crate::preset::manifest::NextTarget::Branches(branches)) => {
+                // V1.56 P2: Form B multi-branch — all branches + default are reachable.
+                for rule in &branches.branches {
+                    if state_ids.contains(rule.target.as_str()) {
+                        adj.entry(&state.id).or_default().push(rule.target.as_str());
+                    }
+                }
+                if state_ids.contains(branches.default.as_str()) {
+                    adj.entry(&state.id)
+                        .or_default()
+                        .push(branches.default.as_str());
+                }
+            }
             _ => {}
         }
     }
