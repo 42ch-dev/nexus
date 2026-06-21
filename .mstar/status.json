@@ -1,103 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-06-21T00:00:00Z",
+  "updated_at": "2026-06-22T18:00:00Z",
   "plans": [
-    {
-      "plan_id": "2026-06-22-v1.55-compass-and-plan-stubs",
-      "title": "V1.55 P-1 — Compass & Plan Stubs",
-      "status": "Done",
-      "owner": "@project-manager",
-      "effort": "M",
-      "working_branch": "iteration/v1.55",
-      "merge_target": "iteration/v1.55",
-      "type": "prepare",
-      "created": "2026-06-22",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
-      "qc_status": "skipped (PM whitelist — Prepare-phase plan authoring)",
-      "qa_status": "n/a",
-      "merge_commit": "4ef17268 (P-1 signoff) + 626ba878 (track-ownership fix) + a3d0daee (compass + plan stubs baseline)",
-      "done_at": "2026-06-21"
-    },
-    {
-      "plan_id": "2026-06-22-v1.55-df43-sqlite-alignment",
-      "title": "V1.55 P0 — DF-43 SQLite Persistence / Crate-Model Alignment",
-      "status": "Done",
-      "owner": "@fullstack-dev",
-      "effort": "M",
-      "working_branch": "feature/v1.55-df43-sqlite-alignment",
-      "merge_target": "iteration/v1.55",
-      "type": "implement",
-      "track": "Theme B / Track A",
-      "created": "2026-06-22",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
-      "dependencies": [
-        "2026-06-22-v1.55-compass-and-plan-stubs"
-      ],
-      "qc_status": "Approve — qc1/qc2/qc3 (commits 7306102a / 21c4b28a / 85406d1c)",
-      "qa_status": "Pass — @qa-engineer mid-QA (commit 24122d26; 8/8 AC; CI gates re-run clean)",
-      "merge_commit": "fa2f28d5 (P0 merge) + 4c768b78 (plan notes)",
-      "done_at": "2026-06-21"
-    },
-    {
-"plan_id": "2026-06-22-v1.55-df31-workspace-interface",
-      "title": "V1.55 P1 — DF-31 Workspace Open / Commit Interface Skeleton",
-      "status": "Done",
-      "owner": "@fullstack-dev",
-      "effort": "M",
-      "working_branch": "feature/v1.55-df31-workspace-interface",
-      "merge_target": "iteration/v1.55",
-      "type": "implement",
-      "track": "Theme B / Track A",
-      "created": "2026-06-22",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
-      "dependencies": [
-        "2026-06-22-v1.55-compass-and-plan-stubs"
-      ],
-      "qc_status": "qc1 Approve (commit 39d96204); qc2 Approve (commit 20ac1978); qc3 Approve (commit 8533a1b5); all after 1 fix-wave (5da1ec08) addressing consume_session race + SessionError enum + poison recovery + typed errors + capability count",
-      "qa_status": "Pass — @qa-engineer mid-QA (commit 3197e14c; 7/7 AC; CI gates re-run clean; DF-31 skeleton confirmed)",
-      "merge_commit": "9b3d70ce (P1 base) + 5da1ec08 (P1 fix-wave) + 376ef43a (P1 fix-wave merge)",
-      "done_at": "2026-06-21"
-    },
-    {
-      "plan_id": "2026-06-22-v1.55-game-bible-depth-35",
-      "title": "V1.55 P2 — Game-Bible Depth 3.5",
-      "status": "Done",
-      "owner": "@fullstack-dev-2",
-      "effort": "L",
-      "working_branch": "feature/v1.55-game-bible-depth-35",
-      "merge_target": "iteration/v1.55",
-      "type": "implement",
-      "track": "Theme D / Track B",
-      "created": "2026-06-22",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
-      "dependencies": [
-        "2026-06-22-v1.55-compass-and-plan-stubs"
-      ],
-      "qc_status": "qc1 Approve (after 2 fix-waves; commits ea351a75 + 35772299); qc2 Approve (commit 53efe06f); qc3 Approve (after 1 fix-wave; commit 8fe08564)",
-      "qa_status": "Pass — @qa-engineer mid-QA (commit de1eb1d9; 7/7 AC; CI gates re-run clean; R-V154P1-S002 resolved; R-V155P2-F002 registered)",
-      "merge_commit": "0718a6fe (P2 base) + 798c47a0 (P2 1st fix-wave) + af987571 (P2 2nd fix-wave) + d5f5f8dd + b37d19e5 + f3cec4e6 (commits incl. plan stub updates)",
-      "done_at": "2026-06-21"
-    },
-    {
-      "plan_id": "2026-06-22-v1.55-script-scaffold",
-      "title": "V1.55 P3 — Script Profile Scaffold",
-      "status": "Done",
-      "owner": "@fullstack-dev-2",
-      "effort": "M",
-      "working_branch": "feature/v1.55-script-scaffold",
-      "merge_target": "iteration/v1.55",
-      "type": "implement",
-      "track": "Theme D / Track B",
-      "created": "2026-06-22",
-      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
-      "dependencies": [
-        "2026-06-22-v1.55-game-bible-depth-35"
-      ],
-      "qc_status": "qc1 Approve (commit 7018b8e4); qc2 Approve (commit 964d2268); qc3 Approve (initial review commit 82e6fdd4); all after 1 fix-wave (21908cdb) addressing ScaffoldTransaction overwrites + validate_work_ref + temp+rename atomic + ValidationMode::Script tests + daemon boot count",
-      "qa_status": "Pass — @qa-engineer mid-QA (commit 16bcf48b; 7/7 AC; CI gates re-run clean; R-V154P1-W001 resolved; additive BlockType verified)",
-      "merge_commit": "c30cdd48 (P3 base) + 21908cdb (P3 fix-wave) — R-V154P1-W001 ScaffoldTransaction closure applied to BOTH game-bible and script scaffolds",
-      "done_at": "2026-06-21"
-    },
     {
       "plan_id": "2026-06-22-v1.55-mid-qc-and-fix-waves",
       "title": "V1.55 P-mid — Mid-QC Checkpoints & Fix Waves",
@@ -138,44 +42,68 @@
     }
   ],
   "metadata": {
-    "integration_branch": "iteration/v1.55",
-    "integration_branch_retired": false,
+    "integration_branch": "iteration/v1.55 (retiring)",
+    "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.54",
     "integration_merge_target": "main",
-    "latest_active_iteration": "v1.55",
-    "latest_active_compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO — V1.55 P-1 Done 2026-06-22",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.54",
-      "compass": "v1.54-df46-completion-and-game-bible-foundation",
-      "shipped_at": "2026-06-21T02:22:34Z",
-      "plan_count": 4,
-      "plan_count_done": 4,
+      "iteration": "V1.55",
+      "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor",
+      "shipped_at": "2026-06-22T00:00:00Z",
+      "plan_count": 5,
+      "plan_count_done": 5,
       "open_at_ship": 0,
-      "deferred_to_next": 2,
+      "deferred_to_next": 1,
       "wire_contracts_changed": false,
+      "wire_contracts_note": "Additive enum only (script BlockType `dialogue`/`beat`/`act`); per project convention additive enum counts as wire_contracts_changed: false",
       "profile_b_compaction": "done",
       "spec_promotions": [
-        "capability-registry.md: Draft → Master"
+        "game-bible-profile.md: Draft → Master (V1.55 P2 Depth 3.5 shipped)"
       ],
-      "merge_commit": "2fd183f059e898fd7f9fa0466653985364af7287",
-      "pr": 76,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/76"
+      "plan_ids": [
+        "2026-06-22-v1.55-compass-and-plan-stubs",
+        "2026-06-22-v1.55-df43-sqlite-alignment",
+        "2026-06-22-v1.55-df31-workspace-interface",
+        "2026-06-22-v1.55-game-bible-depth-35",
+        "2026-06-22-v1.55-script-scaffold"
+      ],
+      "highlights": {
+        "P0_DF43": "Closed: adapter From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource in nexus-local-db; nexus-knowledge crate docs locked to model/adapter-seam only; local-db-schema.md §4.1.1 ownership boundary text; round-trip + duplicate-truth prevention tests",
+        "P1_DF31": "Shipped interface skeleton: path validation (nexus-home-layout), WorkspaceSessionManager with atomic consume_session + SessionError enum + poison recovery + typed errors; 2 Local API routes (POST /v1/local/workspace/open, POST /v1/local/workspace/commit); no broad DF-42 Local API redesign",
+        "P2_game_bible_depth_35": "Shipped Depth 3.5: design-writing preset (LLM-driven per-section drafting) + design 五问 quality rubric (design-pillars/mechanics/continuity/playability/clarity) + section completion detection (is_game_bible_design_complete checks overview.md/pillars.md/mechanics.md + intake_status) + KB extraction (candidate_from_llm_json_for_profile wired into run_llm_extract + LlmExtractTask with production-path test); R-V154P1-S002 closed (profile-gate tracing/audit)",
+        "P3_script_scaffold": "Shipped V1.54-style scaffold (Scripts/ + Beats/ + Characters/ + Logs/); additive BlockType variants `dialogue`/`beat`/`act` + `script_category` validation; ValidationMode::Script; R-V154P1-W001 closed (ScaffoldTransaction applied to BOTH game-bible and script scaffolds with create/overwrite tracking + temp+rename atomic + validate_work_ref)",
+        "P_last": "game-bible-profile.md Draft → Master; Profile B compaction (5 plans archived); deferred-features tracker V1.55 ship snapshot; shipped-features tracker V1.55 snapshot; integration branch iteration/v1.55 retiring; R-V155P2-F002 registered (deferred to V1.56+)"
+      },
+      "residual_lifecycle": {
+        "archived_in_v155": [
+          "R-V154P1-S002 (resolved in P2 profile-gate observability)",
+          "R-V154P1-W001 (resolved in P3 ScaffoldTransaction)"
+        ],
+        "open_v156_carry_forward": [
+          "R-V155P2-F002 (deferred to V1.56+: design-writing preset no durable section_status auto-transition; manual author step for V1.55)"
+        ],
+        "open_v156_count": 1
+      },
+      "wire_contract_changes": "None (per compass §0.1; additive enum only — script BlockType `dialogue`/`beat`/`act` are additive to V1.54's 15-variant BlockType)",
+      "qc_tri_review_outcome": "P0: 3/3 Approve. P1: initial 3/3 Request Changes → 1 fix-wave (consume_session race + SessionError + typed errors) → 3/3 Approve. P2: initial qc1 Request Changes + qc3 Request Changes → 2 fix-waves (profile-aware extraction + section_status narrowing + production-path test) → 3/3 Approve. P3: initial qc1+qc2 Request Changes → 1 fix-wave (ScaffoldTransaction + validate_work_ref + temp+rename + ValidationMode tests + daemon boot count) → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies (2 mid-QA per wave).",
+      "note": "V1.55 ship pending PR to main (user authorization required for push). Integration branch iteration/v1.55 retiring per mstar-branch-worktree."
     },
     "tech_debt_summary": {
-      "total_open": 2,
-      "total_deferred": 2,
+      "total_open": 1,
+      "total_deferred": 1,
       "total_resolved": 14,
       "total_archived": 4,
       "by_severity_active": {
         "medium": 0,
-        "low": 2
+        "low": 1
       },
       "by_target_active": {
-        "V1.55 P3": 1,
         "V1.56+": 1
       }
     }
