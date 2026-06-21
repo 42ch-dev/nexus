@@ -691,6 +691,17 @@ fn validate_manifest(
                 }
             }
         }
+
+        // V1.56 P2 fix-wave (M-002): validate converge config.
+        // Reject terminal converge states.
+        if let Some(ref _converge_cfg) = state.converge {
+            if state.terminal {
+                problems.push(ValidationProblem {
+                    path: format!("{state_path}.converge"),
+                    error: "converge state must not be terminal".to_string(),
+                });
+            }
+        }
     }
 
     // --- WS-E T6: Role validation ---
@@ -950,9 +961,62 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
         }
     }
 
+    // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
+    // Count which states can route to each converge-annotated state.
+    let mut converge_predecessors: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+    for state in &manifest.states {
+        let pred_id = state.id.as_str();
+        // Collect all possible target states from this state's next.
+        let mut targets: Vec<&str> = Vec::new();
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => targets.push(next_id),
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                targets.push(&go_nogo.go);
+                targets.push(&go_nogo.nogo);
+            }
+            Some(NextTarget::Labeled(ref edges)) => {
+                for edge in edges {
+                    targets.push(&edge.target);
+                }
+            }
+            Some(NextTarget::Conditional(ref cond)) => {
+                for rule in &cond.rules {
+                    targets.push(&rule.target);
+                }
+                targets.push(&cond.default);
+            }
+            Some(NextTarget::Branches(ref branches)) => {
+                for rule in &branches.branches {
+                    targets.push(&rule.target);
+                }
+                targets.push(&branches.default);
+            }
+            None => {}
+        }
+        for target in targets {
+            // Check if target is a converge state.
+            let is_converge = manifest
+                .states
+                .iter()
+                .any(|s| s.id == target && s.converge.is_some());
+            if is_converge {
+                converge_predecessors
+                    .entry(target)
+                    .or_default()
+                    .insert(pred_id);
+            }
+        }
+    }
+
     for state in &manifest.states {
         let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
-        let task = StateCompositeTask::from_manifest(state).with_expected_incoming(incoming);
+        let preds: std::collections::HashSet<String> = converge_predecessors
+            .get(state.id.as_str())
+            .map(|hs| hs.iter().map(std::string::ToString::to_string).collect())
+            .unwrap_or_default();
+        let task = StateCompositeTask::from_manifest(state)
+            .with_expected_incoming(incoming)
+            .with_converge_predecessors(preds);
         graph.add_task(std::sync::Arc::new(task));
     }
 
@@ -1020,11 +1084,61 @@ pub fn build_wired_outer_graph(
         }
     }
 
+    // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
+    let mut converge_predecessors: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+    for state in &loaded.manifest.states {
+        let pred_id = state.id.as_str();
+        let mut targets: Vec<&str> = Vec::new();
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => targets.push(next_id),
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                targets.push(&go_nogo.go);
+                targets.push(&go_nogo.nogo);
+            }
+            Some(NextTarget::Labeled(ref edges)) => {
+                for edge in edges {
+                    targets.push(&edge.target);
+                }
+            }
+            Some(NextTarget::Conditional(ref cond)) => {
+                for rule in &cond.rules {
+                    targets.push(&rule.target);
+                }
+                targets.push(&cond.default);
+            }
+            Some(NextTarget::Branches(ref branches)) => {
+                for rule in &branches.branches {
+                    targets.push(&rule.target);
+                }
+                targets.push(&branches.default);
+            }
+            None => {}
+        }
+        for target in targets {
+            let is_converge = loaded
+                .manifest
+                .states
+                .iter()
+                .any(|s| s.id == target && s.converge.is_some());
+            if is_converge {
+                converge_predecessors
+                    .entry(target)
+                    .or_default()
+                    .insert(pred_id);
+            }
+        }
+    }
+
     for state in &loaded.manifest.states {
         let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
+        let preds: std::collections::HashSet<String> = converge_predecessors
+            .get(state.id.as_str())
+            .map(|hs| hs.iter().map(std::string::ToString::to_string).collect())
+            .unwrap_or_default();
         let mut task = StateCompositeTask::from_manifest(state)
             .with_resolved_template(&loaded.id)
             .with_expected_incoming(incoming)
+            .with_converge_predecessors(preds)
             .with_engine(engine.clone())
             .with_inner_graphs(loaded.inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())
