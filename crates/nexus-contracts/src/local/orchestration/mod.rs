@@ -150,10 +150,24 @@ pub struct RegistryRefreshInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistryRefreshOutput {
-    /// Age of the refreshed cache in milliseconds.
+    /// Age of the refreshed cache in milliseconds (0 for synthetic).
     pub cache_age_ms: u64,
-    /// Number of agents in the registry.
-    pub agent_count: u32,
+    /// Number of registered capabilities in the snapshot/registry.
+    pub capability_count: u32,
+    /// Source of the registry data: `"synthetic"`, `"cdn"`, or `"synthetic_fallback"`.
+    pub source: String,
+    /// Snapshot version string (e.g. "2026-06-22.v1").
+    pub snapshot_version: String,
+    /// ISO-8601 timestamp when the output was generated.
+    pub generated_at: String,
+    /// Maximum fetch timeout in milliseconds (0 if not applicable).
+    pub fetch_timeout_ms: u64,
+    /// Maximum retry count (0 if not applicable).
+    pub max_retries: u32,
+    /// Number of retries actually attempted (0 if synthetic or first-attempt success).
+    pub retry_count: u32,
+    /// Human-readable error description when fallback occurred (empty if success).
+    pub fallback_reason: String,
 }
 
 // ---------------------------------------------------------------------------

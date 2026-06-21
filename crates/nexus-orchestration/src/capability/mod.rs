@@ -183,6 +183,8 @@ impl CapabilityRegistry {
             // V1.55 P3: register script.project_scaffold for
             // embedded preset validation.
             Box::new(builtins::ScriptProjectScaffold::new()),
+            // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
+            Box::new(builtins::GameBibleSectionStatusUpdate::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -235,6 +237,8 @@ impl CapabilityRegistry {
             Box::new(builtins::GameBibleProjectScaffold::with_pool(pool.clone())),
             // V1.55 P3: script.project_scaffold with pool.
             Box::new(builtins::ScriptProjectScaffold::with_pool(pool)),
+            // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
+            Box::new(builtins::GameBibleSectionStatusUpdate::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -374,6 +378,8 @@ impl CapabilityRegistry {
                         builtins::ScriptProjectScaffold::with_pool(pool.clone())
                     }),
             ),
+            // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
+            Box::new(builtins::GameBibleSectionStatusUpdate::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -438,11 +444,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_twenty_four_builtins() {
-        // 24 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
-        // + script.scaffold (V1.55 P3)
+    fn registry_has_twenty_five_builtins() {
+        // 25 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
+        // + script.scaffold (V1.55 P3) + game_bible.section_status.update (V1.56 P-last R-V155P2-F002).
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 24);
+        assert_eq!(reg.len(), 25);
     }
 
     #[test]
@@ -473,6 +479,7 @@ mod tests {
             "essay.project_scaffold",
             "game_bible.project_scaffold",
             "script.project_scaffold",
+            "game_bible.section_status.update",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -491,7 +498,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.len(), 25); // 24 up to V1.55 P3 + 1 (R-V155P2-F002)
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));

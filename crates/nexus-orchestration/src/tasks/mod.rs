@@ -16,10 +16,12 @@
 
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use crate::engine::OrchestrationEngine;
+use crate::preset::manifest::{ConvergeConfig, ConvergeStrategy};
 use crate::preset::manifest::{EnterAction, ExitWhen, MergeKind, NextTarget, StateDefinition};
 use async_trait::async_trait;
 use graph_flow::{Graph, NextAction, Task, TaskResult};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -641,6 +643,41 @@ pub struct StateCompositeTask {
     expected_incoming: usize,
     /// Pre-computed merge key ("_merge_{id}") to avoid per-tick allocation (W-QC3-2).
     merge_key: String,
+    /// Converge (merge-point) config for states with explicit `converge:` declaration
+    /// (V1.56 P2 fix-wave, H-001/W-002).
+    converge: Option<ConvergeConfig>,
+    /// Converge-predecessor tracking key ("_`converge_arrivals`_{id}").
+    converge_key: String,
+    /// Predecessor task IDs for this converge node (populated at graph build time).
+    converge_predecessors: std::collections::HashSet<String>,
+    /// Pre-compiled expression AST for this state's conditional branches (M-004).
+    ///
+    /// Parsed once at task construction time; reused across transitions.
+    /// `None` means this state has no conditional/branches next, or parse failed.
+    cached_expr: Option<CachedExpressions>,
+    /// Optional workspace session state for expression evaluation (V1.56 P3).
+    ///
+    /// When set, `build_context_json()` exposes this as a nested `workspace`
+    /// object. Tests set this directly; in production the engine populates it
+    /// from the active workspace session.
+    workspace_state: Option<serde_json::Value>,
+}
+
+/// Pre-compiled expression ASTs for conditional routing (V1.56 P2 fix-wave, M-004).
+///
+/// V1.56 P3: extended with context dependency flags so the runtime knows
+/// whether to invoke `registry.refresh` or query workspace session state
+/// before evaluating branches.
+#[derive(Clone)]
+struct CachedExpressions {
+    /// Parsed expressions + their target state IDs.
+    branches: Vec<(crate::preset::expr::Expr, String)>,
+    /// Default target when no branch matches.
+    default: String,
+    /// Any branch expression references `_context.registry_refresh.*`
+    needs_registry_refresh: bool,
+    /// Any branch expression references `_context.workspace.*`
+    needs_workspace: bool,
 }
 
 impl StateCompositeTask {
@@ -649,6 +686,9 @@ impl StateCompositeTask {
     /// Inner graph actions will fail at runtime if no engine is set.
     #[must_use]
     pub fn from_manifest(state: &StateDefinition) -> Self {
+        // M-004: pre-compile expression AST at construction time.
+        let cached_expr = Self::build_expr_cache(state.next.as_ref());
+
         Self {
             id: state.id.clone(),
             terminal: state.terminal,
@@ -663,6 +703,11 @@ impl StateCompositeTask {
             merge_kind: state.merge.clone(),
             expected_incoming: 0,
             merge_key: format!("_merge_{}", state.id),
+            converge: state.converge.clone(),
+            converge_key: format!("_converge_arrivals_{}", state.id),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr,
+            workspace_state: None,
         }
     }
 
@@ -717,6 +762,70 @@ impl StateCompositeTask {
         self
     }
 
+    /// Set the converge predecessor task IDs (V1.56 P2 fix-wave, H-001).
+    #[must_use]
+    pub fn with_converge_predecessors(mut self, preds: HashSet<String>) -> Self {
+        self.converge_predecessors = preds;
+        self
+    }
+
+    /// Set the workspace session state for expression evaluation (V1.56 P3).
+    ///
+    /// When set, `build_context_json()` exposes this value as a nested
+    /// `workspace` object, accessible in expressions as
+    /// `_context.workspace.<field>`.
+    #[must_use]
+    pub fn with_workspace_state(mut self, state: serde_json::Value) -> Self {
+        self.workspace_state = Some(state);
+        self
+    }
+
+    /// Pre-compile expression AST for conditional/branches next (M-004).
+    ///
+    /// Parses each branch's `when` expression once at construction time;
+    /// returns `None` if the state has no conditional next or all parses fail.
+    ///
+    /// V1.56 P3: also scans each expression for context dependencies
+    /// (`registry_refresh`, `workspace`) so the runtime can invoke the
+    /// appropriate capability before evaluating branches.
+    fn build_expr_cache(next: Option<&NextTarget>) -> Option<CachedExpressions> {
+        let (rules, default) = match next {
+            Some(NextTarget::Conditional(cond)) => (&cond.rules, &cond.default),
+            Some(NextTarget::Branches(branches)) => (&branches.branches, &branches.default),
+            _ => return None,
+        };
+
+        let mut branches = Vec::with_capacity(rules.len());
+        let mut needs_registry_refresh = false;
+        let mut needs_workspace = false;
+
+        for rule in rules {
+            match crate::preset::expr::parse(&rule.when) {
+                Ok(ast) => {
+                    // V1.56 P3: scan expression for context dependencies.
+                    let deps = crate::preset::expr::scan_context_deps(&ast);
+                    needs_registry_refresh = needs_registry_refresh || deps.needs_registry_refresh;
+                    needs_workspace = needs_workspace || deps.needs_workspace;
+                    branches.push((ast, rule.target.clone()));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        when = %rule.when,
+                        error = %e,
+                        "expression parse error at construction time, branch will be skipped at runtime"
+                    );
+                }
+            }
+        }
+
+        Some(CachedExpressions {
+            branches,
+            default: default.clone(),
+            needs_registry_refresh,
+            needs_workspace,
+        })
+    }
+
     /// Resolve `template_file` paths in `exit_when: llm_judge` to actual file content.
     ///
     /// For embedded presets, reads the template content from the compiled-in
@@ -758,7 +867,11 @@ impl StateCompositeTask {
     #[allow(clippy::missing_const_for_fn)]
     fn judge_next_action(&self, judge_result: bool) -> NextAction {
         match &self.next {
-            Some(NextTarget::GoNogo(_)) => NextAction::Continue,
+            Some(NextTarget::GoNogo(_) | NextTarget::Branches(_) | NextTarget::Conditional(_)) => {
+                // Conditional/Branches routing handles both GO and NOGO via
+                // resolve_expression_target (step 2.5).
+                NextAction::Continue
+            }
             _ if judge_result => NextAction::Continue,
             _ => NextAction::WaitForInput,
         }
@@ -796,6 +909,11 @@ impl StateCompositeTask {
                 // W-QC3-2: binary→Labeled auto-conversion.
                 vec![("go", go_nogo.go.as_str()), ("nogo", go_nogo.nogo.as_str())]
             }
+            Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) => {
+                return Err(graph_flow::GraphError::TaskExecutionFailed(
+                    "resolve_labeled_target: Conditional/Branches routing requires expression evaluation, not label matching".to_string(),
+                ));
+            }
             _ => return Ok(NextAction::WaitForInput),
         };
         candidates.sort_by_key(|(label, _)| std::cmp::Reverse(label.len()));
@@ -813,6 +931,8 @@ impl StateCompositeTask {
                     arrived.push((*label).to_string());
                 }
                 context.set_sync(&merge_key, arrived);
+                // V1.56 P2 fix-wave (H-001): also record converge arrival.
+                Self::record_converge_arrival(context, target, &self.id);
                 return Ok(NextAction::GoTo((*target).to_string()));
             }
         }
@@ -834,6 +954,304 @@ impl StateCompositeTask {
             "Labeled routing: no label matched judge output. Known labels: {known_labels:?}. Judge output excerpt: {excerpt}"
         )))
     }
+
+    /// V1.56 P2: resolve expression-based conditional routing target.
+    ///
+    /// Uses pre-compiled expression AST (M-004) for performance. Evaluates each
+    /// branch's `when` expression against the context, returning the first matching
+    /// branch's target. Falls back to the `default` target if no branch matches.
+    ///
+    /// V1.56 P2 fix-wave (M-006): expression eval failures are now propagated as
+    /// errors instead of silently skipping the branch.
+    fn resolve_expression_target(
+        &self,
+        context: &graph_flow::Context,
+    ) -> Result<NextAction, graph_flow::GraphError> {
+        let ctx_json = build_context_json(context);
+
+        let cache = self.cached_expr.as_ref().ok_or_else(|| {
+            graph_flow::GraphError::TaskExecutionFailed(
+                "resolve_expression_target: no cached expressions available".to_string(),
+            )
+        })?;
+
+        for (i, (ast, target)) in cache.branches.iter().enumerate() {
+            match crate::preset::expr::evaluate(ast, &ctx_json) {
+                Ok(true) => {
+                    tracing::debug!(
+                        state_id = %self.id,
+                        branch_index = i,
+                        target = %target,
+                        "expression branch matched"
+                    );
+                    // V1.56 P2 fix-wave (H-001): record arrival at converge target.
+                    Self::record_converge_arrival(context, target, &self.id);
+                    return Ok(NextAction::GoTo(target.clone()));
+                }
+                Ok(false) => {
+                    // Continue to next branch.
+                }
+                Err(e) => {
+                    // M-006: propagate expression eval failures, don't swallow.
+                    tracing::error!(
+                        state_id = %self.id,
+                        branch_index = i,
+                        error = %e,
+                        "expression evaluation error, failing the transition"
+                    );
+                    return Err(graph_flow::GraphError::TaskExecutionFailed(format!(
+                        "expression evaluation error in state '{}' branch {}: {e}",
+                        self.id, i
+                    )));
+                }
+            }
+        }
+
+        // No branch matched — use default.
+        tracing::debug!(
+            state_id = %self.id,
+            default = %cache.default,
+            "no expression branch matched, falling back to default"
+        );
+        // V1.56 P2 fix-wave (H-001): record arrival at converge target for default branch too.
+        Self::record_converge_arrival(context, &cache.default, &self.id);
+        Ok(NextAction::GoTo(cache.default.clone()))
+    }
+
+    /// Record a converge arrival for the given target state (V1.56 P2 fix-wave, H-001).
+    ///
+    /// Writes `source_id` into `_converge_arrivals_{target}` (per-source tracking via
+    /// `HashSet` for automatic dedup). Each distinct predecessor's `source_id` is
+    /// recorded exactly once; repeated arrivals from the same source are idempotent.
+    /// If the target is not a converge node, this is a no-op (the key is ignored).
+    ///
+    /// # Source ID semantics
+    ///
+    /// `source_id` is the task ID (`self.id`) of the predecessor that is arriving
+    /// at the converge target.  This aligns with `converge_predecessors` (a
+    /// `HashSet<String>` of predecessor task IDs populated at graph build time),
+    /// so the converge gate check `arrived_sources.len() == expected_predecessor_count`
+    /// correctly gates on per-predecessor arrival.
+    pub fn record_converge_arrival(context: &graph_flow::Context, target: &str, source_id: &str) {
+        let converge_key = format!("_converge_arrivals_{target}");
+        let mut arrived: std::collections::HashSet<String> =
+            context.get_sync(&converge_key).unwrap_or_default();
+        if arrived.insert(source_id.to_string()) {
+            // New predecessor arrival — persist the updated set.
+            context.set_sync(&converge_key, arrived);
+        }
+        // else: duplicate arrival from same source → idempotent no-op.
+    }
+
+    /// Inject context dependencies before expression evaluation (V1.56 P3).
+    ///
+    /// Called before `resolve_expression_target()` to populate
+    /// `__registry_refresh_output` and `__workspace_state` in the context
+    /// so that `build_context_json()` can expose them as nested objects
+    /// (`registry_refresh` / `workspace`).
+    async fn inject_context_deps(&self, context: &graph_flow::Context) {
+        if let Some(cache) = &self.cached_expr {
+            if cache.needs_registry_refresh {
+                self.inject_registry_refresh_context(context).await;
+            }
+            if cache.needs_workspace {
+                self.inject_workspace_context(context).await;
+            }
+        }
+    }
+
+    /// Invoke `registry.refresh` capability and store output in context.
+    ///
+    /// If the capability registry is unavailable, falls back to a minimal
+    /// synthetic output so expressions don't fail on missing fields.
+    async fn inject_registry_refresh_context(&self, context: &graph_flow::Context) {
+        // Check if we already have registry output (avoid redundant invocation).
+        if context
+            .get::<serde_json::Value>("__registry_refresh_output")
+            .await
+            .is_some()
+        {
+            return;
+        }
+
+        let output = if let Some(registry) = &self.registry {
+            // Try to invoke the registered capability.
+            if let Some(cap) = registry.get("registry.refresh") {
+                match cap.run(serde_json::json!({})).await {
+                    Ok(val) => val,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "registry.refresh capability invocation failed, using synthetic fallback"
+                        );
+                        synthetic_registry_output()
+                    }
+                }
+            } else {
+                tracing::debug!(
+                    "registry.refresh capability not found in registry, using synthetic fallback"
+                );
+                synthetic_registry_output()
+            }
+        } else {
+            // No registry available — use synthetic fallback.
+            synthetic_registry_output()
+        };
+
+        context.set("__registry_refresh_output", output).await;
+    }
+
+    /// Inject workspace session state into context for expression evaluation.
+    ///
+    /// If `self.workspace_state` is set (e.g., by tests), uses that.
+    /// Otherwise, injects a minimal default state so expressions referencing
+    /// `_context.workspace.*` fields get valid values without error.
+    async fn inject_workspace_context(&self, context: &graph_flow::Context) {
+        // Check if already injected (avoid clobbering).
+        if context
+            .get::<serde_json::Value>("__workspace_state")
+            .await
+            .is_some()
+        {
+            return;
+        }
+
+        let ws_state = self.workspace_state.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "session_id": "",
+                "conflict_detected": false,
+                "changes_applied": 0,
+                "workspace_root": ""
+            })
+        });
+
+        context.set("__workspace_state", ws_state).await;
+    }
+}
+
+/// Build a minimal synthetic `RegistryRefreshOutput` as a fallback for
+/// expression evaluation when the capability is unavailable (V1.56 P3).
+fn synthetic_registry_output() -> serde_json::Value {
+    serde_json::json!({
+        "source": "synthetic",
+        "snapshotVersion": "2026-06-22.v1",
+        "capabilityCount": 31,
+        "fallbackReason": "",
+        "retryCount": 0,
+        "cacheAgeMs": 0,
+        "generatedAt": "",
+        "fetchTimeoutMs": 0,
+        "maxRetries": 0,
+    })
+}
+
+/// Build a JSON object from context keys for expression evaluation.
+///
+/// V1.56 P2 fix-wave (M-003): extended to expose user-set context values
+/// in addition to the fixed set of orchestration keys. All key-value pairs
+/// in the context's data map are now included.
+///
+/// V1.56 P3: also exposes `__registry_refresh_output` as a nested
+/// `registry_refresh` object and `__workspace_state` as a nested
+/// `workspace` object when the runtime has populated those context keys.
+fn build_context_json(context: &graph_flow::Context) -> serde_json::Value {
+    // Known orchestration keys that expressions may reference.
+    let known_keys = [
+        "_judge_result",
+        "_judge_reason",
+        "_judge_label",
+        "_state_result",
+        "_run_id",
+        "output",
+        "result",
+        "status",
+        "score",
+    ];
+
+    let mut map = serde_json::Map::new();
+
+    // Include known orchestration keys.
+    for key in &known_keys {
+        if let Some(val) = context.get_sync::<serde_json::Value>(key) {
+            map.insert(key.to_string(), val);
+        }
+    }
+
+    // M-003: also include all user-set context values.
+    // We serialize the full context data map and merge.
+    if let Ok(serialized) = serde_json::to_value(context) {
+        if let Some(data) = serialized
+            .as_object()
+            .and_then(|obj| obj.get("data"))
+            .and_then(|d| d.as_object())
+        {
+            for (key, value) in data {
+                // Skip internal/hidden keys (start with double underscore).
+                if key.starts_with("__") {
+                    continue;
+                }
+                if !map.contains_key(key) {
+                    map.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+
+    // V1.56 P3: expose registry.refresh output as a nested object.
+    if let Some(reg_output) = context.get_sync::<serde_json::Value>("__registry_refresh_output") {
+        // Translate camelCase capability output fields to snake_case
+        // context fields for expression grammar consistency.
+        let reg_obj = registry_output_to_context(&reg_output);
+        map.insert("registry_refresh".to_string(), reg_obj);
+    }
+
+    // V1.56 P3: expose workspace session state as a nested object.
+    if let Some(ws_state) = context.get_sync::<serde_json::Value>("__workspace_state") {
+        map.insert("workspace".to_string(), ws_state);
+    }
+
+    serde_json::Value::Object(map)
+}
+
+/// Translate `RegistryRefreshOutput` (camelCase) to `snake_case` context object.
+///
+/// The capability returns camelCase JSON fields; expressions use `snake_case`
+/// (`_context.registry_refresh.snapshot_version` not
+/// `_context.registry_refresh.snapshotVersion`). This function maps the
+/// output shape to the context shape used by the expression grammar.
+fn registry_output_to_context(output: &serde_json::Value) -> serde_json::Value {
+    let Some(obj) = output.as_object() else {
+        return serde_json::Value::Null;
+    };
+
+    let source = obj
+        .get("source")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let snapshot_version = obj
+        .get("snapshotVersion")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let capability_count = obj
+        .get("capabilityCount")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let fallback_reason = obj
+        .get("fallbackReason")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let retry_count = obj
+        .get("retryCount")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    serde_json::json!({
+        "source": source,
+        "snapshot_version": snapshot_version,
+        "capability_count": capability_count,
+        "fallback_reason": fallback_reason,
+        "retry_count": retry_count,
+    })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -903,6 +1321,52 @@ impl Task for StateCompositeTask {
                 arrived = arrived_count,
                 "merge node condition met, advancing"
             );
+        }
+
+        // 0.6. V1.56 P2 fix-wave (H-001/W-002): Converge (merge-point) gate.
+        // For states with explicit `converge:` config, track arrivals from
+        // connected predecessors and enforce the declared converge strategy.
+        if let Some(ref converge_config) = self.converge {
+            if !self.converge_predecessors.is_empty() {
+                let arrived: std::collections::HashSet<String> =
+                    context.get(&self.converge_key).await.unwrap_or_default();
+                let arrived_count = arrived.len();
+                let expected = self.converge_predecessors.len();
+
+                let condition_met = match converge_config.strategy {
+                    ConvergeStrategy::WaitForAll => arrived_count >= expected,
+                    ConvergeStrategy::FirstCompleted | ConvergeStrategy::Any => arrived_count >= 1,
+                };
+
+                if !condition_met {
+                    let state_id = self.id.clone();
+                    tracing::debug!(
+                        state_id = %state_id,
+                        arrived = arrived_count,
+                        expected = expected,
+                        strategy = ?converge_config.strategy,
+                        "converge node waiting for more incoming edges"
+                    );
+                    return Ok(TaskResult::new(
+                        Some(format!(
+                            "converge node '{state_id}': {arrived_count}/{expected} arrivals, waiting ({:?})",
+                            converge_config.strategy
+                        )),
+                        NextAction::WaitForInput,
+                    ));
+                }
+
+                // Converge condition met — clear arrivals for next cycle.
+                context
+                    .set(&self.converge_key, serde_json::Value::Null)
+                    .await;
+                tracing::info!(
+                    state_id = %self.id,
+                    arrived = arrived_count,
+                    strategy = ?converge_config.strategy,
+                    "converge node condition met, advancing"
+                );
+            }
         }
 
         // 1. Process enter actions.
@@ -1088,27 +1552,35 @@ impl Task for StateCompositeTask {
                                                 "min_interval throttle: reusing previous result"
                                                     .to_string()
                                             });
+                                        // V1.56 P3: inject context dependencies before
+                                        // expression routing. Must happen before the
+                                        // return because we need the .await point.
+                                        self.inject_context_deps(&context).await;
+
+                                        let next_action = if self.terminal {
+                                            NextAction::End
+                                        } else {
+                                            // V1.56 P2 fix-wave (H-002): throttle path
+                                            // must delegate to resolve_expression_target for
+                                            // Conditional/Branches variants.
+                                            // resolve_labeled_target rejects them.
+                                            match &self.next {
+                                                Some(
+                                                    NextTarget::Conditional(_)
+                                                    | NextTarget::Branches(_),
+                                                ) => self.resolve_expression_target(&context)?,
+                                                Some(
+                                                    NextTarget::Labeled(_) | NextTarget::GoNogo(_),
+                                                ) => self.resolve_labeled_target(
+                                                    &context,
+                                                    &prev_reason,
+                                                )?,
+                                                _ => self.judge_next_action(prev_result),
+                                            }
+                                        };
                                         return Ok(TaskResult::new(
                                             Some(format!("judge (throttled): {prev_reason}")),
-                                            if self.terminal {
-                                                NextAction::End
-                                            } else {
-                                                // V1.52 T-B P0: labeled routing via GoTo
-                                                if matches!(
-                                                    &self.next,
-                                                    Some(
-                                                        NextTarget::Labeled(_)
-                                                            | NextTarget::GoNogo(_)
-                                                    )
-                                                ) {
-                                                    self.resolve_labeled_target(
-                                                        &context,
-                                                        &prev_reason,
-                                                    )?
-                                                } else {
-                                                    self.judge_next_action(prev_result)
-                                                }
-                                            },
+                                            next_action,
                                         ));
                                     }
                                 }
@@ -1157,6 +1629,19 @@ impl Task for StateCompositeTask {
                 context.set(resume_key, true).await;
                 NextAction::WaitForInput
             }
+        };
+
+        // 2.5. V1.56 P2: Expression-based conditional routing.
+        // For states with Conditional/Branches next (any exit_when), evaluate
+        // expressions and route to the matching target.
+        // V1.56 P2 fix-wave (M-006): errors now propagated via ?.
+        // V1.56 P3: inject registry.refresh + workspace context before evaluation.
+        let next_action = match &self.next {
+            Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) => {
+                self.inject_context_deps(&context).await;
+                self.resolve_expression_target(&context)?
+            }
+            _ => next_action,
         };
 
         // 3. Terminal override — always End regardless of exit_when.
@@ -2030,6 +2515,7 @@ fn parse_iso8601_duration(s: &str) -> Option<chrono::Duration> {
 mod tests {
     use super::*;
     use crate::preset::manifest::{GoNogoNext, LabeledNext};
+    use nexus_contracts::local::orchestration::preset::{ConditionalBranches, ConditionalRule};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -2482,6 +2968,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2529,6 +3016,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2565,6 +3053,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2598,6 +3087,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def).with_registry(registry);
@@ -2630,6 +3120,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task =
@@ -2678,6 +3169,7 @@ mod tests {
             terminal: false,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3049,6 +3541,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3104,6 +3597,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3151,6 +3645,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3259,6 +3754,7 @@ mod tests {
             terminal: true,
             context_update: None,
             merge: None,
+            converge: None,
         };
 
         let task = StateCompositeTask::from_manifest(&state_def)
@@ -3329,6 +3825,11 @@ mod tests {
             merge_kind: None,
             expected_incoming: 0,
             merge_key: "_merge_test_judge".to_string(),
+            converge: None,
+            converge_key: "_converge_arrivals_test_judge".to_string(),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr: None,
+            workspace_state: None,
         }
     }
 
@@ -3550,6 +4051,11 @@ mod tests {
             merge_kind: None, // absent from YAML
             expected_incoming: 2,
             merge_key: "_merge_merged".to_string(),
+            converge: None,
+            converge_key: "_converge_arrivals_merged".to_string(),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr: None,
+            workspace_state: None,
         };
 
         let ctx = graph_flow::Context::new();
@@ -3579,6 +4085,401 @@ mod tests {
         assert!(
             matches!(result.next_action, NextAction::Continue),
             "with 2/2 arrivals and merge absent (default wait-all), should Continue; got {:?}",
+            result.next_action
+        );
+    }
+
+    // ── V1.56 P3: registry.refresh conditional edges ──────────────────
+
+    /// Build a state with `Branches` next for expression routing.
+    fn make_branches_task(
+        state_id: &str,
+        branches: Vec<ConditionalRule>,
+        default: &str,
+    ) -> StateCompositeTask {
+        let next = NextTarget::Branches(ConditionalBranches {
+            branches,
+            default: default.to_string(),
+        });
+        let cached_expr = StateCompositeTask::build_expr_cache(Some(&next));
+
+        StateCompositeTask {
+            id: state_id.to_string(),
+            terminal: false,
+            enter_actions: vec![],
+            exit_when: None,
+            next: Some(next),
+            engine: None,
+            inner_graphs: std::collections::HashMap::new(),
+            output_bindings: std::collections::HashMap::new(),
+            registry: Some(std::sync::Arc::new(CapabilityRegistry::with_builtins())),
+            daemon_tool_dispatch: None,
+            merge_kind: None,
+            expected_incoming: 0,
+            merge_key: format!("_merge_{state_id}"),
+            converge: None,
+            converge_key: format!("_converge_arrivals_{state_id}"),
+            converge_predecessors: std::collections::HashSet::new(),
+            cached_expr,
+            workspace_state: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn registry_synthetic_branch() {
+        // When registry.refresh returns synthetic output, the expression
+        // `_context.registry_refresh.source == 'synthetic'` should match.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.source == 'synthetic'".to_string(),
+                target: "synthetic_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "synthetic_state"),
+            "synthetic source should route to synthetic_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_network_branch() {
+        // Pre-set CDN-like output to simulate a successful network fetch.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.source == 'cdn'".to_string(),
+                target: "network_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        // Inject synthetic CDN output into the context before the task runs.
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "cdn",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 42,
+                "fallbackReason": "",
+                "retryCount": 1,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 10000,
+                "maxRetries": 3,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "network_state"),
+            "CDN source should route to network_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_fallback_branch() {
+        // Inject fallback output (CDN failure → synthetic_fallback).
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.source == 'synthetic_fallback'".to_string(),
+                target: "fallback_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "synthetic_fallback",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 31,
+                "fallbackReason": "CdnError::Timeout",
+                "retryCount": 3,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 10000,
+                "maxRetries": 3,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "fallback_state"),
+            "fallback source should route to fallback_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_capability_count_threshold() {
+        // capability_count > 50 should match when capabilityCount is 100.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.capability_count > 50".to_string(),
+                target: "high_capability_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "cdn",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 100,
+                "fallbackReason": "",
+                "retryCount": 0,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 0,
+                "maxRetries": 0,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "high_capability_state"),
+            "capability_count > 50 should route to high_capability_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_capability_count_below_threshold_goes_default() {
+        // capability_count > 50 should NOT match when capabilityCount is 30.
+        let task = make_branches_task(
+            "check_registry",
+            vec![ConditionalRule {
+                when: "_context.registry_refresh.capability_count > 50".to_string(),
+                target: "high_capability_state".to_string(),
+            }],
+            "standard_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__registry_refresh_output",
+            serde_json::json!({
+                "source": "synthetic",
+                "snapshotVersion": "2026-06-22.v1",
+                "capabilityCount": 30,
+                "fallbackReason": "",
+                "retryCount": 0,
+                "cacheAgeMs": 0,
+                "generatedAt": "2026-06-22T00:00:00Z",
+                "fetchTimeoutMs": 0,
+                "maxRetries": 0,
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "standard_state"),
+            "capability_count <= 50 should route to default, got {:?}",
+            result.next_action
+        );
+    }
+
+    // ── V1.56 P3: workspace.open/commit branch inputs ─────────────────
+
+    #[tokio::test]
+    async fn workspace_no_conflict_continues() {
+        // When no conflict, `_context.workspace.conflict_detected` is false,
+        // so `!_context.workspace.conflict_detected` should be true → continue.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "!_context.workspace.conflict_detected".to_string(),
+                target: "continue_state".to_string(),
+            }],
+            "resolve_conflict_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test1",
+                "conflict_detected": false,
+                "changes_applied": 0,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
+            "no conflict should route to continue_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_conflict_resolves() {
+        // When conflict_detected is true, route to resolve_conflict.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.conflict_detected".to_string(),
+                target: "resolve_conflict_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test2",
+                "conflict_detected": true,
+                "changes_applied": 0,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "resolve_conflict_state"),
+            "conflict should route to resolve_conflict_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_changes_count_threshold() {
+        // changes_applied > 3 → route to review_state.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.changes_applied > 3".to_string(),
+                target: "review_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test3",
+                "conflict_detected": false,
+                "changes_applied": 5,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "review_state"),
+            "changes_applied > 3 should route to review_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_changes_count_below_threshold_goes_default() {
+        // changes_applied > 3 should NOT match when changes_applied is 2.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.changes_applied > 3".to_string(),
+                target: "review_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set(
+            "__workspace_state",
+            serde_json::json!({
+                "session_id": "ws_test4",
+                "conflict_detected": false,
+                "changes_applied": 2,
+                "workspace_root": "/tmp/ws"
+            }),
+        )
+        .await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
+            "changes_applied <= 3 should route to default, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_default_state_when_no_state_injected() {
+        // When no workspace state is set, the default values should be used:
+        // conflict_detected = false, so `_context.workspace.conflict_detected` is false.
+        let task = make_branches_task(
+            "check_workspace",
+            vec![ConditionalRule {
+                when: "_context.workspace.conflict_detected".to_string(),
+                target: "resolve_conflict_state".to_string(),
+            }],
+            "continue_state",
+        );
+
+        let ctx = graph_flow::Context::new();
+        // No workspace state injected — the task uses its own default.
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "continue_state"),
+            "default workspace state (no conflict) should route to continue_state, got {:?}",
+            result.next_action
+        );
+    }
+
+    #[tokio::test]
+    async fn registry_refresh_only_invoked_when_needed() {
+        // Task with no registry references should NOT invoke registry.refresh.
+        let task = make_branches_task(
+            "check_simple",
+            vec![ConditionalRule {
+                when: "_context.score > 80".to_string(),
+                target: "approved".to_string(),
+            }],
+            "rejected",
+        );
+
+        let ctx = graph_flow::Context::new();
+        ctx.set("score", serde_json::json!(90)).await;
+
+        let result = task.run(ctx).await.unwrap();
+
+        assert!(
+            matches!(result.next_action, NextAction::GoTo(ref t) if t == "approved"),
+            "score > 80 should route to approved, got {:?}",
             result.next_action
         );
     }

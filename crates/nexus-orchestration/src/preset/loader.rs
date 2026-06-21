@@ -547,12 +547,40 @@ fn validate_manifest(
                         }
                     }
                 }
-                NextTarget::Conditional(_) => {
-                    problems.push(ValidationProblem {
-                        path: format!("{state_path}.next"),
-                        error: "conditional next is not yet supported in V1.4 (ConditionalNotYetSupported)"
-                            .to_string(),
-                    });
+                NextTarget::Conditional(next_cond) => {
+                    // V1.56 P2: Conditional next is now accepted on any state kind.
+                    // Legacy `kind: conditional` form (rules field).
+                    for (k, rule) in next_cond.rules.iter().enumerate() {
+                        if !state_ids.contains(rule.target.as_str()) {
+                            problems.push(ValidationProblem {
+                                path: format!("{state_path}.next.rules[{k}].target"),
+                                error: format!("unknown state: '{}'", rule.target),
+                            });
+                        }
+                    }
+                    if !state_ids.contains(next_cond.default.as_str()) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next.default"),
+                            error: format!("unknown default state: '{}'", next_cond.default),
+                        });
+                    }
+                }
+                NextTarget::Branches(branches) => {
+                    // V1.56 P2: Form B — expression/rule-based multi-branch.
+                    for (k, rule) in branches.branches.iter().enumerate() {
+                        if !state_ids.contains(rule.target.as_str()) {
+                            problems.push(ValidationProblem {
+                                path: format!("{state_path}.next.branches[{k}].target"),
+                                error: format!("unknown state: '{}'", rule.target),
+                            });
+                        }
+                    }
+                    if !state_ids.contains(branches.default.as_str()) {
+                        problems.push(ValidationProblem {
+                            path: format!("{state_path}.next.default"),
+                            error: format!("unknown default state: '{}'", branches.default),
+                        });
+                    }
                 }
             }
         }
@@ -661,6 +689,17 @@ fn validate_manifest(
                         });
                     }
                 }
+            }
+        }
+
+        // V1.56 P2 fix-wave (M-002): validate converge config.
+        // Reject terminal converge states.
+        if let Some(ref _converge_cfg) = state.converge {
+            if state.terminal {
+                problems.push(ValidationProblem {
+                    path: format!("{state_path}.converge"),
+                    error: "converge state must not be terminal".to_string(),
+                });
             }
         }
     }
@@ -922,9 +961,62 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
         }
     }
 
+    // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
+    // Count which states can route to each converge-annotated state.
+    let mut converge_predecessors: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+    for state in &manifest.states {
+        let pred_id = state.id.as_str();
+        // Collect all possible target states from this state's next.
+        let mut targets: Vec<&str> = Vec::new();
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => targets.push(next_id),
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                targets.push(&go_nogo.go);
+                targets.push(&go_nogo.nogo);
+            }
+            Some(NextTarget::Labeled(ref edges)) => {
+                for edge in edges {
+                    targets.push(&edge.target);
+                }
+            }
+            Some(NextTarget::Conditional(ref cond)) => {
+                for rule in &cond.rules {
+                    targets.push(&rule.target);
+                }
+                targets.push(&cond.default);
+            }
+            Some(NextTarget::Branches(ref branches)) => {
+                for rule in &branches.branches {
+                    targets.push(&rule.target);
+                }
+                targets.push(&branches.default);
+            }
+            None => {}
+        }
+        for target in targets {
+            // Check if target is a converge state.
+            let is_converge = manifest
+                .states
+                .iter()
+                .any(|s| s.id == target && s.converge.is_some());
+            if is_converge {
+                converge_predecessors
+                    .entry(target)
+                    .or_default()
+                    .insert(pred_id);
+            }
+        }
+    }
+
     for state in &manifest.states {
         let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
-        let task = StateCompositeTask::from_manifest(state).with_expected_incoming(incoming);
+        let preds: std::collections::HashSet<String> = converge_predecessors
+            .get(state.id.as_str())
+            .map(|hs| hs.iter().map(std::string::ToString::to_string).collect())
+            .unwrap_or_default();
+        let task = StateCompositeTask::from_manifest(state)
+            .with_expected_incoming(incoming)
+            .with_converge_predecessors(preds);
         graph.add_task(std::sync::Arc::new(task));
     }
 
@@ -954,7 +1046,7 @@ fn build_outer_graph(manifest: &PresetManifest) -> graph_flow::Graph {
                     graph.add_edge(&state.id, &edge.target);
                 }
             }
-            Some(NextTarget::Conditional(_)) | None => {}
+            Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) | None => {}
         }
     }
 
@@ -992,11 +1084,61 @@ pub fn build_wired_outer_graph(
         }
     }
 
+    // V1.56 P2 fix-wave (H-001): pre-compute converge predecessor sets.
+    let mut converge_predecessors: HashMap<&str, std::collections::HashSet<&str>> = HashMap::new();
+    for state in &loaded.manifest.states {
+        let pred_id = state.id.as_str();
+        let mut targets: Vec<&str> = Vec::new();
+        match &state.next {
+            Some(NextTarget::Linear(ref next_id)) => targets.push(next_id),
+            Some(NextTarget::GoNogo(ref go_nogo)) => {
+                targets.push(&go_nogo.go);
+                targets.push(&go_nogo.nogo);
+            }
+            Some(NextTarget::Labeled(ref edges)) => {
+                for edge in edges {
+                    targets.push(&edge.target);
+                }
+            }
+            Some(NextTarget::Conditional(ref cond)) => {
+                for rule in &cond.rules {
+                    targets.push(&rule.target);
+                }
+                targets.push(&cond.default);
+            }
+            Some(NextTarget::Branches(ref branches)) => {
+                for rule in &branches.branches {
+                    targets.push(&rule.target);
+                }
+                targets.push(&branches.default);
+            }
+            None => {}
+        }
+        for target in targets {
+            let is_converge = loaded
+                .manifest
+                .states
+                .iter()
+                .any(|s| s.id == target && s.converge.is_some());
+            if is_converge {
+                converge_predecessors
+                    .entry(target)
+                    .or_default()
+                    .insert(pred_id);
+            }
+        }
+    }
+
     for state in &loaded.manifest.states {
         let incoming = *incoming_labeled.get(state.id.as_str()).unwrap_or(&0);
+        let preds: std::collections::HashSet<String> = converge_predecessors
+            .get(state.id.as_str())
+            .map(|hs| hs.iter().map(std::string::ToString::to_string).collect())
+            .unwrap_or_default();
         let mut task = StateCompositeTask::from_manifest(state)
             .with_resolved_template(&loaded.id)
             .with_expected_incoming(incoming)
+            .with_converge_predecessors(preds)
             .with_engine(engine.clone())
             .with_inner_graphs(loaded.inner_graphs.clone())
             .with_output_bindings(loaded.output_bindings.clone())
@@ -1030,7 +1172,7 @@ pub fn build_wired_outer_graph(
                     graph.add_edge(&state.id, &edge.target);
                 }
             }
-            Some(NextTarget::Conditional(_)) | None => {}
+            Some(NextTarget::Conditional(_) | NextTarget::Branches(_)) | None => {}
         }
     }
 
@@ -1351,6 +1493,7 @@ states:
 
     #[test]
     fn reject_conditional_next() {
+        // V1.56 P2: Conditional next is now accepted on any state kind.
         let yaml = r#"
 preset:
   id: cond-test
@@ -1378,13 +1521,11 @@ states:
     terminal: true
 "#;
         let caps = test_capability_registry();
-        let err = load_preset_from_str(yaml, &caps).unwrap_err();
-        let problems = err.problems();
+        // V1.56 P2: conditional on non-llm_judge state is now accepted.
+        let result = load_preset_from_str(yaml, &caps);
         assert!(
-            problems
-                .iter()
-                .any(|p| p.error.contains("ConditionalNotYetSupported")),
-            "expected 'ConditionalNotYetSupported' problem: {problems:?}"
+            result.is_ok(),
+            "V1.56 P2: conditional next should be accepted on any state; got: {result:?}"
         );
     }
 
@@ -2764,7 +2905,8 @@ states:
 
     #[test]
     fn expression_conditional_still_rejected() {
-        // Ensure the expression-based Conditional form is still rejected.
+        // V1.56 P2: The expression-based Conditional form is now accepted on llm_judge states.
+        // This test verifies the form parses correctly (targets must be valid state IDs).
         let yaml = r#"
 preset:
   id: expr-cond
@@ -2779,12 +2921,11 @@ states:
     enter: []
     exit_when:
       kind: llm_judge
-      template_file: "judge.txt"
     next:
       kind: conditional
       rules:
         - when: "true"
-          to: b
+          target: b
       default: c
   - id: b
     enter: []
@@ -2794,13 +2935,11 @@ states:
     terminal: true
 "#;
         let caps = test_capability_registry();
-        let err = load_preset_from_str(yaml, &caps).unwrap_err();
-        let problems = err.problems();
+        // V1.56 P2: conditional form now accepted; validates target state references.
+        let result = load_preset_from_str(yaml, &caps);
         assert!(
-            problems
-                .iter()
-                .any(|p| p.error.contains("ConditionalNotYetSupported")),
-            "expected 'ConditionalNotYetSupported': {problems:?}"
+            result.is_ok(),
+            "V1.56 P2: expression conditional should be accepted; got: {result:?}"
         );
     }
 
