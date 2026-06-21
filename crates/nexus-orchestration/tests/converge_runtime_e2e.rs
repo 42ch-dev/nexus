@@ -1,7 +1,11 @@
 //! V1.56 P2 fix-wave (H-001/W-002): Converge runtime integration tests.
 //!
 //! Tests the converge (merge-point) gate in `StateCompositeTask::run()`.
-//! Verifies wait_for_all, first_completed, any strategies, and edge cases.
+//! Verifies wait_for_all, first_completed, any strategies, edge cases,
+//! and per-source dedup (C-NEW-001 regression).
+//!
+//! All converge arrivals go through `StateCompositeTask::record_converge_arrival`
+//! (the real runtime path, NOT a test-local helper).
 
 use graph_flow::{Context, NextAction, Task};
 use nexus_orchestration::preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget};
@@ -29,12 +33,12 @@ fn make_converge_task(
     .with_converge_predecessors(pred_set)
 }
 
-/// Record an arrival from a predecessor in the converge tracking key.
-fn record_arrival(ctx: &Context, target_id: &str) {
-    let key = format!("_converge_arrivals_{target_id}");
-    let mut arrived: Vec<String> = ctx.get_sync(&key).unwrap_or_default();
-    arrived.push("arrived".to_string());
-    ctx.set_sync(&key, arrived);
+/// Convenience: record a converge arrival using the real runtime path.
+///
+/// `source_id` identifies which predecessor is arriving (must match
+/// an entry in `converge_predecessors` for the gate to count it).
+fn converge_arrive(ctx: &Context, target_id: &str, source_id: &str) {
+    StateCompositeTask::record_converge_arrival(ctx, target_id, source_id);
 }
 
 // ── wait_for_all tests ────────────────────────────────────────────────
@@ -52,21 +56,21 @@ async fn converge_wait_for_all_two_way_both_arrive_advances() {
         result.next_action
     );
 
-    // 1 of 2 arrivals → should still wait.
-    record_arrival(&ctx, "merge_2");
+    // 1 of 2 arrivals (predecessor "a") → should still wait.
+    converge_arrive(&ctx, "merge_2", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::WaitForInput),
-        "with 1/2 arrivals, should WaitForInput; got {:?}",
+        "with 1/2 arrivals (a), should WaitForInput; got {:?}",
         result.next_action
     );
 
-    // 2 of 2 arrivals → should advance.
-    record_arrival(&ctx, "merge_2");
+    // 2 of 2 arrivals (predecessor "b") → should advance.
+    converge_arrive(&ctx, "merge_2", "b");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::Continue),
-        "with 2/2 arrivals, should Continue; got {:?}",
+        "with 2/2 arrivals (a+b), should Continue; got {:?}",
         result.next_action
     );
 }
@@ -76,14 +80,14 @@ async fn converge_wait_for_all_three_way_advances_when_all_arrive() {
     let task = make_converge_task("merge_3", ConvergeStrategy::WaitForAll, &["a", "b", "c"]);
     let ctx = Context::new();
 
-    // 2 of 3 → wait.
-    record_arrival(&ctx, "merge_3");
-    record_arrival(&ctx, "merge_3");
+    // 2 of 3 → wait (sources "a" and "b").
+    converge_arrive(&ctx, "merge_3", "a");
+    converge_arrive(&ctx, "merge_3", "b");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::WaitForInput));
 
-    // 3 of 3 → advance.
-    record_arrival(&ctx, "merge_3");
+    // 3 of 3 ("c") → advance.
+    converge_arrive(&ctx, "merge_3", "c");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(matches!(result.next_action, NextAction::Continue));
 }
@@ -96,7 +100,7 @@ async fn converge_first_completed_advances_on_first_arrival() {
     let ctx = Context::new();
 
     // 1 arrival → should advance immediately.
-    record_arrival(&ctx, "merge_fc");
+    converge_arrive(&ctx, "merge_fc", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::Continue),
@@ -127,7 +131,7 @@ async fn converge_any_advances_on_first_arrival() {
     let ctx = Context::new();
 
     // 1 arrival → should advance.
-    record_arrival(&ctx, "merge_any");
+    converge_arrive(&ctx, "merge_any", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::Continue),
@@ -143,7 +147,7 @@ async fn converge_any_idempotent_second_run_resumes() {
     let ctx = Context::new();
 
     // First pass: 1 arrival → advance.
-    record_arrival(&ctx, "merge_idem");
+    converge_arrive(&ctx, "merge_idem", "a");
     let result = task.run(ctx.clone()).await.unwrap();
     assert!(
         matches!(result.next_action, NextAction::Continue),
@@ -158,6 +162,77 @@ async fn converge_any_idempotent_second_run_resumes() {
     assert!(
         matches!(result.next_action, NextAction::Continue),
         "resumed run: should advance; got {:?}",
+        result.next_action
+    );
+}
+
+// ── C-NEW-001 dedup regression tests ───────────────────────────────────
+
+#[tokio::test]
+async fn converge_dedup_three_distinct_predecessors_all_recorded() {
+    // Regression test for C-NEW-001: three distinct predecessors arriving
+    // in arbitrary order must all be recorded, so wait_for_all advances.
+    let task = make_converge_task(
+        "merge_dedup",
+        ConvergeStrategy::WaitForAll,
+        &["x", "y", "z"],
+    );
+    let ctx = Context::new();
+
+    // Arrive in order: y, x, z (non-canonical order).
+    converge_arrive(&ctx, "merge_dedup", "y");
+    converge_arrive(&ctx, "merge_dedup", "x");
+
+    // 2 of 3 → still waiting.
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::WaitForInput),
+        "with 2/3 distinct arrivals (y, x), should WaitForInput; got {:?}",
+        result.next_action
+    );
+
+    // Third distinct predecessor arrives.
+    converge_arrive(&ctx, "merge_dedup", "z");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::Continue),
+        "with 3/3 distinct arrivals (y, x, z), should Continue; got {:?}",
+        result.next_action
+    );
+}
+
+#[tokio::test]
+async fn converge_dedup_same_source_twice_idempotent() {
+    // Regression test for C-NEW-001: a repeated arrival from the same
+    // source_id must be idempotent (not double-counted). Only when a
+    // DIFFERENT predecessor arrives should the gate advance.
+    let task = make_converge_task("merge_idem2", ConvergeStrategy::WaitForAll, &["a", "b"]);
+    let ctx = Context::new();
+
+    // Predecessor "a" arrives.
+    converge_arrive(&ctx, "merge_idem2", "a");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::WaitForInput),
+        "with 1/2 arrivals (a), should WaitForInput; got {:?}",
+        result.next_action
+    );
+
+    // Predecessor "a" arrives AGAIN → idempotent no-op, still 1/2.
+    converge_arrive(&ctx, "merge_idem2", "a");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::WaitForInput),
+        "after duplicate arrival from 'a', should still be 1/2 → WaitForInput; got {:?}",
+        result.next_action
+    );
+
+    // Predecessor "b" arrives → now 2/2 → advance.
+    converge_arrive(&ctx, "merge_idem2", "b");
+    let result = task.run(ctx.clone()).await.unwrap();
+    assert!(
+        matches!(result.next_action, NextAction::Continue),
+        "with 2/2 distinct arrivals (a idempotent + b), should Continue; got {:?}",
         result.next_action
     );
 }
