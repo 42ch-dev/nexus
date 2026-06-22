@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T23:30:00Z",
+  "updated_at": "2026-06-22T22:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.57-mid-qc-and-fix-waves",
@@ -49,7 +49,7 @@
           "commit": "8b793cc5"
         }
       ],
-      "completion_report": "T1 done: agent-nexus-tool-bridge.md Master promotion (header final rename; draft annotation removed). T2 done: capability-registry.md fold-in (Last updated + Scope + Coordinates + Iteration compass updated to V1.57; reconciliation of 18-host-tool count). T3 done: other amended specs (cli-spec.md §6.2M + daemon-runtime.md 3-caller + local-runtime-boundary.md topology + orchestration-engine.md §6.4) verified final via P0/P1/P3 fix-waves. T4 done: Profile B compaction (5 Done plans archived + plans-done.json index updated + status.json.plans[] cleaned to P-mid + P-last only). T5 done: tracker updates (shipped-features-tracker V1.57 snapshot appended; deferred-features-tracker V1.57 ship line + DF-46 reduced + §3.5 + §5 updated). T6 done: tech-debt rollup (status.json.metadata.tech_debt_summary reflects post-Wave 3 state: 35 open, 3 deferred, 19 resolved, 5 archived). T7 done: final verification (cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all -- --check clean; all 4 implement plans Done; 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA = 17 reports committed). T8 done: report-only QA by qa-engineer verdict Pass (commit 8b793cc5). V1.57 PR-ready on iteration/v1.57."
+      "completion_report": "P-1: Compass + 7 plan stubs authored by writing-specialist; PM review with CACHE-01 + V1.52-era residual coverage additions; merged into iteration/v1.58 @ 7bd746a2."
     },
     {
       "plan_id": "2026-06-22-v1.58-compass-and-plan-stubs",
@@ -59,12 +59,14 @@
       "wave": "—",
       "effort": "M",
       "owner": "@project-manager (PM whitelist; authored by @writing-specialist)",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.58-compass-and-plan-stubs.md",
       "working_branch": "feature/v1.58-prepare",
       "merge_target": "iteration/v1.58",
       "depends_on": null,
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "merge_commit": "7bd746a2",
+      "closed_at": "2026-06-22"
     },
     {
       "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
@@ -74,14 +76,34 @@
       "wave": "Wave 1 (parallel w/ P1)",
       "effort": "L",
       "owner": "@fullstack-dev (Track A canonical owner)",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.58-workspace-occ-hardening.md",
       "working_branch": "feature/v1.58-workspace-occ-hardening",
       "merge_target": "iteration/v1.58",
       "depends_on": [
         "2026-06-22-v1.58-compass-and-plan-stubs"
       ],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "merge_commit": "9667c5a4",
+      "closed_at": "2026-06-22",
+      "qc_reports": [
+        {
+          "reviewer": "qc-specialist",
+          "verdict": "Approve",
+          "commit": "a7382c10"
+        },
+        {
+          "reviewer": "qc-specialist-2",
+          "verdict": "Approve",
+          "commit": "1c121db9 (initial) + revalidation"
+        },
+        {
+          "reviewer": "qc-specialist-3",
+          "verdict": "Approve",
+          "commit": "783a2353 (initial) + revalidation"
+        }
+      ],
+      "completion_report": "P0: Workspace OCC hardening + capability surface quality. 7 implement commits + 8 fix-wave commits; QC tri-review (3/3 Approve after re-review). Carry-forwards closed: R-V156P0-M001..M006, R-V156P1-M003..M005+L001..L007, R-V156-MIDQA-01, R-V156-PROCESS-01+R-V156P1-CACHE-01, R-V157P0-L001/L002. Spec amendments: daemon-runtime.md V1.58 P0 Draft overlay, capability-registry.md V1.58 P0 Draft overlay, V1.57 plan text AC5 wording reconciled."
     },
     {
       "plan_id": "2026-06-22-v1.58-df44-reference-refresh-pipeline",
@@ -91,14 +113,34 @@
       "wave": "Wave 1 (parallel w/ P0)",
       "effort": "L",
       "owner": "@fullstack-dev-2 (Track B canonical owner)",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.58-df44-reference-refresh-pipeline.md",
       "working_branch": "feature/v1.58-df44-reference-refresh-pipeline",
       "merge_target": "iteration/v1.58",
       "depends_on": [
         "2026-06-22-v1.58-compass-and-plan-stubs"
       ],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "merge_commit": "20c8ae0f",
+      "closed_at": "2026-06-22",
+      "qc_reports": [
+        {
+          "reviewer": "qc-specialist",
+          "verdict": "Approve",
+          "commit": "6595367f"
+        },
+        {
+          "reviewer": "qc-specialist-2",
+          "verdict": "Approve",
+          "commit": "4790076f (initial) + revalidation"
+        },
+        {
+          "reviewer": "qc-specialist-3",
+          "verdict": "Approve",
+          "commit": "43bf69e2 (initial) + revalidation"
+        }
+      ],
+      "completion_report": "P1: DF-44 reference body refreshable pipeline core. 7 implement commits + 2 fix-wave commits; QC tri-review (3/3 Approve after re-review). Capability nexus.reference.refresh registered in orchestration CapabilityRegistry + host_tool_registry (P3 fix); daemon-side refresh_scheduler periodic task; new Draft spec reference-knowledge.md (7 sections); DB migration 202606220003 adds reference_sources refresh-tracking columns + partial indexes; per-ID test vectors ≥ 1 success + ≥ 1 failure. Fix-wave added validate_reference_url (HTTPS-only + private-IP block) and streaming body fetch with incremental blake3 + 100 MiB cap."
     },
     {
       "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
@@ -108,7 +150,7 @@
       "wave": "Wave 2 (after Wave 1 accepts)",
       "effort": "M",
       "owner": "@fullstack-dev (Track A canonical owner)",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.58-capability-quality-convergence.md",
       "working_branch": "feature/v1.58-capability-quality-convergence",
       "merge_target": "iteration/v1.58",
@@ -116,7 +158,27 @@
         "2026-06-22-v1.58-workspace-occ-hardening",
         "2026-06-22-v1.58-df44-reference-refresh-pipeline"
       ],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "merge_commit": "4bfb1399",
+      "closed_at": "2026-06-22",
+      "qc_reports": [
+        {
+          "reviewer": "qc-specialist",
+          "verdict": "Approve",
+          "commit": "04e14908"
+        },
+        {
+          "reviewer": "qc-specialist-2",
+          "verdict": "Approve",
+          "commit": "579294ca"
+        },
+        {
+          "reviewer": "qc-specialist-3",
+          "verdict": "Approve",
+          "commit": "4a76634c"
+        }
+      ],
+      "completion_report": "P2: Capability quality convergence (12/16 tasks done; 4 low-priority deferred with rationale). QC tri-review (3/3 Approve on first review, no fix-wave). Spec amendments: preset-conditional-routing.md §3.3 null semantics + 0-predecessor converge reconciliation + converge timeout documentation. Carry-forwards closed: R-V156P2-M001..M003+L001..L004, R-V156P2-CACHE-01, R-V156P3-W001/W002+S001/S002/S004, R-V157P1-W001."
     },
     {
       "plan_id": "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
@@ -126,14 +188,34 @@
       "wave": "Wave 3 (after Wave 2 accepts)",
       "effort": "M",
       "owner": "@fullstack-dev-2 (Track B canonical owner)",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.58-reference-cli-and-cross-cut-tests.md",
       "working_branch": "feature/v1.58-reference-cli-and-cross-cut-tests",
       "merge_target": "iteration/v1.58",
       "depends_on": [
         "2026-06-22-v1.58-capability-quality-convergence"
       ],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "merge_commit": "ba334fa8",
+      "closed_at": "2026-06-22",
+      "qc_reports": [
+        {
+          "reviewer": "qc-specialist",
+          "verdict": "Approve",
+          "commit": "76c0effb"
+        },
+        {
+          "reviewer": "qc-specialist-2",
+          "verdict": "Approve",
+          "commit": "(initial) + revalidation"
+        },
+        {
+          "reviewer": "qc-specialist-3",
+          "verdict": "Approve",
+          "commit": "5cba5235 (initial) + revalidation"
+        }
+      ],
+      "completion_report": "P3: Reference CLI + cross-cut tests (8/9 tasks done; T7 skipped no codegen, T8 deferred). QC tri-review + fix-wave + re-review (3/3 Approve). CLI subcommand nexus42 creator reference refresh + daemon IPC + atomic body file write + cross-reference E2E test (6 hermetic + 2 network-ignored). Fix-wave: H-001 host_tool registration (registry 20→21 tools), H-002 creator scoping (migration 202606220004 adds creator_id column + find_by_id_for_creator DAO), W-001 fsync. DF-44 fully closed (capability + migration + CLI + body file write + cross-cut)."
     },
     {
       "plan_id": "2026-06-22-v1.58-mid-qc-and-fix-waves",
@@ -143,11 +225,21 @@
       "wave": "Across all 3 waves",
       "effort": "M",
       "owner": "@project-manager",
-      "status": "Todo",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-22-v1.58-mid-qc-and-fix-waves.md",
       "merge_target": "iteration/v1.58",
       "depends_on": null,
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "merge_commit": "1de842f2",
+      "closed_at": "2026-06-22",
+      "qc_reports": [
+        {
+          "reviewer": "qa-engineer",
+          "verdict": "Pass with notes",
+          "commit": "v1.58-wave-1-mid-qa.md"
+        }
+      ],
+      "completion_report": "P-mid: 3-wave evidence gate complete. 12 QC reports all Approve. 33/35 V1.57+/V1.58+ residuals closed + DF-44 fully closed. Mid-QA Pass with notes (1 non-blocking test expectation drift for P-last hygiene). Wave 1 + Wave 3 had fix-waves; Wave 2 clean first-pass."
     },
     {
       "plan_id": "2026-06-22-v1.58-hygiene-and-closeout",
@@ -157,7 +249,7 @@
       "wave": "After Wave 3",
       "effort": "M",
       "owner": "@project-manager",
-      "status": "Todo",
+      "status": "InProgress",
       "file": ".mstar/plans/2026-06-22-v1.58-hygiene-and-closeout.md",
       "merge_target": "iteration/v1.58",
       "depends_on": [
@@ -166,7 +258,9 @@
         "2026-06-22-v1.58-capability-quality-convergence",
         "2026-06-22-v1.58-reference-cli-and-cross-cut-tests"
       ],
-      "created": "2026-06-22"
+      "created": "2026-06-22",
+      "merge_commit": null,
+      "closed_at": null
     }
   ],
   "metadata": {
@@ -177,7 +271,7 @@
     "latest_active_iteration": "V1.58",
     "latest_active_compass": "v1.58-workspace-occ-hardening-and-df44-reference-refresh",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "go",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -250,18 +344,18 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/79"
     },
     "tech_debt_summary": {
-      "total_open": 35,
-      "total_deferred": 3,
-      "total_resolved": 19,
+      "total_open": 14,
+      "total_deferred": 0,
+      "total_resolved": 35,
       "total_archived": 5,
       "by_severity_active": {
-        "medium": 18,
-        "low": 17
+        "low": 14,
+        "medium": 0
       },
       "by_target_active": {
-        "V1.57+": 32,
-        "V1.58+": 3
-      }
+        "V1.59+": 14
+      },
+      "v1_58_closeout_note": "V1.58 closed 33 of 35 V1.57+/V1.58+ residuals + DF-44 fully closed. 14 remaining are V1.52-era WL-A polish residuals explicitly deferred to V1.59+ per compass §6. 33 new residuals closed: R-V156P0-M001..M006 (workspace OCC), R-V156P1-M003..M005+L001..L007 (capability surface), R-V156-PROCESS-01+R-V156P1-CACHE-01+R-V156P2-CACHE-01 (process), R-V156P2-M001..M003+L001..L004 (DF-56 independent), R-V156P3-W001/W002+S001/S002/S004 (DF-56 dependent), R-V157P0-L001/L002+R-V157P1-W001 (V1.57-new). DF-44 closed end-to-end (P1 core + P3 CLI + body file write). All 4 implement plans merged to iteration/v1.58."
     },
     "v1_57_carry_forward_index": {
       "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. After Wave 2: ALL 3 V1.57 carry-forwards CLOSED (R-V156P1-M001 in P2 commit 28005f11; R-V156P1-M002 in P1 commit 64c0b245; R-V156P3-S003 in P0+P1 commits 7e9932ce + fc0e250a). 3 new V1.57+ residuals filed post-Wave 1: R-V157P0-L001 (low; AC wording), R-V157P0-L002 (medium; per-ID test vectors), R-V157P1-W001 (medium; host-call smoke `#[ignore]`). Wave 3 (P3) adds more V1.57+ residuals if surfaced.",
