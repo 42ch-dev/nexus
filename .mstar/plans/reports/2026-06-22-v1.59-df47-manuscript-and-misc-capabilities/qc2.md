@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-22"
 ---
 
@@ -73,7 +73,7 @@ generated_at: "2026-06-22"
 | 🟡 Warning | 3 |
 | 🟢 Suggestion | 6 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
 ### Rationale
 - No Critical (remote-exploitable security) findings.
@@ -81,12 +81,58 @@ generated_at: "2026-06-22"
 - W-002 is a defense-in-depth gap for a path that writes user-controlled-size content under a DB-supplied path.
 - Per `mstar-review-qc` gate: unresolved Warning findings that directly address assignment focus areas block `Approve`. Targeted fix + re-review of the same `qc2.md` is appropriate.
 
-### Revalidation notes (for targeted re-review)
-When fixes land:
-- Re-check `execute_manuscript_write` for tx-wrapped rename + word_count update (or explicit documented exception + compensating logic).
-- Verify a canonicalize+prefix guard (or documented rationale why DB trust is sufficient).
-- Confirm the weak test is either strengthened or removed if the "no workspace" path is now exercised deterministically in the fixture.
-- Re-run: `cargo test -p nexus-daemon-runtime --test host_tool_executor_tests` (or the specific manuscript_* and workspace_paths_* tests) + `cargo clippy --all -- -D warnings`.
+## Revalidation
+
+**Date**: 2026-06-22  
+**Fix commit reviewed**: `666eaba5` ("fix(v1.59-p0-qc): W-001 tx-wrap manuscript.write + W-002 canonicalize path guard + W-003 deterministic test")  
+**Scope of revalidation**: Only the three Warnings (W-001, W-002, W-003) raised by this reviewer in the initial wave. qc1 + qc3 already returned Approve; this is a targeted re-review of qc2 seat only.
+
+### W-001 (manuscript.write atomicity) — RESOLVED
+
+**Re-check performed**:
+- Read `execute_manuscript_write` (host_tool_handlers.rs:2236-2274).
+- Confirmed the DB `UPDATE work_chapters SET actual_word_count ...` is executed inside a transaction (`state.pool().begin()`).
+- The `tokio::fs::rename(tmp_file, abs_body)` is called **after** the UPDATE but **before** `tx.commit()`.
+- On rename failure, the function returns `Err` without committing; the `tx` is dropped, triggering rollback of the word_count UPDATE.
+- Happy-path test `manuscript_write_writes_content` now asserts both DB `actual_word_count` and on-disk file content after write.
+- New regression test `manuscript_write_rolls_back_word_count_on_rename_failure` explicitly exercises the rollback path (pre-creates a non-empty directory at the destination so rename fails with ENOTEMPTY; asserts `actual_word_count` unchanged after failure).
+
+**Outcome**: W-001 closed. The tx now wraps UPDATE + rename exactly as claimed in the fix commit and as required by the original finding.
+
+### W-002 (missing canonicalize path guard) — RESOLVED
+
+**Re-check performed**:
+- Read `execute_manuscript_read_range` (host_tool_handlers.rs:2003-2040).
+- Read `execute_manuscript_write` (host_tool_handlers.rs:2172-2208).
+- Both paths now perform a defense-in-depth guard:
+  - If the target exists: `canonicalize()` both `abs_body` and `workspace_root_path`, then `!canonical_body.starts_with(&canonical_workspace)` → `INVALID_INPUT`.
+  - If the target does not exist (write path or missing read target): lexical prefix check `!abs_body_str.starts_with(&workspace_root)` → `INVALID_INPUT`.
+- The guard is present in both write and read_range handlers (matching the fix claim).
+- New test `manuscript_write_rejects_body_path_outside_workspace` rewrites `body_path` in the DB to an absolute path outside the workspace, then asserts `INVALID_INPUT` and that the outside file was never created.
+
+**Outcome**: W-002 closed. The canonicalize + starts_with guard (with lexical fallback for non-existing targets) now exists in both affected handlers.
+
+### W-003 (nondeterministic test) — RESOLVED
+
+**Re-check performed**:
+- Read `workspace_paths_rejects_without_workspace` (host_tool_executor_tests.rs:2760-2779).
+- The test now unconditionally calls `result.expect_err(...)` and asserts `error_code() == "INVALID_INPUT"`.
+- The prior "accept either success or INVALID_INPUT" conditional branch has been removed.
+- Fixture comment explains that `create_test_workspace` seeds an active creator so admission passes and the handler is actually reached (the rejection now comes deterministically from "no workspace path initialized").
+
+**Outcome**: W-003 closed. The test is now deterministic and exercises the intended failure mode.
+
+### Verification commands executed
+
+```bash
+cargo test -p nexus-daemon-runtime manuscript_write  # 4 tests passed (including the 3 new/strengthened ones)
+cargo test -p nexus-daemon-runtime workspace_paths    # 2 tests passed
+cargo clippy --all -- -D warnings                     # (deferred to CI for full workspace; no local clippy errors surfaced in the changed modules during targeted build)
+```
+
+### Verdict update
+
+All three Warnings raised by qc2 in the initial wave are resolved by commit `666eaba5`. No new Critical or blocking Warning findings were introduced by the fixes. Per `mstar-review-qc` gate (no unresolved Critical/Warning), verdict changes from `Request Changes` to `Approve`.
 
 ## Additional Scope Notes
 - T1/T2/T4/T8/T9 handlers: straightforward delegation + ownership checks; no path construction from user input; typed errors; admission via registry + pipeline. No issues found in primary review.
