@@ -60,7 +60,8 @@
       "qc_tri_review_outcome": "Wave 1 (P0+P1 parallel): P0 qc1 Approve + qc2 Request Changes (3 W) + qc3 Approve → fix-wave → qc2 targeted re-review Approve. P1 qc1/qc2/qc3 all Approve. Total: 6 QC + 1 targeted re-review + 1 mid-QA = 8 reports.",
       "note": "V1.59 Shipped 2026-06-22; PR-ready on iteration/v1.59. 5 plans all Done; 9 DF-47 capabilities shipped + DF-12 closed. 8 low V1.59 residuals + 14 WL-A deferred to V1.60+. 1 fix-wave (P0). Pre-existing clippy baseline verified clean on origin/main (mid-QA confirmed no pre-existing errors).",
       "merge_commit": null,
-      "pr": null
+      "pr": 81,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/81"
     },
     "tech_debt_summary": {
       "total_open": 22,
