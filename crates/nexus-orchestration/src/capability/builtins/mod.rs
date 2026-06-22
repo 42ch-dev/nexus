@@ -9,6 +9,7 @@ mod acp_session_load;
 mod context_summarize;
 mod creator;
 mod essay_scaffold;
+mod fork;
 mod game_bible_scaffold;
 mod game_bible_section_status;
 mod judge_llm;
@@ -24,7 +25,9 @@ pub mod registry;
 mod script_scaffold;
 mod soul_experience_aggregate;
 mod sync;
+mod timeline;
 mod workspace;
+mod world;
 mod world_refs_validate;
 
 pub use acp_prompt::AcpPrompt;
@@ -35,6 +38,7 @@ pub use creator::{
     CreatorWriteMemory,
 };
 pub use essay_scaffold::EssayProjectScaffold;
+pub use fork::ForkCreate;
 pub use game_bible_scaffold::GameBibleProjectScaffold;
 pub use game_bible_section_status::GameBibleSectionStatusUpdate;
 pub use judge_llm::JudgeLlm;
@@ -52,7 +56,9 @@ pub use registry::{
 pub use script_scaffold::ScriptProjectScaffold;
 pub use soul_experience_aggregate::SoulExperienceAggregate;
 pub use sync::{SyncPull, SyncPush};
+pub use timeline::TimelineEventAppend;
 pub use workspace::{WorkspaceCommit, WorkspaceOpen};
+pub use world::{WorldDeltaApply, WorldDeltaPropose, WorldStateQuery};
 // WAIVER: pre-1.0 local-first; see V1.41 P-last residual R-V140P3-S5
 // — world_refs_validate is exposed as a library function but not registered
 // as a Capability in the builtins registry; it is called directly by daemon
