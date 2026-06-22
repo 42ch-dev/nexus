@@ -84,6 +84,17 @@ is a periodic `tokio::spawn` task:
   success/failure counters per tick.
 - **Graceful shutdown**: Exits cleanly when `shutdown_notify` fires; errors are
   logged and the loop continues (non-fatal).
+- **Idempotency guard**: The `refresh_status = 'refreshing'` marker acts as an
+  in-progress lock: `mark_refreshing` sets the status before the fetch,
+  and `find_stale_sources` excludes sources with `refresh_status = 'refreshing'`.
+  This prevents concurrent scheduler ticks from refreshing the same source.
+  **Limitation (single-daemon only):** This guard is best-effort within a single
+  daemon process. There is no cross-invocation or cross-process lock. An explicit
+  CLI call (P3) arriving between the SELECT and the UPDATE, or two daemon
+  instances against the same SQLite file, could both proceed to fetch. For the
+  V1.58 single-daemon local model this is acceptable; a cross-process mutex or
+  row-level optimistic concurrency check (OCC) on the refresh columns should be
+  considered when P3 lands and multi-process scenarios are supported.
 
 ---
 
