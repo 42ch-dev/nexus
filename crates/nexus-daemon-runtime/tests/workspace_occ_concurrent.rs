@@ -18,8 +18,7 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_daemon_runtime::workspace::session::{
-    occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId,
-    WorkspaceSessionManager,
+    occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId, WorkspaceSessionManager,
 };
 use nexus_local_db as db;
 use std::sync::Arc;
@@ -73,7 +72,10 @@ async fn concurrent_consume_single_winner() {
 
     // Exactly one must succeed, the other must get AlreadyCommitted.
     let wins = matches!(r1, Ok(_)) as u32 + matches!(r2, Ok(_)) as u32;
-    assert_eq!(wins, 1, "exactly one consumer must win; got r1={r1:?} r2={r2:?}");
+    assert_eq!(
+        wins, 1,
+        "exactly one consumer must win; got r1={r1:?} r2={r2:?}"
+    );
 
     let conflicts = matches!(r1, Err(SessionError::AlreadyCommitted(_))) as u32
         + matches!(r2, Err(SessionError::AlreadyCommitted(_))) as u32;

@@ -112,7 +112,10 @@ impl fmt::Display for SessionError {
             }
             Self::Database(msg) => write!(f, "session database error: {msg}"),
             Self::Io(msg) => write!(f, "session I/O error: {msg}"),
-            Self::PathEscape { path, workspace_root } => {
+            Self::PathEscape {
+                path,
+                workspace_root,
+            } => {
                 write!(
                     f,
                     "path '{path}' escapes canonical workspace root '{workspace_root}'"
@@ -170,10 +173,7 @@ pub fn canonicalize_workspace_root(root: &Path) -> Result<PathBuf, SessionError>
 /// Both paths must already be canonical. Returns `Ok(())` if `target` starts
 /// with `workspace_root`, otherwise [`SessionError::PathEscape`]. This closes
 /// the symlink-traversal gap that string-level `..` checks cannot detect.
-pub fn enforce_path_boundary(
-    target: &Path,
-    workspace_root: &Path,
-) -> Result<(), SessionError> {
+pub fn enforce_path_boundary(target: &Path, workspace_root: &Path) -> Result<(), SessionError> {
     if target.starts_with(workspace_root) {
         Ok(())
     } else {
@@ -435,8 +435,8 @@ impl WorkspaceSessionManager {
             // V1.58 P0 T2 (R-V156P0-M002): enforce the file stays within the
             // workspace root after resolving any symlinks.
             if file_path.exists() {
-                let canonical_file =
-                    std::fs::canonicalize(&file_path).map_err(|e| SessionError::Io(e.to_string()))?;
+                let canonical_file = std::fs::canonicalize(&file_path)
+                    .map_err(|e| SessionError::Io(e.to_string()))?;
                 let canonical_root = canonicalize_workspace_root(Path::new(workspace_root))?;
                 enforce_path_boundary(&canonical_file, &canonical_root)?;
             }
@@ -706,8 +706,11 @@ mod tests {
         // Create a symlink inside the workspace that points to an outside file.
         let outside = tempfile::tempdir().expect("tempdir");
         std::fs::write(outside.path().join("secret.txt"), b"secret").expect("write");
-        symlink(outside.path().join("secret.txt"), dir.path().join("escape.txt"))
-            .expect("symlink");
+        symlink(
+            outside.path().join("secret.txt"),
+            dir.path().join("escape.txt"),
+        )
+        .expect("symlink");
 
         let result = compute_content_hashes(dir.path()).await.expect("compute");
         // real.txt is hashed; escape.txt (symlink) is skipped.

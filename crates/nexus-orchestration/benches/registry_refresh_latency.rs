@@ -43,5 +43,9 @@ fn bench_registry_refresh_warm(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_registry_refresh_cold, bench_registry_refresh_warm);
+criterion_group!(
+    benches,
+    bench_registry_refresh_cold,
+    bench_registry_refresh_warm
+);
 criterion_main!(benches);

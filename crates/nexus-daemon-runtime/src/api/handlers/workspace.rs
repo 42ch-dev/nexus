@@ -344,9 +344,7 @@ fn map_session_error(
             workspace_root,
         } => NexusApiError::InvalidInput {
             field: "path".into(),
-            reason: format!(
-                "path '{path}' escapes canonical workspace root '{workspace_root}'"
-            ),
+            reason: format!("path '{path}' escapes canonical workspace root '{workspace_root}'"),
         },
     }
 }
