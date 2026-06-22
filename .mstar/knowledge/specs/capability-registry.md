@@ -283,3 +283,123 @@ Failure-path test vectors for `registry.refresh`:
   `CapabilityError::InputInvalid`.
 - `registry_refresh_rejects_unknown_field_strictly` — documents the
   serde-default contract (unknown fields ignored, not rejected).
+
+---
+
+## V1.59 P0: DF-47 manuscript & misc capability parity batch (9 host tools)
+
+**Status**: Shipped (V1.59 P0)
+**Plans**: `2026-06-22-v1.59-df47-manuscript-and-misc-capabilities`
+**Host tool count**: 21 → 30
+
+All 9 capabilities transition from `catalog-only` (Registry row ref = orchestration)
+to `shipped` with a `host_tool` binding in `host_tool_registry()`. Each entry below
+documents the runtime contract and per-ID test vectors (success + failure paths).
+
+### `nexus.manuscript.list`
+
+- **id**: `nexus.manuscript.list`
+- **access**: `Read`
+- **admission**: `ADMISSION_READ_WORKSPACE` (Allowlist, ActiveCreator, WorkspaceBounds, PermissionPolicy, AuditLog)
+- **handler**: `execute_manuscript_list` → delegates to `works::list_works`.
+- **ACP wire**: `{}` → `{"manuscripts": [{work_id, title, work_ref, work_profile, current_stage, stage_status, total_planned_chapters, current_chapter}], "count": int}`
+- **failure mode**: `Forbidden` (missing active creator or workspace).
+- **test vectors**:
+  - success: `manuscript_list_returns_manuscripts` — returns ≥1 manuscript for active creator.
+  - failure: `manuscript_list_rejects_without_active_creator` — `FORBIDDEN` when no active creator.
+
+### `nexus.manuscript.read_range`
+
+- **id**: `nexus.manuscript.read_range`
+- **access**: `Read`
+- **admission**: `ADMISSION_READ_WORKSPACE`
+- **handler**: `execute_manuscript_read_range` → reads chapter body file, applies `[start_line, end_line]` range (1-indexed inclusive).
+- **ACP wire**: `{work_id, chapter, volume?, start_line?, end_line?}` → `{work_id, chapter, volume, content, range: {start_line, end_line}, total_lines, truncated}`
+- **failure mode**: `InvalidInput` (missing field, bad type); `Forbidden` (cross-creator); `NotFound` (missing chapter or body).
+- **test vectors**:
+  - success: `manuscript_read_range_returns_bounded_content` — returns lines 2-4 of a 5-line body.
+  - failure: `manuscript_read_range_rejects_missing_chapter` — `INVALID_INPUT` when `chapter` absent.
+
+### `nexus.manuscript.write`
+
+- **id**: `nexus.manuscript.write`
+- **access**: `Write`
+- **admission**: `ADMISSION_WRITE_WORKSPACE`
+- **handler**: `execute_manuscript_write` → writes content to chapter body via temp+atomic-rename, updates `actual_word_count`. Enforces `MANUSCRIPT_WRITE_MAX_BYTES` (1 MiB) size quota.
+- **ACP wire**: `{work_id, chapter, volume?, content}` → `{written, work_id, chapter, volume, word_count, bytes_written}`
+- **failure mode**: `InvalidInput` (missing field, oversized content); `Forbidden` (cross-creator); `NotFound` (missing chapter).
+- **test vectors**:
+  - success: `manuscript_write_writes_content` — writes 12-word body, returns `written=true`.
+  - failure: `manuscript_write_rejects_oversized_content` — `INVALID_INPUT` when content > 1 MiB.
+
+### `nexus.manuscript.phase.get`
+
+- **id**: `nexus.manuscript.phase.get`
+- **access**: `Read`
+- **admission**: `ADMISSION_READ_WORKSPACE`
+- **handler**: `execute_manuscript_phase_get` → delegates to `works::get_work_stage`.
+- **ACP wire**: `{work_id}` → `{work_id, phase, stage_status}`
+- **failure mode**: `Forbidden` (cross-creator or missing work).
+- **test vectors**:
+  - success: `manuscript_phase_get_returns_current_phase` — returns `phase="brainstorm"` for seeded work.
+  - failure: `manuscript_phase_get_rejects_cross_creator` — `FORBIDDEN` for unknown work_id.
+
+### `nexus.manuscript.phase.set`
+
+- **id**: `nexus.manuscript.phase.set`
+- **access**: `Write`
+- **admission**: `ADMISSION_WRITE_WORKSPACE`
+- **handler**: `execute_manuscript_phase_set` → validates phase against canonical set `[brainstorm, draft, review, finalize]`; enforces forward-transition rule (backward transitions require `force=true`); delegates to `works::update_work_stage`.
+- **ACP wire**: `{work_id, phase, force?}` → `{work_id, previous_phase, current_phase, stage_status, transitioned}`
+- **failure mode**: `InvalidInput` (invalid phase, illegal backward transition without force); `Forbidden` (cross-creator).
+- **test vectors**:
+  - success: `manuscript_phase_set_advances_phase` — moves `brainstorm` → `draft`, returns `transitioned=true`.
+  - failure: `manuscript_phase_set_rejects_invalid_phase` — `INVALID_INPUT` for non-canonical phase value.
+
+### `nexus.workspace.paths`
+
+- **id**: `nexus.workspace.paths`
+- **access**: `Read`
+- **admission**: `ADMISSION_READ_CONTEXT`
+- **handler**: `execute_workspace_paths` → returns workspace root + allowed roots (`Works/`, `Worlds/`, `References/`, `.nexus42/`).
+- **ACP wire**: `{}` → `{workspace_root, allowed_roots: [string], preset_id}`
+- **failure mode**: `InvalidInput` (workspace not initialized).
+- **test vectors**:
+  - success: `workspace_paths_returns_allowed_roots` — returns ≥1 allowed root after `init_workspace`.
+  - failure: `workspace_paths_rejects_without_workspace` — `INVALID_INPUT` when `workspace_path()` is `None`.
+
+### `nexus.research.query`
+
+- **id**: `nexus.research.query`
+- **access**: `Read`
+- **admission**: `ADMISSION_READ_WORKSPACE`
+- **handler**: `execute_research_query` → queries `reference_sources` table; supports `reference_source_id` direct lookup or paginated list with optional tag filter.
+- **ACP wire**: `{reference_source_id?, tags?, limit?}` → `{results: [{reference_source_id, title, uri, source_type, tags, scan_status}], count}`
+- **failure mode**: `InvalidInput`; `NotFound` (unknown `reference_source_id`).
+- **test vectors**:
+  - success: `research_query_returns_reference_sources` — returns `results` array (empty or populated).
+  - failure: `research_query_rejects_unknown_reference_id` — `NOT_FOUND` for unknown `reference_source_id`.
+
+### `nexus.runtime.health`
+
+- **id**: `nexus.runtime.health`
+- **access**: `Read`
+- **admission**: `ADMISSION_READ_CONTEXT`
+- **handler**: `execute_runtime_health` → returns agent-visible health (distinct from `nexus.observability.daemon.health` which exposes uptime/lifecycle). Returns `runtime_mode`, `registry_reachable`, `registry_size`, `sync_state`, `cloud_enabled`, `pool_healthy`.
+- **ACP wire**: `{}` → `{runtime_mode, registry_reachable, registry_size, sync_state, cloud_enabled, pool_healthy}`
+- **failure mode**: `Forbidden` (missing active creator).
+- **test vectors**:
+  - success: `runtime_health_returns_agent_visible_status` — returns `registry_size=30`, `cloud_enabled=false`, `sync_state="disabled"` in local-only mode.
+  - failure: `runtime_health_rejects_without_active_creator` — `FORBIDDEN` when no active creator.
+
+### `nexus.trace.correlation`
+
+- **id**: `nexus.trace.correlation`
+- **access**: `Read`
+- **admission**: `ADMISSION_READ_CONTEXT`
+- **handler**: `execute_trace_correlation` → echoes incoming `correlation_id` (or generates one if absent) plus `session_id`, `parent_request_id`, `trace_timestamp`. Enables agents to thread trace context through multi-step tool chains.
+- **ACP wire**: `{correlation_id?, session_id?}` → `{correlation_id, session_id?, parent_request_id?, trace_timestamp, propagated}`
+- **failure mode**: `Forbidden` (missing active creator).
+- **test vectors**:
+  - success: `trace_correlation_propagates_correlation_id` — echoes `correlation_id`, `session_id`, `parent_request_id`.
+  - failure: `trace_correlation_rejects_without_active_creator` — `FORBIDDEN` when no active creator.
