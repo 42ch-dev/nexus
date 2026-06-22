@@ -52,196 +52,6 @@
       "completion_report": "P-1: Compass + 7 plan stubs authored by writing-specialist; PM review with CACHE-01 + V1.52-era residual coverage additions; merged into iteration/v1.58 @ 7bd746a2."
     },
     {
-      "plan_id": "2026-06-22-v1.58-compass-and-plan-stubs",
-      "title": "Compass & Plan Stubs (P-1)",
-      "iteration": "V1.58",
-      "track": "prepare",
-      "wave": "—",
-      "effort": "M",
-      "owner": "@project-manager (PM whitelist; authored by @writing-specialist)",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.58-compass-and-plan-stubs.md",
-      "working_branch": "feature/v1.58-prepare",
-      "merge_target": "iteration/v1.58",
-      "depends_on": null,
-      "created": "2026-06-22",
-      "merge_commit": "7bd746a2",
-      "closed_at": "2026-06-22"
-    },
-    {
-      "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
-      "title": "Workspace OCC Hardening & Capability Surface Quality (P0)",
-      "iteration": "V1.58",
-      "track": "Track A",
-      "wave": "Wave 1 (parallel w/ P1)",
-      "effort": "L",
-      "owner": "@fullstack-dev (Track A canonical owner)",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.58-workspace-occ-hardening.md",
-      "working_branch": "feature/v1.58-workspace-occ-hardening",
-      "merge_target": "iteration/v1.58",
-      "depends_on": [
-        "2026-06-22-v1.58-compass-and-plan-stubs"
-      ],
-      "created": "2026-06-22",
-      "merge_commit": "9667c5a4",
-      "closed_at": "2026-06-22",
-      "qc_reports": [
-        {
-          "reviewer": "qc-specialist",
-          "verdict": "Approve",
-          "commit": "a7382c10"
-        },
-        {
-          "reviewer": "qc-specialist-2",
-          "verdict": "Approve",
-          "commit": "1c121db9 (initial) + revalidation"
-        },
-        {
-          "reviewer": "qc-specialist-3",
-          "verdict": "Approve",
-          "commit": "783a2353 (initial) + revalidation"
-        }
-      ],
-      "completion_report": "P0: Workspace OCC hardening + capability surface quality. 7 implement commits + 8 fix-wave commits; QC tri-review (3/3 Approve after re-review). Carry-forwards closed: R-V156P0-M001..M006, R-V156P1-M003..M005+L001..L007, R-V156-MIDQA-01, R-V156-PROCESS-01+R-V156P1-CACHE-01, R-V157P0-L001/L002. Spec amendments: daemon-runtime.md V1.58 P0 Draft overlay, capability-registry.md V1.58 P0 Draft overlay, V1.57 plan text AC5 wording reconciled."
-    },
-    {
-      "plan_id": "2026-06-22-v1.58-df44-reference-refresh-pipeline",
-      "title": "DF-44 Reference Body Refreshable Pipeline (P1)",
-      "iteration": "V1.58",
-      "track": "Track B",
-      "wave": "Wave 1 (parallel w/ P0)",
-      "effort": "L",
-      "owner": "@fullstack-dev-2 (Track B canonical owner)",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.58-df44-reference-refresh-pipeline.md",
-      "working_branch": "feature/v1.58-df44-reference-refresh-pipeline",
-      "merge_target": "iteration/v1.58",
-      "depends_on": [
-        "2026-06-22-v1.58-compass-and-plan-stubs"
-      ],
-      "created": "2026-06-22",
-      "merge_commit": "20c8ae0f",
-      "closed_at": "2026-06-22",
-      "qc_reports": [
-        {
-          "reviewer": "qc-specialist",
-          "verdict": "Approve",
-          "commit": "6595367f"
-        },
-        {
-          "reviewer": "qc-specialist-2",
-          "verdict": "Approve",
-          "commit": "4790076f (initial) + revalidation"
-        },
-        {
-          "reviewer": "qc-specialist-3",
-          "verdict": "Approve",
-          "commit": "43bf69e2 (initial) + revalidation"
-        }
-      ],
-      "completion_report": "P1: DF-44 reference body refreshable pipeline core. 7 implement commits + 2 fix-wave commits; QC tri-review (3/3 Approve after re-review). Capability nexus.reference.refresh registered in orchestration CapabilityRegistry + host_tool_registry (P3 fix); daemon-side refresh_scheduler periodic task; new Draft spec reference-knowledge.md (7 sections); DB migration 202606220003 adds reference_sources refresh-tracking columns + partial indexes; per-ID test vectors ≥ 1 success + ≥ 1 failure. Fix-wave added validate_reference_url (HTTPS-only + private-IP block) and streaming body fetch with incremental blake3 + 100 MiB cap."
-    },
-    {
-      "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
-      "title": "Capability Quality Convergence (P2)",
-      "iteration": "V1.58",
-      "track": "Track A",
-      "wave": "Wave 2 (after Wave 1 accepts)",
-      "effort": "M",
-      "owner": "@fullstack-dev (Track A canonical owner)",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.58-capability-quality-convergence.md",
-      "working_branch": "feature/v1.58-capability-quality-convergence",
-      "merge_target": "iteration/v1.58",
-      "depends_on": [
-        "2026-06-22-v1.58-workspace-occ-hardening",
-        "2026-06-22-v1.58-df44-reference-refresh-pipeline"
-      ],
-      "created": "2026-06-22",
-      "merge_commit": "4bfb1399",
-      "closed_at": "2026-06-22",
-      "qc_reports": [
-        {
-          "reviewer": "qc-specialist",
-          "verdict": "Approve",
-          "commit": "04e14908"
-        },
-        {
-          "reviewer": "qc-specialist-2",
-          "verdict": "Approve",
-          "commit": "579294ca"
-        },
-        {
-          "reviewer": "qc-specialist-3",
-          "verdict": "Approve",
-          "commit": "4a76634c"
-        }
-      ],
-      "completion_report": "P2: Capability quality convergence (12/16 tasks done; 4 low-priority deferred with rationale). QC tri-review (3/3 Approve on first review, no fix-wave). Spec amendments: preset-conditional-routing.md §3.3 null semantics + 0-predecessor converge reconciliation + converge timeout documentation. Carry-forwards closed: R-V156P2-M001..M003+L001..L004, R-V156P2-CACHE-01, R-V156P3-W001/W002+S001/S002/S004, R-V157P1-W001."
-    },
-    {
-      "plan_id": "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
-      "title": "Reference CLI & Cross-Cut Tests (P3)",
-      "iteration": "V1.58",
-      "track": "Track B",
-      "wave": "Wave 3 (after Wave 2 accepts)",
-      "effort": "M",
-      "owner": "@fullstack-dev-2 (Track B canonical owner)",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.58-reference-cli-and-cross-cut-tests.md",
-      "working_branch": "feature/v1.58-reference-cli-and-cross-cut-tests",
-      "merge_target": "iteration/v1.58",
-      "depends_on": [
-        "2026-06-22-v1.58-capability-quality-convergence"
-      ],
-      "created": "2026-06-22",
-      "merge_commit": "ba334fa8",
-      "closed_at": "2026-06-22",
-      "qc_reports": [
-        {
-          "reviewer": "qc-specialist",
-          "verdict": "Approve",
-          "commit": "76c0effb"
-        },
-        {
-          "reviewer": "qc-specialist-2",
-          "verdict": "Approve",
-          "commit": "(initial) + revalidation"
-        },
-        {
-          "reviewer": "qc-specialist-3",
-          "verdict": "Approve",
-          "commit": "5cba5235 (initial) + revalidation"
-        }
-      ],
-      "completion_report": "P3: Reference CLI + cross-cut tests (8/9 tasks done; T7 skipped no codegen, T8 deferred). QC tri-review + fix-wave + re-review (3/3 Approve). CLI subcommand nexus42 creator reference refresh + daemon IPC + atomic body file write + cross-reference E2E test (6 hermetic + 2 network-ignored). Fix-wave: H-001 host_tool registration (registry 20→21 tools), H-002 creator scoping (migration 202606220004 adds creator_id column + find_by_id_for_creator DAO), W-001 fsync. DF-44 fully closed (capability + migration + CLI + body file write + cross-cut)."
-    },
-    {
-      "plan_id": "2026-06-22-v1.58-mid-qc-and-fix-waves",
-      "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
-      "iteration": "V1.58",
-      "track": "meta",
-      "wave": "Across all 3 waves",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.58-mid-qc-and-fix-waves.md",
-      "merge_target": "iteration/v1.58",
-      "depends_on": null,
-      "created": "2026-06-22",
-      "merge_commit": "1de842f2",
-      "closed_at": "2026-06-22",
-      "qc_reports": [
-        {
-          "reviewer": "qa-engineer",
-          "verdict": "Pass with notes",
-          "commit": "v1.58-wave-1-mid-qa.md"
-        }
-      ],
-      "completion_report": "P-mid: 3-wave evidence gate complete. 12 QC reports all Approve. 33/35 V1.57+/V1.58+ residuals closed + DF-44 fully closed. Mid-QA Pass with notes (1 non-blocking test expectation drift for P-last hygiene). Wave 1 + Wave 3 had fix-waves; Wave 2 clean first-pass."
-    },
-    {
       "plan_id": "2026-06-22-v1.58-hygiene-and-closeout",
       "title": "Hygiene & Closeout (P-last)",
       "iteration": "V1.58",
@@ -2882,7 +2692,13 @@
         "target": "V1.58+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.57-spec-governance-and-registry][R-V157P0-L001]",
         "note": "Low; PM noted that the plan stub said handlers live in `capability/builtins/`, but the P0 implementation found `capability/builtins/registry.rs` was already the SSOT (V1.53 P0) and P1 extracted the per-ID handlers to `host_tool_handlers.rs` instead. The 18 host tools register via the existing `CapabilityRow { id, access, admission, handler, ACP wire, failure_mode, handler_test_vector }` shape — semantically equivalent to what the plan wanted, just located differently. AC5 was met by intent. Reconciliation: update plan stub in V1.58+ to reflect reality (handlers live in `host_tool_handlers.rs`, not `capability/builtins/`).",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "5a53d72e"
+        },
+        "closure_note": "V1.58 P0 T19 closed: V1.57 plan text AC5 wording reconciled to \"18 shipped / 18 catalog-only / 3 scaffold-equivalent / 2 OUT\" per the actual 41-row roster (was \"35 shipped\" claim)."
       },
       {
         "id": "R-V157P0-L002",
@@ -2895,7 +2711,13 @@
         "target": "V1.58+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.57-spec-governance-and-registry][R-V157P0-L002]",
         "note": "Medium; P0 AC7 promised ≥1 success + ≥1 failure test per ID dispatched through `CapabilityRegistry::dispatch()`. P0 delivered the success-path test (catalog↔registry invariant) and the success-path per-ID smoke, but the per-ID failure-path (admission denied / invalid input) coverage is incomplete. Add in V1.58+ as a test-coverage hardening round.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "closure_note": "V1.58 P0 T20 + P2 T14 closed: per-ID failure-path test vectors added for capability handlers dispatched through CapabilityRegistry::dispatch(). Coverage spans registry.refresh handlers touched in P0 + DF-56 dependent path handlers in P2."
       }
     ],
     "2026-06-22-v1.57-daemon-refactor-and-caller-adapters": [
@@ -2910,7 +2732,13 @@
         "target": "V1.58+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.57-daemon-refactor-and-caller-adapters][R-V157P1-W001]",
         "note": "Medium; P1 dev marked smoke tests `#[ignore]` because they require a live daemon + active creator. qc2 raised a warning (not blocking) that the debug-only `host-call` subcommand lacks automated coverage. Add hermetic test harness for `host-call` in V1.58+ that mocks the daemon connection so the 3 smoke tests can run in CI.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "e78c9307"
+        },
+        "closure_note": "V1.58 P2 T13 closed: host-call smoke un-ignore with hermetic harness. 4 new hermetic tests added in crates/nexus42/tests/host_call_smoke.rs; 3 retained #[ignore] with documented justification (DaemonClient trait extraction is P1 boundary)."
       }
     ]
   }

@@ -1,0 +1,37 @@
+{
+  "plan_id": "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
+  "title": "Reference CLI & Cross-Cut Tests (P3)",
+  "iteration": "V1.58",
+  "track": "Track B",
+  "wave": "Wave 3 (after Wave 2 accepts)",
+  "effort": "M",
+  "owner": "@fullstack-dev-2 (Track B canonical owner)",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.58-reference-cli-and-cross-cut-tests.md",
+  "working_branch": "feature/v1.58-reference-cli-and-cross-cut-tests",
+  "merge_target": "iteration/v1.58",
+  "depends_on": [
+    "2026-06-22-v1.58-capability-quality-convergence"
+  ],
+  "created": "2026-06-22",
+  "merge_commit": "ba334fa8",
+  "closed_at": "2026-06-22",
+  "qc_reports": [
+    {
+      "reviewer": "qc-specialist",
+      "verdict": "Approve",
+      "commit": "76c0effb"
+    },
+    {
+      "reviewer": "qc-specialist-2",
+      "verdict": "Approve",
+      "commit": "(initial) + revalidation"
+    },
+    {
+      "reviewer": "qc-specialist-3",
+      "verdict": "Approve",
+      "commit": "5cba5235 (initial) + revalidation"
+    }
+  ],
+  "completion_report": "P3: Reference CLI + cross-cut tests (8/9 tasks done; T7 skipped no codegen, T8 deferred). QC tri-review + fix-wave + re-review (3/3 Approve). CLI subcommand nexus42 creator reference refresh + daemon IPC + atomic body file write + cross-reference E2E test (6 hermetic + 2 network-ignored). Fix-wave: H-001 host_tool registration (registry 20→21 tools), H-002 creator scoping (migration 202606220004 adds creator_id column + find_by_id_for_creator DAO), W-001 fsync. DF-44 fully closed (capability + migration + CLI + body file write + cross-cut)."
+}
