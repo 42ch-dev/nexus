@@ -724,6 +724,7 @@ pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandida
 /// |---|---|---|---|
 /// | `"novel"` | `attributes.novel_category` via [`block_type_to_novel_category`] | `["novel", "llm-extracted"]` | `Novel` |
 /// | `"game_bible"` | `attributes.game_bible_category` via [`block_type_to_game_bible_category`] | `["game-bible", "llm-extracted"]` | `GameBible` |
+/// | `"script"` | `attributes.script_category` via [`block_type_to_script_category`] | `["script", "llm-extracted"]` | `Script` |
 /// | other / unknown | `attributes.novel_category` (novel default) | `["novel", "llm-extracted"]` | `Novel` |
 ///
 /// The payload also carries the four LLK keys (`block_type`, `canonical_name`,
@@ -767,6 +768,12 @@ pub(crate) fn candidate_from_llm_json_for_profile(
             "game_bible_category",
             block_type_to_game_bible_category(&block_type),
             vec!["game-bible", "llm-extracted"],
+        )
+    } else if work_profile == "script" {
+        (
+            "script_category",
+            block_type_to_script_category(&block_type),
+            vec!["script", "llm-extracted"],
         )
     } else {
         (
@@ -866,6 +873,46 @@ pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
                 "block_type_to_game_bible_category: unknown block_type; defaulting to species"
             );
             "species"
+        }
+    }
+}
+
+/// Map a wire `block_type` (`snake_case`) to the script-profile `script_category`
+/// body attribute (script-profile.md §7.2 mapping).
+///
+/// V1.60 P1: used when constructing the `proposed_payload` for script
+/// KB extraction so adopt-time `ValidationMode::Script` validates.
+/// The three valid categories are: `dialogue`, `beat`, `act`. Existing
+/// cross-domain types map to the closest script category per §7.2 table.
+///
+/// Unknown `block_types` default to `dialogue` — the most generic script
+/// category — and emit a `tracing::debug!` so operators can see unclassified
+/// candidates.
+// Direct-mapping arms and cross-domain fallback arms may produce the same
+// string value, but the semantics differ (identity mapping vs. best-guess).
+#[allow(clippy::match_same_arms)]
+#[must_use]
+pub fn block_type_to_script_category(block_type: &str) -> &'static str {
+    match block_type {
+        // V1.55 P3 new script BlockTypes: direct mapping.
+        "dialogue" => "dialogue",
+        "beat" => "beat",
+        "act" => "act",
+        // Cross-domain reuse: existing BlockType → closest script_category.
+        "character" => "dialogue",  // Characters express through dialogue
+        "scene" => "act",           // Scenes belong to acts
+        "event" => "beat",          // Events are beats in narrative
+        "organization" => "act",    // Organizations anchor acts
+        "conflict" => "beat",       // Conflict is beat-level tension
+        "info_point" => "dialogue", // Info conveyed through dialogue
+        "ability" => "dialogue",    // Abilities expressed in dialogue
+        "item" => "beat",           // Items are beat-level props
+        _ => {
+            tracing::debug!(
+                block_type,
+                "block_type_to_script_category: unknown block_type; defaulting to dialogue"
+            );
+            "dialogue"
         }
     }
 }
@@ -1908,6 +1955,141 @@ mod tests {
         );
         assert_eq!(payload["tags"][0], "novel");
         assert_eq!(payload["tags"][1], "llm-extracted");
+    }
+
+    // ── V1.60 P1: profile-aware candidate materialization for script ──
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_produces_script_category() {
+        let c = serde_json::json!({
+            "canonical_name": "Alice's Confession",
+            "block_type": "dialogue",
+            "summary": "A pivotal character reveal",
+            "confidence": 0.92,
+            "source_quote": "I never wanted you to find out this way.",
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+
+        // script payload MUST have script_category, NOT novel_category or game_bible_category.
+        assert_eq!(
+            payload["attributes"]["script_category"], "dialogue",
+            "script profile: dialogue block_type → script_category dialogue"
+        );
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "script profile: must NOT emit novel_category"
+        );
+        assert!(
+            payload["attributes"].get("game_bible_category").is_none(),
+            "script profile: must NOT emit game_bible_category"
+        );
+        // Tags must be script scoped.
+        assert_eq!(payload["tags"][0], "script");
+        assert_eq!(payload["tags"][1], "llm-extracted");
+        // LLM keys still present.
+        assert_eq!(payload["block_type"], "dialogue");
+        assert_eq!(payload["canonical_name"], "Alice's Confession");
+        assert_eq!(payload["confidence"], 0.92);
+        assert_eq!(
+            payload["source_quote"],
+            "I never wanted you to find out this way."
+        );
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_cross_domain_maps_character_to_dialogue() {
+        // Cross-domain: character BlockType → dialogue script_category.
+        let c = serde_json::json!({
+            "canonical_name": "Bob",
+            "block_type": "character",
+            "confidence": 0.9,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["script_category"], "dialogue");
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "script profile: must NOT emit novel_category for cross-domain block_type"
+        );
+        assert_eq!(payload["tags"][0], "script");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_cross_domain_event_to_beat() {
+        // Cross-domain: event BlockType → beat script_category.
+        let c = serde_json::json!({
+            "canonical_name": "The Explosion",
+            "block_type": "event",
+            "confidence": 0.95,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["script_category"], "beat");
+        assert_eq!(payload["tags"][0], "script");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_unknown_defaults_dialogue() {
+        // Unknown block_type defaults to dialogue per the mapping.
+        let c = serde_json::json!({
+            "canonical_name": "???",
+            "block_type": "unknown_thing",
+            "confidence": 0.5,
+        });
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["script_category"], "dialogue");
+    }
+
+    #[test]
+    fn block_type_to_script_category_direct_mappings() {
+        assert_eq!(block_type_to_script_category("dialogue"), "dialogue");
+        assert_eq!(block_type_to_script_category("beat"), "beat");
+        assert_eq!(block_type_to_script_category("act"), "act");
+    }
+
+    #[test]
+    fn block_type_to_script_category_cross_domain_mappings() {
+        assert_eq!(
+            block_type_to_script_category("character"),
+            "dialogue",
+            "character → dialogue"
+        );
+        assert_eq!(block_type_to_script_category("scene"), "act", "scene → act");
+        assert_eq!(
+            block_type_to_script_category("event"),
+            "beat",
+            "event → beat"
+        );
+        assert_eq!(
+            block_type_to_script_category("organization"),
+            "act",
+            "organization → act"
+        );
+        assert_eq!(
+            block_type_to_script_category("conflict"),
+            "beat",
+            "conflict → beat"
+        );
+        assert_eq!(
+            block_type_to_script_category("info_point"),
+            "dialogue",
+            "info_point → dialogue"
+        );
+    }
+
+    #[test]
+    fn block_type_to_script_category_unknown_defaults_dialogue() {
+        assert_eq!(
+            block_type_to_script_category("goblin_king"),
+            "dialogue",
+            "unknown → dialogue (default)"
+        );
     }
 
     // ── V1.51 T-A P1: cross-chapter aggregation ───────────────────────────
