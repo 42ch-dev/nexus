@@ -774,6 +774,21 @@ impl StateCompositeTask {
     /// When set, `build_context_json()` exposes this value as a nested
     /// `workspace` object, accessible in expressions as
     /// `_context.workspace.<field>`.
+    ///
+    /// # Activation status (V1.58 P2 — R-V156P3-S004)
+    ///
+    /// This builder is currently **test-only**: the production loader
+    /// (`build_outer_graph` / `build_wired_outer_graph`) does not call it,
+    /// so `self.workspace_state` is `None` at runtime. When `None`,
+    /// `inject_workspace_context` falls back to a minimal synthetic default
+    /// (`session_id: ""`, `conflict_detected: false`, `changes_applied: 0`).
+    ///
+    /// Production activation requires wiring the engine to inject real
+    /// workspace session state per schedule tick (e.g. via a context key
+    /// that `inject_workspace_context` reads, or a capability invocation
+    /// mirroring the `registry.refresh` pattern). This is deferred to a
+    /// future plan because it requires changes to the engine → task context
+    /// injection boundary.
     #[must_use]
     pub fn with_workspace_state(mut self, state: serde_json::Value) -> Self {
         self.workspace_state = Some(state);
