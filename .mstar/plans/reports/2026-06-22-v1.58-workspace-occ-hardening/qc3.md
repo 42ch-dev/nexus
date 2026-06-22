@@ -1,17 +1,17 @@
 ---
+
 plan_id: 2026-06-22-v1.58-workspace-occ-hardening
 reviewer: qc-specialist-3
 reviewer_index: 3
 focus: performance-reliability
 review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
 working_branch: iteration/v1.58
-diff_basis: d443e855..af82ad39
+diff_basis: 43bf69e2..20c8ae0f
 reviewed_at: 2026-06-22T23:45:00Z
-verdict: Request Changes
+verdict: Approve
 ---
 
 # QC3 — V1.58 P0 Workspace OCC Hardening — Performance/Reliability Review
-
 ## Summary
 
 This review focused on async I/O performance, TOCTOU contention mitigation, path canonicalization costs, concurrent test reliability, benchmark validity, and metrics overhead. **One HIGH severity finding** was identified: `std::fs::canonicalize` is called from async context without `spawn_blocking`, which could block the async runtime under load. The implementation has good patterns for OCC CAS, retry jitter, and body-size enforcement, but there are gaps in documentation of retry semantics and stress testing evidence.
@@ -163,3 +163,41 @@ The benchmark is functional but missing key configuration (F-004) that would mak
 - `db::consume_session` implementation showing CAS primitive without retry loop
 - Benchmark code showing default Criterion configuration
 - Concurrent test code showing `tokio::spawn` usage without timing assertions
+
+---
+
+## Revalidation
+
+**Revalidated by**: qc-specialist-3
+**Revalidated at**: 2026-06-22T23:55:00Z
+**Diff basis**: 43bf69e2..20c8ae0f (P0 fix-wave)
+
+### Findings Status
+
+| Original Finding | Severity | Status | Evidence |
+| --- | --- | --- | --- |
+| F-001 std::fs::canonicalize async | Critical | Closed | `session.rs` lines 161-177: `canonicalize_workspace_root()` wraps `std::fs::canonicalize` in `tokio::task::spawn_blocking`. Comment explicitly references QC2 H-1 / QC3 F-001 fix. |
+| F-002 retry semantics | Warning | Closed | `session.rs` lines 575-590: `consume_session()` doc comment documents "No automatic retry" with detailed semantics. `daemon-runtime.md` lines 248-266: §Retry semantics updated with one-shot CAS design rationale. |
+| F-003 canonicalize cost | Warning | Closed | `session.rs` lines 448-453: `canonicalize_workspace_root()` hoisted outside per-change loop in `validate_changes_manifest()`. Comment references QC3 F-003 fix: "canonicalize the workspace root ONCE per `validate_changes_manifest` call." |
+| F-004 benchmark config | Warning | Closed | `registry_refresh_latency.rs` lines 44-55: explicit `criterion_config()` with warmup=1s, measurement=3s, sample_size=100. Lines 20-32: cold/warm/fallback groups separated with latency targets (<1ms synthetic warm, <5ms cold/fallback). |
+| S-001 jitter range | Suggestion | Deferred | `daemon-runtime.md` lines 291-298: documented rationale — speculative without measured incident; daemon is single-process local-first (N≪100). |
+| S-002 metrics overhead | Suggestion | Deferred | `daemon-runtime.md` lines 300-307: documented rationale — `Ordering::Relaxed` optimal; existing bench (734 ns) shows negligible overhead; revisit only if profiling shows >1% cold path. |
+
+### New Findings (if any)
+
+None. All original QC3 findings addressed.
+
+### Verdict
+
+**Verdict**: Approve
+
+**Rationale**: All blocking findings from the original Request Changes verdict have been closed:
+
+- **F-001 (Critical)**: `std::fs::canonicalize` is now safely wrapped in `tokio::task::spawn_blocking`, eliminating async runtime blocking risk (lines 161-177 in `session.rs`).
+- **F-002 (Warning)**: Retry semantics are comprehensively documented in both inline doc comments (`consume_session()` lines 575-590) and normative spec (`daemon-runtime.md` lines 248-266), clarifying one-shot CAS design with no automatic retry.
+- **F-003 (Warning)**: Path canonicalization is hoisted outside the per-change loop (`validate_changes_manifest()` lines 448-453), reducing O(N) syscalls to O(1) per call.
+- **F-004 (Warning)**: Benchmark now has explicit Criterion config (warmup, measurement, sample size), separated cold/warm/fallback groups, and documented latency targets in the benchmark file and spec.
+
+The suggestions S-001/S-002 are appropriately deferred with documented rationale in `daemon-runtime.md` — no measured need for changes in current single-process local-first deployment. The benchmark compiles successfully (`cargo check -p nexus-orchestration --bench registry_refresh_latency` passed).
+
+The P0 fix-wave closes the performance and reliability gaps identified in the original review. The hardened OCC foundation is ready for merge.
