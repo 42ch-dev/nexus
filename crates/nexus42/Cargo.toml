@@ -50,7 +50,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 hex = "0.4"
 # ACP SDK consumed via nexus-acp-host (worker-only linkage — see spec §11.3)
 # agent-client-protocol = "=0.10.4"  — REMOVED: consumed through nexus-acp-host
