@@ -2933,6 +2933,193 @@ mod tests {
         );
     }
 
+    // V1.60 P1: is_script_complete tests
+
+    #[tokio::test]
+    async fn test_is_script_complete_all_accepted() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_scr_comp_001").await;
+
+        // SAFETY: UPDATE — runtime query.
+        sqlx::query(
+            "UPDATE works SET work_profile = 'script', work_ref = 'my-script', \
+             intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("wrk_scr_comp_001")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let scripts_dir = dir.path().join("Works").join("my-script").join("Scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let beats_dir = dir.path().join("Works").join("my-script").join("Beats");
+        std::fs::create_dir_all(&beats_dir).unwrap();
+
+        std::fs::write(
+            scripts_dir.join("script.md"),
+            "---\nsection_status: accepted\nsection_weight: critical\n---\n\n# Script\n",
+        )
+        .unwrap();
+        std::fs::write(
+            beats_dir.join("beat-sheet.md"),
+            "---\nsection_status: accepted\nsection_weight: critical\n---\n\n# Beat Sheet\n",
+        )
+        .unwrap();
+
+        assert!(
+            is_script_complete(&pool, "wrk_scr_comp_001", dir.path())
+                .await
+                .unwrap(),
+            "all critical script sections accepted → script complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_script_complete_one_draft() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_scr_comp_002").await;
+
+        sqlx::query(
+            "UPDATE works SET work_profile = 'script', work_ref = 'my-script-2', \
+             intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("wrk_scr_comp_002")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let scripts_dir = dir.path().join("Works").join("my-script-2").join("Scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let beats_dir = dir.path().join("Works").join("my-script-2").join("Beats");
+        std::fs::create_dir_all(&beats_dir).unwrap();
+
+        std::fs::write(
+            scripts_dir.join("script.md"),
+            "---\nsection_status: accepted\nsection_weight: critical\n---\n\n# Script\n",
+        )
+        .unwrap();
+        std::fs::write(
+            beats_dir.join("beat-sheet.md"),
+            "---\nsection_status: draft\nsection_weight: critical\n---\n\n# Beat Sheet\n",
+        )
+        .unwrap();
+
+        assert!(
+            !is_script_complete(&pool, "wrk_scr_comp_002", dir.path())
+                .await
+                .unwrap(),
+            "beat-sheet is draft → script NOT complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_script_complete_missing_files() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_scr_comp_003").await;
+
+        sqlx::query(
+            "UPDATE works SET work_profile = 'script', work_ref = 'my-script-3', \
+             intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("wrk_scr_comp_003")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Scripts/ dir exists but no script.md
+        let scripts_dir = dir.path().join("Works").join("my-script-3").join("Scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        // Beats/ dir empty — no beat-sheet.md
+        let beats_dir = dir.path().join("Works").join("my-script-3").join("Beats");
+        std::fs::create_dir_all(&beats_dir).unwrap();
+
+        assert!(
+            !is_script_complete(&pool, "wrk_scr_comp_003", dir.path())
+                .await
+                .unwrap(),
+            "missing critical files → script NOT complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_script_complete_intake_pending() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_scr_comp_004").await;
+
+        // intake_status is pending
+        sqlx::query(
+            "UPDATE works SET work_profile = 'script', work_ref = 'my-script-4', \
+             intake_status = 'pending' WHERE work_id = ?",
+        )
+        .bind("wrk_scr_comp_004")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let scripts_dir = dir.path().join("Works").join("my-script-4").join("Scripts");
+        std::fs::create_dir_all(&scripts_dir).unwrap();
+        let beats_dir = dir.path().join("Works").join("my-script-4").join("Beats");
+        std::fs::create_dir_all(&beats_dir).unwrap();
+
+        std::fs::write(
+            scripts_dir.join("script.md"),
+            "---\nsection_status: accepted\nsection_weight: critical\n---\n\n# Script\n",
+        )
+        .unwrap();
+        std::fs::write(
+            beats_dir.join("beat-sheet.md"),
+            "---\nsection_status: accepted\nsection_weight: critical\n---\n\n# Beat Sheet\n",
+        )
+        .unwrap();
+
+        assert!(
+            !is_script_complete(&pool, "wrk_scr_comp_004", dir.path())
+                .await
+                .unwrap(),
+            "intake is pending → script NOT complete"
+        );
+    }
+
+    // V1.60 P1: script profile gate in is_work_completed
+    #[tokio::test]
+    async fn test_is_work_completed_script_returns_false() {
+        let (pool, _dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_script_001").await;
+
+        // Set work_profile to script and works.status to 'completed'
+        // SAFETY: UPDATE against works — runtime query for profile gate test.
+        sqlx::query(
+            "UPDATE works SET work_profile = 'script', status = 'completed', \
+             intake_status = 'complete', total_planned_chapters = 1, current_chapter = 1 \
+             WHERE work_id = ?",
+        )
+        .bind("wrk_script_001")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Even with status='completed', script Works should return false —
+        // the script profile gate prevents the novel completion logic from
+        // applying to script Works.
+        assert!(
+            !is_work_completed(&pool, "wrk_script_001")
+                .await
+                .unwrap(),
+            "script profile: is_work_completed must return false \
+             (novel completion bypassed; script section completion via is_script_complete)"
+        );
+    }
+
+    // V1.60 P1: is_script_profile helper test
+    #[test]
+    fn test_is_script_profile() {
+        assert!(crate::is_script_profile(Some("script")));
+        assert!(!crate::is_script_profile(Some("novel")));
+        assert!(!crate::is_script_profile(Some("game_bible")));
+        assert!(!crate::is_script_profile(Some("essay")));
+        assert!(!crate::is_script_profile(None));
+    }
+
     // R-V143P0-fix: negative/zero volume frontmatter must default to 1.
     #[tokio::test]
     async fn test_reconcile_volume_rejects_negative() {
