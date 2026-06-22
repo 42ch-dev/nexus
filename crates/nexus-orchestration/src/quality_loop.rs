@@ -1957,6 +1957,145 @@ mod tests {
         assert_eq!(payload["tags"][1], "llm-extracted");
     }
 
+    // ── V1.60 P1: profile-aware candidate materialization for script ──
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_produces_script_category() {
+        let c = serde_json::json!({
+            "canonical_name": "Alice's Confession",
+            "block_type": "dialogue",
+            "summary": "A pivotal character reveal",
+            "confidence": 0.92,
+            "source_quote": "I never wanted you to find out this way.",
+        });
+        let built = candidate_from_llm_json_for_profile(&c, "script")
+            .expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+
+        // script payload MUST have script_category, NOT novel_category or game_bible_category.
+        assert_eq!(
+            payload["attributes"]["script_category"], "dialogue",
+            "script profile: dialogue block_type → script_category dialogue"
+        );
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "script profile: must NOT emit novel_category"
+        );
+        assert!(
+            payload["attributes"].get("game_bible_category").is_none(),
+            "script profile: must NOT emit game_bible_category"
+        );
+        // Tags must be script scoped.
+        assert_eq!(payload["tags"][0], "script");
+        assert_eq!(payload["tags"][1], "llm-extracted");
+        // LLM keys still present.
+        assert_eq!(payload["block_type"], "dialogue");
+        assert_eq!(payload["canonical_name"], "Alice's Confession");
+        assert_eq!(payload["confidence"], 0.92);
+        assert_eq!(
+            payload["source_quote"],
+            "I never wanted you to find out this way."
+        );
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_cross_domain_maps_character_to_dialogue() {
+        // Cross-domain: character BlockType → dialogue script_category.
+        let c = serde_json::json!({
+            "canonical_name": "Bob",
+            "block_type": "character",
+            "confidence": 0.9,
+        });
+        let built = candidate_from_llm_json_for_profile(&c, "script")
+            .expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["script_category"], "dialogue");
+        assert!(
+            payload["attributes"].get("novel_category").is_none(),
+            "script profile: must NOT emit novel_category for cross-domain block_type"
+        );
+        assert_eq!(payload["tags"][0], "script");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_cross_domain_event_to_beat() {
+        // Cross-domain: event BlockType → beat script_category.
+        let c = serde_json::json!({
+            "canonical_name": "The Explosion",
+            "block_type": "event",
+            "confidence": 0.95,
+        });
+        let built = candidate_from_llm_json_for_profile(&c, "script")
+            .expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["script_category"], "beat");
+        assert_eq!(payload["tags"][0], "script");
+    }
+
+    #[test]
+    fn candidate_from_llm_json_for_profile_script_unknown_defaults_dialogue() {
+        // Unknown block_type defaults to dialogue per the mapping.
+        let c = serde_json::json!({
+            "canonical_name": "???",
+            "block_type": "unknown_thing",
+            "confidence": 0.5,
+        });
+        let built = candidate_from_llm_json_for_profile(&c, "script")
+            .expect("canonical_name present");
+        let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
+        assert_eq!(payload["attributes"]["script_category"], "dialogue");
+    }
+
+    #[test]
+    fn block_type_to_script_category_direct_mappings() {
+        assert_eq!(block_type_to_script_category("dialogue"), "dialogue");
+        assert_eq!(block_type_to_script_category("beat"), "beat");
+        assert_eq!(block_type_to_script_category("act"), "act");
+    }
+
+    #[test]
+    fn block_type_to_script_category_cross_domain_mappings() {
+        assert_eq!(
+            block_type_to_script_category("character"),
+            "dialogue",
+            "character → dialogue"
+        );
+        assert_eq!(
+            block_type_to_script_category("scene"),
+            "act",
+            "scene → act"
+        );
+        assert_eq!(
+            block_type_to_script_category("event"),
+            "beat",
+            "event → beat"
+        );
+        assert_eq!(
+            block_type_to_script_category("organization"),
+            "act",
+            "organization → act"
+        );
+        assert_eq!(
+            block_type_to_script_category("conflict"),
+            "beat",
+            "conflict → beat"
+        );
+        assert_eq!(
+            block_type_to_script_category("info_point"),
+            "dialogue",
+            "info_point → dialogue"
+        );
+    }
+
+    #[test]
+    fn block_type_to_script_category_unknown_defaults_dialogue() {
+        assert_eq!(
+            block_type_to_script_category("goblin_king"),
+            "dialogue",
+            "unknown → dialogue (default)"
+        );
+    }
+
     // ── V1.51 T-A P1: cross-chapter aggregation ───────────────────────────
 
     /// Helper: a heuristic candidate for `name` (the shape
