@@ -18,7 +18,8 @@
 #![allow(clippy::unwrap_used)]
 
 use nexus_daemon_runtime::workspace::session::{
-    occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId, WorkspaceSessionManager,
+    compute_content_hashes, occ_conflict_total, ChangeEntry, ChangeOp, SessionError, SessionId,
+    WorkspaceSessionManager,
 };
 use nexus_local_db as db;
 use std::sync::Arc;
@@ -181,4 +182,71 @@ async fn consume_after_commit_is_stale() {
 /// its own manager handle pointing at the same DB.
 fn clone_mgr(mgr: &WorkspaceSessionManager) -> WorkspaceSessionManager {
     WorkspaceSessionManager::new(mgr.pool())
+}
+
+// ── V1.58 P0 T2 (QC2 H-2 regression): symlink rejection in Modify path ────
+
+#[tokio::test]
+#[serial_test::serial]
+#[cfg(unix)]
+async fn validate_changes_manifest_rejects_symlink_in_modify_path() {
+    // V1.58 P0 T2 (QC2 H-2 regression): `validate_changes_manifest` must
+    // reject a symlink introduced at a Modify change path BEFORE opening the
+    // file for hashing. Without the `symlink_metadata` defense, a symlink
+    // pointing outside the workspace root would be followed by `File::open`
+    // inside `compute_single_file_hash`, allowing the hash of outside
+    // content to be used for OCC comparison (TOCTOU between boundary check
+    // and hash read). Mirrors the `compute_content_hashes_inner` defense.
+    use std::os::unix::fs::symlink;
+
+    let (pool, _dir) = fresh_pool().await;
+    let mgr = WorkspaceSessionManager::new(pool);
+
+    // Workspace with one tracked file.
+    let ws_dir = tempfile::tempdir().unwrap();
+    std::fs::write(ws_dir.path().join("real.txt"), b"real").unwrap();
+
+    // Open a session on the workspace root (scans real.txt → snapshot).
+    let ws_root = ws_dir.path().to_string_lossy().to_string();
+    let session_id = mgr
+        .open_session(&ws_root, "", true)
+        .await
+        .expect("open_session");
+
+    // Compute the stored hash so the Modify change has a matching content_hash.
+    let stored_hashes = compute_content_hashes(ws_dir.path())
+        .await
+        .expect("compute");
+    let stored_hash = stored_hashes
+        .hashes
+        .get("real.txt")
+        .cloned()
+        .expect("real.txt tracked");
+
+    // Swap real.txt for a symlink pointing OUTSIDE the workspace root.
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), b"secret-outside").unwrap();
+    std::fs::remove_file(ws_dir.path().join("real.txt")).unwrap();
+    symlink(
+        outside.path().join("secret.txt"),
+        ws_dir.path().join("real.txt"),
+    )
+    .expect("symlink");
+
+    // The commit-time validation must reject the symlink with `PathEscape` —
+    // it must NOT compute the hash of the outside file (which would be a
+    // successful symlink escape).
+    let changes = vec![ChangeEntry {
+        path: "real.txt".to_string(),
+        content_hash: stored_hash,
+        op: ChangeOp::Modify,
+    }];
+    let err = mgr
+        .validate_changes_manifest(&session_id, &changes, &ws_root)
+        .await
+        .expect_err("symlink must be rejected");
+    assert!(
+        matches!(err, SessionError::PathEscape { .. }),
+        "expected PathEscape for symlink in Modify path, got {err:?}"
+    );
 }
