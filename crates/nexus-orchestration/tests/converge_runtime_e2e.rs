@@ -4,8 +4,25 @@
 //! Verifies wait_for_all, first_completed, any strategies, edge cases,
 //! and per-source dedup (C-NEW-001 regression).
 //!
-//! All converge arrivals go through `StateCompositeTask::record_converge_arrival`
-//! (the real runtime path, NOT a test-local helper).
+//! # Test Contract (R-V156P2-CACHE-01)
+//!
+//! **All converge arrivals go through `StateCompositeTask::record_converge_arrival`
+//! (the real runtime path, NOT a test-local helper).**
+//!
+//! This is a hard contract for the convergence surface because:
+//! 1. `record_converge_arrival` is the only function that writes the
+//!    `_converge_arrivals_{target}` context key with the correct
+//!    `HashSet<String>` shape expected by the gate check in `run()`.
+//! 2. Bypassing it (e.g. `ctx.set("_converge_arrivals_merge", ...)`) would
+//!    test a serialization round-trip, not the actual arrival-recording
+//!    semantics — defeating the purpose of verifying per-source dedup.
+//! 3. The converge gate reads the key back via `context.get::<HashSet<String>>()`
+//!    and compares `arrived.len()` against `converge_predecessors.len()`.
+//!    Only `record_converge_arrival` guarantees the shape invariant.
+//!
+//! **Any new converge test in this file MUST use the `converge_arrive` helper
+//! (which delegates to `record_converge_arrival`). Do not add tests that
+//! manually write the converge-arrivals context key.**
 
 use graph_flow::{Context, NextAction, Task};
 use nexus_orchestration::preset::manifest::{ConvergeConfig, ConvergeStrategy, NextTarget};
