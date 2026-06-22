@@ -166,3 +166,84 @@ Cross-caller E2E test: `crates/nexus-daemon-runtime/tests/cross_caller_e2e.rs`
 verifies dispatch equivalence across all 3 caller paths for all 18 IDs
 (54 invocation cases).
 
+## V1.58 P0 Draft overlay: .sqlx cache hygiene protocol (R-V156-PROCESS-01 + R-V156P1-CACHE-01)
+
+**Status**: Draft (V1.58 P0)
+**Plans**: `2026-06-22-v1.58-workspace-occ-hardening` (T18)
+
+The `.sqlx/` compile-time query cache must be regenerated whenever a SQL
+migration or `sqlx::query!` / `sqlx::query_as!` / `sqlx::query_scalar!` macro
+is added or modified — in **library code OR test code**.
+
+### Protocol
+
+1. **After any migration or query change**, run:
+   ```sh
+   DATABASE_URL="sqlite:.sqlx/state.db?mode=rwc" cargo sqlx prepare --workspace -- --tests
+   ```
+   The `--tests` flag is **critical** (R-V156P1-CACHE-01): it ensures
+   `sqlx::query!` macros inside `#[cfg(test)]` modules and integration test
+   files are also captured. Omitting `--tests` produces a cache that compiles
+   the library but fails the test binaries under `SQLX_OFFLINE=true`.
+
+2. **Commit the regenerated `.sqlx/query-*.json` artifacts**. The `.sqlx/`
+   directory is tracked in git; `state.db`, `state.db-wal`, `state.db-shm`
+   are gitignored.
+
+3. **CI verification** (offline mode — no live database required):
+   ```sh
+   SQLX_OFFLINE=true cargo check --workspace --tests
+   ```
+   This validates every `query!` macro against the committed cache. A
+   failure means the cache is stale — re-run step 1.
+
+4. **Equivalently**, `cargo sqlx prepare --workspace --check -- --tests`
+   exits 0 when the cache is up-to-date and 1 when it needs regeneration.
+   Note: `--check` goes **before** `--` (the plan's original
+   `cargo sqlx prepare --workspace -- --tests --check` ordering is incorrect
+   for sqlx-cli 0.8+).
+
+### Common pitfall (R-V156P1-CACHE-01)
+
+`cargo sqlx prepare --workspace` (without `--tests`) generates a cache that
+omits test-only queries. The library compiles, but `cargo test --workspace`
+fails under `SQLX_OFFLINE=true` with "no cached statement" errors on test
+binaries. Always include `--tests`.
+
+## V1.58 P0 Draft overlay: Workspace OCC hardening (R-V156P0-M001..M006)
+
+**Status**: Draft (V1.58 P0)
+**Plans**: `2026-06-22-v1.58-workspace-occ-hardening` (T1–T6)
+**Coordinates with**: `concurrency.md` §7 (per-row OCC)
+
+### Path canonicalization contract (R-V156P0-M002)
+
+`WorkspaceSessionManager::open_session` canonicalizes the workspace root via
+`std::fs::canonicalize` before computing content hashes. The target path is
+canonicalized and checked against the canonical workspace root prefix via
+`enforce_path_boundary`. Symlinks inside the workspace are **skipped** during
+hash computation (`symlink_metadata` check) so a symlink chain cannot escape
+the workspace root.
+
+### TOCTOU mitigation (R-V156P0-M005)
+
+The commit path (`commit_workspace` HTTP handler →
+`WorkspaceSessionManager::commit_session`) validates the `changes[]` manifest
+and consumes the session in a single method call, closing the TOCTOU window
+between `validate_changes_manifest` and `consume_session`. The underlying
+`db::consume_session` atomic `UPDATE ... WHERE consumed = 0 AND expires_at > now`
+is the compare-and-swap primitive; `commit_session` is the transaction guard.
+
+### Async I/O (R-V156P0-M004)
+
+Content hashing (`compute_content_hashes`, `compute_single_file_hash`) uses
+`tokio::fs` + `AsyncReadExt`, not blocking `std::fs`. This prevents executor
+stalls when the daemon processes large workspace directories.
+
+### Metrics & tracing (R-V156P0-M006)
+
+OCC conflicts (AlreadyConsumed race losers, content hash mismatches) emit
+`tracing::warn!` with structured fields (`session_id`, `conflict_type`) and
+increment the process-wide `occ_conflict_total` AtomicU64 counter (read via
+`workspace::session::occ_conflict_total()`).
+

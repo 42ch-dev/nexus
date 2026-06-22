@@ -2499,6 +2499,7 @@ dependencies = [
  "blake3",
  "chrono",
  "chrono-tz",
+ "criterion",
  "cron",
  "futures-util",
  "graph-flow",
