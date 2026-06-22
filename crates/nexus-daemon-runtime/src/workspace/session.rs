@@ -21,7 +21,7 @@ use tracing;
 // local-first posture; see daemon-runtime.md §observability).
 
 /// Total OCC conflicts detected at the workspace session commit path
-/// (AlreadyCommitted race or content hash mismatch).
+/// (`AlreadyCommitted` race or content hash mismatch).
 static OCC_CONFLICT_TOTAL: AtomicU64 = AtomicU64::new(0);
 
 /// Increment the OCC conflict counter (V1.58 P0 T6).
@@ -173,6 +173,11 @@ pub fn canonicalize_workspace_root(root: &Path) -> Result<PathBuf, SessionError>
 /// Both paths must already be canonical. Returns `Ok(())` if `target` starts
 /// with `workspace_root`, otherwise [`SessionError::PathEscape`]. This closes
 /// the symlink-traversal gap that string-level `..` checks cannot detect.
+///
+/// # Errors
+///
+/// Returns [`SessionError::PathEscape`] when `target` does not start with
+/// `workspace_root`.
 pub fn enforce_path_boundary(target: &Path, workspace_root: &Path) -> Result<(), SessionError> {
     if target.starts_with(workspace_root) {
         Ok(())
