@@ -5,8 +5,8 @@ reviewer_index: 3
 focus: performance-reliability
 review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
 working_branch: iteration/v1.58
-diff_basis: 04e14908..1f9ff88a
-reviewed_at: 2026-06-22T00:00:00Z
+diff_basis: 04e14908..1f9ff88a (original), 5cba5235..ba334fa8 (fix-wave revalidation)
+reviewed_at: 2026-06-22T00:00:00Z (original), 2026-06-22T00:00:00Z (revalidation)
 verdict: Approve
 ---
 
@@ -133,3 +133,25 @@ No cross-plan regressions detected for P0/P1/P2 performance:
 4. **Daemon performance**: The new refresh path adds HTTP fetches (up to 100 MiB per source) but this is scoped to the refresh capability and does not affect daemon startup or other capabilities.
 
 **Recommendation**: Address W-QC3-P3-001 (add fsync to `atomic_write_body`) before merging.
+## Revalidation
+
+**Revalidated by**: qc-specialist-3
+**Revalidated at**: 2026-06-22 (see commit for exact timestamp)
+**Diff basis**: 5cba5235..ba334fa8 (P3 fix-wave)
+
+### Findings Status
+
+| Original Finding | Severity | Status | Evidence |
+| --- | --- | --- | --- |
+| W-QC3-P3-001 fsync | Warning | ✅ Closed | `crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs:183-187` — Added `tmp_file.sync_all().await?;` between `tokio::fs::write()` and `tokio::fs::rename()` matching V1.55 P3 ScaffoldTransaction pattern (write → sync → rename). |
+| S-QC3-P3-001 progress | Suggestion | ⏸️ Deferred | Progress indicators for `all` path remain a future improvement. V1.58 P3 fix-wave focused on H-002 (creator scoping); CLI changes in `crates/nexus42/src/commands/creator/reference.rs:269-289` added creator context but did not add progress feedback. This is acceptable per original plan risks section. |
+
+### New Findings (if any)
+
+None.
+
+### Verdict
+
+**Verdict**: Approve
+
+**Rationale**: W-QC3-P3-001 (missing fsync in atomic_write_body) has been addressed with the correct write → sync → rename pattern matching V1.55 P3 ScaffoldTransaction precedent. The fix is surgical, well-commented with finding ID reference, and eliminates the power-loss risk. S-QC3-P3-001 (progress indicators) was already categorized as a non-blocking Suggestion in the original review and remains appropriately deferred per the plan's documented tradeoffs. No new performance or reliability regressions introduced in the fix-wave (commits 40afdf52, ef8468e2, ba334fa8).
