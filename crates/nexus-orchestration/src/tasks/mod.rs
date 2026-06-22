@@ -1090,9 +1090,7 @@ impl StateCompositeTask {
             .await
             .is_some()
         {
-            tracing::debug!(
-                "registry.refresh skipped: cached output already present in context"
-            );
+            tracing::debug!("registry.refresh skipped: cached output already present in context");
             return;
         }
 
