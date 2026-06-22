@@ -1119,6 +1119,14 @@ mod tests {
     ///
     /// V1.59 P0: Expanded `is_likely_host_tool` to cover the 9 newly-shipped
     /// DF-47 capabilities so the bijection is enforced bidirectionally.
+    ///
+    /// V1.60 P0 (R-V159P0-002): Replaced the manual 28-element match list with
+    /// a catalog-driven derivation. The test now parses the §4 table's `Status`
+    /// + `Registry row ref` columns: a catalog id is expected in
+    /// `host_tool_registry()` iff Status=`shipped` AND Registry row
+    /// ref=`host_tool`. Orchestration-scope shipped ids (e.g.
+    /// `nexus.reference.refresh`, the 5 DF-46 capabilities) are correctly
+    /// excluded from the host_tool direction — no manual list to maintain.
     #[test]
     fn catalog_registry_invariant_all_ids_present() {
         use std::collections::HashSet;
@@ -1140,30 +1148,48 @@ mod tests {
         let catalog_content =
             std::fs::read_to_string(catalog_path).expect("acp-capability-set.md must be readable");
 
-        // Extract all `nexus.<id>` lines from markdown tables
-        let catalog_ids: HashSet<String> = catalog_content
+        // V1.60 P0: parse structured rows from the §4 table so the host_tool
+        // direction is auto-derived from the `Status` + `Registry row ref`
+        // columns rather than a manual match list (closes R-V159P0-002).
+        // Row shape: | `nexus.<id>` | description | status | shipped_in | registry_ref |
+        struct CatalogRow {
+            id: String,
+            status: String,
+            registry_ref: String,
+        }
+
+        let catalog_rows: Vec<CatalogRow> = catalog_content
             .lines()
             .filter_map(|line| {
                 let trimmed = line.trim();
-                // Match table rows like: `| nexus.world.snapshot.get | yes | ...`
-                if trimmed.starts_with('|') && trimmed.contains('`') {
-                    // Extract text between first pair of backticks
-                    let start = trimmed.find('`')?;
-                    let rest = &trimmed[start + 1..];
-                    let end = rest.find('`')?;
-                    let id = &rest[..end];
-                    if id.starts_with("nexus.") || id.starts_with("fs/") {
-                        Some(id.to_string())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+                if !trimmed.starts_with('|') || !trimmed.contains('`') {
+                    return None;
                 }
+                let cols: Vec<&str> = trimmed.split('|').map(str::trim).collect();
+                // Need ≥6 columns: "" | id | desc | status | shipped_in | registry_ref
+                if cols.len() < 6 {
+                    return None;
+                }
+                let id_cell = cols[1];
+                let start = id_cell.find('`')?;
+                let rest = &id_cell[start + 1..];
+                let end = rest.find('`')?;
+                let id = rest[..end].to_string();
+                if !(id.starts_with("nexus.") || id.starts_with("fs/")) {
+                    return None;
+                }
+                Some(CatalogRow {
+                    id,
+                    status: cols[3].to_string(),
+                    registry_ref: cols[5].to_string(),
+                })
             })
             .collect();
 
-        // Every registry id must have a catalog row (except known P1 gaps)
+        let catalog_ids: HashSet<String> = catalog_rows.iter().map(|r| r.id.clone()).collect();
+
+        // Direction 1: every registry id must have a catalog row (except known
+        // `fs/*` gaps).
         for id in &registry_ids {
             if known_catalog_gaps.contains(id) {
                 continue;
@@ -1175,53 +1201,21 @@ mod tests {
             );
         }
 
-        // Every catalog nexus.*/fs/* id that maps to a host tool should be in the registry.
-        // This is now a bidirectional hard check for the canonical read/context/tools that
-        // are shipped as host tools. Catalog-only IDs (orchestration, deferred, OUT) are
-        // excluded from this match list.
-        let missing_from_registry: Vec<_> = catalog_ids
+        // Direction 2 (auto-derived, R-V159P0-002): every catalog id with
+        // Status=`shipped` AND Registry row ref=`host_tool` MUST be in the
+        // host_tool registry. Orchestration-scope shipped ids are excluded
+        // (they live in the orchestration CapabilityRegistry, not here).
+        let missing_from_registry: Vec<String> = catalog_rows
             .iter()
-            .filter(|cid| {
-                // Only flag catalog ids that are shipped host tools.
-                let is_shipped_host_tool = matches!(
-                    cid.as_str(),
-                    "nexus.context.whoami"
-                        | "nexus.workspace.info"
-                        | "nexus.workspace.paths"
-                        | "nexus.context.assemble"
-                        | "nexus.work.get"
-                        | "nexus.work.patch"
-                        | "nexus.orchestration.schedule_status"
-                        | "nexus.world.snapshot.get"
-                        | "nexus.timeline.recent.get"
-                        | "nexus.kb_snapshot.read"
-                        | "nexus.kb_snapshot.write"
-                        | "nexus.manuscript.chapter.get"
-                        | "nexus.manuscript.chapter.update"
-                        | "nexus.manuscript.list"
-                        | "nexus.manuscript.read_range"
-                        | "nexus.manuscript.write"
-                        | "nexus.manuscript.phase.get"
-                        | "nexus.manuscript.phase.set"
-                        | "nexus.world.configure"
-                        | "nexus.work.schedule.set"
-                        | "nexus.finding.resolve"
-                        | "nexus.pool.entry.manage"
-                        | "nexus.observability.daemon.health"
-                        | "nexus.registry.refresh"
-                        | "nexus.reference.refresh"
-                        | "nexus.research.query"
-                        | "nexus.runtime.health"
-                        | "nexus.trace.correlation"
-                );
-                is_shipped_host_tool && !registry_ids.contains(cid.as_str())
-            })
+            .filter(|r| r.status == "shipped" && r.registry_ref == "host_tool")
+            .filter(|r| !registry_ids.contains(r.id.as_str()))
+            .map(|r| r.id.clone())
             .collect();
 
-        // Hard failure: every shipped host tool listed above MUST be in the registry.
+        // Hard failure: every shipped host tool MUST be in the registry.
         assert!(
             missing_from_registry.is_empty(),
-            "Catalog ids marked as shipped host tools but missing from registry: \
+            "Catalog ids marked shipped + host_tool but missing from registry: \
              {missing_from_registry:?}"
         );
     }

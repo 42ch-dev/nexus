@@ -189,6 +189,13 @@ impl CapabilityRegistry {
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh (pool-less; returns WorkerUnavailable)
             Box::new(builtins::ReferenceRefresh::new()),
+            // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities
+            // (pool-less; return WorkerUnavailable without a pool).
+            Box::new(builtins::WorldStateQuery::new()),
+            Box::new(builtins::WorldDeltaPropose::new()),
+            Box::new(builtins::WorldDeltaApply::new()),
+            Box::new(builtins::TimelineEventAppend::new()),
+            Box::new(builtins::ForkCreate::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -244,7 +251,13 @@ impl CapabilityRegistry {
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh with pool
-            Box::new(builtins::ReferenceRefresh::with_pool(pool)),
+            Box::new(builtins::ReferenceRefresh::with_pool(pool.clone())),
+            // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities.
+            Box::new(builtins::WorldStateQuery::with_pool(pool.clone())),
+            Box::new(builtins::WorldDeltaPropose::with_pool(pool.clone())),
+            Box::new(builtins::WorldDeltaApply::with_pool(pool.clone())),
+            Box::new(builtins::TimelineEventAppend::with_pool(pool.clone())),
+            Box::new(builtins::ForkCreate::with_pool(pool)),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -415,6 +428,43 @@ impl CapabilityRegistry {
                         builtins::ReferenceRefresh::with_pool(pool.clone())
                     }),
             ),
+            // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities
+            // (pool-conditional; pool-less returns WorkerUnavailable).
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::WorldStateQuery::new, |pool| {
+                        builtins::WorldStateQuery::with_pool(pool.clone())
+                    }),
+            ),
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::WorldDeltaPropose::new, |pool| {
+                        builtins::WorldDeltaPropose::with_pool(pool.clone())
+                    }),
+            ),
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::WorldDeltaApply::new, |pool| {
+                        builtins::WorldDeltaApply::with_pool(pool.clone())
+                    }),
+            ),
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::TimelineEventAppend::new, |pool| {
+                        builtins::TimelineEventAppend::with_pool(pool.clone())
+                    }),
+            ),
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::ForkCreate::new, |pool| {
+                        builtins::ForkCreate::with_pool(pool.clone())
+                    }),
+            ),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -483,8 +533,11 @@ mod tests {
         // 26 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
         // + script.scaffold (V1.55 P3) + game_bible.section_status.update (V1.56 P-last R-V155P2-F002)
         // + nexus.reference.refresh (V1.58 P1 DF-44).
+        // V1.60 P0: +5 DF-46 orchestration capabilities (world.state.query,
+        // world.delta.propose, world.delta.apply, timeline.event.append,
+        // fork.create) → 26 + 5 = 31.
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 26);
+        assert_eq!(reg.len(), 31);
     }
 
     #[test]
@@ -517,6 +570,12 @@ mod tests {
             "script.project_scaffold",
             "game_bible.section_status.update",
             "nexus.reference.refresh",
+            // V1.60 P0: DF-46 orchestration capabilities (full nexus.* names).
+            "nexus.world.state.query",
+            "nexus.world.delta.propose",
+            "nexus.world.delta.apply",
+            "nexus.timeline.event.append",
+            "nexus.fork.create",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -535,7 +594,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 26); // 25 up to V1.57 + 1 (V1.58 P1 nexus.reference.refresh)
+        assert_eq!(names.len(), 31); // 26 (V1.58) + 5 (V1.60 P0 DF-46)
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -546,5 +605,8 @@ mod tests {
         assert!(names.contains(&"soul.experience.aggregate"));
         assert!(names.contains(&"novel.project_scaffold"));
         assert!(names.contains(&"novel.chapter_transition"));
+        // V1.60 P0 DF-46 orchestration capabilities.
+        assert!(names.contains(&"nexus.world.state.query"));
+        assert!(names.contains(&"nexus.fork.create"));
     }
 }
