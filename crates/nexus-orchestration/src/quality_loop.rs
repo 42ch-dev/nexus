@@ -655,16 +655,18 @@ pub(crate) async fn run_llm_extract(
         }
     };
 
-    let candidates_json = output
-        .get("candidates")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let candidates: Vec<KbCandidate> = candidates_json
-        .iter()
-        .filter_map(|c| candidate_from_llm_json_for_profile(c, work_profile))
-        .take(MAX_CANDIDATES_PER_PASS)
-        .collect();
+    let candidates_json = output.get("candidates").and_then(|v| v.as_array());
+    // R-V152TA-S007: skip the `filter_map` + `collect` allocation when the LLM
+    // produced no candidate array (or an empty one). Avoids the prior
+    // `.cloned().unwrap_or_default()` which always allocated a `Vec<Value>`.
+    let candidates: Vec<KbCandidate> = match candidates_json {
+        Some(arr) if !arr.is_empty() => arr
+            .iter()
+            .filter_map(|c| candidate_from_llm_json_for_profile(c, work_profile))
+            .take(MAX_CANDIDATES_PER_PASS)
+            .collect(),
+        _ => Vec::new(),
+    };
     LlmExtractOutcome::Candidates(candidates)
 }
 

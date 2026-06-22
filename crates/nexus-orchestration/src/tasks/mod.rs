@@ -518,6 +518,11 @@ impl LlmJudgeTask {
 /// caller's responsibility (the review-time hook), keeping the task pure.
 ///
 /// Design: `llm-extract.md` §2, compass §0.1 #7.
+// R-V152TA-S003: `LlmExtractTask` has no production preset routing yet
+// (`exit_when: llm_extract` is a future preset kind; see llm-extract.md §2).
+// It is exercised by the hermetic tests below and by `quality_loop`'s shared
+// `run_llm_extract` pathway. Suppressed in non-test builds until a preset
+// wires it into the runtime graph.
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct LlmExtractTask {
     /// Extraction instruction template (rendered against the context).
@@ -560,6 +565,7 @@ impl LlmExtractTask {
     /// unexpected internal failures (e.g., template render panic). Capability
     /// errors are represented inside [`LlmExtractOutcome`] so callers decide
     /// how to handle them.
+    // R-V152TA-S003: see struct-level note — no production graph wiring yet.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn evaluate(
         &self,
@@ -1195,6 +1201,19 @@ impl StateCompositeTask {
 
 /// Build a minimal synthetic `RegistryRefreshOutput` as a fallback for
 /// expression evaluation when the capability is unavailable (V1.56 P3).
+///
+/// # `source` value semantics (R-V156P3-S001)
+///
+/// This helper emits `source = "synthetic"` — a **test-grade placeholder**
+/// produced locally by the orchestrator when no capability output exists at
+/// all (e.g. `registry_refresh` was never invoked for this session). It is
+/// distinct from `source = "synthetic_fallback"`, which the **real**
+/// `RegistryRefresh` capability emits when the CDN fetch failed but the
+/// embedded snapshot was served successfully (see
+/// `capability::builtins::registry::RegistryRefresh` and the
+/// `registry_refresh_latency` bench). Preset `when:` expressions that branch
+/// on `source` must treat `"synthetic"` as "no data" and
+/// `"synthetic_fallback"` as "best-effort data from a deterministic source".
 fn synthetic_registry_output() -> serde_json::Value {
     serde_json::json!({
         "source": "synthetic",
@@ -1615,6 +1634,18 @@ impl Task for StateCompositeTask {
 
                     // min_interval throttle: skip evaluation if last
                     // evaluation was too recent.
+                    //
+                    // R-V156P3-S002 (yield-point audit): every branch in this
+                    // throttle-hit block awaits exactly once before returning,
+                    // so the cooperative scheduler always gets a yield point
+                    // (no infinite sync loop in a single `evaluate` call):
+                    //   1. `context.get(throttle_key).await`     — entry read
+                    //   2. `context.get("_judge_result").await`   — reuse read
+                    //   3. `context.get("_judge_reason").await`   — reuse read
+                    //   4. `inject_context_deps(&context).await`  — deps inject
+                    // The `resolve_expression_target` / `resolve_labeled_target`
+                    // helpers are sync but run AFTER step 4's yield, so the
+                    // throttle-hit return path always yields at least once.
                     if let Some(ref interval_str) = min_interval {
                         let throttle_key = format!("_judge_last_eval_{}", self.id);
                         let last_eval: Option<String> = context.get(&throttle_key).await;

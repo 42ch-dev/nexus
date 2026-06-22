@@ -960,6 +960,16 @@ pub async fn kb_adopt_auto(
     let mut promoted: Vec<PromotedRecord> = Vec::new();
     let mut skipped: Vec<SkippedRecord> = Vec::new();
 
+    // R-V152TA-S009 (doc-defer): each candidate opens its own transaction
+    // (begin → insert_key_block_in_tx → CAS flip → commit) so that a
+    // per-candidate failure (duplicate canonical_name, validation error, CAS
+    // race) rolls back ONLY that candidate and the loop continues with the
+    // rest. Consolidating into a single transaction would change semantics —
+    // one candidate's failure would abort the whole batch, and partial
+    // promotion is the explicit product behavior adopt-auto guarantees
+    // (operators rely on the `promoted` / `skipped` split). A single-tx
+    // redesign with SAVEPOINTs is deferred to V1.61+ pending a product
+    // decision on all-or-nothing vs best-effort promotion.
     for candidate in pending {
         let Some(ref canonical_name) = candidate.canonical_name_guess else {
             skipped.push(SkippedRecord {
@@ -1106,6 +1116,19 @@ pub async fn kb_adopt_auto(
         });
     }
 
+    // R-V152TA-S004: surface every auto-promote skip at `info!` so operators
+    // can see why candidates were left pending (provenance gaps, low
+    // confidence, duplicate names, CAS races) without re-running the command
+    // with `--json`. One event per skip keeps the audit trail greppable.
+    for s in &skipped {
+        tracing::info!(
+            extract_job_id = %s.extract_job_id,
+            reason = %s.reason,
+            world_id = %world_id,
+            "kb-adopt-auto: skipped candidate"
+        );
+    }
+
     // ── Output ───────────────────────────────────────────────────────────
     if json {
         println!(
@@ -1203,7 +1226,32 @@ async fn write_auto_promoted_log(
         actor = actor,
         ts = chrono::Utc::now().to_rfc3339(),
     );
-    std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
+    write_audit_log_with_fsync(&log_path, &body)
+        .map_err(|e| format!("write {}: {e}", log_path.display()))?;
+    Ok(())
+}
+
+/// Write an audit log `body` to `path` and `fsync` before returning
+/// (R-V152TA-S005).
+///
+/// `std::fs::write` alone does not guarantee the bytes reach durable storage
+/// on macOS/Linux — the file `BufWriter`/page-cache may hold them until a
+/// later `fsync`. KB promotion/reject audit logs are forensic evidence and
+/// must survive a crash that occurs immediately after the write returns, so
+/// we open explicitly, `write_all`, then `sync_all`. Mirrors the pattern
+/// already used in `rules_layers.rs` / `auto_chronology.rs`.
+fn write_audit_log_with_fsync(
+    path: &std::path::Path,
+    body: &str,
+) -> std::result::Result<(), std::io::Error> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)?;
+    f.write_all(body.as_bytes())?;
+    f.sync_all()?;
     Ok(())
 }
 
@@ -1526,7 +1574,8 @@ fn write_rejected_log(
             .map_or_else(|| "-".to_string(), |n| n.to_string()),
         ts = chrono::Utc::now().to_rfc3339(),
     );
-    std::fs::write(&log_path, body).map_err(|e| format!("write {}: {e}", log_path.display()))?;
+    write_audit_log_with_fsync(&log_path, &body)
+        .map_err(|e| format!("write {}: {e}", log_path.display()))?;
     Ok(())
 }
 
