@@ -160,6 +160,29 @@ const fn is_ipv6_private_range(v6: &Ipv6Addr) -> bool {
     octets[0] & 0xfe == 0xfc
 }
 
+// ─── Atomic body file write (V1.58 P3) ──────────────────────────────────────
+
+/// Write `body` to `target_path` atomically via temp-file + rename.
+///
+/// Matches the V1.55 P3 `ScaffoldTransaction` pattern: write to
+/// `<target>.tmp`, then rename.  On failure the temp file is cleaned up
+/// best-effort.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if the parent directory cannot be created or
+/// the write/rename fails.
+async fn atomic_write_body(target_path: &std::path::Path, body: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = target_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let tmp_path = target_path.with_extension("tmp");
+    tokio::fs::write(&tmp_path, body).await?;
+    tokio::fs::rename(&tmp_path, target_path).await?;
+    Ok(())
+}
+
 // ─── Input / Output types ───────────────────────────────────────────────────
 
 /// Input shape for `nexus.reference.refresh`.
@@ -178,16 +201,27 @@ struct ReferenceRefreshInput {
 ///
 /// Holds an optional `SqlitePool` for reading/writing `reference_sources` rows.
 /// Without a pool, returns `WorkerUnavailable`.
+///
+/// When `creator_home` is set (V1.58 P3), the handler writes refreshed body
+/// content to the on-disk `body.md` file via `nexus_home_layout`.
 #[derive(Debug, Clone)]
 pub struct ReferenceRefresh {
     pool: Option<Arc<sqlx::SqlitePool>>,
+    /// Optional home directory + creator ID for writing refreshed body files.
+    /// When absent, the handler updates the DB only (scheduler path).
+    creator_home: Option<std::path::PathBuf>,
+    creator_id: Option<String>,
 }
 
 impl ReferenceRefresh {
     /// Create a new instance without a pool (placeholder mode).
     #[must_use]
     pub const fn new() -> Self {
-        Self { pool: None }
+        Self {
+            pool: None,
+            creator_home: None,
+            creator_id: None,
+        }
     }
 
     /// Create a new instance with a pool for full DB access.
@@ -195,7 +229,21 @@ impl ReferenceRefresh {
     pub fn with_pool(pool: sqlx::SqlitePool) -> Self {
         Self {
             pool: Some(Arc::new(pool)),
+            creator_home: None,
+            creator_id: None,
         }
+    }
+
+    /// Set the creator context for writing refreshed body files to disk.
+    ///
+    /// When set, the handler will atomically write the fetched body to
+    /// `~/.nexus42/creators/<creator_id>/references/units/<ref_id>/body.md`
+    /// after a successful refresh with `content_changed: true`.
+    #[must_use]
+    pub fn with_creator_context(mut self, home: std::path::PathBuf, creator_id: String) -> Self {
+        self.creator_home = Some(home);
+        self.creator_id = Some(creator_id);
+        self
     }
 }
 
@@ -314,6 +362,7 @@ impl Capability for ReferenceRefresh {
                 // Stream the response body and compute blake3 hash incrementally
                 // (F-001: QC3 fix — avoids loading entire body into memory).
                 let mut hasher = blake3::Hasher::new();
+                let mut body_bytes: Vec<u8> = Vec::new();
                 let mut stream = response.bytes_stream();
                 let mut total_bytes: usize = 0;
 
@@ -327,6 +376,7 @@ impl Capability for ReferenceRefresh {
                         )));
                     }
                     hasher.update(&chunk);
+                    body_bytes.extend_from_slice(&chunk);
                     total_bytes += chunk.len();
                 }
 
@@ -335,15 +385,26 @@ impl Capability for ReferenceRefresh {
                 let content_changed = old_hash.as_deref() != Some(&new_hash);
 
                 if content_changed {
-                    // Update the body file on disk.
-                    // NOTE: On-disk body.md is NOT updated here — only the DB
-                    // content_hash is updated. The body file write is deferred to
-                    // P3 (CLI surface wires file I/O). Until P3, consumers
-                    // reading from `content_path` will see stale content even
-                    // when this capability reports `content_changed: true`.
-                    // See .mstar/knowledge/specs/reference-knowledge.md §5.
-                    if let Some(ref content_path) = source.content_path {
-                        let _ = content_path;
+                    // V1.58 P3: write the refreshed body to the on-disk body.md
+                    // when creator context is available (CLI path). The scheduler
+                    // path (no creator context) only updates the DB.
+                    if let (Some(ref home), Some(ref creator_id)) =
+                        (&self.creator_home, &self.creator_id)
+                    {
+                        let body_path = nexus_home_layout::reference_body_path(
+                            home,
+                            creator_id,
+                            &parsed.reference_source_id,
+                        );
+                        // Atomic write: temp file + rename.
+                        if let Err(e) = atomic_write_body(&body_path, &body_bytes).await {
+                            tracing::warn!(
+                                reference_source_id = %parsed.reference_source_id,
+                                body_path = %body_path.display(),
+                                error = %e,
+                                "nx.reference.refresh: body.md write failed — DB updated, disk stale"
+                            );
+                        }
                     }
 
                     // Update the DB with new hash + refreshed timestamp.
