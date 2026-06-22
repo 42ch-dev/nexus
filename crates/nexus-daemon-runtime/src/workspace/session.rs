@@ -5,7 +5,7 @@
 //! `SQLite`, survive daemon restarts, and expire per TTL.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use nexus_local_db as db;
@@ -59,6 +59,12 @@ pub enum SessionError {
     Database(String),
     /// An I/O error occurred during file operations.
     Io(String),
+    /// V1.58 P0 T2 (R-V156P0-M002): the resolved path escapes the canonical
+    /// workspace root (symlink traversal or prefix-boundary violation).
+    PathEscape {
+        path: String,
+        workspace_root: String,
+    },
 }
 
 impl fmt::Display for SessionError {
@@ -83,6 +89,12 @@ impl fmt::Display for SessionError {
             }
             Self::Database(msg) => write!(f, "session database error: {msg}"),
             Self::Io(msg) => write!(f, "session I/O error: {msg}"),
+            Self::PathEscape { path, workspace_root } => {
+                write!(
+                    f,
+                    "path '{path}' escapes canonical workspace root '{workspace_root}'"
+                )
+            }
         }
     }
 }
@@ -116,52 +128,110 @@ pub struct FileSnapshots {
 
 // ── Content hashing ─────────────────────────────────────────────────────────
 
+/// Canonicalize a workspace root path (V1.58 P0 T2 — R-V156P0-M002).
+///
+/// Wraps `std::fs::canonicalize` to resolve symlinks and relative components
+/// so the prefix-boundary check in [`enforce_path_boundary`] is robust.
+///
+/// # Errors
+///
+/// Returns [`SessionError::Io`] if canonicalization fails (missing path,
+/// permission denied, etc.).
+pub fn canonicalize_workspace_root(root: &Path) -> Result<PathBuf, SessionError> {
+    std::fs::canonicalize(root).map_err(|e| SessionError::Io(e.to_string()))
+}
+
+/// Enforce that `target` lies within the canonical `workspace_root` prefix
+/// (V1.58 P0 T2 — R-V156P0-M002).
+///
+/// Both paths must already be canonical. Returns `Ok(())` if `target` starts
+/// with `workspace_root`, otherwise [`SessionError::PathEscape`]. This closes
+/// the symlink-traversal gap that string-level `..` checks cannot detect.
+pub fn enforce_path_boundary(
+    target: &Path,
+    workspace_root: &Path,
+) -> Result<(), SessionError> {
+    if target.starts_with(workspace_root) {
+        Ok(())
+    } else {
+        Err(SessionError::PathEscape {
+            path: target.to_string_lossy().to_string(),
+            workspace_root: workspace_root.to_string_lossy().to_string(),
+        })
+    }
+}
+
 /// Compute SHA-256 content hashes for all regular files under `root`.
 ///
 /// Walks the directory tree and returns a map of relative path → hex digest.
-/// Symlinks, directories, and non-regular files are skipped.
+/// Symlinks, directories, and non-regular files are skipped. Symlinks are
+/// explicitly rejected via `symlink_metadata` so a symlink chain cannot
+/// escape the workspace root (V1.58 P0 T2 — R-V156P0-M002).
+///
+/// Uses `tokio::fs` so the function is safe to call from async context
+/// (V1.58 P0 T4 — R-V156P0-M004).
 ///
 /// # Errors
 ///
 /// Returns [`SessionError::Io`] if file I/O operations fail (e.g., permission denied).
-pub fn compute_content_hashes(root: &Path) -> Result<FileSnapshots, SessionError> {
-    use sha2::{Digest, Sha256};
-    use std::io::Read;
-
+pub async fn compute_content_hashes(root: &Path) -> Result<FileSnapshots, SessionError> {
     let mut hashes = std::collections::HashMap::new();
     if !root.exists() {
         return Ok(FileSnapshots { hashes });
     }
 
-    let entries = std::fs::read_dir(root).map_err(|e| SessionError::Io(e.to_string()))?;
+    compute_content_hashes_inner(root, root, &mut hashes).await?;
+    Ok(FileSnapshots { hashes })
+}
 
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
+/// Recursive worker for [`compute_content_hashes`].
+async fn compute_content_hashes_inner(
+    dir: &Path,
+    root: &Path,
+    hashes: &mut std::collections::HashMap<String, String>,
+) -> Result<(), SessionError> {
+    use sha2::{Digest, Sha256};
+    use tokio::io::AsyncReadExt;
 
+    let mut entries = tokio::fs::read_dir(dir)
+        .await
+        .map_err(|e| SessionError::Io(e.to_string()))?;
+
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| SessionError::Io(e.to_string()))?
+    {
         let path = entry.path();
         let relative = match path.strip_prefix(root) {
             Ok(r) => r.to_string_lossy().to_string(),
             Err(_) => continue,
         };
 
-        if path.is_dir() {
-            // Recurse into subdirectories
-            let sub_hashes = compute_content_hashes(&path)?;
-            for (sub_path, hash) in sub_hashes.hashes {
-                let full_relative = format!("{relative}/{sub_path}");
-                hashes.insert(full_relative, hash);
-            }
-        } else if path.is_file() {
-            // Compute SHA-256 for regular files
-            let mut file =
-                std::fs::File::open(&path).map_err(|e| SessionError::Io(e.to_string()))?;
+        // V1.58 P0 T2: reject symlinks explicitly — do not follow them.
+        // `symlink_metadata` does not traverse symlinks, so a symlink shows
+        // up as a symlink rather than its target.
+        let meta = tokio::fs::symlink_metadata(&path)
+            .await
+            .map_err(|e| SessionError::Io(e.to_string()))?;
+        if meta.file_type().is_symlink() {
+            // Skip symlinks — they could escape the workspace root.
+            continue;
+        }
+
+        if meta.is_dir() {
+            // Recurse into subdirectories.
+            Box::pin(compute_content_hashes_inner(&path, root, hashes)).await?;
+        } else if meta.is_file() {
+            let mut file = tokio::fs::File::open(&path)
+                .await
+                .map_err(|e| SessionError::Io(e.to_string()))?;
             let mut sha = Sha256::new();
             let mut buffer = [0u8; 8192];
             loop {
                 let n = file
                     .read(&mut buffer)
+                    .await
                     .map_err(|e| SessionError::Io(e.to_string()))?;
                 if n == 0 {
                     break;
@@ -173,7 +243,7 @@ pub fn compute_content_hashes(root: &Path) -> Result<FileSnapshots, SessionError
         }
     }
 
-    Ok(FileSnapshots { hashes })
+    Ok(())
 }
 
 // ── Workspace session manager (DB-backed) ───────────────────────────────────
@@ -224,10 +294,25 @@ impl WorkspaceSessionManager {
         // Cleanup expired sessions first
         let _ = db::cleanup_expired_sessions(&self.pool).await;
 
-        // Compute content hashes if the path exists
-        let target_path = Path::new(workspace_root).join(relative_path);
-        let file_hashes = if existed && target_path.exists() && target_path.is_dir() {
-            compute_content_hashes(&target_path)?
+        // V1.58 P0 T2 (R-V156P0-M002): canonicalize the workspace root so the
+        // prefix-boundary check is robust against symlinks and relative
+        // components. Compute the canonical target and enforce it stays
+        // within the workspace root before hashing anything.
+        let canonical_root = canonicalize_workspace_root(Path::new(workspace_root))?;
+        let target_path = canonical_root.join(relative_path);
+        let canonical_target = if target_path.exists() {
+            std::fs::canonicalize(&target_path).map_err(|e| SessionError::Io(e.to_string()))?
+        } else {
+            // Path may not exist yet (Create op) — enforce boundary on the
+            // logical join against the canonical root.
+            target_path.clone()
+        };
+        enforce_path_boundary(&canonical_target, &canonical_root)?;
+        let workspace_root_canonical = canonical_root.to_string_lossy().to_string();
+
+        // Compute content hashes if the path exists (async — V1.58 P0 T4).
+        let file_hashes = if existed && canonical_target.is_dir() {
+            compute_content_hashes(&canonical_target).await?
         } else {
             FileSnapshots::default()
         };
@@ -241,7 +326,7 @@ impl WorkspaceSessionManager {
             &self.pool,
             &db::CreateSessionParams {
                 session_id: session_id.to_string(),
-                workspace_root: workspace_root.to_string(),
+                workspace_root: workspace_root_canonical,
                 relative_path: relative_path.to_string(),
                 existed,
                 file_hashes_json,
@@ -324,6 +409,15 @@ impl WorkspaceSessionManager {
         for change in changes {
             let file_path = Path::new(workspace_root).join(&change.path);
 
+            // V1.58 P0 T2 (R-V156P0-M002): enforce the file stays within the
+            // workspace root after resolving any symlinks.
+            if file_path.exists() {
+                let canonical_file =
+                    std::fs::canonicalize(&file_path).map_err(|e| SessionError::Io(e.to_string()))?;
+                let canonical_root = canonicalize_workspace_root(Path::new(workspace_root))?;
+                enforce_path_boundary(&canonical_file, &canonical_root)?;
+            }
+
             match change.op {
                 ChangeOp::Modify => {
                     // File must exist in the snapshot
@@ -346,7 +440,7 @@ impl WorkspaceSessionManager {
                         });
                     }
 
-                    let current_hash = compute_single_file_hash(&file_path)?;
+                    let current_hash = compute_single_file_hash(&file_path).await?;
                     if current_hash != *stored_hash {
                         return Err(SessionError::HashConflict {
                             session_id: session_id.clone(),
@@ -432,16 +526,22 @@ impl WorkspaceSessionManager {
 }
 
 /// Compute SHA-256 hash for a single file.
-fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
+///
+/// Uses `tokio::fs` so the function is safe to call from async context
+/// (V1.58 P0 T4 — R-V156P0-M004).
+async fn compute_single_file_hash(path: &Path) -> Result<String, SessionError> {
     use sha2::{Digest, Sha256};
-    use std::io::Read;
+    use tokio::io::AsyncReadExt;
 
-    let mut file = std::fs::File::open(path).map_err(|e| SessionError::Io(e.to_string()))?;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| SessionError::Io(e.to_string()))?;
     let mut sha = Sha256::new();
     let mut buffer = [0u8; 8192];
     loop {
         let n = file
             .read(&mut buffer)
+            .await
             .map_err(|e| SessionError::Io(e.to_string()))?;
         if n == 0 {
             break;
@@ -465,20 +565,20 @@ mod tests {
         assert!(id1.0.starts_with("ws_"));
     }
 
-    #[test]
-    fn compute_content_hashes_empty_dir() {
+    #[tokio::test]
+    async fn compute_content_hashes_empty_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let result = compute_content_hashes(dir.path()).expect("compute");
+        let result = compute_content_hashes(dir.path()).await.expect("compute");
         assert!(result.hashes.is_empty());
     }
 
-    #[test]
-    fn compute_content_hashes_single_file() {
+    #[tokio::test]
+    async fn compute_content_hashes_single_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let file_path = dir.path().join("test.txt");
         std::fs::write(&file_path, b"hello world").expect("write");
 
-        let result = compute_content_hashes(dir.path()).expect("compute");
+        let result = compute_content_hashes(dir.path()).await.expect("compute");
         assert_eq!(result.hashes.len(), 1);
         assert!(result.hashes.contains_key("test.txt"));
 
@@ -487,34 +587,87 @@ mod tests {
         assert_eq!(result.hashes.get("test.txt").unwrap(), expected);
     }
 
-    #[test]
-    fn compute_content_hashes_nested_dir() {
+    #[tokio::test]
+    async fn compute_content_hashes_nested_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::create_dir_all(dir.path().join("sub")).expect("mkdir");
         std::fs::write(dir.path().join("a.txt"), b"aaa").expect("write");
         std::fs::write(dir.path().join("sub").join("b.txt"), b"bbb").expect("write");
 
-        let result = compute_content_hashes(dir.path()).expect("compute");
+        let result = compute_content_hashes(dir.path()).await.expect("compute");
         assert_eq!(result.hashes.len(), 2);
         assert!(result.hashes.contains_key("a.txt"));
         assert!(result.hashes.contains_key("sub/b.txt"));
     }
 
-    #[test]
-    fn compute_content_hashes_different_content_different_hash() {
+    #[tokio::test]
+    async fn compute_content_hashes_different_content_different_hash() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("a.txt"), b"content A").expect("write");
-        let result_a = compute_content_hashes(dir.path()).expect("compute");
+        let result_a = compute_content_hashes(dir.path()).await.expect("compute");
 
         // Rewrite with different content
         std::fs::write(dir.path().join("a.txt"), b"content B").expect("write");
-        let result_b = compute_content_hashes(dir.path()).expect("compute");
+        let result_b = compute_content_hashes(dir.path()).await.expect("compute");
 
         assert_ne!(
             result_a.hashes.get("a.txt").unwrap(),
             result_b.hashes.get("a.txt").unwrap(),
             "different content must produce different hashes"
         );
+    }
+
+    // ── V1.58 P0 T2 (R-V156P0-M002): symlink rejection + boundary ─────────
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn compute_content_hashes_skips_symlinks() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("real.txt"), b"real").expect("write");
+        // Create a symlink inside the workspace that points to an outside file.
+        let outside = tempfile::tempdir().expect("tempdir");
+        std::fs::write(outside.path().join("secret.txt"), b"secret").expect("write");
+        symlink(outside.path().join("secret.txt"), dir.path().join("escape.txt"))
+            .expect("symlink");
+
+        let result = compute_content_hashes(dir.path()).await.expect("compute");
+        // real.txt is hashed; escape.txt (symlink) is skipped.
+        assert!(result.hashes.contains_key("real.txt"));
+        assert!(
+            !result.hashes.contains_key("escape.txt"),
+            "symlink must be skipped, got: {:?}",
+            result.hashes
+        );
+    }
+
+    #[test]
+    fn enforce_path_boundary_accepts_nested() {
+        let root = Path::new("/tmp/ws");
+        let target = Path::new("/tmp/ws/sub/file.txt");
+        assert!(enforce_path_boundary(target, root).is_ok());
+    }
+
+    #[test]
+    fn enforce_path_boundary_rejects_escape() {
+        let root = Path::new("/tmp/ws");
+        let target = Path::new("/etc/passwd");
+        assert!(matches!(
+            enforce_path_boundary(target, root),
+            Err(SessionError::PathEscape { .. })
+        ));
+    }
+
+    #[test]
+    fn path_escape_display_is_descriptive() {
+        let err = SessionError::PathEscape {
+            path: "/etc/passwd".to_string(),
+            workspace_root: "/tmp/ws".to_string(),
+        };
+        let s = err.to_string();
+        assert!(s.contains("/etc/passwd"));
+        assert!(s.contains("/tmp/ws"));
+        assert!(s.contains("escapes"));
     }
 
     #[test]
