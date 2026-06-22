@@ -267,43 +267,14 @@ pub async fn commit_workspace(
         return Err(NexusApiError::Uninitialized);
     };
 
-    // Step 1: Validate changes[] manifest against session snapshot (OCC)
-    if !req.changes.is_empty() {
-        match session_mgr
-            .validate_changes_manifest(&session_id, &req.changes, &workspace_root)
-            .await
-        {
-            Ok(()) => {
-                debug!(
-                    session_id = %session_id,
-                    "Changes manifest validated successfully"
-                );
-            }
-            Err(SessionError::HashConflict {
-                path,
-                expected_hash,
-                actual_hash,
-                ..
-            }) => {
-                debug!(
-                    session_id = %session_id,
-                    %path,
-                    %expected_hash,
-                    %actual_hash,
-                    "OCC hash conflict"
-                );
-                return Err(NexusApiError::Conflict(format!(
-                    "content hash conflict for {path}: expected {expected_hash}, got {actual_hash}"
-                )));
-            }
-            Err(e) => {
-                return Err(map_session_error(&session_id, e));
-            }
-        }
-    }
-
-    // Step 2: Consume the session (atomically marks as committed)
-    match session_mgr.consume_session(&session_id).await {
+    // V1.58 P0 T5 (R-V156P0-M005): validate + consume in one atomic step.
+    // The previous two-call sequence (validate_changes_manifest then
+    // consume_session) left a TOCTOU window; `commit_session` closes it by
+    // binding the two into a single transaction-guarded operation.
+    match session_mgr
+        .commit_session(&session_id, &req.changes, &workspace_root)
+        .await
+    {
         Ok(_info) => {
             let revision = format!("rev_{}", uuid::Uuid::new_v4());
             info!(
@@ -317,7 +288,24 @@ pub async fn commit_workspace(
                 committed: true,
             }))
         }
-        Err(err) => Err(map_session_error(&session_id, err)),
+        Err(SessionError::HashConflict {
+            path,
+            expected_hash,
+            actual_hash,
+            ..
+        }) => {
+            debug!(
+                session_id = %session_id,
+                %path,
+                %expected_hash,
+                %actual_hash,
+                "OCC hash conflict"
+            );
+            Err(NexusApiError::Conflict(format!(
+                "content hash conflict for {path}: expected {expected_hash}, got {actual_hash}"
+            )))
+        }
+        Err(e) => Err(map_session_error(&session_id, e)),
     }
 }
 
