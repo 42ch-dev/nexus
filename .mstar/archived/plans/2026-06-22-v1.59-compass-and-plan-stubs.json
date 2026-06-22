@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-22-v1.59-compass-and-plan-stubs",
+  "title": "Compass & Plan Stubs + Deferred-Tracker Audit (P-1)",
+  "iteration": "V1.59",
+  "track": "prepare",
+  "wave": "—",
+  "effort": "M",
+  "owner": "@project-manager (PM whitelist; authored by @writing-specialist)",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.59-compass-and-plan-stubs.md",
+  "created": "2026-06-22",
+  "closed_at": "2026-06-22",
+  "working_branch": "feature/v1.59-prepare",
+  "merge_target": "iteration/v1.59",
+  "depends_on": null,
+  "completion_report": "P-1 Prepare complete. T1 deferred-tracker audit: DF-56 §3.6.3 marked CLOSED (all 5 post-V1.42 slices shipped V1.56 P2+P3); DF-44 stray row tombstoned; PM review additionally archived 4 stale closed/rejected rows (DF-40/48/51/54). T2 compass authored (v1.59-capability-parity-and-outbox-consolidation-delivery-compass-v1.md; 6 grill decisions Q1-Q6; 5-plan single-wave dual-track topology). T3-T7 five plan stubs authored. T8 iterations/README.md updated. Status.json NOT touched by writing-specialist (PM owns). Commits: d01ae4b3 (writing-specialist) + 71b7bbaa (PM review tombstones) + 500cc70e (merge to iteration/v1.59). Archived to plans-done.json at V1.59 P-1 close."
+}

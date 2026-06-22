@@ -256,7 +256,8 @@
     "2026-06-22-v1.58-df44-reference-refresh-pipeline",
     "2026-06-22-v1.58-capability-quality-convergence",
     "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
-    "2026-06-22-v1.58-mid-qc-and-fix-waves"
+    "2026-06-22-v1.58-mid-qc-and-fix-waves",
+    "2026-06-22-v1.59-compass-and-plan-stubs"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -310,8 +311,8 @@
         "P0_findings_lifecycle": "F6 extended findings lifecycle (6 states; transition state machine; actionable consumer filter; W-1 typed error split: IllegalTransition vs InvalidEnum)",
         "P1_narrative_indexes": "F###/E### narrative index runtime (parser, serializer, id allocation, outline promotion; W-1+W-2 typed ForeshadowingStatus enum + explicit F### token requirement)",
         "P2_author_desk_ux": "Author desk UX (creator works intake [<work_id>]; reconcile-chapters --dry-run/--yes; R-V147P1-01 + R-V148P4-W2 closed; W-1 clap help text accuracy)",
-        "P3_serial_reliability": "Serial reliability (reconcile lock optimization — compute_reconcile_diff unlocked + apply_reconcile_diff under lock; creator works findings prune CLI + --dry-run; review-report path-traversal guard; R-V148P4-W3 + R-V148P0-W1 closed)",
-        "P-last_hygiene": "WL-A hygiene (10 V1.46 lows closed) + overlay promotion (3 overlays folded into masters: findings-lifecycle → quality-loop.md §2; narrative-indexes → workflow-profile.md §4.6 with 5-col reconciliation per R-V149P1-01; author-experience.md §8) + tracker V1.49 snapshot"
+        "P3_serial_reliability": "Serial reliability (reconcile lock optimization \u2014 compute_reconcile_diff unlocked + apply_reconcile_diff under lock; creator works findings prune CLI + --dry-run; review-report path-traversal guard; R-V148P4-W3 + R-V148P0-W1 closed)",
+        "P-last_hygiene": "WL-A hygiene (10 V1.46 lows closed) + overlay promotion (3 overlays folded into masters: findings-lifecycle \u2192 quality-loop.md \u00a72; narrative-indexes \u2192 workflow-profile.md \u00a74.6 with 5-col reconciliation per R-V149P1-01; author-experience.md \u00a78) + tracker V1.49 snapshot"
       },
       "residual_lifecycle": {
         "archived_in_v149": [
@@ -346,7 +347,7 @@
         ],
         "open_v150_count": 7
       },
-      "wire_contract_changes": "None (per compass §0.1 #8)",
+      "wire_contract_changes": "None (per compass \u00a70.1 #8)",
       "carry_forward_v150": "7 residuals: 1 CLI gap (R-V149P0-01), 1 overlay reconciliation (R-V149P1-01), 1 flake (R-V149P1-02), 4 V1.46 lows (R-V146P4-QC1-S2, R-V146P4-QC3-S2, R-V146P3-QC3-S1, R-V146P3-QC3-S2)",
       "pr": "PR #62",
       "note": "Merged to main at d160379ff5a6 via PR #62 on 2026-06-17. Integration branch iteration/v1.49 retired."
@@ -383,12 +384,12 @@
         "2026-06-18-v1.51-per-row-occ"
       ],
       "highlights": {
-        "T-A_P0": "nexus.llm.extract capability + heuristic→LLM swap (closes R-V150KBED-01)",
+        "T-A_P0": "nexus.llm.extract capability + heuristic\u2192LLM swap (closes R-V150KBED-01)",
         "T-A_P1": "creator kb rescan --work <ref> cross-chapter reconciliation (closes R-V150KBED-08)",
         "T-A_P2": "finalize-time missing-KB detection + creator world kb pending --missing-only",
         "T-B_P0": "Works/<work_ref>/.lock advisory lock + heartbeat + zombie detection (closes R-V149P1-01 advisory-lock note)",
         "T-B_P1": "per-row OCC on kb_extract_jobs + novel_pool_entries; E_VERSION/E_LOCK stable CLI codes",
-        "P-last": "8 WL-A surgical fixes; 6 spec overlays promoted to Normative — V1.51 Shipped; Profile B compaction; tech debt rollup; PR to main"
+        "P-last": "8 WL-A surgical fixes; 6 spec overlays promoted to Normative \u2014 V1.51 Shipped; Profile B compaction; tech debt rollup; PR to main"
       },
       "residual_lifecycle": {
         "archived_in_v151": [
@@ -407,11 +408,11 @@
         ],
         "open_v152_count": 6
       },
-      "wire_contract_changes": "None (per compass §0.1 #8)",
+      "wire_contract_changes": "None (per compass \u00a70.1 #8)",
       "pr": 64,
       "merged_at": "2026-06-19T07:52:26Z",
       "pr_url": "https://github.com/42ch-dev/nexus/pull/64",
-      "note": "V1.51 P-last T1-T7 Done. T1-T2 (8 WL-A residuals closed) + T3 (6 spec overlays promoted to Normative — V1.51 Shipped) + T4 (Profile B compaction: 7 plans archived) + T5 (tech_debt rollup: 6 deferred to V1.52+) + T6 (PR #64) + T7 (PM signoff). Merged to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 on 2026-06-19 via PR #64. Integration branch iteration/v1.51 to be retired per mstar-branch-worktree."
+      "note": "V1.51 P-last T1-T7 Done. T1-T2 (8 WL-A residuals closed) + T3 (6 spec overlays promoted to Normative \u2014 V1.51 Shipped) + T4 (Profile B compaction: 7 plans archived) + T5 (tech_debt rollup: 6 deferred to V1.52+) + T6 (PR #64) + T7 (PM signoff). Merged to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 on 2026-06-19 via PR #64. Integration branch iteration/v1.51 to be retired per mstar-branch-worktree."
     },
     "v1.54": {
       "version": "v1.54",
@@ -427,7 +428,7 @@
       "highlights": {
         "P0_DF46_write_tools": "6 write tools (kb_snapshot.write, manuscript.chapter.update, world.configure, work.schedule.set, finding.resolve, pool.entry.manage) + LazyLock<CapabilityRegistry> cache + &'_static [AdmissionGate] conversion + Criterion dispatch_latency benchmark + 13 V1.53 residuals (4 medium + 9 low) all converged",
         "P1_game_bible_scaffold": "Depth-2 scaffold: specs/game-bible-profile.md Draft + 7 new BlockType variants (species, faction, magic_system, technology, deity, level, economy_tier) + ValidationMode::GameBible + game-bible-init preset + GameBibleProjectScaffold capability + 12 Design templates + profile gates (is_novel_profile / is_game_bible_profile) + bootstrap --profile game-bible",
-        "P_last_closeout": "capability-registry.md Draft → Master promotion; Profile B compaction (P0+P1 archived); deferred-features tracker V1.54 ship snapshot; shipped-features-tracker V1.54 snapshot; WL-A sweep"
+        "P_last_closeout": "capability-registry.md Draft \u2192 Master promotion; Profile B compaction (P0+P1 archived); deferred-features tracker V1.54 ship snapshot; shipped-features-tracker V1.54 snapshot; WL-A sweep"
       },
       "residual_lifecycle": {
         "archived_in_v154": [
@@ -451,8 +452,8 @@
         ],
         "open_v155_count": 2
       },
-      "wire_contract_changes": "None (per compass §0.1)",
-      "qc_tri_review_outcome": "P0: 3/3 Request Changes → targeted re-review → all Approve; P1: 2/3 Request Changes (qc1+3) + 1/3 Approve (qc2) → 2 fix-waves → consolidated Pass",
+      "wire_contract_changes": "None (per compass \u00a70.1)",
+      "qc_tri_review_outcome": "P0: 3/3 Request Changes \u2192 targeted re-review \u2192 all Approve; P1: 2/3 Request Changes (qc1+3) + 1/3 Approve (qc2) \u2192 2 fix-waves \u2192 consolidated Pass",
       "spec_promotions": [
         {
           "spec": "capability-registry.md",
@@ -467,9 +468,9 @@
       ],
       "spec_amends": [
         "acp-capability-set.md (6 new write-tool IDs)",
-        "agent-nexus-tool-bridge.md §8 (write-tool dispatch patterns)",
-        "cli-spec.md §6.2M (write-tool mappings) + §12.1 (game-bible bootstrap)",
-        "entity-scope-model.md §5.1.1 (game-bible BlockType taxonomy)",
+        "agent-nexus-tool-bridge.md \u00a78 (write-tool dispatch patterns)",
+        "cli-spec.md \u00a76.2M (write-tool mappings) + \u00a712.1 (game-bible bootstrap)",
+        "entity-scope-model.md \u00a75.1.1 (game-bible BlockType taxonomy)",
         "non-novel-profiles-roadmap.md (game-bible marked Scaffold Shipped)"
       ],
       "code_smoke": "3970+ tests passing; cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all --check clean on P1 files (P0 carry-over files clean per f665e1c2); 2 carry-over residuals registered",
@@ -488,11 +489,11 @@
         "2026-06-22-v1.55-script-scaffold"
       ],
       "highlights": {
-        "P0_DF43": "Closed: adapter From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource; nexus-knowledge locked to model/adapter-seam; local-db-schema.md §4.1.1 ownership boundary text; round-trip + duplicate-truth tests",
+        "P0_DF43": "Closed: adapter From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource; nexus-knowledge locked to model/adapter-seam; local-db-schema.md \u00a74.1.1 ownership boundary text; round-trip + duplicate-truth tests",
         "P1_DF31": "Interface skeleton shipped: WorkspaceSessionManager (atomic consume_session + SessionError + poison recovery + typed errors); 2 Local API routes; no broad DF-42 Local API redesign",
-        "P2_game_bible_depth_35": "Depth 3.5: design-writing + design 五问 rubric + section completion detection + profile-aware KB extraction (candidate_from_llm_json_for_profile); R-V154P1-S002 closed",
+        "P2_game_bible_depth_35": "Depth 3.5: design-writing + design \u4e94\u95ee rubric + section completion detection + profile-aware KB extraction (candidate_from_llm_json_for_profile); R-V154P1-S002 closed",
         "P3_script_scaffold": "V1.54-style scaffold + additive BlockType dialogue/beat/act + script_category + ValidationMode::Script; R-V154P1-W001 closed (ScaffoldTransaction on BOTH game-bible + script)",
-        "P_last": "game-bible-profile.md Draft → Master; Profile B compaction; tracker V1.55 ship snapshot; integration branch retiring; R-V155P2-F002 registered (V1.56+)"
+        "P_last": "game-bible-profile.md Draft \u2192 Master; Profile B compaction; tracker V1.55 ship snapshot; integration branch retiring; R-V155P2-F002 registered (V1.56+)"
       },
       "residual_lifecycle": {
         "archived_in_v155": [
@@ -504,15 +505,15 @@
         ],
         "open_v156_count": 1
       },
-      "wire_contract_changes": "None (per compass §0.1; additive enum only — script BlockType dialogue/beat/act)",
-      "qc_tri_review_outcome": "P0: 3/3 Approve. P1: 3/3 Request Changes → 1 fix-wave → 3/3 Approve. P2: qc1+qc3 Request Changes → 2 fix-waves → 3/3 Approve. P3: qc1+qc2 Request Changes → 1 fix-wave → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies.",
+      "wire_contract_changes": "None (per compass \u00a70.1; additive enum only \u2014 script BlockType dialogue/beat/act)",
+      "qc_tri_review_outcome": "P0: 3/3 Approve. P1: 3/3 Request Changes \u2192 1 fix-wave \u2192 3/3 Approve. P2: qc1+qc3 Request Changes \u2192 2 fix-waves \u2192 3/3 Approve. P3: qc1+qc2 Request Changes \u2192 1 fix-wave \u2192 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies.",
       "note": "V1.55 ship pending PR to main (user authorization required for push). Integration branch iteration/v1.55 retiring per mstar-branch-worktree."
     }
   },
   "metadata": {
     "last_updated": "2026-06-19 (V1.51 shipped at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64)",
-    "v1_47_iteration_complete": "yes — ready for PR to main",
-    "v1_50_iteration_complete": "yes — ready for PR to main",
-    "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
+    "v1_47_iteration_complete": "yes \u2014 ready for PR to main",
+    "v1_50_iteration_complete": "yes \u2014 ready for PR to main",
+    "v1_51_iteration_complete": "yes \u2014 shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
   }
 }

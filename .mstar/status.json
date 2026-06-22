@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T22:45:00Z",
+  "updated_at": "2026-06-22T23:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.57-mid-qc-and-fix-waves",
@@ -79,17 +79,80 @@
           "commit": "c250027c"
         }
       ]
+    },
+    {
+      "plan_id": "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
+      "title": "DF-47 Manuscript & Misc Capability Parity Batch (P0)",
+      "iteration": "V1.59",
+      "track": "Track A",
+      "wave": "Wave 1 (parallel w/ P1)",
+      "effort": "L",
+      "owner": "@fullstack-dev",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.59-df47-manuscript-and-misc-capabilities.md",
+      "working_branch": "feature/v1.59-df47-manuscript-and-misc-capabilities",
+      "merge_target": "iteration/v1.59",
+      "depends_on": ["2026-06-22-v1.59-compass-and-plan-stubs"],
+      "created": "2026-06-22",
+      "review_strategy": "Merge to integration → tri-review → mid-QA → targeted fix-wave"
+    },
+    {
+      "plan_id": "2026-06-22-v1.59-df12-outbox-consolidation",
+      "title": "DF-12 Outbox Consolidation (P1)",
+      "iteration": "V1.59",
+      "track": "Track B",
+      "wave": "Wave 1 (parallel w/ P0)",
+      "effort": "L",
+      "owner": "@fullstack-dev-2",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.59-df12-outbox-consolidation.md",
+      "working_branch": "feature/v1.59-df12-outbox-consolidation",
+      "merge_target": "iteration/v1.59",
+      "depends_on": ["2026-06-22-v1.59-compass-and-plan-stubs"],
+      "created": "2026-06-22",
+      "review_strategy": "Merge to integration → tri-review → mid-QA → targeted fix-wave"
+    },
+    {
+      "plan_id": "2026-06-22-v1.59-mid-qc-and-fix-waves",
+      "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
+      "iteration": "V1.59",
+      "track": "meta",
+      "wave": "Across Wave 1",
+      "effort": "M",
+      "owner": "@project-manager",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.59-mid-qc-and-fix-waves.md",
+      "depends_on": null,
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.59-hygiene-and-closeout",
+      "title": "Hygiene & Closeout (P-last)",
+      "iteration": "V1.59",
+      "track": "closeout",
+      "wave": "After Wave 1",
+      "effort": "M",
+      "owner": "@project-manager",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.59-hygiene-and-closeout.md",
+      "merge_target": "iteration/v1.59",
+      "depends_on": [
+        "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
+        "2026-06-22-v1.59-df12-outbox-consolidation"
+      ],
+      "created": "2026-06-22",
+      "review_strategy": "Report-only QA"
     }
   ],
   "metadata": {
-    "integration_branch": "iteration/v1.58 (PR-ready)",
+    "integration_branch": "iteration/v1.59",
     "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.57 (retired)",
+    "last_integration_branch": "iteration/v1.58 (retired, merged PR #80 @ 578be523)",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.59",
+    "latest_active_compass": "v1.59-capability-parity-and-outbox-consolidation",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "pending",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -168,7 +231,7 @@
       },
       "qc_tri_review_outcome": "Wave 1 (P0+P1 parallel): P0 qc1 Approve + qc2/qc3 Request Changes → fix-wave → targeted re-review 3/3 Approve. P1 qc1 Approve + qc2/qc3 Request Changes → fix-wave → targeted re-review 3/3 Approve. Wave 2 (P2 sequential): qc1/qc2/qc3 all Approve (clean first-pass; no fix-wave). Wave 3 (P3 sequential): qc1 Approve + qc2/qc3 Request Changes → fix-wave → targeted re-review 3/3 Approve. Total: 12 QC reports + 6 targeted re-reviews + 1 mid-QA + 1 report-only QA = 20 reports across 4 waves.",
       "note": "V1.58 Shipped 2026-06-22; PR-ready on iteration/v1.58. 7 plans all Done; 33 of 35 V1.57+/V1.58+ residuals CLOSED + DF-44 fully closed end-to-end; 14 V1.52-era WL-A residuals deferred to V1.59+. 3 fix-waves (P0 + P1 + P3); Wave 2 clean first-pass. Pre-existing clippy baseline (96 errors in nexus-agent-host + 1 in nexus-orchestration) verified on origin/main; V1.58 added 0 new clippy errors per PM override per V1.57 P-last precedent.",
-      "merge_commit": null,
+      "merge_commit": "578be523",
       "pr": 80,
       "pr_url": "https://github.com/42ch-dev/nexus/pull/80"
     },
