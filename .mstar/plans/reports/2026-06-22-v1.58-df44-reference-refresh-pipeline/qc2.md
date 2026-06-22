@@ -7,7 +7,7 @@ review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
 working_branch: iteration/v1.58
 diff_basis: d443e855..af82ad39
 reviewed_at: 2026-06-22T05:48:05Z
-verdict: Request Changes
+verdict: Approve
 ---
 
 # QC2 — V1.58 P1 DF-44 Reference Refresh — Security/Correctness Review
@@ -84,3 +84,26 @@ All other properties are either satisfied within the declared P1 scope or are ex
 - **Network hygiene should be shared** — once H-001 is fixed, consider extracting the URL validation (https + !blocked_ip) into a small shared helper in `nexus-orchestration` (or a new lightweight crate) so future "fetch from user-controlled URI" capabilities do not reintroduce the gap.
 - **sqlx hygiene protocol** (from P0 T18) worked as intended here — the regression was caught in the integration merge commit. Ensure the CI step that runs `SQLX_OFFLINE=true cargo check --workspace --tests` (or equivalent) remains in the V1.58+ workflow.
 - **Deferred-features tracker** — DF-44 row should be updated at P3 closeout to reflect that the body file materialization and CLI surface were the P3 increments.
+
+## Revalidation
+
+**Revalidated by**: qc-specialist-2
+**Revalidated at**: 2026-06-22T06:30:28Z
+**Diff basis**: 43bf69e2..20c8ae0f (P1 fix-wave)
+
+### Findings Status
+
+| Original Finding | Severity | Status | Evidence |
+| --- | --- | --- | --- |
+| H-001 HTTPS-only + private-IP | HIGH | Closed | `validate_reference_url()` (reference_refresh.rs:62-118) extracted following `validate_cdn_url_static` + `is_blocked_ip` pattern from registry.rs; called at line 288 *before* `HTTP_CLIENT.get(fetch_url)`; rejects non-https, resolves DNS and rejects private/loopback/link-local/169.254.0.0/16 + IPv6 equivalents; 10 dedicated regression tests pass (`validate_reference_url_rejects_*`, `is_blocked_ip_*`) + full module test run (17 passed, 3 ignored network) |
+| M-001 body file deferred | Medium | Acknowledged | Doc comment at reference_refresh.rs:339-344: "NOTE: On-disk body.md is NOT updated here — only the DB content_hash is updated. The body file write is deferred to P3 (CLI surface wires file I/O). ... See .mstar/knowledge/specs/reference-knowledge.md §5." |
+| M-002 single-daemon idempotency | Medium | Closed | `reference-knowledge.md` §3 (lines 91-97): "**Limitation (single-daemon only):** This guard is best-effort within a single daemon process. There is no cross-invocation or cross-process lock. An explicit CLI call (P3) arriving between the SELECT and the UPDATE, or two daemon instances against the same SQLite file, could both proceed to fetch. For the V1.58 single-daemon local model this is acceptable..." |
+
+### New Findings (if any)
+
+None.
+
+### Verdict
+
+**Verdict**: Approve
+**Rationale**: All three Request Changes items from the original QC2 report have been resolved in the P1 fix-wave. H-001 security/correctness gap is closed with a dedicated `validate_reference_url` helper (modeled directly on the V1.57 registry precedent), invoked before any network egress, and covered by targeted regression tests. M-001 and M-002 are explicitly documented as acknowledged scope boundaries with no code change required this round. All non-network tests in the module pass cleanly.

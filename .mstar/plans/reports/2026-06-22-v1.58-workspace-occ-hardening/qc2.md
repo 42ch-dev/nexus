@@ -7,7 +7,7 @@ review_cwd: /Users/bibi/workspace/organizations/42ch/nexus
 working_branch: iteration/v1.58
 diff_basis: d443e855..af82ad39
 reviewed_at: 2026-06-22T14:15:00Z
-verdict: Request Changes
+verdict: Approve
 ---
 
 # QC2 — V1.58 P0 Workspace OCC Hardening — Security/Correctness Review
@@ -95,3 +95,28 @@ No Critical findings were waived. The security surface that was intended to be h
 - `.mstar/knowledge/specs/daemon-runtime.md` (V1.58 overlay sections)
 - `.mstar/plans/2026-06-22-v1.58-workspace-occ-hardening.md`
 - Working tree `.sqlx/` state and `git status`
+
+## Revalidation
+
+**Revalidated by**: qc-specialist-2
+**Revalidated at**: 2026-06-22T15:42:00Z
+**Diff basis**: 43bf69e2..20c8ae0f (P0 fix-wave)
+
+### Findings Status
+
+| Original Finding | Severity | Status | Evidence |
+| --- | --- | --- | --- |
+| H-1 std::fs::canonicalize async | HIGH | Closed | `canonicalize_workspace_root` (session.rs:171-177) wraps `std::fs::canonicalize` in `tokio::task::spawn_blocking`; all 3 call sites (open_session:340/343, validate:453) route through wrapper. T4 acceptance criterion fully met. |
+| H-2 validate_changes_manifest TOCTOU | HIGH | Closed | `symlink_metadata` re-validation immediately before hash read (session.rs:511-519); regression test `validate_changes_manifest_rejects_symlink_in_modify_path` (workspace_occ_concurrent.rs:192-251) exercises symlink escape and asserts `PathEscape`. |
+| H-3 .sqlx/ cache hygiene | HIGH | Closed | `SQLX_OFFLINE=true cargo check --workspace --tests` → clean (exit 0); 141 `query-*.json` files present (≥50); `crates/nexus-local-db/tests/sqlx_cache_intact.rs` exists and passes; protocol in daemon-runtime.md §V1.58 explicitly requires `--tests` flag. |
+| M-1 force param removed | Medium | Closed | Input schema (registry.rs:380) is `{}` with `additionalProperties:false`; `RegistryRefreshInput` struct (contracts) has no `force` field; help text (registry.rs:89-96) omits force; run() parses to empty struct; backward compat test `registry_refresh_tolerates_historical_force_field` (registry.rs:999-1005) confirms serde ignores unknown fields. |
+| M-2 per-file canonicalize sites | Medium | Closed | Closed by H-1 (all canonicalize now via spawn_blocking wrapper). |
+
+### New Findings (if any)
+
+None. No new HIGH or MEDIUM findings discovered during targeted re-review.
+
+### Verdict
+
+**Verdict**: Approve
+**Rationale**: All 3 original HIGH findings (H-1, H-2, H-3) are closed with concrete evidence (spawn_blocking wrapper, pre-open symlink_metadata + regression test, cache hygiene verification + guard test + documented protocol). Both Medium findings are also closed (M-1 by schema/help/run changes + compat test; M-2 subsumed by H-1). `SQLX_OFFLINE=true cargo check --workspace --tests` is clean; `cargo test -p nexus-local-db --test sqlx_cache_intact` passes. No new blocking issues found. Security/correctness surface for the P0 scope is now acceptable.
