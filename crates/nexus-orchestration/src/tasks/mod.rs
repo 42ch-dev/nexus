@@ -1064,6 +1064,10 @@ impl StateCompositeTask {
     ///
     /// If the capability registry is unavailable, falls back to a minimal
     /// synthetic output so expressions don't fail on missing fields.
+    ///
+    /// V1.58 P2 (R-V156P3-W002): every invocation site emits a `tracing::info!`
+    /// span with `duration_ms` and `status` so operators can observe refresh
+    /// latency and fallback rate on conditional-edge evaluation paths.
     async fn inject_registry_refresh_context(&self, context: &graph_flow::Context) {
         // Check if we already have registry output (avoid redundant invocation).
         if context
@@ -1071,16 +1075,33 @@ impl StateCompositeTask {
             .await
             .is_some()
         {
+            tracing::debug!(
+                "registry.refresh skipped: cached output already present in context"
+            );
             return;
         }
 
         let output = if let Some(registry) = &self.registry {
             // Try to invoke the registered capability.
             if let Some(cap) = registry.get("registry.refresh") {
+                let start = std::time::Instant::now();
                 match cap.run(serde_json::json!({})).await {
-                    Ok(val) => val,
+                    Ok(val) => {
+                        let duration_ms = start.elapsed().as_millis();
+                        tracing::info!(
+                            capability = "registry.refresh",
+                            duration_ms,
+                            status = "ok",
+                            "registry.refresh invocation completed"
+                        );
+                        val
+                    }
                     Err(e) => {
+                        let duration_ms = start.elapsed().as_millis();
                         tracing::warn!(
+                            capability = "registry.refresh",
+                            duration_ms,
+                            status = "fallback",
                             error = %e,
                             "registry.refresh capability invocation failed, using synthetic fallback"
                         );
@@ -1088,13 +1109,22 @@ impl StateCompositeTask {
                     }
                 }
             } else {
-                tracing::debug!(
+                tracing::info!(
+                    capability = "registry.refresh",
+                    duration_ms = 0u128,
+                    status = "fallback",
                     "registry.refresh capability not found in registry, using synthetic fallback"
                 );
                 synthetic_registry_output()
             }
         } else {
             // No registry available — use synthetic fallback.
+            tracing::info!(
+                capability = "registry.refresh",
+                duration_ms = 0u128,
+                status = "fallback",
+                "no capability registry available, using synthetic fallback"
+            );
             synthetic_registry_output()
         };
 
@@ -1106,6 +1136,10 @@ impl StateCompositeTask {
     /// If `self.workspace_state` is set (e.g., by tests), uses that.
     /// Otherwise, injects a minimal default state so expressions referencing
     /// `_context.workspace.*` fields get valid values without error.
+    ///
+    /// V1.58 P2 (R-V156P3-W001): emits a `tracing::debug!` span so operators
+    /// can trace what workspace context was injected into which schedule tick
+    /// (previously this path had zero tracing).
     async fn inject_workspace_context(&self, context: &graph_flow::Context) {
         // Check if already injected (avoid clobbering).
         if context
@@ -1113,6 +1147,9 @@ impl StateCompositeTask {
             .await
             .is_some()
         {
+            tracing::debug!(
+                "workspace context injection skipped: __workspace_state already present"
+            );
             return;
         }
 
@@ -1124,6 +1161,20 @@ impl StateCompositeTask {
                 "workspace_root": ""
             })
         });
+
+        tracing::debug!(
+            state_id = %self.id,
+            source = if self.workspace_state.is_some() { "hook" } else { "default" },
+            conflict_detected = %ws_state
+                .get("conflict_detected")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            changes_applied = %ws_state
+                .get("changes_applied")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0),
+            "injecting workspace context for expression evaluation"
+        );
 
         context.set("__workspace_state", ws_state).await;
     }
