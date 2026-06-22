@@ -18,8 +18,10 @@
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -37,6 +39,126 @@ static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .build()
         .expect("failed to build shared reqwest::Client for reference refresh")
 });
+
+// ─── URL validation (H-001: QC2 fix — HTTPS-only + private-IP blocking) ─────
+
+/// Maximum body size for reference refresh fetches: 100 MiB.
+///
+/// Bodies larger than this are rejected to prevent daemon OOM.
+const MAX_REFERENCE_BODY_BYTES: usize = 100 * 1024 * 1024;
+
+/// Validate a reference source URL before fetching.
+///
+/// # Security (H-001)
+///
+/// 1. Rejects non-https schemes (only `https://` URLs are allowed).
+/// 2. Rejects literal private/loopback/link-local/169.254.0.0/16 IP addresses.
+/// 3. Resolves hostnames via DNS and rejects any resolved address that falls
+///    in a blocked range (private, loopback, link-local, or metadata endpoint).
+///
+/// Mirrors the pattern established for `registry.refresh` in
+/// [`super::registry::validate_cdn_url_static`] and
+/// [`super::registry::fetch_from_cdn`].
+async fn validate_reference_url(fetch_url: &str) -> Result<(), CapabilityError> {
+    // Guard 1: scheme must be https.
+    if !fetch_url.starts_with("https://") {
+        return Err(CapabilityError::InputInvalid(
+            "reference URL must use https:// scheme".into(),
+        ));
+    }
+
+    // Extract host portion.
+    let after_scheme = &fetch_url["https://".len()..];
+    let host_part = after_scheme.split('/').next().unwrap_or(after_scheme);
+    let host = host_part.split(':').next().unwrap_or(host_part);
+
+    if host.is_empty() {
+        return Err(CapabilityError::InputInvalid(
+            "reference URL has empty host".into(),
+        ));
+    }
+
+    // Guard 2: if host is a literal IP, reject blocked ranges immediately
+    // (no DNS resolution needed).
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(&ip) {
+            return Err(CapabilityError::InputInvalid(format!(
+                "reference URL host {host} is a blocked network address"
+            )));
+        }
+        return Ok(());
+    }
+
+    // Guard 3: resolve hostname via DNS and check all resolved addresses.
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, 443_u16))
+        .await
+        .map_err(|e| {
+            CapabilityError::InputInvalid(format!(
+                "reference URL host {host} DNS resolution failed: {e}"
+            ))
+        })?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(CapabilityError::InputInvalid(format!(
+            "reference URL host {host} resolved to no addresses"
+        )));
+    }
+
+    for addr in &addrs {
+        if is_blocked_ip(&addr.ip()) {
+            return Err(CapabilityError::InputInvalid(format!(
+                "reference URL host {host} resolves to blocked address {}",
+                addr.ip()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+/// Check whether an IP address is in a blocked range (private, loopback,
+/// link-local, or metadata endpoint).
+///
+/// Duplicated from `registry.rs:is_blocked_ip` — see H-001 (QC2).
+fn is_blocked_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                // Explicit metadata endpoint range (169.254.0.0/16) —
+                // `is_link_local()` already covers this on most platforms,
+                // but we double-check for clarity.
+                || v4.octets()[0] == 169 && v4.octets()[1] == 254
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback() || is_ipv6_mapped_ipv4_private(v6) || is_ipv6_private_range(v6)
+        }
+    }
+}
+
+/// Check if an IPv6 address is an IPv4-mapped IPv6 address whose embedded
+/// IPv4 address falls in a blocked range.
+fn is_ipv6_mapped_ipv4_private(v6: &Ipv6Addr) -> bool {
+    let octets = v6.octets();
+    // ::ffff:0:0/96 prefix
+    if octets[..10] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] && octets[10] == 0xff && octets[11] == 0xff {
+        let v4 = Ipv4Addr::new(octets[12], octets[13], octets[14], octets[15]);
+        return v4.is_private()
+            || v4.is_loopback()
+            || v4.is_link_local()
+            || (v4.octets()[0] == 169 && v4.octets()[1] == 254);
+    }
+    false
+}
+
+/// Check if an IPv6 address falls in a private/unique-local range (`fc00::/7`).
+const fn is_ipv6_private_range(v6: &Ipv6Addr) -> bool {
+    let octets = v6.octets();
+    // fc00::/7 → first octet 0xfc or 0xfd
+    octets[0] & 0xfe == 0xfc
+}
 
 // ─── Input / Output types ───────────────────────────────────────────────────
 
@@ -162,7 +284,10 @@ impl Capability for ReferenceRefresh {
             }));
         }
 
-        // Step 5: Fetch content.
+        // Step 5: Validate URL (H-001: HTTPS-only + private-IP blocking).
+        validate_reference_url(fetch_url).await?;
+
+        // Step 6: Fetch content.
         let fetch_result = HTTP_CLIENT.get(fetch_url).send().await;
 
         match fetch_result {
@@ -186,23 +311,38 @@ impl Capability for ReferenceRefresh {
                     }));
                 }
 
-                let body_bytes = response
-                    .bytes()
-                    .await
-                    .map_err(|e| CapabilityError::TransientExternal(format!("fetch body: {e}")))?;
+                // Stream the response body and compute blake3 hash incrementally
+                // (F-001: QC3 fix — avoids loading entire body into memory).
+                let mut hasher = blake3::Hasher::new();
+                let mut stream = response.bytes_stream();
+                let mut total_bytes: usize = 0;
 
-                let new_hash = blake3_hash(&body_bytes);
+                while let Some(chunk_result) = stream.next().await {
+                    let chunk = chunk_result.map_err(|e| {
+                        CapabilityError::TransientExternal(format!("fetch body: {e}"))
+                    })?;
+                    if total_bytes + chunk.len() > MAX_REFERENCE_BODY_BYTES {
+                        return Err(CapabilityError::TransientExternal(format!(
+                            "reference body exceeds {MAX_REFERENCE_BODY_BYTES} bytes limit"
+                        )));
+                    }
+                    hasher.update(&chunk);
+                    total_bytes += chunk.len();
+                }
+
+                let new_hash = hasher.finalize().to_hex().to_string();
                 let old_hash = source.content_hash.clone();
                 let content_changed = old_hash.as_deref() != Some(&new_hash);
 
                 if content_changed {
                     // Update the body file on disk.
+                    // NOTE: On-disk body.md is NOT updated here — only the DB
+                    // content_hash is updated. The body file write is deferred to
+                    // P3 (CLI surface wires file I/O). Until P3, consumers
+                    // reading from `content_path` will see stale content even
+                    // when this capability reports `content_changed: true`.
+                    // See .mstar/knowledge/specs/reference-knowledge.md §5.
                     if let Some(ref content_path) = source.content_path {
-                        // Reconstruct the full path from the relative content_path.
-                        // The content_path is relative to the creator root;
-                        // we use the home_layout helper.
-                        // For now, update the DB hash only — file update is a
-                        // follow-up concern (P3 wires file I/O through CLI).
                         let _ = content_path;
                     }
 
@@ -222,7 +362,7 @@ impl Capability for ReferenceRefresh {
                         "status": "fresh",
                         "new_content_hash": new_hash,
                         "refreshed_at": now,
-                        "bytes_fetched": body_bytes.len(),
+                        "bytes_fetched": total_bytes,
                     }))
                 } else {
                     // Content unchanged — mark as fresh (not stale).
@@ -241,7 +381,7 @@ impl Capability for ReferenceRefresh {
                         "status": "not_modified",
                         "new_content_hash": new_hash,
                         "refreshed_at": now,
-                        "bytes_fetched": body_bytes.len(),
+                        "bytes_fetched": total_bytes,
                     }))
                 }
             }
@@ -270,11 +410,6 @@ impl Capability for ReferenceRefresh {
             }
         }
     }
-}
-
-/// Compute a blake3 hex hash of the given bytes.
-fn blake3_hash(data: &[u8]) -> String {
-    blake3::hash(data).to_hex().to_string()
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -427,5 +562,173 @@ mod tests {
             matches!(err, CapabilityError::WorkerUnavailable),
             "expected WorkerUnavailable, got {err:?}"
         );
+    }
+
+    // ── H-001: URL validation tests ─────────────────────────────────────
+
+    /// Non-HTTPS scheme must be rejected before any network call.
+    #[tokio::test]
+    async fn validate_reference_url_rejects_non_https() {
+        let result = validate_reference_url("http://example.com/body").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("https"),
+            "error must mention https, got: {msg}"
+        );
+    }
+
+    /// Literal loopback IP must be rejected (static check, no DNS).
+    #[tokio::test]
+    async fn validate_reference_url_rejects_loopback_ip() {
+        let result = validate_reference_url("https://127.0.0.1/body").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid for loopback, got {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("blocked") || msg.contains("127.0.0.1"),
+            "error must mention blocked address, got: {msg}"
+        );
+    }
+
+    /// Literal private IP (10.x) must be rejected.
+    #[tokio::test]
+    async fn validate_reference_url_rejects_private_ip() {
+        let result = validate_reference_url("https://10.0.0.1/body").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid for 10.0.0.1, got {err:?}"
+        );
+    }
+
+    /// Literal link-local IP (169.254.x.x) must be rejected.
+    #[tokio::test]
+    async fn validate_reference_url_rejects_link_local_ip() {
+        let result = validate_reference_url("https://169.254.169.254/body").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid for 169.254.x.x, got {err:?}"
+        );
+    }
+
+    /// Literal private IP (192.168.x) must be rejected.
+    #[tokio::test]
+    async fn validate_reference_url_rejects_private_class_c() {
+        let result = validate_reference_url("https://192.168.1.1/body").await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InputInvalid(_)),
+            "expected InputInvalid for 192.168.1.1, got {err:?}"
+        );
+    }
+
+    /// Valid public IP (1.1.1.1) must pass static check.
+    #[tokio::test]
+    async fn validate_reference_url_allows_public_ip() {
+        // 1.1.1.1 is a public IP — static check passes (no DNS needed).
+        let result = validate_reference_url("https://1.1.1.1/body").await;
+        assert!(
+            result.is_ok(),
+            "1.1.1.1 should pass static check, got {result:?}"
+        );
+    }
+
+    /// Empty host must be rejected.
+    #[tokio::test]
+    async fn validate_reference_url_rejects_empty_host() {
+        let result = validate_reference_url("https:///body").await;
+        assert!(result.is_err());
+    }
+
+    // ── H-001: is_blocked_ip unit tests ─────────────────────────────────
+
+    #[test]
+    fn is_blocked_ip_rejects_loopback_v4() {
+        assert!(is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+    }
+
+    #[test]
+    fn is_blocked_ip_rejects_private_v4() {
+        assert!(is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))));
+        assert!(is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1))));
+        assert!(is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn is_blocked_ip_rejects_link_local_v4() {
+        assert!(is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1))));
+    }
+
+    #[test]
+    fn is_blocked_ip_allows_public_v4() {
+        assert!(!is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))));
+        assert!(!is_blocked_ip(&IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+    }
+
+    #[test]
+    fn is_blocked_ip_rejects_loopback_v6() {
+        assert!(is_blocked_ip(&IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    }
+
+    #[test]
+    fn is_blocked_ip_rejects_private_v6_range() {
+        // fc00::1 is in the fc00::/7 unique-local range.
+        let addr = Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1);
+        assert!(is_blocked_ip(&IpAddr::V6(addr)));
+    }
+
+    #[test]
+    fn is_blocked_ip_allows_public_v6() {
+        // 2001:db8::1 is documentation-only but not in blocked ranges.
+        let addr = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        assert!(!is_blocked_ip(&IpAddr::V6(addr)));
+    }
+
+    // ── F-001: streaming hash test ──────────────────────────────────────
+
+    /// Verify that the body is fetched with streaming (no OOM risk) and
+    /// the hash matches the expected blake3 output for known content.
+    /// Uses httpbin.org/base64 to fetch a deterministic small body.
+    #[tokio::test]
+    #[ignore = "requires network access to httpbin.org"]
+    async fn refresh_streams_body_with_correct_hash() {
+        let (pool, dir) = fresh_pool().await;
+        let home = dir.path();
+        // httpbin.org/base64/dmV4YW1wbGU= decodes to "vexample" (7 bytes)
+        let source_id = register_test_source(
+            &pool,
+            home,
+            "stream",
+            "https://httpbin.org/base64/dmV4YW1wbGU=",
+        )
+        .await;
+        reference_source::set_refresh_policy(&pool, &source_id, "on_change")
+            .await
+            .unwrap();
+
+        let cap = ReferenceRefresh::with_pool(pool.clone());
+        let input = serde_json::json!({"reference_source_id": source_id});
+        let result = cap.run(input).await.unwrap();
+
+        assert_eq!(result["status"], "fresh");
+        // The body "vexample" has a known blake3 hash.
+        // Pre-computed: blake3(b"vexample") → hex
+        let expected_hash = blake3::hash(b"vexample").to_hex().to_string();
+        assert_eq!(result["new_content_hash"], expected_hash);
+        assert_eq!(result["bytes_fetched"], 7);
     }
 }
