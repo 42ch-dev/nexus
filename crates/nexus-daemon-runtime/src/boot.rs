@@ -132,6 +132,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             url: cdn_url.clone(),
             timeout_ms: 10_000,
             max_retries: 3,
+            max_body_bytes: nexus_orchestration::capability::builtins::registry::DEFAULT_MAX_CDN_BODY_SIZE,
         })
     } else {
         tracing::info!("No CDN URL configured — registry.refresh will use synthetic output only");
