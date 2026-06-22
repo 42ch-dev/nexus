@@ -1,11 +1,11 @@
 # Reference Knowledge — Reference Body Refreshable Scan Pipeline
 
-**Status**: Draft (V1.58 P1)
-**Document class**: Draft overlay
-**Created**: 2026-06-22
+**Status**: Normative (V1.58 P-last promote)
+**Document class**: Master
+**Created**: 2026-06-22 (Draft at P1)
+**Promoted to Master**: 2026-06-22 (V1.58 P-last)
 **Scope**: Reference body externalization — refreshable scan pipeline for DF-44
-**Coordinates with**: [acp-capability-set.md](acp-capability-set.md) §4, [capability-registry.md](capability-registry.md) §2.8, [daemon-runtime.md](daemon-runtime.md) §4e, [entity-scope-model.md](entity-scope-model.md)
-**Promotion**: Master at V1.58 P-last
+**Coordinates with**: [acp-capability-set.md](acp-capability-set.md) §4, [capability-registry.md](capability-registry.md) §2.8, [daemon-runtime.md](daemon-runtime.md) §10, [entity-scope-model.md](entity-scope-model.md)
 
 ---
 
