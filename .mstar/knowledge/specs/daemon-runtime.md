@@ -304,5 +304,52 @@ current implementation is correct and documented):
   (`fetch_add` on a hot cache line). Adding a dedicated micro-benchmark is
   low value; the existing `synthetic_warm_run` bench (734 ns end-to-end)
   already confirms metrics overhead is negligible at the capability layer.
-  Deferred; revisit only if profiling shows > 1% of cold path.
+   Deferred; revisit only if profiling shows > 1% of cold path.
+
+## 10. Refresh-scheduler hook (V1.58 P1 / P3)
+
+### 10.1 Overview
+
+The daemon runtime includes a background refresh-scheduler task (`refresh_scheduler::spawn_refresh_scheduler`) that periodically scans the `reference_sources` table for stale rows and dispatches `nexus.reference.refresh` for each candidate.  The scheduler is a detached `tokio::spawn` task — all errors are logged at `warn!` level and never bubble out to the daemon lifecycle.
+
+### 10.2 Configuration
+
+| Knob | Default | Env override | Description |
+|------|---------|-------------|-------------|
+| Sweep cadence | 3600 s (1 h) | `NEXUS_DAEMON_REFRESH_SCHEDULER_INTERVAL_SECS` | How often the scheduler scans for stale sources |
+| Stale threshold | 86400 s (24 h) | `NEXUS_DAEMON_REFRESH_SCHEDULER_STALE_THRESHOLD_SECS` | How old a `scheduled` source must be to count as stale |
+| Initial delay | 60 s | — | First cycle fires after this delay to avoid blocking daemon boot |
+
+### 10.3 Query logic
+
+The `find_stale_sources` DAO (`nexus_local_db::reference_source`) excludes:
+- Sources with `refresh_policy = 'offline'`
+- Sources with `refresh_status = 'refreshing'` (concurrent-refresh guard)
+
+`on_change` sources are always included.  `scheduled` sources are included when `last_refreshed_at IS NULL` or older than the stale threshold.  Results are capped at 50 per tick and ordered by `last_refreshed_at ASC NULLS FIRST`.
+
+### 10.4 Dispatch path
+
+```
+refresh_scheduler::run_one_refresh_tick
+  └─ for each stale source:
+       └─ ReferenceRefresh::run({ "reference_source_id": "<id>" })
+            └─ get_by_id → check policy → mark_refreshing → fetch URL
+                 → hash → mark_refreshed → body.md write (if creator context)
+```
+
+The scheduler path does NOT set creator context — therefore body.md on-disk writes are deferred to the CLI-initiated refresh path.
+
+### 10.5 Error handling
+
+- Individual source refresh failures are logged and counted; they never abort the tick.
+- `find_stale_sources` query failure logs a warning and skips the tick.
+- Counters: `success` / `failure` per tick, logged at `info!` level.
+
+### 10.6 Tracing contract
+
+- `info!` at task start, each source refresh, and tick completion.
+- `warn!` on fetch failure or DB query failure.
+- `debug!` when no stale sources are found.
+- All messages carry the `reference_source_id` as a structured field.
 
