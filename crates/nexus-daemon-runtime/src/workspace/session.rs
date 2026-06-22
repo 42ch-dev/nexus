@@ -577,9 +577,9 @@ impl WorkspaceSessionManager {
     /// **No automatic retry.** This method returns immediately on CAS loss:
     /// the losing caller receives [`SessionError::AlreadyCommitted`] and the
     /// process-wide `occ_conflict_total` counter is incremented (T6) with a
-    /// structured `tracing::warn!` (conflict_type = "already_consumed").
-    /// There is no backoff, no sleep, and no max-retry counter — the call is
-    /// one-shot.
+    /// structured `tracing::warn!` with field `conflict_type` set to
+    /// `"already_consumed"`. There is no backoff, no sleep, and no
+    /// max-retry counter — the call is one-shot.
     ///
     /// This is intentional: the validate+consume pair bound a single logical
     /// operation (see [`commit_session`]). Retrying the consume in isolation
@@ -594,7 +594,7 @@ impl WorkspaceSessionManager {
     /// AND consumed = 0 AND expires_at > now` statement (in
     /// [`db::consume_session`]) executes as a single compare-and-swap. Two
     /// concurrent consumers race on `rows_affected()`: exactly one gets 1
-    /// (Consumed), the other gets 0 (re-read → AlreadyConsumed or Expired).
+    /// (`Consumed`), the other gets 0 (re-read → `AlreadyConsumed` or `Expired`).
     ///
     /// # Errors
     ///
