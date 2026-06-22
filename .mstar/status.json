@@ -142,23 +142,25 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/81"
     },
     "tech_debt_summary": {
-      "total_open": 28,
+      "total_open": 34,
       "total_deferred": 0,
-      "total_resolved": 63,
+      "total_resolved": 64,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 28,
+        "low": 35,
         "medium": 0,
         "high": 0
       },
       "by_target_active": {
-        "V1.52 T-A P2": 1,
-        "V1.52 P-last": 1,
-        "V1.52 P-last WL-A": 14,
-        "V1.60+": 12
+        "V1.52-era WL-A": 16,
+        "V1.60+": 12,
+        "V1.61+": 7
       },
+      "v1_60_qc_registration_note": "V1.60 Wave 1 tri-review registered 8 QC residuals (1 medium must-fix R-V160P0-QC1-W001 in fix-wave; 7 low accepted-as-deferred WL-A). Post-fix-wave target: 7 open (all low) → P-last absorbs → 0 at ship.",
       "v1_60_preamble_note": "V1.60 P-1 T0 bulk-resolve applied 28 V1.57+ rows per forensic audit (25 CONFIRMED_CLOSED + 2 PARTIALLY_CLOSED + 1 wontfix). 4 V1.58 P2 NOT_CLOSED rows retargeted V1.57+ -> V1.60+ for P-last absorption. Pre-bulk-resolve total_open was 56 (honest lifecycle count); post-bulk-resolve is 28.",
-      "v1_58_closeout_note": "V1.58 closed 33 of 35 V1.57+/V1.58+ residuals + DF-44 fully closed. 14 remaining are V1.52-era WL-A polish residuals explicitly deferred to V1.59+ per compass §6. 33 new residuals closed: R-V156P0-M001..M006 (workspace OCC), R-V156P1-M003..M005+L001..L007 (capability surface), R-V156-PROCESS-01+R-V156P1-CACHE-01+R-V156P2-CACHE-01 (process), R-V156P2-M001..M003+L001..L004 (DF-56 independent), R-V156P3-W001/W002+S001/S002/S004 (DF-56 dependent), R-V157P0-L001/L002+R-V157P1-W001 (V1.57-new). DF-44 closed end-to-end (P1 core + P3 CLI + body file write). All 4 implement plans merged to iteration/v1.58."
+      "v1_58_closeout_note": "V1.58 closed 33 of 35 V1.57+/V1.58+ residuals + DF-44 fully closed. 14 remaining are V1.52-era WL-A polish residuals explicitly deferred to V1.59+ per compass §6. 33 new residuals closed: R-V156P0-M001..M006 (workspace OCC), R-V156P1-M003..M005+L001..L007 (capability surface), R-V156-PROCESS-01+R-V156P1-CACHE-01+R-V156P2-CACHE-01 (process), R-V156P2-M001..M003+L001..L004 (DF-56 independent), R-V156P3-W001/W002+S001/S002/S004 (DF-56 dependent), R-V157P0-L001/L002+R-V157P1-W001 (V1.57-new). DF-44 closed end-to-end (P1 core + P3 CLI + body file write). All 4 implement plans merged to iteration/v1.58.",
+      "v1_60_post_fixwave_note": "Post-fixwave: R-V160P0-QC1-W001 resolved (1 row). Remaining 7 residuals all low severity, targeted V1.61+. P-last will absorb those that fit scope.",
+      "v1_60_lifecycle_normalization_note": "Normalized lifecycle field: 7 entries 'defer' → 'deferred' (canonical). Total open corrected: 7 → 35 (28 P-last scope: 16 V1.52-era + 8 V1.60+ + 4 V1.58-leftover; 7 V1.61+ QC residuals). P-last target: absorb 28 → 0 open in P-last scope (7 V1.61+ stay deferred)."
     },
     "v1_57_carry_forward_index": {
       "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. After Wave 2: ALL 3 V1.57 carry-forwards CLOSED (R-V156P1-M001 in P2 commit 28005f11; R-V156P1-M002 in P1 commit 64c0b245; R-V156P3-S003 in P0+P1 commits 7e9932ce + fc0e250a). 3 new V1.57+ residuals filed post-Wave 1: R-V157P0-L001 (low; AC wording), R-V157P0-L002 (medium; per-ID test vectors), R-V157P1-W001 (medium; host-call smoke `#[ignore]`). Wave 3 (P3) adds more V1.57+ residuals if surfaced.",
@@ -181,7 +183,7 @@
       "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
       "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
     },
-    "updated_at": "2026-06-22T23:59:00Z",
+    "updated_at": "2026-06-23T01:05:00Z",
     "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
   },
   "residual_findings": {
@@ -2991,7 +2993,14 @@
         "owner": "@fullstack-dev",
         "target": "V1.60+",
         "note": "Suggest auto-deriving via host_tool_registry().ids().filter(). Not blocking.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "V1.60 P0 T8 closed: catalog_registry_invariant_all_ids_present auto-derived via catalog Status + Registry-ref parsing. Manual 28-element match list eliminated.",
+        "closure_evidence": "merged to iteration/v1.60 @ a45e5b8f",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-df46-local-parity",
+          "commit": "ea90e435"
+        }
       }
     ],
     "2026-06-22-v1.59-df12-outbox-consolidation": [
@@ -3066,6 +3075,137 @@
         "target": "V1.60+",
         "note": "Typed error variants preferred for observability. Not blocking.",
         "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.60-df46-local-parity": [
+      {
+        "id": "R-V160P0-QC1-W001",
+        "title": "world.delta.apply create path references non-existent metadata_json column on kb_key_blocks (latent runtime bug; no test covered the branch)",
+        "severity": "medium",
+        "source": "qc1 (architecture/maintainability) W-001",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/world.rs ~line 601 (kb_key_block create branch)",
+        "decision": "fix-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.60 P0 QC1 fix-wave",
+        "target_date": "V1.60 P0 QC1 fix-wave",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc1.md §W-001",
+        "note": "Targeted fix-wave dispatched to @fullstack-dev. Fix: route kb_key_block create through SqliteKbStore::insert_key_block_in_tx DAO method + regression test exercising the create branch. Must-close before merge to main.",
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-23",
+        "closure_note": "V1.60 P0 QC1 fix-wave closed (commit f054887e merged to iteration/v1.60): world.delta.apply create branch now routes through SqliteKbStore::insert_key_block_in_tx DAO method. Non-existent metadata_json column reference eliminated. Bonus fix: 'concept' default was never a valid BlockType variant → now BlockType::Character. New regression test world_delta_apply_kb_key_block_create_persists_row exercises the create branch (reads row back; would have caught W-001). PM self-approved targeted re-review (clean single-file surgical fix).",
+        "closure_evidence": "feature/v1.60-df46-local-parity @ f054887e → merged to iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-df46-local-parity",
+          "commit": "f054887e"
+        }
+      },
+      {
+        "id": "R-V160P0-QC1-W002",
+        "title": "R-V159P0-002 auto-derivation hardcodes positional column indices (cols[1]/cols[3]/cols[5]); future table-column insertion would silently mis-classify",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) W-002",
+        "scope": "crates/nexus-daemon-runtime (catalog_registry_invariant_all_ids_present auto-derive path)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61+",
+        "target_date": "V1.61+",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc1.md §W-002",
+        "note": "WL-A. Pre-1.0 acceptable; future schema-column insertion risk. Consider named-column parsing instead of positional.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+      },
+      {
+        "id": "R-V160P0-QC2-W001",
+        "title": "Duplicated ownership gate (ensure_world_owned inline copy from daemon host_tool layer); orchestration cannot depend on daemon crate — drift risk",
+        "severity": "low",
+        "source": "qc2 (security/correctness) W-001",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/world.rs + timeline.rs + fork.rs (ensure_world_owned pattern)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61+",
+        "target_date": "V1.61+",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc2.md §W-001",
+        "note": "WL-A. Architectural constraint (orchestration crate cannot depend on daemon crate). Future: extract shared admission-gate utility into a lower crate.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+      },
+      {
+        "id": "R-V160P0-QC2-W002",
+        "title": "timeline.event.append does explicit-ID rename AFTER append_event succeeds, outside any transaction; rename failure leaves event under auto-allocated id",
+        "severity": "low",
+        "source": "qc2 (security/correctness) W-002",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/timeline.rs (rename path post-append)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61+",
+        "target_date": "V1.61+",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc2.md §W-002",
+        "note": "WL-A. Edge case: rename failure (e.g., ID collision) leaves orphan event under auto-id. Low practical risk (local single-writer). Future: wrap append+rename in single transaction.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+      },
+      {
+        "id": "R-V160P0-QC3-W001",
+        "title": "N+1 query pattern in world.delta.apply loop (one SELECT + one UPDATE per change inside transaction); acceptable for small deltas, optimize for >50 changes",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) F3",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/world.rs (delta.apply change loop)",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61+",
+        "target_date": "V1.61+",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc3.md §F3",
+        "note": "WL-A. Acceptable for V1.60 local-first use case with small delta sizes. Future minor release: batched optimization for large deltas.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+      }
+    ],
+    "2026-06-22-v1.60-script-depth-35": [
+      {
+        "id": "R-V160P1-QC1-W001",
+        "title": "script.section_status.update capability referenced in spec (§5.1, §9.2) + preset header but NOT in CapabilityRegistry; cross-track drift (P0 owns registry, P1 owns spec)",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) W-001 (P1) + W-003 (P0 cross-reference)",
+        "scope": ".mstar/knowledge/specs/script-profile.md §5.1 + §9.2; embedded-presets/script-writing/preset.yaml header",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61+",
+        "target_date": "V1.61+",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc1.md §W-001",
+        "note": "Cross-track drift. The capability is not used in any preset state (P1 implementer correctly omitted from requires_capabilities). Spec references are aspirational. V1.61+: implement the handler (mirrors game_bible.section_status.update 727-line pattern) + register in CapabilityRegistry + spec cleanup.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+      },
+      {
+        "id": "R-V160P1-QC2-W001",
+        "title": "is_script_complete builds paths from caller-supplied workspace_dir + work_ref with no internal canonicalize + boundary check (trusts daemon handler layer; same pattern as game-bible today)",
+        "severity": "low",
+        "source": "qc2 (security/correctness) W-001",
+        "scope": "crates/nexus-local-db/src/work_chapters.rs (is_script_complete path construction)",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61+",
+        "target_date": "V1.61+",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc2.md §W-001",
+        "note": "WL-A. Same pattern as game-bible V1.55 P2. Pre-1.0 local-first acceptable. Future: canonicalize at the boundary (caller responsibility is already established).",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+      },
+      {
+        "id": "R-V160P1-QC2-W002",
+        "title": "Table-recreate migration 202606230001 lacks explicit post-rename PRAGMA foreign_key_check / integrity step (change is strictly widening; data copy is SELECT *)",
+        "severity": "low",
+        "source": "qc2 (security/correctness) W-002",
+        "scope": "crates/nexus-local-db/migrations/202606230001_work_profile_script.sql",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61+",
+        "target_date": "V1.61+",
+        "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc2.md §W-002",
+        "note": "WL-A. Migration is widening-only (CHECK constraint adds 'script'); data copy is SELECT *. Low risk. Future: add PRAGMA foreign_key_check as belt-and-suspenders for all table-recreate migrations.",
+        "lifecycle": "deferred",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35"
       }
     ]
   }
