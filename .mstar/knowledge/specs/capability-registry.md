@@ -188,6 +188,16 @@ correspond to an actual `#[test]` or `#[tokio::test]` function
 in the repository. A cross-validation test in `capability_registry.rs`
 verifies that all 7 fields are populated for every registered row.
 
+### 2.8 `nexus.reference.refresh` (V1.58 P1 — DF-44)
+
+**id**: `nexus.reference.refresh`
+**access**: `Read` + side-effect (writes `last_refreshed_at` / `refresh_status` to `reference_sources`)
+**admission**: Reference source must exist in `reference_sources` table; `refresh_policy != 'offline'` (else `policy_blocked`); URL must be valid (else `invalid_input`); network timeout returns `transient_error`.
+**handler**: `ReferenceRefresh::run()` in `crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs`. Registered in orchestration `CapabilityRegistry` (pool-aware; without pool returns `WorkerUnavailable`). Not registered in `host_tool_registry()` (reference-source-scoped, not ACP-facing).
+**ACP wire**: Not ACP-facing — dispatched internally by daemon refresh-scheduler hook and direct capability invocation.
+**failure mode**: `PolicyBlocked` when `refresh_policy = 'offline'`; `InvalidInput` when reference source not found or URL is empty; `TransientExternal` on network timeout.
+**handler test vector**: ≥1 success (fetch + compare + update) + ≥1 failure (offline source → policy_blocked, not-found → invalid_input, network error → error).
+
 ---
 
 ## 3. Authority chain
