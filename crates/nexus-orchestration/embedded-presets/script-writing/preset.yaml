@@ -32,7 +32,6 @@ preset:
     - creator.inject_prompt
     - acp.prompt
     - judge.llm
-    - script.section_status.update
   run_intents:
     - work_continue
   initial: outline
