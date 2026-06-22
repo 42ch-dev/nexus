@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT finding_id as \"finding_id!\", work_id as \"work_id!\", chapter,\n                severity as \"severity!\", status as \"status!\",\n                title as \"title!\", description as \"description!\",\n                target_executor as \"target_executor!\",\n                creator_id as \"creator_id!\",\n                kind as \"kind!\", rule_suggestion,\n                created_at as \"created_at!\", updated_at as \"updated_at!\"\n         FROM findings\n         WHERE creator_id = ?\n           AND (? IS NULL OR work_id = ?)\n           AND (? IS NULL OR chapter = ?)\n           AND (? IS NULL OR status = ?)\n           AND (? IS NULL OR severity = ?)\n         ORDER BY created_at DESC\n         LIMIT ? OFFSET ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "finding_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "work_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "chapter",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "severity!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "description!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "target_executor!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "kind!",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "rule_suggestion",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 12,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "50d646abe39b50abbe3b5b57478cd3876cda0a1f6f2de2d8192026036eaa894e"
+}

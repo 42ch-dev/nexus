@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT source_anchor_json as \"source_anchor_json!\"\n               FROM kb_source_anchors\n               WHERE key_block_id = ?\n               ORDER BY anchor_ordinal ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_anchor_json!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "177bdf5c4939242da1ae85be2451b39ca2cde64a964ceb8d5701a3ebd07c498a"
+}

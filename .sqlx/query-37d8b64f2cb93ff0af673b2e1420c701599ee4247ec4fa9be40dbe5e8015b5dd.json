@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM world_stories WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "37d8b64f2cb93ff0af673b2e1420c701599ee4247ec4fa9be40dbe5e8015b5dd"
+}

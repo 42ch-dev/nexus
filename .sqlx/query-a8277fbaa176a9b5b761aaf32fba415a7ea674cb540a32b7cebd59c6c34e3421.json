@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE creator_schedules\n             SET current_core_context_version = ?, updated_at = ?\n             WHERE schedule_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "a8277fbaa176a9b5b761aaf32fba415a7ea674cb540a32b7cebd59c6c34e3421"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM memory_pending_review WHERE pending_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "3cd665d5abb41631067141df272415510df175435d79fc30c9e8e8c085746c4d"
+}

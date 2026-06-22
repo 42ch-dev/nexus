@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM soul_meta WHERE creator_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "bb44f500dff479034c51ac6e3ddd9f490b430d25329671448a6d1d36b470cabf"
+}
