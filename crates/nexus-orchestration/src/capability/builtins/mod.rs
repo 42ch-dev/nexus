@@ -19,6 +19,7 @@ mod novel_chapter_transition;
 mod novel_scaffold;
 mod novel_scaffold_sanitize;
 mod outbox;
+mod reference_refresh;
 pub mod registry;
 mod script_scaffold;
 mod soul_experience_aggregate;
@@ -43,6 +44,7 @@ pub use llm_extract::LlmExtract;
 pub use novel_chapter_transition::NovelChapterTransition;
 pub use novel_scaffold::NovelProjectScaffold;
 pub use outbox::{OutboxCompact, OutboxFlush};
+pub use reference_refresh::ReferenceRefresh;
 pub use registry::{
     embedded_snapshot_capabilities, embedded_snapshot_version, validate_cdn_url_static, CdnConfig,
     CdnError, RegistryRefresh,
