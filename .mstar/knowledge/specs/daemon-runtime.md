@@ -210,6 +210,17 @@ omits test-only queries. The library compiles, but `cargo test --workspace`
 fails under `SQLX_OFFLINE=true` with "no cached statement" errors on test
 binaries. Always include `--tests`.
 
+### Regression guard (V1.58 P0 fix-wave — QC2 H-3)
+
+A lightweight integration test in `nexus-local-db`
+(`tests/sqlx_cache_intact.rs::sqlx_cache_is_present_and_non_empty`) asserts
+the workspace `.sqlx/` directory exists and contains at least 50
+`query-*.json` artifacts. This catches accidental mass deletion (the exact
+P1 incident dropped the count from 138 to 1) without being brittle to normal
+query add/remove churn. It does NOT validate query correctness — that remains
+the job of `SQLX_OFFLINE=true cargo check --workspace --tests` in CI. Run
+locally with `cargo test -p nexus-local-db --test sqlx_cache_intact`.
+
 ## V1.58 P0 Draft overlay: Workspace OCC hardening (R-V156P0-M001..M006)
 
 **Status**: Draft (V1.58 P0)
@@ -234,11 +245,39 @@ between `validate_changes_manifest` and `consume_session`. The underlying
 `db::consume_session` atomic `UPDATE ... WHERE consumed = 0 AND expires_at > now`
 is the compare-and-swap primitive; `commit_session` is the transaction guard.
 
+#### Retry semantics (V1.58 P0 fix-wave — QC3 F-002)
+
+**No automatic retry on CAS loss.** When two concurrent `commit_session`
+calls race on the same session ID, exactly one wins (the atomic
+`UPDATE ... WHERE consumed = 0` ensures single-consumer semantics); the loser
+receives `SessionError::AlreadyCommitted` immediately — no backoff, no sleep,
+no max-retry counter. The OCC conflict counter (`occ_conflict_total`)
+increments on the losing side with a structured `tracing::warn!`
+(conflict_type = "already_consumed") for observability.
+
+This one-shot design is intentional: the validate+consume pair binds a single
+logical operation, and retrying the consume in isolation would be unsound
+(the session snapshot may have changed since validate ran). Higher layers
+that want retry-on-conflict must implement it above the session layer
+(re-open → re-validate → re-commit).
+
+Atomicity is provided by `SQLite`'s database-level write lock: two concurrent
+consumers race on `rows_affected()` — exactly one gets 1 (`Consumed`), the
+other gets 0 (re-read → `AlreadyConsumed` or `Expired`).
+
 ### Async I/O (R-V156P0-M004)
 
 Content hashing (`compute_content_hashes`, `compute_single_file_hash`) uses
 `tokio::fs` + `AsyncReadExt`, not blocking `std::fs`. This prevents executor
 stalls when the daemon processes large workspace directories.
+
+V1.58 P0 fix-wave (QC2 H-1 / QC3 F-001): `canonicalize_workspace_root` (used
+by `open_session` and `validate_changes_manifest`) wraps
+`std::fs::canonicalize` in `tokio::task::spawn_blocking` because tokio has no
+native async `canonicalize`. This closes the last blocking-syscall gap in
+the async session paths. The workspace-root canonicalize is computed once
+per `validate_changes_manifest` call (memoized outside the per-change loop)
+to avoid O(N) syscalls for N changes (QC3 F-003).
 
 ### Metrics & tracing (R-V156P0-M006)
 
@@ -246,4 +285,24 @@ OCC conflicts (AlreadyConsumed race losers, content hash mismatches) emit
 `tracing::warn!` with structured fields (`session_id`, `conflict_type`) and
 increment the process-wide `occ_conflict_total` AtomicU64 counter (read via
 `workspace::session::occ_conflict_total()`).
+
+### Deferred suggestions (V1.58 P0 fix-wave — QC3 S-001 / S-002)
+
+The following QC3 suggestions were reviewed and deferred (no measured need;
+current implementation is correct and documented):
+
+- **S-001 (jitter range expansion)**: the current 100–500 ms jitter range
+  (in `retry_jitter_ms`) is documented as "sufficient for jitter; not
+  cryptographic" and combines with exponential backoff (500 ms ×
+  2^(attempt-1)). Expanding to 100–1000 ms for high-N (N ≥ 100) concurrent
+  refresher scenarios is speculative without a measured contention incident
+  — the daemon runtime is single-process local-first and does not currently
+  approach N=100. Deferred until a surge-load incident is observed.
+- **S-002 (metrics overhead benchmarking)**: the four `AtomicU64` counters
+  in `registry.rs` use `Ordering::Relaxed` (optimal for non-cross-thread
+  data-dependency counters). Expected overhead is < 10 ns per call
+  (`fetch_add` on a hot cache line). Adding a dedicated micro-benchmark is
+  low value; the existing `synthetic_warm_run` bench (734 ns end-to-end)
+  already confirms metrics overhead is negligible at the capability layer.
+  Deferred; revisit only if profiling shows > 1% of cold path.
 

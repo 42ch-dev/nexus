@@ -156,15 +156,24 @@ pub struct FileSnapshots {
 
 /// Canonicalize a workspace root path (V1.58 P0 T2 — R-V156P0-M002).
 ///
-/// Wraps `std::fs::canonicalize` to resolve symlinks and relative components
-/// so the prefix-boundary check in [`enforce_path_boundary`] is robust.
+/// Resolves symlinks and relative components via `std::fs::canonicalize` so
+/// the prefix-boundary check in [`enforce_path_boundary`] is robust. The
+/// syscall is wrapped in `tokio::task::spawn_blocking` because tokio has no
+/// native async `canonicalize` (unlike `tokio::fs::read_dir`,
+/// `tokio::fs::File::open`, etc.); running the blocking syscall inline would
+/// stall the async worker thread (V1.58 P0 T4 — R-V156P0-M004; closes
+/// QC2 H-1 / QC3 F-001).
 ///
 /// # Errors
 ///
 /// Returns [`SessionError::Io`] if canonicalization fails (missing path,
-/// permission denied, etc.).
-pub fn canonicalize_workspace_root(root: &Path) -> Result<PathBuf, SessionError> {
-    std::fs::canonicalize(root).map_err(|e| SessionError::Io(e.to_string()))
+/// permission denied, etc.) or the `spawn_blocking` task fails to join.
+pub async fn canonicalize_workspace_root(root: &Path) -> Result<PathBuf, SessionError> {
+    let owned = root.to_path_buf();
+    tokio::task::spawn_blocking(move || std::fs::canonicalize(&owned))
+        .await
+        .map_err(|e| SessionError::Io(format!("canonicalize spawn_blocking join: {e}")))?
+        .map_err(|e| SessionError::Io(e.to_string()))
 }
 
 /// Enforce that `target` lies within the canonical `workspace_root` prefix
@@ -326,10 +335,12 @@ impl WorkspaceSessionManager {
         // prefix-boundary check is robust against symlinks and relative
         // components. Compute the canonical target and enforce it stays
         // within the workspace root before hashing anything.
-        let canonical_root = canonicalize_workspace_root(Path::new(workspace_root))?;
+        // V1.58 P0 T4 (QC2 H-1 / QC3 F-001 fix): the canonicalize syscall
+        // runs inside `spawn_blocking` so it cannot stall the async runtime.
+        let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
         let target_path = canonical_root.join(relative_path);
         let canonical_target = if target_path.exists() {
-            std::fs::canonicalize(&target_path).map_err(|e| SessionError::Io(e.to_string()))?
+            canonicalize_workspace_root(&target_path).await?
         } else {
             // Path may not exist yet (Create op) — enforce boundary on the
             // logical join against the canonical root.
@@ -434,16 +445,37 @@ impl WorkspaceSessionManager {
         let stored_hashes: std::collections::HashMap<String, String> =
             serde_json::from_str(&row.file_hashes_json).unwrap_or_default();
 
+        // V1.58 P0 T2 (QC3 F-003 fix): canonicalize the workspace root ONCE
+        // per `validate_changes_manifest` call. Previously the root was
+        // re-canonicalized inside the per-change loop, costing O(N) syscalls
+        // for N changes plus an O(depth) traversal each time. The cached
+        // value is reused for every change's boundary check below.
+        let canonical_root = canonicalize_workspace_root(Path::new(workspace_root)).await?;
+
         for change in changes {
             let file_path = Path::new(workspace_root).join(&change.path);
 
-            // V1.58 P0 T2 (R-V156P0-M002): enforce the file stays within the
-            // workspace root after resolving any symlinks.
+            // V1.58 P0 T2 (QC2 H-1 fix): the per-file `std::fs::canonicalize`
+            // (sync I/O on the async runtime) is replaced by a
+            // non-traversing `tokio::fs::symlink_metadata` check. Symlinks
+            // are rejected outright — mirrors the `compute_content_hashes_inner`
+            // defense so a symlink chain cannot escape the workspace root.
             if file_path.exists() {
-                let canonical_file = std::fs::canonicalize(&file_path)
+                let meta = tokio::fs::symlink_metadata(&file_path)
+                    .await
                     .map_err(|e| SessionError::Io(e.to_string()))?;
-                let canonical_root = canonicalize_workspace_root(Path::new(workspace_root))?;
-                enforce_path_boundary(&canonical_file, &canonical_root)?;
+                if meta.file_type().is_symlink() {
+                    return Err(SessionError::PathEscape {
+                        path: change.path.clone(),
+                        workspace_root: workspace_root.to_string(),
+                    });
+                }
+                // Defense-in-depth: enforce the logical join of the change
+                // path against the canonical root stays within the boundary.
+                // With symlinks rejected above and the root already canonical,
+                // the joined path cannot escape the workspace.
+                let logical_target = canonical_root.join(&change.path);
+                enforce_path_boundary(&logical_target, &canonical_root)?;
             }
 
             match change.op {
@@ -465,6 +497,24 @@ impl WorkspaceSessionManager {
                             path: change.path.clone(),
                             expected_hash: stored_hash.clone(),
                             actual_hash: "file-not-found".to_string(),
+                        });
+                    }
+
+                    // V1.58 P0 T2 (QC2 H-2 fix): re-validate with
+                    // `symlink_metadata` IMMEDIATELY before opening the file
+                    // for hashing. This closes the TOCTOU window between the
+                    // boundary check above and `tokio::fs::File::open` inside
+                    // `compute_single_file_hash`: a symlink substituted in the
+                    // gap would otherwise be followed by `File::open` and
+                    // could escape the workspace root. Mirrors the
+                    // `compute_content_hashes_inner` defense.
+                    let pre_open_meta = tokio::fs::symlink_metadata(&file_path)
+                        .await
+                        .map_err(|e| SessionError::Io(e.to_string()))?;
+                    if pre_open_meta.file_type().is_symlink() {
+                        return Err(SessionError::PathEscape {
+                            path: change.path.clone(),
+                            workspace_root: workspace_root.to_string(),
                         });
                     }
 
@@ -522,9 +572,33 @@ impl WorkspaceSessionManager {
     /// with the same session ID cannot both succeed — `SQLite`'s UPDATE WHERE
     /// guarantees single-consumer semantics.
     ///
+    /// # Retry semantics (V1.58 P0 fix-wave — QC3 F-002)
+    ///
+    /// **No automatic retry.** This method returns immediately on CAS loss:
+    /// the losing caller receives [`SessionError::AlreadyCommitted`] and the
+    /// process-wide `occ_conflict_total` counter is incremented (T6) with a
+    /// structured `tracing::warn!` with field `conflict_type` set to
+    /// `"already_consumed"`. There is no backoff, no sleep, and no
+    /// max-retry counter — the call is one-shot.
+    ///
+    /// This is intentional: the validate+consume pair bound a single logical
+    /// operation (see [`commit_session`]). Retrying the consume in isolation
+    /// would be unsound because the session snapshot may have changed since
+    /// validate ran; the caller must re-open the session and re-validate
+    /// before retrying. Higher layers that want retry-on-conflict semantics
+    /// must implement them above this layer (re-open → re-validate →
+    /// re-commit), not inside `consume_session`.
+    ///
+    /// Atomicity: `SQLite` serializes writes via a database-level lock, so
+    /// the `UPDATE workspace_sessions SET consumed = 1 WHERE session_id = ?
+    /// AND consumed = 0 AND expires_at > now` statement (in
+    /// [`db::consume_session`]) executes as a single compare-and-swap. Two
+    /// concurrent consumers race on `rows_affected()`: exactly one gets 1
+    /// (`Consumed`), the other gets 0 (re-read → `AlreadyConsumed` or `Expired`).
+    ///
     /// # Errors
     ///
-    /// Returns `SessionError` if the session is not found, consumed, or expired.
+    /// Returns [`SessionError`] if the session is not found, consumed, or expired.
     pub async fn consume_session(
         &self,
         session_id: &SessionId,
