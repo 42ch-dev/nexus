@@ -54,6 +54,8 @@ pub(crate) const TOOL_ALLOWLIST: &[&str] = &[
     "nexus.pool.entry.manage",
     // nexus.* tools (V1.56 P1: DF-29 registry.refresh)
     "nexus.registry.refresh",
+    // nexus.* tools (V1.58 P3: DF-44 reference.refresh)
+    "nexus.reference.refresh",
     // fs/* baseline (V1.33)
     "fs/read_text_file",
     "fs/write_text_file",
@@ -337,6 +339,7 @@ pub(crate) use super::host_tool_handlers::registry_manuscript_chapter_get;
 pub(crate) use super::host_tool_handlers::registry_manuscript_chapter_update;
 pub(crate) use super::host_tool_handlers::registry_pool_entry_manage;
 pub(crate) use super::host_tool_handlers::registry_read_file;
+pub(crate) use super::host_tool_handlers::registry_reference_refresh;
 pub(crate) use super::host_tool_handlers::registry_registry_refresh;
 pub(crate) use super::host_tool_handlers::registry_schedule_status;
 pub(crate) use super::host_tool_handlers::registry_timeline_recent_get;

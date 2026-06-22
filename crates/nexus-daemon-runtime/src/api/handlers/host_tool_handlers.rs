@@ -1163,6 +1163,41 @@ pub(crate) fn registry_daemon_health<'a>(
     Box::pin(async move { Ok(result) })
 }
 
+// ─── V1.58 P3: nexus.reference.refresh ──────────────────────────────────────
+
+/// `nexus.reference.refresh` — refresh a reference source body via the daemon.
+///
+/// Delegates to `nexus_orchestration::capability::builtins::ReferenceRefresh`.
+/// Requires an active creator (admission gate) and a pool. Creator context
+/// (home dir + `creator_id`) is wired so the handler can write refreshed body
+/// content to the on-disk `body.md`.
+async fn execute_reference_refresh(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    use nexus_orchestration::capability::Capability;
+    let home = state.nexus_home();
+    let cap = nexus_orchestration::capability::builtins::ReferenceRefresh::with_pool(
+        state.pool().clone(),
+    )
+    .with_creator_context(home.clone(), creator_id.to_string());
+
+    let input = req.parameters.clone();
+    cap.run(input).await.map_err(|e| NexusApiError::Internal {
+        code: "REFERENCE_REFRESH_FAILED".to_string(),
+        message: format!("nexus.reference.refresh failed: {e}"),
+    })
+}
+
+pub(crate) fn registry_reference_refresh<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_reference_refresh(req, state, creator_id))
+}
+
 // ─── V1.56 P1: nexus.registry.refresh ──────────────────────────────────────
 
 /// `nexus.registry.refresh` — return the registry snapshot (synthetic or CDN).
