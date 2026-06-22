@@ -334,8 +334,8 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | --------------------------- | -------------------------------------------------------------- | ---------------------- | -------------- |
 | `sync.pull`                 | Pull remote deltas (replaces HTTP-era trigger)                 | `nexus-cloud-sync`     | Deferred wiring |
 | `sync.push`                 | Push local outbox (replaces HTTP-era trigger)                  | `nexus-cloud-sync`     | Deferred wiring |
-| `outbox.flush`              | Flush pending outbox entries                                   | `nexus-cloud-sync`     | Deferred wiring |
-| `outbox.compact`            | Compact outbox table                                           | `nexus-local-db`       | Deferred wiring |
+| `outbox.flush`              | Flush pending outbox entries                                   | `nexus-orchestration`  | **Shipped (V1.59)** — local drain via `nexus-local-db` pool; see §5.7 |
+| `outbox.compact`            | Compact outbox table                                           | `nexus-orchestration`  | **Shipped (V1.59)** — retention-window compaction via `nexus-local-db` pool; see §5.7 |
 | `workspace.open`            | Ensure workspace dir is present and valid                      | `nexus-home-layout`    | Deferred wiring (DF-31) |
 | `workspace.commit`          | Commit manuscript diff into working copy                       | `nexus-home-layout`    | Deferred wiring (DF-31) |
 | `registry.refresh`          | Refresh ACP registry cache                                     | `nexus-acp-host`       | Deferred network/CDN wiring (DF-29) |
@@ -357,7 +357,7 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 
 Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
 
-> **Daemon builds:** `sync.*` / `outbox.flush` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §7.
+> **Daemon builds:** `sync.*` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §7. `outbox.flush` / `outbox.compact` (V1.59) are local-only pool-backed capabilities that operate directly on `outbox_entries` via `nexus-local-db` — they do not depend on `nexus-cloud-sync`.
 
 ### 5.4 Capability errors
 
@@ -381,6 +381,19 @@ Operational semantics:
 2. The next worker-backed `acp.prompt` drains pending injections for that creator session before sending the prompt to the worker.
 3. Consumed rows are marked/drained transactionally with the prompt dispatch path so a daemon restart does not lose unconsumed injections.
 4. The queue is for orchestration-to-worker prompt augmentation only; it does not bypass ACP tool policy or worker permission handling.
+
+### 5.7 Outbox consolidation (V1.59)
+
+The dual-outbox architecture identified in TD-8 ([dual-outbox-architecture.md](../../archived/knowledge/dual-outbox-architecture.md)) is consolidated in V1.59. The unified outbox schema uses `outbox_entries` / `partial_apply_states` (migration `20260420_outbox_tables.sql`) as the single source of truth.
+
+**Single-writer rule**: each outbox event type has exactly one authorized writer subsystem. `nexus-cloud-sync::outbox::Outbox` owns sync push/pull commands. `nexus-orchestration` capabilities (`outbox.flush`, `outbox.compact`) own maintenance operations. The daemon legacy `outbox` queue table is deprecated and has zero active consumers (V1.59 T3 audit).
+
+**Flush/compact invocation path**:
+- `outbox.flush` (`OutboxFlush`, pool-backed): drains pending (`staged`/`ready`) entries by marking them `acked`. Input: optional `limit`. Output: `{ flushed: N }`.
+- `outbox.compact` (`OutboxCompact`, pool-backed): deletes `acked` entries older than a configurable retention window (default 7 days). Input: optional `retentionDays`. Output: `{ removed: N, retained: M }`.
+- Both capabilities are local-only (platform paused). Full semantics and test vectors are defined in the Draft overlay [outbox-consolidation.md](outbox-consolidation.md).
+
+**Pool injection**: both capabilities receive `sqlx::SqlitePool` through `with_pool()` constructors, following the same pattern as `kb.extract_work`, `novel.project_scaffold`, and other pool-backed capabilities. The `with_builtins_and_pool()` and `with_runtime_deps()` registry factories inject the pool.
 
 ---
 

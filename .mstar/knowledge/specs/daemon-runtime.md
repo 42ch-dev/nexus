@@ -353,3 +353,33 @@ The scheduler path does NOT set creator context — therefore body.md on-disk wr
 - `debug!` when no stale sources are found.
 - All messages carry the `reference_source_id` as a structured field.
 
+---
+
+## 11. Outbox flush/compact invocation path (V1.59 P1)
+
+### 11.1 Overview
+
+The orchestration engine's `outbox.flush` and `outbox.compact` capabilities are invoked through the standard capability dispatch path (see [orchestration-engine.md](orchestration-engine.md) §5.7). Both are local-only, pool-backed capabilities that operate directly on the unified `outbox_entries` table in `state.db`.
+
+### 11.2 Dispatch path
+
+```
+CapabilityRegistry::get("outbox.flush") / get("outbox.compact")
+  └─ capability.run(input)
+       └─ OutboxFlush / OutboxCompact (orchestration crate)
+            └─ Direct SQL on outbox_entries via injected sqlx::SqlitePool
+```
+
+### 11.3 Single-writer enforcement
+
+The unified outbox follows a single-writer rule per event type (see [outbox-consolidation.md](outbox-consolidation.md) §2):
+
+- **Sync push/pull commands**: written exclusively by `nexus-cloud-sync::outbox::Outbox` (`append`, `stage`, `stage_if_absent`).
+- **Flush/compact operations**: written exclusively by `nexus-orchestration` capability layer (`OutboxFlush`, `OutboxCompact`).
+- **Daemon runtime**: does NOT write to `outbox_entries` directly. All outbox access is routed through the capability registry.
+
+The daemon legacy `outbox` table (initial migration `20260417_000001_initial.sql`) is deprecated with zero active consumers (V1.59 T3 audit). The daemon-runtime schema test emits a `tracing::warn!` on access documenting the phased-removal plan.
+
+### 11.4 Runtime deps injection
+
+Both capabilities receive the `sqlx::SqlitePool` through the standard `with_pool()` constructor pattern, registered in `CapabilityRegistry::with_builtins_and_pool()` and `CapabilityRegistry::with_runtime_deps()`. No capability requires `nexus-cloud-sync` — all outbox operations are local-only DB queries.
