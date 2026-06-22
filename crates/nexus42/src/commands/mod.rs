@@ -19,6 +19,8 @@ pub mod daemon;
 #[deny(clippy::unwrap_used)]
 pub mod daemon_run;
 #[deny(clippy::unwrap_used)]
+pub mod host_call;
+#[deny(clippy::unwrap_used)]
 pub mod platform;
 #[deny(clippy::unwrap_used)]
 pub mod sync;

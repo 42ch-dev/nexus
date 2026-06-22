@@ -19,9 +19,9 @@ Related docs: nexus-platform `v1-spec/architecture.md`, [`cli-spec.md`](./cli-sp
 
 **Naming note**: CLI executable **`nexus42`**; local supervisor is the **daemon runtime** (single-binary mode via `nexus42 daemon start`, crate `nexus-daemon-runtime`). Product name **Nexus** (42ch / Creative Hub). **`nexus.*`** is the stable logical capability ID prefix; capability IDs need not match executable names.
 
-## 0.5 Runtime registry pointer (V1.53)
+## 0.5 Runtime registry and bridge pointers (V1.53; V1.57)
 
-This spec is the logical catalog for `nexus.*` capabilities. Each entry lists the capability id and a one-line description. **It is not the runtime source of truth for dispatch.** The runtime SSOT is [`capability-registry.md`](capability-registry.md) (Draft overlay, V1.53).
+This spec is the logical catalog for `nexus.*` capabilities. Each entry lists the capability id and a one-line description. **It is not the runtime source of truth for dispatch.** The runtime SSOT is [`capability-registry.md`](capability-registry.md) (Master, V1.54 P-last). The mediated external-agent tool invocation path is now Master-spec [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (promoted from Feature line in V1.57 P-last).
 
 ---
 
@@ -85,136 +85,71 @@ Each capability carries a semver-style contract version independent of Nexus CLI
 
 Agents must declare supported `(capability_id, major)` pairs at minimum. Clients may request minor features if present.
 
-### 3.3 Capability sets
+### 3.3 Capability sets (profiles)
 
-| Profile | Purpose | Notes |
-| --- | --- | --- |
-| `nexus.profile.minimal` | Smoke tests / doctor | read-only context + health |
-| `nexus.profile.writer` | V1.0 default | world read + delta propose + manuscript bounded write + sync helpers |
-| `nexus.profile.publisher` | Explicit publish flows | includes `publish.*` gated capabilities |
+The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nexus.profile.publisher`) serve as **§3.3 metadata** (capability grouping) — they are not action IDs. Their status in the §4 roster is `scaffold-equivalent`. See the §4 roster for per-ID detail.
 
 ---
 
-## 4. Minimal capability set
+## 4. Capability roster (V1.57)
 
-> **V1.34 implementation subset:** Daemon host tools for `nexus.context.whoami`, `nexus.workspace.info`, `nexus.work.get`, `nexus.work.patch`, `nexus.orchestration.schedule_status`, and `nexus.context.assemble` (local/read-only or `policy_blocked`) are specified in [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md). Remaining IDs in this section remain **logical contract only** until DF-46.
+> **Roster governance:** This table is the single SSOT for every `nexus.*` capability ID.
+> Each row maps to a runtime binding via the `host_tool_registry()` (daemon host tools)
+> or the `CapabilityRegistry` (orchestration engine capabilities). Cross-references:
+> [`agent-nexus-tool-bridge.md`](agent-nexus-tool-bridge.md) (Master — mediated external-agent tool path),
+> [`capability-registry.md`](capability-registry.md) (Master — runtime dispatch contract).
+>
+> **Status tags**: `shipped` (runtime handler bound), `scaffold-equivalent` (§3.3 metadata, not an action ID), `OUT` (explicitly non-implemented), `catalog-only` (logical contract; runtime binding deferred or in orchestration engine), `deferred-to-V2.0+` (platform-gated).
 
-### 4.1 Context
+| Capability ID | Description | Status | Shipped in | Registry row ref |
+| --- | --- | --- | --- | --- |
+| `nexus.profile.minimal` | Smoke tests / doctor; read-only context + health | scaffold-equivalent | — | §3.3 metadata |
+| `nexus.profile.writer` | V1.0 default profile; world read + delta propose + manuscript bounded write + sync helpers | scaffold-equivalent | — | §3.3 metadata |
+| `nexus.profile.publisher` | Explicit publish flows; includes `publish.*` gated capabilities | scaffold-equivalent | — | §3.3 metadata |
+| `nexus.context.whoami` | Resolve active Nexus profile / creator context | shipped | V1.34 | `host_tool` |
+| `nexus.workspace.info` | Workspace root, linked world ref, environment flags | shipped | V1.34 | `host_tool` |
+| `nexus.workspace.paths` | Enumerate allowed roots from the active preset | catalog-only | — | orchestration |
+| `nexus.context.assemble` | Assemble stable writing context from confirmed KB / canon timeline / memory slices | shipped | V1.34 | `host_tool` |
+| `nexus.work.get` | Read Work row + stage fields for active creator | shipped | V1.34 | `host_tool` |
+| `nexus.work.patch` | Append inspiration; update policy-approved stage_metadata keys | shipped | V1.34 | `host_tool` |
+| `nexus.orchestration.schedule_status` | Schedules linked to a work_id; debug / agent planning | shipped | V1.34 | `host_tool` |
+| `nexus.world.snapshot.get` | Consistent read of structured world snapshot | shipped | V1.53 P1 | `host_tool` |
+| `nexus.world.state.query` | Query KB/timeline slices needed for reasoning | catalog-only | — | orchestration |
+| `nexus.timeline.recent.get` | Fetch recent timeline tail for continuity | shipped | V1.53 P1 | `host_tool` |
+| `nexus.kb_snapshot.read` | Focused KB snapshot read | shipped | V1.53 P1 | `host_tool` |
+| `nexus.world.delta.propose` | Produce structured proposed delta package | catalog-only | — | orchestration |
+| `nexus.world.delta.apply` | Apply staged deltas locally under policy | catalog-only | — | orchestration |
+| `nexus.timeline.event.append` | Append new events; must not silently rewrite canon history | catalog-only | — | orchestration |
+| `nexus.fork.create` | Explicit branch creation when rewrite-past is intended | catalog-only | — | orchestration |
+| `nexus.kb_snapshot.write` | Write/update key blocks for a world (kb edit/adopt) | shipped | V1.54 P0 | `host_tool` |
+| `nexus.world.configure` | Update world metadata (title, visibility, time policy) | shipped | V1.54 P0 | `host_tool` |
+| `nexus.sync.prepare_push` | Build idempotent push bundle metadata | catalog-only | — | orchestration |
+| `nexus.sync.push` | Submit structured deltas via runtime-owned client | catalog-only | — | orchestration |
+| `nexus.sync.pull` | Agent-triggered pull | catalog-only | — | orchestration |
+| `nexus.sync.status` | Surface outbox / conflicts / cursors | catalog-only | — | orchestration |
+| `nexus.manuscript.list` | List manuscript files under whitelist | catalog-only | — | orchestration |
+| `nexus.manuscript.read_range` | Read a bounded range for prompting | catalog-only | — | orchestration |
+| `nexus.manuscript.write` | Write only within whitelist paths and size quotas | catalog-only | — | orchestration |
+| `nexus.manuscript.phase.get` | Read current manuscript phase | catalog-only | — | orchestration |
+| `nexus.manuscript.phase.set` | Move between brainstorm / draft / review / finalize with runtime checks | catalog-only | — | orchestration |
+| `nexus.manuscript.chapter.get` | Read chapter content and block metadata for a work | shipped | V1.53 P1 | `host_tool` |
+| `nexus.manuscript.chapter.update` | Update chapter content and block metadata for a work | shipped | V1.54 P0 | `host_tool` |
+| `nexus.publish.chapter` | User-attested publish flow for a chapter artifact | OUT | — | DF-59 Backlog |
+| `nexus.publish.story` | User-attested publish flow for a story artifact | OUT | — | DF-59 Backlog |
+| `nexus.research.query` | Query local-only `ReferenceSource` index / excerpts | catalog-only | — | orchestration |
+| `nexus.trace.correlation` | Propagate correlation IDs across tool calls | catalog-only | — | orchestration |
+| `nexus.runtime.health` | Agent-visible health, registry reachability, sync state | catalog-only | — | orchestration |
+| `nexus.observability.daemon.health` | Daemon runtime status (uptime, lifecycle, registry) | shipped | V1.53 P1 | `host_tool` |
+| `nexus.registry.refresh` | Refresh agent capability registry from embedded snapshot or optional CDN | shipped | V1.56 P1 | `host_tool` |
+| `nexus.work.schedule.set` | Link/unlink schedules to a work (schedule DAO write) | shipped | V1.54 P0 | `host_tool` |
+| `nexus.finding.resolve` | Resolve/close a finding entry (findings DAO write) | shipped | V1.54 P0 | `host_tool` |
+| `nexus.pool.entry.manage` | Add/remove entries from the selection pool (pool DAO write) | shipped | V1.54 P0 | `host_tool` |
 
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.context.whoami` | yes | Resolve active Nexus profile / creator context |
-| `nexus.workspace.info` | yes | Workspace root, linked world ref, environment flags |
-| `nexus.workspace.paths` | yes | Enumerate allowed roots from the active preset: e.g. V1.36 `novel-writing` **`Works/<work_ref>/`** (正文 under **`Stories/`**), **`.nexus42/references/<run-id>/`**, workspace `.agents/skills/`, and other policy-defined subtrees — see [novel-writing/workflow-profile.md](./novel-writing/workflow-profile.md) |
-| `nexus.context.assemble` | yes | Assemble a stable writing context from confirmed KB / canon timeline / memory slices |
+### 4.1 Host tool permissions note
 
-### 4.2 World read
+Public / invited / private world access is determined by world policy, membership, and pairing state; capability presence alone does not grant private access. `nexus.kb_snapshot.write` and `nexus.world.configure` require world ownership (creator-level gate).
 
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.world.snapshot.get` | yes | Consistent read of structured world snapshot |
-| `nexus.world.state.query` | yes | Query KB/timeline slices needed for reasoning |
-| `nexus.timeline.recent.get` | yes | Fetch recent timeline tail for continuity |
-| `nexus.kb_snapshot.read` | optional | Focused KB snapshot read; conceptual equivalent of `kb_snapshot_read` in notes/design docs |
-
-### 4.3 World mutation
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.world.delta.propose` | yes | Produce structured proposed delta package |
-| `nexus.world.delta.apply` | optional | Apply staged deltas locally under policy |
-| `nexus.timeline.event.append` | yes | Append new events; must not silently rewrite canon history |
-| `nexus.fork.create` | optional | Explicit branch creation when rewrite-past is intended |
-
-### 4.3A World CLI write (V1.54 — DF-46)
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.kb_snapshot.write` | yes | Write/update key blocks for a world (kb edit/adopt) |
-| `nexus.world.configure` | yes | Update world metadata (title, visibility, time policy) |
-
-Permission note:
-
-- Public / invited / private world access is determined by world policy, membership, and pairing state; capability presence alone does not grant private access.
-- `nexus.kb_snapshot.write` and `nexus.world.configure` require world ownership (creator-level gate).
-
-### 4.4 Sync
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.sync.prepare_push` | yes | Build idempotent push bundle metadata |
-| `nexus.sync.push` | yes | Submit structured deltas via runtime-owned client |
-| `nexus.sync.pull` | optional | Agent-triggered pull |
-| `nexus.sync.status` | yes | Surface outbox / conflicts / cursors |
-
-Platform credentials remain in Nexus runtime, not exported to the agent process in v1.
-
-### 4.5 Manuscript
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.manuscript.list` | yes | List manuscript files under whitelist |
-| `nexus.manuscript.read_range` | yes | Read a bounded range for prompting |
-| `nexus.manuscript.write` | yes | Write only within whitelist paths and size quotas |
-| `nexus.manuscript.phase.get` | yes | Read current manuscript phase |
-| `nexus.manuscript.phase.set` | optional | Move between brainstorm / draft / review / finalize with runtime checks |
-| `nexus.manuscript.chapter.update` | yes | Update chapter content and block metadata for a work (V1.54 DF-46) |
-
-Runtime note:
-
-- If `output_manuscript=false`, `nexus.manuscript.write` may be skipped by policy, but the capability contract remains available and unchanged.
-
-### 4.6 Publish
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.publish.chapter` | optional | User-attested publish flow for a chapter artifact |
-| `nexus.publish.story` | optional | User-attested publish flow for a story artifact |
-
-### 4.6A Research
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.research.query` | optional | Query local-only `ReferenceSource` index / excerpts without syncing source material |
-
-### 4.7B Game-Bible (V1.56 P-last)
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `game_bible.section_status.update` | yes | Atomically update the `section_status` field in a game-bible `Design/*.md` YAML frontmatter; validates transition (draft → reviewed → accepted) and writes via temp+rename for durability |
-
-**Invocation contract**:
-
-- **Input**: `{ work_ref: string, section_path: string, new_status: "draft" | "reviewed" | "accepted", reason?: string, works_root?: string }`
-- **Output**: `{ updated: bool, new_section_status: string, section_path: string }`
-- **Transition rules**:
-  - `draft → reviewed` — auto-transition after design-writing review pass (GO)
-  - `reviewed → accepted` — explicit author accept
-  - No skipping (`draft → accepted` rejected with `InputInvalid`)
-  - No backwards (`accepted → draft` / `accepted → reviewed` rejected with `InputInvalid`)
-  - No self-transition (same-status rejected)
-- **Atomicity**: writes to `{tmp}` then renames over the target; no half-written file survives a crash
-- **Field preservation**: updates `section_status` and `last_updated` (if present); all other frontmatter fields (`section_weight`, etc.) are preserved unchanged
-- **Errors**:
-  - `InputInvalid` — invalid transition, unknown status, section not found, missing frontmatter
-  - `Internal` — I/O errors, write failures
-
-**Preset integration**: The `design-writing` preset (V1.56 P-last) invokes this capability automatically after a review pass (GO) to transition `draft → reviewed`. The `requires_capabilities` gate ensures the capability is registered before the preset can be loaded.
-
-### 4.7 Observability
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.trace.correlation` | yes | Propagate correlation IDs across tool calls |
-| `nexus.runtime.health` | yes | Agent-visible health, registry reachability, sync state |
-
-### 4.7A Registry
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.registry.refresh` | optional | Refresh agent capability registry from embedded snapshot or optional CDN; returns synthetic output by default (sandbox/air-gap safe) with snapshot version, capability count, and source metadata. When `--cdn-url` is configured at daemon start, fetches from CDN with configurable timeout (default 10s) and retry (default 3); falls back to synthetic on network failure. |
-
-#### 4.7A.1 Security contract (V1.56 P1 fix-wave)
+### 4.2 `nexus.registry.refresh` security contract (V1.56 P1 fix-wave)
 
 `nexus.registry.refresh` enforces the following security invariants regardless of configuration:
 
@@ -222,32 +157,12 @@ Runtime note:
 - **No open redirects**: `reqwest::redirect::Policy::limited(0)` — zero redirect hops allowed. Exceeded redirects return `CdnError::TooManyRedirects`.
 - **Private-IP / metadata block**: rejected hosts include `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (including AWS metadata endpoint `169.254.169.254`), `fc00::/7`, `::1`, and IPv4-mapped IPv6 in private ranges. Enforced at CLI parse (DNS resolution) and at runtime `fetch_from_cdn` with `CdnError::BlockedHost`.
 - **Body size cap**: 8 MiB max response body. Exceeded returns `CdnError::BodyTooLarge` (streaming read with byte counter).
-- **Typed errors**: failures carry `CdnError` enum variants (`InsecureScheme`, `BlockedHost`, `TooManyRedirects`, `BodyTooLarge`, `Timeout`, `ServerStatus(u16)`, `Parse`, `Io`, `EmptyUrl`, `UrlParse`, `Other`) — not raw strings. `RegistryRefreshOutput.fallback_reason` is a stringified `CdnError` variant, never a raw reqwest error message.
-- **Sandbox/air-gap guarantee**: when `--cdn-url` is absent at daemon start, the capability makes zero network calls; `source` field in output is `synthetic`. Network mode is opt-in via the boot-time flag only; runtime-mutable CDN URL is not supported.
+- **Typed errors**: failures carry `CdnError` enum variants — not raw strings.
+- **Sandbox/air-gap guarantee**: when `--cdn-url` is absent at daemon start, the capability makes zero network calls; `source` field in output is `synthetic`.
 
-#### 4.7A.2 Negative test coverage (V1.56 P1 fix-wave)
+### 4.3 `game_bible.section_status.update` (V1.56 P-last)
 
-Eleven negative tests cover the rejection classes:
-
-- `c_fetch_from_cdn_rejects_http_scheme`
-- `c_fetch_from_cdn_rejects_https_with_private_ip` (RFC 5737 docs IP)
-- `c_fetch_from_cdn_rejects_https_with_localhost`
-- `c_fetch_from_cdn_rejects_https_with_metadata_ip_169_254_169_254`
-- `c_fetch_from_cdn_rejects_too_many_redirects`
-- `c_fetch_from_cdn_rejects_body_too_large`
-- `c_set_cdn_config_rejects_empty_url`
-- `c_set_cdn_config_rejects_whitespace_url`
-- `c_set_cdn_config_rejects_http_scheme`
-- `c_set_cdn_config_rejects_private_ip_at_parse`
-- `c_fallback_reason_carries_typed_error`
-
-### 4.8 Work & orchestration write (V1.54 — DF-46)
-
-| Capability ID | Required | Description |
-| --- | --- | --- |
-| `nexus.work.schedule.set` | optional | Link/unlink schedules to a work (schedule DAO write) |
-| `nexus.finding.resolve` | optional | Resolve/close a finding entry (findings DAO write) |
-| `nexus.pool.entry.manage` | optional | Add/remove entries from the selection pool (pool DAO write) |
+**Invocation contract**: `game_bible.section_status.update` atomically updates the `section_status` field in a game-bible `Design/*.md` YAML frontmatter; validates transition (draft → reviewed → accepted) and writes via temp+rename for durability. Input/output shape and transition rules are documented in the orchestration engine spec. This capability is registered in the orchestration `CapabilityRegistry`, not in `host_tool_registry()`.
 
 ---
 

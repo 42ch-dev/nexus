@@ -1,12 +1,12 @@
 # Capability Registry — Master v1
 
-**Status**: Master (V1.54 P-last promoted from Draft overlay)  
+**Status**: Master (V1.57 P-last promote — bridge Master promotion + P0/P1/P3 spec changes folded in)
 **Document class**: Master  
 **Created**: 2026-06-20 (V1.53 P-1 Draft)  
-**Last updated**: 2026-06-20 (V1.54 P-last promote to Master after V1.54 P0 validates write-tool patterns + V1.54 P1 adds GameBibleProjectScaffold)  
-**Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch — 19 tools (13 read + 6 write) + GameBibleProjectScaffold  
-**Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md)  
-**Iteration compass**: [v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md](../../iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md)
+**Last updated**: 2026-06-22 (V1.57 P-last — folded in P0 test vectors + P1 3-caller dispatch + P3 dynamic allowlist mechanism)  
+**Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch — 18 host tools (per V1.57 P0 acp §4 roster, reconciled from 35 plan estimate) + dynamic worker allowlist (per V1.57 P3) + 3-caller entry point shape (per V1.57 P1)  
+**Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) (now Master), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md) (§6.4 worker IPC), [daemon-runtime.md](daemon-runtime.md) (3-caller topology), [local-runtime-boundary.md](local-runtime-boundary.md) (3-caller adapter pattern)  
+**Iteration compass**: [v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md](../../iterations/v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md)
 
 ---
 
@@ -206,7 +206,7 @@ verifies that all 7 fields are populated for every registered row.
 | Existing spec | Boundary |
 | --- | --- |
 | `acp-capability-set.md` | Logical catalog only; no runtime dispatch authority. |
-| `agent-nexus-tool-bridge.md` | Entrypoint/admission history and V1.34 minimal bridge; V1.53 registry can become the shared runtime SSOT underneath it. |
+| `agent-nexus-tool-bridge.md` | Master spec (promoted V1.57 P-last). Entrypoint/admission history and mediated external-agent tool invocation; registry is the shared runtime SSOT underneath it. |
 | `acp-client-tech-spec.md` | ACP client behavior and handshake; registry rows may reference wire details but do not redefine ACP. |
 | `orchestration-engine.md` | Schedules and worker tool requests; registry may serve schedule-initiated tool dispatch but does not replace preset grammar. |
 | `cli-spec.md` | User-visible commands; capability registry is not a CLI command tree. |

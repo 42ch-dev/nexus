@@ -91,6 +91,8 @@ pub struct CapabilityRuntimeDeps {
     pub worker_provider: Option<std::sync::Arc<dyn WorkerHandleProvider>>,
     /// Daemon-side tool dispatch for `nexus.*` tools (DF-47, V1.42 P3).
     pub daemon_tool_dispatch: Option<std::sync::Arc<dyn DaemonToolDispatch>>,
+    /// CDN fetch config for `registry.refresh` (V1.57 P1 — constructor-injected).
+    pub cdn_config: Option<builtins::CdnConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +155,7 @@ impl CapabilityRegistry {
             Box::new(builtins::OutboxCompact),
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
-            Box::new(builtins::RegistryRefresh),
+            Box::new(builtins::RegistryRefresh::new()),
             Box::new(builtins::CreatorReadMemory::new()),
             Box::new(builtins::CreatorWriteMemory::new()),
             Box::new(builtins::CreatorInjectPrompt::new()),
@@ -210,7 +212,7 @@ impl CapabilityRegistry {
             Box::new(builtins::OutboxCompact),
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
-            Box::new(builtins::RegistryRefresh),
+            Box::new(builtins::RegistryRefresh::new()),
             Box::new(builtins::CreatorReadMemory::with_store(
                 creator_store.clone(),
             )),
@@ -293,6 +295,14 @@ impl CapabilityRegistry {
                 builtins::AcpPrompt::with_worker_provider(provider.clone())
             });
 
+        // V1.57 P1: cdn_config is constructor-injected (no global state).
+        let registry_refresh = deps
+            .cdn_config
+            .as_ref()
+            .map_or_else(builtins::RegistryRefresh::new, |cdn| {
+                builtins::RegistryRefresh::with_cdn(cdn.clone())
+            });
+
         let creator_store = deps.pool.as_ref().map(|pool| {
             std::sync::Arc::new(builtins::CreatorCapabilityStore::from_arc(
                 std::sync::Arc::new(pool.clone()),
@@ -327,7 +337,7 @@ impl CapabilityRegistry {
             Box::new(builtins::OutboxCompact),
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
-            Box::new(builtins::RegistryRefresh),
+            Box::new(registry_refresh),
             Box::new(creator_read),
             Box::new(creator_write),
             Box::new(creator_inject),

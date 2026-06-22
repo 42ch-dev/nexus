@@ -241,3 +241,50 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 - Whether loopback TCP is allowed on shared machines
 - Multi-workspace daemon strategy vs one-daemon-multi-workspace
 - Whether the frozen `/v1/local/*` envelope should be JSON-over-HTTP only or also mirrored on unix socket RPC
+
+---
+
+## V1.57 P1 Draft overlay: 3-caller adapter topology
+
+**Status**: Draft (V1.57 P1)  
+**Plan**: `2026-06-22-v1.57-daemon-refactor-and-caller-adapters`
+
+### Updated topology diagram
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│                   Caller entry points                    │
+│  ┌──────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │CLI       │  │Worker        │  │HTTP               │  │
+│  │host-call │  │agent_tool    │  │ToolExecuteRequest │  │
+│  │<tool_id> │  │_request IPC  │  │POST /v1/local/... │  │
+│  └────┬─────┘  └──────┬───────┘  └────────┬──────────┘  │
+│       │               │                   │              │
+│       ▼               ▼                   ▼              │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │         HostToolExecutor (3-caller adapter)         │ │
+│  │  normalize → admission_pipeline (5 gates)           │ │
+│  │           → CapabilityRegistry::dispatch(tool_id)   │ │
+│  │           → audit_tool_execution                    │ │
+│  └──────────────────────┬──────────────────────────────┘ │
+│                         │                                 │
+│                         ▼                                 │
+│  ┌─────────────────────────────────────────────────────┐ │
+│  │       CapabilityRegistry (in daemon-runtime)         │ │
+│  │  20 registered host tools: nexus.* + fs/*            │ │
+│  │  Handler bindings → host_tool_handlers               │ │
+│  └─────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Notes
+
+- **3 caller entry points**: CLI subcommand (`host-call`), worker IPC
+  (`agent_tool_request`), HTTP POST (`ToolExecuteRequest`). All normalize
+  to the same internal shape and dispatch through a single registry.
+- **Single dispatch invariant**: All three paths call
+  `CapabilityRegistry::dispatch(tool_id, input)`. No alternate execution
+  paths bypass admission gating or audit logging.
+- **`host-call` subcommand** (V1.57 P1): Debug-only CLI entry.
+  `nexus42 host-call <tool_id> --args <json>` → daemon IPC → registry dispatch.
+- **CdnConfig** (V1.57 P1): Constructor-injected; no global `RwLock`.
