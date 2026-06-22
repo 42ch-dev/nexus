@@ -56,6 +56,16 @@ pub(crate) const TOOL_ALLOWLIST: &[&str] = &[
     "nexus.registry.refresh",
     // nexus.* tools (V1.58 P3: DF-44 reference.refresh)
     "nexus.reference.refresh",
+    // nexus.* tools (V1.59 P0: DF-47 manuscript & misc parity batch)
+    "nexus.manuscript.list",
+    "nexus.manuscript.read_range",
+    "nexus.manuscript.write",
+    "nexus.manuscript.phase.get",
+    "nexus.manuscript.phase.set",
+    "nexus.workspace.paths",
+    "nexus.research.query",
+    "nexus.runtime.health",
+    "nexus.trace.correlation",
     // fs/* baseline (V1.33)
     "fs/read_text_file",
     "fs/write_text_file",
@@ -350,6 +360,17 @@ pub(crate) use super::host_tool_handlers::registry_workspace_info;
 pub(crate) use super::host_tool_handlers::registry_world_configure;
 pub(crate) use super::host_tool_handlers::registry_world_snapshot_get;
 pub(crate) use super::host_tool_handlers::registry_write_file;
+
+// V1.59 P0: DF-47 manuscript & misc capability parity batch (9 new tools).
+pub(crate) use super::host_tool_handlers::registry_manuscript_list;
+pub(crate) use super::host_tool_handlers::registry_manuscript_phase_get;
+pub(crate) use super::host_tool_handlers::registry_manuscript_phase_set;
+pub(crate) use super::host_tool_handlers::registry_manuscript_read_range;
+pub(crate) use super::host_tool_handlers::registry_manuscript_write;
+pub(crate) use super::host_tool_handlers::registry_research_query;
+pub(crate) use super::host_tool_handlers::registry_runtime_health;
+pub(crate) use super::host_tool_handlers::registry_trace_correlation;
+pub(crate) use super::host_tool_handlers::registry_workspace_paths;
 
 // ─── Include tests from extracted test file ───────────────────────────────
 
