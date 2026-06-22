@@ -575,8 +575,17 @@ impl Capability for WorldDeltaApply {
                     }));
                 }
                 ("kb_key_block", None) => {
-                    // Create path: insert a new provisional key block.
-                    // V1.60 supports body_json + canonical_name via a new kb_ id.
+                    // Create path: insert a new provisional key block via the
+                    // proper DAO method (`insert_key_block_in_tx`), which shares
+                    // this handler's transaction so the create rolls back
+                    // atomically with sibling changes.
+                    //
+                    // R-V160P0-QC1-W001: the prior hand-written INSERT
+                    // referenced a non-existent `metadata_json` column and
+                    // defaulted `block_type` to the invalid literal "concept".
+                    // Routing through the DAO issues the correct INSERT, runs
+                    // canonical_name + body validation, and reuses the canonical
+                    // `KeyBlock::new` defaults (status = provisional).
                     let canonical = ch
                         .new_value
                         .get("canonical_name")
@@ -586,36 +595,40 @@ impl Capability for WorldDeltaApply {
                                 "create kb_key_block requires new_value.canonical_name".into(),
                             )
                         })?;
+                    // Parse `block_type` into the enum (snake_case wire form).
+                    // Defaults to `BlockType::Character` (the canonical default)
+                    // when absent or unrecognised; the prior "concept" literal
+                    // was never a valid variant.
                     let block_type = ch
                         .new_value
                         .get("block_type")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("concept");
-                    let new_id = format!("kb_{}", uuid::Uuid::new_v4().simple());
-                    let body_str = ch
-                        .new_value
-                        .get("body_json")
-                        .and_then(|v| serde_json::to_string(v).ok())
-                        .unwrap_or_else(|| "null".to_string());
-                    // SAFETY: INSERT against known kb_key_blocks schema.
-                    sqlx::query(
-                        "INSERT INTO kb_key_blocks \
-                         (key_block_id, world_id, block_type, canonical_name, status, \
-                          body_json, metadata_json) \
-                         VALUES (?, ?, ?, ?, 'provisional', ?, '{}')",
-                    )
-                    .bind(&new_id)
-                    .bind(&world_id)
-                    .bind(block_type)
-                    .bind(canonical)
-                    .bind(&body_str)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| CapabilityError::Internal(format!("kb insert: {e}")))?;
+                        .and_then(|v| {
+                            serde_json::from_value::<nexus_contracts::BlockType>(v.clone()).ok()
+                        })
+                        .unwrap_or_default();
+                    let mut kb =
+                        nexus_kb::key_block::KeyBlock::new(&world_id, block_type, canonical);
+                    if let Some(body) = ch.new_value.get("body_json").and_then(|v| {
+                        serde_json::from_value::<nexus_kb::key_block::KeyBlockBody>(v.clone()).ok()
+                    }) {
+                        kb.body = Some(body);
+                    }
+
+                    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new((**pool).clone());
+                    let insert_result = kb_store
+                        .insert_key_block_in_tx(&mut tx, kb)
+                        .await
+                        .map_err(|e| match e {
+                            nexus_kb::store::KbStoreError::Validation(_)
+                            | nexus_kb::store::KbStoreError::ValidationLegacy(_) => {
+                                CapabilityError::InputInvalid(format!("kb insert: {e}"))
+                            }
+                            other => CapabilityError::Internal(format!("kb insert: {other}")),
+                        })?;
 
                     results.push(json!({
                         "entity": ch.entity,
-                        "entity_id": new_id,
+                        "entity_id": insert_result.key_block_id,
                         "field": ch.field,
                         "status": "applied",
                         "rationale": rationale,
@@ -957,5 +970,81 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(title, "Test World");
+    }
+
+    #[tokio::test]
+    async fn world_delta_apply_kb_key_block_create_persists_row() {
+        // Regression for R-V160P0-QC1-W001: the kb_key_block create branch
+        // previously hand-wrote an INSERT referencing a non-existent
+        // `metadata_json` column (and an invalid "concept" block_type default).
+        // None of the 9 in-file tests exercised the create path, so CI stayed
+        // green while runtime would fail with a SQL error. This test drives the
+        // create branch end to end and asserts the row lands in kb_key_blocks.
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+
+        let cap = WorldDeltaApply::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "policy_context": {
+                    "world_id": "wld_a",
+                    "creator_id": "ctr_a",
+                    "source_work_id": "wrk_local"
+                },
+                "proposed_changes": [{
+                    "entity": "kb_key_block",
+                    "field": "canonical_name",
+                    "new_value": {
+                        "canonical_name": "Hero of Aethel",
+                        "block_type": "character",
+                        "body_json": {
+                            "summary": "The protagonist",
+                            "tags": ["protagonist"]
+                        }
+                    },
+                    "rationale": "agent creates a new character key block"
+                }],
+                "atomic": true
+            }))
+            .await
+            .expect("create kb_key_block must succeed (W-001 regression)");
+
+        // The change reports applied with a freshly minted kb_ id.
+        assert_eq!(out["applied"][0]["status"], "applied");
+        assert_eq!(out["atomic_applied"], true);
+        let new_id = out["applied"][0]["entity_id"]
+            .as_str()
+            .expect("entity_id should be a kb_ string");
+        assert!(
+            new_id.starts_with("kb_"),
+            "expected a kb_ prefixed id, got {new_id}"
+        );
+
+        // The row actually persisted with the canonical schema columns. This
+        // read-back would have failed entirely under the old hand-written SQL
+        // (the INSERT never succeeded).
+        let (row_canonical, row_type, row_status, row_body): (
+            String,
+            String,
+            String,
+            Option<String>,
+        ) = sqlx::query_as(
+            "SELECT canonical_name, block_type, status, body_json \
+             FROM kb_key_blocks WHERE key_block_id = ?",
+        )
+        .bind(new_id)
+        .fetch_one(&pool)
+        .await
+        .expect("created key block row must be readable");
+        assert_eq!(row_canonical, "Hero of Aethel");
+        assert_eq!(row_type, "character");
+        assert_eq!(row_status, "provisional");
+        let body = row_body.expect("body_json should be persisted");
+        assert!(
+            body.contains("The protagonist"),
+            "body_json should carry the summary, got {body}"
+        );
+        assert!(body.contains("protagonist"));
     }
 }
