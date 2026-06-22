@@ -203,7 +203,7 @@ async fn run_list(config: &CliConfig) -> Result<()> {
     let _creator_context = resolve_creator_context(config)?;
     let pool = open_workspace_pool(config).await?;
 
-    let rows = nexus_local_db::list_references(&pool, None, None).await?;
+    let rows = nexus_local_db::list_references(&pool, None, None, None).await?;
 
     if rows.is_empty() {
         println!("No registered references.");
@@ -266,23 +266,27 @@ async fn run_show(config: &CliConfig, reference_id: &str) -> Result<()> {
 /// V1.58 P3: closes DF-44 by wiring the user-facing CLI surface to the daemon's
 /// host-call endpoint.  `--dry-run` lists what would be refreshed without mutating.
 async fn run_refresh(config: &CliConfig, reference_ref: &str, dry_run: bool) -> Result<()> {
-    let (_creator_id, _slug, _home) = resolve_creator_context(config)?;
+    let (creator_id, _slug, _home) = resolve_creator_context(config)?;
     let pool = open_workspace_pool(config).await?;
 
-    // Determine which reference sources to refresh.
+    // Determine which reference sources to refresh — scoped by creator (H-002).
     let sources: Vec<nexus_local_db::ReferenceSourceRow> = if reference_ref == "all" {
-        // Refresh every non-offline source.
-        let all = nexus_local_db::list_references(&pool, Some(1000), None).await?;
+        // Refresh every non-offline source owned by the active creator.
+        let all =
+            nexus_local_db::list_references(&pool, Some(1000), None, Some(&creator_id)).await?;
         all.into_iter()
             .filter(|s| s.refresh_policy != "offline")
             .collect()
     } else {
-        // Single reference by ID.
-        let source = nexus_local_db::get_reference_by_id(&pool, reference_ref)
-            .await?
-            .ok_or_else(|| {
-                CliError::Other(format!("Reference source '{reference_ref}' not found."))
-            })?;
+        // Single reference by ID, scoped to creator.
+        let source =
+            nexus_local_db::find_reference_by_id_for_creator(&pool, reference_ref, &creator_id)
+                .await?
+                .ok_or_else(|| {
+                    CliError::Other(format!(
+                        "Reference source '{reference_ref}' not found or not owned by creator '{creator_id}'."
+                    ))
+                })?;
         if source.refresh_policy == "offline" {
             return Err(CliError::Other(format!(
                 "Reference source '{reference_ref}' has refresh policy 'offline' — cannot refresh."
