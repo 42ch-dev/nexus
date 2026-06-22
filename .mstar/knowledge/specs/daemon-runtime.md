@@ -271,10 +271,38 @@ Content hashing (`compute_content_hashes`, `compute_single_file_hash`) uses
 `tokio::fs` + `AsyncReadExt`, not blocking `std::fs`. This prevents executor
 stalls when the daemon processes large workspace directories.
 
+V1.58 P0 fix-wave (QC2 H-1 / QC3 F-001): `canonicalize_workspace_root` (used
+by `open_session` and `validate_changes_manifest`) wraps
+`std::fs::canonicalize` in `tokio::task::spawn_blocking` because tokio has no
+native async `canonicalize`. This closes the last blocking-syscall gap in
+the async session paths. The workspace-root canonicalize is computed once
+per `validate_changes_manifest` call (memoized outside the per-change loop)
+to avoid O(N) syscalls for N changes (QC3 F-003).
+
 ### Metrics & tracing (R-V156P0-M006)
 
 OCC conflicts (AlreadyConsumed race losers, content hash mismatches) emit
 `tracing::warn!` with structured fields (`session_id`, `conflict_type`) and
 increment the process-wide `occ_conflict_total` AtomicU64 counter (read via
 `workspace::session::occ_conflict_total()`).
+
+### Deferred suggestions (V1.58 P0 fix-wave — QC3 S-001 / S-002)
+
+The following QC3 suggestions were reviewed and deferred (no measured need;
+current implementation is correct and documented):
+
+- **S-001 (jitter range expansion)**: the current 100–500 ms jitter range
+  (in `retry_jitter_ms`) is documented as "sufficient for jitter; not
+  cryptographic" and combines with exponential backoff (500 ms ×
+  2^(attempt-1)). Expanding to 100–1000 ms for high-N (N ≥ 100) concurrent
+  refresher scenarios is speculative without a measured contention incident
+  — the daemon runtime is single-process local-first and does not currently
+  approach N=100. Deferred until a surge-load incident is observed.
+- **S-002 (metrics overhead benchmarking)**: the four `AtomicU64` counters
+  in `registry.rs` use `Ordering::Relaxed` (optimal for non-cross-thread
+  data-dependency counters). Expected overhead is < 10 ns per call
+  (`fetch_add` on a hot cache line). Adding a dedicated micro-benchmark is
+  low value; the existing `synthetic_warm_run` bench (734 ns end-to-end)
+  already confirms metrics overhead is negligible at the capability layer.
+  Deferred; revisit only if profiling shows > 1% of cold path.
 
