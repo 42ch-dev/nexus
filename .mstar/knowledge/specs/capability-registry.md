@@ -403,3 +403,73 @@ documents the runtime contract and per-ID test vectors (success + failure paths)
 - **test vectors**:
   - success: `trace_correlation_propagates_correlation_id` — echoes `correlation_id`, `session_id`, `parent_request_id`.
   - failure: `trace_correlation_rejects_without_active_creator` — `FORBIDDEN` when no active creator.
+
+## V1.60 P0: DF-46 local capability parity batch (5 orchestration capabilities)
+
+**Status**: Shipped (V1.60 P0)
+**Plans**: `2026-06-22-v1.60-df46-local-parity`
+**Orchestration registry count**: 26 → 31
+
+All 5 capabilities transition from `catalog-only` to `shipped` with an
+orchestration `CapabilityRegistry` handler (Registry row ref = `orchestration`,
+**not** `host_tool`). They are registered in
+`CapabilityRegistry::{with_builtins, with_builtins_and_pool, with_runtime_deps}`
+in `crates/nexus-orchestration/src/capability/mod.rs`, NOT in
+`host_tool_registry()`. Each is admission-gated by creator world-ownership
+(`ensure_world_owned` — `owner_creator_id` match). Per-ID test vectors (success +
+failure + admission gate) live inline in each handler module.
+
+Delta-package semantics and the agent-vs-runtime split are normatively defined
+in [`world-delta-propose-apply.md`](world-delta-propose-apply.md) (Draft, V1.60
+P0). No new DB migrations — all five reuse existing `narrative_worlds`,
+`narrative_timeline_events`, and `kb_key_blocks` tables.
+
+### `nexus.world.state.query`
+
+- **id**: `nexus.world.state.query`
+- **access**: `Read`
+- **admission**: creator world-ownership (`ensure_world_owned`).
+- **handler**: `WorldStateQuery::run()` in `crates/nexus-orchestration/src/capability/builtins/world.rs`. Joined read via `SqliteNarrativeGateway` (world state + timeline) and `SqliteKbStore::list_by_world` (KB blocks).
+- **ACP wire**: `{world_id, creator_id, slice?: "kb"|"timeline"|"all", branch_id?, limit?}` → `{world_id, world, kb_blocks: [...], timeline: [...], generated_at}`
+- **failure mode**: `Forbidden` (cross-creator); `InputInvalid` (bad input); `WorkerUnavailable` (no pool).
+- **test vectors**: `world_state_query_success`, `world_state_query_rejects_cross_creator` (admission gate), `world_state_query_rejects_invalid_input`.
+
+### `nexus.world.delta.propose`
+
+- **id**: `nexus.world.delta.propose`
+- **access**: `Read` (no writes — produces a package only)
+- **admission**: creator world-ownership.
+- **handler**: `WorldDeltaPropose::run()` — reads current state to populate `old_value` per change; no writes.
+- **ACP wire**: `{world_id, creator_id, changeset: [{entity, entity_id?, field, new_value, rationale}]}` → `{schema_version, policy_context, proposed_changes: [...], atomic}`
+- **failure mode**: `Forbidden` (cross-creator); `InputInvalid` (unsupported entity / bad input).
+- **test vectors**: `world_delta_propose_success_populates_old_value`, `world_delta_propose_rejects_cross_creator`, `world_delta_propose_rejects_invalid_input`.
+
+### `nexus.world.delta.apply`
+
+- **id**: `nexus.world.delta.apply`
+- **access**: `Write`
+- **admission**: creator world-ownership (re-checked inside the transaction — TOCTOU guard).
+- **handler**: `WorldDeltaApply::run()` — applies a delta package atomically in one sqlx transaction with a lost-update guard (`old_value` must match the live row). Closes acp §8 line 223 Open Item: **runtime-side**.
+- **ACP wire**: `{policy_context, proposed_changes: [...], atomic?}` → `{applied: [{entity, entity_id, field, status: "applied"|"conflict", live_value?, rationale}], atomic_applied, source_work_id}`
+- **failure mode**: `Forbidden` (cross-creator); `InputInvalid` (unsupported field/entity); `TransientExternal` (commit failure).
+- **test vectors**: `world_delta_apply_title_update_success`, `world_delta_apply_rejects_cross_creator`, `world_delta_apply_lost_update_guard_reports_conflict` (lost-update → `conflict` + rollback).
+
+### `nexus.timeline.event.append`
+
+- **id**: `nexus.timeline.event.append`
+- **access**: `Write`
+- **admission**: creator world-ownership.
+- **handler**: `TimelineEventAppend::run()` in `crates/nexus-orchestration/src/capability/builtins/timeline.rs` — immutable append via `narrative_write::append_event`. New events are always `provisional`; `event_id` collisions are rejected (canon immutability, acp §6).
+- **ACP wire**: `{world_id, creator_id, branch_id, event_type, title?, summary?, event_id?}` → `{event_id, sequence_no, status: "provisional", created_at}`
+- **failure mode**: `Forbidden` (cross-creator); `InputInvalid` (event_id collision, bad input, sequence conflict).
+- **test vectors**: `timeline_event_append_success`, `timeline_event_append_rejects_cross_creator`, `timeline_event_append_rejects_collision`.
+
+### `nexus.fork.create`
+
+- **id**: `nexus.fork.create`
+- **access**: `Write`
+- **admission**: creator world-ownership.
+- **handler**: `ForkCreate::run()` in `crates/nexus-orchestration/src/capability/builtins/fork.rs` — allocates a new `fbk_*` branch id and materializes it with a `fork_created` marker event. **PD-01 boundary**: local timeline branching only; community/social fork is platform-only.
+- **ACP wire**: `{world_id, creator_id, parent_branch_id, forked_from_event_id, label?}` → `{branch_id, parent_branch_id, forked_from_event_id, created_at}`
+- **failure mode**: `Forbidden` (cross-creator); `InputInvalid` (fork point event not found on parent branch, bad input).
+- **test vectors**: `fork_create_success`, `fork_create_rejects_cross_creator`, `fork_create_rejects_bad_fork_point`.
