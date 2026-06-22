@@ -1,7 +1,7 @@
 //! V1.56 P2 fix-wave (H-001/W-002): Converge runtime integration tests.
 //!
 //! Tests the converge (merge-point) gate in `StateCompositeTask::run()`.
-//! Verifies wait_for_all, first_completed, any strategies, edge cases,
+//! Verifies `wait_for_all`, `first_completed`, `any` strategies, edge cases,
 //! and per-source dedup (C-NEW-001 regression).
 //!
 //! # Test Contract (R-V156P2-CACHE-01)
@@ -35,7 +35,10 @@ fn make_converge_task(
     strategy: ConvergeStrategy,
     predecessors: &[&str],
 ) -> StateCompositeTask {
-    let pred_set: HashSet<String> = predecessors.iter().map(|s| s.to_string()).collect();
+    let pred_set: HashSet<String> = predecessors
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     StateCompositeTask::from_manifest(&nexus_orchestration::preset::manifest::StateDefinition {
         id: id.to_string(),
         description: None,

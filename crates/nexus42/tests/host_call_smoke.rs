@@ -129,7 +129,7 @@ mod tests {
         // May fail with admission denial (INVALID_INPUT) if work doesn't exist,
         // but should not crash or produce unexpected errors.
         match result {
-            Ok(_) => {} // success
+            Ok(()) => {} // success
             Err(e) => {
                 let msg = e.to_string();
                 assert!(
@@ -143,8 +143,8 @@ mod tests {
         }
     }
 
-    /// Call a policy-gated tool (nexus.context.assemble with requires_platform=true).
-    /// Should be POLICY_BLOCKED in local-only mode.
+    /// Call a policy-gated tool (`nexus.context.assemble` with `requires_platform=true`).
+    /// Should be `POLICY_BLOCKED` in local-only mode.
     #[tokio::test]
     #[ignore = "requires running daemon; see module-level docs for R-V157P1-W001 justification"]
     async fn host_call_smoke_policy_gated_tool() {
@@ -156,7 +156,7 @@ mod tests {
         let result = run(args, &config).await;
         // Should fail with POLICY_BLOCKED when daemon is in local-only mode
         match result {
-            Ok(_) => {} // may succeed if no active creator check bypasses platform gate
+            Ok(()) => {} // may succeed if no active creator check bypasses platform gate
             Err(e) => {
                 let msg = e.to_string();
                 assert!(

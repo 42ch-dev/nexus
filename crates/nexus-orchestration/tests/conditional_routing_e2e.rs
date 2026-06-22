@@ -2,7 +2,7 @@
 //!
 //! Exercises expression routing through the **full dispatch path**:
 //! preset YAML load → expression cache build (parser + context-dep scanner)
-//! → `StateCompositeTask::run()` → `resolve_expression_target()` → GoTo transition.
+//! → `StateCompositeTask::run()` → `resolve_expression_target()` → `GoTo` transition.
 //!
 //! Unlike the unit tests in `src/tasks/mod.rs` which construct `StateCompositeTask`
 //! by hand, these tests load presets from YAML strings, proving the loader,
