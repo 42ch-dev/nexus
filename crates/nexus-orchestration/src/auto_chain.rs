@@ -1478,6 +1478,9 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         // `preset_version_mapping_matches_yaml_includes_cron_presets` test
         // enforces the sync for both presets.
         "novel-brainstorm" | "novel-write" => 1,
+        // V1.60 P1: `script-writing` — LLM-driven act/dialogue drafting
+        // for script Works. Ships at v1 (embedded-presets/script-writing/preset.yaml).
+        "script-writing" => 1,
         // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
         // per compass §0.1 #6). Bumped to version 1 (was already 1 as
         // `reflection-loop`); the state-machine contract is intentionally new
@@ -2159,6 +2162,10 @@ mod tests {
             "kb-extract",
             "novel-brainstorm",
             "novel-write",
+            // V1.55 P2: game-bible design-writing preset (Master Depth 3.5)
+            "design-writing",
+            // V1.60 P1: script-writing preset (Depth 3.5)
+            "script-writing",
         ];
 
         for preset_id in &known_ids {

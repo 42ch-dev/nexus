@@ -1229,6 +1229,20 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
         return Ok(false);
     }
 
+    // SAFETY: script profile gate (V1.60 P1).
+    // The novel chapter-completion logic must never apply to script Works.
+    // Script completion is evaluated via [is_script_complete] which inspects
+    // Scripts/*.md and Beats/*.md frontmatter in the workspace filesystem.
+    if crate::is_script_profile(work_profile.as_deref()) {
+        tracing::info!(
+            target: "completion",
+            work_id,
+            "script profile: bypassing novel chapter-completion; \
+             script-section evaluation handled by is_script_complete"
+        );
+        return Ok(false);
+    }
+
     // Non-novel Works: keep the legacy early exit (V1.36 backwards compat).
     // Novel-profile Works: always fall through to the full §6.1 check.
     if status == "completed" && !crate::is_novel_profile(work_profile.as_deref()) {
@@ -1403,6 +1417,121 @@ pub async fn is_game_bible_design_complete(
         work_id,
         work_ref,
         "game-bible: all critical Design sections accepted + intake complete; design complete"
+    );
+    Ok(true)
+}
+
+/// V1.60 P1 — Script section completion check.
+///
+/// Evaluates `section_status` frontmatter across all critical script files
+/// in `Works/<work_ref>/Scripts/` and `Works/<work_ref>/Beats/`. A script
+/// Work is complete when:
+///
+/// 1. Both critical sections (`Scripts/script.md`, `Beats/beat-sheet.md`)
+///    have `section_status: accepted` in their YAML frontmatter.
+/// 2. The Work's `intake_status == 'complete'`.
+///
+/// Returns `Ok(false)` when:
+/// - Any critical section is missing from the filesystem
+/// - Any critical section's `section_status` is not `accepted`
+/// - `intake_status` is not `'complete'`
+///
+/// This function reads files from the workspace filesystem. It is designed to
+/// be called from the daemon handler layer (which has access to `workspace_dir`)
+/// rather than from the pure-DB `is_work_completed` function.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Io` if a critical file cannot be read.
+pub async fn is_script_complete(
+    pool: &SqlitePool,
+    work_id: &str,
+    workspace_dir: &std::path::Path,
+) -> Result<bool, LocalDbError> {
+    // Critical script sections per script-profile.md §8.
+    const CRITICAL_SECTIONS: &[(&str, &str, &str)] = &[
+        ("Scripts/script.md", "script", "Scripts/"),
+        ("Beats/beat-sheet.md", "beat-sheet", "Beats/"),
+    ];
+
+    // Resolve work_ref from the works table.
+    // SAFETY: SELECT work_ref, intake_status — runtime query.
+    let row = sqlx::query("SELECT work_ref, intake_status FROM works WHERE work_id = ?")
+        .bind(work_id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(row) = row else {
+        tracing::warn!(work_id, "is_script_complete: work not found");
+        return Ok(false);
+    };
+
+    let intake_status: String = row.get("intake_status");
+    if intake_status != "complete" {
+        tracing::info!(
+            target: "completion",
+            work_id,
+            intake_status,
+            "script: intake_status is not complete; script not complete"
+        );
+        return Ok(false);
+    }
+
+    let work_ref: Option<String> = row.get("work_ref");
+    let Some(ref work_ref) = work_ref else {
+        tracing::debug!(work_id, "is_script_complete: work_ref is NULL");
+        return Ok(false);
+    };
+
+    for (rel_path, label, _parent_dir) in CRITICAL_SECTIONS {
+        let path = workspace_dir
+            .join("Works")
+            .join(work_ref)
+            .join(rel_path);
+        let content = match tokio::fs::read_to_string(&path).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!(
+                    target = "completion",
+                    work_id,
+                    work_ref,
+                    section = label,
+                    error = %e,
+                    "script: critical section file unreadable"
+                );
+                return Ok(false);
+            }
+        };
+        let fm = parse_frontmatter(&content);
+        let status = fm.get("section_status").map_or("draft", String::as_str);
+        // Per-section evaluation at debug level (not info — hot path).
+        tracing::debug!(
+            target = "completion",
+            work_id,
+            work_ref,
+            section = label,
+            section_status = status,
+            "script: critical section evaluated"
+        );
+        if status != "accepted" {
+            // First non-accepted section is a meaningful gate: keep at info.
+            tracing::info!(
+                target = "completion",
+                work_id,
+                work_ref,
+                section = label,
+                section_status = status,
+                "script: critical section not yet accepted; script not complete"
+            );
+            return Ok(false);
+        }
+    }
+
+    tracing::info!(
+        target = "completion",
+        work_id,
+        work_ref,
+        "script: all critical script sections accepted + intake complete; script complete"
     );
     Ok(true)
 }

@@ -773,6 +773,61 @@ pub async fn get_work(
         }
     }
 
+    // V1.60 P1: auto-promote script works.status to 'completed' when all
+    // critical script sections are accepted per script-profile.md §8.
+    if record.status != "completed" && record.work_profile.as_deref() == Some("script") {
+        let workspace_path = state.workspace_path().unwrap_or_default();
+        if !workspace_path.is_empty() {
+            let workspace_dir = std::path::Path::new(&workspace_path);
+            match nexus_local_db::work_chapters::is_script_complete(
+                state.pool(),
+                &work_id,
+                workspace_dir,
+            )
+            .await
+            {
+                Ok(true) => {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let patch = WorkPatch {
+                        status: Some("completed".to_string()),
+                        ..Default::default()
+                    };
+                    match works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now).await
+                    {
+                        Ok(updated) => {
+                            tracing::info!(
+                                target: "completion",
+                                work_id = %work_id,
+                                creator_id = %creator_id,
+                                work_ref = ?updated.work_ref,
+                                "script: Auto-promoted work to 'completed' \
+                                 (all critical script sections accepted)"
+                            );
+                            record = updated;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "completion",
+                                work_id = %work_id,
+                                error = %e,
+                                "script: Failed to auto-promote work to 'completed'"
+                            );
+                        }
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        target: "completion",
+                        work_id = %work_id,
+                        error = %e,
+                        "script: Failed to check script completion status"
+                    );
+                }
+            }
+        }
+    }
+
     Ok(Json(enrich_with_chapters(&state, record).await))
 }
 
