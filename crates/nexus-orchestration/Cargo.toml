@@ -72,3 +72,10 @@ serial_test = "3"
 sqlx = { workspace = true }
 serde_json = { workspace = true }
 nexus-local-db = { path = "../nexus-local-db" }
+# V1.58 P0 T14 (R-V156P1-L005): criterion benchmark for registry.refresh latency.
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# V1.58 P0 T14 (R-V156P1-L005): registry.refresh latency benchmark (cold + warm cache).
+[[bench]]
+name = "registry_refresh_latency"
+harness = false
