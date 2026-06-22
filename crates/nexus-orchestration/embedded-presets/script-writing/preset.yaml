@@ -1,0 +1,131 @@
+# Script-Writing Preset — Script Act/Dialogue Production (V1.60 P1)
+#
+# LLM-driven per-act drafting + review loop for script Works.
+# Stage chain: outline → draft → revise → finalize.
+# On finalize, the 五问 script rubric evaluates dialogue coherence, beat pacing,
+# act structure, character voice, and scene economy. All five must pass (GO)
+# for the script to be considered complete.
+#
+# V1.60 P1: script.section_status.update capability auto-transitions
+# section_status from draft → reviewed after each review pass (GO).
+#
+# Input variables (passed via schedule/CLI input):
+#   work_ref:        Work slug (directory under Works/)
+#   acts:             Act count and structure (from beat sheet)
+#   characters:       Character names and traits
+#   beats:            Story beats and scene outline
+#   scene:            Current scene input (per-draft context)
+#   title:            Working title of the script
+#
+# Stage chain:
+#   outline → draft → revise → finalize → done
+#
+# After finalize, the 五问 exit judge fires; GO = all five pass;
+# NOGO = at least one dimension failed, triggering revise loop.
+
+preset:
+  id: script-writing
+  version: 1
+  kind: creator
+  description: "LLM-driven per-act script drafting + act/dialogue/beat 五问 review loop for script Works (V1.60: Depth 3.5)"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - judge.llm
+  run_intents:
+    - work_continue
+  initial: outline
+  terminal: done
+  # Preset gates — enforced at enqueue time.
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: script
+    - kind: work_field
+      field: work_ref
+      op: required
+    - kind: work_field
+      field: intake_status
+      op: equals
+      value: complete
+    - kind: filesystem
+      path: "Works/{{work_ref}}/Scripts/"
+      must_exist: true
+
+states:
+  - id: outline
+    description: "Draft act structure, beat sheet, and character setup via LLM prompt"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/outline.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            characters: "{{preset.input.characters}}"
+            beats: "{{preset.input.beats}}"
+            title: "{{preset.input.title}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: draft
+
+  - id: draft
+    description: "Generate scene + dialogue per act via LLM prompt"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/draft.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            scene: "{{preset.input.scene}}"
+            acts: "{{preset.input.acts}}"
+            characters: "{{preset.input.characters}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: revise
+
+  - id: revise
+    description: "Apply review feedback to the draft; revise scene + dialogue"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/revise.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            scene: "{{preset.input.scene}}"
+            characters: "{{preset.input.characters}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: finalize
+
+  - id: finalize
+    description: "Polish script + KB extraction hint + 五问 all-pass exit judgment"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/finalize.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            acts: "{{preset.input.acts}}"
+            characters: "{{preset.input.characters}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+    next: done
+
+  - id: done
+    terminal: true
