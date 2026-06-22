@@ -2468,7 +2468,7 @@ async fn manuscript_write_writes_content() {
         Some(workspace_dir.to_string_lossy().to_string()),
     )
     .await;
-    let (work_id, _) = create_test_manuscript_work(&state).await;
+    let (work_id, workspace_root) = create_test_manuscript_work(&state).await;
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.manuscript.write".to_string(),
@@ -2485,6 +2485,121 @@ async fn manuscript_write_writes_content() {
     let val = result.expect("result");
     assert_eq!(val["written"], true);
     assert_eq!(val["word_count"], 12); // "It was the best of times, it was the worst of times."
+
+    // W-001: confirm the word_count UPDATE committed to the DB and the body file
+    // is durable on disk — i.e. the tx happy path landed both sides atomically.
+    let ch = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+        .await
+        .expect("get chapter")
+        .expect("chapter exists");
+    assert_eq!(ch.actual_word_count, Some(12));
+    let body_path = ch.body_path.expect("body_path");
+    let abs_body = std::path::Path::new(&workspace_root).join(&body_path);
+    let on_disk = std::fs::read_to_string(&abs_body).expect("body file durable on disk");
+    assert_eq!(
+        on_disk,
+        "It was the best of times, it was the worst of times."
+    );
+}
+
+/// T3 / W-001: a failed atomic rename rolls back the `word_count` UPDATE.
+///
+/// The destination is pre-created as a non-empty directory so
+/// `tokio::fs::rename(tmp_file, dest)` fails with ENOTEMPTY (deterministic on
+/// both Linux and macOS). The DB transaction must roll back the `word_count`
+/// UPDATE that ran inside the tx, leaving `actual_word_count` unchanged.
+#[tokio::test]
+async fn manuscript_write_rolls_back_word_count_on_rename_failure() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+    let (work_id, workspace_root) = create_test_manuscript_work(&state).await;
+
+    // Resolve chapter 1's body_path and turn the destination into a non-empty
+    // directory so the final rename(file → dir) fails inside the tx.
+    let ch = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+        .await
+        .expect("get chapter")
+        .expect("chapter exists");
+    let body_path = ch.body_path.expect("body_path");
+    let word_count_before = ch.actual_word_count;
+    let abs_body = std::path::Path::new(&workspace_root).join(&body_path);
+    std::fs::create_dir_all(&abs_body).expect("mkdir dest as dir");
+    std::fs::write(abs_body.join("blocker"), "x").expect("make dest non-empty dir");
+
+    let req = ToolExecuteRequest {
+        tool_name: "nexus.manuscript.write".to_string(),
+        parameters: serde_json::json!({"work_id": work_id, "chapter": 1, "content": "these are five words here now"}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("rename onto a non-empty dir must fail");
+    assert_eq!(err.error_code(), "INTERNAL");
+
+    // W-001: the word-count UPDATE inside the tx must have rolled back.
+    let ch_after = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+        .await
+        .expect("get chapter")
+        .expect("chapter exists");
+    assert_eq!(
+        ch_after.actual_word_count, word_count_before,
+        "word_count must be unchanged after the rolled-back rename"
+    );
+}
+
+/// T3 / W-002: a `body_path` that resolves outside the workspace root is rejected.
+///
+/// Defense-in-depth: `body_path` originates from the DB (trusted seed). This test
+/// simulates a future column-tampering scenario by rewriting the chapter's
+/// `body_path` to an absolute path outside `workspace_root`, then asserting the
+/// handler refuses the write with `INVALID_INPUT` before touching the filesystem.
+#[tokio::test]
+async fn manuscript_write_rejects_body_path_outside_workspace() {
+    let (tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+    let (work_id, _workspace_root) = create_test_manuscript_work(&state).await;
+
+    // Rewrite chapter 1's body_path to an absolute path outside the workspace.
+    // `Path::join(absolute)` replaces the base, so the guard's lexical branch
+    // sees a path that does not start with workspace_root.
+    let outside = tmp.path().join("evil_outside_workspace.md");
+    let outside_str = outside.to_string_lossy().to_string();
+    sqlx::query(
+        "UPDATE work_chapters SET body_path = ? \
+         WHERE work_id = ? AND chapter = 1 AND volume = 1",
+    )
+    .bind(&outside_str)
+    .bind(&work_id)
+    .execute(state.pool())
+    .await
+    .expect("rewrite body_path");
+
+    let req = ToolExecuteRequest {
+        tool_name: "nexus.manuscript.write".to_string(),
+        parameters: serde_json::json!({"work_id": work_id, "chapter": 1, "content": "should be rejected"}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("write must be rejected for an escaping body_path");
+    assert_eq!(err.error_code(), "INVALID_INPUT");
+    // And the outside target was never created.
+    assert!(
+        !outside.exists(),
+        "handler must not have written outside the workspace"
+    );
 }
 
 /// T3 failure: `nexus.manuscript.write` rejects content over size quota.
@@ -2646,6 +2761,10 @@ async fn workspace_paths_rejects_without_workspace() {
     let (_tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     // Deliberately do NOT call init_workspace → workspace_path() returns None.
+    // `create_test_workspace` seeds an active creator + workspace slug in
+    // config.toml, so the admission pipeline passes and the handler is reached.
+    // It then deterministically returns InvalidInput because no workspace path
+    // is initialized (see `execute_workspace_paths`).
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.workspace.paths".to_string(),
@@ -2655,13 +2774,8 @@ async fn workspace_paths_rejects_without_workspace() {
         caller_kind: None,
     };
     let result = HostToolExecutor::execute(&req, &state).await;
-    // workspace_path() reads from an in-memory Mutex<Option<String>> that is
-    // only populated by init_workspace(); a fresh test state has None.
-    // If the fixture happened to seed it, accept either path — the invariant
-    // is that the handler does not panic and produces a coherent response.
-    if let Err(e) = result {
-        assert_eq!(e.error_code(), "INVALID_INPUT");
-    }
+    let err = result.expect_err("workspace.paths must fail without an initialized workspace");
+    assert_eq!(err.error_code(), "INVALID_INPUT");
 }
 
 /// T7 success: `nexus.research.query` returns reference sources (empty is OK).
