@@ -724,6 +724,7 @@ pub(crate) fn candidate_from_llm_json(c: &serde_json::Value) -> Option<KbCandida
 /// |---|---|---|---|
 /// | `"novel"` | `attributes.novel_category` via [`block_type_to_novel_category`] | `["novel", "llm-extracted"]` | `Novel` |
 /// | `"game_bible"` | `attributes.game_bible_category` via [`block_type_to_game_bible_category`] | `["game-bible", "llm-extracted"]` | `GameBible` |
+/// | `"script"` | `attributes.script_category` via [`block_type_to_script_category`] | `["script", "llm-extracted"]` | `Script` |
 /// | other / unknown | `attributes.novel_category` (novel default) | `["novel", "llm-extracted"]` | `Novel` |
 ///
 /// The payload also carries the four LLK keys (`block_type`, `canonical_name`,
@@ -767,6 +768,12 @@ pub(crate) fn candidate_from_llm_json_for_profile(
             "game_bible_category",
             block_type_to_game_bible_category(&block_type),
             vec!["game-bible", "llm-extracted"],
+        )
+    } else if work_profile == "script" {
+        (
+            "script_category",
+            block_type_to_script_category(&block_type),
+            vec!["script", "llm-extracted"],
         )
     } else {
         (
@@ -866,6 +873,46 @@ pub fn block_type_to_game_bible_category(block_type: &str) -> &'static str {
                 "block_type_to_game_bible_category: unknown block_type; defaulting to species"
             );
             "species"
+        }
+    }
+}
+
+/// Map a wire `block_type` (`snake_case`) to the script-profile `script_category`
+/// body attribute (script-profile.md §7.2 mapping).
+///
+/// V1.60 P1: used when constructing the `proposed_payload` for script
+/// KB extraction so adopt-time `ValidationMode::Script` validates.
+/// The three valid categories are: `dialogue`, `beat`, `act`. Existing
+/// cross-domain types map to the closest script category per §7.2 table.
+///
+/// Unknown `block_types` default to `dialogue` — the most generic script
+/// category — and emit a `tracing::debug!` so operators can see unclassified
+/// candidates.
+// Direct-mapping arms and cross-domain fallback arms may produce the same
+// string value, but the semantics differ (identity mapping vs. best-guess).
+#[allow(clippy::match_same_arms)]
+#[must_use]
+pub fn block_type_to_script_category(block_type: &str) -> &'static str {
+    match block_type {
+        // V1.55 P3 new script BlockTypes: direct mapping.
+        "dialogue" => "dialogue",
+        "beat" => "beat",
+        "act" => "act",
+        // Cross-domain reuse: existing BlockType → closest script_category.
+        "character" => "dialogue", // Characters express through dialogue
+        "scene" => "act",          // Scenes belong to acts
+        "event" => "beat",         // Events are beats in narrative
+        "organization" => "act",   // Organizations anchor acts
+        "conflict" => "beat",      // Conflict is beat-level tension
+        "info_point" => "dialogue", // Info conveyed through dialogue
+        "ability" => "dialogue",   // Abilities expressed in dialogue
+        "item" => "beat",          // Items are beat-level props
+        _ => {
+            tracing::debug!(
+                block_type,
+                "block_type_to_script_category: unknown block_type; defaulting to dialogue"
+            );
+            "dialogue"
         }
     }
 }
