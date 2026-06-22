@@ -79,6 +79,12 @@ static SHARED_CDN_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
 ///
 /// Explicitly documents that `--cdn-url` must be HTTPS and reachable from the
 /// public internet (no private/loopback/link-local/metadata endpoints).
+///
+/// V1.58 P0 fix-wave (QC2 M-1): the `force` parameter was removed — it was a
+/// documented no-op (no cache layer exists; synthetic is always fresh and CDN
+/// always fetches) but the previous help text advertised it as bypassing cache
+/// freshness, which was misleading. Historical callers that still send
+/// `{"force": ...}` are tolerated (serde ignores unknown fields).
 #[must_use]
 pub const fn registry_refresh_help_text() -> &'static str {
     "Refresh the ACP registry cache. By default returns an embedded synthetic \
@@ -86,8 +92,7 @@ pub const fn registry_refresh_help_text() -> &'static str {
      fetches the live registry JSON over HTTPS. The --cdn-url MUST use the \
      https:// scheme and MUST resolve to a public-internet address; private, \
      loopback, link-local, and cloud-metadata endpoints are blocked. The \
-     response body is capped (default 8 MiB). Set `force: true` to bypass \
-     cache freshness and re-fetch unconditionally."
+     response body is capped (default 8 MiB)."
 }
 
 // ─── Retry jitter (V1.58 P0 T13 — R-V156P1-L004) ───────────────────────────
@@ -369,7 +374,10 @@ impl Capability for RegistryRefresh {
     }
 
     fn input_schema(&self) -> &'static str {
-        r#"{"type":"object","properties":{"force":{"type":"boolean","default":false}},"required":[],"additionalProperties":false}"#
+        // V1.58 P0 fix-wave (QC2 M-1): the `force` property was removed —
+        // it was a documented no-op (no cache layer to bypass). The schema
+        // is now an empty object with additionalProperties:false.
+        r#"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
     }
 
     fn output_schema(&self) -> &'static str {
@@ -380,14 +388,15 @@ impl Capability for RegistryRefresh {
         // V1.58 P0 T16 (R-V156P1-L007): increment the refresh counter on entry.
         REFRESH_TOTAL.fetch_add(1, Ordering::Relaxed);
 
-        // V1.58 P0 T7 (R-V156P1-M003): parse and honor the `force` parameter.
-        // `force=true` bypasses cache freshness. In the current design there is
-        // no cache layer (synthetic is always fresh; CDN always fetches), so the
-        // param is honored by construction — but we log it so operators can see
-        // when a caller explicitly requested a forced refresh.
-        let parsed: RegistryRefreshInput = serde_json::from_value(input)
+        // V1.58 P0 T7 (R-V156P1-M003) / QC2 M-1 fix: the `force` input
+        // parameter was removed from the contract — it was a documented
+        // no-op (the synthetic path is always fresh; the CDN path always
+        // fetches) but the help text advertised it as bypassing cache
+        // freshness, which was misleading. The input is still parsed so
+        // callers that historically sent `{"force": ...}` do not break
+        // (serde ignores unknown fields by default).
+        let _parsed: RegistryRefreshInput = serde_json::from_value(input)
             .map_err(|e| CapabilityError::InputInvalid(format!("registry.refresh input: {e}")))?;
-        let force = parsed.force;
 
         // V1.58 P0 T15 (R-V156P1-L006): generated_at is captured ONCE per
         // invocation (not per retry) so the field is deterministic across the
@@ -398,13 +407,12 @@ impl Capability for RegistryRefresh {
         // fetch → response phases.
         let span = tracing::info_span!(
             "registry_refresh",
-            force,
             cdn_configured = self.cdn_config.is_some(),
             %now,
         );
         let _guard = span.enter();
 
-        tracing::info!(force, "registry.refresh admitted");
+        tracing::info!("registry.refresh admitted");
 
         // Check if CDN URL is configured (constructor-injected, V1.57 P1)
         if let Some(ref cdn) = self.cdn_config {
@@ -853,29 +861,6 @@ mod tests {
         assert_eq!(schema["type"], "object");
     }
 
-    // ── V1.58 P0 T7 (R-V156P1-M003): force param wired ────────────────────
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn force_param_true_is_accepted_synthetic() {
-        // force=true must be accepted without error in synthetic mode (no
-        // cache layer to bypass; the embedded snapshot is always fresh).
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({"force": true})).await.unwrap();
-        assert_eq!(out["source"], "synthetic");
-        assert!(out.get("generatedAt").and_then(|v| v.as_str()).is_some());
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn force_param_defaults_to_false() {
-        // Omitting force must behave identically to force=false.
-        let cap = RegistryRefresh::new();
-        let out_default = cap.run(serde_json::json!({})).await.unwrap();
-        let out_false = cap.run(serde_json::json!({"force": false})).await.unwrap();
-        assert_eq!(out_default["source"], out_false["source"]);
-    }
-
     // ── V1.58 P0 T11 (R-V156P1-L002): body-size cap configurable ───────────
 
     #[test]
@@ -961,6 +946,8 @@ mod tests {
 
     #[test]
     fn help_text_documents_https_and_public_requirement() {
+        // V1.58 P0 fix-wave (QC2 M-1): the `force` parameter mention was
+        // removed from the help text (it was a documented no-op).
         let help = registry_refresh_help_text();
         assert!(help.contains("https://"), "help must mention HTTPS scheme");
         assert!(
@@ -968,8 +955,8 @@ mod tests {
             "help must mention public-internet requirement"
         );
         assert!(
-            help.contains("force"),
-            "help must document the force parameter"
+            !help.contains("force"),
+            "help must NOT mention force (removed in QC2 M-1)"
         );
     }
 
@@ -992,11 +979,13 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn registry_refresh_rejects_unknown_field_strictly() {
-        // additionalProperties:false in the input schema — but serde defaults
-        // to ignoring unknown fields. The capability still runs because the
-        // unknown field is dropped. This test documents the current contract:
-        // extra fields are ignored (serde default), force defaults to false.
+    async fn registry_refresh_rejects_unknown_field_silently() {
+        // V1.58 P0 fix-wave (QC2 M-1): with `force` removed from the input
+        // schema, an unknown field like `unknownField` is silently ignored
+        // (serde default). The capability still runs and serves synthetic.
+        // This documents the current contract: extra fields are ignored,
+        // the schema's `additionalProperties:false` is advisory at the
+        // Rust deserialization layer (wire validation happens upstream).
         let cap = RegistryRefresh::new();
         let out = cap
             .run(serde_json::json!({"unknownField": "x"}))
@@ -1007,16 +996,13 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn registry_refresh_rejects_non_boolean_force() {
-        // force must be boolean — passing a string must surface InputInvalid.
+    async fn registry_refresh_tolerates_historical_force_field() {
+        // V1.58 P0 fix-wave (QC2 M-1): historical callers that still send
+        // `{"force": true}` (the removed parameter) must not break — serde
+        // ignores unknown fields by default. This is the backward-compat
+        // guarantee after the force parameter was removed from the contract.
         let cap = RegistryRefresh::new();
-        let err = cap
-            .run(serde_json::json!({"force": "yes"}))
-            .await
-            .expect_err("non-boolean force must error");
-        assert!(
-            matches!(err, CapabilityError::InputInvalid(_)),
-            "expected InputInvalid for string force, got {err:?}"
-        );
+        let out = cap.run(serde_json::json!({"force": true})).await.unwrap();
+        assert_eq!(out["source"], "synthetic");
     }
 }
