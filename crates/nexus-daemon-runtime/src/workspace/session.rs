@@ -572,9 +572,33 @@ impl WorkspaceSessionManager {
     /// with the same session ID cannot both succeed — `SQLite`'s UPDATE WHERE
     /// guarantees single-consumer semantics.
     ///
+    /// # Retry semantics (V1.58 P0 fix-wave — QC3 F-002)
+    ///
+    /// **No automatic retry.** This method returns immediately on CAS loss:
+    /// the losing caller receives [`SessionError::AlreadyCommitted`] and the
+    /// process-wide `occ_conflict_total` counter is incremented (T6) with a
+    /// structured `tracing::warn!` (conflict_type = "already_consumed").
+    /// There is no backoff, no sleep, and no max-retry counter — the call is
+    /// one-shot.
+    ///
+    /// This is intentional: the validate+consume pair bound a single logical
+    /// operation (see [`commit_session`]). Retrying the consume in isolation
+    /// would be unsound because the session snapshot may have changed since
+    /// validate ran; the caller must re-open the session and re-validate
+    /// before retrying. Higher layers that want retry-on-conflict semantics
+    /// must implement them above this layer (re-open → re-validate →
+    /// re-commit), not inside `consume_session`.
+    ///
+    /// Atomicity: `SQLite` serializes writes via a database-level lock, so
+    /// the `UPDATE workspace_sessions SET consumed = 1 WHERE session_id = ?
+    /// AND consumed = 0 AND expires_at > now` statement (in
+    /// [`db::consume_session`]) executes as a single compare-and-swap. Two
+    /// concurrent consumers race on `rows_affected()`: exactly one gets 1
+    /// (Consumed), the other gets 0 (re-read → AlreadyConsumed or Expired).
+    ///
     /// # Errors
     ///
-    /// Returns `SessionError` if the session is not found, consumed, or expired.
+    /// Returns [`SessionError`] if the session is not found, consumed, or expired.
     pub async fn consume_session(
         &self,
         session_id: &SessionId,
