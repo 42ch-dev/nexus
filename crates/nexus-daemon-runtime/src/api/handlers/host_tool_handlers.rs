@@ -2000,7 +2000,44 @@ async fn execute_manuscript_read_range(
             code: "WORKSPACE_PATH_ERROR".to_string(),
             message: "workspace path not available".to_string(),
         })?;
-    let abs_body = Path::new(&workspace_root).join(&body_path);
+    let workspace_root_path = Path::new(&workspace_root);
+    let abs_body = workspace_root_path.join(&body_path);
+
+    // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
+    // within the workspace root before reading. Mirrors the fs/* guard in
+    // `validate_file_path`; the target normally exists (read path), so
+    // canonicalize both and reject prefixes outside the workspace root. A
+    // missing-but-in-bounds file falls through to the existing FILE_READ_FAILED
+    // behavior below.
+    if abs_body.exists() {
+        let canonical_body = abs_body
+            .canonicalize()
+            .map_err(|e| NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: format!("body path cannot be resolved: {e}"),
+            })?;
+        let canonical_workspace =
+            workspace_root_path
+                .canonicalize()
+                .map_err(|e| NexusApiError::Internal {
+                    code: "WORKSPACE_PATH_INVALID".into(),
+                    message: format!("workspace root cannot be resolved: {e}"),
+                })?;
+        if !canonical_body.starts_with(&canonical_workspace) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    } else {
+        let abs_body_str = abs_body.display().to_string();
+        if !abs_body_str.starts_with(&workspace_root) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    }
 
     let content =
         tokio::fs::read_to_string(&abs_body)
@@ -2132,7 +2169,43 @@ async fn execute_manuscript_write(
             code: "WORKSPACE_PATH_ERROR".to_string(),
             message: "workspace path not available".to_string(),
         })?;
-    let abs_body = Path::new(&workspace_root).join(&body_path);
+    let workspace_root_path = Path::new(&workspace_root);
+    let abs_body = workspace_root_path.join(&body_path);
+
+    // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
+    // within the workspace root before any FS op. Mirrors the fs/* guard in
+    // `validate_file_path`: canonicalize both when the target exists, otherwise
+    // fall back to a lexical check on the absolute joined path. (A future shared
+    // helper is tracked as qc2 S-001/S-002; intentionally inlined here.)
+    if abs_body.exists() {
+        let canonical_body = abs_body
+            .canonicalize()
+            .map_err(|e| NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: format!("body path cannot be resolved: {e}"),
+            })?;
+        let canonical_workspace =
+            workspace_root_path
+                .canonicalize()
+                .map_err(|e| NexusApiError::Internal {
+                    code: "WORKSPACE_PATH_INVALID".into(),
+                    message: format!("workspace root cannot be resolved: {e}"),
+                })?;
+        if !canonical_body.starts_with(&canonical_workspace) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    } else {
+        let abs_body_str = abs_body.display().to_string();
+        if !abs_body_str.starts_with(&workspace_root) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    }
 
     // Ensure parent directory exists.
     if let Some(parent) = abs_body.parent() {
@@ -2144,7 +2217,7 @@ async fn execute_manuscript_write(
             })?;
     }
 
-    // Temp + atomic rename (mirrors execute_manuscript_chapter_update C-002 pattern).
+    // Stage content in a temp file (not durable until rename succeeds).
     let tmp_file = abs_body.with_extension("md.tmp");
     tokio::fs::write(&tmp_file, content)
         .await
@@ -2152,18 +2225,22 @@ async fn execute_manuscript_write(
             code: "FILE_WRITE_FAILED".into(),
             message: format!("failed to write manuscript body: {e}"),
         })?;
-    tokio::fs::rename(&tmp_file, &abs_body).await.map_err(|e| {
-        let _ = std::fs::remove_file(&tmp_file);
-        NexusApiError::Internal {
-            code: "FILE_RENAME_FAILED".into(),
-            message: format!("failed to finalize manuscript file: {e}"),
-        }
-    })?;
 
+    // W-001: wrap the DB word-count update + atomic rename in a single
+    // transaction so the metadata update only commits when the final file is in
+    // place. Mirrors the execute_manuscript_chapter_update C-002 pattern
+    // (UPDATE → rename → commit); a failed rename returns early and the
+    // dropped transaction rolls back the word-count UPDATE.
     let word_count = content.split_whitespace().count();
     let now = chrono::Utc::now().to_rfc3339();
-
-    // Update word count in the same transaction as the rename finalization.
+    let mut tx = state
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("manuscript.write tx begin: {e}"),
+        })?;
     // SAFETY: UPDATE against work_chapters — runtime query.
     #[allow(clippy::cast_possible_wrap)]
     sqlx::query(
@@ -2175,11 +2252,25 @@ async fn execute_manuscript_write(
     .bind(work_id)
     .bind(chapter)
     .bind(volume)
-    .execute(state.pool())
+    .execute(&mut *tx)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".to_string(),
         message: format!("manuscript.write word-count update: {e}"),
+    })?;
+    // Atomically rename temp → final inside the tx (after the UPDATE succeeds).
+    tokio::fs::rename(&tmp_file, &abs_body).await.map_err(|e| {
+        // Best-effort cleanup: remove temp file on rename failure; the dropped
+        // tx rolls back the word-count UPDATE above.
+        let _ = std::fs::remove_file(&tmp_file);
+        NexusApiError::Internal {
+            code: "FILE_RENAME_FAILED".into(),
+            message: format!("failed to finalize manuscript file: {e}"),
+        }
+    })?;
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("manuscript.write tx commit: {e}"),
     })?;
 
     Ok(serde_json::json!({
