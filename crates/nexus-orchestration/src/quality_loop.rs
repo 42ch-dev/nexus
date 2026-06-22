@@ -899,14 +899,14 @@ pub fn block_type_to_script_category(block_type: &str) -> &'static str {
         "beat" => "beat",
         "act" => "act",
         // Cross-domain reuse: existing BlockType → closest script_category.
-        "character" => "dialogue", // Characters express through dialogue
-        "scene" => "act",          // Scenes belong to acts
-        "event" => "beat",         // Events are beats in narrative
-        "organization" => "act",   // Organizations anchor acts
-        "conflict" => "beat",      // Conflict is beat-level tension
+        "character" => "dialogue",  // Characters express through dialogue
+        "scene" => "act",           // Scenes belong to acts
+        "event" => "beat",          // Events are beats in narrative
+        "organization" => "act",    // Organizations anchor acts
+        "conflict" => "beat",       // Conflict is beat-level tension
         "info_point" => "dialogue", // Info conveyed through dialogue
-        "ability" => "dialogue",   // Abilities expressed in dialogue
-        "item" => "beat",          // Items are beat-level props
+        "ability" => "dialogue",    // Abilities expressed in dialogue
+        "item" => "beat",           // Items are beat-level props
         _ => {
             tracing::debug!(
                 block_type,
@@ -1968,8 +1968,8 @@ mod tests {
             "confidence": 0.92,
             "source_quote": "I never wanted you to find out this way.",
         });
-        let built = candidate_from_llm_json_for_profile(&c, "script")
-            .expect("canonical_name present");
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
         let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
 
         // script payload MUST have script_category, NOT novel_category or game_bible_category.
@@ -2006,8 +2006,8 @@ mod tests {
             "block_type": "character",
             "confidence": 0.9,
         });
-        let built = candidate_from_llm_json_for_profile(&c, "script")
-            .expect("canonical_name present");
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
         let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
         assert_eq!(payload["attributes"]["script_category"], "dialogue");
         assert!(
@@ -2025,8 +2025,8 @@ mod tests {
             "block_type": "event",
             "confidence": 0.95,
         });
-        let built = candidate_from_llm_json_for_profile(&c, "script")
-            .expect("canonical_name present");
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
         let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
         assert_eq!(payload["attributes"]["script_category"], "beat");
         assert_eq!(payload["tags"][0], "script");
@@ -2040,8 +2040,8 @@ mod tests {
             "block_type": "unknown_thing",
             "confidence": 0.5,
         });
-        let built = candidate_from_llm_json_for_profile(&c, "script")
-            .expect("canonical_name present");
+        let built =
+            candidate_from_llm_json_for_profile(&c, "script").expect("canonical_name present");
         let payload: serde_json::Value = serde_json::from_str(&built.proposed_payload).unwrap();
         assert_eq!(payload["attributes"]["script_category"], "dialogue");
     }
@@ -2060,11 +2060,7 @@ mod tests {
             "dialogue",
             "character → dialogue"
         );
-        assert_eq!(
-            block_type_to_script_category("scene"),
-            "act",
-            "scene → act"
-        );
+        assert_eq!(block_type_to_script_category("scene"), "act", "scene → act");
         assert_eq!(
             block_type_to_script_category("event"),
             "beat",

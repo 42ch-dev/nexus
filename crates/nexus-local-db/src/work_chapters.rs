@@ -1484,10 +1484,7 @@ pub async fn is_script_complete(
     };
 
     for (rel_path, label, _parent_dir) in CRITICAL_SECTIONS {
-        let path = workspace_dir
-            .join("Works")
-            .join(work_ref)
-            .join(rel_path);
+        let path = workspace_dir.join("Works").join(work_ref).join(rel_path);
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => {
@@ -3102,9 +3099,7 @@ mod tests {
         // the script profile gate prevents the novel completion logic from
         // applying to script Works.
         assert!(
-            !is_work_completed(&pool, "wrk_script_001")
-                .await
-                .unwrap(),
+            !is_work_completed(&pool, "wrk_script_001").await.unwrap(),
             "script profile: is_work_completed must return false \
              (novel completion bypassed; script section completion via is_script_complete)"
         );
