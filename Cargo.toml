@@ -87,6 +87,9 @@ statig = { version = "0.3", features = ["async"] }
 futures-util = "0.3"
 tokio-stream = "0.1"
 blake3 = "1"
+# V1.58 P0 T1 (R-V156P0-M001): sha2 workspace-managed — referenced as
+# `sha2.workspace = true` by crates that compute OCC content hashes.
+sha2 = "0.10"
 handlebars = "6"
 which = "8"
 regex = "1"
