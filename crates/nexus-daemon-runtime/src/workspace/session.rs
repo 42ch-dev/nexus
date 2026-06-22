@@ -6,11 +6,34 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use nexus_local_db as db;
 use sqlx::SqlitePool;
 use tracing;
+
+// ── OCC metrics (V1.58 P0 T6 — R-V156P0-M006) ──────────────────────────────
+//
+// Lightweight process-wide counter for OCC conflicts surfaced at the
+// workspace-session layer. Operators can read it via the monitoring endpoint
+// or `tracing` spans. No external metrics pipeline is required (pre-1.0
+// local-first posture; see daemon-runtime.md §observability).
+
+/// Total OCC conflicts detected at the workspace session commit path
+/// (AlreadyCommitted race or content hash mismatch).
+static OCC_CONFLICT_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+/// Increment the OCC conflict counter (V1.58 P0 T6).
+fn incr_occ_conflict() {
+    OCC_CONFLICT_TOTAL.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Read the current OCC conflict counter (for monitoring / tests).
+#[must_use]
+pub fn occ_conflict_total() -> u64 {
+    OCC_CONFLICT_TOTAL.load(Ordering::Relaxed)
+}
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -512,10 +535,65 @@ impl WorkspaceSessionManager {
             }
             db::ConsumeResult::NotFound => Err(SessionError::NotFound(session_id.clone())),
             db::ConsumeResult::AlreadyConsumed => {
+                // V1.58 P0 T5/T6: OCC conflict — another writer committed this
+                // session between our validate and consume. The atomic UPDATE
+                // in db::consume_session is the CAS; this branch is the
+                // single-consumer race outcome. Record it for observability.
+                tracing::warn!(
+                    session_id = %session_id,
+                    conflict_type = "already_consumed",
+                    "OCC conflict: session already committed by another writer"
+                );
+                incr_occ_conflict();
                 Err(SessionError::AlreadyCommitted(session_id.clone()))
             }
             db::ConsumeResult::Expired => Err(SessionError::Expired(session_id.clone())),
         }
+    }
+
+    /// Commit a workspace session — validate the changes manifest and consume
+    /// the session in one atomic step (V1.58 P0 T5 — R-V156P0-M005).
+    ///
+    /// This closes the TOCTOU window between [`validate_changes_manifest`]
+    /// (read) and [`consume_session`] (write): callers no longer interleave
+    /// the two calls, so a concurrent writer cannot exploit the gap. The
+    /// underlying `db::consume_session` atomic `UPDATE ... WHERE consumed = 0`
+    /// is the compare-and-swap primitive; this method is the transaction
+    /// guard that binds validate + consume into a single logical operation.
+    ///
+    /// On conflict (hash mismatch, stale, or expired), the OCC counter is
+    /// incremented and a structured `tracing::warn!` is emitted (T6).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError`] if validation fails (hash conflict), the
+    /// session is stale/expired, or the consume loses the single-writer race.
+    pub async fn commit_session(
+        &self,
+        session_id: &SessionId,
+        changes: &[ChangeEntry],
+        workspace_root: &str,
+    ) -> Result<db::WorkspaceSessionRow, SessionError> {
+        // Step 1: validate the changes[] manifest against the session snapshot.
+        if !changes.is_empty() {
+            if let Err(err) = self
+                .validate_changes_manifest(session_id, changes, workspace_root)
+                .await
+            {
+                if matches!(err, SessionError::HashConflict { .. }) {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        conflict_type = "hash_mismatch",
+                        "OCC conflict: content hash mismatch at commit"
+                    );
+                    incr_occ_conflict();
+                }
+                return Err(err);
+            }
+        }
+
+        // Step 2: consume the session atomically (CAS on `consumed`).
+        self.consume_session(session_id).await
     }
 
     /// Get the underlying database pool.
