@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T22:30:00Z",
+  "updated_at": "2026-06-22T23:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-22-v1.57-mid-qc-and-fix-waves",
@@ -37,24 +37,147 @@
       ],
       "created": "2026-06-22",
       "inreview_at": "2026-06-22",
-      "inreview_commits": ["8b793cc5"],
+      "inreview_commits": [
+        "8b793cc5"
+      ],
       "closed_at": "2026-06-22",
       "merge_commit": "8b793cc5",
       "qc_reports": [
-        {"reviewer": "qa-engineer", "verdict": "Pass", "commit": "8b793cc5"}
+        {
+          "reviewer": "qa-engineer",
+          "verdict": "Pass",
+          "commit": "8b793cc5"
+        }
       ],
       "completion_report": "T1 done: agent-nexus-tool-bridge.md Master promotion (header final rename; draft annotation removed). T2 done: capability-registry.md fold-in (Last updated + Scope + Coordinates + Iteration compass updated to V1.57; reconciliation of 18-host-tool count). T3 done: other amended specs (cli-spec.md §6.2M + daemon-runtime.md 3-caller + local-runtime-boundary.md topology + orchestration-engine.md §6.4) verified final via P0/P1/P3 fix-waves. T4 done: Profile B compaction (5 Done plans archived + plans-done.json index updated + status.json.plans[] cleaned to P-mid + P-last only). T5 done: tracker updates (shipped-features-tracker V1.57 snapshot appended; deferred-features-tracker V1.57 ship line + DF-46 reduced + §3.5 + §5 updated). T6 done: tech-debt rollup (status.json.metadata.tech_debt_summary reflects post-Wave 3 state: 35 open, 3 deferred, 19 resolved, 5 archived). T7 done: final verification (cargo clippy --all -- -D warnings clean; cargo +nightly fmt --all -- --check clean; all 4 implement plans Done; 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA = 17 reports committed). T8 done: report-only QA by qa-engineer verdict Pass (commit 8b793cc5). V1.57 PR-ready on iteration/v1.57."
+    },
+    {
+      "plan_id": "2026-06-22-v1.58-compass-and-plan-stubs",
+      "title": "Compass & Plan Stubs (P-1)",
+      "iteration": "V1.58",
+      "track": "prepare",
+      "wave": "—",
+      "effort": "M",
+      "owner": "@project-manager (PM whitelist; authored by @writing-specialist)",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.58-compass-and-plan-stubs.md",
+      "working_branch": "feature/v1.58-prepare",
+      "merge_target": "iteration/v1.58",
+      "depends_on": null,
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+      "title": "Workspace OCC Hardening & Capability Surface Quality (P0)",
+      "iteration": "V1.58",
+      "track": "Track A",
+      "wave": "Wave 1 (parallel w/ P1)",
+      "effort": "L",
+      "owner": "@fullstack-dev (Track A canonical owner)",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.58-workspace-occ-hardening.md",
+      "working_branch": "feature/v1.58-workspace-occ-hardening",
+      "merge_target": "iteration/v1.58",
+      "depends_on": [
+        "2026-06-22-v1.58-compass-and-plan-stubs"
+      ],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.58-df44-reference-refresh-pipeline",
+      "title": "DF-44 Reference Body Refreshable Pipeline (P1)",
+      "iteration": "V1.58",
+      "track": "Track B",
+      "wave": "Wave 1 (parallel w/ P0)",
+      "effort": "L",
+      "owner": "@fullstack-dev-2 (Track B canonical owner)",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.58-df44-reference-refresh-pipeline.md",
+      "working_branch": "feature/v1.58-df44-reference-refresh-pipeline",
+      "merge_target": "iteration/v1.58",
+      "depends_on": [
+        "2026-06-22-v1.58-compass-and-plan-stubs"
+      ],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+      "title": "Capability Quality Convergence (P2)",
+      "iteration": "V1.58",
+      "track": "Track A",
+      "wave": "Wave 2 (after Wave 1 accepts)",
+      "effort": "M",
+      "owner": "@fullstack-dev (Track A canonical owner)",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.58-capability-quality-convergence.md",
+      "working_branch": "feature/v1.58-capability-quality-convergence",
+      "merge_target": "iteration/v1.58",
+      "depends_on": [
+        "2026-06-22-v1.58-workspace-occ-hardening",
+        "2026-06-22-v1.58-df44-reference-refresh-pipeline"
+      ],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
+      "title": "Reference CLI & Cross-Cut Tests (P3)",
+      "iteration": "V1.58",
+      "track": "Track B",
+      "wave": "Wave 3 (after Wave 2 accepts)",
+      "effort": "M",
+      "owner": "@fullstack-dev-2 (Track B canonical owner)",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.58-reference-cli-and-cross-cut-tests.md",
+      "working_branch": "feature/v1.58-reference-cli-and-cross-cut-tests",
+      "merge_target": "iteration/v1.58",
+      "depends_on": [
+        "2026-06-22-v1.58-capability-quality-convergence"
+      ],
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.58-mid-qc-and-fix-waves",
+      "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
+      "iteration": "V1.58",
+      "track": "meta",
+      "wave": "Across all 3 waves",
+      "effort": "M",
+      "owner": "@project-manager",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.58-mid-qc-and-fix-waves.md",
+      "merge_target": "iteration/v1.58",
+      "depends_on": null,
+      "created": "2026-06-22"
+    },
+    {
+      "plan_id": "2026-06-22-v1.58-hygiene-and-closeout",
+      "title": "Hygiene & Closeout (P-last)",
+      "iteration": "V1.58",
+      "track": "closeout",
+      "wave": "After Wave 3",
+      "effort": "M",
+      "owner": "@project-manager",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-22-v1.58-hygiene-and-closeout.md",
+      "merge_target": "iteration/v1.58",
+      "depends_on": [
+        "2026-06-22-v1.58-workspace-occ-hardening",
+        "2026-06-22-v1.58-df44-reference-refresh-pipeline",
+        "2026-06-22-v1.58-capability-quality-convergence",
+        "2026-06-22-v1.58-reference-cli-and-cross-cut-tests"
+      ],
+      "created": "2026-06-22"
     }
   ],
   "metadata": {
-    "integration_branch": "iteration/v1.57 (retired)",
-    "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.57",
+    "integration_branch": "iteration/v1.58",
+    "integration_branch_retired": false,
+    "last_integration_branch": "iteration/v1.57 (retired)",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.58",
+    "latest_active_compass": "v1.58-workspace-occ-hardening-and-df44-reference-refresh",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "go",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -145,6 +268,21 @@
       "R-V156P1-M001": "P2 — schema rename: capability_count — CLOSED in P2 (commit 28005f11) with backward-compat serde aliases",
       "R-V156P1-M002": "P1 — global state → constructor injection for CdnConfig — CLOSED in P1 (commit 64c0b245)",
       "R-V156P3-S003": "P0+P1 — field drops — CLOSED in P0+P1 (commits 7e9932ce + fc0e250a)"
+    },
+    "v1_58_carry_forward_index": {
+      "note": "V1.58 absorbs 33 of 35 V1.57+/V1.58+ open residuals (Track A: P0 closes 19, P2 closes 14). DF-44 closure split across P1 (capability + DB migration) + P3 (CLI + cross-cut tests). V1.52-era WL-A polish residuals (14 items: R-V150KBED-02, R-V151Q1-10, R-V152TA-S001..S011, R-V152TB-W006/W007/W008) explicitly OUT of V1.58 scope; deferred to V1.59+ WL-A sweep.",
+      "R-V156P0-M001..M006": "P0 T1-T6 — workspace OCC hardening (6 mediums)",
+      "R-V156P1-M003..M005": "P0 T7-T9 — capability handler quality (3 mediums)",
+      "R-V156P1-L001..L007": "P0 T10-T16 — capability surface polish (7 lows)",
+      "R-V156-PROCESS-01 + R-V156P1-CACHE-01": "P0 T18 — .sqlx/ cache hygiene (workspace AND test macros)",
+      "R-V156-MIDQA-01": "P0 T17 — fmt drift",
+      "R-V157P0-L001 + R-V157P0-L002": "P0 T19-T20 — V1.57-new residual closure",
+      "R-V156P2-M001..M003 + R-V156P2-L001..L004": "P2 T1-T7 — DF-56 independent slice polish (3 mediums + 4 lows)",
+      "R-V156P2-CACHE-01": "P2 T15 — engine test fidelity (1 medium)",
+      "R-V156P3-W001/W002 + R-V156P3-S001/S002/S004": "P2 T8-T12 — DF-56 dependent slice polish (2 mediums + 3 lows)",
+      "R-V157P1-W001": "P2 T13 — host-call smoke un-ignore (1 medium)",
+      "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
+      "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
     }
   },
   "residual_findings": {
