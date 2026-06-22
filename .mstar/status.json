@@ -123,8 +123,8 @@
       "qc_tri_review_outcome": "Wave 1 (P0+P1): P0 3/3 (qc1 RC + qc2 RC + qc3 Approve) → fix-wave 544a1184 + 8f6d598c → re-review 3/3 Approve; P1 3/3 (qc1 Approve + qc2 Approve + qc3 RC) → fix-wave 544a1184 (4 spec amendments) → re-review 3/3 Approve. Wave 2 (P2): 3/3 Approve. Wave 3 (P3): 3/3 Approve. Total: 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA = 17 reports across 4 waves.",
       "note": "V1.57 Shipped 2026-06-22; PR-ready on `iteration/v1.57`. 7 plans all Done; 3 V1.57 carry-forwards CLOSED (R-V156P1-M001/M002/P3-S003); 3 new V1.57+ residuals filed (R-V157P0-L001/L002 + R-V157P1-W001); DF-46 reduced (41-row roster; 18 shipped + 18 catalog-only + 3 scaffold-equivalent + 2 OUT); 2 publish.* IDs remain in catalog as OUT per DF-59 platform publish dependency. PM mid-QA scope reduced from 4 to 1 (Wave 1 only); Waves 2/3 mid-QA skipped via PM override (per iteration rhythm; tri-review gates were 3/3 Approve with no high/critical findings; consolidated evidence in this latest_ship.qc_tri_review_outcome).",
       "merge_commit": "8b793cc5",
-      "pr": null,
-      "pr_url": null
+      "pr": 79,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/79"
     },
     "tech_debt_summary": {
       "total_open": 35,
