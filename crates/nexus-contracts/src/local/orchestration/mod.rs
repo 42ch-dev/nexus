@@ -153,6 +153,11 @@ pub struct RegistryRefreshOutput {
     /// Age of the refreshed cache in milliseconds (0 for synthetic).
     pub cache_age_ms: u64,
     /// Number of registered capabilities in the snapshot/registry.
+    ///
+    /// Renamed from `agent_count` in V1.56 P1 (R-V156P1-M001).
+    /// The serde aliases preserve backward compatibility for consumers
+    /// using the old field name.
+    #[serde(alias = "agent_count", alias = "agentCount")]
     pub capability_count: u32,
     /// Source of the registry data: `"synthetic"`, `"cdn"`, or `"synthetic_fallback"`.
     pub source: String,

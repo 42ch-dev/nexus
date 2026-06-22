@@ -119,26 +119,24 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     tracing::info!("Starting daemon-runtime v{}", env!("CARGO_PKG_VERSION"));
 
-    // --- Section 1.5: Initialize CDN config for registry.refresh ---
-    // Must be set before the capability registry is constructed so the
-    // RegistryRefresh capability can read it at invocation time.
-    if let Some(ref cdn_url) = config.cdn_url {
-        // H-002: validate URL before passing to capability layer.
+    // --- Section 1.5: Resolve CDN config for registry.refresh ---
+    // V1.57 P1: CdnConfig is constructor-injected (no global state).
+    // Validated and resolved here; passed through CapabilityRuntimeDeps below.
+    let cdn_config = if let Some(ref cdn_url) = config.cdn_url {
         if let Err(e) = nexus_orchestration::capability::builtins::validate_cdn_url_static(cdn_url)
         {
             anyhow::bail!("--cdn-url is invalid: {e}");
         }
         tracing::info!(%cdn_url, "CDN URL configured for registry.refresh network mode");
-        nexus_orchestration::capability::builtins::set_cdn_config(Some(
-            nexus_orchestration::capability::builtins::CdnConfig {
-                url: cdn_url.clone(),
-                timeout_ms: 10_000, // default fetch timeout
-                max_retries: 3,     // default retry count
-            },
-        ));
+        Some(nexus_orchestration::capability::builtins::CdnConfig {
+            url: cdn_url.clone(),
+            timeout_ms: 10_000,
+            max_retries: 3,
+        })
     } else {
         tracing::info!("No CDN URL configured — registry.refresh will use synthetic output only");
-    }
+        None
+    };
 
     // --- Section 2: Workspace initialization ---
     // Initialize workspace state (database only; no cloud-sync outbox on daemon).
@@ -175,6 +173,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         pool: None,
         worker_provider: Some(std::sync::Arc::new(worker_provider)),
         daemon_tool_dispatch: None,
+        cdn_config,
     };
     let capabilities = Arc::new(CapabilityRegistry::with_runtime_deps(&runtime_deps));
     tracing::info!("Capability registry built via with_runtime_deps (production wiring)");

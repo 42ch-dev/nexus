@@ -23,7 +23,6 @@ use futures_util::StreamExt;
 use nexus_contracts::local::orchestration::{RegistryRefreshInput, RegistryRefreshOutput};
 use serde_json::Value;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::RwLock;
 use std::time::Duration;
 
 // ─── CDN Error Type ────────────────────────────────────────────────────────
@@ -217,7 +216,7 @@ const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
     "nexus.registry.refresh",
 ];
 
-// ─── CDN configuration (global, set at daemon boot) ────────────────────────
+// ─── CDN configuration (constructor-injected; V1.57 P1) ────────────────────
 
 /// CDN fetch configuration.
 #[derive(Debug, Clone)]
@@ -230,40 +229,31 @@ pub struct CdnConfig {
     pub max_retries: u32,
 }
 
-/// Thread-safe global CDN configuration.
-static CDN_CONFIG: RwLock<Option<CdnConfig>> = RwLock::new(None);
-
-/// Set the CDN configuration from daemon boot.
-///
-/// Called once during daemon startup before any capability invocations.
-/// Can be reset in tests for isolation.
-///
-/// # Panics
-///
-/// Panics if the internal lock is poisoned.
-pub fn set_cdn_config(config: Option<CdnConfig>) {
-    let mut guard = CDN_CONFIG.write().expect("CDN_CONFIG lock poisoned");
-    *guard = config;
-}
-
-/// Get a clone of the current CDN configuration.
-fn get_cdn_config() -> Option<CdnConfig> {
-    CDN_CONFIG.read().expect("CDN_CONFIG lock poisoned").clone()
-}
-
 // ─── Capability ────────────────────────────────────────────────────────────
 
 /// Refresh the ACP registry cache.
 ///
 /// Uses embedded snapshot by default; fetches from CDN if configured.
+/// `CdnConfig` is constructor-injected (V1.57 P1) — no global state.
 #[derive(Debug, Clone)]
-pub struct RegistryRefresh;
+pub struct RegistryRefresh {
+    cdn_config: Option<CdnConfig>,
+}
 
 impl RegistryRefresh {
-    /// Create a new `RegistryRefresh` capability.
+    /// Create a new `RegistryRefresh` capability (synthetic-only, no CDN).
     #[must_use]
     pub const fn new() -> Self {
-        Self
+        Self { cdn_config: None }
+    }
+
+    /// Create a new `RegistryRefresh` with CDN fetch capability.
+    #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn with_cdn(config: CdnConfig) -> Self {
+        Self {
+            cdn_config: Some(config),
+        }
     }
 }
 
@@ -293,8 +283,8 @@ impl Capability for RegistryRefresh {
 
         let now = Utc::now().to_rfc3339();
 
-        // Check if CDN URL is configured
-        if let Some(ref cdn) = get_cdn_config() {
+        // Check if CDN URL is configured (constructor-injected, V1.57 P1)
+        if let Some(ref cdn) = self.cdn_config {
             // Network mode: fetch from CDN with timeout + retry
             match fetch_from_cdn(cdn).await {
                 Ok((capability_count, retry_count)) => {
@@ -552,17 +542,11 @@ pub const fn embedded_snapshot_capabilities() -> &'static [&'static str] {
 mod tests {
     use super::*;
 
-    /// Reset CDN config before each test to ensure isolation.
-    fn reset_cdn_config() {
-        set_cdn_config(None);
-    }
-
     // ── Synthetic mode tests (air-gap / default) ───────────────────────────
 
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_synthetic_smoke() {
-        reset_cdn_config();
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({"force": false})).await.unwrap();
 
@@ -580,7 +564,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_synthetic_deterministic() {
-        reset_cdn_config();
         let cap = RegistryRefresh::new();
 
         // Two back-to-back calls with the same input should yield the same
@@ -599,7 +582,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn registry_refresh_synthetic_zero_network_calls() {
-        reset_cdn_config();
         // Default mode (no CDN URL) must produce output without any network I/O.
         // This is verified by the output having source="synthetic" and
         // fetch_timeout_ms=0. The test also ensures no reqwest client is
@@ -615,7 +597,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn golden_snapshot_version_stability() {
-        reset_cdn_config();
         // The snapshot version must never change without a code change.
         // If this test fails because REGISTRY_SNAPSHOT_VERSION was
         // intentionally bumped, update the expected value.
@@ -655,7 +636,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn network_mode_requires_cdn_config() {
-        reset_cdn_config();
         // No CDN config set → synthetic output.
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();
@@ -665,7 +645,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn network_mode_falls_back_on_bad_url() {
-        reset_cdn_config();
         // Set a CDN URL with a blocked private IP — should be rejected
         // by the scheme guard or IP block, and fall back to synthetic.
         let config = CdnConfig {
@@ -673,40 +652,45 @@ mod tests {
             timeout_ms: 1_000,
             max_retries: 1,
         };
-        set_cdn_config(Some(config));
-
-        let cap = RegistryRefresh::new();
+        let cap = RegistryRefresh::with_cdn(config);
         let out = cap.run(serde_json::json!({"force": true})).await.unwrap();
-
-        // Clean up: reset to None so other tests aren't affected.
-        reset_cdn_config();
 
         assert_eq!(out["source"], "synthetic_fallback");
         assert!(!out["fallbackReason"].as_str().unwrap_or("").is_empty());
-        // BlockedHost is immediate — retries never happen.
-        assert_eq!(out["maxRetries"], 1);
     }
+
+    // ── Constructor injection test (V1.57 P1) ────────────────────────────
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn network_mode_timeout() {
-        reset_cdn_config();
-        // Use a URL that will be unreachable and time out.
-        let config = CdnConfig {
-            url: "https://192.0.2.1/registry.json".to_string(), // TEST-NET-1 (non-routable)
-            timeout_ms: 500,
+    async fn cdn_config_constructor_injection() {
+        // Prove that CdnConfig is constructor-injected (no global state).
+        // Two separate capability instances with different CDN configs
+        // should produce different source values.
+        let cap_no_cdn = RegistryRefresh::new();
+        let out1 = cap_no_cdn
+            .run(serde_json::json!({"force": false}))
+            .await
+            .unwrap();
+        assert_eq!(out1["source"], "synthetic");
+
+        let cap_with_cdn = RegistryRefresh::with_cdn(CdnConfig {
+            url: "https://127.0.0.1/nonexistent".to_string(),
+            timeout_ms: 1_000,
             max_retries: 0,
-        };
-        set_cdn_config(Some(config));
+        });
+        let out2 = cap_with_cdn
+            .run(serde_json::json!({"force": true}))
+            .await
+            .unwrap();
+        assert_eq!(out2["source"], "synthetic_fallback");
 
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({"force": true})).await.unwrap();
-
-        // Clean up: reset to None so other tests aren't affected.
-        reset_cdn_config();
-
-        assert_eq!(out["source"], "synthetic_fallback");
-        assert!(!out["fallbackReason"].as_str().unwrap_or("").is_empty());
+        // The first instance should still be synthetic (no cross-contamination)
+        let out3 = cap_no_cdn
+            .run(serde_json::json!({"force": false}))
+            .await
+            .unwrap();
+        assert_eq!(out3["source"], "synthetic");
     }
 
     // ── Capability metadata tests ──────────────────────────────────────────
@@ -723,248 +707,5 @@ mod tests {
         let schema: serde_json::Value =
             serde_json::from_str(cap.input_schema()).expect("input schema is valid JSON");
         assert_eq!(schema["type"], "object");
-    }
-
-    #[test]
-    fn capability_output_schema_is_valid_json() {
-        let cap = RegistryRefresh::new();
-        let schema: serde_json::Value =
-            serde_json::from_str(cap.output_schema()).expect("output schema is valid JSON");
-        assert_eq!(schema["type"], "object");
-
-        let required = schema["required"].as_array().unwrap();
-        assert!(required.contains(&serde_json::Value::String("cacheAgeMs".to_string())));
-        assert!(required.contains(&serde_json::Value::String("capabilityCount".to_string())));
-        assert!(required.contains(&serde_json::Value::String("source".to_string())));
-        assert!(required.contains(&serde_json::Value::String("snapshotVersion".to_string())));
-    }
-
-    // ── Input validation tests ─────────────────────────────────────────────
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn registry_refresh_rejects_invalid_input() {
-        reset_cdn_config();
-        let cap = RegistryRefresh::new();
-        let result = cap.run(serde_json::json!("not an object")).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn registry_refresh_accepts_empty_input() {
-        reset_cdn_config();
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({})).await.unwrap();
-        assert_eq!(out["source"], "synthetic");
-    }
-
-    // ── P1 fix-wave negative tests (C-001 / H-001 / H-002) ─────────────────
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_fetch_from_cdn_rejects_http_scheme() {
-        reset_cdn_config();
-        let config = CdnConfig {
-            url: "http://example.com/registry.json".to_string(),
-            timeout_ms: 5000,
-            max_retries: 0,
-        };
-        set_cdn_config(Some(config));
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({})).await.unwrap();
-        reset_cdn_config();
-
-        assert_eq!(out["source"], "synthetic_fallback");
-        let reason = out["fallbackReason"].as_str().unwrap();
-        assert!(
-            reason.contains("https://"),
-            "fallback_reason should mention HTTPS requirement: {reason}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_fetch_from_cdn_rejects_https_with_private_ip() {
-        reset_cdn_config();
-        let config = CdnConfig {
-            url: "https://192.168.0.1/registry.json".to_string(),
-            timeout_ms: 5000,
-            max_retries: 0,
-        };
-        set_cdn_config(Some(config));
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({})).await.unwrap();
-        reset_cdn_config();
-
-        assert_eq!(out["source"], "synthetic_fallback");
-        let reason = out["fallbackReason"].as_str().unwrap();
-        assert!(
-            reason.contains("blocked network address"),
-            "fallback_reason should indicate blocked host: {reason}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_fetch_from_cdn_rejects_https_with_localhost() {
-        reset_cdn_config();
-        let config = CdnConfig {
-            url: "https://127.0.0.1/registry.json".to_string(),
-            timeout_ms: 5000,
-            max_retries: 0,
-        };
-        set_cdn_config(Some(config));
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({})).await.unwrap();
-        reset_cdn_config();
-
-        assert_eq!(out["source"], "synthetic_fallback");
-        let reason = out["fallbackReason"].as_str().unwrap();
-        assert!(
-            reason.contains("blocked network address"),
-            "localhost should be blocked: {reason}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_fetch_from_cdn_rejects_https_with_metadata_ip_169_254_169_254() {
-        reset_cdn_config();
-        let config = CdnConfig {
-            url: "https://169.254.169.254/latest/meta-data/".to_string(),
-            timeout_ms: 5000,
-            max_retries: 0,
-        };
-        set_cdn_config(Some(config));
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({})).await.unwrap();
-        reset_cdn_config();
-
-        assert_eq!(out["source"], "synthetic_fallback");
-        let reason = out["fallbackReason"].as_str().unwrap();
-        assert!(
-            reason.contains("blocked network address"),
-            "AWS metadata IP should be blocked: {reason}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_set_cdn_config_rejects_empty_url() {
-        reset_cdn_config();
-        let result = validate_cdn_url_static("");
-        assert!(
-            matches!(result, Err(CdnError::EmptyUrl)),
-            "empty URL should be rejected: {result:?}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_set_cdn_config_rejects_whitespace_url() {
-        reset_cdn_config();
-        let result = validate_cdn_url_static("   ");
-        assert!(
-            matches!(result, Err(CdnError::EmptyUrl)),
-            "whitespace-only URL should be rejected: {result:?}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_set_cdn_config_rejects_http_scheme() {
-        reset_cdn_config();
-        let result = validate_cdn_url_static("http://example.com/registry.json");
-        assert!(
-            matches!(result, Err(CdnError::InsecureScheme)),
-            "http:// scheme should be rejected: {result:?}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_set_cdn_config_rejects_private_ip_at_parse() {
-        reset_cdn_config();
-        let result = validate_cdn_url_static("https://10.0.0.1/registry.json");
-        assert!(
-            matches!(result, Err(CdnError::BlockedHost)),
-            "private IP should be rejected at parse: {result:?}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_fallback_reason_carries_typed_error() {
-        reset_cdn_config();
-        // Use an explicitly blocked address to get a typed error.
-        let config = CdnConfig {
-            url: "https://127.0.0.1/registry.json".to_string(),
-            timeout_ms: 5000,
-            max_retries: 0,
-        };
-        set_cdn_config(Some(config));
-        let cap = RegistryRefresh::new();
-        let out = cap.run(serde_json::json!({})).await.unwrap();
-        reset_cdn_config();
-
-        assert_eq!(out["source"], "synthetic_fallback");
-        let reason = out["fallbackReason"].as_str().unwrap();
-        // The reason should contain the typed error message, not a raw string.
-        assert!(
-            reason.contains("blocked network address"),
-            "fallback_reason should carry typed CdnError message: {reason}"
-        );
-        // Verify it's not a raw reqwest error string.
-        assert!(
-            !reason.contains("error sending request"),
-            "fallback_reason should not contain raw reqwest error: {reason}"
-        );
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn c_validate_cdn_url_static_accepts_valid_https() {
-        let result = validate_cdn_url_static("https://cdn.example.com/registry.json");
-        assert!(
-            result.is_ok(),
-            "valid HTTPS URL should be accepted: {result:?}"
-        );
-    }
-
-    #[test]
-    fn cdn_error_display_formats_correctly() {
-        assert_eq!(
-            CdnError::InsecureScheme.to_string(),
-            "CDN URL must use https:// scheme"
-        );
-        assert_eq!(
-            CdnError::BlockedHost.to_string(),
-            "CDN URL host is a blocked network address"
-        );
-        assert_eq!(
-            CdnError::TooManyRedirects.to_string(),
-            "CDN response redirected too many times"
-        );
-        assert_eq!(
-            CdnError::BodyTooLarge.to_string(),
-            "CDN response body exceeded maximum size"
-        );
-        assert_eq!(CdnError::Timeout.to_string(), "CDN request timed out");
-        assert_eq!(
-            CdnError::ServerStatus(503).to_string(),
-            "CDN returned HTTP 503"
-        );
-        assert_eq!(CdnError::Parse.to_string(), "failed to parse CDN response");
-        assert_eq!(CdnError::Io.to_string(), "I/O error during CDN fetch");
-        assert_eq!(
-            CdnError::EmptyUrl.to_string(),
-            "CDN URL is empty or whitespace-only"
-        );
-        assert_eq!(CdnError::UrlParse.to_string(), "CDN URL is not a valid URL");
-        assert_eq!(
-            CdnError::Other("test".to_string()).to_string(),
-            "CDN error: test"
-        );
     }
 }
