@@ -1,243 +1,66 @@
 {
   "version": 1,
   "updated_at": "2026-06-22T23:30:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-22-v1.57-mid-qc-and-fix-waves",
-      "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
-      "iteration": "V1.57",
-      "track": "meta",
-      "wave": "Across all 3 waves",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.57-mid-qc-and-fix-waves.md",
-      "depends_on": null,
-      "created": "2026-06-22",
-      "closed_at": "2026-06-22",
-      "completion_report": "Meta tracking across 3 waves: Wave 1 (P0+P1 parallel) → 6 QC reports + 3 targeted re-reviews + 1 mid-QA (Pass with notes); Wave 2 (P2 sequential) → 3 QC reports (all Approve); Wave 3 (P3 sequential) → 3 QC reports (all Approve). Total: 12 QC + 3 re-review + 1 mid-QA + 1 closeout QA reports; 2 fix-waves (P0 fmt + P1 spec amendments via commit 544a1184; P0 AC reconcile via commit 8f6d598c). All waves accepted; 4 implement plans merged to integration; 0 mid-QA Request Changes across all waves."
-    },
-    {
-      "plan_id": "2026-06-22-v1.57-hygiene-and-closeout",
-      "title": "Hygiene & Closeout (P-last)",
-      "iteration": "V1.57",
-      "track": "closeout",
-      "wave": "After Wave 3",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.57-hygiene-and-closeout.md",
-      "working_branch": null,
-      "merge_target": "iteration/v1.57",
-      "depends_on": [
-        "2026-06-22-v1.57-spec-governance-and-registry",
-        "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
-        "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
-        "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e"
-      ],
-      "created": "2026-06-22",
-      "inreview_at": "2026-06-22",
-      "inreview_commits": [
-        "8b793cc5"
-      ],
-      "closed_at": "2026-06-22",
-      "merge_commit": "8b793cc5",
-      "qc_reports": [
-        {
-          "reviewer": "qa-engineer",
-          "verdict": "Pass",
-          "commit": "8b793cc5"
-        }
-      ],
-      "completion_report": "P-1: Compass + 7 plan stubs authored by writing-specialist; PM review with CACHE-01 + V1.52-era residual coverage additions; merged into iteration/v1.58 @ 7bd746a2."
-    },
-    {
-      "plan_id": "2026-06-22-v1.58-hygiene-and-closeout",
-      "title": "Hygiene & Closeout (P-last)",
-      "iteration": "V1.58",
-      "track": "closeout",
-      "wave": "After Wave 3",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.58-hygiene-and-closeout.md",
-      "merge_target": "iteration/v1.58",
-      "depends_on": [
-        "2026-06-22-v1.58-workspace-occ-hardening",
-        "2026-06-22-v1.58-df44-reference-refresh-pipeline",
-        "2026-06-22-v1.58-capability-quality-convergence",
-        "2026-06-22-v1.58-reference-cli-and-cross-cut-tests"
-      ],
-      "created": "2026-06-22",
-      "merge_commit": "c250027c",
-      "closed_at": "2026-06-22",
-      "completion_report": "P-last closeout: T0 status.json (7 V1.58 plans registered, 6 Done; tech_debt_summary reflects post-V1.58 state). T1 reference-knowledge.md Draft → Master. T2 deferred-features-tracker DF-44 archived; §5 updated; V1.58 Shipped line. T3-T4 Profile B compaction (6 plans archived to .mstar/archived/plans/; plans-done.json +6 entries; invariant holds; 3 V1.58+ residuals marked resolved). T5 spec consolidation (Draft overlays verified, no folding required at V1.58 P-last per V1.57 pattern). T6 final verification (cargo +nightly fmt clean; SQLX_OFFLINE check clean; pre-existing clippy baseline verified; 21-tool test expectation drift fixed). T7 report-only QA verdict Pass (4249 tests green). T8 Profile B invariant check passes. Ready for PR.",
-      "qc_reports": [
-        {
-          "reviewer": "qa-engineer",
-          "verdict": "Pass",
-          "commit": "c250027c"
-        }
-      ]
-    },
-    {
-      "plan_id": "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
-      "title": "DF-47 Manuscript & Misc Capability Parity Batch (P0)",
-      "iteration": "V1.59",
-      "track": "Track A",
-      "wave": "Wave 1 (parallel w/ P1)",
-      "effort": "L",
-      "owner": "@fullstack-dev",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.59-df47-manuscript-and-misc-capabilities.md",
-      "working_branch": "feature/v1.59-df47-manuscript-and-misc-capabilities",
-      "merge_target": "iteration/v1.59",
-      "depends_on": [
-        "2026-06-22-v1.59-compass-and-plan-stubs"
-      ],
-      "created": "2026-06-22",
-      "review_strategy": "Merge to integration → tri-review → mid-QA → targeted fix-wave"
-    },
-    {
-      "plan_id": "2026-06-22-v1.59-df12-outbox-consolidation",
-      "title": "DF-12 Outbox Consolidation (P1)",
-      "iteration": "V1.59",
-      "track": "Track B",
-      "wave": "Wave 1 (parallel w/ P0)",
-      "effort": "L",
-      "owner": "@fullstack-dev-2",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.59-df12-outbox-consolidation.md",
-      "working_branch": "feature/v1.59-df12-outbox-consolidation",
-      "merge_target": "iteration/v1.59",
-      "depends_on": [
-        "2026-06-22-v1.59-compass-and-plan-stubs"
-      ],
-      "created": "2026-06-22",
-      "review_strategy": "Merge to integration → tri-review → mid-QA → targeted fix-wave"
-    },
-    {
-      "plan_id": "2026-06-22-v1.59-mid-qc-and-fix-waves",
-      "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
-      "iteration": "V1.59",
-      "track": "meta",
-      "wave": "Across Wave 1",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.59-mid-qc-and-fix-waves.md",
-      "depends_on": null,
-      "created": "2026-06-22"
-    },
-    {
-      "plan_id": "2026-06-22-v1.59-hygiene-and-closeout",
-      "title": "Hygiene & Closeout (P-last)",
-      "iteration": "V1.59",
-      "track": "closeout",
-      "wave": "After Wave 1",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.59-hygiene-and-closeout.md",
-      "merge_target": "iteration/v1.59",
-      "depends_on": [
-        "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
-        "2026-06-22-v1.59-df12-outbox-consolidation"
-      ],
-      "created": "2026-06-22",
-      "review_strategy": "Report-only QA"
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.59",
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.58 (retired, merged PR #80 @ 578be523)",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.59",
-    "latest_active_compass": "v1.59-capability-parity-and-outbox-consolidation",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.58",
-      "compass": "v1.58-workspace-occ-hardening-and-df44-reference-refresh",
-      "shipped_at": "2026-06-22T22:30:00Z",
-      "plan_count": 7,
-      "plan_count_done": 7,
-      "open_at_ship": 14,
-      "deferred_to_next": 14,
+      "iteration": "V1.59",
+      "compass": "v1.59-capability-parity-and-outbox-consolidation",
+      "shipped_at": "2026-06-22T23:59:00Z",
+      "plan_count": 5,
+      "plan_count_done": 5,
+      "open_at_ship": 22,
+      "deferred_to_next": 22,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "New DB migrations (202606220003 reference_sources refresh-tracking + 202606220004 reference_sources creator_id); new capability ID nexus.reference.refresh registered in orchestration CapabilityRegistry AND host_tool_registry (21 total host tools); new CLI subcommand nexus42 creator reference refresh [ref_id|all] [--dry-run]; new Master spec reference-knowledge.md (Draft → Master); acp-capability-set.md §4 roster extended from 41 to ~43 rows.",
+      "wire_contracts_note": "DF-47: 9 catalog-only → shipped host tools (host_tool 21→30; acp §4 roster 9 rows flipped). DF-12: outbox schema unification (DDL migrated to nexus-local-db/migrations) + single-writer rule + legacy table deprecation + outbox.flush/compact real impl. New Master spec outbox-consolidation.md (Draft→Master).",
       "profile_b_compaction": "done",
       "spec_promotions": [
         {
-          "spec": "reference-knowledge.md",
-          "from": "Draft (V1.58 P1)",
-          "to": "Master (V1.58 P-last promote)",
-          "plan": "2026-06-22-v1.58-hygiene-and-closeout"
+          "spec": "outbox-consolidation.md",
+          "from": "Draft (V1.59 P1)",
+          "to": "Master (V1.59 P-last)",
+          "plan": "2026-06-22-v1.59-hygiene-and-closeout"
         }
       ],
       "plan_ids": [
-        "2026-06-22-v1.58-compass-and-plan-stubs",
-        "2026-06-22-v1.58-workspace-occ-hardening",
-        "2026-06-22-v1.58-df44-reference-refresh-pipeline",
-        "2026-06-22-v1.58-capability-quality-convergence",
-        "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
-        "2026-06-22-v1.58-mid-qc-and-fix-waves",
-        "2026-06-22-v1.58-hygiene-and-closeout"
+        "2026-06-22-v1.59-compass-and-plan-stubs",
+        "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
+        "2026-06-22-v1.59-df12-outbox-consolidation",
+        "2026-06-22-v1.59-mid-qc-and-fix-waves",
+        "2026-06-22-v1.59-hygiene-and-closeout"
       ],
       "highlights": {
-        "P-1": "Compass + 7 plan stubs authored by writing-specialist; PM review added R-V156P1-CACHE-01 + R-V156P2-CACHE-01 + V1.52-era carry-forwards coverage",
-        "P0_DF46_OCC": "Workspace OCC hardening + capability surface quality. 7 implement + 8 fix-wave commits. Closes 19 V1.57+/V1.58+ residuals (R-V156P0-M001..M006 workspace OCC; R-V156P1-M003..M005+L001..L007 capability surface; R-V156-PROCESS-01+R-V156P1-CACHE-01 sqlx hygiene; R-V156-MIDQA-01 fmt drift; R-V157P0-L001/L002 V1.57-new). Spawn_blocking for canonicalize (T4); symlink_metadata TOCTOU defense (T2); reqwest::Client reuse; .sqlx cache restoration (PM) + sqlx_cache_intact regression guard; canonicalize memoization; Criterion config + cold/warm bench groups; retry semantics documented.",
-        "P1_DF44_REFRESH": "DF-44 reference body refreshable pipeline core. 7 implement + 2 fix-wave commits. nexus.reference.refresh capability registered in orchestration CapabilityRegistry (21 → 22 orchestration capabilities); DB migration 202606220003 adds last_refreshed_at/refresh_policy/refresh_status columns + partial indexes; daemon-side refresh_scheduler periodic task (configurable interval, 60s initial delay); new Draft spec reference-knowledge.md (7 sections). Fix-wave: validate_reference_url (HTTPS-only + private-IP block via is_blocked_ip) — closes SSRF; streaming body fetch with incremental blake3 + 100 MiB cap.",
-        "P2_QUALITY": "Capability quality convergence. 12/16 tasks done; 4 low-priority deferred with rationale (T4/T5/T7/T10/T11/T14). Closes 14 V1.57+ residuals (R-V156P2-M001..M003+L001..L004 DF-56 independent; R-V156P2-CACHE-01 engine test fidelity; R-V156P3-W001/W002+S001/S002/S004 DF-56 dependent; R-V157P1-W001 host-call smoke un-ignore). QC tri-review 3/3 Approve on first pass.",
-        "P3_CLI_E2E": "Reference CLI + cross-cut tests. 8/9 tasks done; T7 skipped (no codegen); T8 deferred. nexus42 creator reference refresh [ref_id|all] [--dry-run] CLI subcommand wired through daemon IPC; cross-reference E2E test (6 hermetic + 2 network-ignored). Fix-wave: H-001 host_tool registration (TOOL_ALLOWLIST 20→21); H-002 creator scoping (migration 202606220004 + find_by_id_for_creator DAO + CLI context injection); W-001 fsync in atomic_write_body. DF-44 fully closed end-to-end.",
-        "P-mid": "3-wave evidence gate complete. 12 QC reports all Approve. 33/35 V1.57+/V1.58+ residuals closed + DF-44 fully closed. Mid-QA Pass with notes (1 non-blocking test expectation drift for P-last hygiene). Wave 1 + Wave 3 had fix-waves; Wave 2 clean first-pass.",
-        "P-last": "Hygiene + closeout. T0 status.json (7 plans; 6 Done archived via Profile B; tech_debt rollup). T1 reference-knowledge.md Draft → Master. T2 deferred-features-tracker DF-44 archived; §5 updated; V1.58 Shipped line. T3-T4 Profile B compaction (6 archived; plans-done.json +6 entries; invariant holds; 3 V1.58+ residuals resolved). T5 spec consolidation (Draft overlays verified). T6 final verification (cargo +nightly fmt clean; SQLX_OFFLINE check clean; pre-existing clippy baseline verified; 21-tool test drift fixed). T7 report-only QA Pass (4249 tests green)."
+        "P-1": "Compass + 5 plan stubs + deferred-tracker audit (DF-56 stale corrected, DF-44/40/48/51/54 archived)",
+        "P0_DF47": "9 catalog-only → shipped host tools (manuscript.*×5 + workspace.paths + research.query + runtime.health + trace.correlation). host_tool 21→30. 18 test vectors. Fix-wave: W-001 tx-wrap manuscript.write + W-002 canonicalize guard + W-003 deterministic test.",
+        "P1_DF12": "Outbox consolidation: single-writer spec (Draft→Master) + flush/compact pool-backed real impl + legacy table deprecation + sync CLI regression test. .sqlx/ cache restored (P1 prepare over-deleted nexus42 entries).",
+        "P-mid": "Single-wave evidence gate. 6 QC reports all Approve (P0 fix-wave + qc2 re-review). Mid-QA Pass with notes.",
+        "P-last": "Status.json finalize + DF-12 archived + DF-46 count 18→9 + outbox-consolidation.md Master + Profile B compaction + report-only QA."
       },
       "residual_lifecycle": {
-        "closed_in_v158": [
-          "R-V156P0-M001 (sha2 workspace dep)",
-          "R-V156P0-M002 (path canonicalize)",
-          "R-V156P0-M003 (concurrent OCC test)",
-          "R-V156P0-M004 (async I/O)",
-          "R-V156P0-M005 (TOCTOU)",
-          "R-V156P0-M006 (metrics/tracing at OCC conflict)",
-          "R-V156P1-M003 (force param)",
-          "R-V156P1-M004 (tracing in capability handler)",
-          "R-V156P1-M005 (reqwest Client reuse)",
-          "R-V156P1-L001..L007 (help text, body-size, naming, retry jitter, latency bench, generated_at, metrics)",
-          "R-V156-PROCESS-01 + R-V156P1-CACHE-01 (.sqlx/ cache hygiene — workspace AND test queries)",
-          "R-V156-MIDQA-01 (cargo +nightly fmt)",
-          "R-V156P2-M001 (null semantics)",
-          "R-V156P2-M002 (0-predecessor converge)",
-          "R-V156P2-M003 (expression routing tests)",
-          "R-V156P2-L001 (latency bench)",
-          "R-V156P2-L002 (eval tracing)",
-          "R-V156P2-L003 (converge timeout)",
-          "R-V156P2-L004 (loader error)",
-          "R-V156P2-CACHE-01 (engine test fidelity)",
-          "R-V156P3-W001 (inject_workspace_context tracing)",
-          "R-V156P3-W002 (registry.refresh instrumentation)",
-          "R-V156P3-S001 (synthetic fallback source field)",
-          "R-V156P3-S002 (throttle-path .await)",
-          "R-V156P3-S004 (with_workspace_state hook)",
-          "R-V157P0-L001 (AC5 wording reconciliation)",
-          "R-V157P0-L002 (per-ID failure-path test vectors)",
-          "R-V157P1-W001 (host-call smoke un-ignore)",
-          "DF-44 (closed end-to-end via P1 + P3: capability + DB migration + CLI + body file write + cross-cut tests + new Master spec)"
+        "closed_in_v159": [
+          "DF-47 (9 catalog-only → shipped)",
+          "DF-12 (outbox consolidation closed end-to-end)"
         ],
         "open_at_ship": [
-          "14 V1.52-era WL-A polish residuals: R-V150KBED-02, R-V151Q1-10, R-V152TA-S001..S011, R-V152TB-W006/W007/W008 — explicitly deferred to V1.59+ per compass §6"
+          "8 V1.59 low residuals (R-V159P0-001/002 + R-V159P1-001..006)",
+          "14 V1.52-era WL-A residuals deferred to V1.60+"
         ],
-        "deferred_to_next": 14
+        "deferred_to_next": 22
       },
-      "qc_tri_review_outcome": "Wave 1 (P0+P1 parallel): P0 qc1 Approve + qc2/qc3 Request Changes → fix-wave → targeted re-review 3/3 Approve. P1 qc1 Approve + qc2/qc3 Request Changes → fix-wave → targeted re-review 3/3 Approve. Wave 2 (P2 sequential): qc1/qc2/qc3 all Approve (clean first-pass; no fix-wave). Wave 3 (P3 sequential): qc1 Approve + qc2/qc3 Request Changes → fix-wave → targeted re-review 3/3 Approve. Total: 12 QC reports + 6 targeted re-reviews + 1 mid-QA + 1 report-only QA = 20 reports across 4 waves.",
-      "note": "V1.58 Shipped 2026-06-22; PR-ready on iteration/v1.58. 7 plans all Done; 33 of 35 V1.57+/V1.58+ residuals CLOSED + DF-44 fully closed end-to-end; 14 V1.52-era WL-A residuals deferred to V1.59+. 3 fix-waves (P0 + P1 + P3); Wave 2 clean first-pass. Pre-existing clippy baseline (96 errors in nexus-agent-host + 1 in nexus-orchestration) verified on origin/main; V1.58 added 0 new clippy errors per PM override per V1.57 P-last precedent.",
-      "merge_commit": "578be523",
-      "pr": 80,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/80"
+      "qc_tri_review_outcome": "Wave 1 (P0+P1 parallel): P0 qc1 Approve + qc2 Request Changes (3 W) + qc3 Approve → fix-wave → qc2 targeted re-review Approve. P1 qc1/qc2/qc3 all Approve. Total: 6 QC + 1 targeted re-review + 1 mid-QA = 8 reports.",
+      "note": "V1.59 Shipped 2026-06-22; PR-ready on iteration/v1.59. 5 plans all Done; 9 DF-47 capabilities shipped + DF-12 closed. 8 low V1.59 residuals + 14 WL-A deferred to V1.60+. 1 fix-wave (P0). Pre-existing clippy baseline verified clean on origin/main (mid-QA confirmed no pre-existing errors).",
+      "merge_commit": null,
+      "pr": null
     },
     "tech_debt_summary": {
       "total_open": 22,
