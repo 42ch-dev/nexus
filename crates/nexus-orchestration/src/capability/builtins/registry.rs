@@ -165,7 +165,7 @@ const fn is_ipv6_private_range(v6: &Ipv6Addr) -> bool {
 
 /// Version string for the embedded registry snapshot.
 /// Bumped every release when the snapshot list is updated.
-const REGISTRY_SNAPSHOT_VERSION: &str = "2026-06-22.v1";
+const REGISTRY_SNAPSHOT_VERSION: &str = "2026-06-22.v2";
 
 /// Embedded capability IDs shipped with the binary.
 ///
@@ -214,6 +214,8 @@ const REGISTRY_SNAPSHOT_CAPABILITIES: &[&str] = &[
     "nexus.pool.entry.manage",
     // ── registry.refresh itself ──
     "nexus.registry.refresh",
+    // ── V1.58 P1: DF-44 ──
+    "nexus.reference.refresh",
 ];
 
 // ─── CDN configuration (constructor-injected; V1.57 P1) ────────────────────
@@ -600,7 +602,7 @@ mod tests {
         // The snapshot version must never change without a code change.
         // If this test fails because REGISTRY_SNAPSHOT_VERSION was
         // intentionally bumped, update the expected value.
-        assert_eq!(REGISTRY_SNAPSHOT_VERSION, "2026-06-22.v1");
+        assert_eq!(REGISTRY_SNAPSHOT_VERSION, "2026-06-22.v2");
 
         let cap = RegistryRefresh::new();
         let out = cap.run(serde_json::json!({})).await.unwrap();

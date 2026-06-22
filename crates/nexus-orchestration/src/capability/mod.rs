@@ -187,6 +187,8 @@ impl CapabilityRegistry {
             Box::new(builtins::ScriptProjectScaffold::new()),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.58 P1: nexus.reference.refresh (pool-less; returns WorkerUnavailable)
+            Box::new(builtins::ReferenceRefresh::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -238,9 +240,11 @@ impl CapabilityRegistry {
             // V1.54 P1: game_bible.project_scaffold with pool.
             Box::new(builtins::GameBibleProjectScaffold::with_pool(pool.clone())),
             // V1.55 P3: script.project_scaffold with pool.
-            Box::new(builtins::ScriptProjectScaffold::with_pool(pool)),
+            Box::new(builtins::ScriptProjectScaffold::with_pool(pool.clone())),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.58 P1: nexus.reference.refresh with pool
+            Box::new(builtins::ReferenceRefresh::with_pool(pool)),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -390,6 +394,14 @@ impl CapabilityRegistry {
             ),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.58 P1: nexus.reference.refresh with pool from runtime deps
+            Box::new(
+                deps.pool
+                    .as_ref()
+                    .map_or_else(builtins::ReferenceRefresh::new, |pool| {
+                        builtins::ReferenceRefresh::with_pool(pool.clone())
+                    }),
+            ),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -454,11 +466,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_twenty_five_builtins() {
-        // 25 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
-        // + script.scaffold (V1.55 P3) + game_bible.section_status.update (V1.56 P-last R-V155P2-F002).
+    fn registry_has_twenty_six_builtins() {
+        // 26 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
+        // + script.scaffold (V1.55 P3) + game_bible.section_status.update (V1.56 P-last R-V155P2-F002)
+        // + nexus.reference.refresh (V1.58 P1 DF-44).
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 25);
+        assert_eq!(reg.len(), 26);
     }
 
     #[test]
@@ -490,6 +503,7 @@ mod tests {
             "game_bible.project_scaffold",
             "script.project_scaffold",
             "game_bible.section_status.update",
+            "nexus.reference.refresh",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -508,7 +522,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 25); // 24 up to V1.55 P3 + 1 (R-V155P2-F002)
+        assert_eq!(names.len(), 26); // 25 up to V1.57 + 1 (V1.58 P1 nexus.reference.refresh)
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
