@@ -245,6 +245,26 @@ between `validate_changes_manifest` and `consume_session`. The underlying
 `db::consume_session` atomic `UPDATE ... WHERE consumed = 0 AND expires_at > now`
 is the compare-and-swap primitive; `commit_session` is the transaction guard.
 
+#### Retry semantics (V1.58 P0 fix-wave — QC3 F-002)
+
+**No automatic retry on CAS loss.** When two concurrent `commit_session`
+calls race on the same session ID, exactly one wins (the atomic
+`UPDATE ... WHERE consumed = 0` ensures single-consumer semantics); the loser
+receives `SessionError::AlreadyCommitted` immediately — no backoff, no sleep,
+no max-retry counter. The OCC conflict counter (`occ_conflict_total`)
+increments on the losing side with a structured `tracing::warn!`
+(conflict_type = "already_consumed") for observability.
+
+This one-shot design is intentional: the validate+consume pair binds a single
+logical operation, and retrying the consume in isolation would be unsound
+(the session snapshot may have changed since validate ran). Higher layers
+that want retry-on-conflict must implement it above the session layer
+(re-open → re-validate → re-commit).
+
+Atomicity is provided by `SQLite`'s database-level write lock: two concurrent
+consumers race on `rows_affected()` — exactly one gets 1 (`Consumed`), the
+other gets 0 (re-read → `AlreadyConsumed` or `Expired`).
+
 ### Async I/O (R-V156P0-M004)
 
 Content hashing (`compute_content_hashes`, `compute_single_file_hash`) uses
