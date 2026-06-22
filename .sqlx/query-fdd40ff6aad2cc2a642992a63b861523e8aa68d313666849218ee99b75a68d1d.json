@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT COUNT(*) AS \"count!\" FROM creator_schedules\n                 WHERE preset_id = ? AND status = 'completed'\n                 AND work_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "count!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fdd40ff6aad2cc2a642992a63b861523e8aa68d313666849218ee99b75a68d1d"
+}

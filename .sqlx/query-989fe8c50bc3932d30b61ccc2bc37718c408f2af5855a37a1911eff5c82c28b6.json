@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT session_id, workspace_root, relative_path, existed, file_hashes_json, created_at, expires_at, consumed FROM workspace_sessions WHERE session_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "workspace_root",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "relative_path",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "existed",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "file_hashes_json",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "consumed",
+        "ordinal": 7,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "989fe8c50bc3932d30b61ccc2bc37718c408f2af5855a37a1911eff5c82c28b6"
+}

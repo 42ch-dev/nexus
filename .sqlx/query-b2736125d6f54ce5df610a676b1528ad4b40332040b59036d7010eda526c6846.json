@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM force_gates_audit WHERE forced_at < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b2736125d6f54ce5df610a676b1528ad4b40332040b59036d7010eda526c6846"
+}

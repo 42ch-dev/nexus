@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('schema_version', ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "a07d94f203d187ead02ba3dd91a53443092b6a010a9be30c963ede26067540f4"
+}
