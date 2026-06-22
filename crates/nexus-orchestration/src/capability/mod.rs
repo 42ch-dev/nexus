@@ -151,8 +151,8 @@ impl CapabilityRegistry {
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
             Box::new(builtins::SyncPush),
-            Box::new(builtins::OutboxFlush),
-            Box::new(builtins::OutboxCompact),
+            Box::new(builtins::OutboxFlush::new()),
+            Box::new(builtins::OutboxCompact::new()),
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh::new()),
@@ -210,8 +210,8 @@ impl CapabilityRegistry {
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
             Box::new(builtins::SyncPush),
-            Box::new(builtins::OutboxFlush),
-            Box::new(builtins::OutboxCompact),
+            Box::new(builtins::OutboxFlush::with_pool(pool.clone())),
+            Box::new(builtins::OutboxCompact::with_pool(pool.clone())),
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(builtins::RegistryRefresh::new()),
@@ -334,11 +334,24 @@ impl CapabilityRegistry {
                 builtins::CreatorWriteBrief::with_store(store.clone())
             });
 
+        let outbox_flush = deps
+            .pool
+            .as_ref()
+            .map_or_else(builtins::OutboxFlush::new, |pool| {
+                builtins::OutboxFlush::with_pool(pool.clone())
+            });
+        let outbox_compact = deps
+            .pool
+            .as_ref()
+            .map_or_else(builtins::OutboxCompact::new, |pool| {
+                builtins::OutboxCompact::with_pool(pool.clone())
+            });
+
         let caps: Vec<Box<dyn Capability>> = vec![
             Box::new(builtins::SyncPull),
             Box::new(builtins::SyncPush),
-            Box::new(builtins::OutboxFlush),
-            Box::new(builtins::OutboxCompact),
+            Box::new(outbox_flush),
+            Box::new(outbox_compact),
             Box::new(builtins::WorkspaceOpen),
             Box::new(builtins::WorkspaceCommit),
             Box::new(registry_refresh),
