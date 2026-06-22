@@ -542,6 +542,24 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         );
     }
 
+    // --- Section 4e: Reference refresh scheduler (V1.58 P1 DF-44) ---
+    //
+    // Periodically scans `reference_sources` for stale rows (on_change or
+    // overdue scheduled) and dispatches `nexus.reference.refresh` for each
+    // candidate. Non-blocking: errors are logged and the loop continues.
+    // First refresh cycle fires after 60s initial delay. See
+    // `crates/nexus-daemon-runtime/src/refresh_scheduler.rs`.
+    {
+        let refresh_pool = state.pool().clone();
+        let refresh_shutdown = state.shutdown_notify();
+        let refresh_config = crate::refresh_scheduler::RefreshSchedulerConfig::from_env();
+        let _refresh_handle = crate::refresh_scheduler::spawn_refresh_scheduler(
+            refresh_pool,
+            refresh_shutdown,
+            refresh_config,
+        );
+    }
+
     // --- Section 5: Agent Host subsystem ---
     let agent_host_facade: Arc<dyn nexus_agent_host::HostFacade> = {
         let manager = nexus_agent_host::core::manager::HostManager::new();
