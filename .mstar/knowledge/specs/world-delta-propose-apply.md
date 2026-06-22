@@ -1,7 +1,7 @@
 # World Delta Propose / Apply — Local Parity Overlay
 
-**Status**: Draft (V1.60 P0)
-**Document class**: Draft overlay
+**Status**: Master (V1.60 P-last promotion)
+**Document class**: Feature line (promoted from Draft overlay V1.60 P0)
 **Coordinates with**: [`acp-capability-set.md`](acp-capability-set.md) §4 + §8, [`capability-registry.md`](capability-registry.md), [`entity-scope-model.md`](entity-scope-model.md) §5, [`orchestration-engine.md`](orchestration-engine.md) §5
 
 ## 0. Purpose and scope

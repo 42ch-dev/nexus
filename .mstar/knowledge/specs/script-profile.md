@@ -1,6 +1,6 @@
-# Script Profile — Draft Specification V1.60
+# Script Profile — Master Specification V1.60
 
-**Status**: Draft (V1.60 P1)
+**Status**: Master (V1.60 P-last promotion from Draft V1.60 P1)
 **Document class**: Feature line
 **Created**: 2026-06-22
 **Last updated**: 2026-06-23 (V1.60 P1: Depth 3.5 sections — script-writing preset, 五问 rubric, section completion, KB extraction contract)
