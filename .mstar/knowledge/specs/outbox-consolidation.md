@@ -1,7 +1,7 @@
 # Outbox Consolidation — Single-Writer Contract & Schema Ownership
 
-**Status**: Draft (V1.59)
-**Document class**: Draft overlay
+**Status**: Normative (Master, V1.59 P-last promote)
+**Document class**: Master
 **Author**: @fullstack-dev-2 (Track B canonical owner)
 **Date**: 2026-06-22
 **Scope**: Consolidation of dual-outbox architecture into a single unified outbox schema in `nexus-local-db`. Defines single-writer rule, schema ownership boundary, migration path, and flush/compact semantics.
