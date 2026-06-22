@@ -91,7 +91,7 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 
 ---
 
-## 4. Capability roster (V1.59)
+## 4. Capability roster (V1.60)
 
 > **Roster governance:** This table is the single SSOT for every `nexus.*` capability ID.
 > Each row maps to a runtime binding via the `host_tool_registry()` (daemon host tools)
@@ -114,13 +114,13 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 | `nexus.work.patch` | Append inspiration; update policy-approved stage_metadata keys | shipped | V1.34 | `host_tool` |
 | `nexus.orchestration.schedule_status` | Schedules linked to a work_id; debug / agent planning | shipped | V1.34 | `host_tool` |
 | `nexus.world.snapshot.get` | Consistent read of structured world snapshot | shipped | V1.53 P1 | `host_tool` |
-| `nexus.world.state.query` | Query KB/timeline slices needed for reasoning | catalog-only | — | orchestration |
+| `nexus.world.state.query` | Query KB/timeline slices needed for reasoning | shipped | V1.60 P0 | orchestration |
 | `nexus.timeline.recent.get` | Fetch recent timeline tail for continuity | shipped | V1.53 P1 | `host_tool` |
 | `nexus.kb_snapshot.read` | Focused KB snapshot read | shipped | V1.53 P1 | `host_tool` |
-| `nexus.world.delta.propose` | Produce structured proposed delta package | catalog-only | — | orchestration |
-| `nexus.world.delta.apply` | Apply staged deltas locally under policy | catalog-only | — | orchestration |
-| `nexus.timeline.event.append` | Append new events; must not silently rewrite canon history | catalog-only | — | orchestration |
-| `nexus.fork.create` | Explicit branch creation when rewrite-past is intended | catalog-only | — | orchestration |
+| `nexus.world.delta.propose` | Produce structured proposed delta package | shipped | V1.60 P0 | orchestration |
+| `nexus.world.delta.apply` | Apply staged deltas locally under policy | shipped | V1.60 P0 | orchestration |
+| `nexus.timeline.event.append` | Append new events; must not silently rewrite canon history | shipped | V1.60 P0 | orchestration |
+| `nexus.fork.create` | Explicit branch creation when rewrite-past is intended | shipped | V1.60 P0 | orchestration |
 | `nexus.kb_snapshot.write` | Write/update key blocks for a world (kb edit/adopt) | shipped | V1.54 P0 | `host_tool` |
 | `nexus.world.configure` | Update world metadata (title, visibility, time policy) | shipped | V1.54 P0 | `host_tool` |
 | `nexus.sync.prepare_push` | Build idempotent push bundle metadata | catalog-only | — | orchestration |
@@ -220,5 +220,5 @@ If handshake succeeds but capability set is incomplete:
 ## 8. Open items
 
 - Map each logical `nexus.*` capability to concrete ACP tool/resource schemas.
-- Decide whether `world.delta.apply` is agent-side or runtime-side by default.
+- ~~Decide whether `world.delta.apply` is agent-side or runtime-side by default.~~ **Resolved V1.60 P0** — runtime-side; see [`world-delta-propose-apply.md`](world-delta-propose-apply.md) §3 (agent proposes, runtime applies under transaction + lost-update guard).
 - Define maximum manuscript read/write quotas and default timeouts.
