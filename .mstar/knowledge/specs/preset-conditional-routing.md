@@ -202,6 +202,13 @@ next:
   - `null > 0` → type error (no numeric comparison with null)
   - Bare `null` reference → falsey
 
+**Absent vs null vs empty string** (V1.58 P2 — R-V156P2-M001 clarification): the expression evaluator treats three field states distinctly:
+  - **Absent** (key not in context): resolves to `null`. `_context.missing == null` → `true`. `_context.missing` (bare truthy) → `false`.
+  - **Explicit `null`** (key present with JSON `null`): identical to absent — both produce `null` at the value layer, so `null == null` → `true`.
+  - **Empty string `""`** (key present with `""`): distinct from null. `_context.text == null` → `false` (string is not null). `_context.text` (bare truthy) → `false` (empty string is falsey per truthy rules). However `_context.text != null` → `true`.
+
+Preset authors should use `== null` / `!= null` to test for field presence, and avoid bare truthy checks when distinguishing absent from empty-string.
+
 **Depth limit** (V1.56 P2 fix-wave, W-003): expression nesting depth is bounded by `MAX_EXPR_DEPTH = 32` to prevent stack overflow from deeply-nested `when:` expressions in user-installable presets. Exceeding the depth returns `ExprError::DepthExceeded`. Depth=32 succeeds; depth=33 returns an error; depth=1000 does not panic.
 
 **Expression caching** (V1.56 P2 fix-wave, M-004): compiled expression ASTs are cached per task at construction time and reused across transitions. Parsing happens once per preset load, not once per transition.
@@ -239,12 +246,14 @@ states:
 
 **Predecessor tracking** (V1.56 P2 fix-wave): converge predecessors are discovered at graph build time by scanning all states' `next` targets. States that are converge targets have their predecessor sets populated in `StateCompositeTask::converge_predecessors`. Source states call `record_converge_arrival()` when routing to a converge target via `resolve_expression_target()` or `resolve_labeled_target()`.
 
-**Loader validation** (V1.56 P2 fix-wave, M-002):
+**Loader validation** (V1.56 P2 fix-wave, M-002; V1.58 P2 — R-V156P2-M002 reconciliation):
   - Converge states must not be terminal
-  - Converge states with 0 predecessors produce a validation error (orphan)
+  - Converge states with 0 predecessors: **gate is skipped, state advances immediately** (no validation error). This handles the orphan-converge edge case gracefully — the state behaves as a normal non-converge state. The predecessor set is empty, so `converge_predecessors.is_empty()` short-circuits the gate check in `StateCompositeTask::run()`. (Previous spec text said "validation error (orphan)"; reconciled to match tested implementation in V1.58 P2.)
   - Converge states with 1 predecessor produce a warning (consider linear transition)
 
 **DAG enforcement**: cycles remain rejected at load time. Acyclic paths through converge nodes (e.g. `A → M → B`, `C → M → B` where M waits for both A and C) are allowed.
+
+**Converge timeout** (V1.58 P2 — R-V156P2-L003): the current implementation does **not** enforce a timeout on `wait_for_all` converge nodes. A converge state with `strategy: wait_for_all` that never receives all predecessor arrivals will wait indefinitely (returns `NextAction::WaitForInput` on each `run()` call). The engine relies on external signals (Resume, Cancel) to break deadlocks. A configurable `wait_for_all_timeout_seconds` field (default 3600s) with deadline-based enforcement is planned but deferred — adding it requires schema changes to `ConvergeConfig` (out of scope for P2: "schemas/ changes") and runtime behavior changes to the converge gate in `StateCompositeTask::run()`. For local-only single-user daemons (pre-1.0), indefinite wait is acceptable since the user controls the schedule.
 
 ### 3.4 Registry and workspace context fields (Draft V1.56 P3 — shipped in plan `2026-06-22-v1.56-df56-dependent-slice`)
 
