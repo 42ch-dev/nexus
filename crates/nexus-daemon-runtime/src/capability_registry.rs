@@ -709,6 +709,170 @@ pub fn build_registry() -> CapabilityRegistry {
         },
     });
 
+    // ── V1.59 P0: DF-47 manuscript & misc capability parity batch (9 tools) ──
+
+    reg.register(CapabilityRow {
+        id: "nexus.manuscript.list",
+        access: Access::Read,
+        admission: ADMISSION_READ_WORKSPACE,
+        handler: hte::registry_manuscript_list,
+        acp_wire: AcpWire {
+            request_schema_ref: "{}",
+            response_schema_ref: r#"{"manuscripts":"[{work_id,title,work_ref,work_profile,current_stage,stage_status,total_planned_chapters,current_chapter}]","count":"int"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "manuscript list returns manuscripts for active creator",
+            expected_outcome: "success",
+            test_fn_name: "manuscript_list_returns_manuscripts",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.manuscript.read_range",
+        access: Access::Read,
+        admission: ADMISSION_READ_WORKSPACE,
+        handler: hte::registry_manuscript_read_range,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","start_line?":"int","end_line?":"int"}"#,
+            response_schema_ref: r#"{"work_id":"string","chapter":"int","volume":"int","content":"string","range":{"start_line":"int","end_line":"int"},"total_lines":"int","truncated":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "manuscript read_range returns bounded content for valid chapter",
+            expected_outcome: "success",
+            test_fn_name: "manuscript_read_range_returns_bounded_content",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.manuscript.write",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORKSPACE,
+        handler: hte::registry_manuscript_write,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","content":"string"}"#,
+            response_schema_ref: r#"{"written":"bool","work_id":"string","chapter":"int","volume":"int","word_count":"int","bytes_written":"int"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "manuscript write writes body content for valid chapter within size quota",
+            expected_outcome: "success",
+            test_fn_name: "manuscript_write_writes_content",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.manuscript.phase.get",
+        access: Access::Read,
+        admission: ADMISSION_READ_WORKSPACE,
+        handler: hte::registry_manuscript_phase_get,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string"}"#,
+            response_schema_ref: r#"{"work_id":"string","phase":"string","stage_status":"string"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "manuscript phase get returns current phase for owned work",
+            expected_outcome: "success",
+            test_fn_name: "manuscript_phase_get_returns_current_phase",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.manuscript.phase.set",
+        access: Access::Write,
+        admission: ADMISSION_WRITE_WORKSPACE,
+        handler: hte::registry_manuscript_phase_set,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"work_id":"string","phase":"string","force?":"bool"}"#,
+            response_schema_ref: r#"{"work_id":"string","previous_phase":"string","current_phase":"string","stage_status":"string","transitioned":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "manuscript phase set moves work forward to next phase",
+            expected_outcome: "success",
+            test_fn_name: "manuscript_phase_set_advances_phase",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.workspace.paths",
+        access: Access::Read,
+        admission: ADMISSION_READ_CONTEXT,
+        handler: hte::registry_workspace_paths,
+        acp_wire: AcpWire {
+            request_schema_ref: "{}",
+            response_schema_ref: r#"{"workspace_root":"string","allowed_roots":"[string]","preset_id":"string"}"#,
+            error_schema_ref: r#"{"code":"INVALID_INPUT|FORBIDDEN|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "workspace paths returns allowed roots from active workspace",
+            expected_outcome: "success",
+            test_fn_name: "workspace_paths_returns_allowed_roots",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.research.query",
+        access: Access::Read,
+        admission: ADMISSION_READ_WORKSPACE,
+        handler: hte::registry_research_query,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"reference_source_id?":"string","tags?":"string","limit?":"int"}"#,
+            response_schema_ref: r#"{"results":"[{reference_source_id,title,uri,source_type,tags,scan_status}]","count":"int"}"#,
+            error_schema_ref: r#"{"code":"INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "research query returns reference sources from local index",
+            expected_outcome: "success",
+            test_fn_name: "research_query_returns_reference_sources",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.runtime.health",
+        access: Access::Read,
+        admission: ADMISSION_READ_CONTEXT,
+        handler: hte::registry_runtime_health,
+        acp_wire: AcpWire {
+            request_schema_ref: "{}",
+            response_schema_ref: r#"{"runtime_mode":"string","registry_reachable":"bool","registry_size":"int","sync_state":"string","cloud_enabled":"bool","pool_healthy":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "runtime health returns agent-visible health and registry reachability",
+            expected_outcome: "success",
+            test_fn_name: "runtime_health_returns_agent_visible_status",
+        },
+    });
+
+    reg.register(CapabilityRow {
+        id: "nexus.trace.correlation",
+        access: Access::Read,
+        admission: ADMISSION_READ_CONTEXT,
+        handler: hte::registry_trace_correlation,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"correlation_id?":"string","session_id?":"string"}"#,
+            response_schema_ref: r#"{"correlation_id":"string","session_id?":"string","parent_request_id?":"string","trace_timestamp":"string","propagated":"bool"}"#,
+            error_schema_ref: r#"{"code":"FORBIDDEN|NOT_SUPPORTED"}"#,
+        },
+        failure_mode: FailureMode::Forbidden,
+        handler_test_vector: TestVector {
+            description: "trace correlation propagates correlation id across tool calls",
+            expected_outcome: "success",
+            test_fn_name: "trace_correlation_propagates_correlation_id",
+        },
+    });
+
     // ── fs/* baseline (V1.33) ──
     reg.register(CapabilityRow {
         id: "fs/read_text_file",
@@ -757,9 +921,9 @@ mod tests {
     use crate::test_utils::create_test_workspace;
 
     #[test]
-    fn registry_has_twenty_one_host_tools() {
+    fn registry_has_thirty_host_tools() {
         let reg = host_tool_registry();
-        assert_eq!(reg.len(), 21);
+        assert_eq!(reg.len(), 30);
     }
 
     #[test]
@@ -785,6 +949,16 @@ mod tests {
             "nexus.work.schedule.set",
             "nexus.finding.resolve",
             "nexus.pool.entry.manage",
+            // V1.59 P0: DF-47 manuscript & misc parity batch (9 tools)
+            "nexus.manuscript.list",
+            "nexus.manuscript.read_range",
+            "nexus.manuscript.write",
+            "nexus.manuscript.phase.get",
+            "nexus.manuscript.phase.set",
+            "nexus.workspace.paths",
+            "nexus.research.query",
+            "nexus.runtime.health",
+            "nexus.trace.correlation",
             "fs/read_text_file",
             "fs/write_text_file",
         ] {
@@ -850,6 +1024,16 @@ mod tests {
         "execute_write_file_succeeds",
         "registry_refresh_synthetic_smoke",
         "reference_refresh_happy_path",
+        // V1.59 P0: DF-47 manuscript & misc parity batch (9 test fn names)
+        "manuscript_list_returns_manuscripts",
+        "manuscript_read_range_returns_bounded_content",
+        "manuscript_write_writes_content",
+        "manuscript_phase_get_returns_current_phase",
+        "manuscript_phase_set_advances_phase",
+        "workspace_paths_returns_allowed_roots",
+        "research_query_returns_reference_sources",
+        "runtime_health_returns_agent_visible_status",
+        "trace_correlation_propagates_correlation_id",
     ];
 
     #[test]
@@ -932,6 +1116,9 @@ mod tests {
     /// V1.57 P0: Catalog updated with full roster (§4 Capability roster).
     /// Only `fs/*` tools remain as known gaps (they are not ACP-facing
     /// `nexus.*` capabilities and use the V1.33 baseline prefix).
+    ///
+    /// V1.59 P0: Expanded `is_likely_host_tool` to cover the 9 newly-shipped
+    /// DF-47 capabilities so the bijection is enforced bidirectionally.
     #[test]
     fn catalog_registry_invariant_all_ids_present() {
         use std::collections::HashSet;
@@ -989,37 +1176,54 @@ mod tests {
         }
 
         // Every catalog nexus.*/fs/* id that maps to a host tool should be in the registry.
-        // Not all catalog ids are host tools (some are logical-only), so this is a
-        // one-way check (registry ⊆ catalog ∪ known_gaps).
+        // This is now a bidirectional hard check for the canonical read/context/tools that
+        // are shipped as host tools. Catalog-only IDs (orchestration, deferred, OUT) are
+        // excluded from this match list.
         let missing_from_registry: Vec<_> = catalog_ids
             .iter()
             .filter(|cid| {
-                // Only flag catalog ids that look like they SHOULD be host tools
-                // (i.e., read-only, non-mutation, non-sync, non-publish)
-                let is_likely_host_tool = matches!(
+                // Only flag catalog ids that are shipped host tools.
+                let is_shipped_host_tool = matches!(
                     cid.as_str(),
                     "nexus.context.whoami"
                         | "nexus.workspace.info"
                         | "nexus.workspace.paths"
                         | "nexus.context.assemble"
+                        | "nexus.work.get"
+                        | "nexus.work.patch"
+                        | "nexus.orchestration.schedule_status"
                         | "nexus.world.snapshot.get"
-                        | "nexus.world.state.query"
                         | "nexus.timeline.recent.get"
                         | "nexus.kb_snapshot.read"
+                        | "nexus.kb_snapshot.write"
+                        | "nexus.manuscript.chapter.get"
+                        | "nexus.manuscript.chapter.update"
+                        | "nexus.manuscript.list"
+                        | "nexus.manuscript.read_range"
+                        | "nexus.manuscript.write"
+                        | "nexus.manuscript.phase.get"
+                        | "nexus.manuscript.phase.set"
+                        | "nexus.world.configure"
+                        | "nexus.work.schedule.set"
+                        | "nexus.finding.resolve"
+                        | "nexus.pool.entry.manage"
+                        | "nexus.observability.daemon.health"
+                        | "nexus.registry.refresh"
+                        | "nexus.reference.refresh"
+                        | "nexus.research.query"
                         | "nexus.runtime.health"
                         | "nexus.trace.correlation"
                 );
-                is_likely_host_tool && !registry_ids.contains(cid.as_str())
+                is_shipped_host_tool && !registry_ids.contains(cid.as_str())
             })
             .collect();
 
-        // Logging-only: catalog ids not yet in registry (these are future tools).
-        // Not a hard failure because P1 scope is limited to 5 tools.
-        if !missing_from_registry.is_empty() {
-            eprintln!(
-                "INFO: catalog ids not yet in registry (future P1+ scope): {missing_from_registry:?}"
-            );
-        }
+        // Hard failure: every shipped host tool listed above MUST be in the registry.
+        assert!(
+            missing_from_registry.is_empty(),
+            "Catalog ids marked as shipped host tools but missing from registry: \
+             {missing_from_registry:?}"
+        );
     }
 
     #[tokio::test]

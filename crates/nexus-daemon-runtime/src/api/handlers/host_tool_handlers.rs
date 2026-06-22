@@ -1875,3 +1875,759 @@ pub(crate) fn registry_pool_entry_manage<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
     Box::pin(execute_pool_entry_manage(req, state, creator_id))
 }
+
+// ─── V1.59 P0: DF-47 manuscript & misc capability parity batch ────────────
+//
+// 9 catalog-only → shipped host tools (Track A). Each handler follows the
+// existing execute_* + registry_* wrapper pattern. See
+// `.mstar/plans/2026-06-22-v1.59-df47-manuscript-and-misc-capabilities.md`.
+
+/// Maximum body size for a single `nexus.manuscript.write` call (1 MiB).
+const MANUSCRIPT_WRITE_MAX_BYTES: usize = 1024 * 1024;
+
+/// Canonical manuscript phases for `nexus.manuscript.phase.set` (spec §4).
+///
+/// Ordered: `brainstorm` → `draft` → `review` → `finalize`.
+/// Backward transitions are rejected unless `force = true`.
+const MANUSCRIPT_PHASES: &[&str] = &["brainstorm", "draft", "review", "finalize"];
+
+fn phase_index(phase: &str) -> Option<usize> {
+    MANUSCRIPT_PHASES.iter().position(|p| *p == phase)
+}
+
+/// T1: `nexus.manuscript.list` — list manuscripts (works) for the active creator.
+async fn execute_manuscript_list(
+    _req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let workspace_slug =
+        read_active_workspace_slug(state.nexus_home(), creator_id).ok_or_else(|| {
+            NexusApiError::Forbidden {
+                resource: "manuscript.list".to_string(),
+                reason: "active workspace required".to_string(),
+            }
+        })?;
+
+    let filters = works::WorkListFilters::default();
+    let records = works::list_works(state.pool(), creator_id, &workspace_slug, &filters)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    let manuscripts: Vec<serde_json::Value> = records
+        .iter()
+        .map(|w| {
+            serde_json::json!({
+                "work_id": w.work_id,
+                "title": w.title,
+                "work_ref": w.work_ref,
+                "work_profile": w.work_profile,
+                "current_stage": w.current_stage,
+                "stage_status": w.stage_status,
+                "total_planned_chapters": w.total_planned_chapters,
+                "current_chapter": w.current_chapter,
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "manuscripts": manuscripts,
+        "count": records.len(),
+    }))
+}
+
+/// T2: `nexus.manuscript.read_range` — read a bounded content range from a chapter body.
+async fn execute_manuscript_read_range(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let chapter: i32 = req.parameters["chapter"]
+        .as_i64()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be an integer".into(),
+        })?
+        .try_into()
+        .map_err(|_| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be a valid i32 chapter number".into(),
+        })?;
+
+    let volume: i32 = req.parameters["volume"]
+        .as_i64()
+        .map_or(1, |v| i32::try_from(v).unwrap_or(1));
+
+    // Verify work ownership (fail closed for cross-creator access).
+    let _work = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    let chapter_record =
+        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
+
+    let body_path = chapter_record
+        .body_path
+        .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}/body")))?;
+
+    let workspace_root = state
+        .workspace_path()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "WORKSPACE_PATH_ERROR".to_string(),
+            message: "workspace path not available".to_string(),
+        })?;
+    let workspace_root_path = Path::new(&workspace_root);
+    let abs_body = workspace_root_path.join(&body_path);
+
+    // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
+    // within the workspace root before reading. Mirrors the fs/* guard in
+    // `validate_file_path`; the target normally exists (read path), so
+    // canonicalize both and reject prefixes outside the workspace root. A
+    // missing-but-in-bounds file falls through to the existing FILE_READ_FAILED
+    // behavior below.
+    if abs_body.exists() {
+        let canonical_body = abs_body
+            .canonicalize()
+            .map_err(|e| NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: format!("body path cannot be resolved: {e}"),
+            })?;
+        let canonical_workspace =
+            workspace_root_path
+                .canonicalize()
+                .map_err(|e| NexusApiError::Internal {
+                    code: "WORKSPACE_PATH_INVALID".into(),
+                    message: format!("workspace root cannot be resolved: {e}"),
+                })?;
+        if !canonical_body.starts_with(&canonical_workspace) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    } else {
+        let abs_body_str = abs_body.display().to_string();
+        if !abs_body_str.starts_with(&workspace_root) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    }
+
+    let content =
+        tokio::fs::read_to_string(&abs_body)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_READ_FAILED".to_string(),
+                message: format!("failed to read manuscript body: {e}"),
+            })?;
+
+    // Apply optional line range [start_line, end_line] (1-indexed inclusive).
+    let start_line = req.parameters["start_line"]
+        .as_i64()
+        .map(|v| usize::try_from(v.max(1)).unwrap_or(1));
+    let end_line = req.parameters["end_line"]
+        .as_i64()
+        .map(|v| usize::try_from(v.max(1)).unwrap_or(1));
+
+    let (ranged_content, truncated, total_lines) =
+        if let (Some(start), Some(end)) = (start_line, end_line) {
+            let lines: Vec<&str> = content.lines().collect();
+            let total = lines.len();
+            let start_idx = (start - 1).min(total);
+            let end_idx = end.min(total);
+            let selected: Vec<&str> = lines
+                .get(start_idx..end_idx)
+                .map(<[&str]>::to_vec)
+                .unwrap_or_default();
+            (selected.join("\n"), end < total, total)
+        } else {
+            let total = content.lines().count();
+            (content, false, total)
+        };
+
+    Ok(serde_json::json!({
+        "work_id": work_id,
+        "chapter": chapter,
+        "volume": volume,
+        "content": ranged_content,
+        "range": {
+            "start_line": start_line.unwrap_or(1),
+            "end_line": end_line.unwrap_or(total_lines),
+        },
+        "total_lines": total_lines,
+        "truncated": truncated,
+    }))
+}
+
+/// T3: `nexus.manuscript.write` — write manuscript content within size quotas.
+async fn execute_manuscript_write(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let chapter: i32 = req.parameters["chapter"]
+        .as_i64()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be an integer".into(),
+        })?
+        .try_into()
+        .map_err(|_| NexusApiError::InvalidInput {
+            field: "parameters.chapter".into(),
+            reason: "must be a valid i32 chapter number".into(),
+        })?;
+
+    let volume: i32 = req.parameters["volume"]
+        .as_i64()
+        .map_or(1, |v| i32::try_from(v).unwrap_or(1));
+
+    let content =
+        req.parameters["content"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.content".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    // Size quota check (spec §4: "within whitelist paths and size quotas").
+    let content_bytes = content.len();
+    if content_bytes > MANUSCRIPT_WRITE_MAX_BYTES {
+        return Err(NexusApiError::InvalidInput {
+            field: "parameters.content".into(),
+            reason: format!(
+                "content size {content_bytes} exceeds maximum {MANUSCRIPT_WRITE_MAX_BYTES} bytes"
+            ),
+        });
+    }
+
+    // Verify work ownership.
+    let _work = works::get_work(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    // Chapter must exist (manuscript.write does not create chapters).
+    let chapter_record =
+        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
+
+    let body_path = chapter_record
+        .body_path
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "CHAPTER_BODY_MISSING".to_string(),
+            message: format!("chapter {work_id}/ch{chapter} has no body_path"),
+        })?;
+
+    let workspace_root = state
+        .workspace_path()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "WORKSPACE_PATH_ERROR".to_string(),
+            message: "workspace path not available".to_string(),
+        })?;
+    let workspace_root_path = Path::new(&workspace_root);
+    let abs_body = workspace_root_path.join(&body_path);
+
+    // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
+    // within the workspace root before any FS op. Mirrors the fs/* guard in
+    // `validate_file_path`: canonicalize both when the target exists, otherwise
+    // fall back to a lexical check on the absolute joined path. (A future shared
+    // helper is tracked as qc2 S-001/S-002; intentionally inlined here.)
+    if abs_body.exists() {
+        let canonical_body = abs_body
+            .canonicalize()
+            .map_err(|e| NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: format!("body path cannot be resolved: {e}"),
+            })?;
+        let canonical_workspace =
+            workspace_root_path
+                .canonicalize()
+                .map_err(|e| NexusApiError::Internal {
+                    code: "WORKSPACE_PATH_INVALID".into(),
+                    message: format!("workspace root cannot be resolved: {e}"),
+                })?;
+        if !canonical_body.starts_with(&canonical_workspace) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    } else {
+        let abs_body_str = abs_body.display().to_string();
+        if !abs_body_str.starts_with(&workspace_root) {
+            return Err(NexusApiError::InvalidInput {
+                field: "body_path".into(),
+                reason: "body path outside workspace root".into(),
+            });
+        }
+    }
+
+    // Ensure parent directory exists.
+    if let Some(parent) = abs_body.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DIR_CREATE_FAILED".into(),
+                message: format!("failed to create manuscript dir: {e}"),
+            })?;
+    }
+
+    // Stage content in a temp file (not durable until rename succeeds).
+    let tmp_file = abs_body.with_extension("md.tmp");
+    tokio::fs::write(&tmp_file, content)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "FILE_WRITE_FAILED".into(),
+            message: format!("failed to write manuscript body: {e}"),
+        })?;
+
+    // W-001: wrap the DB word-count update + atomic rename in a single
+    // transaction so the metadata update only commits when the final file is in
+    // place. Mirrors the execute_manuscript_chapter_update C-002 pattern
+    // (UPDATE → rename → commit); a failed rename returns early and the
+    // dropped transaction rolls back the word-count UPDATE.
+    let word_count = content.split_whitespace().count();
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut tx = state
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("manuscript.write tx begin: {e}"),
+        })?;
+    // SAFETY: UPDATE against work_chapters — runtime query.
+    #[allow(clippy::cast_possible_wrap)]
+    sqlx::query(
+        "UPDATE work_chapters SET actual_word_count = ?, updated_at = ? \
+         WHERE work_id = ? AND chapter = ? AND volume = ?",
+    )
+    .bind(word_count as i64)
+    .bind(&now)
+    .bind(work_id)
+    .bind(chapter)
+    .bind(volume)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("manuscript.write word-count update: {e}"),
+    })?;
+    // Atomically rename temp → final inside the tx (after the UPDATE succeeds).
+    tokio::fs::rename(&tmp_file, &abs_body).await.map_err(|e| {
+        // Best-effort cleanup: remove temp file on rename failure; the dropped
+        // tx rolls back the word-count UPDATE above.
+        let _ = std::fs::remove_file(&tmp_file);
+        NexusApiError::Internal {
+            code: "FILE_RENAME_FAILED".into(),
+            message: format!("failed to finalize manuscript file: {e}"),
+        }
+    })?;
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("manuscript.write tx commit: {e}"),
+    })?;
+
+    Ok(serde_json::json!({
+        "written": true,
+        "work_id": work_id,
+        "chapter": chapter,
+        "volume": volume,
+        "word_count": word_count,
+        "bytes_written": content_bytes,
+    }))
+}
+
+/// T4: `nexus.manuscript.phase.get` — read current manuscript phase.
+async fn execute_manuscript_phase_get(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let (current_stage, stage_status) = works::get_work_stage(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    Ok(serde_json::json!({
+        "work_id": work_id,
+        "phase": current_stage,
+        "stage_status": stage_status,
+    }))
+}
+
+/// T5: `nexus.manuscript.phase.set` — move between brainstorm/draft/review/finalize.
+async fn execute_manuscript_phase_set(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let work_id =
+        req.parameters["work_id"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.work_id".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    let new_phase =
+        req.parameters["phase"]
+            .as_str()
+            .ok_or_else(|| NexusApiError::InvalidInput {
+                field: "parameters.phase".into(),
+                reason: "must be a string".into(),
+            })?;
+
+    // Runtime check: phase must be in canonical set.
+    let new_idx = phase_index(new_phase).ok_or_else(|| NexusApiError::InvalidInput {
+        field: "parameters.phase".into(),
+        reason: format!("phase '{new_phase}' is not in canonical set {MANUSCRIPT_PHASES:?}"),
+    })?;
+
+    let force = req.parameters["force"].as_bool().unwrap_or(false);
+
+    let (current_stage, _stage_status) = works::get_work_stage(state.pool(), creator_id, work_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "work".to_string(),
+            reason: "work not found or cross-creator access denied".to_string(),
+        })?;
+
+    let previous_phase = current_stage.clone();
+
+    // Runtime check: backward transitions require explicit force.
+    // Unknown current phase is treated as index 0 (brainstorm).
+    let current_idx = phase_index(&current_stage).unwrap_or(0);
+    if new_idx < current_idx && !force {
+        return Err(NexusApiError::InvalidInput {
+            field: "parameters.phase".into(),
+            reason: format!(
+                "backward transition '{previous_phase}' → '{new_phase}' requires force=true"
+            ),
+        });
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let updated =
+        works::update_work_stage(state.pool(), creator_id, work_id, new_phase, "active", &now)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+
+    Ok(serde_json::json!({
+        "work_id": work_id,
+        "previous_phase": previous_phase,
+        "current_phase": updated.current_stage,
+        "stage_status": updated.stage_status,
+        "transitioned": previous_phase != updated.current_stage,
+    }))
+}
+
+/// T6: `nexus.workspace.paths` — enumerate allowed roots from active workspace.
+fn execute_workspace_paths(
+    _req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    _creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    let workspace_root = state
+        .workspace_path()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "workspace".into(),
+            reason: "workspace not initialized; run `nexus42 workspace init` first".into(),
+        })?;
+
+    // Allowed roots mirror the standard manuscript/workspace layout.
+    let allowed_roots = vec![
+        format!("{workspace_root}/Works"),
+        format!("{workspace_root}/Worlds"),
+        format!("{workspace_root}/References"),
+        format!("{workspace_root}/.nexus42"),
+    ];
+
+    Ok(serde_json::json!({
+        "workspace_root": workspace_root,
+        "allowed_roots": allowed_roots,
+        "preset_id": "default",
+    }))
+}
+
+/// T7: `nexus.research.query` — query local-only `ReferenceSource` index.
+async fn execute_research_query(
+    req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    _creator_id: &str,
+) -> Result<serde_json::Value, NexusApiError> {
+    // Direct lookup by reference_source_id takes precedence.
+    if let Some(id) = req.parameters["reference_source_id"].as_str() {
+        let row = nexus_local_db::reference_source::get_by_id(state.pool(), id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::NotFound(format!("reference_source/{id}")))?;
+
+        return Ok(serde_json::json!({
+            "results": [serde_json::json!({
+                "reference_source_id": row.reference_source_id,
+                "title": row.title,
+                "uri": row.uri,
+                "source_type": row.source_type,
+                "tags": row.tags,
+                "scan_status": row.scan_status,
+            })],
+            "count": 1,
+        }));
+    }
+
+    let limit = req.parameters["limit"]
+        .as_i64()
+        .map_or(50, |v| v.clamp(1, 1000));
+
+    let rows = nexus_local_db::reference_source::list(state.pool(), Some(limit), None, None)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    // Optional client-side tag filter.
+    let tag_filter: Option<&str> = req.parameters["tags"].as_str();
+    let filtered: Vec<_> = tag_filter.map_or_else(
+        || rows.iter().collect(),
+        |tag| {
+            rows.iter()
+                .filter(|r| {
+                    r.tags
+                        .as_deref()
+                        .is_some_and(|t| t.split(',').any(|x| x.trim() == tag))
+                })
+                .collect()
+        },
+    );
+
+    let results: Vec<serde_json::Value> = filtered
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "reference_source_id": r.reference_source_id,
+                "title": r.title,
+                "uri": r.uri,
+                "source_type": r.source_type,
+                "tags": r.tags,
+                "scan_status": r.scan_status,
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "results": results,
+        "count": results.len(),
+    }))
+}
+
+/// T8: `nexus.runtime.health` — agent-visible runtime health (distinct from
+/// `nexus.observability.daemon.health` which exposes uptime + lifecycle).
+///
+/// Returns registry reachability, sync state, and cloud-enabled flag.
+fn execute_runtime_health(
+    _req: &ToolExecuteRequest,
+    state: &WorkspaceState,
+    _creator_id: &str,
+) -> serde_json::Value {
+    let reg = host_tool_registry();
+    let runtime_mode = state.runtime_mode_as_str();
+    let cloud_enabled = !matches!(
+        state.runtime_mode(),
+        nexus_contracts::local::domain::RuntimeMode::LocalOnly
+    );
+
+    serde_json::json!({
+        "runtime_mode": runtime_mode,
+        "registry_reachable": true,
+        "registry_size": reg.len(),
+        "sync_state": if cloud_enabled { "idle" } else { "disabled" },
+        "cloud_enabled": cloud_enabled,
+        "pool_healthy": true,
+    })
+}
+
+/// T9: `nexus.trace.correlation` — propagate correlation IDs across tool calls.
+///
+/// Echoes the incoming `correlation_id` (or generates one if absent) so agents
+/// can thread trace context through multi-step tool chains.
+fn execute_trace_correlation(
+    req: &ToolExecuteRequest,
+    _state: &WorkspaceState,
+    _creator_id: &str,
+) -> serde_json::Value {
+    let correlation_id = req.parameters["correlation_id"].as_str().map_or_else(
+        || format!("corr_{}", uuid::Uuid::new_v4().simple()),
+        str::to_string,
+    );
+    let session_id = req
+        .session_id
+        .clone()
+        .or_else(|| req.parameters["session_id"].as_str().map(str::to_string));
+    let parent_request_id = req.request_id.clone();
+    let trace_timestamp = chrono::Utc::now().to_rfc3339();
+
+    serde_json::json!({
+        "correlation_id": correlation_id,
+        "session_id": session_id,
+        "parent_request_id": parent_request_id,
+        "trace_timestamp": trace_timestamp,
+        "propagated": true,
+    })
+}
+
+// ─── V1.59 P0: Registry wrappers for the 9 new tools ──────────────────────
+
+/// Registry wrapper: `nexus.manuscript.list` — async passthrough.
+pub(crate) fn registry_manuscript_list<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_manuscript_list(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.manuscript.read_range` — async passthrough.
+pub(crate) fn registry_manuscript_read_range<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_manuscript_read_range(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.manuscript.write` — async passthrough.
+pub(crate) fn registry_manuscript_write<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_manuscript_write(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.manuscript.phase.get` — async passthrough.
+pub(crate) fn registry_manuscript_phase_get<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_manuscript_phase_get(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.manuscript.phase.set` — async passthrough.
+pub(crate) fn registry_manuscript_phase_set<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_manuscript_phase_set(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.workspace.paths` — sync → async wrapper.
+pub(crate) fn registry_workspace_paths<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_workspace_paths(req, state, creator_id);
+    Box::pin(async move { result })
+}
+
+/// Registry wrapper: `nexus.research.query` — async passthrough.
+pub(crate) fn registry_research_query<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    Box::pin(execute_research_query(req, state, creator_id))
+}
+
+/// Registry wrapper: `nexus.runtime.health` — sync → async wrapper.
+pub(crate) fn registry_runtime_health<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_runtime_health(req, state, creator_id);
+    Box::pin(async move { Ok(result) })
+}
+
+/// Registry wrapper: `nexus.trace.correlation` — sync → async wrapper.
+pub(crate) fn registry_trace_correlation<'a>(
+    req: &'a ToolExecuteRequest,
+    state: &'a WorkspaceState,
+    creator_id: &'a str,
+) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
+    let result = execute_trace_correlation(req, state, creator_id);
+    Box::pin(async move { Ok(result) })
+}

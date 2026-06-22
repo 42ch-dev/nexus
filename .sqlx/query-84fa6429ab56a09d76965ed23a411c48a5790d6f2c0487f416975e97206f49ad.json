@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE outbox_entries\n                 SET delivery_state = 'acked', updated_at = ?\n                 WHERE delivery_state IN ('staged', 'ready')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "84fa6429ab56a09d76965ed23a411c48a5790d6f2c0487f416975e97206f49ad"
+}

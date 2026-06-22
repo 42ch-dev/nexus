@@ -61,7 +61,14 @@ mod tests {
         );
 
         // Daemon-only tables
-        assert!(table_names.contains(&"outbox"), "missing outbox");
+        // DEPRECATED (V1.59 P1 T3): legacy `outbox` table has zero active consumers
+        // and is planned for phased removal (see outbox-consolidation.md §6).
+        // Table is still created by initial migration but no Rust code reads/writes it.
+        assert!(table_names.contains(&"outbox"), "missing legacy outbox");
+        tracing::warn!(
+            "legacy outbox table deprecated — zero active consumers; phased removal planned post-V1.59. \
+             See .mstar/knowledge/specs/outbox-consolidation.md §6."
+        );
         assert!(table_names.contains(&"auth_tokens"), "missing auth_tokens");
         assert!(
             table_names.contains(&"acp_tool_audit_log"),

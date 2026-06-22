@@ -256,7 +256,15 @@
     "2026-06-22-v1.58-df44-reference-refresh-pipeline",
     "2026-06-22-v1.58-capability-quality-convergence",
     "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
-    "2026-06-22-v1.58-mid-qc-and-fix-waves"
+    "2026-06-22-v1.58-mid-qc-and-fix-waves",
+    "2026-06-22-v1.59-compass-and-plan-stubs",
+    "2026-06-22-v1.57-mid-qc-and-fix-waves",
+    "2026-06-22-v1.57-hygiene-and-closeout",
+    "2026-06-22-v1.58-hygiene-and-closeout",
+    "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
+    "2026-06-22-v1.59-df12-outbox-consolidation",
+    "2026-06-22-v1.59-mid-qc-and-fix-waves",
+    "2026-06-22-v1.59-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

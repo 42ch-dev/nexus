@@ -1,8 +1,8 @@
 # Deferred Features — Cross-Version Tracker v1
 
-**Quick status**: **V1.58 Shipped (2026-06-22)** — Workspace OCC Hardening & DF-44 Reference Refresh (S-A + S-B dual track; 3-wave dispatch; 4 implement plans all Done). DF-44 fully closed (capability + DB migration + CLI + body file write + cross-cut tests + new Master spec `reference-knowledge.md`). 33 of 35 V1.57+/V1.58+ open residuals closed. 14 V1.52-era WL-A polish residuals deferred to V1.59+. Integration branch `iteration/v1.58` PR-ready. Platform **paused**. Tech debt SSOT: [`status.json`](../status.json)
+**Quick status**: **V1.59 Shipped (2026-06-22)** — DF-47 Capability Parity & DF-12 Outbox Consolidation (dual-track single-wave; P0 9 catalog-only→shipped host tools + P1 outbox schema unification + flush/compact real impl). DF-12 closed. DF-46 roster 18→9 catalog-only (host tools 21→30). 6 QC reports all Approve (P0 had 3-Warning fix-wave + qc2 re-review). Mid-QA Pass with notes. 8 low V1.59 residuals + 14 V1.52-era WL-A deferred to V1.60+. Platform **paused**. Tech debt SSOT: [`status.json`](../status.json)
 
-**Status**: V1.58 Shipped (closeout 2026-06-22) — Workspace OCC Hardening & DF-44 Reference Refresh. **S-A + S-B dual track** (V1.51-V1.57 rhythm). Track A: P0 `2026-06-22-v1.58-workspace-occ-hardening` (L effort, `@fullstack-dev`) + 8-commit fix-wave; P2 `2026-06-22-v1.58-capability-quality-convergence` (M effort, `@fullstack-dev`; 12/16 tasks done). Track B: P1 `2026-06-22-v1.58-df44-reference-refresh-pipeline` (L effort, `@fullstack-dev-2`) + 2-commit fix-wave; P3 `2026-06-22-v1.58-reference-cli-and-cross-cut-tests` (M effort, `@fullstack-dev-2`; 8/9 tasks done) + 4-commit fix-wave. P-mid + P-last meta/closeout. All 4 implement plans Done; 12 QC reports all Approve (P0 + P1 + P3 had fix-waves + targeted re-reviews; P2 clean first-pass). **3 fix-waves total** (P0 + P1 + P3); **Wave 2 had no fix-wave** (clean tri-review).
+**Status**: V1.58 Shipped & MERGED to main (578be523, PR #80). **V1.59 Active** (Prepare). **S-A + S-B dual track** (V1.51-V1.57 rhythm). Track A: P0 `2026-06-22-v1.58-workspace-occ-hardening` (L effort, `@fullstack-dev`) + 8-commit fix-wave; P2 `2026-06-22-v1.58-capability-quality-convergence` (M effort, `@fullstack-dev`; 12/16 tasks done). Track B: P1 `2026-06-22-v1.58-df44-reference-refresh-pipeline` (L effort, `@fullstack-dev-2`) + 2-commit fix-wave; P3 `2026-06-22-v1.58-reference-cli-and-cross-cut-tests` (M effort, `@fullstack-dev-2`; 8/9 tasks done) + 4-commit fix-wave. P-mid + P-last meta/closeout. All 4 implement plans Done; 12 QC reports all Approve (P0 + P1 + P3 had fix-waves + targeted re-reviews; P2 clean first-pass). **3 fix-waves total** (P0 + P1 + P3); **Wave 2 had no fix-wave** (clean tri-review).
 
 **V1.58 carry-forward index**: 33 of 35 V1.57+/V1.58+ open residuals closed + DF-44 fully closed. Track A: P0 closed 19 (R-V156P0-M001..M006 workspace OCC; R-V156P1-M003..M005 capability surface; R-V156P1-L001..L007 polish; R-V156-PROCESS-01 + R-V156P1-CACHE-01 sqlx hygiene; R-V156-MIDQA-01 fmt drift; R-V157P0-L001/L002 V1.57-new). P2 closed 14 (R-V156P2-M001..M003 + L001..L004 DF-56 independent; R-V156P2-CACHE-01 engine test fidelity; R-V156P3-W001/W002 + S001/S002/S004 DF-56 dependent; R-V157P1-W001 host-call smoke). Track B: DF-44 closed end-to-end across P1 (capability + DB migration + reference-knowledge.md Draft spec) + P3 (CLI + cross-cut tests + body file write + topology). **Deferred to V1.59+ WL-A**: 14 V1.52-era polish residuals (R-V150KBED-02, R-V151Q1-10, R-V152TA-S001..S011, R-V152TB-W006/W007/W008) — explicitly out of V1.58 scope per compass §6.
 
@@ -13,7 +13,7 @@
 **Scope**: `nexus` OSS repository only. Platform features referenced only when they block nexus-side work.
 **Predecessor**: Consolidated from delivery compasses (v1.2–v1.21) and the v1.2 reclassification matrix.
 **Created**: 2026-04-21
-**Last updated**: 2026-06-22 (V1.57 Active: compass + 7 plan stubs authored, integration branch `iteration/v1.57` created from main, 3 V1.56 medium/low residuals absorbed into V1.57 plan slots per V1.57 carry-forward index; V1.56 ship baseline)
+**Last updated**: 2026-06-22 (V1.59 Prepare: compass + 5 plan stubs authored on `feature/v1.59-prepare`; deferred-tracker audit corrections; V1.58 merged to main @ 578be523 via PR #80)
 
 ---
 
@@ -66,21 +66,21 @@ Cross-version themes. Suggested targets are non-binding until locked in a compas
 
 | ID | Feature | First deferred | Target | Effort | Deferral history | Notes |
 |----|---------|---------------|--------|--------|-----------------|-------|
-| DF-12 | Dual outbox consolidation (full merge) | V1.2 | Any future | L | V1.2 | Knowledge: `dual-outbox-architecture.md` (archived). Single-writer follow-up. |
+| DF-12 | ~~REMOVED — Closed V1.59 P1 (outbox consolidation: single-writer spec Master + flush/compact real impl + legacy table deprecation); archived during V1.59 P-last~~ | — | — | — | — | — |
 | DF-13 | Entitlements API consumption | V1.3 | V2.0+ | M | V1.3 | Platform API dependency. |
 | DF-16 | Stripe / billing integration | V1.2 | V2.0+ | L | V1.2→V1.3 | ADR-011/012/013. Platform dependency. |
-| DF-40 | Session resume stub in daemon lifecycle | V1.21 audit | **Converged via DF-68 (V1.39 P0 Shipped)** | S | V1.21→V1.39 | `daemon-runtime/lifecycle/actions.rs`. V1.39 P0 conditional boot auto-resume for checkpointed auto-chain drivers supersedes blanket pause-only recovery for those schedules. DF-68 implemented: `find_resumable_works` + boot logging in `boot.rs`. |
+| DF-40 | ~~REMOVED — Closed V1.39 P0 (converged via DF-68: `find_resumable_works` + boot logging); archived during V1.59 P-1 doc audit~~ | — | — | — | — | — |
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
 | DF-43 | SQLite persistence / crate-model alignment | V1.24 audit | **Closed V1.55 P0** | M | V1.26–28 partial→V1.55 P0 | **Closed**: adapter `From<ReferenceSourceRow> for nexus_knowledge::ReferenceSource` added in `nexus-local-db`; `nexus-knowledge` crate docs locked to model/adapter-seam only; spec `local-db-schema.md` §4.1.1 ownership boundary text added; round-trip + duplicate-truth prevention tests in `nexus-local-db/src/reference_source.rs`. Plan: [2026-06-22-v1.55-df43-sqlite-alignment.md](../plans/2026-06-22-v1.55-df43-sqlite-alignment.md). |
-| DF-44 | **Closed in V1.58** | V1.26 | ~~V1.58 P1+P3~~ Closed | M | V1.26→V1.58 | **Closed**: shipped end-to-end via V1.58 P1 (`2026-06-22-v1.58-df44-reference-refresh-pipeline`) + P3 (`2026-06-22-v1.58-reference-cli-and-cross-cut-tests`). Capability `nexus.reference.refresh` registered in orchestration `CapabilityRegistry` AND host_tool_registry (CLI path); DB migration `202606220003_reference_sources_refresh_tracking.sql` adds `last_refreshed_at` / `refresh_policy` / `refresh_status` columns + partial indexes; DB migration `202606220004_reference_sources_creator_id.sql` adds `creator_id` column for scoping; daemon-side `refresh_scheduler` periodic task (configurable interval, 60s initial delay); `nexus42 creator reference refresh [ref_id|all] [--dry-run]` CLI subcommand; `validate_reference_url` enforces HTTPS-only + private-IP block; streaming body fetch with incremental `blake3` + 100 MiB cap; atomic body file write (temp + sync_all + rename) with creator scoping; `reference-knowledge.md` promoted Draft → Master (V1.58 P-last). Per-ID test vectors ≥ 1 success + ≥ 1 failure. **DF-44 row archived at V1.58 P-last.** |
-| DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | **Reduced — V1.57** | L | V1.34→V1.53→V1.57 | V1.34 ships minimal host tools only. V1.53 P0/P1 extended (8→13 host tools). **V1.57 reduces**: 41-row roster in `acp-capability-set.md` §4 (18 `shipped` host tools + 18 `catalog-only` orchestration + 3 `scaffold-equivalent` profile sets + 2 `OUT` publish.*). 2 publish.* IDs remain in catalog as `OUT` (DF-59 platform publish — platform/V2.0+ dependency). Future additions must register in both `capability::Registry` and the acp §4 roster (cross-validation enforced). Roster is the SSOT for capability coverage. See [v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md](../iterations/v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md). |
+| DF-44 | ~~REMOVED — archived to shipped-features-tracker V1.58 P-last~~ | — | — | — | — | — |
+| DF-46 | Full `nexus.*` logical capability implementation (acp-capability-set parity) | V1.34 audit | **Reduced — V1.59** | L | V1.34→V1.53→V1.57→V1.59 | V1.34 ships minimal host tools only. V1.53 P0/P1 extended (8→13 host tools). V1.57 roster: 41 rows (18 shipped + 18 catalog-only + 3 scaffold-equivalent + 2 OUT). **V1.59 P0 ships 9 more** (manuscript.*×5 + workspace.paths + research.query + runtime.health + trace.correlation): roster now 27 shipped + 9 catalog-only + 3 scaffold-equivalent + 2 OUT (host_tool count 21→30). Remaining 9 catalog-only = sync.*×4 + world.*×3 + timeline.event.append + fork.create + manuscript.phase.* already-shipped-skip. 2 publish.* remain OUT (DF-59). Cross-validation enforced by `catalog_registry_invariant_all_ids_present`. |
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | **V1.42 P3 Narrowed** | M | V1.34→V1.35→V1.36→V1.42 | V1.34 P4 shipped adapter. **V1.42 P3 shipped**: `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool (`nexus.orchestration.schedule_status`) proven E2E with 5 hermetic tests. Production caller wiring complete for minimal slice. Full DF-46 parity remains Post-V1.42. Plan: [2026-06-11-v1.42-agent-tool-production-wiring.md](../plans/2026-06-11-v1.42-agent-tool-production-wiring.md). |
-| DF-48 | Agent tool bridge via `nexus42` CLI subprocess | V1.34 | Post-V1.34 | M | V1.34 | Rejected; daemon HostToolExecutor is SSOT. |
+| DF-48 | ~~REMOVED — Cancelled/Rejected V1.34 (daemon HostToolExecutor is SSOT); archived during V1.59 P-1 doc audit~~ | — | — | — | — | — |
 | DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
-| DF-51 | `creator.inject_prompt` wire/schema alignment | V1.33 compass §6 | V1.34+ | S | V1.33→V1.34 | **Closed in V1.34 residual-convergence** (commits a044f94 + 71c10cc). Schema now declares `prompt_file` + `vars` with `anyOf`. Closure recorded in [`.mstar/archived/residuals/v1.32-post-qc-tech-debt.json`](../archived/residuals/v1.32-post-qc-tech-debt.json) (R-P2-01). |
+| DF-51 | ~~REMOVED — Closed V1.34 residual-convergence (commits a044f94 + 71c10cc; schema declares `prompt_file` + `vars` with `anyOf`); archived during V1.59 P-1 doc audit~~ | — | — | — | — | — |
 | DF-52 | Top-level `nexus42 preset` command group | V1.33 | **V1.45 Shipped** (P-last) | S | V1.33 | **Resolution path:** `creator run <preset_id>` generic entry (BL-12). Archived to [shipped-features-tracker.md](../archived/shipped-features-tracker.md) §1 (V1.45 snapshot). |
 | DF-53 | FL-E `--auto-chain` default stage sequencing | V1.34 | **V1.39 P0 Shipped** | S | V1.34→V1.35→V1.36→V1.37→V1.38→V1.39 | V1.35 P4 partial **shipped**: `--chain-novel-writing` defaults true (intake → produce). V1.38 shipped multi-chapter foundation **without** auto-reenqueue. **V1.39 P0** implements full `intake → research → produce → review → persist` auto-chain (default true), chapter outer loop, side-input lane, boot recovery, `--no-auto-chain` opt-out, `creator run resume` command. Core: `nexus-orchestration::auto_chain` module with `evaluate_next_step` + 15 unit tests + 14 integration tests. Plan: [2026-06-09-v1.39-fl-e-auto-chain-engine.md](../plans/2026-06-09-v1.39-fl-e-auto-chain-engine.md). **Tri-review + targeted re-review all Approve; final consolidated gate Approve. PR #50 merged ad9725d8.** |
-| DF-54 | Work `stage` / `stage_status` persistence gap | V1.34 | V1.34+ | S | V1.34 | **Closed in V1.34 P1** (commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`). Stage columns added + DDL migration + 5 hermetic e2e tests + active schedule uniqueness. |
+| DF-54 | ~~REMOVED — Closed V1.34 P1 (commits 655d71c + R-FL-E-01..08; stage columns + DDL migration + 5 hermetic e2e tests); archived during V1.59 P-1 doc audit~~ | — | — | — | — | — |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | V1.34: local/read-only or `policy_blocked` (PD-05). |
 | DF-57 | **Closed in V1.36 P2** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
 | DF-58 | **Closed in V1.36 P1** | — | — | — | See [shipped-features-tracker.md §1 Closed items](../archived/shipped-features-tracker.md) |
@@ -235,7 +235,12 @@ When V1.37+ picks up multi-chapter or multi-novel work:
 4. **Register the new spec + plan in `status.json`** per mstar-plan-artifacts lifecycle.
 5. **Update the deferred tracker** to record the new spec/plan closure (per §4 change control).
 
-#### 3.6.3 DF-56 post-V1.42 P2 roadmap (grill-me 2026-06-11)
+#### 3.6.3 DF-56 conditional routing — **CLOSED (all 5 post-V1.42 slices shipped in V1.56 P2+P3)**
+
+> **DF-56 is FULLY CLOSED.** The 5-item "Deferred Post-V1.42" list below is **historical only** — all slices were shipped in V1.56:
+> - V1.56 P2 shipped "arbitrary stage conditional + expression routing + converge nodes" (independent slice: T1-T4, commits on `feature/v1.56-df56-independent-slice`).
+> - V1.56 P3 shipped "registry.refresh conditional edges + workspace branch inputs" (dependent slice: T1-T5, commits on `feature/v1.56-df56-dependent-slice`).
+> - `preset-conditional-routing.md` header Status shows V1.56 P2+P3 Shipped. DF-56 is NOT in §3.3 open-features table (closed). The deferred-features-tracker quick-status and §3.6.3 were stale; corrected 2026-06-22 (V1.59 Prepare audit).
 
 **Shipped in V1.42 P2 (minimal slice)** — commits on `feature/v1.42-conditional-routing`:
 
@@ -248,7 +253,7 @@ When V1.37+ picks up multi-chapter or multi-novel work:
 
 Runtime behavior: `_judge_result` in `graph_flow::Context` drives the conditional edge. `true` → `go` target; `false` or absent → `nogo` target (safe fallback).
 
-**Deferred Post-V1.42** (remain open under DF-56 until a future compass reopens):
+**Deferred Post-V1.42** (HISTORICAL — all 5 items below shipped in V1.56 P2+P3; retained for audit trail only):
 
 - Arbitrary stage-level conditional `next` (non-judge nodes)
 - Expression / rule-based routing beyond GO/NOGO
@@ -283,6 +288,8 @@ This convention is established by the V1.36 novels-system distill above. Extend,
 ## 5) Related index
 
 **Latest active iteration**
+
+- **V1.59** (Active — Prepare phase P-1 in progress): [v1.59-capability-parity-and-outbox-consolidation-delivery-compass-v1.md](../iterations/v1.59-capability-parity-and-outbox-consolidation-delivery-compass-v1.md) — DF-47 Capability Parity & DF-12 Outbox Consolidation (dual-track single-wave): Track A (P0) DF-47 9 catalog-only → shipped host tools; Track B (P1) DF-12 outbox consolidation (schema unification + single-writer rule + deprecate legacy + flush/compact wiring). 5 plans: P-1 (prepare + doc audit) / P0 (Track A) / P1 (Track B) / P-mid (meta) / P-last (closeout).
 
 - **None** (V1.58 Shipped 2026-06-22; integration branch `iteration/v1.58` PR-ready on `main`; V1.59+ will be the next active iteration).
 
@@ -334,4 +341,4 @@ External (via `.mstar/local-paths.json`): `{v1-spec}/architecture/v1.md`, `{plat
 
 ---
 
-*Last updated: 2026-06-22 (V1.57 closeout: 7 plans all Done; Profile B compaction applied; 3 V1.57 carry-forwards CLOSED; 3 new V1.57+ residuals filed; DF-46 reduced to 41-row roster; bridge→Master promotion finalized; capability-registry.md folded-in; shipped-features-tracker V1.57 snapshot; tech-debt rollup; pre-implement gate: was go; report-only QA pending; integration branch `iteration/v1.57` ready for PR to `main`). Status: **V1.57 Shipped**. PR-ready.*
+*Last updated: 2026-06-22 (V1.59 Prepare: compass + 5 plan stubs authored on `feature/v1.59-prepare`; deferred-tracker audit corrections — DF-44 row removed, DF-56 §3.6.3 closed, V1.58 merge commit 578be523 recorded; status.json staleness flagged for PM).*

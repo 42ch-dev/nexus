@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-06-22-v1.59-hygiene-and-closeout",
+  "title": "Hygiene & Closeout (P-last)",
+  "iteration": "V1.59",
+  "track": "closeout",
+  "wave": "After Wave 1",
+  "effort": "M",
+  "owner": "@project-manager",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.59-hygiene-and-closeout.md",
+  "merge_target": "iteration/v1.59",
+  "depends_on": [
+    "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
+    "2026-06-22-v1.59-df12-outbox-consolidation"
+  ],
+  "created": "2026-06-22",
+  "review_strategy": "Report-only QA",
+  "closed_at": "2026-06-22T23:59:00Z"
+}

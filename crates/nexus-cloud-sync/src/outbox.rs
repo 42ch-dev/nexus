@@ -1686,4 +1686,53 @@ mod tests {
         assert_eq!(reloaded.bundle_id, "bdl_complex");
         assert_eq!(reloaded.result.total_count, 5);
     }
+
+    // ── V1.59 P1 T5: Sync CLI regression with migration-managed schema ──
+
+    /// Verify that the outbox works with a migration-managed schema
+    /// (the path used by `nexus42 sync *` CLI commands via
+    /// `nexus_local_db::init_pool` + `Outbox::with_pool`).
+    ///
+    /// This confirms the consolidated outbox schema (T1) is correctly
+    /// initialized and usable by the sync CLI path.
+    #[tokio::test]
+    async fn outbox_with_migration_managed_schema_roundtrip() {
+        // Simulate the CLI path: init pool with migrations, then use Outbox.
+        let tmp = tempfile::TempDir::new().expect("TempDir");
+        let db_path = tmp.path().join("state.db");
+        let pool = nexus_local_db::init_pool(&db_path)
+            .await
+            .expect("init pool with migrations");
+
+        // Verify outbox_entries table exists (created by migration 20260420_outbox_tables).
+        let tables: Vec<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='outbox_entries'",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("query sqlite_master");
+        assert_eq!(
+            tables.len(),
+            1,
+            "outbox_entries table should exist after migrations"
+        );
+
+        // Create Outbox using the migration-initialized pool.
+        let pool_wrapper = crate::pool::OutboxPool::from(pool.clone());
+        let outbox = Outbox::with_pool(pool_wrapper)
+            .await
+            .expect("create outbox with migration-managed pool");
+
+        // Full lifecycle roundtrip: append → sent → acked.
+        let cmd = make_test_command();
+        let entry_id = outbox.append(&cmd).await.expect("append");
+        let entry = outbox.get(&entry_id).await.expect("get");
+        assert_eq!(entry.delivery_state, nexus_contracts::DeliveryState::Staged);
+
+        outbox.mark_sent(&entry_id).await.expect("mark_sent");
+        outbox.mark_acked(&entry_id).await.expect("mark_acked");
+
+        let entry = outbox.get(&entry_id).await.expect("get after lifecycle");
+        assert_eq!(entry.delivery_state, nexus_contracts::DeliveryState::Acked);
+    }
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM outbox_entries\n             WHERE delivery_state = 'acked'\n               AND (updated_at IS NULL OR updated_at < ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "8de9605b74c021a94e2898c07ec812f38d295bb3702ff1a6842ef829b62967ed"
+}
