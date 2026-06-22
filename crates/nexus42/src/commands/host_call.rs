@@ -46,12 +46,7 @@ pub async fn run(args: HostCallArgs, config: &CliConfig) -> Result<()> {
         .map_err(|e| CliError::Other(format!("--args must be valid JSON: {e}")))?;
 
     let client = DaemonClient::from_config(config);
-
-    // Build the tool execute request and POST to daemon
-    let request_body = serde_json::json!({
-        "tool_name": args.tool_id,
-        "parameters": params,
-    });
+    let request_body = build_tool_request(&args.tool_id, &params);
 
     let response: serde_json::Value = client
         .post(
@@ -69,6 +64,20 @@ pub async fn run(args: HostCallArgs, config: &CliConfig) -> Result<()> {
 
     println!("{output}");
     Ok(())
+}
+
+/// Build the JSON request body for a host-tool dispatch (V1.58 P2 — R-V157P1-W001).
+///
+/// Extracted from `run()` so the request-envelope construction is unit-testable
+/// without a live daemon. The CLI-side contract is: given a tool ID and parsed
+/// parameters, produce the wire request body that the daemon's
+/// `/v1/local/agent-host/internal/tool-executions` endpoint expects.
+#[must_use]
+pub fn build_tool_request(tool_id: &str, params: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "tool_name": tool_id,
+        "parameters": params,
+    })
 }
 
 /// Convenience entry point that exits the process on error with an
