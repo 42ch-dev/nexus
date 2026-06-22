@@ -932,7 +932,10 @@ mod tests {
 
         let _out = cap.run(serde_json::json!({})).await.unwrap();
 
-        assert!(refresh_total() > before_total, "refresh_total must increment");
+        assert!(
+            refresh_total() > before_total,
+            "refresh_total must increment"
+        );
         assert!(
             refresh_success_total() > before_success,
             "refresh_success_total must increment"
