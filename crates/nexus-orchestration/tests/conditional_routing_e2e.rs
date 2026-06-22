@@ -95,11 +95,7 @@ states:
 
 #[tokio::test]
 async fn expression_routes_to_high_path_when_score_above_threshold() {
-    let action = run_expression_route(
-        THRESHOLD_YAML,
-        &[("score", serde_json::json!(95))],
-    )
-    .await;
+    let action = run_expression_route(THRESHOLD_YAML, &[("score", serde_json::json!(95))]).await;
     assert_goto(&action, "high_path");
 }
 
@@ -107,11 +103,7 @@ async fn expression_routes_to_high_path_when_score_above_threshold() {
 
 #[tokio::test]
 async fn expression_routes_to_default_when_no_branch_matches() {
-    let action = run_expression_route(
-        THRESHOLD_YAML,
-        &[("score", serde_json::json!(50))],
-    )
-    .await;
+    let action = run_expression_route(THRESHOLD_YAML, &[("score", serde_json::json!(50))]).await;
     assert_goto(&action, "standard_path");
 }
 
