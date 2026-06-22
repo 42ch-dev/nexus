@@ -91,7 +91,7 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 
 ---
 
-## 4. Capability roster (V1.57)
+## 4. Capability roster (V1.59)
 
 > **Roster governance:** This table is the single SSOT for every `nexus.*` capability ID.
 > Each row maps to a runtime binding via the `host_tool_registry()` (daemon host tools)
@@ -108,7 +108,7 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 | `nexus.profile.publisher` | Explicit publish flows; includes `publish.*` gated capabilities | scaffold-equivalent | — | §3.3 metadata |
 | `nexus.context.whoami` | Resolve active Nexus profile / creator context | shipped | V1.34 | `host_tool` |
 | `nexus.workspace.info` | Workspace root, linked world ref, environment flags | shipped | V1.34 | `host_tool` |
-| `nexus.workspace.paths` | Enumerate allowed roots from the active preset | catalog-only | — | orchestration |
+| `nexus.workspace.paths` | Enumerate allowed roots from the active preset | shipped | V1.59 P0 | `host_tool` |
 | `nexus.context.assemble` | Assemble stable writing context from confirmed KB / canon timeline / memory slices | shipped | V1.34 | `host_tool` |
 | `nexus.work.get` | Read Work row + stage fields for active creator | shipped | V1.34 | `host_tool` |
 | `nexus.work.patch` | Append inspiration; update policy-approved stage_metadata keys | shipped | V1.34 | `host_tool` |
@@ -127,18 +127,18 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 | `nexus.sync.push` | Submit structured deltas via runtime-owned client | catalog-only | — | orchestration |
 | `nexus.sync.pull` | Agent-triggered pull | catalog-only | — | orchestration |
 | `nexus.sync.status` | Surface outbox / conflicts / cursors | catalog-only | — | orchestration |
-| `nexus.manuscript.list` | List manuscript files under whitelist | catalog-only | — | orchestration |
-| `nexus.manuscript.read_range` | Read a bounded range for prompting | catalog-only | — | orchestration |
-| `nexus.manuscript.write` | Write only within whitelist paths and size quotas | catalog-only | — | orchestration |
-| `nexus.manuscript.phase.get` | Read current manuscript phase | catalog-only | — | orchestration |
-| `nexus.manuscript.phase.set` | Move between brainstorm / draft / review / finalize with runtime checks | catalog-only | — | orchestration |
+| `nexus.manuscript.list` | List manuscript files under whitelist | shipped | V1.59 P0 | `host_tool` |
+| `nexus.manuscript.read_range` | Read a bounded range for prompting | shipped | V1.59 P0 | `host_tool` |
+| `nexus.manuscript.write` | Write only within whitelist paths and size quotas | shipped | V1.59 P0 | `host_tool` |
+| `nexus.manuscript.phase.get` | Read current manuscript phase | shipped | V1.59 P0 | `host_tool` |
+| `nexus.manuscript.phase.set` | Move between brainstorm / draft / review / finalize with runtime checks | shipped | V1.59 P0 | `host_tool` |
 | `nexus.manuscript.chapter.get` | Read chapter content and block metadata for a work | shipped | V1.53 P1 | `host_tool` |
 | `nexus.manuscript.chapter.update` | Update chapter content and block metadata for a work | shipped | V1.54 P0 | `host_tool` |
 | `nexus.publish.chapter` | User-attested publish flow for a chapter artifact | OUT | — | DF-59 Backlog |
 | `nexus.publish.story` | User-attested publish flow for a story artifact | OUT | — | DF-59 Backlog |
-| `nexus.research.query` | Query local-only `ReferenceSource` index / excerpts | catalog-only | — | orchestration |
-| `nexus.trace.correlation` | Propagate correlation IDs across tool calls | catalog-only | — | orchestration |
-| `nexus.runtime.health` | Agent-visible health, registry reachability, sync state | catalog-only | — | orchestration |
+| `nexus.research.query` | Query local-only `ReferenceSource` index / excerpts | shipped | V1.59 P0 | `host_tool` |
+| `nexus.trace.correlation` | Propagate correlation IDs across tool calls | shipped | V1.59 P0 | `host_tool` |
+| `nexus.runtime.health` | Agent-visible health, registry reachability, sync state | shipped | V1.59 P0 | `host_tool` |
 | `nexus.observability.daemon.health` | Daemon runtime status (uptime, lifecycle, registry) | shipped | V1.53 P1 | `host_tool` |
 | `nexus.registry.refresh` | Refresh agent capability registry from embedded snapshot or optional CDN | shipped | V1.56 P1 | `host_tool` |
 | `nexus.work.schedule.set` | Link/unlink schedules to a work (schedule DAO write) | shipped | V1.54 P0 | `host_tool` |
