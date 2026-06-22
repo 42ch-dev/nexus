@@ -82,3 +82,9 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "registry_refresh_latency"
 harness = false
+
+# V1.60 P-last (R-V156P2-L001): preset expression evaluator latency benchmark
+# (simple field, numeric comparison, complex nested boolean).
+[[bench]]
+name = "expression_eval_latency"
+harness = false
