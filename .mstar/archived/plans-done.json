@@ -250,7 +250,13 @@
     "2026-06-22-v1.57-spec-governance-and-registry",
     "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
     "2026-06-22-v1.57-v156-carry-forwards-and-compliance",
-    "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e"
+    "2026-06-22-v1.57-worker-ipc-and-cross-caller-e2e",
+    "2026-06-22-v1.58-compass-and-plan-stubs",
+    "2026-06-22-v1.58-workspace-occ-hardening",
+    "2026-06-22-v1.58-df44-reference-refresh-pipeline",
+    "2026-06-22-v1.58-capability-quality-convergence",
+    "2026-06-22-v1.58-reference-cli-and-cross-cut-tests",
+    "2026-06-22-v1.58-mid-qc-and-fix-waves"
   ],
   "iteration_summaries": {
     "v1.45": {

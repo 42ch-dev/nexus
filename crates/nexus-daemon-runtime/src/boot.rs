@@ -132,6 +132,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             url: cdn_url.clone(),
             timeout_ms: 10_000,
             max_retries: 3,
+            max_body_bytes:
+                nexus_orchestration::capability::builtins::registry::DEFAULT_MAX_CDN_BODY_SIZE,
         })
     } else {
         tracing::info!("No CDN URL configured — registry.refresh will use synthetic output only");
@@ -539,6 +541,24 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
             chron_workspace,
             chron_shutdown,
             chron_config,
+        );
+    }
+
+    // --- Section 4e: Reference refresh scheduler (V1.58 P1 DF-44) ---
+    //
+    // Periodically scans `reference_sources` for stale rows (on_change or
+    // overdue scheduled) and dispatches `nexus.reference.refresh` for each
+    // candidate. Non-blocking: errors are logged and the loop continues.
+    // First refresh cycle fires after 60s initial delay. See
+    // `crates/nexus-daemon-runtime/src/refresh_scheduler.rs`.
+    {
+        let refresh_pool = state.pool().clone();
+        let refresh_shutdown = state.shutdown_notify();
+        let refresh_config = crate::refresh_scheduler::RefreshSchedulerConfig::from_env();
+        let _refresh_handle = crate::refresh_scheduler::spawn_refresh_scheduler(
+            refresh_pool,
+            refresh_shutdown,
+            refresh_config,
         );
     }
 

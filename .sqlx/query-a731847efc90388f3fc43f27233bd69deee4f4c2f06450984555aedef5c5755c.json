@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n             reference_source_id as \"reference_source_id!\",\n             workspace_id as \"workspace_id!\",\n             source_type as \"source_type!\",\n             source_mutability as \"source_mutability!\",\n             uri as \"uri!\",\n             title as \"title!\",\n             tags,\n             content_hash,\n             content_path,\n             scan_status as \"scan_status!\",\n             created_at as \"created_at!\",\n             updated_at\n           FROM reference_sources WHERE reference_source_id = ?",
+  "query": "INSERT INTO reference_sources\n            (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at, updated_at)\n           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, NULL)\n           RETURNING\n              reference_source_id as \"reference_source_id!\",\n              workspace_id as \"workspace_id!\",\n              source_type as \"source_type!\",\n              source_mutability as \"source_mutability!\",\n              uri as \"uri!\",\n              title as \"title!\",\n              tags,\n              content_hash,\n              content_path,\n              scan_status as \"scan_status!\",\n              created_at as \"created_at!\",\n              updated_at,\n              last_refreshed_at,\n              refresh_policy as \"refresh_policy!\",\n              refresh_status",
   "describe": {
     "columns": [
       {
@@ -62,10 +62,25 @@
         "name": "updated_at",
         "ordinal": 11,
         "type_info": "Text"
+      },
+      {
+        "name": "last_refreshed_at",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "refresh_policy!",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "refresh_status",
+        "ordinal": 14,
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 10
     },
     "nullable": [
       true,
@@ -79,8 +94,11 @@
       true,
       false,
       false,
+      true,
+      true,
+      false,
       true
     ]
   },
-  "hash": "eebcbdcfe8641fa5e838285ce70ba6eb62a2859996de61dc7a12387fa6ee5d1a"
+  "hash": "a731847efc90388f3fc43f27233bd69deee4f4c2f06450984555aedef5c5755c"
 }

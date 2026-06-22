@@ -144,6 +144,7 @@ The three profile-set IDs (`nexus.profile.minimal`, `nexus.profile.writer`, `nex
 | `nexus.work.schedule.set` | Link/unlink schedules to a work (schedule DAO write) | shipped | V1.54 P0 | `host_tool` |
 | `nexus.finding.resolve` | Resolve/close a finding entry (findings DAO write) | shipped | V1.54 P0 | `host_tool` |
 | `nexus.pool.entry.manage` | Add/remove entries from the selection pool (pool DAO write) | shipped | V1.54 P0 | `host_tool` |
+| `nexus.reference.refresh` | Refresh a reference source body by fetching its URL and comparing content hash; honors refresh_policy (on_change / scheduled / offline) | shipped | V1.58 P1 | orchestration |
 
 ### 4.1 Host tool permissions note
 

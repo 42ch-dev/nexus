@@ -44,6 +44,8 @@ impl SourceMutability {
 pub struct ReferenceSourceRow {
     /// Registry primary key and disk unit directory name.
     pub reference_source_id: String,
+    /// Creator that registered this source (cross-creator isolation — H-002).
+    pub creator_id: String,
     /// Workspace binding.
     pub workspace_id: String,
     /// Contract enum string (file, url, pdf, note).
@@ -66,6 +68,12 @@ pub struct ReferenceSourceRow {
     pub created_at: String,
     /// Last registry update timestamp.
     pub updated_at: Option<String>,
+    /// ISO-8601 timestamp of last successful refresh (nullable).
+    pub last_refreshed_at: Option<String>,
+    /// Refresh policy: `on_change` | `scheduled` | `offline`.
+    pub refresh_policy: String,
+    /// Refresh lifecycle status: `fresh` | `stale` | `refreshing` | `error`.
+    pub refresh_status: Option<String>,
 }
 
 /// Parameters for registering a new reference source.
@@ -114,34 +122,42 @@ pub async fn register(
     let content_hash = blake3_hash(params.body.as_bytes());
 
     // Step 1: Insert metadata into SQLite first (R5: DB first, file second)
-    let row = sqlx::query!(
-        r#"INSERT INTO reference_sources
-            (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, NULL)
+    // SAFETY: runtime query — the creator_id column was added in V1.58 P3
+    // migration and is not yet in the sqlx offline cache. Once sqlx prepare
+    // is re-run, this can be promoted to sqlx::query!().
+    let row = sqlx::query(
+        r"INSERT INTO reference_sources
+            (reference_source_id, creator_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, NULL)
            RETURNING
-             reference_source_id as "reference_source_id!",
-             workspace_id as "workspace_id!",
-             source_type as "source_type!",
-             source_mutability as "source_mutability!",
-             uri as "uri!",
-             title as "title!",
-             tags,
-             content_hash,
-             content_path,
-             scan_status as "scan_status!",
-             created_at as "created_at!",
-             updated_at"#,
-        reference_source_id,
-        params.workspace_id,
-        params.source_type,
-        mutability_str,
-        params.uri,
-        params.title,
-        params.tags,
-        content_hash,
-        content_path,
-        now,
+               reference_source_id,
+               creator_id,
+               workspace_id,
+               source_type,
+               source_mutability,
+               uri,
+               title,
+               tags,
+               content_hash,
+               content_path,
+               scan_status,
+               created_at,
+               updated_at,
+               last_refreshed_at,
+               refresh_policy,
+               refresh_status",
     )
+    .bind(&reference_source_id)
+    .bind(params.creator_id)
+    .bind(params.workspace_id)
+    .bind(params.source_type)
+    .bind(mutability_str)
+    .bind(params.uri)
+    .bind(params.title)
+    .bind(params.tags)
+    .bind(&content_hash)
+    .bind(&content_path)
+    .bind(&now)
     .fetch_one(pool)
     .await?;
 
@@ -175,18 +191,22 @@ pub async fn register(
         })?;
 
     Ok(ReferenceSourceRow {
-        reference_source_id: row.reference_source_id,
-        workspace_id: row.workspace_id,
-        source_type: row.source_type,
-        source_mutability: row.source_mutability,
-        uri: row.uri,
-        title: row.title,
-        tags: row.tags,
-        content_hash: row.content_hash,
-        content_path: row.content_path,
-        scan_status: row.scan_status,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
+        reference_source_id: row.get("reference_source_id"),
+        creator_id: row.get("creator_id"),
+        workspace_id: row.get("workspace_id"),
+        source_type: row.get("source_type"),
+        source_mutability: row.get("source_mutability"),
+        uri: row.get("uri"),
+        title: row.get("title"),
+        tags: row.get("tags"),
+        content_hash: row.get("content_hash"),
+        content_path: row.get("content_path"),
+        scan_status: row.get("scan_status"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+        last_refreshed_at: row.get("last_refreshed_at"),
+        refresh_policy: row.get("refresh_policy"),
+        refresh_status: row.get("refresh_status"),
     })
 }
 
@@ -218,7 +238,10 @@ fn blake3_hash(data: &[u8]) -> String {
     blake3::hash(data).to_hex().to_string()
 }
 
-/// List reference sources with pagination.
+/// List reference sources with pagination and optional creator scoping.
+///
+/// When `creator_id` is provided, only sources owned by that creator are returned
+/// (H-002: cross-creator isolation). When `None`, all sources are returned.
 ///
 /// Ordered by `created_at` descending (newest first). Uses `limit`/`offset` pagination
 /// with a default page size of [`DEFAULT_PAGE_LIMIT`].
@@ -230,6 +253,7 @@ pub async fn list(
     pool: &SqlitePool,
     limit: Option<i64>,
     offset: Option<i64>,
+    creator_id: Option<&str>,
 ) -> Result<Vec<ReferenceSourceRow>, LocalDbError> {
     let limit = limit.unwrap_or(DEFAULT_PAGE_LIMIT).clamp(1, 1000);
     let offset = offset.unwrap_or(0).max(0);
@@ -237,9 +261,10 @@ pub async fn list(
     // SAFETY: `limit` is clamped to 1..=1000 and `offset` to >= 0.
     // Dynamic SQL needed because `sqlx::query!` does not support
     // `LIMIT`/`OFFSET` as bind parameters in SQLite offline mode.
-    let rows = sqlx::query(&format!(
+    let sql = format!(
         "SELECT
               reference_source_id,
+              creator_id,
               workspace_id,
               source_type,
               source_mutability,
@@ -250,18 +275,33 @@ pub async fn list(
               content_path,
               scan_status,
               created_at,
-              updated_at
+              updated_at,
+              last_refreshed_at,
+              refresh_policy,
+              refresh_status
            FROM reference_sources
+           {}
            ORDER BY created_at DESC
-           LIMIT {limit} OFFSET {offset}"
-    ))
-    .fetch_all(pool)
-    .await?;
+           LIMIT {limit} OFFSET {offset}",
+        if creator_id.is_some() {
+            "WHERE creator_id = ?1 "
+        } else {
+            ""
+        }
+    );
+
+    let mut query = sqlx::query(&sql);
+    if let Some(cid) = creator_id {
+        query = query.bind(cid);
+    }
+
+    let rows = query.fetch_all(pool).await?;
 
     Ok(rows
         .into_iter()
         .map(|r| ReferenceSourceRow {
             reference_source_id: r.get("reference_source_id"),
+            creator_id: r.get("creator_id"),
             workspace_id: r.get("workspace_id"),
             source_type: r.get("source_type"),
             source_mutability: r.get("source_mutability"),
@@ -273,6 +313,9 @@ pub async fn list(
             scan_status: r.get("scan_status"),
             created_at: r.get("created_at"),
             updated_at: r.get("updated_at"),
+            last_refreshed_at: r.get("last_refreshed_at"),
+            refresh_policy: r.get("refresh_policy"),
+            refresh_status: r.get("refresh_status"),
         })
         .collect())
 }
@@ -290,18 +333,22 @@ pub async fn get_by_id(
 ) -> Result<Option<ReferenceSourceRow>, LocalDbError> {
     let row = sqlx::query!(
         r#"SELECT
-             reference_source_id as "reference_source_id!",
-             workspace_id as "workspace_id!",
-             source_type as "source_type!",
-             source_mutability as "source_mutability!",
-             uri as "uri!",
-             title as "title!",
-             tags,
-             content_hash,
-             content_path,
-             scan_status as "scan_status!",
-             created_at as "created_at!",
-             updated_at
+              reference_source_id as "reference_source_id!",
+              creator_id as "creator_id!",
+              workspace_id as "workspace_id!",
+              source_type as "source_type!",
+              source_mutability as "source_mutability!",
+              uri as "uri!",
+              title as "title!",
+              tags,
+              content_hash,
+              content_path,
+              scan_status as "scan_status!",
+              created_at as "created_at!",
+              updated_at,
+              last_refreshed_at,
+              refresh_policy as "refresh_policy!",
+              refresh_status
            FROM reference_sources WHERE reference_source_id = ?"#,
         reference_source_id
     )
@@ -310,6 +357,7 @@ pub async fn get_by_id(
 
     Ok(row.map(|r| ReferenceSourceRow {
         reference_source_id: r.reference_source_id,
+        creator_id: r.creator_id,
         workspace_id: r.workspace_id,
         source_type: r.source_type,
         source_mutability: r.source_mutability,
@@ -321,7 +369,235 @@ pub async fn get_by_id(
         scan_status: r.scan_status,
         created_at: r.created_at,
         updated_at: r.updated_at,
+        last_refreshed_at: r.last_refreshed_at,
+        refresh_policy: r.refresh_policy,
+        refresh_status: r.refresh_status,
     }))
+}
+
+/// Get a reference source by ID, scoped to a specific creator (H-002: cross-creator isolation).
+///
+/// Returns `None` if the record does not exist **or** belongs to a different creator.
+/// This is the preferred lookup for paths that have access to creator context.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn find_by_id_for_creator(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+    creator_id: &str,
+) -> Result<Option<ReferenceSourceRow>, LocalDbError> {
+    let row = sqlx::query!(
+        r#"SELECT
+              reference_source_id as "reference_source_id!",
+              creator_id as "creator_id!",
+              workspace_id as "workspace_id!",
+              source_type as "source_type!",
+              source_mutability as "source_mutability!",
+              uri as "uri!",
+              title as "title!",
+              tags,
+              content_hash,
+              content_path,
+              scan_status as "scan_status!",
+              created_at as "created_at!",
+              updated_at,
+              last_refreshed_at,
+              refresh_policy as "refresh_policy!",
+              refresh_status
+           FROM reference_sources
+           WHERE reference_source_id = ?1 AND creator_id = ?2"#,
+        reference_source_id,
+        creator_id,
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| ReferenceSourceRow {
+        reference_source_id: r.reference_source_id,
+        creator_id: r.creator_id,
+        workspace_id: r.workspace_id,
+        source_type: r.source_type,
+        source_mutability: r.source_mutability,
+        uri: r.uri,
+        title: r.title,
+        tags: r.tags,
+        content_hash: r.content_hash,
+        content_path: r.content_path,
+        scan_status: r.scan_status,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        last_refreshed_at: r.last_refreshed_at,
+        refresh_policy: r.refresh_policy,
+        refresh_status: r.refresh_status,
+    }))
+}
+
+// ── Refresh lifecycle DAOs (V1.58 P1) ──────────────────────────────────
+
+/// Set the refresh policy for a reference source.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn set_refresh_policy(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+    policy: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        "UPDATE reference_sources SET refresh_policy = ? WHERE reference_source_id = ?",
+        policy,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Mark a reference source as currently refreshing.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn mark_refreshing(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+) -> Result<(), LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query!(
+        "UPDATE reference_sources SET refresh_status = 'refreshing', updated_at = ? WHERE reference_source_id = ?",
+        now,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Mark a reference source as successfully refreshed with a new body hash.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn mark_refreshed(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+    new_body_hash: &str,
+) -> Result<(), LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query!(
+        "UPDATE reference_sources SET last_refreshed_at = ?, refresh_status = 'fresh', content_hash = ?, updated_at = ? WHERE reference_source_id = ?",
+        now,
+        new_body_hash,
+        now,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Mark a reference source refresh as failed with an error message.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn mark_refresh_error(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+    _error_msg: &str,
+) -> Result<(), LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    // The error message is logged via tracing in the caller (capability handler);
+    // we store the status change only.
+    sqlx::query!(
+        "UPDATE reference_sources SET refresh_status = 'error', updated_at = ? WHERE reference_source_id = ?",
+        now,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Find stale reference sources that need refreshing.
+///
+/// `stale_threshold_seconds` is the interval (in seconds) after which a
+/// `scheduled` source is considered stale. `on_change` sources are always
+/// included (they need constant polling). Sources with `refresh_policy = 'offline'`
+/// or `refresh_status = 'refreshing'` are excluded.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn find_stale_sources(
+    pool: &SqlitePool,
+    limit: Option<i64>,
+    stale_threshold_seconds: i64,
+) -> Result<Vec<ReferenceSourceRow>, LocalDbError> {
+    let limit = limit.unwrap_or(50).clamp(1, 500);
+    // SAFETY: dynamic SQL — compile-time macro not sufficient for
+    // parameterized LIMIT and dynamic stale-threshold arithmetic.
+    let rows = sqlx::query(&format!(
+        "SELECT
+              reference_source_id,
+              creator_id,
+              workspace_id,
+              source_type,
+              source_mutability,
+              uri,
+              title,
+              tags,
+              content_hash,
+              content_path,
+              scan_status,
+              created_at,
+              updated_at,
+              last_refreshed_at,
+              refresh_policy,
+              refresh_status
+           FROM reference_sources
+           WHERE refresh_policy != 'offline'
+             AND (refresh_status IS NULL OR refresh_status != 'refreshing')
+             AND (
+                 refresh_policy = 'on_change'
+                 OR (
+                     refresh_policy = 'scheduled'
+                     AND (
+                         last_refreshed_at IS NULL
+                         OR last_refreshed_at < datetime('now', '-{stale_threshold_seconds} seconds')
+                     )
+                 )
+             )
+           ORDER BY last_refreshed_at ASC NULLS FIRST
+           LIMIT {limit}"
+    ))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| ReferenceSourceRow {
+            reference_source_id: r.get("reference_source_id"),
+            creator_id: r.get("creator_id"),
+            workspace_id: r.get("workspace_id"),
+            source_type: r.get("source_type"),
+            source_mutability: r.get("source_mutability"),
+            uri: r.get("uri"),
+            title: r.get("title"),
+            tags: r.get("tags"),
+            content_hash: r.get("content_hash"),
+            content_path: r.get("content_path"),
+            scan_status: r.get("scan_status"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+            last_refreshed_at: r.get("last_refreshed_at"),
+            refresh_policy: r.get("refresh_policy"),
+            refresh_status: r.get("refresh_status"),
+        })
+        .collect())
 }
 
 // ── Adapter: DB row → Domain model ────────────────────────────────────
@@ -461,7 +737,7 @@ mod tests {
         .await
         .unwrap();
 
-        let all = list(&pool, None, None).await.unwrap();
+        let all = list(&pool, None, None, None).await.unwrap();
         assert_eq!(all.len(), 2);
 
         // Ordered by created_at DESC — newest first
@@ -499,11 +775,11 @@ mod tests {
         }
 
         // Page 1: limit=2, offset=0
-        let page1 = list(&pool, Some(2), Some(0)).await.unwrap();
+        let page1 = list(&pool, Some(2), Some(0), None).await.unwrap();
         assert_eq!(page1.len(), 2);
 
         // Page 2: limit=2, offset=2
-        let page2 = list(&pool, Some(2), Some(2)).await.unwrap();
+        let page2 = list(&pool, Some(2), Some(2), None).await.unwrap();
         assert_eq!(page2.len(), 1);
 
         // No overlap

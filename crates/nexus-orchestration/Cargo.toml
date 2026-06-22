@@ -41,7 +41,7 @@ chrono-tz = { workspace = true }
 # V1.50 T-B P1: review-time KB candidate extraction heuristic (quality_loop).
 regex = { workspace = true }
 blake3 = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 include_dir = "0.7"
 handlebars = { workspace = true }
 anyhow = { workspace = true }
@@ -72,3 +72,10 @@ serial_test = "3"
 sqlx = { workspace = true }
 serde_json = { workspace = true }
 nexus-local-db = { path = "../nexus-local-db" }
+# V1.58 P0 T14 (R-V156P1-L005): criterion benchmark for registry.refresh latency.
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# V1.58 P0 T14 (R-V156P1-L005): registry.refresh latency benchmark (cold + warm cache).
+[[bench]]
+name = "registry_refresh_latency"
+harness = false

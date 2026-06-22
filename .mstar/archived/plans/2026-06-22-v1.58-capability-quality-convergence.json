@@ -1,0 +1,38 @@
+{
+  "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+  "title": "Capability Quality Convergence (P2)",
+  "iteration": "V1.58",
+  "track": "Track A",
+  "wave": "Wave 2 (after Wave 1 accepts)",
+  "effort": "M",
+  "owner": "@fullstack-dev (Track A canonical owner)",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.58-capability-quality-convergence.md",
+  "working_branch": "feature/v1.58-capability-quality-convergence",
+  "merge_target": "iteration/v1.58",
+  "depends_on": [
+    "2026-06-22-v1.58-workspace-occ-hardening",
+    "2026-06-22-v1.58-df44-reference-refresh-pipeline"
+  ],
+  "created": "2026-06-22",
+  "merge_commit": "4bfb1399",
+  "closed_at": "2026-06-22",
+  "qc_reports": [
+    {
+      "reviewer": "qc-specialist",
+      "verdict": "Approve",
+      "commit": "04e14908"
+    },
+    {
+      "reviewer": "qc-specialist-2",
+      "verdict": "Approve",
+      "commit": "579294ca"
+    },
+    {
+      "reviewer": "qc-specialist-3",
+      "verdict": "Approve",
+      "commit": "4a76634c"
+    }
+  ],
+  "completion_report": "P2: Capability quality convergence (12/16 tasks done; 4 low-priority deferred with rationale). QC tri-review (3/3 Approve on first review, no fix-wave). Spec amendments: preset-conditional-routing.md §3.3 null semantics + 0-predecessor converge reconciliation + converge timeout documentation. Carry-forwards closed: R-V156P2-M001..M003+L001..L004, R-V156P2-CACHE-01, R-V156P3-W001/W002+S001/S002/S004, R-V157P1-W001."
+}

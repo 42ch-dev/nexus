@@ -188,6 +188,16 @@ correspond to an actual `#[test]` or `#[tokio::test]` function
 in the repository. A cross-validation test in `capability_registry.rs`
 verifies that all 7 fields are populated for every registered row.
 
+### 2.8 `nexus.reference.refresh` (V1.58 P1 — DF-44)
+
+**id**: `nexus.reference.refresh`
+**access**: `Read` + side-effect (writes `last_refreshed_at` / `refresh_status` to `reference_sources`)
+**admission**: Reference source must exist in `reference_sources` table; `refresh_policy != 'offline'` (else `policy_blocked`); URL must be valid (else `invalid_input`); network timeout returns `transient_error`.
+**handler**: `ReferenceRefresh::run()` in `crates/nexus-orchestration/src/capability/builtins/reference_refresh.rs`. Registered in orchestration `CapabilityRegistry` (pool-aware; without pool returns `WorkerUnavailable`). Not registered in `host_tool_registry()` (reference-source-scoped, not ACP-facing).
+**ACP wire**: Not ACP-facing — dispatched internally by daemon refresh-scheduler hook and direct capability invocation.
+**failure mode**: `PolicyBlocked` when `refresh_policy = 'offline'`; `InvalidInput` when reference source not found or URL is empty; `TransientExternal` on network timeout.
+**handler test vector**: ≥1 success (fetch + compare + update) + ≥1 failure (offline source → policy_blocked, not-found → invalid_input, network error → error).
+
 ---
 
 ## 3. Authority chain
@@ -224,3 +234,52 @@ Promote decision checklist for P-last:
 - [ ] `acp-capability-set.md` remains catalog-only and points here for runtime SSOT.
 - [x] `agent-nexus-tool-bridge.md` §8 documents write-tool dispatch patterns and allocation cache.
 - [ ] P-last decides whether this overlay is promoted into a Master or retained as a Draft overlay with a successor plan.
+
+---
+
+## V1.58 P0 Draft overlay: `registry.refresh` capability body extension
+
+**Status**: Draft (V1.58 P0)
+**Plans**: `2026-06-22-v1.58-workspace-occ-hardening` (T7–T16, T20)
+
+### Body extension
+
+The `registry.refresh` capability (`crates/nexus-orchestration/src/capability/builtins/registry.rs`)
+gained the following quality hardening in V1.58 P0:
+
+- **`force` param wired** (R-V156P1-M003): `RegistryRefreshInput.force` is
+  parsed and honored. In synthetic mode it is a no-op (embedded snapshot is
+  always fresh). In CDN mode it bypasses cache freshness. Logged via
+  `tracing::info!(force, ...)`.
+- **Tracing spans** (R-V156P1-M004): `run()` is wrapped in a
+  `tracing::info_span!("registry_refresh", force, cdn_configured, generated_at)`
+  covering admission → fetch → response phases.
+- **Shared reqwest client** (R-V156P1-M005): a `LazyLock<reqwest::Client>`
+  (`SHARED_CDN_CLIENT`) with `redirect(Policy::limited(0))` + connection
+  pooling is reused across invocations. Per-request timeout applied via
+  `.timeout()` on the request builder.
+- **Help text** (R-V156P1-L001): `registry_refresh_help_text()` documents
+  HTTPS-only + public-internet requirement + `force` semantics.
+- **Body-size cap configurable** (R-V156P1-L002): `CdnConfig.max_body_bytes`
+  (default 8 MiB via `DEFAULT_MAX_CDN_BODY_SIZE`); `CdnConfig::new`
+  constructor.
+- **Retry jitter** (R-V156P1-L004): 100–500 ms randomized jitter added to
+  the exponential backoff via `retry_jitter_ms()`.
+- **Latency benchmark** (R-V156P1-L005):
+  `crates/nexus-orchestration/benches/registry_refresh_latency.rs` (cold +
+  warm).
+- **`generated_at` determinism** (R-V156P1-L006): captured once per
+  invocation (`now = Utc::now().to_rfc3339()`) before the retry loop.
+- **Structured metrics** (R-V156P1-L007): AtomicU64 counters —
+  `refresh_total`, `refresh_success`, `refresh_failure`,
+  `refresh_cache_hit` — with pub readers.
+
+### Per-ID test vector extension (R-V157P0-L002)
+
+Failure-path test vectors for `registry.refresh`:
+- `registry_refresh_rejects_invalid_input_type` — non-object input →
+  `CapabilityError::InputInvalid`.
+- `registry_refresh_rejects_non_boolean_force` — string `force` →
+  `CapabilityError::InputInvalid`.
+- `registry_refresh_rejects_unknown_field_strictly` — documents the
+  serde-default contract (unknown fields ignored, not rejected).
