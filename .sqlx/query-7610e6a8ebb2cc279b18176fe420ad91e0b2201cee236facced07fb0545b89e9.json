@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n              reference_source_id as \"reference_source_id!\",\n              creator_id as \"creator_id!\",\n              workspace_id as \"workspace_id!\",\n              source_type as \"source_type!\",\n              source_mutability as \"source_mutability!\",\n              uri as \"uri!\",\n              title as \"title!\",\n              tags,\n              content_hash,\n              content_path,\n              scan_status as \"scan_status!\",\n              created_at as \"created_at!\",\n              updated_at,\n              last_refreshed_at,\n              refresh_policy as \"refresh_policy!\",\n              refresh_status\n           FROM reference_sources WHERE reference_source_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "reference_source_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "workspace_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_type!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_mutability!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "uri!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "tags",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_hash",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_path",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "scan_status!",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "last_refreshed_at",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "refresh_policy!",
+        "ordinal": 14,
+        "type_info": "Text"
+      },
+      {
+        "name": "refresh_status",
+        "ordinal": 15,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "7610e6a8ebb2cc279b18176fe420ad91e0b2201cee236facced07fb0545b89e9"
+}
