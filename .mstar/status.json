@@ -3,14 +3,14 @@
   "updated_at": "2026-06-22T23:30:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.60",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.59 (retired, merged PR #81 @ a0d2e503)",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.60",
+    "latest_active_compass": "v1.60-df46-local-parity-and-script-depth",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "pending",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -64,18 +64,22 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/81"
     },
     "tech_debt_summary": {
-      "total_open": 22,
+      "total_open": 28,
       "total_deferred": 0,
-      "total_resolved": 35,
+      "total_resolved": 63,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 22,
-        "medium": 0
+        "low": 28,
+        "medium": 0,
+        "high": 0
       },
       "by_target_active": {
-        "V1.59+": 14,
-        "V1.60+": 8
+        "V1.52 T-A P2": 1,
+        "V1.52 P-last": 1,
+        "V1.52 P-last WL-A": 14,
+        "V1.60+": 12
       },
+      "v1_60_preamble_note": "V1.60 P-1 T0 bulk-resolve applied 28 V1.57+ rows per forensic audit (25 CONFIRMED_CLOSED + 2 PARTIALLY_CLOSED + 1 wontfix). 4 V1.58 P2 NOT_CLOSED rows retargeted V1.57+ -> V1.60+ for P-last absorption. Pre-bulk-resolve total_open was 56 (honest lifecycle count); post-bulk-resolve is 28.",
       "v1_58_closeout_note": "V1.58 closed 33 of 35 V1.57+/V1.58+ residuals + DF-44 fully closed. 14 remaining are V1.52-era WL-A polish residuals explicitly deferred to V1.59+ per compass §6. 33 new residuals closed: R-V156P0-M001..M006 (workspace OCC), R-V156P1-M003..M005+L001..L007 (capability surface), R-V156-PROCESS-01+R-V156P1-CACHE-01+R-V156P2-CACHE-01 (process), R-V156P2-M001..M003+L001..L004 (DF-56 independent), R-V156P3-W001/W002+S001/S002/S004 (DF-56 dependent), R-V157P0-L001/L002+R-V157P1-W001 (V1.57-new). DF-44 closed end-to-end (P1 core + P3 CLI + body file write). All 4 implement plans merged to iteration/v1.58."
     },
     "v1_57_carry_forward_index": {
@@ -98,7 +102,8 @@
       "R-V157P1-W001": "P2 T13 — host-call smoke un-ignore (1 medium)",
       "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
       "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
-    }
+    },
+    "updated_at": "2026-06-22T23:59:00Z"
   },
   "residual_findings": {
     "2026-06-22-v1.54-game-bible-scaffold": [
@@ -2113,7 +2118,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M001]",
         "note": "Deferrable medium; surfaced by qc1 W-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: sha2 dep lifted into root Cargo.toml [workspace.dependencies] line 92; all 4 consumer crates reference sha2 = { workspace = true }. Verified on main.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "d4a0b3ac"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P0-M002",
@@ -2126,7 +2139,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M002]",
         "note": "Deferrable medium; surfaced by qc2 W-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: canonicalize_workspace_root() (async, spawn_blocking) + enforce_path_boundary() + symlink_metadata() non-traversing check at session.rs:159-349. Fix-wave 99da008f closed qc2-H-2 TOCTOU with symlink_metadata re-validation.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "764cee49"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P0-M003",
@@ -2139,7 +2160,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M003]",
         "note": "Deferrable medium; surfaced by qc2 W-002. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs on main; two-concurrent-consumer test asserts single-winner on consume_session + commit_session.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "bf9e7677"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P0-M004",
@@ -2152,7 +2181,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M004]",
         "note": "Deferrable medium; surfaced by qc3 W-QC3-001. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: compute_content_hashes + compute_single_file_hash migrated to tokio::fs + AsyncReadExt + tokio::task::spawn_blocking for canonicalize syscall. Fix-wave 99da008f hardened.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "764cee49"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P0-M005",
@@ -2165,7 +2202,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M005]",
         "note": "Deferrable medium; surfaced by qc3 W-QC3-002. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: WorkspaceSessionManager::commit_session (line 650 on main) binds validate+consume into transaction-guarded call; db::consume_session atomic UPDATE WHERE consumed = 0 is CAS primitive. Fix-wave added validate_changes_manifest_rejects_symlink_in_modify_path regression test.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "bf9e7677"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P0-M006",
@@ -2178,7 +2223,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M006]",
         "note": "Deferrable medium; surfaced by qc3 W-QC3-003. No blocking — V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: occ_conflict_total() AtomicU64 reader + tracing::warn! with session_id and conflict_type fields at AlreadyConsumed (line 621) and HashConflict (line 663) sites on main.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "bf9e7677"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       }
     ],
     "2026-06-22-v1.56-df29-registry-refresh": [
@@ -2237,7 +2290,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M003]",
         "note": "Deferrable medium; surfaced by qc1 F-103 (architecture). No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed (nuance): initially wired via 3347fee8, then qc2-M-1 fix-wave a2168175 REMOVED the entire force field (dead code — no cache layer to bypass). Backward compat: serde ignores unknown fields; registry_refresh_tolerates_historical_force_field test added. Residual resolved by eliminating the dead code.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "a2168175"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-M004",
@@ -2250,7 +2311,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M004]",
         "note": "Deferrable medium; surfaced by qc3 F-001 (performance/reliability). No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: tracing::info_span!('registry_refresh', ...) wraps run() (line 408); tracing::info! at admission (415), debug! at fetch (420), warn! at fallback (446), debug! at synthetic-serve (473) on main.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-M005",
@@ -2263,7 +2332,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-M005]",
         "note": "Deferrable medium; surfaced by qc3 F-002 (performance/reliability). No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: static SHARED_CDN_CLIENT: LazyLock<reqwest::Client> with connection pooling at registry.rs:71-76 on main. All fetch sites use SHARED_CDN_CLIENT.clone().",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-L001",
@@ -2276,7 +2353,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L001]",
         "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #1. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: registry_refresh_help_text() (line 89) explicitly documents HTTPS-only + public-internet requirement; covered by help_text_documents_https_and_public_requirement test.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-L002",
@@ -2289,7 +2374,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L002]",
         "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #2. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: CdnConfig.max_body_bytes configurable; DEFAULT_MAX_CDN_BODY_SIZE = 8 * 1024 * 1024 constant; cdn_config_new_defaults_to_8mib + cdn_config_max_body_bytes_is_overridable tests.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-L003",
@@ -2302,7 +2395,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L003]",
         "note": "Deferrable low; surfaced by qc2-revalidation cosmetic Suggestion #3. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed (audit-only): symbols already follow registry_refresh_*/refresh_* prefix convention; no renames needed. qc1 verdict: Approve.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-L004",
@@ -2315,7 +2416,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L004]",
         "note": "Deferrable low; surfaced by qc3 F-003. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: retry_jitter_ms() returns 100-500ms (line 100-105 on main); applied in exponential backoff (line 546-548). retry_jitter_is_in_100_to_500ms_range test.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-L005",
@@ -2328,7 +2437,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L005]",
         "note": "Deferrable low; surfaced by qc3 F-004. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: crates/nexus-orchestration/benches/registry_refresh_latency.rs on main with synthetic_cold_construct_and_run + synthetic_warm_run + fallback_warm_run Criterion benches; criterion = \"0.5\" dev-dep added.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-L006",
@@ -2341,7 +2458,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L006]",
         "note": "Deferrable low; surfaced by qc3 F-005. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: now = Utc::now().to_rfc3339() captured once before retry loop (line 395 on main); generated_at_is_set_once_per_invocation determinism test added.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-L007",
@@ -2354,7 +2479,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-L007]",
         "note": "Deferrable low; surfaced by qc3 F-006. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: REFRESH_TOTAL, REFRESH_SUCCESS_TOTAL, REFRESH_FAILURE_TOTAL, REFRESH_CACHE_HIT_TOTAL AtomicU64 counters with pub readers at registry.rs:36-60 on main; metrics_increment_on_synthetic_refresh + metrics_counters_are_readable tests.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "3347fee8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P1-CACHE-01",
@@ -2367,7 +2500,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156P1-CACHE-01]",
         "note": "Deferrable medium; surfaced by PM mid-QA Gate 2 fail. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: crates/nexus-local-db/tests/sqlx_cache_intact.rs regression guard on main with comment referencing qc2-H-3 fix; asserts .sqlx/ directory exists with >= 50 query-*.json files. PM commit af82ad39 regenerated cache after P1 mass-deletion incident. .sqlx/ has 150 cache files on main.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "af82ad39"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156-MIDQA-01",
@@ -2380,7 +2521,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156-MIDQA-01]",
         "note": "Deferrable low; surfaced by PM mid-QA Gate 4 fail. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: commit message 'T17 cargo +nightly fmt clean (R-V156-MIDQA-01)'. qc1 + qc3 reports confirm 'Process Residuals (T17-T19) — All Closed' after fix-wave.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "cb6193ed"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156-PROCESS-01",
@@ -2393,7 +2542,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df29-registry-refresh][R-V156-PROCESS-01]",
         "note": "Deferrable low; surfaced by PM pre-QC + mid-QA hygiene. No blocking — V1.56 P1 marked Approve.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P0 closed: .sqlx/ cache hygiene protocol documented in .mstar/knowledge/specs/daemon-runtime.md §V1.58 P0 Draft overlay lines 169-221; explicitly notes --tests flag is critical for test query! macros (lines 181-188, 206-211) and --workspace -- --tests ordering requirement.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+          "commit": "af82ad39"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       }
     ],
     "2026-06-22-v1.56-df56-independent-slice": [
@@ -2408,7 +2565,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M001]",
         "note": "Deferrable medium; surfaced by qc1 W-003 / qc2 revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 closed: 'Absent vs null vs empty string' paragraph added to preset-conditional-routing.md §3.3 (line 205 on main); distinguishes three field states with worked examples.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "ffcb2473"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P2-M002",
@@ -2421,7 +2586,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M002]",
         "note": "Deferrable medium; surfaced by qc2-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 closed: Spec reconciled — 'Converge states with 0 predecessors: gate is skipped, state advances immediately (no validation error)' replacing prior 'validation error (orphan)' text. Verified on main line 251.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "ffcb2473"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P2-M003",
@@ -2434,7 +2607,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M003]",
         "note": "Deferrable medium; surfaced by qc3-revalidation pre-existing. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 closed: crates/nexus-orchestration/tests/conditional_routing_e2e.rs (304 lines) on main with 8 #[tokio::test] integration tests loading YAML -> real loader -> parser -> scanner -> StateCompositeTask::run -> resolve_expression_target. qc2 explicit: M-003 All implemented.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "be29f3f8"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P2-CACHE-01",
@@ -2447,7 +2628,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-CACHE-01]",
         "note": "Deferrable medium; surfaced by qc3-revalidation C-NEW-001. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 closed: crates/nexus-orchestration/tests/converge_runtime_e2e.rs lines 12-30 on main carry explicit '# Test Contract (R-V156P2-CACHE-01)' doc-comment block. Audit confirmed all converge arrivals use record_converge_arrival; no bypass paths found.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "70c626b4"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P2-L001",
@@ -2457,10 +2646,12 @@
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
         "decision": "accept (defer to post-V1.56 hardening)",
         "owner": "@fullstack-dev (P2 implementer)",
-        "target": "V1.57+",
+        "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L001]",
         "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "deferred",
+        "target_date": "V1.60+",
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
       },
       {
         "id": "R-V156P2-L002",
@@ -2470,10 +2661,12 @@
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
         "decision": "accept (defer to post-V1.56 hardening)",
         "owner": "@fullstack-dev (P2 implementer)",
-        "target": "V1.57+",
+        "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L002]",
         "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "deferred",
+        "target_date": "V1.60+",
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
       },
       {
         "id": "R-V156P2-L003",
@@ -2486,7 +2679,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L003]",
         "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 PARTIALLY_CLOSED (PM accepts per V1.60 compass Q12): Spec paragraph 'Converge timeout' added at preset-conditional-routing.md line 256 on main, explicitly documenting that bounded timeout is NOT implemented. PM decision: spec-doc-only closure sufficient for pre-1.0 local-only scope; production bounded-timeout enforcement deferred to V1.61+ ConvergeConfig schema work.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "ffcb2473"
+        },
+        "_v1_60_audit_verdict": "partial"
       },
       {
         "id": "R-V156P2-L004",
@@ -2499,7 +2700,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L004]",
         "note": "Deferrable low; surfaced by qc3 M-002 (residual nuance). No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 NOT_CLOSED -> wontfix (PM decision per V1.60 compass Q10): V1.58 P2 T2 actively REVERSED the spec at preset-conditional-routing.md §3.3 from 'validation error (orphan)' to 'gate is skipped, state advances immediately' — the original ask (make 0-pred converge a hard error) is explicitly superseded. PM judges re-flipping spec would be more disruptive than the underlying issue warrants (pre-1.0, local-only, no measured incident).",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "ffcb2473"
+        },
+        "_v1_60_audit_verdict": "wontfix"
       }
     ],
     "2026-06-22-v1.56-df56-dependent-slice": [
@@ -2514,7 +2723,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-W001]",
         "note": "Deferrable medium; surfaced by qc3 W-001. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 closed: inject_workspace_context (line 1156 on main) emits tracing::debug! with state_id, source (hook vs default), conflict_detected, changes_applied (lines 1163, 1178). qc3 confirmed: T8 inject_workspace_context tracing.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "adcc13b9"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P3-W002",
@@ -2527,7 +2744,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-W002]",
         "note": "Deferrable medium; surfaced by qc3 W-002. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 closed: inject_registry_refresh_context (line 1086 on main) emits tracing::info! with capability, duration_ms, status at every invocation path. qc3 confirmed: T9 registry.refresh invocation instrumentation.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "adcc13b9"
+        },
+        "_v1_60_audit_verdict": "confirmed"
       },
       {
         "id": "R-V156P3-S001",
@@ -2537,10 +2762,12 @@
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
         "decision": "accept (defer to post-V1.56 hardening)",
         "owner": "@fullstack-dev-2 (P3 implementer)",
-        "target": "V1.57+",
+        "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S001]",
         "note": "Deferrable low; surfaced by qc3 S-001. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
-        "lifecycle": "deferred"
+        "lifecycle": "deferred",
+        "target_date": "V1.60+",
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
       },
       {
         "id": "R-V156P3-S002",
@@ -2550,10 +2777,12 @@
         "scope": "crates/nexus-orchestration/src/tasks/mod.rs + preset-conditional-routing.md + entity-scope-model.md (now amended)",
         "decision": "accept (defer to post-V1.56 hardening)",
         "owner": "@fullstack-dev-2 (P3 implementer)",
-        "target": "V1.57+",
+        "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S002]",
         "note": "Deferrable low; surfaced by qc3 S-002. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
-        "lifecycle": "deferred"
+        "lifecycle": "deferred",
+        "target_date": "V1.60+",
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
       },
       {
         "id": "R-V156P3-S003",
@@ -2588,7 +2817,15 @@
         "target": "V1.57+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S004]",
         "note": "Deferrable low; surfaced by qc1 S-004. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-22",
+        "closure_note": "V1.58 P2 PARTIALLY_CLOSED (PM accepts per V1.60 compass Q12): with_workspace_state builder at tasks/mod.rs line 793 on main has doc-comment lines 785-791 explaining production activation requires engine -> task context injection boundary changes. PM decision: doc-comment-only closure sufficient; production activation deferred to V1.61+ engine boundary work.",
+        "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+          "commit": "ffcb2473"
+        },
+        "_v1_60_audit_verdict": "partial"
       }
     ],
     "2026-06-22-v1.57-spec-governance-and-registry": [
