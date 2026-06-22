@@ -264,7 +264,12 @@
     "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
     "2026-06-22-v1.59-df12-outbox-consolidation",
     "2026-06-22-v1.59-mid-qc-and-fix-waves",
-    "2026-06-22-v1.59-hygiene-and-closeout"
+    "2026-06-22-v1.59-hygiene-and-closeout",
+    "2026-06-22-v1.60-compass-and-plan-stubs",
+    "2026-06-22-v1.60-df46-local-parity",
+    "2026-06-22-v1.60-script-depth-35",
+    "2026-06-22-v1.60-mid-qc-and-fix-waves",
+    "2026-06-22-v1.60-hygiene-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

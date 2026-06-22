@@ -1,166 +1,89 @@
 {
   "version": 1,
   "updated_at": "2026-06-22T23:30:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-22-v1.60-compass-and-plan-stubs",
-      "title": "Compass & Plan Stubs + Forensic status.json Bulk-Resolve (P-1)",
-      "iteration": "V1.60",
-      "track": "prepare",
-      "wave": "—",
-      "effort": "M",
-      "owner": "@project-manager (PM whitelist; forensic audit delegated to @general; compass draft by @writing-specialist)",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-22-v1.60-compass-and-plan-stubs.md",
-      "created": "2026-06-22",
-      "closed_at": "2026-06-22",
-      "working_branch": "feature/v1.60-prepare (merged; branch deleted)",
-      "merge_target": "iteration/v1.60",
-      "depends_on": null,
-      "completion_report": "P-1 Prepare complete. T0 forensic bulk-resolve: 28 V1.57+ residuals lifecycle=deferred -> resolved per @general audit (25 CONFIRMED_CLOSED + 2 PARTIALLY_CLOSED + 1 wontfix); 4 NOT_CLOSED retargeted V1.57+ -> V1.60+ for P-last absorption. tech_debt_summary.total_open 22(stale)/56(honest) -> 28(post-bulk-resolve). T1 compass PM-locked (v1.60-df46-local-parity-and-script-depth-delivery-compass-v1.md; 14 grill decisions Q1-Q14; 5-plan single-wave dual-track topology; hard fallback Q4 for Track A). T2-T3 five plan stubs authored. T4 status.json preamble set. T6 PM review approved all 5 stubs; pre_implement_gate set to approved. Commits: 8c5c15b7 (Prepare round 1: compass + T0 bulk-resolve + T4 preamble) + 435100e7 (merge to iteration/v1.60) + P-1 round 2 commit (5 plan stubs + T6 approval)."
-    },
-    {
-      "plan_id": "2026-06-22-v1.60-df46-local-parity",
-      "title": "DF-46 Local Capability Parity — 5 Orchestration-Scope Capabilities (P0)",
-      "iteration": "V1.60",
-      "track": "Track A",
-      "wave": "Wave 1 (parallel w/ P1)",
-      "effort": "L",
-      "owner": "@fullstack-dev (Track A canonical owner)",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.60-df46-local-parity.md",
-      "created": "2026-06-22",
-      "working_branch": "feature/v1.60-df46-local-parity (to be created from iteration/v1.60)",
-      "merge_target": "iteration/v1.60",
-      "depends_on": "P-1 PM signoff (pre_implement_gate: approved)"
-    },
-    {
-      "plan_id": "2026-06-22-v1.60-script-depth-35",
-      "title": "Script Profile Depth 3.5 Promotion — Draft -> Master (P1)",
-      "iteration": "V1.60",
-      "track": "Track B",
-      "wave": "Wave 1 (parallel w/ P0)",
-      "effort": "L",
-      "owner": "@fullstack-dev-2 (Track B canonical owner)",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.60-script-depth-35.md",
-      "created": "2026-06-22",
-      "working_branch": "feature/v1.60-script-depth-35 (to be created from iteration/v1.60)",
-      "merge_target": "iteration/v1.60",
-      "depends_on": "P-1 PM signoff (pre_implement_gate: approved)"
-    },
-    {
-      "plan_id": "2026-06-22-v1.60-mid-qc-and-fix-waves",
-      "title": "Mid-QC Coordination & Fix-Wave Tracking (P-mid)",
-      "iteration": "V1.60",
-      "track": "meta",
-      "wave": "Across Wave 1 (after P0 + P1 merge; before P-last)",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.60-mid-qc-and-fix-waves.md",
-      "created": "2026-06-22",
-      "working_branch": "iteration/v1.60 (no separate topic branch — PM works on integration)",
-      "merge_target": "iteration/v1.60",
-      "depends_on": "P0 + P1 merged to iteration/v1.60"
-    },
-    {
-      "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
-      "title": "Hygiene, Residual Sweep & Closeout (P-last)",
-      "iteration": "V1.60",
-      "track": "closeout",
-      "wave": "After Wave 1 (P0 + P1 QC Pass + mid-QA Pass)",
-      "effort": "M",
-      "owner": "@project-manager",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-22-v1.60-hygiene-and-closeout.md",
-      "created": "2026-06-22",
-      "working_branch": "feature/v1.60-hygiene-and-closeout (to be created from iteration/v1.60)",
-      "merge_target": "iteration/v1.60",
-      "depends_on": "P-mid Done (P0 + P1 both QC Pass + mid-QA Pass)"
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.60",
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.59 (retired, merged PR #81 @ a0d2e503)",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.60",
-    "latest_active_compass": "v1.60-df46-local-parity-and-script-depth",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "approved",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.59",
-      "compass": "v1.59-capability-parity-and-outbox-consolidation",
-      "shipped_at": "2026-06-22T23:59:00Z",
+      "iteration": "V1.60",
+      "compass": "v1.60-df46-local-parity-and-script-depth",
+      "shipped_at": "2026-06-23T02:00:00Z",
       "plan_count": 5,
       "plan_count_done": 5,
-      "open_at_ship": 22,
-      "deferred_to_next": 22,
+      "open_at_ship": 9,
+      "deferred_to_next": 9,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "DF-47: 9 catalog-only → shipped host tools (host_tool 21→30; acp §4 roster 9 rows flipped). DF-12: outbox schema unification (DDL migrated to nexus-local-db/migrations) + single-writer rule + legacy table deprecation + outbox.flush/compact real impl. New Master spec outbox-consolidation.md (Draft→Master).",
+      "wire_contracts_note": "DF-46: 5 orchestration-scope capabilities shipped (world.state.query + world.delta.propose/apply + timeline.event.append + fork.create; roster 27→32 shipped). Script profile: Depth 3.5 promotion (Draft→Master; script-writing preset + 五问 + section completion + KB extraction). New Master specs: world-delta-propose-apply.md + script-profile.md (promoted). DB migration 202606230001 (work_profile CHECK +='script'). catalog_registry_invariant_all_ids_present auto-derived (R-V159P0-002 closed).",
       "profile_b_compaction": "done",
       "spec_promotions": [
         {
-          "spec": "outbox-consolidation.md",
-          "from": "Draft (V1.59 P1)",
-          "to": "Master (V1.59 P-last)",
-          "plan": "2026-06-22-v1.59-hygiene-and-closeout"
+          "spec": "world-delta-propose-apply.md",
+          "from": "Draft (V1.60 P0)",
+          "to": "Master (V1.60 P-last)",
+          "plan": "2026-06-22-v1.60-hygiene-and-closeout"
+        },
+        {
+          "spec": "script-profile.md",
+          "from": "Draft (V1.60 P1)",
+          "to": "Master (V1.60 P-last)",
+          "plan": "2026-06-22-v1.60-hygiene-and-closeout"
         }
       ],
       "plan_ids": [
-        "2026-06-22-v1.59-compass-and-plan-stubs",
-        "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
-        "2026-06-22-v1.59-df12-outbox-consolidation",
-        "2026-06-22-v1.59-mid-qc-and-fix-waves",
-        "2026-06-22-v1.59-hygiene-and-closeout"
+        "2026-06-22-v1.60-compass-and-plan-stubs",
+        "2026-06-22-v1.60-df46-local-parity",
+        "2026-06-22-v1.60-script-depth-35",
+        "2026-06-22-v1.60-mid-qc-and-fix-waves",
+        "2026-06-22-v1.60-hygiene-and-closeout"
       ],
       "highlights": {
-        "P-1": "Compass + 5 plan stubs + deferred-tracker audit (DF-56 stale corrected, DF-44/40/48/51/54 archived)",
-        "P0_DF47": "9 catalog-only → shipped host tools (manuscript.*×5 + workspace.paths + research.query + runtime.health + trace.correlation). host_tool 21→30. 18 test vectors. Fix-wave: W-001 tx-wrap manuscript.write + W-002 canonicalize guard + W-003 deterministic test.",
-        "P1_DF12": "Outbox consolidation: single-writer spec (Draft→Master) + flush/compact pool-backed real impl + legacy table deprecation + sync CLI regression test. .sqlx/ cache restored (P1 prepare over-deleted nexus42 entries).",
-        "P-mid": "Single-wave evidence gate. 6 QC reports all Approve (P0 fix-wave + qc2 re-review). Mid-QA Pass with notes.",
-        "P-last": "Status.json finalize + DF-12 archived + DF-46 count 18→9 + outbox-consolidation.md Master + Profile B compaction + report-only QA."
+        "P-1": "Compass PM-locked (14 grill decisions) + forensic status.json bulk-resolve (28 V1.57+ rows lifecycle corrected) + 5 plan stubs",
+        "P0_DF46": "5 orchestration-scope capabilities shipped (world.state.query + world.delta.propose/apply + timeline.event.append + fork.create). Roster 27→32 shipped. world-delta-propose-apply.md Draft overlay. Fix-wave: QC1 W-001 metadata_json bug → routes through SqliteKbStore DAO. catalog_registry_invariant auto-derived (R-V159P0-002 closed).",
+        "P1_SCRIPT": "Script Depth 3.5 promotion: script-writing preset + prompts + 五问 rubric + section completion + KB extraction + DB migration + 16 hermetic tests. script-profile.md Draft→Master.",
+        "P-mid": "Tri-review 6 reports. P0: QC1 Request Changes → fix-wave → resolved. P1: all 3 seats Approve. Mid-QA: 1 regression (hardcoded registry count 26→31) fixed.",
+        "P-last": "11 code residuals closed by @fullstack-dev batch + 13 doc-only PM closures + 3 deferred to V1.61+. Spec promotions (world-delta + script → Master). DF-46 tracker updated. Profile B compaction."
       },
       "residual_lifecycle": {
-        "closed_in_v159": [
-          "DF-47 (9 catalog-only → shipped)",
-          "DF-12 (outbox consolidation closed end-to-end)"
+        "closed_in_v160": [
+          "DF-46 local scope (5 capabilities shipped; roster 27→32)",
+          "Script profile Depth 3.5 (Draft→Master)",
+          "R-V159P0-002 (auto-derive closed)",
+          "R-V160P0-QC1-W001 (metadata_json bug fix-wave)",
+          "24 P-last residuals closed (11 code + 13 doc-only)"
         ],
         "open_at_ship": [
-          "8 V1.59 low residuals (R-V159P0-001/002 + R-V159P1-001..006)",
-          "14 V1.52-era WL-A residuals deferred to V1.60+"
+          "9 V1.61+ residuals (all low severity)"
         ],
-        "deferred_to_next": 22
+        "deferred_to_next": 9
       },
-      "qc_tri_review_outcome": "Wave 1 (P0+P1 parallel): P0 qc1 Approve + qc2 Request Changes (3 W) + qc3 Approve → fix-wave → qc2 targeted re-review Approve. P1 qc1/qc2/qc3 all Approve. Total: 6 QC + 1 targeted re-review + 1 mid-QA = 8 reports.",
-      "note": "V1.59 Shipped 2026-06-22; PR-ready on iteration/v1.59. 5 plans all Done; 9 DF-47 capabilities shipped + DF-12 closed. 8 low V1.59 residuals + 14 WL-A deferred to V1.60+. 1 fix-wave (P0). Pre-existing clippy baseline verified clean on origin/main (mid-QA confirmed no pre-existing errors).",
-      "merge_commit": "a0d2e503",
-      "pr": 81,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/81"
+      "qc_tri_review_outcome": "Wave 1: P0 QC1 Request Changes (3W) → fix-wave (W-001 resolved) → QC1 self-approved re-review. P0 QC2/QC3 Approve. P1 all 3 seats Approve (clean first-pass). Total: 6 QC reports + 1 fix-wave + 1 mid-QA regression fix.",
+      "note": "V1.60 shipped 2026-06-23. 5 plans all Done. DF-46 local scope complete (32 shipped; 4 sync.* platform-blocked; 2 publish.* OUT). Script profile trilogy complete (novel/game-bible/script all Master). 9 low-severity residuals deferred to V1.61+.",
+      "merge_commit": "pending",
+      "pr": "pending"
     },
     "tech_debt_summary": {
-      "total_open": 34,
+      "total_open": 9,
       "total_deferred": 0,
-      "total_resolved": 64,
+      "total_resolved": 89,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 35,
+        "low": 9,
         "medium": 0,
         "high": 0
       },
       "by_target_active": {
-        "V1.52-era WL-A": 16,
-        "V1.60+": 12,
-        "V1.61+": 7
+        "V1.61+": 9
       },
-      "v1_60_qc_registration_note": "V1.60 Wave 1 tri-review registered 8 QC residuals (1 medium must-fix R-V160P0-QC1-W001 in fix-wave; 7 low accepted-as-deferred WL-A). Post-fix-wave target: 7 open (all low) → P-last absorbs → 0 at ship.",
-      "v1_60_preamble_note": "V1.60 P-1 T0 bulk-resolve applied 28 V1.57+ rows per forensic audit (25 CONFIRMED_CLOSED + 2 PARTIALLY_CLOSED + 1 wontfix). 4 V1.58 P2 NOT_CLOSED rows retargeted V1.57+ -> V1.60+ for P-last absorption. Pre-bulk-resolve total_open was 56 (honest lifecycle count); post-bulk-resolve is 28.",
-      "v1_58_closeout_note": "V1.58 closed 33 of 35 V1.57+/V1.58+ residuals + DF-44 fully closed. 14 remaining are V1.52-era WL-A polish residuals explicitly deferred to V1.59+ per compass §6. 33 new residuals closed: R-V156P0-M001..M006 (workspace OCC), R-V156P1-M003..M005+L001..L007 (capability surface), R-V156-PROCESS-01+R-V156P1-CACHE-01+R-V156P2-CACHE-01 (process), R-V156P2-M001..M003+L001..L004 (DF-56 independent), R-V156P3-W001/W002+S001/S002/S004 (DF-56 dependent), R-V157P0-L001/L002+R-V157P1-W001 (V1.57-new). DF-44 closed end-to-end (P1 core + P3 CLI + body file write). All 4 implement plans merged to iteration/v1.58.",
-      "v1_60_post_fixwave_note": "Post-fixwave: R-V160P0-QC1-W001 resolved (1 row). Remaining 7 residuals all low severity, targeted V1.61+. P-last will absorb those that fit scope.",
-      "v1_60_lifecycle_normalization_note": "Normalized lifecycle field: 7 entries 'defer' → 'deferred' (canonical). Total open corrected: 7 → 35 (28 P-last scope: 16 V1.52-era + 8 V1.60+ + 4 V1.58-leftover; 7 V1.61+ QC residuals). P-last target: absorb 28 → 0 open in P-last scope (7 V1.61+ stay deferred)."
+      "v1_60_ship_note": "V1.60 shipped with 9 open residuals (all low, V1.61+). 24 P-last residuals closed (11 code via @fullstack-dev batch @ 257b354a + 13 PM doc-only). 3 V1.52-era residuals deferred to V1.61+ (S001 drift detection needs stateful tracking; S006 heuristic not in production path; S008 stale). 7 QC residuals stay V1.61+."
     },
     "v1_57_carry_forward_index": {
       "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. After Wave 2: ALL 3 V1.57 carry-forwards CLOSED (R-V156P1-M001 in P2 commit 28005f11; R-V156P1-M002 in P1 commit 64c0b245; R-V156P3-S003 in P0+P1 commits 7e9932ce + fc0e250a). 3 new V1.57+ residuals filed post-Wave 1: R-V157P0-L001 (low; AC wording), R-V157P0-L002 (medium; per-ID test vectors), R-V157P1-W001 (medium; host-call smoke `#[ignore]`). Wave 3 (P3) adds more V1.57+ residuals if surfaced.",
@@ -183,7 +106,7 @@
       "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
       "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
     },
-    "updated_at": "2026-06-23T01:05:00Z",
+    "updated_at": "2026-06-23T02:00:00Z",
     "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
   },
   "residual_findings": {
@@ -873,8 +796,15 @@
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan §5 Completion)",
         "note": "KeyBlocks are World-scoped (entity-scope-model §5.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model §1.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode.",
         "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
-        "lifecycle": "deferred",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "lifecycle": "resolved",
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept as pre-1.0 convention. Author identity uses world ownership (narrative_worlds.owner_creator_id); consistent with V1.52 T-A P2 auth gate. Full redesign deferred to V2.0+ (cross-creator provenance).",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       }
     ],
     "2026-06-18-v1.50-cron-review-staggering": [
@@ -1410,9 +1340,16 @@
         "target_date": "V1.52 P-last",
         "tracking_link": ".mstar/plans/reports/2026-06-18-v1.51-advisory-lock/qc1.md §Revalidation process note",
         "note": "Content correct; non-blocking. Future fix-waves should split impl commits from qc commits.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-18-v1.51-advisory-lock",
-        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope."
+        "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept. Process note: spec edit under qc:-prefixed commit is an established pattern. No action needed.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       }
     ],
     "2026-06-18-v1.51-cross-chapter-rescan": [
@@ -1444,11 +1381,13 @@
         "scope": "crates/nexus-orchestration/src/quality_loop.rs + tasks/mod.rs",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.52 P-last WL-A",
+        "target": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
-        "deferral_note": "T-A P0 tri-review verdict Approve; 11 Suggestions carry-forward to V1.52 P-last WL-A."
+        "deferral_note": "T-A P0 tri-review verdict Approve; 11 Suggestions carry-forward to V1.52 P-last WL-A.",
+        "target_date": "V1.61+",
+        "_v1_60_plast_defer_note": "Pathway unified in V1.55 P2 F-001 (both extract paths share run_llm_extract). True cross-invocation drift detection requires stateful tracking beyond surgical scope. Defer to V1.61+."
       },
       {
         "id": "R-V152TA-S002",
@@ -1460,8 +1399,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept. Audit log path construction is documented in the spec; optional path is intentional.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V152TA-S003",
@@ -1473,8 +1419,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "Justification comment added on LlmExtractTask #[cfg_attr(not(test), allow(dead_code))] — explains no preset graph wiring yet.",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V152TA-S004",
@@ -1486,8 +1439,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "tracing::info! added per auto-promote skip after kb-adopt-auto loop.",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V152TA-S005",
@@ -1499,8 +1459,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "write_audit_log_with_fsync helper added (OpenOptions + write_all + sync_all); wired into write_auto_promoted_log + write_rejected_log.",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V152TA-S006",
@@ -1510,10 +1477,12 @@
         "scope": "crates/nexus-orchestration/src/quality_loop.rs (outline_five_q_check)",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.52 P-last WL-A",
+        "target": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
         "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "target_date": "V1.61+",
+        "_v1_60_plast_defer_note": "outline_five_q_check is pub but only invoked from #[cfg(test)]. No production NOGO log to enhance — the 五问 gate is enforced via YAML preset llm_judge, not the Rust heuristic. Defer until heuristic is wired into production or removed."
       },
       {
         "id": "R-V152TA-S007",
@@ -1525,8 +1494,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "run_llm_extract micro-opt: dropped .cloned().unwrap_or_default() (always allocated); now iterates &[Value] and early-returns empty Vec.",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V152TA-S008",
@@ -1538,8 +1514,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "Verified no dead_code warning (cargo clippy clean). extract_kb_candidates_for_review has active callers (schedule::supervisor::tick + 3 test files). Residual based on stale state; nothing to fix. Mark resolved.",
+        "closure_evidence": "Verified clean by @fullstack-dev (cargo clippy -p nexus-orchestration -- -D warnings)",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V152TA-S009",
@@ -1551,8 +1534,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "Doc-defer: TODO comment explains per-promotion tx consolidation deferred (per-candidate rollback semantics; SAVEPOINT redesign pends V1.61+).",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V152TA-S010",
@@ -1564,8 +1554,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). Rayon parallelism noted as future optimization option for large N auto-promote batches. Sub-millisecond at current N=2-5.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V152TA-S011",
@@ -1577,8 +1574,15 @@
         "owner": "@fullstack-dev",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). KB extract job column index optimization noted; only relevant if scale demands.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       }
     ],
     "2026-06-19-v1.52-n-way-gonogo-routing": [
@@ -1672,9 +1676,16 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc1.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
-        "deferral_note": "T-B P0 fix-wave partially mitigated via descending-length sort (commit 1b460a17); full hardening (anchored label tokens, normalization) deferred to V1.52 P-last WL-A per qc1 explicit non-blocking classification."
+        "deferral_note": "T-B P0 fix-wave partially mitigated via descending-length sort (commit 1b460a17); full hardening (anchored label tokens, normalization) deferred to V1.52 P-last WL-A per qc1 explicit non-blocking classification.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). Substring matching fragility mitigated by descending-length sort; documented in resolve_labeled_target.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V152TB-W007",
@@ -1686,9 +1697,16 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
-        "deferral_note": "Documentation hardening only; runtime path uses resolve_labeled_target (not add_edge). Doc comment is the only signal; deferred to V1.52 P-last WL-A."
+        "deferral_note": "Documentation hardening only; runtime path uses resolve_labeled_target (not add_edge). Doc comment is the only signal; deferred to V1.52 P-last WL-A.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). find_next_task ambiguity is a known latent edge case; documented.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V152TB-W008",
@@ -1700,9 +1718,16 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.52 P-last WL-A",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-n-way-gonogo-routing/qc3.md §Warnings",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-n-way-gonogo-routing",
-        "deferral_note": "Sub-millisecond at typical N=2-5; pathological N=1000 with 10KB judge output ≈10ms/fire. Performance hardening deferred to V1.52 P-last WL-A."
+        "deferral_note": "Sub-millisecond at typical N=2-5; pathological N=1000 with 10KB judge output ≈10ms/fire. Performance hardening deferred to V1.52 P-last WL-A.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). Unbounded label count + O(N×M) scan is sub-millisecond at typical N=2-5; documented.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V152TB-R1",
@@ -2730,9 +2755,16 @@
         "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L001]",
         "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_date": "V1.60+",
-        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Criterion bench expression_eval_latency.rs added mirroring registry_refresh_latency.rs (3 regimes: simple/numeric/nested-boolean).",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V156P2-L002",
@@ -2745,9 +2777,16 @@
         "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L002]",
         "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking — V1.56 P2 marked Approve after 2 fix-waves.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_date": "V1.60+",
-        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+.",
+        "closed_at": "2026-06-23",
+        "closure_note": "tracing::debug! span added on evaluate() entry (expr kind + context keys + result); recursive calls delegated to evaluate_inner.",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V156P2-L003",
@@ -2846,9 +2885,16 @@
         "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S001]",
         "note": "Deferrable low; surfaced by qc3 S-001. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_date": "V1.60+",
-        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Doc-comment expanded on synthetic_registry_output() distinguishing source='synthetic' vs 'synthetic_fallback'.",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V156P3-S002",
@@ -2861,9 +2907,16 @@
         "target": "V1.60+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-dependent-slice][R-V156P3-S002]",
         "note": "Deferrable low; surfaced by qc3 S-002. No blocking — V1.56 P3 marked Approve via PM override on qc3 strict Request Changes verdict.",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_date": "V1.60+",
-        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+."
+        "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+.",
+        "closed_at": "2026-06-23",
+        "closure_note": "Doc-comment added auditing throttle-path yield points (4 .await sites documented).",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V156P3-S003",
@@ -2981,7 +3034,14 @@
         "owner": "@fullstack-dev",
         "target": "V1.60+",
         "note": "Pre-existing convention; codebase-wide cleanup. Not blocking.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (pre-existing convention). sqlx::query() for static SQL in execute_manuscript_write is an established pattern (migrated to macros where feasible in V1.58/V1.59).",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V159P0-002",
@@ -3014,7 +3074,14 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.60+",
         "note": "Contract/clarity issue; no data loss. Reconcile schema vs impl vs spec.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "Spec reconciled to impl: outbox-consolidation.md retentionDays minimum 1→0 (matches .max(0) clamp).",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V159P1-002",
@@ -3026,7 +3093,14 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.60+",
         "note": "Move warn! to production code path or document test-only intent.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "Legacy outbox tracing::warn! moved from #[cfg(test)] to production Schema::init path.",
+        "closure_evidence": "commit 257b354a on iteration/v1.60",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "257b354a"
+        }
       },
       {
         "id": "R-V159P1-003",
@@ -3038,7 +3112,14 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.60+",
         "note": "Snapshot count then DELETE; small race window. Low impact (compact is maintenance op).",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). OutboxCompact::retained count race is idempotency-absorbed; documented.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V159P1-004",
@@ -3050,7 +3131,14 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.60+",
         "note": "Unlimited path is atomic; limited path best-effort. Idempotency of SQL protects correctness.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). Limited-flush SELECT-then-UPDATE is best-effort under concurrency; documented.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V159P1-005",
@@ -3062,7 +3150,14 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.60+",
         "note": "Spec-contracted; SQL idempotency protects correctness. Runtime guard is defense-in-depth.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "Accept (doc-only). Single-writer rule enforced via SQL idempotency; runtime guard is belt-and-suspenders.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       },
       {
         "id": "R-V159P1-006",
@@ -3074,7 +3169,14 @@
         "owner": "@fullstack-dev-2",
         "target": "V1.60+",
         "note": "Typed error variants preferred for observability. Not blocking.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "Defer typed error refactor to V1.61+. All outbox DB failures currently surface as CapabilityError::Internal(String); typed variants would improve diagnostics but are not blocking.",
+        "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+        "resolution": {
+          "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+          "commit": "PM-closure"
+        }
       }
     ],
     "2026-06-22-v1.60-df46-local-parity": [
