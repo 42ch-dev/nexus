@@ -646,11 +646,11 @@ async fn daemon_health_returns_registry_status() {
     let val = result.expect("result");
     assert!(val["uptime_seconds"].as_u64().is_some());
     assert_eq!(val["runtime_mode"], "local_only");
-    assert_eq!(val["registry_size"], 20);
+    assert_eq!(val["registry_size"], 21); // V1.58 P3 fix-wave added nexus.reference.refresh (20 → 21)
     assert!(val["pool_healthy"].as_bool().unwrap_or(false));
     assert_eq!(
         val["registry_ids"].as_array().expect("registry_ids").len(),
-        20
+        21
     );
 }
 

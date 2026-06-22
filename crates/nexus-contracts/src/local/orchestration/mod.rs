@@ -138,13 +138,16 @@ pub struct WorkspaceCommitOutput {
 // ---------------------------------------------------------------------------
 
 /// Input for `registry.refresh` — refresh ACP registry cache.
+///
+/// V1.58 P0 fix-wave (QC2 M-1): the `force` field was removed — it was a
+/// documented no-op (no cache layer exists in the daemon runtime: the
+/// synthetic snapshot is always fresh and the CDN path always fetches) but
+/// the capability's help text advertised it as bypassing cache freshness,
+/// which was misleading. Historical callers that still send `{"force": ...}`
+/// are tolerated because serde ignores unknown fields by default.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RegistryRefreshInput {
-    /// Force refresh even if cache is fresh.
-    #[serde(default)]
-    pub force: bool,
-}
+pub struct RegistryRefreshInput {}
 
 /// Output for `registry.refresh`.
 #[derive(Debug, Clone, Serialize, Deserialize)]

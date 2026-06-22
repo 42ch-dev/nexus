@@ -2,7 +2,11 @@
 //!
 //! CLI surface for the V1.26 reference store (`SQLite` registry + body.md on disk).
 //! Uses `nexus_local_db::reference_source` as the repository layer.
+//!
+//! V1.58 P3 adds `reference refresh` — dispatches `nexus.reference.refresh`
+//! through the daemon's host-call endpoint for one or all non-offline sources.
 
+use crate::api::daemon_client::DaemonClient;
 use crate::config::CliConfig;
 use crate::errors::{CliError, Result};
 use clap::Subcommand;
@@ -50,6 +54,23 @@ pub enum ReferenceCommand {
         /// Reference source ID (e.g. `ref_abc123`)
         reference_id: String,
     },
+
+    /// Refresh one or all reference source bodies (V1.58 P3 — DF-44).
+    ///
+    /// Dispatches `nexus.reference.refresh` through the daemon's host-call
+    /// endpoint for each matching non-offline reference source.  Use `all`
+    /// to refresh every eligible source; otherwise pass a specific
+    /// `reference_source_id`.
+    ///
+    /// --dry-run prints what would be refreshed without mutating.
+    Refresh {
+        /// Reference source ID or "all" to refresh every non-offline source
+        reference_ref: String,
+
+        /// Print what would be refreshed without mutating
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Run a reference command.
@@ -85,6 +106,10 @@ pub async fn run(cmd: ReferenceCommand, config: &CliConfig) -> Result<()> {
         }
         ReferenceCommand::List => run_list(config).await,
         ReferenceCommand::Show { reference_id } => run_show(config, &reference_id).await,
+        ReferenceCommand::Refresh {
+            reference_ref,
+            dry_run,
+        } => run_refresh(config, &reference_ref, dry_run).await,
     }
 }
 
@@ -178,7 +203,7 @@ async fn run_list(config: &CliConfig) -> Result<()> {
     let _creator_context = resolve_creator_context(config)?;
     let pool = open_workspace_pool(config).await?;
 
-    let rows = nexus_local_db::list_references(&pool, None, None).await?;
+    let rows = nexus_local_db::list_references(&pool, None, None, None).await?;
 
     if rows.is_empty() {
         println!("No registered references.");
@@ -232,6 +257,112 @@ async fn run_show(config: &CliConfig, reference_id: &str) -> Result<()> {
     if let Some(cp) = &row.content_path {
         println!("  Body Path:    {cp}");
     }
+
+    Ok(())
+}
+
+/// `reference refresh` — dispatch `nexus.reference.refresh` for one or all non-offline sources.
+///
+/// V1.58 P3: closes DF-44 by wiring the user-facing CLI surface to the daemon's
+/// host-call endpoint.  `--dry-run` lists what would be refreshed without mutating.
+async fn run_refresh(config: &CliConfig, reference_ref: &str, dry_run: bool) -> Result<()> {
+    let (creator_id, _slug, _home) = resolve_creator_context(config)?;
+    let pool = open_workspace_pool(config).await?;
+
+    // Determine which reference sources to refresh — scoped by creator (H-002).
+    let sources: Vec<nexus_local_db::ReferenceSourceRow> = if reference_ref == "all" {
+        // Refresh every non-offline source owned by the active creator.
+        let all =
+            nexus_local_db::list_references(&pool, Some(1000), None, Some(&creator_id)).await?;
+        all.into_iter()
+            .filter(|s| s.refresh_policy != "offline")
+            .collect()
+    } else {
+        // Single reference by ID, scoped to creator.
+        let source =
+            nexus_local_db::find_reference_by_id_for_creator(&pool, reference_ref, &creator_id)
+                .await?
+                .ok_or_else(|| {
+                    CliError::Other(format!(
+                        "Reference source '{reference_ref}' not found or not owned by creator '{creator_id}'."
+                    ))
+                })?;
+        if source.refresh_policy == "offline" {
+            return Err(CliError::Other(format!(
+                "Reference source '{reference_ref}' has refresh policy 'offline' — cannot refresh."
+            )));
+        }
+        vec![source]
+    };
+
+    if sources.is_empty() {
+        println!("No reference sources to refresh.");
+        return Ok(());
+    }
+
+    if dry_run {
+        println!(
+            "[DRY RUN] Would refresh {} reference source(s):",
+            sources.len()
+        );
+        for s in &sources {
+            println!(
+                "  {}  title=\"{}\"  policy={}  uri={}",
+                s.reference_source_id, s.title, s.refresh_policy, s.uri
+            );
+        }
+        return Ok(());
+    }
+
+    // Connect to the daemon.
+    let client = DaemonClient::from_config(config);
+    if !client.health_check().await? {
+        return Err(CliError::daemon_not_reachable_with_remediation());
+    }
+
+    let mut refreshed = 0u64;
+    let mut errors = 0u64;
+
+    for source in &sources {
+        let params = serde_json::json!({
+            "tool_name": "nexus.reference.refresh",
+            "parameters": {
+                "reference_source_id": source.reference_source_id,
+            },
+        });
+
+        match client
+            .post::<serde_json::Value, _>("/v1/local/agent-host/internal/tool-executions", &params)
+            .await
+        {
+            Ok(result) => {
+                let status = result
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown");
+                let content_changed = result
+                    .get("content_changed")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let marker = if content_changed { "✓" } else { "○" };
+                println!("  {marker} {}  status={status}", source.reference_source_id);
+                refreshed += 1;
+            }
+            Err(e) => {
+                eprintln!("  ✗ {}  error={e}", source.reference_source_id);
+                errors += 1;
+            }
+        }
+    }
+
+    println!(
+        "Refreshed {refreshed} source(s){}.",
+        if errors > 0 {
+            format!("; {errors} error(s)")
+        } else {
+            String::new()
+        }
+    );
 
     Ok(())
 }

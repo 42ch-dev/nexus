@@ -14,6 +14,7 @@ pub mod config;
 pub mod cron_supervisor;
 pub mod db;
 pub mod lifecycle;
+pub mod refresh_scheduler;
 pub mod stale_findings_watcher;
 pub mod worker_provider;
 pub mod workspace;

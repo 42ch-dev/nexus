@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE reference_sources SET refresh_status = 'refreshing', updated_at = ? WHERE reference_source_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "43903dd22149bb7dc05ed526a72700aa7cb5b94641799b9d7ccf5ba69bca9487"
+}

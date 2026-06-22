@@ -92,8 +92,9 @@ pub use knowledge_store::SqliteKnowledgeStore;
 
 // Re-export reference_source types
 pub use reference_source::{
-    get_by_id as get_reference_by_id, list as list_references, register as register_reference,
-    ReferenceSourceRow, RegisterParams, SourceMutability,
+    find_by_id_for_creator as find_reference_by_id_for_creator, get_by_id as get_reference_by_id,
+    list as list_references, register as register_reference, ReferenceSourceRow, RegisterParams,
+    SourceMutability,
 };
 
 // Re-export kb_extract_job types
