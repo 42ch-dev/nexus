@@ -221,9 +221,7 @@ impl Capability for WorldStateQuery {
         let want_kb = matches!(slice, "kb" | "all");
         let want_timeline = matches!(slice, "timeline" | "all");
 
-        let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new(
-            (**pool).clone(),
-        );
+        let gw = nexus_local_db::narrative_gateway::SqliteNarrativeGateway::new((**pool).clone());
 
         // World metadata (always returned).
         let world = gw
@@ -249,16 +247,12 @@ impl Capability for WorldStateQuery {
 
         // Timeline slice.
         let timeline = if want_timeline {
-            gw.get_timeline(
-                &parsed.world_id,
-                parsed.branch_id.as_deref(),
-                parsed.limit,
-            )
-            .await
-            .map_err(|e| CapabilityError::Internal(format!("timeline read: {e}")))?
-            .into_iter()
-            .filter_map(|evt| serde_json::to_value(&evt).ok())
-            .collect::<Vec<_>>()
+            gw.get_timeline(&parsed.world_id, parsed.branch_id.as_deref(), parsed.limit)
+                .await
+                .map_err(|e| CapabilityError::Internal(format!("timeline read: {e}")))?
+                .into_iter()
+                .filter_map(|evt| serde_json::to_value(&evt).ok())
+                .collect::<Vec<_>>()
         } else {
             Vec::new()
         };
@@ -316,8 +310,9 @@ impl Capability for WorldDeltaPropose {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let parsed: WorldDeltaProposeInput = serde_json::from_value(input)
-            .map_err(|e| CapabilityError::InputInvalid(format!("world.delta.propose input: {e}")))?;
+        let parsed: WorldDeltaProposeInput = serde_json::from_value(input).map_err(|e| {
+            CapabilityError::InputInvalid(format!("world.delta.propose input: {e}"))
+        })?;
 
         let pool = self
             .pool
@@ -341,8 +336,7 @@ impl Capability for WorldDeltaPropose {
             let old_value = match (ch.entity.as_str(), ch.entity_id.as_deref()) {
                 ("kb_key_block", Some(kid)) => {
                     let existing = store.get_key_block(kid).await.ok();
-                    existing
-                        .and_then(|kb| serde_json::to_value(field_of(&kb, &ch.field)).ok())
+                    existing.and_then(|kb| serde_json::to_value(field_of(&kb, &ch.field)).ok())
                 }
                 ("kb_key_block", None) => {
                     // Create path — no prior value.
@@ -631,13 +625,14 @@ impl Capability for WorldDeltaApply {
                     // Lost-update guard: compare old_value (if supplied) to the
                     // live title before applying. SAFETY: SELECT against known
                     // narrative_worlds schema.
-                    let live_title: Option<String> = sqlx::query_scalar(
-                        "SELECT title FROM narrative_worlds WHERE world_id = ?",
-                    )
-                    .bind(&world_id)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .map_err(|e| CapabilityError::Internal(format!("title read (tx): {e}")))?;
+                    let live_title: Option<String> =
+                        sqlx::query_scalar("SELECT title FROM narrative_worlds WHERE world_id = ?")
+                            .bind(&world_id)
+                            .fetch_optional(&mut *tx)
+                            .await
+                            .map_err(|e| {
+                                CapabilityError::Internal(format!("title read (tx): {e}"))
+                            })?;
                     if let Some(expected) = &ch.old_value {
                         let live = live_title.map_or(Value::Null, Value::String);
                         if &live != expected {
@@ -733,11 +728,7 @@ mod tests {
         .unwrap();
     }
 
-    async fn seed_world(
-        pool: &sqlx::SqlitePool,
-        owner: &str,
-        world_id: &str,
-    ) {
+    async fn seed_world(pool: &sqlx::SqlitePool, owner: &str, world_id: &str) {
         // SAFETY: test-only seed using narrative_write helper.
         nexus_local_db::narrative_write::create_world(
             pool,

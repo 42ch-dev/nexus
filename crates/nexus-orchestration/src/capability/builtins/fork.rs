@@ -75,10 +75,7 @@ impl Default for ForkCreate {
 
 /// Generate a new fork branch id.
 fn generate_fork_branch_id() -> String {
-    format!(
-        "fbk_{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..12]
-    )
+    format!("fbk_{}", &uuid::Uuid::new_v4().simple().to_string()[..12])
 }
 
 #[async_trait]
@@ -96,9 +93,8 @@ impl Capability for ForkCreate {
     }
 
     async fn run(&self, input: Value) -> Result<Value, CapabilityError> {
-        let parsed: ForkCreateInput = serde_json::from_value(input).map_err(|e| {
-            CapabilityError::InputInvalid(format!("fork.create input: {e}"))
-        })?;
+        let parsed: ForkCreateInput = serde_json::from_value(input)
+            .map_err(|e| CapabilityError::InputInvalid(format!("fork.create input: {e}")))?;
 
         let pool = self
             .pool
@@ -201,7 +197,10 @@ mod tests {
         .unwrap();
     }
 
-    async fn seed_world_with_event(pool: &sqlx::SqlitePool, owner: &str) -> (String, String, String) {
+    async fn seed_world_with_event(
+        pool: &sqlx::SqlitePool,
+        owner: &str,
+    ) -> (String, String, String) {
         let w = nexus_local_db::narrative_write::create_world(
             pool, owner, "Test", "test", "private", "manual",
         )

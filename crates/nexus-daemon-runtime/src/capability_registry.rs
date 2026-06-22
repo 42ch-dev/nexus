@@ -1186,8 +1186,7 @@ mod tests {
             })
             .collect();
 
-        let catalog_ids: HashSet<String> =
-            catalog_rows.iter().map(|r| r.id.clone()).collect();
+        let catalog_ids: HashSet<String> = catalog_rows.iter().map(|r| r.id.clone()).collect();
 
         // Direction 1: every registry id must have a catalog row (except known
         // `fs/*` gaps).
