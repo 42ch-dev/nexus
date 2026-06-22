@@ -1298,3 +1298,59 @@ CLI `--help` text documents this intent.
 **No per-`nexus.*` subcommands**: Per Q4 (compass §0), there is exactly one
 `host-call` entry, not per-tool subcommands. All 20 registered host tools are
 callable through this single entry point.
+
+---
+
+## V1.58 P3 Draft overlay: §6.2N `reference refresh` subcommand
+
+**Status**: Draft (V1.58 P3)
+**Plan**: `2026-06-22-v1.58-reference-cli-and-cross-cut-tests`
+
+### §6.2N `nexus42 creator reference refresh [ref_id|all] [--dry-run]`
+
+Refreshes one or all non-offline reference source bodies by dispatching
+`nexus.reference.refresh` through the daemon's host-call endpoint.  The
+CLI resolves the active creator context (`$HOME`, creator ID) and opens
+the workspace state DB; the daemon fetches each source URL, compares the
+content hash, and updates the DB row (`last_refreshed_at`, `content_hash`,
+`refresh_status`).  When the refresh capability has creator context
+(V1.58 P3), the fetched body is written atomically to the on-disk
+`body.md` path via `nexus_home_layout`.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `reference_ref` | string (positional) | yes | Reference source ID (e.g. `ref_abc123`) or literal `all` for every non-offline source |
+| `--dry-run` | flag | no | Print what would be refreshed without mutating; no daemon call |
+
+**Exit codes**:
+- `0` — all refreshes dispatched successfully
+- `1` — usage error, source not found, or offline policy blocked
+- `1` — daemon not reachable (canonical remediation message printed)
+
+**Scope filtering**:
+- `all` → lists every non-offline reference source (`refresh_policy != 'offline'`) from the workspace DB and dispatches a refresh for each.
+- `<ref_id>` → resolves the single source by `reference_source_id`; returns error if the source has `refresh_policy = 'offline'`.
+
+**`--dry-run` semantics**:
+- Lists candidate sources from the DB with title, policy, and URI.
+- No daemon call; no mutation.
+- Output format: `[DRY RUN] Would refresh N reference source(s):` followed by one line per source.
+
+**Wiring**: `nexus42 creator reference refresh` → `DaemonClient::post` →
+daemon `POST /v1/local/agent-host/internal/tool-executions` →
+`HostToolExecutor::execute()` → `admission_pipeline()` →
+`CapabilityRegistry::dispatch("nexus.reference.refresh", {"reference_source_id":"..."})` →
+`ReferenceRefresh::run()` → fetch URL → hash → update DB → write body.md.
+
+**IPC timeout**: Uses `DaemonClient` default timeout (30 s per request).
+The daemon-side capability handler enforces a 30 s HTTP fetch timeout and
+100 MiB body size limit.
+
+**Atomic body file write** (V1.58 P3): When the capability handler detects
+`content_changed = true` and `creator_home` is set, it writes the body
+bytes to `<target>.tmp` then renames to `<target>` (matches the V1.55 P3
+`ScaffoldTransaction` pattern).  The scheduler path (no creator context)
+updates only the DB.
+
+**No per-source flags**: `--policy` is not exposed at this CLI surface;
+the refresh policy is set during source registration and stored in the DB row.

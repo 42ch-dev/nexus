@@ -154,6 +154,16 @@ CLI --Local API--> daemon runtime mode --ACP Client--> ACP Agent
   +-- sync / register / platform HTTP --> nexus-cloud-sync --> Platform HTTPS
   |
   +-- Registry fetch (CLI or daemon-local cache refresh)
+  |
+  +-- reference refresh (V1.58 P3):
+       nexus42 creator reference refresh [ref_id|all]
+         └─ DaemonClient::post
+              └─ POST /v1/local/agent-host/internal/tool-executions
+                   └─ HostToolExecutor::execute()
+                        └─ admission_pipeline()
+                             └─ CapabilityRegistry::dispatch("nexus.reference.refresh", ...)
+                                  └─ ReferenceRefresh::run()
+                                       └─ fetch URL → hash → update DB → atomic body.md write
 ```
 
 ---
