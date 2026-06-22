@@ -130,9 +130,9 @@ impl Capability for TimelineEventAppend {
         )
         .await
         .map_err(|e| match e {
-            nexus_local_db::narrative_write::NarrativeWriteError::SequenceConflict {
-                ..
-            } => CapabilityError::InputInvalid(format!("sequence conflict: {e}")),
+            nexus_local_db::narrative_write::NarrativeWriteError::SequenceConflict { .. } => {
+                CapabilityError::InputInvalid(format!("sequence conflict: {e}"))
+            }
             other => CapabilityError::Internal(format!("append_event: {other}")),
         })?;
 

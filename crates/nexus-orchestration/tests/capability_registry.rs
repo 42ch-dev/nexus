@@ -19,9 +19,12 @@ async fn registry_has_twenty_six_builtins() {
     // V1.55 P3 added `script.project_scaffold` (23→24);
     // V1.56 P-last (R-V155P2-F002) added `game_bible.section_status.update` (24→25).
     // V1.58 P1 (DF-44) added `nexus.reference.refresh` (25→26).
+    // V1.60 P0 (DF-46) added 5 orchestration capabilities (26→31):
+    //   world.state.query, world.delta.propose, world.delta.apply,
+    //   timeline.event.append, fork.create.
     // UPDATE THIS TEST when adding a new builtin.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 26);
+    assert_eq!(reg.len(), 31);
 }
 
 #[tokio::test]
