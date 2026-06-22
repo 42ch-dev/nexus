@@ -460,6 +460,34 @@ Given these findings, I recommend **Request Changes** with a fix wave addressing
 
 ---
 
+## Revalidation
+
+**Revalidated by**: qc-specialist-3
+**Revalidated at**: 2026-06-22T14:30:00Z
+**Diff basis**: 43bf69e2..20c8ae0f (P1 fix-wave)
+
+### Findings Status
+
+| Original Finding | Severity | Status | Evidence |
+| --- | --- | --- | --- |
+| F-001 streaming body fetch | Critical | ✅ Closed | `reference_refresh.rs:317` uses `response.bytes_stream()` with `blake3::Hasher::new()`, incremental `hasher.update(&chunk)`, and `hasher.finalize()`. Hard cap enforced via `MAX_REFERENCE_BODY_BYTES` (100 MiB) at line 324-327. Test `refresh_streams_body_with_correct_hash` (lines 708-733) verifies streaming behavior + hash correctness. |
+| F-002 partial index not used | Warning | ⏭️ Deferred | No DB migration or DAO changes in P1 fix-wave commits. Fix-wave targeted F-001 (Critical) only. Defer as technical debt — medium-severity performance optimization for scheduler hot path. |
+| F-003 low-selectivity index | Warning | ⏭️ Deferred | No migration changes in P1 fix-wave. Defer as technical debt — medium-severity write amplification optimization. |
+| F-004 CPU-bound hashing | Warning | ✅ Closed | Addressed by same streaming fix as F-001. Incremental blake3 hashing via `hasher.update()` eliminates synchronous in-memory hash of full body (was `blake3_hash(&body_bytes)` at line 194 in original). |
+| F-005 last_refreshed_at on unchanged | Warning | ⏭️ Deferred | No DAO changes in P1 fix-wave. Defer as technical debt — low-medium correctness issue (skews staleness tracking but not data loss). |
+| F-006 no per-source intervals | Warning | ⏭️ Deferred | No scheduler changes in P1 fix-wave. Defer as feature request — medium-severity operational flexibility gap (not blocking). |
+
+### New Findings (if any)
+
+None. No new performance/reliability issues introduced by the P1 fix-wave.
+
+### Verdict
+
+**Verdict**: Approve
+**Rationale**: F-001 (Critical) — memory pressure from large body fetch — is fully resolved with streaming implementation, 100 MiB hard cap, and verified test coverage. The fix eliminates OOM risk while maintaining correct hash computation. F-004 (CPU-bound hashing) is implicitly closed by the same streaming approach. F-002, F-003, F-005, F-006 are Warning-level findings deferred as technical debt; they do not block P1 delivery given (1) the fix-wave scope was targeted at the Critical finding only, (2) deferral rationale is documented in original report, and (3) no blocking regressions were introduced. The P1 fix-wave (commits 0f90997d, 04a45366) addresses the primary reliability risk while maintaining functional correctness.
+
+---
+
 ## Revalidation Notes
 
 This is the initial QC3 review for V1.58 P1. No revalidation was performed.
