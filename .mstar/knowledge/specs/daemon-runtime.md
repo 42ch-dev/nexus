@@ -210,6 +210,17 @@ omits test-only queries. The library compiles, but `cargo test --workspace`
 fails under `SQLX_OFFLINE=true` with "no cached statement" errors on test
 binaries. Always include `--tests`.
 
+### Regression guard (V1.58 P0 fix-wave — QC2 H-3)
+
+A lightweight integration test in `nexus-local-db`
+(`tests/sqlx_cache_intact.rs::sqlx_cache_is_present_and_non_empty`) asserts
+the workspace `.sqlx/` directory exists and contains at least 50
+`query-*.json` artifacts. This catches accidental mass deletion (the exact
+P1 incident dropped the count from 138 to 1) without being brittle to normal
+query add/remove churn. It does NOT validate query correctness — that remains
+the job of `SQLX_OFFLINE=true cargo check --workspace --tests` in CI. Run
+locally with `cargo test -p nexus-local-db --test sqlx_cache_intact`.
+
 ## V1.58 P0 Draft overlay: Workspace OCC hardening (R-V156P0-M001..M006)
 
 **Status**: Draft (V1.58 P0)
