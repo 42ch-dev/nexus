@@ -179,6 +179,14 @@ async fn atomic_write_body(target_path: &std::path::Path, body: &[u8]) -> std::i
 
     let tmp_path = target_path.with_extension("tmp");
     tokio::fs::write(&tmp_path, body).await?;
+
+    // W-QC3-P3-001: fsync the temp file before rename to ensure durable
+    // write in case of power loss. Matches the V1.55 P3 ScaffoldTransaction
+    // atomic write pattern (write → sync → rename).
+    let tmp_file = tokio::fs::File::open(&tmp_path).await?;
+    tmp_file.sync_all().await?;
+    drop(tmp_file);
+
     tokio::fs::rename(&tmp_path, target_path).await?;
     Ok(())
 }
@@ -278,10 +286,18 @@ impl Capability for ReferenceRefresh {
             .as_ref()
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
-        // Step 1: Look up the reference source.
-        let source = nexus_local_db::reference_source::get_by_id(pool, &parsed.reference_source_id)
+        // Step 1: Look up the reference source — scoped by creator when available (H-002).
+        let source = if let Some(ref creator_id) = self.creator_id {
+            nexus_local_db::reference_source::find_by_id_for_creator(
+                pool,
+                &parsed.reference_source_id,
+                creator_id,
+            )
             .await
-            .map_err(|e| CapabilityError::Internal(format!("DB error: {e}")))?;
+        } else {
+            nexus_local_db::reference_source::get_by_id(pool, &parsed.reference_source_id).await
+        }
+        .map_err(|e| CapabilityError::Internal(format!("DB error: {e}")))?;
 
         let source = source.ok_or_else(|| {
             CapabilityError::InputInvalid(format!(

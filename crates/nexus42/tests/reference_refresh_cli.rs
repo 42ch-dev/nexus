@@ -139,7 +139,7 @@ async fn dry_run_all_lists_non_offline_sources() {
     // Dry-run will filter offline sources; the refresh command uses the
     // workspace pool path.  We test the function-level logic directly
     // by exercising the same SQL path that run_refresh uses.
-    let all = nexus_local_db::list_references(&pool, Some(1000), None)
+    let all = nexus_local_db::list_references(&pool, Some(1000), None, None)
         .await
         .unwrap();
     let candidates: Vec<_> = all
@@ -183,7 +183,7 @@ async fn all_path_filters_offline() {
     let dir = tempfile::tempdir().unwrap();
     let (pool, ref_id_1, ref_id_2) = fresh_pool_with_refs(&dir).await;
 
-    let all = nexus_local_db::list_references(&pool, Some(1000), None)
+    let all = nexus_local_db::list_references(&pool, Some(1000), None, None)
         .await
         .unwrap();
     assert_eq!(all.len(), 2);

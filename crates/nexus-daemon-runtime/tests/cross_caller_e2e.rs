@@ -48,6 +48,7 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.finding.resolve",
     "nexus.pool.entry.manage",
     "nexus.registry.refresh",
+    "nexus.reference.refresh",
 ];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -535,7 +536,7 @@ async fn not_supported_equivalence_all_3_paths() {
 // ─── T2: Registry integrity check ────────────────────────────────────────
 
 #[test]
-fn all_18_ids_registered_in_capability_registry() {
+fn all_19_nexus_tool_ids_registered_in_capability_registry() {
     let reg = host_tool_registry();
     for &tool_id in NEXUS_TOOL_IDS {
         assert!(
@@ -545,8 +546,8 @@ fn all_18_ids_registered_in_capability_registry() {
     }
     assert_eq!(
         reg.len(),
-        20,
-        "Registry must have 20 entries (18 nexus.* + 2 fs/*)"
+        21,
+        "Registry must have 21 entries (19 nexus.* + 2 fs/*)"
     );
 }
 

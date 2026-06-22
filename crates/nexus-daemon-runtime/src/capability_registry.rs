@@ -690,6 +690,25 @@ pub fn build_registry() -> CapabilityRegistry {
         },
     });
 
+    // ── V1.58 P3: nexus.reference.refresh ──
+    reg.register(CapabilityRow {
+        id: "nexus.reference.refresh",
+        access: Access::Write,
+        admission: ADMISSION_READ_WORKSPACE,
+        handler: hte::registry_reference_refresh,
+        acp_wire: AcpWire {
+            request_schema_ref: r#"{"reference_source_id":"string","url?":"string"}"#,
+            response_schema_ref: r#"{"reference_source_id":"string","refreshed":"bool","content_changed":"bool","status":"string"}"#,
+            error_schema_ref: r#"{"code":"NOT_SUPPORTED|INVALID_INPUT|INTERNAL"}"#,
+        },
+        failure_mode: FailureMode::InvalidInput,
+        handler_test_vector: TestVector {
+            description: "reference refresh updates content hash and writes body.md for owned source",
+            expected_outcome: "success",
+            test_fn_name: "reference_refresh_happy_path",
+        },
+    });
+
     // ── fs/* baseline (V1.33) ──
     reg.register(CapabilityRow {
         id: "fs/read_text_file",
@@ -738,9 +757,9 @@ mod tests {
     use crate::test_utils::create_test_workspace;
 
     #[test]
-    fn registry_has_twenty_host_tools() {
+    fn registry_has_twenty_one_host_tools() {
         let reg = host_tool_registry();
-        assert_eq!(reg.len(), 20);
+        assert_eq!(reg.len(), 21);
     }
 
     #[test]
@@ -759,6 +778,7 @@ mod tests {
             "nexus.manuscript.chapter.get",
             "nexus.observability.daemon.health",
             "nexus.registry.refresh",
+            "nexus.reference.refresh",
             "nexus.kb_snapshot.write",
             "nexus.manuscript.chapter.update",
             "nexus.world.configure",
@@ -829,6 +849,7 @@ mod tests {
         "execute_read_file_succeeds",
         "execute_write_file_succeeds",
         "registry_refresh_synthetic_smoke",
+        "reference_refresh_happy_path",
     ];
 
     #[test]
