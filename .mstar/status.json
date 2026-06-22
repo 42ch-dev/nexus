@@ -92,7 +92,9 @@
       "file": ".mstar/plans/2026-06-22-v1.59-df47-manuscript-and-misc-capabilities.md",
       "working_branch": "feature/v1.59-df47-manuscript-and-misc-capabilities",
       "merge_target": "iteration/v1.59",
-      "depends_on": ["2026-06-22-v1.59-compass-and-plan-stubs"],
+      "depends_on": [
+        "2026-06-22-v1.59-compass-and-plan-stubs"
+      ],
       "created": "2026-06-22",
       "review_strategy": "Merge to integration → tri-review → mid-QA → targeted fix-wave"
     },
@@ -108,7 +110,9 @@
       "file": ".mstar/plans/2026-06-22-v1.59-df12-outbox-consolidation.md",
       "working_branch": "feature/v1.59-df12-outbox-consolidation",
       "merge_target": "iteration/v1.59",
-      "depends_on": ["2026-06-22-v1.59-compass-and-plan-stubs"],
+      "depends_on": [
+        "2026-06-22-v1.59-compass-and-plan-stubs"
+      ],
       "created": "2026-06-22",
       "review_strategy": "Merge to integration → tri-review → mid-QA → targeted fix-wave"
     },
@@ -236,16 +240,17 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/80"
     },
     "tech_debt_summary": {
-      "total_open": 14,
+      "total_open": 22,
       "total_deferred": 0,
       "total_resolved": 35,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 14,
+        "low": 22,
         "medium": 0
       },
       "by_target_active": {
-        "V1.59+": 14
+        "V1.59+": 14,
+        "V1.60+": 8
       },
       "v1_58_closeout_note": "V1.58 closed 33 of 35 V1.57+/V1.58+ residuals + DF-44 fully closed. 14 remaining are V1.52-era WL-A polish residuals explicitly deferred to V1.59+ per compass §6. 33 new residuals closed: R-V156P0-M001..M006 (workspace OCC), R-V156P1-M003..M005+L001..L007 (capability surface), R-V156-PROCESS-01+R-V156P1-CACHE-01+R-V156P2-CACHE-01 (process), R-V156P2-M001..M003+L001..L004 (DF-56 independent), R-V156P3-W001/W002+S001/S002/S004 (DF-56 dependent), R-V157P0-L001/L002+R-V157P1-W001 (V1.57-new). DF-44 closed end-to-end (P1 core + P3 CLI + body file write). All 4 implement plans merged to iteration/v1.58."
     },
@@ -2821,6 +2826,106 @@
           "commit": "e78c9307"
         },
         "closure_note": "V1.58 P2 T13 closed: host-call smoke un-ignore with hermetic harness. 4 new hermetic tests added in crates/nexus42/tests/host_call_smoke.rs; 3 retained #[ignore] with documented justification (DaemonClient trait extraction is P1 boundary)."
+      }
+    ],
+    "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities": [
+      {
+        "id": "R-V159P0-001",
+        "title": "execute_manuscript_write uses sqlx::query() (runtime) for static SQL — carry-over pattern (R-V140P0-S3 waived)",
+        "severity": "low",
+        "source": "qc1 (architecture) R1 carry-over",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs execute_manuscript_write",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.60+",
+        "note": "Pre-existing convention; codebase-wide cleanup. Not blocking.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V159P0-002",
+        "title": "catalog_registry_invariant_all_ids_present uses 28-element manual match list — auto-derive preferred",
+        "severity": "low",
+        "source": "qc1 (architecture) R2 suggestion",
+        "scope": "crates/nexus-daemon-runtime/src/capability_registry.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.60+",
+        "note": "Suggest auto-deriving via host_tool_registry().ids().filter(). Not blocking.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-22-v1.59-df12-outbox-consolidation": [
+      {
+        "id": "R-V159P1-001",
+        "title": "outbox.compact input schema/implementation/spec test-vector three-way inconsistency (minimum:1 vs impl .max(0))",
+        "severity": "low",
+        "source": "qc1 (architecture) W1",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/outbox.rs OutboxCompact input",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.60+",
+        "note": "Contract/clarity issue; no data loss. Reconcile schema vs impl vs spec.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V159P1-002",
+        "title": "legacy outbox deprecation tracing::warn! lives inside #[cfg(test)] — never fires in production",
+        "severity": "low",
+        "source": "qc1 (architecture) W2",
+        "scope": "crates/nexus-daemon-runtime/src/db/schema.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.60+",
+        "note": "Move warn! to production code path or document test-only intent.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V159P1-003",
+        "title": "OutboxCompact::retained count has non-transactional window against its DELETE",
+        "severity": "low",
+        "source": "qc1 (architecture) W3",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/outbox.rs OutboxCompact::call",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.60+",
+        "note": "Snapshot count then DELETE; small race window. Low impact (compact is maintenance op).",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V159P1-004",
+        "title": "limited-flush path uses SELECT-then-dynamic-IN-UPDATE (best-effort under concurrency)",
+        "severity": "low",
+        "source": "qc2 (security) W1",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/outbox.rs OutboxFlush limited path",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.60+",
+        "note": "Unlimited path is atomic; limited path best-effort. Idempotency of SQL protects correctness.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V159P1-005",
+        "title": "single-writer rule documented in spec but has no runtime enforcement guard",
+        "severity": "low",
+        "source": "qc2 (security) W2",
+        "scope": "outbox write paths (daemon + sync)",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.60+",
+        "note": "Spec-contracted; SQL idempotency protects correctness. Runtime guard is defense-in-depth.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V159P1-006",
+        "title": "All outbox DB failures surface as CapabilityError::Internal(String) — not typed",
+        "severity": "low",
+        "source": "qc2 (security) W3",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/outbox.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.60+",
+        "note": "Typed error variants preferred for observability. Not blocking.",
+        "lifecycle": "deferred"
       }
     ]
   }
