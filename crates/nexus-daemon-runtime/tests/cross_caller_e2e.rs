@@ -27,7 +27,7 @@ use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use serde_json::json;
 
-// ─── 18 shipped nexus.* host tool IDs (V1.57 P0 roster) ───────────────────
+// ─── 28 shipped nexus.* host tool IDs (V1.59 P0 roster) ───────────────────
 
 const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.context.whoami",
@@ -49,6 +49,16 @@ const NEXUS_TOOL_IDS: &[&str] = &[
     "nexus.pool.entry.manage",
     "nexus.registry.refresh",
     "nexus.reference.refresh",
+    // V1.59 P0: DF-47 manuscript & misc parity batch (9 tools)
+    "nexus.manuscript.list",
+    "nexus.manuscript.read_range",
+    "nexus.manuscript.write",
+    "nexus.manuscript.phase.get",
+    "nexus.manuscript.phase.set",
+    "nexus.workspace.paths",
+    "nexus.research.query",
+    "nexus.runtime.health",
+    "nexus.trace.correlation",
 ];
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -146,11 +156,26 @@ fn assert_outputs_equivalent(
         "{tool_id}: HTTP ⇔ Schedule key mismatch"
     );
 
-    // Compare non-timestamp values
-    const TIMESTAMP_KEYS: &[&str] = &["assembled_at", "created_at", "updated_at", "generatedAt"];
+    // Compare non-deterministic fields that may drift between near-simultaneous
+    // calls: timestamps, per-invocation generated correlation IDs, and uptime
+    // counters (which advance between calls).
+    const NON_DETERMINISTIC_KEYS: &[&str] = &[
+        "assembled_at",
+        "created_at",
+        "updated_at",
+        "generatedAt",
+        // V1.59 P0: trace.correlation generates a new ID per call when absent.
+        "correlation_id",
+        "trace_timestamp",
+        // V1.59 P0: parent_request_id is caller-path-specific by design
+        // (HTTP, Worker, Schedule each pass a different request_id).
+        "parent_request_id",
+        // V1.59 P0: runtime.health uptime may drift between near-instant calls.
+        "uptime_seconds",
+    ];
     for key in http_keys {
-        if TIMESTAMP_KEYS.contains(&key.as_str()) {
-            continue; // Allow timestamp drift
+        if NON_DETERMINISTIC_KEYS.contains(&key.as_str()) {
+            continue; // Allow drift for non-deterministic fields.
         }
         assert_eq!(
             http[key], worker[key],
@@ -536,7 +561,7 @@ async fn not_supported_equivalence_all_3_paths() {
 // ─── T2: Registry integrity check ────────────────────────────────────────
 
 #[test]
-fn all_19_nexus_tool_ids_registered_in_capability_registry() {
+fn all_nexus_tool_ids_registered_in_capability_registry() {
     let reg = host_tool_registry();
     for &tool_id in NEXUS_TOOL_IDS {
         assert!(
@@ -546,8 +571,8 @@ fn all_19_nexus_tool_ids_registered_in_capability_registry() {
     }
     assert_eq!(
         reg.len(),
-        21,
-        "Registry must have 21 entries (19 nexus.* + 2 fs/*)"
+        30,
+        "Registry must have 30 entries (28 nexus.* + 2 fs/*)"
     );
 }
 
