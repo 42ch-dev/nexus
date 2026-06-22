@@ -66,6 +66,12 @@ pub struct ReferenceSourceRow {
     pub created_at: String,
     /// Last registry update timestamp.
     pub updated_at: Option<String>,
+    /// ISO-8601 timestamp of last successful refresh (nullable).
+    pub last_refreshed_at: Option<String>,
+    /// Refresh policy: `on_change` | `scheduled` | `offline`.
+    pub refresh_policy: String,
+    /// Refresh lifecycle status: `fresh` | `stale` | `refreshing` | `error`.
+    pub refresh_status: Option<String>,
 }
 
 /// Parameters for registering a new reference source.
@@ -119,18 +125,21 @@ pub async fn register(
             (reference_source_id, workspace_id, source_type, source_mutability, uri, title, tags, content_hash, content_path, content, scan_status, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, NULL)
            RETURNING
-             reference_source_id as "reference_source_id!",
-             workspace_id as "workspace_id!",
-             source_type as "source_type!",
-             source_mutability as "source_mutability!",
-             uri as "uri!",
-             title as "title!",
-             tags,
-             content_hash,
-             content_path,
-             scan_status as "scan_status!",
-             created_at as "created_at!",
-             updated_at"#,
+              reference_source_id as "reference_source_id!",
+              workspace_id as "workspace_id!",
+              source_type as "source_type!",
+              source_mutability as "source_mutability!",
+              uri as "uri!",
+              title as "title!",
+              tags,
+              content_hash,
+              content_path,
+              scan_status as "scan_status!",
+              created_at as "created_at!",
+              updated_at,
+              last_refreshed_at,
+              refresh_policy as "refresh_policy!",
+              refresh_status"#,
         reference_source_id,
         params.workspace_id,
         params.source_type,
@@ -187,6 +196,9 @@ pub async fn register(
         scan_status: row.scan_status,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        last_refreshed_at: row.last_refreshed_at,
+        refresh_policy: row.refresh_policy,
+        refresh_status: row.refresh_status,
     })
 }
 
@@ -250,7 +262,10 @@ pub async fn list(
               content_path,
               scan_status,
               created_at,
-              updated_at
+              updated_at,
+              last_refreshed_at,
+              refresh_policy,
+              refresh_status
            FROM reference_sources
            ORDER BY created_at DESC
            LIMIT {limit} OFFSET {offset}"
@@ -273,6 +288,9 @@ pub async fn list(
             scan_status: r.get("scan_status"),
             created_at: r.get("created_at"),
             updated_at: r.get("updated_at"),
+            last_refreshed_at: r.get("last_refreshed_at"),
+            refresh_policy: r.get("refresh_policy"),
+            refresh_status: r.get("refresh_status"),
         })
         .collect())
 }
@@ -290,18 +308,21 @@ pub async fn get_by_id(
 ) -> Result<Option<ReferenceSourceRow>, LocalDbError> {
     let row = sqlx::query!(
         r#"SELECT
-             reference_source_id as "reference_source_id!",
-             workspace_id as "workspace_id!",
-             source_type as "source_type!",
-             source_mutability as "source_mutability!",
-             uri as "uri!",
-             title as "title!",
-             tags,
-             content_hash,
-             content_path,
-             scan_status as "scan_status!",
-             created_at as "created_at!",
-             updated_at
+              reference_source_id as "reference_source_id!",
+              workspace_id as "workspace_id!",
+              source_type as "source_type!",
+              source_mutability as "source_mutability!",
+              uri as "uri!",
+              title as "title!",
+              tags,
+              content_hash,
+              content_path,
+              scan_status as "scan_status!",
+              created_at as "created_at!",
+              updated_at,
+              last_refreshed_at,
+              refresh_policy as "refresh_policy!",
+              refresh_status
            FROM reference_sources WHERE reference_source_id = ?"#,
         reference_source_id
     )
@@ -321,7 +342,174 @@ pub async fn get_by_id(
         scan_status: r.scan_status,
         created_at: r.created_at,
         updated_at: r.updated_at,
+        last_refreshed_at: r.last_refreshed_at,
+        refresh_policy: r.refresh_policy,
+        refresh_status: r.refresh_status,
     }))
+}
+
+// ── Refresh lifecycle DAOs (V1.58 P1) ──────────────────────────────────
+
+/// Set the refresh policy for a reference source.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn set_refresh_policy(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+    policy: &str,
+) -> Result<(), LocalDbError> {
+    sqlx::query!(
+        "UPDATE reference_sources SET refresh_policy = ? WHERE reference_source_id = ?",
+        policy,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Mark a reference source as currently refreshing.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn mark_refreshing(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+) -> Result<(), LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query!(
+        "UPDATE reference_sources SET refresh_status = 'refreshing', updated_at = ? WHERE reference_source_id = ?",
+        now,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Mark a reference source as successfully refreshed with a new body hash.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn mark_refreshed(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+    new_body_hash: &str,
+) -> Result<(), LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    sqlx::query!(
+        "UPDATE reference_sources SET last_refreshed_at = ?, refresh_status = 'fresh', content_hash = ?, updated_at = ? WHERE reference_source_id = ?",
+        now,
+        new_body_hash,
+        now,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Mark a reference source refresh as failed with an error message.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database update fails.
+pub async fn mark_refresh_error(
+    pool: &SqlitePool,
+    reference_source_id: &str,
+    _error_msg: &str,
+) -> Result<(), LocalDbError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    // The error message is logged via tracing in the caller (capability handler);
+    // we store the status change only.
+    sqlx::query!(
+        "UPDATE reference_sources SET refresh_status = 'error', updated_at = ? WHERE reference_source_id = ?",
+        now,
+        reference_source_id,
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Find stale reference sources that need refreshing.
+///
+/// `stale_threshold_seconds` is the interval (in seconds) after which a
+/// `scheduled` source is considered stale. `on_change` sources are always
+/// included (they need constant polling). Sources with `refresh_policy = 'offline'`
+/// or `refresh_status = 'refreshing'` are excluded.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn find_stale_sources(
+    pool: &SqlitePool,
+    limit: Option<i64>,
+    stale_threshold_seconds: i64,
+) -> Result<Vec<ReferenceSourceRow>, LocalDbError> {
+    let limit = limit.unwrap_or(50).clamp(1, 500);
+    // SAFETY: dynamic SQL — compile-time macro not sufficient for
+    // parameterized LIMIT and dynamic stale-threshold arithmetic.
+    let rows = sqlx::query(&format!(
+        "SELECT
+              reference_source_id,
+              workspace_id,
+              source_type,
+              source_mutability,
+              uri,
+              title,
+              tags,
+              content_hash,
+              content_path,
+              scan_status,
+              created_at,
+              updated_at,
+              last_refreshed_at,
+              refresh_policy,
+              refresh_status
+           FROM reference_sources
+           WHERE refresh_policy != 'offline'
+             AND (refresh_status IS NULL OR refresh_status != 'refreshing')
+             AND (
+                 refresh_policy = 'on_change'
+                 OR (
+                     refresh_policy = 'scheduled'
+                     AND (
+                         last_refreshed_at IS NULL
+                         OR last_refreshed_at < datetime('now', '-{stale_threshold_seconds} seconds')
+                     )
+                 )
+             )
+           ORDER BY last_refreshed_at ASC NULLS FIRST
+           LIMIT {limit}"
+    ))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| ReferenceSourceRow {
+            reference_source_id: r.get("reference_source_id"),
+            workspace_id: r.get("workspace_id"),
+            source_type: r.get("source_type"),
+            source_mutability: r.get("source_mutability"),
+            uri: r.get("uri"),
+            title: r.get("title"),
+            tags: r.get("tags"),
+            content_hash: r.get("content_hash"),
+            content_path: r.get("content_path"),
+            scan_status: r.get("scan_status"),
+            created_at: r.get("created_at"),
+            updated_at: r.get("updated_at"),
+            last_refreshed_at: r.get("last_refreshed_at"),
+            refresh_policy: r.get("refresh_policy"),
+            refresh_status: r.get("refresh_status"),
+        })
+        .collect())
 }
 
 // ── Adapter: DB row → Domain model ────────────────────────────────────
