@@ -36,6 +36,8 @@ nexus-local-db = { path = "../nexus-local-db" }
 # world/timeline reads via SqliteNarrativeGateway.
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
+# V1.61 P3: narrative.compute capability calls nexus-wasm-host for sandboxed WASM compute.
+nexus-wasm-host = { path = "../nexus-wasm-host" }
 # V1.50 T-A P1: cron expression parsing + IANA TZ conversion for the daemon-side
 # cron evaluator (novel-writing three-role staggering). Same workspace deps as
 # `nexus42` (T-A P0 cron CLI validation).

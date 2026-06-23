@@ -1481,6 +1481,9 @@ fn preset_version_for_id(preset_id: &str) -> i64 {
         // V1.60 P1: `script-writing` — LLM-driven act/dialogue drafting
         // for script Works. Ships at v1 (embedded-presets/script-writing/preset.yaml).
         "script-writing" => 1,
+        // V1.61 P3: `combat-engine` — WASM combat resolution preset.
+        // Ships at v1 (embedded-presets/combat-engine/preset.yaml).
+        "combat-engine" => 1,
         // V1.47: `novel-chapter-review` replaces `reflection-loop` (renamed
         // per compass §0.1 #6). Bumped to version 1 (was already 1 as
         // `reflection-loop`); the state-machine contract is intentionally new
@@ -2166,6 +2169,8 @@ mod tests {
             "design-writing",
             // V1.60 P1: script-writing preset (Depth 3.5)
             "script-writing",
+            // V1.61 P3: combat-engine preset (WASM compute)
+            "combat-engine",
         ];
 
         for preset_id in &known_ids {
