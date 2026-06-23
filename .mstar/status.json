@@ -1,174 +1,52 @@
 {
   "version": 1,
   "updated_at": "2026-06-23T02:35:00Z",
-  "plans": [
-    {
-      "id": "2026-06-23-v1.61-compass-and-plan-stubs",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-23-v1.61-compass-and-plan-stubs.md",
-      "metadata": {
-        "iteration": "V1.61",
-        "slot": "P-1",
-        "effort": "M",
-        "owner": "@project-manager",
-        "description": "V1.61 delivery compass + 6 plan stubs + iteration index registration"
-      }
-    },
-    {
-      "id": "2026-06-23-v1.61-schemas-and-codegen",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-23-v1.61-schemas-and-codegen.md",
-      "metadata": {
-        "iteration": "V1.61",
-        "slot": "P0",
-        "effort": "M",
-        "owner": "@fullstack-dev",
-        "description": "Compute I/O schemas (4 new) + key-block schema extension (state, computable)",
-        "dependency": "P-1 PM signoff",
-        "working_branch": "feature/v1.61-schemas-and-codegen",
-        "merge_target": "iteration/v1.61"
-      }
-    },
-    {
-      "id": "2026-06-23-v1.61-kb-structured-layer",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-23-v1.61-kb-structured-layer.md",
-      "metadata": {
-        "iteration": "V1.61",
-        "slot": "P1",
-        "effort": "M",
-        "owner": "@fullstack-dev-2",
-        "description": "KB structured layer: state field, computable flag, ValidationMode::Structured, KbQuery filter",
-        "dependency": "P0 merged to integration",
-        "working_branch": "feature/v1.61-kb-structured-layer",
-        "merge_target": "iteration/v1.61"
-      }
-    },
-    {
-      "id": "2026-06-23-v1.61-wasm-host-and-basic-combat",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-23-v1.61-wasm-host-and-basic-combat.md",
-      "metadata": {
-        "iteration": "V1.61",
-        "slot": "P2",
-        "effort": "L",
-        "owner": "@fullstack-dev",
-        "description": "nexus-wasm-host crate (wasmtime engine, sandbox, ABI) + basic-combat sample module",
-        "dependency": "P0 merged to integration",
-        "working_branch": "feature/v1.61-wasm-host-and-basic-combat",
-        "merge_target": "iteration/v1.61"
-      }
-    },
-    {
-      "id": "2026-06-23-v1.61-mid-qc-and-fix-waves",
-      "status": "Todo",
-      "file": ".mstar/plans/2026-06-23-v1.61-mid-qc-and-fix-waves.md",
-      "metadata": {
-        "iteration": "V1.61",
-        "slot": "P-mid",
-        "effort": "M",
-        "owner": "@project-manager",
-        "description": "Meta tracking: verify wave gates, tri-review coordination, fix-wave dispatch"
-      }
-    },
-    {
-      "id": "2026-06-23-v1.61-compute-capability-and-preset",
-      "status": "Done",
-      "file": ".mstar/plans/2026-06-23-v1.61-compute-capability-and-preset.md",
-      "metadata": {
-        "iteration": "V1.61",
-        "slot": "P3",
-        "effort": "L",
-        "owner": "@fullstack-dev-2",
-        "description": "narrative.compute capability + combat-engine preset + state delta apply",
-        "dependency": "P1 + P2 merged to integration",
-        "working_branch": "feature/v1.61-compute-capability-and-preset",
-        "merge_target": "iteration/v1.61"
-      }
-    },
-    {
-      "id": "2026-06-23-v1.61-daemon-integration-and-closeout",
-      "status": "InReview",
-      "file": ".mstar/plans/2026-06-23-v1.61-daemon-integration-and-closeout.md",
-      "metadata": {
-        "iteration": "V1.61",
-        "slot": "P-last",
-        "effort": "M",
-        "owner": "@project-manager",
-        "description": "Daemon integration + E2E test + closeout (Profile B compaction, PR to main)",
-        "working_branch": "feature/v1.61-daemon-integration-and-closeout",
-        "merge_target": "iteration/v1.61"
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.61",
+    "integration_branch": "iteration/v1.62 (TBD)",
     "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.60 (retired, merged PR #82 @ 59982fc8)",
+    "last_integration_branch": "iteration/v1.61 (pending PR to main)",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.61",
-    "latest_active_compass": "v1.61-programmable-narrative-progression-delivery-compass-v1.md",
+    "latest_active_iteration": "V1.62+",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "approved",
+    "pre_implement_gate": "pending",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.60",
-      "compass": "v1.60-df46-local-parity-and-script-depth",
-      "shipped_at": "2026-06-23T02:00:00Z",
-      "plan_count": 5,
-      "plan_count_done": 5,
-      "open_at_ship": 9,
-      "deferred_to_next": 9,
+      "iteration": "V1.61",
+      "compass": "v1.61-programmable-narrative-progression-delivery-compass-v1",
+      "shipped_at": "2026-06-23T11:00:09Z",
+      "plan_count": 7,
+      "plan_count_done": 7,
+      "open_at_ship": 7,
+      "deferred_to_next": 7,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "DF-46: 5 orchestration-scope capabilities shipped (world.state.query + world.delta.propose/apply + timeline.event.append + fork.create; roster 27→32 shipped). Script profile: Depth 3.5 promotion (Draft→Master; script-writing preset + 五问 + section completion + KB extraction). New Master specs: world-delta-propose-apply.md + script-profile.md (promoted). DB migration 202606230001 (work_profile CHECK +='script'). catalog_registry_invariant_all_ids_present auto-derived (R-V159P0-002 closed).",
+      "wire_contracts_note": "V1.61: key-block.schema.json extended (state + computable additive fields); 4 new schemas in schemas/compute/ (compute-input, compute-output, entity-attributes, entity-state). Codegen cascade to Rust + TS. No DB migration (body_json TEXT). npm @42ch/nexus-contracts major bump. New crate nexus-wasm-host (wasmtime runtime). New capability narrative.compute (orchestration-scope, roster 32→33). New preset combat-engine.",
       "profile_b_compaction": "done",
-      "spec_promotions": [
-        {
-          "spec": "world-delta-propose-apply.md",
-          "from": "Draft (V1.60 P0)",
-          "to": "Master (V1.60 P-last)",
-          "plan": "2026-06-22-v1.60-hygiene-and-closeout"
-        },
-        {
-          "spec": "script-profile.md",
-          "from": "Draft (V1.60 P1)",
-          "to": "Master (V1.60 P-last)",
-          "plan": "2026-06-22-v1.60-hygiene-and-closeout"
-        }
-      ],
       "plan_ids": [
-        "2026-06-22-v1.60-compass-and-plan-stubs",
-        "2026-06-22-v1.60-df46-local-parity",
-        "2026-06-22-v1.60-script-depth-35",
-        "2026-06-22-v1.60-mid-qc-and-fix-waves",
-        "2026-06-22-v1.60-hygiene-and-closeout"
+        "2026-06-23-v1.61-compass-and-plan-stubs",
+        "2026-06-23-v1.61-schemas-and-codegen",
+        "2026-06-23-v1.61-kb-structured-layer",
+        "2026-06-23-v1.61-wasm-host-and-basic-combat",
+        "2026-06-23-v1.61-mid-qc-and-fix-waves",
+        "2026-06-23-v1.61-compute-capability-and-preset",
+        "2026-06-23-v1.61-daemon-integration-and-closeout"
       ],
       "highlights": {
-        "P-1": "Compass PM-locked (14 grill decisions) + forensic status.json bulk-resolve (28 V1.57+ rows lifecycle corrected) + 5 plan stubs",
-        "P0_DF46": "5 orchestration-scope capabilities shipped (world.state.query + world.delta.propose/apply + timeline.event.append + fork.create). Roster 27→32 shipped. world-delta-propose-apply.md Draft overlay. Fix-wave: QC1 W-001 metadata_json bug → routes through SqliteKbStore DAO. catalog_registry_invariant auto-derived (R-V159P0-002 closed).",
-        "P1_SCRIPT": "Script Depth 3.5 promotion: script-writing preset + prompts + 五问 rubric + section completion + KB extraction + DB migration + 16 hermetic tests. script-profile.md Draft→Master.",
-        "P-mid": "Tri-review 6 reports. P0: QC1 Request Changes → fix-wave → resolved. P1: all 3 seats Approve. Mid-QA: 1 regression (hardcoded registry count 26→31) fixed.",
-        "P-last": "11 code residuals closed by @fullstack-dev batch + 13 doc-only PM closures + 3 deferred to V1.61+. Spec promotions (world-delta + script → Master). DF-46 tracker updated. Profile B compaction."
+        "P-1": "Compass PM-locked (12 grill decisions: wasmtime, embedded+user modules, V1 envelope ABI, KB structured layer attributes/state/computable, per-invocation sandbox, combat-engine preset). 7 plan stubs.",
+        "P0": "4 new compute schemas + key-block extension (state, computable additive). Codegen → Rust + TS. Tri-review 3/3 Approve. mid-QA PASS.",
+        "P1": "KB structured layer: KeyBlockBody state/computable fields, ValidationMode::Structured, KbQuery computable filter (InMemory + Sqlite). 24 new tests. Tri-review 3/3 Approve.",
+        "P2": "nexus-wasm-host crate (wasmtime engine, sandbox fuel/memory/wall-time, host ABI kb_read + narrative_query). basic-combat module (ATK-DEF). build.rs compile-from-source (user-requested gitignore fix). 17 tests. Tri-review 3/3 Approve + qc3 revalidation.",
+        "P-mid": "Meta tracking across 4 waves. No product code.",
+        "P3": "narrative.compute capability (WasmEngine compute + state delta apply add/sub/set + battle_report 64KB cap + compute_error graceful handling). combat-engine preset (load_world→compute→apply_delta→advance_timeline→done). Registry 32 builtins. Tri-review 3/3 Approve.",
+        "P-last": "Daemon singleton WasmEngine + module cache at boot. Embedded + user module loading. 3 E2E tests. Full regression 4375 pass. 8 residuals closed. Report-only QA PASS."
       },
-      "residual_lifecycle": {
-        "closed_in_v160": [
-          "DF-46 local scope (5 capabilities shipped; roster 27→32)",
-          "Script profile Depth 3.5 (Draft→Master)",
-          "R-V159P0-002 (auto-derive closed)",
-          "R-V160P0-QC1-W001 (metadata_json bug fix-wave)",
-          "24 P-last residuals closed (11 code + 13 doc-only)"
-        ],
-        "open_at_ship": [
-          "9 V1.61+ residuals (all low severity)"
-        ],
-        "deferred_to_next": 9
-      },
-      "qc_tri_review_outcome": "Wave 1: P0 QC1 Request Changes (3W) → fix-wave (W-001 resolved) → QC1 self-approved re-review. P0 QC2/QC3 Approve. P1 all 3 seats Approve (clean first-pass). Total: 6 QC reports + 1 fix-wave + 1 mid-QA regression fix.",
-      "note": "V1.60 shipped 2026-06-23. 5 plans all Done. DF-46 local scope complete (32 shipped; 4 sync.* platform-blocked; 2 publish.* OUT). Script profile trilogy complete (novel/game-bible/script all Master). 9 low-severity residuals deferred to V1.61+.",
-      "merge_commit": "59982fc8",
-      "pr": 82,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/82"
+      "qc_tri_review_outcome": "Wave 1 P0: 3/3 Approve (0C/0W). Wave 2 P1: 3/3 Approve (0C/0W). P2: 3/3 Approve (0C/3W V1-acceptable) + qc3 fix-wave revalidation. Wave 3 P3: 3/3 Approve (0C/3W V1-acceptable). Wave 4 P-last: report-only QA PASS. Total: 12 QC reports + 1 fix-wave revalidation + 2 mid-QA.",
+      "note": "V1.61 ships Programmable Narrative Progression: WASM compute modules for timeline-based narrative iteration. XL iteration (largest since novel-writing). 7 plans, 4 waves. New crate nexus-wasm-host + new capability narrative.compute + new preset combat-engine + KB structured layer (state/computable) + 4 compute ABI schemas. User-requested design fix: embedded-modules gitignored + build.rs compile-from-source. 7 low residuals deferred to V1.62+/advisory.",
+      "merge_commit": null,
+      "pr": null,
+      "pr_url": null
     },
     "tech_debt_summary": {
       "total_open": 7,
