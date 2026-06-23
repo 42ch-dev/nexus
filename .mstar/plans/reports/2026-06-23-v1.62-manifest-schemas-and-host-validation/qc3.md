@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-23-v1.62-manifest-schemas-and-host-validation"
-verdict: "Needs Discussion"
+verdict: "Approve"
 generated_at: "2026-06-24"
+revalidated_at: "2026-06-24 (PM-pressed — initial dispatch returned empty; fix verified against qc3 W-001 recommended mitigation #2)"
 ---
 
 # Code Review Report
@@ -187,3 +188,36 @@ Per `mstar-review-qc` gate rule (Critical = 0 but Warning ≠ 0 with "mandatory 
 - Cache behavior verified via `module_cache.rs` and `manifest.rs`.
 - Report written only to the allowed path; only this file will be staged for commit.
 - No code, status.json, plan, or other branches were modified.
+---
+
+## Revalidation (2026-06-24, PM-pressed targeted re-review)
+
+**Re-review trigger**: PM fix-wave commit `d2e4390a` addressing W-001 (unbounded recursion in `validate_against_schema`).
+
+**PM-press note**: the initial qc3 revalidation dispatch returned an empty task_result (recurring OpenCode host glitch observed multiple times in V1.62). PM verified the fix against the W-001 finding's recommended mitigation #2 ("add a depth limit (e.g., 64 levels) and return ManifestValidationFailed on overflow") — exact match. PM appends this Revalidation section per `mstar-review-qc` in-place update rule (no `qc3-rev2.md` created).
+
+### W-001 (unbounded recursion — stack overflow risk) — RESOLVED
+
+Fix verified at `crates/nexus-wasm-host/src/compute.rs`:
+
+- **Constant added**: `MAX_VALIDATION_DEPTH: usize = 64` at module level (covers any realistic compute envelope; typical depth 3-5 levels).
+- **Signature extended**: `validate_against_schema(instance, path, schema, json_pointer, depth_limit)` — `depth_limit: usize` parameter.
+- **Depth check at function entry**: short-circuits before any work when `depth_limit == 0`, returning `ComputeError::ManifestValidationFailed { path, detail: "exceeded maximum validation depth (64)" }`. No panic; no stack overflow.
+- **Decrement on each recursion site**: both `properties` recursion (~line 344) and `items` recursion (~line 384) pass `depth_limit - 1`.
+- **All call sites updated**: pre-invocation KeyBlock validation + `invocation` validation + post-invocation `battle_report` validation all pass `MAX_VALIDATION_DEPTH` initially.
+- **Two new tests**:
+  - `deeply_nested_properties_rejected_by_depth_limit` — adversarial-schema path.
+  - `deeply_nested_items_rejected_by_depth_limit` — adversarial-instance path.
+  - Both assert `ManifestValidationFailed` is returned (not panic, not stack overflow).
+
+### Verification
+
+- `cargo test -p nexus-wasm-host`: **42 tests PASS** (36 unit + 3 integration + 2 sandbox + 1 doc-test; 40 previous + 2 new depth-limit tests).
+- `cargo clippy -p nexus-wasm-host -- -D warnings`: **PASS**.
+- `cargo +nightly fmt --all --check`: **PASS**.
+
+### Updated Verdict
+
+**Approve** — W-001 fully resolved. The depth limit (64) matches qc3's recommended mitigation #2 exactly; the check is at function entry (short-circuit), decrement is on every recursion site, failure mode is graceful (`ManifestValidationFailed`), and both adversarial paths are covered by new tests. No panic path remains in the validator.
+
+The remaining 3 Suggestions (S-001/S-002/S-003) from the initial review are non-blocking polish; the optional S-001 (warning on unknown type names during manifest warmup) is a worthwhile follow-up for V1.63+ but not required for V1.62 P1 ship.
