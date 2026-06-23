@@ -469,6 +469,28 @@ impl KbStore for SqliteKbStore {
         // Strategy: fetch all active blocks for the world, then apply
         // optional filters in-memory. This avoids complex dynamic SQL
         // and is efficient for per-world datasets (typically small).
+        //
+        // ## body_json growth and computable indexing (R-V161P0-LOW-004)
+        //
+        // Computable KeyBlocks (V1.61) embed `state` (dynamic runtime) and
+        // `attributes` (immutable compute params) inside `body_json`. For
+        // character KeyBlocks this can add several KiB of structured JSON
+        // per block — the `body_json` TEXT column may grow with compute
+        // usage over time.
+        //
+        // The `computable` filter is applied in-memory after `list_by_world`
+        // (consistent with all other query filters). If per-world KeyBlock
+        // counts grow to thousands, a SQLite expression index on
+        // `json_extract(body_json, '$.computable')` would accelerate the
+        // filter at the storage layer:
+        //
+        // ```sql
+        // CREATE INDEX IF NOT EXISTS idx_kb_key_blocks_computable
+        //   ON kb_key_blocks(json_extract(body_json, '$.computable'));
+        // ```
+        //
+        // This is deferred to a future iteration — V1.61 worlds are small
+        // enough that in-memory filtering is sufficient. No migration needed.
         let all_active = self.list_by_world(&query.world_id).await?;
 
         let text_lower = query.text_search.as_deref().map(str::to_lowercase);
@@ -499,6 +521,14 @@ impl KbStore for SqliteKbStore {
                         .and_then(|b| b.tags.as_ref())
                         .is_some_and(|tags| tags.iter().any(|t| t.to_lowercase().contains(lower)));
                     if !hit_name && !hit_summary && !hit_tags {
+                        return false;
+                    }
+                }
+                // V1.61 P1: filter by computable flag
+                if let Some(want) = query.computable {
+                    let is_computable =
+                        kb.body.as_ref().and_then(|b| b.computable).unwrap_or(false);
+                    if is_computable != want {
                         return false;
                     }
                 }
@@ -926,6 +956,7 @@ mod tests {
                 "traits": ["test"]
             })),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         });
         kb
     }
@@ -952,6 +983,7 @@ mod tests {
             summary: Some("A character without category".to_string()),
             attributes: Some(serde_json::json!({"aliases": ["NoCat"]})),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         });
 
         let err = store.insert_key_block(kb).await.unwrap_err();
@@ -1053,6 +1085,7 @@ mod tests {
             summary: Some("A generic character".to_string()),
             attributes: None,
             tags: None,
+            ..Default::default()
         });
         assert!(store.insert_key_block(kb).await.is_ok());
     }
@@ -1072,6 +1105,7 @@ mod tests {
             summary: Some("updated".to_string()),
             attributes: Some(serde_json::json!({"traits": ["old"]})),
             tags: None,
+            ..Default::default()
         });
         kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
 
@@ -1102,5 +1136,151 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(row.0, "info_point");
+    }
+
+    // ── Computable query filter (V1.61 P1) ─────────────────────────
+
+    fn make_computable_kb(world_id: &str, name: &str, bt: BlockType, computable: bool) -> KeyBlock {
+        let mut kb = KeyBlock::new(world_id, bt, name);
+        kb.body = Some(KeyBlockBody {
+            summary: Some(format!("{name} summary")),
+            attributes: if computable {
+                Some(serde_json::json!({"max_hp": 100}))
+            } else {
+                None
+            },
+            tags: None,
+            computable: Some(computable),
+            state: if computable {
+                Some(serde_json::json!({"character": {"current_hp": 80}}))
+            } else {
+                None
+            },
+        });
+        kb
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_query_computable_true() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        store
+            .insert_key_block(make_computable_kb(
+                "wld_1",
+                "Hero",
+                BlockType::Character,
+                true,
+            ))
+            .await
+            .unwrap();
+        store
+            .insert_key_block(make_computable_kb(
+                "wld_1",
+                "NPC",
+                BlockType::Character,
+                false,
+            ))
+            .await
+            .unwrap();
+
+        let q = KbQuery::new("wld_1").with_computable(Some(true));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.items[0].canonical_name, "Hero");
+        assert_eq!(
+            result.items[0].body.as_ref().unwrap().computable,
+            Some(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_query_computable_false() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        store
+            .insert_key_block(make_computable_kb(
+                "wld_1",
+                "Hero",
+                BlockType::Character,
+                true,
+            ))
+            .await
+            .unwrap();
+        store
+            .insert_key_block(make_computable_kb(
+                "wld_1",
+                "NPC",
+                BlockType::Character,
+                false,
+            ))
+            .await
+            .unwrap();
+
+        let q = KbQuery::new("wld_1").with_computable(Some(false));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.items[0].canonical_name, "NPC");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_query_computable_none_returns_all() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        store
+            .insert_key_block(make_computable_kb(
+                "wld_1",
+                "Hero",
+                BlockType::Character,
+                true,
+            ))
+            .await
+            .unwrap();
+        store
+            .insert_key_block(make_computable_kb(
+                "wld_1",
+                "NPC",
+                BlockType::Character,
+                false,
+            ))
+            .await
+            .unwrap();
+
+        // No computable filter → should return both
+        let q = KbQuery::new("wld_1");
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_query_computable_legacy_block() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_world(&pool).await;
+
+        let store = SqliteKbStore::new(pool.clone());
+        // Legacy block with no computable field
+        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "Legacy");
+        kb.body = Some(KeyBlockBody {
+            summary: Some("legacy".to_string()),
+            attributes: None,
+            tags: None,
+            ..Default::default()
+        });
+        store.insert_key_block(kb).await.unwrap();
+
+        // computable=true should exclude it
+        let q = KbQuery::new("wld_1").with_computable(Some(true));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 0);
+
+        // computable=false should include it
+        let q = KbQuery::new("wld_1").with_computable(Some(false));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 1);
     }
 }

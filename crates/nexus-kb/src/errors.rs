@@ -32,6 +32,14 @@ pub enum ValidationKind {
     InvalidScriptCategory,
     /// `body.attributes.script_category` exists but is not a string (V1.55 P3).
     NonStringScriptCategory,
+    /// `body.attributes` is missing for a computable `KeyBlock` (V1.61 P1).
+    MissingStructuredAttributes,
+    /// `body.state` is missing for a computable `KeyBlock` (V1.61 P1).
+    MissingStructuredState,
+    /// `body.state` is not a JSON object for a computable `KeyBlock` (V1.61 P1).
+    NonObjectStructuredState,
+    /// `body.state` does not contain the expected per-`block_type` nested key (V1.61 P1).
+    InvalidStructuredStateKey,
 }
 
 impl fmt::Display for ValidationKind {
@@ -50,6 +58,10 @@ impl fmt::Display for ValidationKind {
             Self::MissingScriptCategory => write!(f, "missing_script_category"),
             Self::InvalidScriptCategory => write!(f, "invalid_script_category"),
             Self::NonStringScriptCategory => write!(f, "non_string_script_category"),
+            Self::MissingStructuredAttributes => write!(f, "missing_structured_attributes"),
+            Self::MissingStructuredState => write!(f, "missing_structured_state"),
+            Self::NonObjectStructuredState => write!(f, "non_object_structured_state"),
+            Self::InvalidStructuredStateKey => write!(f, "invalid_structured_state_key"),
         }
     }
 }

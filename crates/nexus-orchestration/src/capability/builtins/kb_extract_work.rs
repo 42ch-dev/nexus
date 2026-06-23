@@ -356,6 +356,7 @@ impl Capability for KbExtractWork {
                     summary: Some(extract.body.clone()),
                     attributes: None,
                     tags: None,
+                    ..Default::default()
                 }
             };
 

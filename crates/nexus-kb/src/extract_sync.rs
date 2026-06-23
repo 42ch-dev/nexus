@@ -197,6 +197,7 @@ mod tests {
             summary: Some(summary.to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         }
     }
 

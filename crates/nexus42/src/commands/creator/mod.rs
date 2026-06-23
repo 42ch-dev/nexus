@@ -813,6 +813,7 @@ async fn run_demo_seed(config: &CliConfig, force: bool) -> Result<()> {
         summary: Some("The protagonist of the demo world.".to_string()),
         attributes: None,
         tags: Some(vec!["protagonist".to_string(), "demo".to_string()]),
+        ..Default::default()
     });
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let kb_result = kb_store

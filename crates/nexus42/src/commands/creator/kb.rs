@@ -703,6 +703,7 @@ async fn kb_add(
                 summary: Some(summary),
                 attributes: None,
                 tags: None,
+                ..Default::default()
             });
         }
 
@@ -1196,6 +1197,7 @@ mod tests {
             summary: Some("UT list summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-list".to_string()]),
+            ..Default::default()
         });
         let result = store.insert_key_block(kb_block).await.unwrap();
         let _block_id = result.key_block_id;
@@ -1242,6 +1244,7 @@ mod tests {
             summary: Some("UT show summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-show".to_string()]),
+            ..Default::default()
         });
         let result = store.insert_key_block(kb_block).await.unwrap();
 
@@ -1286,6 +1289,7 @@ mod tests {
             summary: Some("UT remove summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-rm".to_string()]),
+            ..Default::default()
         });
         let result = store.insert_key_block(kb_block).await.unwrap();
 
@@ -1324,6 +1328,7 @@ mod tests {
             summary: Some("UT cross-author".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["ut-rm2".to_string()]),
+            ..Default::default()
         });
         let result2 = store2.insert_key_block(kb_block2).await.unwrap();
 

@@ -340,6 +340,7 @@ async fn kb_adopt_failure_rolls_back_insert() {
             "aliases": ["Race Candidate"],
         })),
         tags: Some(vec!["novel".to_string()]),
+        ..Default::default()
     });
     kb.status = "confirmed".to_string();
     kb.created_at = chrono::Utc::now().to_rfc3339();
