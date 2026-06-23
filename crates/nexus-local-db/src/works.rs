@@ -39,6 +39,16 @@ pub fn is_game_bible_profile(profile: Option<&str>) -> bool {
     profile == Some("game_bible")
 }
 
+/// Returns `true` if `profile` indicates a script Work.
+///
+/// V1.60 P1: script Works do not use `work_chapters`, `Stories/`,
+/// or novel completion logic. All novel-specific code paths should gate
+/// on [`is_novel_profile`] before executing.
+#[must_use]
+pub fn is_script_profile(profile: Option<&str>) -> bool {
+    profile == Some("script")
+}
+
 /// Map a sqlx row to [`WorkRecord`].
 #[must_use]
 pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {
