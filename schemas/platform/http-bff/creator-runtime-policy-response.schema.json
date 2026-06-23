@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/creator-runtime-policy-response.schema.json",
+  "schema_version": 1,
+  "title": "CreatorRuntimePolicyResponseV1",
+  "description": "GET /creators/:id/runtime-policy 200 response body. Exposes Creator-level policy capabilities for CLI consumption. SSOT: v1-spec platform/local-first-runtime-policy-v1.md §4, §7.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "creator_id",
+    "memory_structured_write",
+    "memory_vector_index"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Wire revision; fixed to 1"
+    },
+    "creator_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
+      "description": "Creator identifier"
+    },
+    "memory_structured_write": {
+      "type": "boolean",
+      "description": "Whether memory structured write is enabled for this Creator (spec §4)"
+    },
+    "memory_vector_index": {
+      "type": "boolean",
+      "description": "Whether memory vector indexing/embedding is enabled (spec §4)"
+    },
+    "local_first_embedding_remaining": {
+      "type": "integer",
+      "minimum": 0,
+      "nullable": true,
+      "description": "Remaining embedding quota for local_first creators (null if not applicable or unlimited)"
+    }
+  },
+  "additionalProperties": false
+}

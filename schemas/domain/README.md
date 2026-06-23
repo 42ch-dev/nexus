@@ -47,7 +47,7 @@ Business action command with audit attribution and origin tracking. §5.10
 
 ### OutboxEntry (local Rust only)
 
-Outbox queue rows are **not** in `schemas/`; type `OutboxEntry` lives in `crates/nexus-contracts/src/local/domain/outbox_entry.rs` (platform does not observe outbox shape on wire). See [schemas-wire-platform-sync-boundary.md](../../.mstar/knowledge/schemas-wire-platform-sync-boundary.md).
+Outbox queue rows are **not** in `schemas/`; type `OutboxEntry` lives in `crates/nexus-contracts/src/local/domain/outbox_entry.rs` (platform does not observe outbox shape on wire). See [schemas-external-consumer-boundary.md](../../.mstar/knowledge/schemas-external-consumer-boundary.md).
 
 ## Common Types
 

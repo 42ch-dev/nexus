@@ -65,7 +65,7 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative |
 
-Also: [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) (knowledge root).
+Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) (knowledge root).
 
 ### Runtime and persistence
 

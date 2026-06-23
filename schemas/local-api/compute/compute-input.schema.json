@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/compute/compute-input.schema.json",
+  "schema_version": 1,
+  "title": "Nexus Compute Input Envelope",
+  "description": "Standard input envelope passed into a WASM compute module (V1.61 ABI, compass Q3/Q8). Bundles a read-only KeyBlock snapshot, the narrative position, and module-declared invocation parameters. Modules are stateless pure functions (compass Q6): every call receives a fresh envelope and returns a ComputeOutput.",
+  "type": "object",
+  "required": ["schema_version", "world_ref", "key_blocks"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "world_ref": {
+      "type": "object",
+      "properties": {
+        "world_id": {
+          "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId",
+          "description": "World the compute invocation runs against"
+        },
+        "branch_id": {
+          "type": "string",
+          "description": "Fork branch ID (root branch or a specific fork)"
+        },
+        "timeline_head_event_id": {
+          "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/TimelineEventId",
+          "description": "Current timeline head the compute advances from"
+        }
+      },
+      "description": "World and timeline locator for this invocation"
+    },
+    "key_blocks": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/domain/key-block.schema.json"
+      },
+      "description": "Snapshot of KeyBlocks relevant to this invocation. Each KeyBlock carries its body including state (for computable blocks) and attributes (immutable compute params). The host selects which blocks to pass based on the module manifest and the capability context."
+    },
+    "narrative_state": {
+      "type": "object",
+      "properties": {
+        "timeline_position": {
+          "type": "string",
+          "description": "Opaque timeline position label (module-interpreted)"
+        },
+        "current_chapter": {
+          "type": "string",
+          "description": "Current chapter identifier, if applicable"
+        },
+        "current_scene": {
+          "type": "string",
+          "description": "Current scene identifier, if applicable"
+        }
+      },
+      "description": "Narrative position context (timeline, chapter, scene). Shape is module-declared; fields not listed here may be supplied by the host per the module manifest."
+    },
+    "invocation": {
+      "type": "object",
+      "description": "Module-defined input parameters for this invocation (freeform object). The exact fields are declared by the module's manifest.json; the host passes them through verbatim. This is the V1 envelope escape hatch for module-specific inputs (e.g. chosen targets, difficulty, dice seed)."
+    }
+  },
+  "additionalProperties": false
+}

@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generated::common_types::ManuscriptPhase;
+use crate::generated::common::common_types::ManuscriptPhase;
 
 /// `ManuscriptState` — local-only manuscript phase machine tracking.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

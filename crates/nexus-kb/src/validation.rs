@@ -114,9 +114,12 @@ pub enum ValidationMode {
     /// Rejects `novel_category` and `game_bible_category` when active.
     Script,
     /// Structured compute validation (V1.61 P1) — validates computable
-    /// `KeyBlock`s against per-`block_type` structured schemas from
-    /// `schemas/compute/entity-state.schema.json` and
-    /// `schemas/compute/entity-attributes.schema.json`.
+    /// `KeyBlock`s carry the structural shape expected by the compute
+    /// envelope: `attributes` and `state` are JSON objects, with `state`
+    /// nested by `block_type` per compass Q5 (e.g. `state.character.current_hp`).
+    /// Per-module attribute/state shapes are declared by each compute
+    /// module's `manifest.json` `schemas` block (V1.62 — see
+    /// `modules/README.md`).
     ///
     /// When a `KeyBlock` has `computable: true`, this mode checks:
     /// 1. `attributes` is present and is a JSON object (immutable compute params)
@@ -608,9 +611,9 @@ fn validate_structured_body(
 /// # Computable set (compass open design item #5, locked P1 T2)
 ///
 /// The canonical computable `BlockType` set is `Character`, `Item`, `Faction`,
-/// `Ability`, `Species`. These are the types for which per-`block_type` structured
-/// schemas exist in `schemas/compute/entity-state.schema.json` and
-/// `schemas/compute/entity-attributes.schema.json`.
+/// `Ability`, `Species`. Per-module attribute/state shapes are declared in
+/// each compute module's `manifest.json` `schemas` block (V1.62 — see
+/// `modules/README.md`).
 /// `environment` is NOT a valid `BlockType` enum variant and is not included.
 #[must_use]
 pub const fn block_type_state_key(block_type: BlockType) -> Option<&'static str> {

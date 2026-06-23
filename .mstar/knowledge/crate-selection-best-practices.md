@@ -19,7 +19,7 @@ This document does **not** override:
 
 - `AGENTS.md` — release discipline, codegen rules, reachability rules.
 - `v1-spec/` (ADRs / codegen strategy / wire schemas) — wire and protocol decisions (e.g. `agent-client-protocol` SDK pin) remain owned there.
-- Architecture SSOTs — **`specs/local-cloud-crate-architecture.md`** (crate graph & local/cloud lines), `orchestration-engine.md`, `daemon-runtime.md`, `creator-schedule-and-core-context.md`, `acp-client-tech-spec.md`, [`schemas-wire-platform-sync-boundary.md`](schemas-wire-platform-sync-boundary.md); archived: `schemas-boundary.md`, `daemon-lifecycle-api.md`, `local-db-refactor.md`, `architecture-alignment-review.md`.
+- Architecture SSOTs — **`specs/local-cloud-crate-architecture.md`** (crate graph & local/cloud lines), `orchestration-engine.md`, `daemon-runtime.md`, `creator-schedule-and-core-context.md`, `acp-client-tech-spec.md`, [`schemas-external-consumer-boundary.md`](schemas-external-consumer-boundary.md); archived: `schemas-boundary.md`, `daemon-lifecycle-api.md`, `local-db-refactor.md`, `architecture-alignment-review.md`.
 
 **Conflict order**: `AGENTS.md` > `v1-spec` / ADR > architecture SSOTs > this document > other knowledge.
 

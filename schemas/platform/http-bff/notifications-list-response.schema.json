@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/notifications-list-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus NotificationsListResponse",
+  "description": "Paginated notifications list (platform plan 20). Item shape matches NotificationsInboxItem fields for wire stability.",
+  "type": "object",
+  "required": ["schema_version", "items", "has_more"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["notification_id", "kind", "title", "created_at"],
+        "properties": {
+          "notification_id": {
+            "type": "string",
+            "pattern": "^ntf_[a-zA-Z0-9]+$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["system", "social", "publish", "workspace", "other"]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "read_at": {
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+          },
+          "created_at": {
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+          },
+          "link_url": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "next_cursor": {
+      "type": "string"
+    },
+    "has_more": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

@@ -46,7 +46,7 @@
         },
         "attributes": {
           "type": "object",
-          "description": "Key-value attributes. For computable KeyBlocks these hold IMMUTABLE compute params; conform to schemas/compute/entity-attributes.schema.json keyed by block_type."
+          "description": "Key-value attributes. For computable KeyBlocks these hold IMMUTABLE compute params; per-module shape is declared in the module's manifest.json `schemas.key_block_attributes[<block_type>]` block (V1.62). Keys are nested by block_type."
         },
         "tags": {
           "type": "array",
@@ -55,7 +55,7 @@
         },
         "state": {
           "type": "object",
-          "description": "DYNAMIC runtime state for computable KeyBlocks (V1.61, compass Q4/Q5). Nested by block_type to avoid field-name collisions across module types (e.g. state.character.current_hp). Conform to schemas/compute/entity-state.schema.json keyed by block_type. Only meaningful when computable is true."
+          "description": "DYNAMIC runtime state for computable KeyBlocks (V1.61, compass Q4/Q5). Nested by block_type to avoid field-name collisions across module types (e.g. state.character.current_hp). Per-module state shape is declared in the module's manifest.json `schemas.key_block_state[<block_type>]` block (V1.62). Only meaningful when computable is true."
         },
         "computable": {
           "type": "boolean",
