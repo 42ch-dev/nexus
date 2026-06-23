@@ -41,11 +41,14 @@ The host whitelists two imported host functions (module namespace `nexus`):
   come from `nexus-contracts` (generated). Do not hand-write duplicate DTOs.
 - **No cross-call state**: each `compute()` builds a fresh `Store` + `Instance`.
   Never cache instance state across calls.
-- **Embedded modules are committed binaries**: the `.wasm` blobs under
-  `embedded-modules/` are built from `modules/` and committed. `build.rs` is a
-  guard that asserts they exist; it does **not** compile WASM (keeps the host
-  crate hermetic — no wasm toolchain required to build `nexus-wasm-host`).
-  Rebuild procedure: see `modules/README.md`.
+- **Embedded modules are compiled from source at build time**: the `.wasm`
+  blobs under `embedded-modules/` are **generated** (gitignored) by `build.rs`,
+  which compiles each module from `modules/<id>/` via
+  `cargo build --release --target wasm32-unknown-unknown` when the embedded copy
+  is missing or stale. The `wasm32-unknown-unknown` target is therefore
+  **required** to build this crate: `rustup target add wasm32-unknown-unknown`.
+  CI installs it via the `targets:` input on `dtolnay/rust-toolchain` in every
+  Rust job (`.github/workflows/ci.yml`). Module authoring: see `modules/README.md`.
 - **Sandbox limits are non-negotiable**: a module that exhausts fuel, exceeds the
   memory cap, or runs past the wall-time deadline traps and is reported as a
   `ComputeError`, never crashing the host.
