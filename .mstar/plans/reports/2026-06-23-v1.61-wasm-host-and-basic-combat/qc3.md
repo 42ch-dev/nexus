@@ -128,6 +128,122 @@ fn bench_compute_baseline(c: &mut Criterion) {
 
 **Verdict**: Approve
 
+## Revalidation (fix-wave: gitignore + compile-from-source build.rs)
+
+**Context**: After the original QC3 approval, the fix-wave changed the build pipeline from "guard that asserts pre-committed .wasm exists" to "compile-from-source at build time with mtime gating". The embedded .wasm is now gitignored instead of committed.
+
+### Revalidation Scope
+- `build.rs`: mtime gating logic, staleness detection, `rerun-if-changed` directives
+- `.gitignore`: correct gitignore pattern for `embedded-modules/`
+- `.github/workflows/ci.yml`: wasm32-unknown-unknown target installation in all Rust jobs
+- `AGENTS.md`: documentation updated to reflect compile-from-source requirement
+- Runtime behavior: confirmed no `src/*.rs` changes
+
+### Assessment Results
+
+#### ✅ 1. build.rs mtime gating logic is sound
+The `is_fresh()` function (lines 95-106) correctly:
+- Returns `false` (trigger rebuild) if the embedded `.wasm` does not exist or metadata read fails
+- Returns `false` if `Cargo.toml` or `manifest.json` in the module source are newer than the embedded artifact
+- Recursively checks `src/` directory via `dir_contains_newer()` for any newer file
+- Treats unreadable source trees as stale (forces rebuild attempt to surface real errors)
+
+**Evidence**: Incremental build after fresh compilation completed in 0.13s (0.171s total), confirming that the mtime check correctly skips recompilation when sources are unchanged. Dev reported 0.73s; this aligns with expected Cargo overhead on different hardware.
+
+**Risk Assessment**: Low. The logic correctly handles edge cases (missing artifact, mtime read failures, directory traversal). Error propagation uses `die()` with clear messages, so failures are actionable.
+
+#### ✅ 2. Fresh build reproducibility confirmed
+Ran `rm -rf crates/nexus-wasm-host/embedded-modules/ && cargo build -p nexus-wasm-host`:
+- Embedded `.wasm` generated at 78,192 bytes (matches dev report)
+- SHA256: `ef7d48ca8c0e7cadd9f5e7ee0106d48907b56316f325c9a93366bd6618819c5c`
+- All 17 tests pass (11 lib + 3 basic_combat + 2 sandbox_limits + 1 doc)
+- Binary is byte-identical to previous fresh builds (expected because `modules/basic-combat/` sources unchanged and `dlmalloc` allocator is deterministic for wasm32)
+
+**Evidence**: Fresh build succeeded, tests passed, SHA256 hash stable across clean rebuilds.
+
+**Risk Assessment**: None. Reproducibility is sound; no stochastic elements in the build pipeline (module Cargo.toml uses fixed opt-level/z, lto=true, codegen-units=1, panic=abort, strip=true).
+
+#### ✅ 3. `rerun-if-changed` directives are sufficient
+The `build_module()` function emits:
+```rust
+println!("cargo:rerun-if-changed={}", src_manifest.display());
+println!("cargo:rerun-if-changed={}", src_cargo.display());
+println!("cargo:rerun-if-changed={}", src_code.display());
+```
+
+This covers:
+- `manifest.json`: changes to module metadata
+- `Cargo.toml`: changes to module dependencies or build profile
+- `src/`: recursive watch on all Rust sources (directory-level watch catches new/deleted files)
+
+**Cargo behavior**: Directory-level `rerun-if-changed` watches for mtimes on the directory entry, so file additions/removals under `src/` trigger re-runs. The mtime gating logic in `is_fresh()` ensures that even if Cargo re-runs `build.rs`, the actual wasm compilation only occurs if truly stale.
+
+**Evidence**: Verified that incremental build does not recompile wasm when sources unchanged (0.13s vs 60s for fresh wasm compilation).
+
+**Risk Assessment**: Low. The directives cover all critical paths (metadata, build config, code). No missing dependencies on build script inputs.
+
+#### ✅ 4. Missing wasm target error message is clear
+The `is_missing_target_error()` function (lines 173-178) detects common patterns from rustc/cargo when the wasm sysroot is absent:
+```rust
+stderr.contains("can't find crate for `core`")
+    || stderr.contains("can't find crate for `std`")
+    || stderr.contains("does not have a standard library preinstalled")
+    || stderr.contains("rust-std")
+```
+
+The `compile_module()` function provides a helpful fix hint:
+```rust
+die(&format!(
+    "wasm32-unknown-unknown target not installed — required to compile \
+     embedded module `{id}`.\n\
+     Fix: rustup target add wasm32-unknown-unknown"
+));
+```
+
+**Evidence**: Manually verified that this message matches common rustc errors for missing targets.
+
+**Risk Assessment**: None. Error message is actionable and points to the exact fix command.
+
+#### ✅ 5. CI correctly installs wasm32-unknown-unknown
+`.github/workflows/ci.yml` adds `targets: wasm32-unknown-unknown` to `dtolnay/rust-toolchain` in **all three** Rust CI jobs:
+- `check` (line 101)
+- `test` (line 132)
+- `clippy` (line 227)
+
+This ensures that every CI run that builds `nexus-wasm-host` has the wasm target available.
+
+**Evidence**: Verified the three locations in the diff; each uses the same pattern.
+
+**Risk Assessment**: None. CI configuration is complete and consistent.
+
+#### ✅ 6. No runtime behavior changes
+Confirmed via diff analysis that:
+- No `src/*.rs` files changed in the fix-wave
+- Only changes: `build.rs`, `.gitignore`, `.github/workflows/ci.yml`, `AGENTS.md`
+- All 17 tests still pass
+- `AGENTS.md` correctly documents the new compile-from-source requirement
+
+**Evidence**: `git diff 5692fe5c..HEAD --stat` shows only the expected 4 files changed (plus QC reports and status.json). Test run confirms no regressions.
+
+**Risk Assessment**: None. Fix-wave is build-pipeline-only; runtime semantics are preserved.
+
+### Updated Suggestion for V2
+
+The original S-002 suggested documenting build reproducibility expectations. The fix-wave's new build.rs implementation makes this more urgent:
+
+#### S-002 (updated): Document build reproducibility with compile-from-source model
+
+**Suggestion**: Update `modules/README.md` to document the compile-from-source guarantees:
+- `.wasm` binaries are reproducible if built with the same rustc version and wasm32-unknown-unknown target
+- The `dlmalloc` global allocator for wasm32 has deterministic behavior; changes to `modules/*/Cargo.toml` (opt-level, lto, codegen-units) affect reproducibility
+- Fresh build: `rm -rf <host>/embedded-modules/ && cargo build -p nexus-wasm-host`
+- Incremental build behavior: mtime gating ensures wasm is only recompiled when module sources change
+- CI automatically installs the wasm target; local dev needs: `rustup target add wasm32-unknown-unknown`
+
+**Benefit**: Makes the compile-from-source contract explicit for contributors and CI maintainers.
+
+---
+
 ## Detailed Assessment
 
 ### Engine Construction Cost (✅ Sound Pattern)
