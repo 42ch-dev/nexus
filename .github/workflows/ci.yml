@@ -98,6 +98,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           components: rustfmt, clippy
+          # nexus-wasm-host's build.rs compiles embedded modules from source
+          # (see crates/nexus-wasm-host/build.rs).
+          targets: wasm32-unknown-unknown
       - name: Install nightly rustfmt (for workspace .rustfmt.toml `ignore` on codegen output)
         run: rustup toolchain install nightly --component rustfmt --no-self-update
       - uses: actions/download-artifact@v4
@@ -126,6 +129,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: actions/download-artifact@v4
         with:
           name: generated-types
@@ -206,6 +211,7 @@ jobs:
               -p nexus-narrative
               -p nexus-moment-context-assembly
               -p nexus-cloud-sync
+              -p nexus-wasm-host
           - group: daemon
             packages: >-
               -p nexus-daemon-runtime
@@ -219,6 +225,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: actions/download-artifact@v4
         with:
           name: generated-types

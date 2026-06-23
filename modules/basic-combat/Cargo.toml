@@ -1,0 +1,40 @@
+# basic-combat — Nexus compute module (sample / reference implementation)
+#
+# This is a STANDALONE crate (compass Q2/Q10): it is NOT a member of the nexus
+# workspace. Build it from this directory with:
+#
+#   cargo build --release --target wasm32-unknown-unknown
+#
+# The compiled .wasm is then copied into
+# `crates/nexus-wasm-host/embedded-modules/basic-combat/basic-combat.wasm`
+# (see ../../modules/README.md for the full procedure).
+[package]
+name = "basic-combat"
+version = "1.0.0"
+edition = "2021"
+authors = ["42ch"]
+license = "GPL-3.0-only"
+description = "Sample Nexus WASM compute module: simple ATK−DEF combat resolution."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Global allocator for wasm32-unknown-unknown (std has no default allocator on
+# this target). dlmalloc grows linear memory on demand; the host's memory cap
+# bounds it.
+dlmalloc = { version = "0.2", features = ["global"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Standalone workspace root so `cargo build` here does not traverse up into the
+# nexus workspace.
+[workspace]

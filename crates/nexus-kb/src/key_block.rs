@@ -12,7 +12,26 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// `KeyBlock` body content.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// # V1.61 Structured Compute Layer
+///
+/// The [`state`] and [`computable`] fields are additive (optional) for the WASM
+/// compute pipeline (compass Q4). Existing `KeyBlock`s without them remain valid.
+///
+/// ## Computable `BlockType` set
+///
+/// The canonical set of `BlockType`s that participate in compute is:
+/// `Character`, `Item`, `Faction`, `Ability`, `Species`. These are the
+/// types for which per-`block_type` structured schemas exist in
+/// `schemas/compute/entity-attributes.schema.json` and
+/// `schemas/compute/entity-state.schema.json`. `environment` is NOT a
+/// valid `BlockType` enum variant and is not included.
+///
+/// When [`computable`](Self::computable) is `Some(true)`, the body SHOULD
+/// carry static `attributes` (immutable compute params) and MAY carry
+/// dynamic `state` (mutable runtime data, nested by `block_type` per
+/// compass Q5: `state.character.current_hp`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct KeyBlockBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -20,6 +39,18 @@ pub struct KeyBlockBody {
     pub attributes: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// Dynamic runtime state for computable `KeyBlocks` (V1.61, compass Q4/Q5).
+    /// Nested by `block_type` to avoid field-name collisions across module
+    /// types. Conform to `schemas/compute/entity-state.schema.json` keyed by
+    /// `block_type`. Only meaningful when [`computable`](Self::computable) is `Some(true)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<serde_json::Value>,
+    /// Marks this `KeyBlock` as participating in WASM compute (V1.61, compass Q4).
+    /// When `Some(true)`, `state` holds mutable runtime state and `attributes`
+    /// hold immutable compute params. Stored inside `body_json` (no DB column)
+    /// for additive, migration-free rollout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub computable: Option<bool>,
 }
 
 /// Result of a conflict check for confirm gates.
@@ -278,13 +309,9 @@ impl From<nexus_contracts::KeyBlock> for KeyBlock {
             canonical_name: c.canonical_name,
             status: c.status.as_str().to_string(),
             revision: c.revision,
-            body: c.body.map(|v| {
-                serde_json::from_value(v).unwrap_or(KeyBlockBody {
-                    summary: None,
-                    attributes: None,
-                    tags: None,
-                })
-            }),
+            body: c
+                .body
+                .map(|v| serde_json::from_value(v).unwrap_or_else(|_| KeyBlockBody::default())),
             source_anchor: c.source_anchor.map(SourceAnchor::from),
             created_from_command_id: c.created_from_command_id,
             created_at: c.created_at,
@@ -390,6 +417,7 @@ mod tests {
             summary: Some("new summary".to_string()),
             attributes: None,
             tags: None,
+            ..Default::default()
         });
         assert!(matches!(result, Err(KbError::ImmutableConfirmedState)));
     }
@@ -401,6 +429,7 @@ mod tests {
             summary: Some("A dark forest".to_string()),
             attributes: None,
             tags: Some(vec!["location".to_string()]),
+            ..Default::default()
         })
         .unwrap();
         assert!(kb.body.is_some());
@@ -511,5 +540,79 @@ mod tests {
         let visible_manifests: &[&str] = &["stm_visible1"];
         let result = kb.confirm(&owner_membership(), 0, &no_conflicts(), visible_manifests);
         assert!(result.is_ok());
+    }
+
+    // ── State roundtrip (V1.61 P1) ─────────────────────────────────
+
+    #[test]
+    fn test_state_roundtrip_serialize_deserialize_preserves_state() {
+        let body = KeyBlockBody {
+            summary: Some("Hero character".to_string()),
+            attributes: Some(serde_json::json!({"max_hp": 100, "base_atk": 30})),
+            tags: Some(vec!["combat".to_string()]),
+            computable: Some(true),
+            state: Some(serde_json::json!({
+                "character": {
+                    "current_hp": 80,
+                    "status_effects": ["poisoned"],
+                    "position": "front_line",
+                    "is_alive": true
+                }
+            })),
+        };
+
+        let json = serde_json::to_string(&body).unwrap();
+        let deserialized: KeyBlockBody = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.computable, Some(true));
+        assert_eq!(
+            deserialized.state.as_ref().unwrap()["character"]["current_hp"],
+            80
+        );
+        assert_eq!(
+            deserialized.state.as_ref().unwrap()["character"]["status_effects"][0],
+            "poisoned"
+        );
+    }
+
+    #[test]
+    fn test_state_roundtrip_without_state_and_computable() {
+        // Legacy KeyBlock without state/computable should roundtrip correctly
+        let body = KeyBlockBody {
+            summary: Some("Old block".to_string()),
+            attributes: None,
+            tags: None,
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&body).unwrap();
+        let deserialized: KeyBlockBody = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.summary.as_deref(), Some("Old block"));
+        assert_eq!(deserialized.state, None);
+        assert_eq!(deserialized.computable, None);
+    }
+
+    #[test]
+    fn test_state_roundtrip_empty_state_object() {
+        let body = KeyBlockBody {
+            summary: Some("minimal".to_string()),
+            attributes: Some(serde_json::json!({"max_hp": 50})),
+            tags: None,
+            computable: Some(true),
+            state: Some(serde_json::json!({"character": {}})),
+        };
+
+        let json = serde_json::to_string(&body).unwrap();
+        let deserialized: KeyBlockBody = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.computable, Some(true));
+        assert!(deserialized
+            .state
+            .as_ref()
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("character"));
     }
 }

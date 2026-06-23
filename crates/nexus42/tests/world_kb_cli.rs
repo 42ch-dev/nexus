@@ -54,6 +54,7 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
         summary: Some("Original summary".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: Some(vec!["novel".to_string()]),
+        ..Default::default()
     });
     let result = store.insert_key_block(kb).await.unwrap();
     (pool, result.key_block_id, dir)
