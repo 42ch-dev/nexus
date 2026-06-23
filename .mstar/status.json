@@ -4,8 +4,8 @@
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.62 (TBD)",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.61 (pending PR to main)",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.61 (retired, merged PR #83 @ 140f2594)",
     "integration_merge_target": "main",
     "latest_active_iteration": "V1.62+",
     "latest_active_compass": null,
@@ -44,7 +44,7 @@
       },
       "qc_tri_review_outcome": "Wave 1 P0: 3/3 Approve (0C/0W). Wave 2 P1: 3/3 Approve (0C/0W). P2: 3/3 Approve (0C/3W V1-acceptable) + qc3 fix-wave revalidation. Wave 3 P3: 3/3 Approve (0C/3W V1-acceptable). Wave 4 P-last: report-only QA PASS. Total: 12 QC reports + 1 fix-wave revalidation + 2 mid-QA.",
       "note": "V1.61 ships Programmable Narrative Progression: WASM compute modules for timeline-based narrative iteration. XL iteration (largest since novel-writing). 7 plans, 4 waves. New crate nexus-wasm-host + new capability narrative.compute + new preset combat-engine + KB structured layer (state/computable) + 4 compute ABI schemas. User-requested design fix: embedded-modules gitignored + build.rs compile-from-source. 7 low residuals deferred to V1.62+/advisory.",
-      "merge_commit": null,
+      "merge_commit": "140f2594",
       "pr": 83,
       "pr_url": "https://github.com/42ch-dev/nexus/pull/83"
     },
