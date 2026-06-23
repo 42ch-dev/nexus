@@ -136,6 +136,31 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         // Bundle: generated ONLY from domain/bundle.schema.json (cloud-sync variant is
         // allOf-only, skipped by codegen per SKIP_STRUCT_GENERATION_REL_PATHS)
         entry!("schemas/domain/bundle.schema.json", Strict, Bundle),
+        // ── compute/ ────────────────────────────────────────────────────
+        // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
+        // struct of each schema is registered; inline/definition structs
+        // (ComputeOutputStateDelta, CharacterAttributes, CharacterState) are
+        // emitted by codegen but validated indirectly via their parent schema.
+        entry!(
+            "schemas/compute/compute-input.schema.json",
+            Strict,
+            ComputeInput
+        ),
+        entry!(
+            "schemas/compute/compute-output.schema.json",
+            Strict,
+            ComputeOutput
+        ),
+        entry!(
+            "schemas/compute/entity-attributes.schema.json",
+            Strict,
+            EntityAttributes
+        ),
+        entry!(
+            "schemas/compute/entity-state.schema.json",
+            Strict,
+            EntityState
+        ),
         // ── common/ ──────────────────────────────────────────────────────
         entry!("schemas/common/version-ref.schema.json", Strict, VersionRef),
         // SourceAnchor lives in common_types.rs, generated from source-anchor.schema.json

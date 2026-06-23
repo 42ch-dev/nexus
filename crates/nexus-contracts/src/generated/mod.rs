@@ -9,6 +9,10 @@ pub mod conflict_response;
 pub mod sync_pull_request;
 pub mod sync_pull_response;
 pub mod version_ref;
+pub mod compute_input;
+pub mod compute_output;
+pub mod entity_attributes;
+pub mod entity_state;
 pub mod bundle;
 pub mod creator;
 pub mod delta;
@@ -64,6 +68,10 @@ pub use conflict_response::*;
 pub use sync_pull_request::*;
 pub use sync_pull_response::*;
 pub use version_ref::*;
+pub use compute_input::*;
+pub use compute_output::*;
+pub use entity_attributes::*;
+pub use entity_state::*;
 pub use bundle::*;
 pub use creator::*;
 pub use delta::*;
@@ -118,6 +126,10 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("SyncPullRequest", 1),
     ("SyncPullResponse", 1),
     ("VersionRef", 1),
+    ("ComputeInput", 1),
+    ("ComputeOutput", 1),
+    ("EntityAttributes", 1),
+    ("EntityState", 1),
     ("Bundle", 1),
     ("Creator", 1),
     ("Delta", 1),
