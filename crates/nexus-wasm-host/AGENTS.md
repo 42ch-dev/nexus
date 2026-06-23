@@ -52,6 +52,13 @@ The host whitelists two imported host functions (module namespace `nexus`):
 - **Sandbox limits are non-negotiable**: a module that exhausts fuel, exceeds the
   memory cap, or runs past the wall-time deadline traps and is reported as a
   `ComputeError`, never crashing the host.
+- **Manifest-driven validation** (V1.62): When `manifest.schemas` is declared,
+  the host validates `ComputeInput.key_blocks` (per
+  `key_block_attributes[block_type]` and `key_block_state[block_type]`),
+  `ComputeInput.invocation`, and `ComputeOutput.battle_report` against the
+  declared JSON-Schema fragments. Validation failure →
+  `ComputeError::ManifestValidationFailed { path, detail }`. Omitted schemas
+  fields → no validation for that aspect (backward-compatible with V1.61).
 
 ## Dependencies
 
