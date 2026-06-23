@@ -1,11 +1,13 @@
 //! Embedded compute modules, compiled into the binary at build time.
 //!
-//! Mirrors the `embedded-presets/` pattern in `nexus-orchestration`: pre-built
-//! `.wasm` artifacts live under `embedded-modules/<id>/<id>.wasm` and are
-//! embedded via [`include_dir!`]. The committed `.wasm` blobs are rebuilt from
-//! `modules/<id>/` per the procedure in `modules/README.md` (open design item
-//! #6: pre-compile + commit). This keeps `cargo build -p nexus-wasm-host`
-//! hermetic — no wasm toolchain required by host-crate consumers.
+//! Mirrors the `embedded-presets/` pattern in `nexus-orchestration`: the
+//! `.wasm` artifacts under `embedded-modules/<id>/<id>.wasm` are embedded via
+//! [`include_dir!`]. The `embedded-modules/` tree is **generated and
+//! gitignored** — those `.wasm` blobs are **compiled by `build.rs`** from the
+//! source crates under `modules/<id>/` (see `modules/README.md` and
+//! `build.rs`). This keeps `cargo build -p nexus-wasm-host` reproducible while
+//! avoiding committed binary artifacts; the `wasm32-unknown-unknown` target is
+//! the only extra requirement (installed automatically in CI).
 
 use include_dir::{include_dir, Dir};
 
@@ -49,10 +51,11 @@ mod tests {
 
     #[test]
     fn basic_combat_is_embedded() {
-        // Populated by T7 once the .wasm is committed under embedded-modules/.
+        // Populated by build.rs, which compiles modules/basic-combat/ into
+        // embedded-modules/basic-combat/basic-combat.wasm at build time.
         assert!(
             embedded_module_bytes("basic-combat").is_some(),
-            "basic-combat.wasm must be embedded; run the modules/ build procedure"
+            "basic-combat.wasm must be embedded; build.rs compiles it from modules/basic-combat/"
         );
         assert!(embedded_module_manifest("basic-combat").is_some());
     }

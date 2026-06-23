@@ -16,6 +16,9 @@ nexus-contracts = { path = "../nexus-contracts" }
 nexus-creator = { path = "../nexus-creator" }
 nexus-local-db = { path = "../nexus-local-db" }
 nexus-orchestration = { path = "../nexus-orchestration" }
+# V1.61 P-last T1: daemon-wide singleton WasmEngine + module cache, injected
+# into `narrative.compute` via `CapabilityRegistry::with_runtime_deps_and_wasm`.
+nexus-wasm-host = { path = "../nexus-wasm-host" }
 nexus-agent-host = { path = "../nexus-agent-host" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-narrative = { path = "../nexus-narrative" }

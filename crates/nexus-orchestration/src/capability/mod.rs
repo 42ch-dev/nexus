@@ -277,9 +277,59 @@ impl CapabilityRegistry {
     /// Production daemon boot should use this constructor when both a pool
     /// and worker provider are available. Capabilities without runtime deps
     /// are constructed in their default (standalone) form.
+    ///
+    /// `narrative.compute` is constructed via [`builtins::NarrativeCompute::with_pool`],
+    /// which builds its own `WasmEngine` + per-instance module cache. For the
+    /// daemon-wide singleton engine + cache (P-last T1, closes
+    /// R-V161P3-PERF-001), use [`CapabilityRegistry::with_runtime_deps_and_wasm`].
     #[must_use]
     #[allow(clippy::too_many_lines)]
     pub fn with_runtime_deps(deps: &CapabilityRuntimeDeps) -> Self {
+        let narrative_compute = deps
+            .pool
+            .as_ref()
+            .map_or_else(builtins::NarrativeCompute::new, |pool| {
+                builtins::NarrativeCompute::with_pool(pool.clone())
+            });
+        Self::build_with_narrative_compute(deps, narrative_compute)
+    }
+
+    /// Create a registry with runtime dependencies **and** a daemon-wide
+    /// singleton `WasmEngine` + `ModuleCache` injected into `narrative.compute`
+    /// (P-last T1/T4 — closes R-V161P3-PERF-001/002).
+    ///
+    /// The daemon builds exactly one engine + one cache at boot (pre-warmed
+    /// with embedded and user-installed modules) and passes them here so module
+    /// compilation happens once process-wide and is reused by every compute
+    /// invocation. When `deps.pool` is absent, `narrative.compute` falls back
+    /// to its standalone (`WorkerUnavailable`) form.
+    #[must_use]
+    pub fn with_runtime_deps_and_wasm(
+        deps: &CapabilityRuntimeDeps,
+        engine: std::sync::Arc<nexus_wasm_host::WasmEngine>,
+        module_cache: std::sync::Arc<nexus_wasm_host::ModuleCache>,
+    ) -> Self {
+        let narrative_compute =
+            deps.pool
+                .as_ref()
+                .map_or_else(builtins::NarrativeCompute::new, |pool| {
+                    builtins::NarrativeCompute::with_pool_and_engine(
+                        pool.clone(),
+                        engine,
+                        module_cache,
+                    )
+                });
+        Self::build_with_narrative_compute(deps, narrative_compute)
+    }
+
+    /// Shared body of [`with_runtime_deps`] / [`with_runtime_deps_and_wasm`],
+    /// parameterized only by the `narrative.compute` instance to register.
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
+    fn build_with_narrative_compute(
+        deps: &CapabilityRuntimeDeps,
+        narrative_compute: builtins::NarrativeCompute,
+    ) -> Self {
         let kb = deps
             .pool
             .as_ref()
@@ -470,14 +520,10 @@ impl CapabilityRegistry {
                         builtins::ForkCreate::with_pool(pool.clone())
                     }),
             ),
-            // V1.61 P3: narrative.compute with pool from runtime deps.
-            Box::new(
-                deps.pool
-                    .as_ref()
-                    .map_or_else(builtins::NarrativeCompute::new, |pool| {
-                        builtins::NarrativeCompute::with_pool(pool.clone())
-                    }),
-            ),
+            // V1.61 P3: narrative.compute — injected by the caller
+            // (`with_runtime_deps` builds a per-instance engine + cache;
+            // `with_runtime_deps_and_wasm` injects the daemon-wide singleton).
+            Box::new(narrative_compute),
         ];
         let mut reg = Self {
             capabilities: caps,
