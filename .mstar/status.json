@@ -16,7 +16,7 @@
     },
     {
       "id": "2026-06-23-v1.61-schemas-and-codegen",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-23-v1.61-schemas-and-codegen.md",
       "metadata": {
         "iteration": "V1.61",
@@ -24,7 +24,9 @@
         "effort": "M",
         "owner": "@fullstack-dev",
         "description": "Compute I/O schemas (4 new) + key-block schema extension (state, computable)",
-        "dependency": "P-1 PM signoff"
+        "dependency": "P-1 PM signoff",
+        "working_branch": "feature/v1.61-schemas-and-codegen",
+        "merge_target": "iteration/v1.61"
       }
     },
     {
@@ -161,17 +163,20 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/82"
     },
     "tech_debt_summary": {
-      "total_open": 9,
+      "total_open": 15,
       "total_deferred": 0,
       "total_resolved": 89,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 9,
+        "low": 15,
         "medium": 0,
         "high": 0
       },
       "by_target_active": {
-        "V1.61+": 9
+        "V1.61+": 9,
+        "V1.61 P1": 3,
+        "V1.61 P2/P3": 1,
+        "V1.61 P3": 2
       },
       "v1_60_ship_note": "V1.60 shipped with 9 open residuals (all low, V1.61+). 24 P-last residuals closed (11 code via @fullstack-dev batch @ 257b354a + 13 PM doc-only). 3 V1.52-era residuals deferred to V1.61+ (S001 drift detection needs stateful tracking; S006 heuristic not in production path; S008 stale). 7 QC residuals stay V1.61+."
     },
@@ -200,6 +205,92 @@
     "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
   },
   "residual_findings": {
+    "2026-06-23-v1.61-schemas-and-codegen": [
+      {
+        "id": "R-V161P0-LOW-001",
+        "title": "Pre-existing clippy lints in test targets (7 unnecessary_hashes in preset.rs, 1 redundant_clone in http.rs) — not in default CI gate",
+        "severity": "low",
+        "source": "P0 implementer (out-of-scope, pre-existing)",
+        "scope": "crates/nexus-contracts/src/local/orchestration/preset.rs (7), src/local/schedule/http.rs (1) — test targets only",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61+",
+        "target_date": "V1.61 P-last hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-001]",
+        "note": "Surfaced by `cargo clippy -p nexus-contracts --tests`. Not caught by CI `cargo clippy --all -- -D warnings` (default targets). Pre-existing on iteration base. P0 surgical-scope: left untouched.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-INFO-001",
+        "title": "BlockType enum does not include `environment` — P0 entity-attributes/state schemas substituted valid combat-relevant types (character/item/faction/ability/species)",
+        "severity": "low",
+        "source": "P0 implementer (design note for P1)",
+        "scope": "schemas/compute/entity-attributes.schema.json, schemas/compute/entity-state.schema.json — block_type definitions",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P1",
+        "target_date": "V1.61 P1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-INFO-001]",
+        "note": "Compass §1.1 P0 T3/T4 named `environment` as a computable BlockType, but `environment` is not a BlockType enum value. P0 substituted character (fully specified) + item/faction/ability/species (permissive placeholders). P1 must confirm the canonical computable BlockType set when wiring the local KeyBlockBody fields.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-LOW-002",
+        "title": "state_delta.op serializes as plain String in generated Rust (codegen maps inline string-enums to String); P3 may promote to a real enum",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-001",
+        "scope": "schemas/compute/compute-output.schema.json state_delta.op; crates/nexus-contracts/src/generated/compute_output.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P3",
+        "target_date": "V1.61 P3",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-002]",
+        "note": "Schema is additive (inline enum in JSON Schema). Generated Rust uses String. P3 (state delta apply) is the consumer — may promote to enum for exhaustive matching. Non-blocking.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-LOW-003",
+        "title": "battle_report is freeform (additionalProperties: true) with no size guard — add runtime cap (e.g. 64 KB) in P3 apply path",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-001",
+        "scope": "schemas/compute/compute-output.schema.json battle_report; P3 narrative.compute apply path",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P3",
+        "target_date": "V1.61 P3",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-003]",
+        "note": "V1 envelope design (compass Q8) intentionally freeform; module-declared fields. Runtime size guard belongs in P3 apply path, not schema (V2 may add per-kind shape enforcement).",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-LOW-004",
+        "title": "KeyBlock body.state growth in SQLite body_json — document expectation + assess json_extract index need in P1 SqliteKbStore",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-002",
+        "scope": "crates/nexus-local-db SqliteKbStore::query (P1 scope); schemas/domain/key-block.schema.json state field",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P1",
+        "target_date": "V1.61 P1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-004]",
+        "note": "No DB migration (body_json TEXT). Computable KeyBlocks accumulate mutable state over compute invocations. P1 should document body_json growth expectation and assess whether json_extract queries on computable need indexing. Not blocking for V1.61 additive rollout.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-LOW-005",
+        "title": "Permissive placeholder schemas (item/faction/ability/species) — module manifest validation should declare expected shapes in P2/P3",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-003",
+        "scope": "schemas/compute/entity-attributes.schema.json, entity-state.schema.json placeholder definitions",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P2/P3",
+        "target_date": "V1.61 P2/P3",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-005]",
+        "note": "Non-character BlockTypes use additionalProperties: true (intentional V1 placeholders). Runtime validation cost is deferred to module contract enforcement (manifest.json). P2/P3 should document that manifest declares BlockType + attribute/state shapes.",
+        "lifecycle": "open"
+      }
+    ],
     "2026-06-22-v1.54-game-bible-scaffold": [
       {
         "id": "R-V154P1-W001",

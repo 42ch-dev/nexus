@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | [common/](common/) | 3 | Shared IDs, enums, `SourceAnchor`, `VersionRef` |
 | [domain/](domain/) | 12 | Wire entities (Creator, World, Bundle, Delta, …) |
+| [compute/](compute/) | 4 | WASM compute ABI envelopes (input/output + per-BlockType attributes/state). V1.61. |
 | [platform/](platform/) | 33 | Platform HTTP request/response bodies |
 | [cloud-sync/](cloud-sync/) | 4 | Sync bundle / pull / conflict (`nexus-cloud-sync` wire) |
 
