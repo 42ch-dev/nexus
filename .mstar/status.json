@@ -4,8 +4,8 @@
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.60",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.59 (retired, merged PR #81 @ a0d2e503)",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.60 (retired, merged PR #82 @ 59982fc8)",
     "integration_merge_target": "main",
     "latest_active_iteration": null,
     "latest_active_compass": null,
@@ -67,8 +67,9 @@
       },
       "qc_tri_review_outcome": "Wave 1: P0 QC1 Request Changes (3W) → fix-wave (W-001 resolved) → QC1 self-approved re-review. P0 QC2/QC3 Approve. P1 all 3 seats Approve (clean first-pass). Total: 6 QC reports + 1 fix-wave + 1 mid-QA regression fix.",
       "note": "V1.60 shipped 2026-06-23. 5 plans all Done. DF-46 local scope complete (32 shipped; 4 sync.* platform-blocked; 2 publish.* OUT). Script profile trilogy complete (novel/game-bible/script all Master). 9 low-severity residuals deferred to V1.61+.",
-      "merge_commit": "pending",
-      "pr": "pending"
+      "merge_commit": "59982fc8",
+      "pr": 82,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/82"
     },
     "tech_debt_summary": {
       "total_open": 9,
@@ -106,7 +107,7 @@
       "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
       "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
     },
-    "updated_at": "2026-06-23T02:00:00Z",
+    "updated_at": "2026-06-23T02:30:00Z",
     "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
   },
   "residual_findings": {
