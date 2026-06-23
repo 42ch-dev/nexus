@@ -46,15 +46,24 @@
         },
         "attributes": {
           "type": "object",
-          "description": "Key-value attributes"
+          "description": "Key-value attributes. For computable KeyBlocks these hold IMMUTABLE compute params; conform to schemas/compute/entity-attributes.schema.json keyed by block_type."
         },
         "tags": {
           "type": "array",
           "items": {"type": "string"},
           "description": "Classification tags"
+        },
+        "state": {
+          "type": "object",
+          "description": "DYNAMIC runtime state for computable KeyBlocks (V1.61, compass Q4/Q5). Nested by block_type to avoid field-name collisions across module types (e.g. state.character.current_hp). Conform to schemas/compute/entity-state.schema.json keyed by block_type. Only meaningful when computable is true."
+        },
+        "computable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Marks this KeyBlock as participating in WASM compute (V1.61, compass Q4). When true, body.state holds mutable runtime state and body.attributes hold immutable compute params. Stored inside body_json (no DB column) for additive, migration-free rollout."
         }
       },
-      "description": "KeyBlock body content"
+      "description": "KeyBlock body content. V1.61 added state (dynamic compute state) and computable (compute participation flag); both optional and additive-only, so existing KeyBlocks without them remain valid."
     },
     "source_anchor": {
       "$ref": "https://nexus42.invalid/schemas/common/source-anchor.schema.json",
