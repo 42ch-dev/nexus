@@ -41,15 +41,6 @@ Git-tracked docs and plans must be openable after a fresh `git clone`: no `.giti
 
 `status.json` is **machine-readable structured state only** — the SSOT for active plans, residuals, gates, and iteration pointers. **Narrative belongs in `notes.json`** (append-only timeline), git commit messages, or plan/compass docs — not in `metadata` prose fields.
 
-**Allowed in `metadata`** (structured):
-
-- Iteration / branch pointers (`integration_branch`, `integration_merge_target`, `latest_active_iteration`, `latest_active_compass`, `last_integration_branch`, `integration_branch_retired`).
-- Gate state (`pre_implement_gate`, `platform_integration`, `pre_iteration_hotfix`).
-- Ship pointer (`latest_ship` — compact structured block; per closeout checklist step 4, drop verbose per-iteration ship blocks after P-last and keep only `latest_ship`).
-- Debt counts (`tech_debt_summary` totals + `by_severity_active` / `by_target_active` maps — counts and ID maps only).
-- `plans[]` rows with status / owner / wave / dependency / branch fields.
-- `residual_findings[<plan_id>]` entries per `mstar-plan-artifacts` schema.
-
 **Forbidden in `metadata`** (narrative — write to `notes.json` instead):
 
 - ❌ `metadata.<iter>_plan_registration_note` — plan-registration facts live in `plans[]` rows.
