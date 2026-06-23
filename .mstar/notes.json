@@ -215,6 +215,16 @@
       "at": "2026-06-19T08:30:00Z",
       "message": "harness hygiene: status.json metadata simplified (dropped 5 redundant fields, slimmed latest_ship 16→13 + tech_debt_summary 8→6); v1_49/v1_50/v1_51 root-level iteration_complete + status fields removed and migrated to .mstar/notes.json (structured data already in .mstar/archived/plans-done.json iteration_summaries). AGENTS.md branch_naming rule corrected: integration is iteration/{ver} (was feature/<ver>-<iteration-slug>); hotfix rule added (fix/{short-name} per V1.42.1 pattern).",
       "plan_id": "2026-06-19-harness-status-json-simplify"
+    },
+    {
+      "at": "2026-06-23T15:30:00Z",
+      "message": "V1.62 Prepare complete (P-1 Done). Compass: .mstar/iterations/v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1.md (289 lines). PM-locked via grill-me (6 decisions): Q1 theme=compute course-correction + schemas reorg; Q2 dynamics→manifest.json (PRIMARY) + boundary→schemas reorg; Q3 expand schemas/ to Local API surface (future WebApp); Q4 consumer-scope tree (common + domain + platform/{http-bff,sync} + local-api/compute); Q5 2 NEW Master specs (compute-module-abi + wasm-host) + 4 amendments; Q6 manifest.json gains inline JSON-Schema fragments in 'schemas' block (4 optional). XL iteration: 6 plans, 3 waves. Markdown authored by @writing-specialist; PM resolved 1 open question (bundle collision → bundle-refinement.schema.json) + 3 revisions. status.json preamble: integration_branch locked iteration/v1.62; latest_active_iteration V1.62; 6 plans registered (P-1 Done; P0/P1/P2/P-mid/P-last Todo). Predecessor V1.61 shipped via PR #83 @ 140f2594. Branch: iteration/v1.62 (from main HEAD 4db51a90); feature/v1.62-prepare merged + deleted.",
+      "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
+    },
+    {
+      "at": "2026-06-23T15:45:00Z",
+      "message": "harness hygiene: status.json metadata de-cruft. Removed 5 fields that violated the 2026-04-14 policy ('avoid metadata.*_note fields in .mstar/status.json — keep status.json focused on machine-readable structured fields; write timeline/context notes in notes.json'): tech_debt_summary.v1_60_ship_note (narrative), v1_57_carry_forward_index (V1.56/V1.57 closed-residual narrative — actual residual state preserved in residual_findings + archived/residuals/), v1_58_carry_forward_index (V1.58 closed-residual narrative — same), v1_60_plan_registration_note (V1.60 prepare narrative — superseded by archived/plans/<id>.json snapshots), v1_62_plan_registration_note (V1.62 prepare narrative I introduced in the previous commit — direct policy violation caught by user). All V1.62 plan-registration facts remain machine-readable in plans[] (6 rows with status/owner/wave/dependency fields). Carry-forward plan narratives are not needed once the residuals themselves carry lifecycle state in residual_findings. No data lost: residual rows in residual_findings + per-plan snapshots in archived/plans/ remain the SSOT.",
+      "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
     }
   ]
 }

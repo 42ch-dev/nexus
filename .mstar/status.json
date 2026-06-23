@@ -145,33 +145,9 @@
         "V1.61 P2/P3": 1,
         "V1.61 P-last": 9,
         "V1.62+": 2
-      },
-      "v1_60_ship_note": "V1.60 shipped with 9 open residuals (all low, V1.61+). 24 P-last residuals closed (11 code via @fullstack-dev batch @ 257b354a + 13 PM doc-only). 3 V1.52-era residuals deferred to V1.61+ (S001 drift detection needs stateful tracking; S006 heuristic not in production path; S008 stale). 7 QC residuals stay V1.61+."
+      }
     },
-    "v1_57_carry_forward_index": {
-      "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. After Wave 2: ALL 3 V1.57 carry-forwards CLOSED (R-V156P1-M001 in P2 commit 28005f11; R-V156P1-M002 in P1 commit 64c0b245; R-V156P3-S003 in P0+P1 commits 7e9932ce + fc0e250a). 3 new V1.57+ residuals filed post-Wave 1: R-V157P0-L001 (low; AC wording), R-V157P0-L002 (medium; per-ID test vectors), R-V157P1-W001 (medium; host-call smoke `#[ignore]`). Wave 3 (P3) adds more V1.57+ residuals if surfaced.",
-      "R-V156P1-M001": "P2 — schema rename: capability_count — CLOSED in P2 (commit 28005f11) with backward-compat serde aliases",
-      "R-V156P1-M002": "P1 — global state → constructor injection for CdnConfig — CLOSED in P1 (commit 64c0b245)",
-      "R-V156P3-S003": "P0+P1 — field drops — CLOSED in P0+P1 (commits 7e9932ce + fc0e250a)"
-    },
-    "v1_58_carry_forward_index": {
-      "note": "V1.58 absorbs 33 of 35 V1.57+/V1.58+ open residuals (Track A: P0 closes 19, P2 closes 14). DF-44 closure split across P1 (capability + DB migration) + P3 (CLI + cross-cut tests). V1.52-era WL-A polish residuals (14 items: R-V150KBED-02, R-V151Q1-10, R-V152TA-S001..S011, R-V152TB-W006/W007/W008) explicitly OUT of V1.58 scope; deferred to V1.59+ WL-A sweep.",
-      "R-V156P0-M001..M006": "P0 T1-T6 — workspace OCC hardening (6 mediums)",
-      "R-V156P1-M003..M005": "P0 T7-T9 — capability handler quality (3 mediums)",
-      "R-V156P1-L001..L007": "P0 T10-T16 — capability surface polish (7 lows)",
-      "R-V156-PROCESS-01 + R-V156P1-CACHE-01": "P0 T18 — .sqlx/ cache hygiene (workspace AND test macros)",
-      "R-V156-MIDQA-01": "P0 T17 — fmt drift",
-      "R-V157P0-L001 + R-V157P0-L002": "P0 T19-T20 — V1.57-new residual closure",
-      "R-V156P2-M001..M003 + R-V156P2-L001..L004": "P2 T1-T7 — DF-56 independent slice polish (3 mediums + 4 lows)",
-      "R-V156P2-CACHE-01": "P2 T15 — engine test fidelity (1 medium)",
-      "R-V156P3-W001/W002 + R-V156P3-S001/S002/S004": "P2 T8-T12 — DF-56 dependent slice polish (2 mediums + 3 lows)",
-      "R-V157P1-W001": "P2 T13 — host-call smoke un-ignore (1 medium)",
-      "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
-      "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
-    },
-    "updated_at": "2026-06-23T15:30:00Z",
-    "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction).",
-    "v1_62_plan_registration_note": "6 V1.62 plans registered in plans[]: P-1 (Done; Prepare complete — grill-me locked 6 decisions, writing-specialist authored compass, PM resolved bundle-collision open question + 3 revisions); P0/P1/P2/P-mid/P-last (Todo; chained dependencies — P0 Wave 1, P1+P2 Wave 2 parallel, P-last Wave 3). Profile B invariant: P-1 stays Done for one cycle; archived at P-last compaction. Integration branch locked: iteration/v1.62 (created from main HEAD 4db51a90 post-V1.61 PR #83 merge)."
+    "updated_at": "2026-06-23T15:30:00Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
