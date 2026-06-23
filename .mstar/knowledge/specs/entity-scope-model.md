@@ -4,11 +4,11 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar) implemented in `nexus-kb::validation`; mandatory world binding enforced upstream (P0 amend). **V1.50 Shipped**: §5.5 World KB promotion state machine (T-B P1); promotion row promoted Draft → Normative at V1.50 P-last when the `kb_extract_jobs` migration landed and review-time extraction is verified end-to-end. **V1.51 Shipped**: §5.5.6 LLM pathway subsection (T-A P0) — `nexus.llm.extract` wire `BlockType` → `novel_category` mapping documented as SSOT. **V1.54 Shipped**: §5.1.1 game-bible taxonomy — 7 new `BlockType` variants (`species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`) registered in wire schema; `game_bible_category` body-layer field + `ValidationMode::GameBible` wired. **V1.55 P3**: §5.1.1 script taxonomy — 3 new `BlockType` variants (`dialogue`, `beat`, `act`) registered in wire schema; `script_category` body-layer field + `ValidationMode::Script` wired. |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
-| **Last updated** | 2026-06-22 — V1.55 P3 §5.1.1 script BlockType taxonomy + `ValidationMode::Script` (P3 implement) |
-| **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
+| **Last updated** | 2026-06-23 — V1.62 P2 §5.5.9 computable-flag semantics + structured validation mode |
+| **Related** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [cli-spec.md](./cli-spec.md), [daemon-runtime.md](./daemon-runtime.md), [orchestration-engine.md](./orchestration-engine.md), [compute-module-abi.md](./compute-module-abi.md), [wasm-host.md](./wasm-host.md), [local-db-schema.md](./local-db-schema.md), [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) |
 
 This file is normative for V1.23 crate wiring and naming alignment. When this file
 overlaps older wording in prior specs, keep the locked decisions here and update the
@@ -142,6 +142,110 @@ Branch inputs do **not** redefine entity ownership. The expression evaluator rea
 - Workspace input: `nexus-orchestration::tasks::inject_workspace_context()` → reads active workspace session via existing `nexus-daemon-runtime` workspace handlers.
 
 This amendment exists to clarify that DF-56 conditional routing branch inputs are **derived from**, not **owners of**, the entity scope. The entity ownership hierarchy (Creator > World > Timeline > Event > Moment) is unchanged; routing inputs are projections.
+
+#### 5.5.9 Computable-flag semantics and structured validation mode (V1.62 P2)
+
+**Status**: Normative — V1.62 Shipped (closes `R-V161P1-LOW-001`).
+
+V1.61 added `computable: Option<bool>` and `state: Option<serde_json::Value>` to
+`KeyBlockBody` (see `schemas/domain/key-block.schema.json`). V1.62 formalizes
+the semantics of these fields and establishes the structured validation mode that
+was deferred from V1.61 P1.
+
+##### 5.5.9.1 `computable` flag
+
+The `computable` boolean field on `KeyBlockBody` marks a KeyBlock as
+participating in WASM compute. Its semantics are:
+
+| Value | Meaning |
+| --- | --- |
+| `Some(true)` | The KeyBlock participates in WASM compute. Its `body` must carry `attributes` (immutable compute params, e.g., `max_hp`, `base_atk`) and may carry `state` (mutable runtime data, e.g., `current_hp`). The host includes computable KeyBlocks in `ComputeInput.key_blocks` when their `block_type` matches the module's `required_key_block_types`. |
+| `None` or `Some(false)` | The KeyBlock does not participate in WASM compute. It may still appear in `ComputeInput.key_blocks` for read-only reference (e.g., a scene KeyBlock providing narrative context), but the host does not apply `state_delta` operations to it. |
+
+The flag is a filterable marker — the KB query layer
+(`KbQuery::with_computable(bool)`) can select only computable KeyBlocks when
+building the invocation snapshot. This was implemented in V1.61 P1
+(`crates/nexus-kb/src/query.rs`, `InMemoryKbStore`, `SqliteKbStore`).
+
+##### 5.5.9.2 `state` field
+
+The `state` field on `KeyBlockBody` holds **mutable runtime data** scoped to the
+KeyBlock. Its shape is nested by `block_type` (compass V1.61 Q5):
+
+```json
+{
+  "state": {
+    "character": {
+      "current_hp": 85,
+      "status_effects": ["poisoned"],
+      "is_alive": true
+    }
+  }
+}
+```
+
+The nesting by `block_type` avoids field-name collisions when the same KeyBlock
+is used by different module types. The `state` object is mutable — the host
+applies `state_delta` operations (`+/-/set`) from `ComputeOutput.state_delta`
+(see [compute-module-abi.md](./compute-module-abi.md) §5.1).
+
+The `state` field is carried in the KeyBlock's `body_json` (TEXT column in
+SQLite). No separate DB column is required — the JSON is transparent to the
+storage layer (compass V1.61 design item #2). Growth is expected as modules
+add per-block state, but individual state objects are small (character-scale
+combat state is < 1 KiB).
+
+##### 5.5.9.3 Structured validation mode
+
+Per-module attribute and state shapes are **not** declared in product-level
+schemas. V1.61 placed placeholder schemas under
+`schemas/compute/compute-entity-attributes.schema.json` and
+`schemas/compute/compute-entity-state.schema.json` — these are **deleted**
+in V1.62 P0. Their content (per-`BlockType` shape declarations) is replaced
+by per-module JSON Schema fragments declared in each compute module's
+`manifest.json` `schemas` block (V1.62 P1; see
+[compute-module-abi.md](./compute-module-abi.md) §7.3).
+
+The structured validation mode is:
+
+1. The `nexus-kb::validation` module provides `ValidationMode::Structured`
+   (added in V1.61 P1, `crates/nexus-kb/src/validation.rs`). This mode
+   requires `computable: true` on KeyBlocks that carry `state`.
+2. Per-module attribute/state shapes are declared in the module's
+   `manifest.json` `schemas.key_block_attributes[block_type]` and
+   `schemas.key_block_state[block_type]` blocks.
+3. At compute invocation time, the host (`nexus-wasm-host`) validates each
+   KeyBlock in `ComputeInput.key_blocks` against the manifest-declared
+   schemas (see [wasm-host.md](./wasm-host.md) §8.5).
+4. Validation failures produce `ComputeError::ManifestValidationFailed`
+   with a JSON path to the offending field.
+
+The `ValidationMode::Structured` variant in `nexus-kb` validates the
+computable flag and state field at the KB layer; the manifest-driven
+validation in `nexus-wasm-host` validates the **shapes** of those fields
+at compute time. Both layers are additive — KB validation ensures the
+KeyBlock is structurally valid for compute; host validation ensures the
+concrete values match the module's declared schemas.
+
+##### 5.5.9.4 Relationship to deleted entity-* schemas
+
+V1.61's `schemas/compute/compute-entity-attributes.schema.json` and
+`schemas/compute/compute-entity-state.schema.json` are **deleted** in
+V1.62 P0. Their content was per-`BlockType` placeholder shape declarations
+(e.g., `character` attributes: `max_hp`, `base_atk`, `base_def`). V1.62
+replaces this with:
+
+- **Per-module shape declarations** in each module's `manifest.json`
+  `schemas` block (V1.62 P1).
+- **No product-level enumeration** of all possible BlockType attributes
+  — the manifest is the module author's contract, not the platform's.
+
+Specs and code MUST NOT reference the deleted paths
+`schemas/compute/compute-entity-attributes.schema.json` or
+`schemas/compute/compute-entity-state.schema.json`. The canonical
+replacement is `manifest.json` `schemas` as documented in
+[compute-module-abi.md](./compute-module-abi.md) §7.3.
+
 | `nexus42` | CLI surface | Owns user-facing command routing and wording. It invokes the owning crates; it MUST NOT become a second domain implementation for scope rules. |
 
 ---

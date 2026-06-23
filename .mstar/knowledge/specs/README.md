@@ -61,9 +61,9 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | Document | Class | Status |
 | --- | --- | --- |
 | [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active |
-| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1 (taxonomy + `canonical_name` grammar); **V1.51 Shipped** §5.5.6 LLM pathway |
+| [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1; V1.51 Shipped §5.5.6; **V1.62 Shipped** §5.5.9 (computable-flag + structured validation) |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
-| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative |
+| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.62 Shipped (consumer-scope tree) |
 
 Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) (knowledge root).
 
@@ -75,6 +75,13 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
+
+### Compute and WASM
+
+| Document | Class | Status |
+| --- | --- | --- |
+| [compute-module-abi.md](compute-module-abi.md) | Master | **Normative — V1.62 Shipped (P2)** — V1 envelope ABI: exports, host imports, marshalling, manifest.json contract |
+| [wasm-host.md](wasm-host.md) | Master | **Normative — V1.62 Shipped (P2)** — nexus-wasm-host crate: engine, sandbox, limits, watchdog, module loading, error taxonomy |
 
 ### CLI product surface
 
@@ -90,7 +97,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [orchestration-engine.md](orchestration-engine.md) | Master | Active |
+| [orchestration-engine.md](orchestration-engine.md) | Master | Active; **V1.62 Shipped** §5.2 narrative.compute + §8.4 combat-engine |
 | [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) | Legacy scope | Active (WS7 schedule/core_context) |
 | [preset-conditional-routing.md](preset-conditional-routing.md) | Feature line | **Shipped (V1.42 P2)** — DF-56 `llm_judge` GO/NOGO minimal slice |
 | [llm-extract.md](llm-extract.md) | Master | **Normative — V1.51 Shipped (T-A P0)** — `nexus.llm.extract` capability + `LlmExtractTask` + `kb_extract_jobs` LLM payload extension (closes R-V150KBED-01) |
@@ -158,6 +165,8 @@ When specs disagree, higher row wins:
 | ACP worker process | acp-client-tech-spec | daemon-runtime, local-runtime-boundary |
 | KB naming (KCA-003) | entity-scope-model §5.4 + cli-command-ia §3.2 | cli-spec §6.2E–F |
 | LLM extraction capability | [llm-extract.md](llm-extract.md) | entity-scope-model §5.5.6, world-kb-runtime-architecture §5.5, cli-spec §6.2G |
+| Compute module ABI (V1 envelope) | [compute-module-abi.md](compute-module-abi.md) | wasm-host, schemas-directory-layout §3.5, orchestration-engine §8.4, entity-scope-model §5.5.9, `schemas/local-api/compute/` |
+| WASM compute host runtime | [wasm-host.md](wasm-host.md) | compute-module-abi, orchestration-engine §8.4, `crates/nexus-wasm-host/AGENTS.md` |
 
 ---
 

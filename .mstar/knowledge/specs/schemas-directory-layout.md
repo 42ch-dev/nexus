@@ -4,12 +4,11 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Active — normative layout for JSON Schema contract tree (V1.62 consumer-scope reorganization) |
+| **Status** | Normative — V1.62 Shipped (consumer-scope reorganization) |
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
-| **Boundary rule** | [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — what may appear under `schemas/` at all (external-client rule: platform wire OR Local API) |
-| **Crate alignment** | [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) — `nexus-contracts` generated vs `src/local/` |
-| **Codegen** | [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
+| **Last updated** | 2026-06-23 — V1.62 P2 (spec-seal polish) |
+| **Related** | [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
 
@@ -109,7 +108,7 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 - These are cross-language contracts (Rust host ↔ wasm32 module), so they live under `schemas/` and run through codegen, not as hand-written local types.
 - Per-module shape declarations (per-BlockType attributes/state) do **not** live here — they live in each module's `manifest.json` `schemas` block (V1.62 P1). See [modules/README.md](../../../modules/README.md).
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/local-api/compute/...`.
-- Maintain [`local-api/compute/README.md`](../../../schemas/local-api/compute/README.md). Compute ABI normative detail: `.mstar/knowledge/specs/compute-module-abi.md` (V1.62 P2).
+- Maintain [`local-api/compute/README.md`](../../../schemas/local-api/compute/README.md). Compute ABI normative detail: [compute-module-abi.md](./compute-module-abi.md). Host-side runtime detail: [wasm-host.md](./wasm-host.md).
 
 ---
 
@@ -168,4 +167,4 @@ Historical audit (pre-rename paths): [archived schemas-boundary §5.2](../archiv
 
 ---
 
-*Layout SSOT. V1.62 P0 consumer-scope reorganization (2026-06-23). Boundary rule: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md).*
+*Normative Master. V1.62 P0 consumer-scope reorganization (2026-06-23); V1.62 P2 spec-seal polish. Boundary rule: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md).*
