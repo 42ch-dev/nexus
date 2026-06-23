@@ -568,8 +568,9 @@
       },
       "integration_branch": "iteration/v1.62",
       "integration_merge_target": "main",
-      "pr": null,
-      "merge_commit": null
+      "pr": 85,
+      "merge_commit": null,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/85"
     }
   },
   "metadata": {
