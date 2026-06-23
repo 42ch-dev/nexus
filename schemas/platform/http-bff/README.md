@@ -1,9 +1,10 @@
-# Platform HTTP Wire Schemas
+# Platform HTTP BFF Wire Schemas
 
-Request/response JSON Schemas for **platform BFF HTTP** (`nexus-platform` observes these on the wire).
+Request/response JSON Schemas for **platform BFF HTTP** bodies (`nexus-platform` observes these on the wire).
 
 - **Not** daemon Local API (`/v1/local/*`) — those DTOs are in `crates/nexus-contracts/src/local/`.
 - V1.20 removed **daemon proxies** for world/explore; clients call **platform HTTP** directly. Schemas here remain wire contracts for platform.
+- V1.62 (2026-06-23) moved these files from flat `schemas/platform/` into `schemas/platform/http-bff/` (consumer-scope split from `platform/sync/`).
 
 ## Index (by prefix)
 
@@ -22,4 +23,4 @@ Request/response JSON Schemas for **platform BFF HTTP** (`nexus-platform` observ
 
 **Consumer:** `@42ch/nexus-contracts` (npm) + `nexus-cloud-sync` Rust HTTP client.
 
-**Layout spec:** [schemas-directory-layout.md](../../.mstar/knowledge/specs/schemas-directory-layout.md) §3.1.
+**Layout spec:** [schemas-directory-layout.md](../../../.mstar/knowledge/specs/schemas-directory-layout.md) §3.1.
