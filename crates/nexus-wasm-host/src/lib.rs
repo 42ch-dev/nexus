@@ -43,7 +43,7 @@ pub use embedded::{embedded_module_bytes, embedded_module_ids, embedded_module_m
 pub use engine::{WasmEngine, WasmModule};
 pub use error::{ComputeError, Result};
 pub use host::HostContext;
-pub use manifest::{HostFunction, ModuleManifest};
+pub use manifest::{HostFunction, ModuleManifest, ModuleSchemas};
 pub use module_cache::{CachedModule, ModuleCache};
 pub use sandbox::SandboxConfig;
 
