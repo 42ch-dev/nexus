@@ -235,6 +235,11 @@
       "at": "2026-06-23T17:00:00Z",
       "message": "V1.62 P0 implement complete → InReview. @fullstack-dev delivered 3 commits on feature/v1.62-schemas-reorganization (f8f22d0a..126f041d; 203 files; base 3cefb6d9). All gates PASS: pnpm validate-schemas (56/56), pnpm codegen, check-wire-drift, schema_drift_detection (52 schemas registered), cargo check --workspace, cargo +nightly fmt --all --check, TS typecheck. Pre-existing clippy -p nexus-contracts 8 errors verified against base (R-V161P0-LOW-001 → P-last T5; not P0-attributable). Codegen restructure decision: user chose NESTED module layout (generated::{common,domain,platform/{http_bff,sync},local_api/compute}/) with flat root re-exports for backwards compat. Implementer's 2 flagged findings both NOT registered as new residuals: R-V162P0-LOW-001 == R-V161P0-LOW-001 (duplicate); R-V162P0-INFO-001 (compass prose said 33 platform files / 55 total; actual 34 / 56) — purely doc drift already corrected in schemas-directory-layout.md §7. Tree: 56 schemas across common(3) + domain(10) + platform/http-bff(34) + platform/sync(7) + local-api/compute(2). QC tri-review dispatching next.",
       "plan_id": "2026-06-23-v1.62-schemas-reorganization-and-envelope-move"
+    },
+    {
+      "at": "2026-06-23T18:00:00Z",
+      "message": "V1.62 P0 Done. QC tri-review: qc1 Approve (after PM fix-wave 502809c3 addressing 3 doc-drift Warnings + revalidation 7834e29a), qc2 Approve (0C/0W/1S), qc3 Informational/Approve. mid-QA PASS (4375/4375 cargo test --all; nexus-wasm-host 23 tests; compute_e2e 3/3 tests; codegen idempotent; drift detection 4/4; clippy --all -D warnings clean; nightly fmt clean; TS typecheck clean). Merged to iteration/v1.62 @ c74ebfbf (no-ff). Wave 2 (P1 ∥ P2) dispatch-ready. PM whitelist used for fix-wave (doc-only edits in nexus-kb src comments + nexus-wasm-host AGENTS.md + canonical-hash.md).",
+      "plan_id": "2026-06-23-v1.62-schemas-reorganization-and-envelope-move"
     }
   ]
 }
