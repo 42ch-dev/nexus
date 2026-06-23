@@ -31,7 +31,7 @@
     },
     {
       "id": "2026-06-23-v1.61-kb-structured-layer",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-23-v1.61-kb-structured-layer.md",
       "metadata": {
         "iteration": "V1.61",
@@ -39,12 +39,14 @@
         "effort": "M",
         "owner": "@fullstack-dev-2",
         "description": "KB structured layer: state field, computable flag, ValidationMode::Structured, KbQuery filter",
-        "dependency": "P0 merged to integration"
+        "dependency": "P0 merged to integration",
+        "working_branch": "feature/v1.61-kb-structured-layer",
+        "merge_target": "iteration/v1.61"
       }
     },
     {
       "id": "2026-06-23-v1.61-wasm-host-and-basic-combat",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-23-v1.61-wasm-host-and-basic-combat.md",
       "metadata": {
         "iteration": "V1.61",
@@ -52,7 +54,9 @@
         "effort": "L",
         "owner": "@fullstack-dev",
         "description": "nexus-wasm-host crate (wasmtime engine, sandbox, ABI) + basic-combat sample module",
-        "dependency": "P0 merged to integration"
+        "dependency": "P0 merged to integration",
+        "working_branch": "feature/v1.61-wasm-host-and-basic-combat",
+        "merge_target": "iteration/v1.61"
       }
     },
     {
