@@ -144,7 +144,7 @@ The tables are **not** created inline by any Rust code (WS8 R4, closed in V1.21)
 
 `outbox.compact` removes successfully-delivered (`acked`) entries older than a configurable retention window. Default is 7 days.
 
-1. Accept optional `retentionDays` (integer, minimum 1, default 7).
+1. Accept optional `retentionDays` (integer, minimum 0, default 7). A value of `0` means "remove all acked entries immediately" (matches the implementation's `.max(0)` clamp).
 2. Delete entries where `delivery_state = 'acked'` AND `updated_at < (now - retention_days)`.
 3. Count retained entries (remaining `acked` entries after compaction).
 4. Return `{ removed: <count>, retained: <count> }`.
@@ -155,7 +155,7 @@ The tables are **not** created inline by any Rust code (WS8 R4, closed in V1.21)
 {
   "type": "object",
   "properties": {
-    "retentionDays": { "type": "integer", "minimum": 1, "default": 7 }
+    "retentionDays": { "type": "integer", "minimum": 0, "default": 7 }
   },
   "required": [],
   "additionalProperties": false

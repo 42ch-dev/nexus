@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-06-22-v1.60-mid-qc-and-fix-waves",
+  "title": "Mid-QC Coordination & Fix-Wave Tracking (P-mid)",
+  "iteration": "V1.60",
+  "track": "meta",
+  "wave": "Across Wave 1 (after P0 + P1 merge; before P-last)",
+  "effort": "M",
+  "owner": "@project-manager",
+  "status": "Todo",
+  "file": ".mstar/plans/2026-06-22-v1.60-mid-qc-and-fix-waves.md",
+  "created": "2026-06-22",
+  "working_branch": "iteration/v1.60 (no separate topic branch — PM works on integration)",
+  "merge_target": "iteration/v1.60",
+  "depends_on": "P0 + P1 merged to iteration/v1.60"
+}

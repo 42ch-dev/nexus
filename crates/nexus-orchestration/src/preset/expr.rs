@@ -630,6 +630,64 @@ impl Parser {
 /// Returns [`ExprError::FieldNotFound`] if a field path references a
 /// non-existent key, or [`ExprError::TypeError`] on type mismatches.
 pub fn evaluate(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprError> {
+    // R-V156P2-L002: debug span capturing input context shape + expression
+    // kind + result. Kept at `debug!` so it is no-op by default; enable with
+    // `RUST_LOG=nexus_orchestration::preset::expr=debug` when diagnosing
+    // conditional-routing misfires.
+    let result = evaluate_inner(expr, context);
+    tracing::debug!(
+        expr_kind = ?expr.variant_name(),
+        context_keys = %context_summary(context),
+        result = ?result.as_ref().copied().ok(),
+        error = ?result.as_ref().err(),
+        "expression_eval: evaluated"
+    );
+    result
+}
+
+/// Compact one-line summary of a JSON context for debug logging (top-level
+/// keys only — avoids dumping large nested values).
+fn context_summary(context: &serde_json::Value) -> String {
+    match context {
+        serde_json::Value::Object(map) => {
+            let keys: Vec<&str> = map.keys().map(String::as_str).collect();
+            format!("{{{}}}", keys.join(","))
+        }
+        _ => format!("<{}>", context_type_name(context)),
+    }
+}
+
+/// Short type name for a JSON value (debug aid).
+const fn context_type_name(v: &serde_json::Value) -> &'static str {
+    match v {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "bool",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
+    }
+}
+
+impl Expr {
+    /// Debug-friendly variant name (R-V156P2-L002 tracing aid).
+    const fn variant_name(&self) -> &'static str {
+        match self {
+            Self::Bool(_) => "Bool",
+            Self::Number(_) => "Number",
+            Self::Str(_) => "Str",
+            Self::Null => "Null",
+            Self::FieldAccess { .. } => "FieldAccess",
+            Self::Comparison { .. } => "Comparison",
+            Self::And(_, _) => "And",
+            Self::Or(_, _) => "Or",
+            Self::Not(_) => "Not",
+        }
+    }
+}
+
+/// Inner recursive evaluation (entry point for the public `evaluate` wrapper).
+fn evaluate_inner(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprError> {
     match expr {
         Expr::Bool(b) => Ok(*b),
         Expr::Number(n) => Ok(*n != 0.0),
@@ -645,21 +703,21 @@ pub fn evaluate(expr: &Expr, context: &serde_json::Value) -> Result<bool, ExprEr
             compare(&lv, *op, &rv)
         }
         Expr::And(left, right) => {
-            let l = evaluate(left, context)?;
+            let l = evaluate_inner(left, context)?;
             if !l {
                 return Ok(false); // short-circuit
             }
-            evaluate(right, context)
+            evaluate_inner(right, context)
         }
         Expr::Or(left, right) => {
-            let l = evaluate(left, context)?;
+            let l = evaluate_inner(left, context)?;
             if l {
                 return Ok(true); // short-circuit
             }
-            evaluate(right, context)
+            evaluate_inner(right, context)
         }
         Expr::Not(inner) => {
-            let v = evaluate(inner, context)?;
+            let v = evaluate_inner(inner, context)?;
             Ok(!v)
         }
     }
@@ -689,7 +747,7 @@ fn eval_value(expr: &Expr, context: &serde_json::Value) -> Result<serde_json::Va
         Expr::Null => Ok(serde_json::Value::Null),
         Expr::FieldAccess { path } => Ok(resolve_field(context, path).clone()),
         Expr::Comparison { .. } | Expr::And(..) | Expr::Or(..) | Expr::Not(_) => {
-            let b = evaluate(expr, context)?;
+            let b = evaluate_inner(expr, context)?;
             Ok(serde_json::Value::Bool(b))
         }
     }

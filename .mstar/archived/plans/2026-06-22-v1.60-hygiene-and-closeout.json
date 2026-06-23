@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+  "title": "Hygiene, Residual Sweep & Closeout (P-last)",
+  "iteration": "V1.60",
+  "track": "closeout",
+  "wave": "After Wave 1 (P0 + P1 QC Pass + mid-QA Pass)",
+  "effort": "M",
+  "owner": "@project-manager",
+  "status": "Todo",
+  "file": ".mstar/plans/2026-06-22-v1.60-hygiene-and-closeout.md",
+  "created": "2026-06-22",
+  "working_branch": "feature/v1.60-hygiene-and-closeout (to be created from iteration/v1.60)",
+  "merge_target": "iteration/v1.60",
+  "depends_on": "P-mid Done (P0 + P1 both QC Pass + mid-QA Pass)"
+}
