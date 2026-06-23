@@ -49,6 +49,12 @@ pub enum ComputeError {
     #[error("output envelope mismatch: {0}")]
     OutputSchemaMismatch(String),
 
+    /// Manifest-declared JSON-Schema validation failed (V1.62).
+    /// `path` identifies the failing field (e.g. `key_blocks[1].body.attributes.base_atk`),
+    /// `detail` describes the violation.
+    #[error("manifest validation failed at {path}: {detail}")]
+    ManifestValidationFailed { path: String, detail: String },
+
     /// An internal wasmtime error (engine/store/instantiation failure).
     #[error("wasmtime error: {0}")]
     Wasmtime(#[from] wasmtime::Error),

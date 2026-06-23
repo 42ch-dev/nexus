@@ -139,8 +139,8 @@ fn killing_blow_marks_defender_not_alive() {
         "schema_version": 1,
         "world_ref": {"world_id": "w"},
         "key_blocks": [
-            {"schema_version":1,"key_block_id":"a","world_id":"w","block_type":"character","canonical_name":"A","status":"confirmed","body":{"attributes":{"base_atk":50},"state":{"character":{"current_hp":10,"is_alive":true}}},"created_at":"t"},
-            {"schema_version":1,"key_block_id":"d","world_id":"w","block_type":"character","canonical_name":"D","status":"confirmed","body":{"attributes":{"base_def":2},"state":{"character":{"current_hp":10,"is_alive":true}}},"created_at":"t"}
+            {"schema_version":1,"key_block_id":"a","world_id":"w","block_type":"character","canonical_name":"A","status":"confirmed","body":{"attributes":{"max_hp":100,"base_atk":50,"base_def":10},"state":{"character":{"current_hp":10,"is_alive":true}}},"created_at":"t"},
+            {"schema_version":1,"key_block_id":"d","world_id":"w","block_type":"character","canonical_name":"D","status":"confirmed","body":{"attributes":{"max_hp":50,"base_atk":10,"base_def":2},"state":{"character":{"current_hp":10,"is_alive":true}}},"created_at":"t"}
         ],
         "invocation": {"attacker_id": "a", "defender_id": "d"}
     }"#;

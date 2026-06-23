@@ -29,6 +29,8 @@
 //! | `max_memory_mib` | integer | host `SandboxConfig` | Per-invocation memory-cap override (MiB). |
 //! | `max_wall_time_ms` | integer | host `SandboxConfig` | Per-invocation wall-time override (ms). |
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Whitelisted host functions a module may import (open design item #4).
@@ -41,8 +43,32 @@ pub enum HostFunction {
     NarrativeQuery,
 }
 
+/// Module schemas — inline JSON-Schema fragments for per-module
+/// input/output validation (V1.62 manifest dynamics).
+///
+/// Every sub-field is optional: a manifest may declare none, some, or
+/// all four fragments. Omitted fields → no validation for that aspect.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[allow(clippy::derive_partial_eq_without_eq)]
+// ^ `serde_json::Value` in field types does not implement `Eq`.
+pub struct ModuleSchemas {
+    /// Per-BlockType attribute shape fragments (immutable compute params).
+    /// Keyed by `block_type` (e.g. "character"). Skipped if absent.
+    #[serde(default)]
+    pub key_block_attributes: Option<HashMap<String, serde_json::Value>>,
+    /// Per-BlockType state shape fragments (mutable runtime data).
+    #[serde(default)]
+    pub key_block_state: Option<HashMap<String, serde_json::Value>>,
+    /// Shape for the `ComputeInput.invocation` freeform field.
+    #[serde(default)]
+    pub invocation: Option<serde_json::Value>,
+    /// Shape for the `ComputeOutput.battle_report` freeform field.
+    #[serde(default)]
+    pub battle_report: Option<serde_json::Value>,
+}
+
 /// Module manifest (`manifest.json`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModuleManifest {
     pub module_id: String,
     pub name: String,
@@ -58,6 +84,11 @@ pub struct ModuleManifest {
     /// Whitelisted host functions the module may call. Defaults to none.
     #[serde(default)]
     pub host_functions: Vec<HostFunction>,
+    /// Inline JSON-Schema fragments for input/output validation (V1.62).
+    /// When declared, the host validates `KeyBlocks`, invocation, and
+    /// `battle_report` against these shapes. Omitted → no validation.
+    #[serde(default)]
+    pub schemas: Option<ModuleSchemas>,
     #[serde(default)]
     pub battle_report_kind: Option<String>,
     #[serde(default)]
@@ -116,5 +147,84 @@ mod tests {
         assert!(m.host_functions.is_empty());
         assert!(m.max_fuel.is_none());
         assert!(m.description.is_none());
+    }
+
+    #[test]
+    fn parses_manifest_with_schemas_block() {
+        let json = r#"{
+            "module_id": "test-mod",
+            "name": "Test Module",
+            "version": "1.0.0",
+            "nexus_abi_version": 1,
+            "required_key_block_types": ["character"],
+            "compute_export": "compute",
+            "init_export": "init",
+            "schemas": {
+                "key_block_attributes": {
+                    "character": {
+                        "type": "object",
+                        "properties": {
+                            "max_hp": {"type": "integer", "minimum": 0}
+                        },
+                        "required": ["max_hp"]
+                    }
+                },
+                "invocation": {
+                    "type": "object",
+                    "properties": {
+                        "attacker_id": {"type": "string"}
+                    }
+                }
+            }
+        }"#;
+        let m: ModuleManifest = serde_json::from_str(json).unwrap();
+        let schemas = m.schemas.expect("schemas should be present");
+        assert!(schemas.key_block_attributes.is_some());
+        assert!(schemas.key_block_state.is_none());
+        assert!(schemas.invocation.is_some());
+        assert!(schemas.battle_report.is_none());
+        let attrs = schemas.key_block_attributes.unwrap();
+        assert!(attrs.contains_key("character"));
+        let char_schema = attrs.get("character").unwrap();
+        assert_eq!(char_schema["required"][0].as_str().unwrap(), "max_hp");
+    }
+
+    #[test]
+    fn manifest_without_schemas_is_backward_compat() {
+        // V1.61 manifests omit `schemas` → deserializes with schemas = None.
+        let json = r#"{
+            "module_id": "legacy-mod",
+            "name": "Legacy Module",
+            "version": "1.0.0",
+            "nexus_abi_version": 1,
+            "required_key_block_types": [],
+            "compute_export": "compute",
+            "init_export": "init"
+        }"#;
+        let m: ModuleManifest = serde_json::from_str(json).unwrap();
+        assert!(m.schemas.is_none(), "V1.61 manifest must have schemas=None");
+    }
+
+    #[test]
+    fn manifest_with_empty_schemas_object() {
+        // A manifest with `schemas: {}` should parse with all sub-fields None.
+        let json = r#"{
+            "module_id": "empty-schemas",
+            "name": "Empty Schemas",
+            "version": "1.0.0",
+            "nexus_abi_version": 1,
+            "required_key_block_types": [],
+            "compute_export": "compute",
+            "init_export": "init",
+            "schemas": {}
+        }"#;
+        let m: ModuleManifest = serde_json::from_str(json).unwrap();
+        let schemas = m
+            .schemas
+            .expect("schemas should be present (even if empty)");
+        assert!(schemas.key_block_attributes.is_none());
+        assert!(schemas.key_block_state.is_none());
+        assert!(schemas.invocation.is_none());
+        assert!(schemas.battle_report.is_none());
     }
 }
