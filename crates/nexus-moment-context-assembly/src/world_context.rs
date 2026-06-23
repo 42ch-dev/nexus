@@ -458,6 +458,7 @@ mod tests {
                 "traits": ["test"]
             })),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         })
         .unwrap();
         kb
@@ -758,6 +759,7 @@ mod tests {
                 )),
                 attributes: None,
                 tags: None,
+                ..Default::default()
             })
             .unwrap();
             store.insert_key_block(kb).await.unwrap();

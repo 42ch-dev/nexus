@@ -200,6 +200,7 @@ async fn rescan_refreshes_out_of_sync_confirmed_keyblock_body() {
         summary: Some("stale hand-edited body".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: None,
+        ..Default::default()
     });
     kb.updated_at = Some(chrono::Utc::now().to_rfc3339());
     store.update_key_block(kb).await.unwrap();

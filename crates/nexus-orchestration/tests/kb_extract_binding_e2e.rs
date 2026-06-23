@@ -74,6 +74,7 @@ async fn test_persist_extract_chapter_block_e2e() {
             "traits": ["brave", "resourceful"]
         })),
         tags: Some(vec!["novel".to_string()]),
+        ..Default::default()
     };
     let source_anchor = SourceAnchor::from_excerpt("Chapter 01: Lin Xia appeared...");
 
@@ -113,6 +114,7 @@ async fn test_worldless_work_skips_world_promotion() {
         summary: Some("A generic knowledge item".to_string()),
         attributes: None,
         tags: None,
+        ..Default::default()
     };
     let source_anchor = SourceAnchor::from_excerpt("Generic excerpt");
 
@@ -187,6 +189,7 @@ async fn test_extract_novel_requires_novel_category() {
         summary: Some("Test".to_string()),
         attributes: Some(serde_json::json!({})), // missing novel_category
         tags: None,
+        ..Default::default()
     };
     let source_anchor = SourceAnchor::from_excerpt("test");
 
