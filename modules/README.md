@@ -165,34 +165,42 @@ A module's `compute` must emit a JSON object with exactly these top-level keys
 
 ## Embedding a module
 
-Compiled `.wasm` artifacts are **committed** to the repo under
-`crates/nexus-wasm-host/embedded-modules/<id>/`. The host crate embeds them at
-compile time via `include_dir!` (compass Q10). This is a **pre-compile +
-commit** strategy (open design item #6): it keeps `cargo build -p
-nexus-wasm-host` hermetic — no wasm toolchain is required by host-crate
-consumers or CI.
+Compiled `.wasm` artifacts live under
+`crates/nexus-wasm-host/embedded-modules/<id>/` and are embedded into the host
+crate at compile time via `include_dir!` (compass Q10). The
+`embedded-modules/` tree is **generated and gitignored** — those artifacts are
+**compiled from source by `crates/nexus-wasm-host/build.rs`**, not committed.
 
-To add or update an embedded module:
+This is a **compile-from-source** strategy (open design item #6, resolved): the
+build script invokes `cargo build --release --target wasm32-unknown-unknown`
+for each registered module id whenever its embedded copy is missing or older
+than its source. This keeps `cargo build -p nexus-wasm-host` reproducible
+without committing binary blobs; the only extra requirement is the
+`wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`,
+installed automatically in CI via `dtolnay/rust-toolchain` `targets:`).
 
-```bash
-# 1. Build the module (from its directory):
-cd modules/basic-combat
-cargo build --release --target wasm32-unknown-unknown
+To add a new embedded module:
 
-# 2. Copy the artifact + manifest into the embed tree:
-DIST=../../crates/nexus-wasm-host/embedded-modules/basic-combat
-mkdir -p "$DIST"
-cp target/wasm32-unknown-unknown/release/basic_combat.wasm "$DIST/basic-combat.wasm"
-cp manifest.json "$DIST/manifest.json"
+1. Author the module crate under `modules/<id>/` (see
+   [Writing a module](#writing-a-module-rust)) and add a `manifest.json`.
 
-# 3. Rebuild the host crate — build.rs guards that both files are present:
-cd ../..
-cargo test -p nexus-wasm-host
-```
+2. Register the module id in the `MODULE_IDS` array at the top of
+   `crates/nexus-wasm-host/build.rs`.
 
-`nexus-wasm-host/build.rs` scans `embedded-modules/` and fails the build with a
-clear message if any module dir is missing its `<id>.wasm` or `manifest.json`.
-It does **not** compile WASM — that is a manual step, by design.
+3. Build the workspace (or just the host crate):
+
+   ```bash
+   cargo build -p nexus-wasm-host
+   ```
+
+   `build.rs` compiles the module, stages `<id>.wasm` + `manifest.json` into
+   `embedded-modules/<id>/`, and emits `cargo:rerun-if-changed=` directives so
+   incremental rebuilds only recompile a module when its source changes. If a
+   module dir is missing its `<id>.wasm` or `manifest.json` after the build
+   script runs, the build fails with a clear message.
+
+To update an existing embedded module, edit its source under `modules/<id>/`
+and rebuild — `build.rs` detects the newer mtime and recompiles automatically.
 
 ## Sandbox guarantees (compass Q6)
 

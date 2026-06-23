@@ -54,10 +54,7 @@ use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;
 use nexus_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
-use nexus_wasm_host::{
-    embedded_module_bytes, embedded_module_manifest, ComputeInput, ComputeOutputStateDelta,
-    ModuleManifest, WasmEngine, WasmModule,
-};
+use nexus_wasm_host::{ComputeInput, ComputeOutputStateDelta, ModuleCache, WasmEngine};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -94,6 +91,10 @@ fn default_module_id() -> String {
 pub struct NarrativeCompute {
     pool: Option<Arc<sqlx::SqlitePool>>,
     engine: Option<Arc<WasmEngine>>,
+    /// Daemon-wide compilation cache (R-V161P3-PERF-002). When present, the
+    /// module for an invocation is resolved by id from this cache instead of
+    /// recompiling on every `run()`.
+    module_cache: Option<Arc<ModuleCache>>,
 }
 
 impl NarrativeCompute {
@@ -102,20 +103,58 @@ impl NarrativeCompute {
         Self {
             pool: None,
             engine: None,
+            module_cache: None,
         }
     }
 
-    /// Construct with a pool and a fresh `WasmEngine`.
+    /// Construct with a pool and a fresh `WasmEngine`, warming a per-instance
+    /// module cache from the embedded modules (R-V161P3-PERF-001/002).
     ///
-    /// `WasmEngine` construction is expensive; this is the pool-bound constructor
-    /// that enables actual compute at runtime. The engine is reused across all
-    /// `compute()` calls (compass Q6: per-invocation sandbox isolates each call).
+    /// The `WasmEngine` and the populated cache are reused across all
+    /// `compute()` calls on this capability instance (compass Q6: a fresh
+    /// sandboxed instance is still built per call). Use
+    /// [`NarrativeCompute::with_pool_and_engine`] to inject a daemon-wide
+    /// singleton engine + cache at boot.
     #[must_use]
     pub fn with_pool(pool: sqlx::SqlitePool) -> Self {
-        let engine = WasmEngine::new().ok().map(Arc::new);
+        let engine = match WasmEngine::new() {
+            Ok(e) => Arc::new(e),
+            Err(e) => {
+                tracing::warn!(error = %e, "narrative.compute: WasmEngine init failed");
+                return Self {
+                    pool: Some(Arc::new(pool)),
+                    engine: None,
+                    module_cache: None,
+                };
+            }
+        };
+        let cache = Arc::new(ModuleCache::new());
+        if let Err(e) = cache.warm_embedded(&engine) {
+            tracing::warn!(error = %e, "narrative.compute: embedded module warmup had errors");
+        }
         Self {
             pool: Some(Arc::new(pool)),
-            engine,
+            engine: Some(engine),
+            module_cache: Some(cache),
+        }
+    }
+
+    /// Construct with a pool and a **shared, daemon-wide** `WasmEngine` +
+    /// `ModuleCache` (P-last T1 singleton injection — closes R-V161P3-PERF-001).
+    ///
+    /// The daemon builds one engine + one cache at boot (pre-warmed with
+    /// embedded and user modules) and hands them to every `NarrativeCompute`
+    /// instance so module compilation happens exactly once process-wide.
+    #[must_use]
+    pub fn with_pool_and_engine(
+        pool: sqlx::SqlitePool,
+        engine: Arc<WasmEngine>,
+        module_cache: Arc<ModuleCache>,
+    ) -> Self {
+        Self {
+            pool: Some(Arc::new(pool)),
+            engine: Some(engine),
+            module_cache: Some(module_cache),
         }
     }
 }
@@ -212,27 +251,27 @@ impl Capability for NarrativeCompute {
             invocation: parsed.invocation_params,
         };
 
-        // Load the embedded module (compile once, reuse).
-        let wasm_bytes = embedded_module_bytes(&parsed.module_id).ok_or_else(|| {
+        // Resolve the compiled module + manifest from the daemon-wide cache
+        // (R-V161P3-PERF-002: compile once, reuse). Modules are pre-warmed at
+        // daemon boot (embedded + user-installed); a cache miss means the
+        // requested module id is neither embedded nor installed under
+        // `~/.nexus42/modules/`.
+        let module_cache = self.module_cache.as_ref().ok_or_else(|| {
+            tracing::warn!(
+                module_id = %parsed.module_id,
+                "narrative.compute: no module cache wired (capability constructed without engine)"
+            );
+            CapabilityError::WorkerUnavailable
+        })?;
+
+        let cached = module_cache.get(&parsed.module_id).ok_or_else(|| {
             CapabilityError::InputInvalid(format!(
-                "embedded module '{}' not found",
+                "module '{}' not loaded; ensure it is embedded or installed under ~/.nexus42/modules/",
                 parsed.module_id
             ))
         })?;
-
-        let manifest_json = embedded_module_manifest(&parsed.module_id).ok_or_else(|| {
-            CapabilityError::InputInvalid(format!(
-                "manifest for module '{}' not found",
-                parsed.module_id
-            ))
-        })?;
-
-        let manifest: ModuleManifest = serde_json::from_str(manifest_json)
-            .map_err(|e| CapabilityError::InputInvalid(format!("module manifest parse: {e}")))?;
-
-        let module: WasmModule = engine
-            .load_module(wasm_bytes)
-            .map_err(|e| CapabilityError::Internal(format!("wasm module compile: {e}")))?;
+        let module = cached.module.clone();
+        let manifest = cached.manifest.clone();
 
         // Invoke compute with graceful error handling.
         let output = match engine.compute(&module, &manifest, &compute_input) {
@@ -522,16 +561,32 @@ fn apply_op_to_field(
 /// Create new `KeyBlock`s emitted by the compute module. Each block is inserted
 /// with `provisional` status via the KB store.
 ///
+/// # Security: `world_id` re-assertion (R-V161P3-CORR-002)
+///
+/// Every emitted block MUST target the same world that was admitted by the
+/// capability's admission gate. A module that emits a block carrying a
+/// different `world_id` (or no `world_id`) is rejected with `InputInvalid`
+/// before any insert runs, preventing cross-world injection. This re-checks
+/// the invariant after the sandboxed module has run, where the admitted
+/// `world_id` is the sole trusted source.
+///
 /// Returns the number of blocks created.
 async fn create_new_key_blocks(
     pool: &sqlx::SqlitePool,
-    _world_id: &str,
+    world_id: &str,
     blocks: &[nexus_contracts::KeyBlock],
 ) -> Result<usize, CapabilityError> {
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let mut created = 0usize;
 
     for kb_contract in blocks {
+        if kb_contract.world_id != world_id {
+            return Err(CapabilityError::InputInvalid(format!(
+                "new_key_block '{}' targets world '{}' but admitted world is '{}'; \
+                 cross-world block injection rejected",
+                kb_contract.key_block_id, kb_contract.world_id, world_id
+            )));
+        }
         let kb = nexus_kb::key_block::KeyBlock::from(kb_contract.clone());
         kb_store
             .insert_key_block(kb)
@@ -841,6 +896,47 @@ mod tests {
 
     // ── Integration: narrative.compute capability ──────────────────────────
 
+    // H1 / R-V161P3-CORR-002: create_new_key_blocks re-asserts world_id before
+    // any insert, rejecting cross-world block injection from a (hypothetically
+    // hostile or buggy) module.
+    #[tokio::test]
+    async fn create_new_key_blocks_rejects_cross_world_injection() {
+        let (pool, _dir) = fresh_pool().await;
+        let hostile = nexus_contracts::KeyBlock {
+            key_block_id: "kb_hostile".to_string(),
+            world_id: "wld_OTHER".to_string(),
+            block_type: nexus_contracts::BlockType::Character,
+            ..Default::default()
+        };
+        let err = create_new_key_blocks(&pool, "wld_admitted", std::slice::from_ref(&hostile))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CapabilityError::InputInvalid(_)));
+        // And nothing was inserted.
+        let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        assert!(kb_store.get_key_block("kb_hostile").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_new_key_blocks_accepts_matching_world_id() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_kb").await;
+        seed_world(&pool, "ctr_kb", "wld_admitted").await;
+        let kb = nexus_contracts::KeyBlock {
+            key_block_id: "kb_ok".to_string(),
+            world_id: "wld_admitted".to_string(),
+            block_type: nexus_contracts::BlockType::Character,
+            canonical_name: "Ok".to_string(),
+            ..Default::default()
+        };
+        let n = create_new_key_blocks(&pool, "wld_admitted", std::slice::from_ref(&kb))
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+        let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
+        assert!(kb_store.get_key_block("kb_ok").await.is_ok());
+    }
+
     #[tokio::test]
     async fn narrative_compute_rejects_missing_world() {
         let (pool, _dir) = fresh_pool().await;
@@ -916,8 +1012,8 @@ mod tests {
         seed_world(&pool, "ctr_a", "wld_a").await;
 
         // Seed two computable characters with HP state.
-        let kb_a = seed_computable_character(&pool, "wld_a", "Hero", 100, 80).await;
-        let kb_b = seed_computable_character(&pool, "wld_a", "Villain", 120, 120).await;
+        let _kb_a = seed_computable_character(&pool, "wld_a", "Hero", 100, 80).await;
+        let _kb_b = seed_computable_character(&pool, "wld_a", "Villain", 120, 120).await;
 
         let cap = NarrativeCompute::with_pool(pool.clone());
 

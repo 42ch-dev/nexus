@@ -171,14 +171,76 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         )))
     };
     let worker_provider = ProductionWorkerProvider::new(shared_worker_registry.clone());
+
+    // V1.61 P-last T1/T2/T3: build ONE daemon-wide `WasmEngine` + `ModuleCache`
+    // and inject them into `narrative.compute` so module compilation happens
+    // exactly once process-wide (closes R-V161P3-PERF-001/002). The cache is
+    // pre-warmed with embedded modules (T2) and user-installed modules under
+    // `~/.nexus42/modules/` (T3) before any capability runs.
+    //
+    // `WasmEngine::new()` failing (e.g. JIT unavailable on an exotic host) is
+    // non-fatal: the daemon still boots and the registry falls back to the
+    // non-wasm wiring, in which case `narrative.compute` returns
+    // `WorkerUnavailable` if a caller actually invokes it.
+    let wasm_singleton: Option<(
+        Arc<nexus_wasm_host::WasmEngine>,
+        Arc<nexus_wasm_host::ModuleCache>,
+    )> = match nexus_wasm_host::WasmEngine::new() {
+        Ok(engine) => {
+            let engine = Arc::new(engine);
+            let cache = Arc::new(nexus_wasm_host::ModuleCache::new());
+            // T2: embedded modules (compiled by build.rs into embedded-modules/).
+            match cache.warm_embedded(&engine) {
+                Ok(n) => tracing::info!("warmed {n} embedded WASM module(s) into the daemon cache"),
+                Err(e) => tracing::warn!(error = %e, "embedded WASM module warmup had errors"),
+            }
+            // T3: user-installed modules under ~/.nexus42/modules/.
+            let user_modules_dir = nexus_home_layout::user_modules_dir(state.nexus_home());
+            match cache.warm_dir(&engine, &user_modules_dir) {
+                Ok(n) => {
+                    if n > 0 {
+                        tracing::info!(
+                            dir = %user_modules_dir.display(),
+                            "warmed {n} user WASM module(s) into the daemon cache"
+                        );
+                    }
+                }
+                Err(e) => tracing::warn!(
+                    dir = %user_modules_dir.display(),
+                    error = %e,
+                    "user WASM module warmup had errors"
+                ),
+            }
+            tracing::info!(
+                "WASM module cache ready: {} module(s) loaded (engine singleton)",
+                cache.len()
+            );
+            Some((engine, cache))
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "WasmEngine init failed; narrative.compute will be unavailable"
+            );
+            None
+        }
+    };
+
     let runtime_deps = CapabilityRuntimeDeps {
         pool: None,
         worker_provider: Some(std::sync::Arc::new(worker_provider)),
         daemon_tool_dispatch: None,
         cdn_config,
     };
-    let capabilities = Arc::new(CapabilityRegistry::with_runtime_deps(&runtime_deps));
-    tracing::info!("Capability registry built via with_runtime_deps (production wiring)");
+    let capabilities = Arc::new(match wasm_singleton {
+        Some((engine, cache)) => {
+            CapabilityRegistry::with_runtime_deps_and_wasm(&runtime_deps, engine, cache)
+        }
+        None => CapabilityRegistry::with_runtime_deps(&runtime_deps),
+    });
+    tracing::info!(
+        "Capability registry built (production wiring + WASM singleton where available)"
+    );
 
     // V1.42 P3 (DF-47): wire daemon-side tool dispatch adapter.
     // Stored in WorkspaceState so schedule-executed HostToolCallTask instances

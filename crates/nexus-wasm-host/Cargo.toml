@@ -20,15 +20,16 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# Embeds pre-built .wasm artifacts at compile time (compass Q10; mirrors the
-# `embedded-presets/` pattern in nexus-orchestration). The committed .wasm blobs
-# live under `embedded-modules/` and are rebuilt via the procedure in
-# `modules/README.md` (open design item #6: pre-compile + commit).
+# Embeds compiled .wasm artifacts at compile time (compass Q10; mirrors the
+# `embedded-presets/` pattern in nexus-orchestration). The `embedded-modules/`
+# tree is generated and gitignored — `build.rs` compiles each module from
+# `modules/<id>/` (see `modules/README.md`).
 include_dir = "0.7"
 
 [dev-dependencies]
 nexus-contracts = { path = "../nexus-contracts" }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 # `wat` compiles WebAssembly text → binary for unit tests that exercise
 # validation/sandbox paths without shipping a real module.
 wat = "1"
