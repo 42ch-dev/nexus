@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/memory-web-list-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus MemoryWebListResponse",
+  "description": "Paginated list response for memory web read APIs (platform plan 18). Items are read projections; full MemoryItem sync may use domain bundle types separately.",
+  "type": "object",
+  "required": ["schema_version", "items", "has_more"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "memory_item_id",
+          "creator_id",
+          "world_id",
+          "memory_type",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "memory_item_id": {
+            "type": "string",
+            "pattern": "^mem_[a-zA-Z0-9]+$",
+            "description": "MemoryItem id"
+          },
+          "creator_id": {
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
+          },
+          "world_id": {
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/WorldId"
+          },
+          "memory_type": {
+            "type": "string",
+            "enum": ["canon", "working", "experience"],
+            "description": "Same values as common MemoryType (inline for TS inline-object codegen imports)"
+          },
+          "memory_kind": {
+            "type": "string",
+            "enum": [
+              "story_summary",
+              "research_material",
+              "review_note",
+              "character_note",
+              "world_building",
+              "plot_outline",
+              "theme_analysis",
+              "custom"
+            ],
+            "description": "Same values as common MemoryKind"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "superseded", "archived"],
+            "description": "Same values as common MemoryStatus"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Summary text when exposed"
+          },
+          "created_at": {
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+          },
+          "updated_at": {
+            "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "next_cursor": {
+      "type": "string"
+    },
+    "has_more": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

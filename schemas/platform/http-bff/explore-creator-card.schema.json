@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/explore-creator-card.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ExploreCreatorCard",
+  "description": "Public creator projection for Explore / creator-profile read APIs (platform plan 16 / W3 slice). Field tiers follow v1-spec visibility; omit sensitive fields at the edge.",
+  "type": "object",
+  "required": ["schema_version", "creator_id", "display_name"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "creator_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Public display name"
+    },
+    "bio": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Public bio text when visibility allows"
+    },
+    "avatar_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "HTTPS URL to avatar when exposed"
+    },
+    "follower_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Denormalized follower count when exposed"
+    },
+    "is_platform_owned": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this is a platform-hosted creator (drives 'Official' badge)"
+    },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "Creator registration timestamp ('Member since' display)"
+    },
+    "public_world_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of public active worlds owned by this creator"
+    },
+    "visibility": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Visibility",
+      "description": "Effective visibility of this card"
+    }
+  },
+  "additionalProperties": false
+}

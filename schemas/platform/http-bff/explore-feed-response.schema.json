@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/explore-feed-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ExploreFeedResponse",
+  "description": "Paginated Explore results for browse and search responses (POST /v1/explore/browse | /v1/explore/search).",
+  "type": "object",
+  "required": ["schema_version", "entries", "has_more"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/platform/http-bff/explore-hit.schema.json"
+      }
+    },
+    "next_cursor": {
+      "type": "string",
+      "description": "Opaque cursor for the next page; omit or null when not available"
+    },
+    "has_more": {
+      "type": "boolean",
+      "description": "True when additional pages may exist"
+    }
+  },
+  "additionalProperties": false
+}
