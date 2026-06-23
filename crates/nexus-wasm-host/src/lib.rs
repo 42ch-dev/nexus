@@ -36,6 +36,7 @@ mod engine;
 mod error;
 mod host;
 mod manifest;
+mod module_cache;
 mod sandbox;
 
 pub use embedded::{embedded_module_bytes, embedded_module_ids, embedded_module_manifest};
@@ -43,6 +44,7 @@ pub use engine::{WasmEngine, WasmModule};
 pub use error::{ComputeError, Result};
 pub use host::HostContext;
 pub use manifest::{HostFunction, ModuleManifest};
+pub use module_cache::{CachedModule, ModuleCache};
 pub use sandbox::SandboxConfig;
 
 // Re-export the compute ABI types from nexus-contracts so consumers depend on a
