@@ -276,7 +276,13 @@
     "2026-06-23-v1.61-wasm-host-and-basic-combat",
     "2026-06-23-v1.61-mid-qc-and-fix-waves",
     "2026-06-23-v1.61-compute-capability-and-preset",
-    "2026-06-23-v1.61-daemon-integration-and-closeout"
+    "2026-06-23-v1.61-daemon-integration-and-closeout",
+    "2026-06-23-v1.62-compass-and-plan-stubs",
+    "2026-06-23-v1.62-schemas-reorganization-and-envelope-move",
+    "2026-06-23-v1.62-manifest-schemas-and-host-validation",
+    "2026-06-23-v1.62-spec-extraction-compute-abi-and-wasm-host",
+    "2026-06-23-v1.62-mid-qc-and-fix-waves",
+    "2026-06-23-v1.62-daemon-verification-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -527,6 +533,43 @@
       "wire_contract_changes": "None (per compass §0.1; additive enum only — script BlockType dialogue/beat/act)",
       "qc_tri_review_outcome": "P0: 3/3 Approve. P1: 3/3 Request Changes → 1 fix-wave → 3/3 Approve. P2: qc1+qc3 Request Changes → 2 fix-waves → 3/3 Approve. P3: qc1+qc2 Request Changes → 1 fix-wave → 3/3 Approve. Total: 12 QC reports + 4 mid-QA verifies.",
       "note": "V1.55 ship pending PR to main (user authorization required for push). Integration branch iteration/v1.55 retiring per mstar-branch-worktree."
+    },
+    "V1.62": {
+      "compass": "v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1",
+      "shipped_at": "2026-06-24T02:00:00Z",
+      "plan_count": 6,
+      "plan_ids": [
+        "2026-06-23-v1.62-compass-and-plan-stubs",
+        "2026-06-23-v1.62-schemas-reorganization-and-envelope-move",
+        "2026-06-23-v1.62-manifest-schemas-and-host-validation",
+        "2026-06-23-v1.62-spec-extraction-compute-abi-and-wasm-host",
+        "2026-06-23-v1.62-mid-qc-and-fix-waves",
+        "2026-06-23-v1.62-daemon-verification-and-closeout"
+      ],
+      "wire_contracts_changed": true,
+      "highlights": {
+        "P-1": "Compass PM-locked via grill-me (6 decisions); writing-specialist authored; PM-resolved bundle-collision open question.",
+        "P0": "schemas/ reorganized to consumer-scope tree (common + domain + platform/{http-bff,sync} + local-api/compute); 56 schemas; codegen nested-modules decision; boundary docs rewritten. QC 3/3 Approve (after fix-wave). mid-QA PASS.",
+        "P1": "manifest.json schemas block + host validation + basic-combat enrichment. Hand-rolled JSON-Schema validator with MAX_VALIDATION_DEPTH=64. 42 tests. QC 3/3 Approve (after fix-wave for qc3 W-001). mid-QA PASS.",
+        "P2": "2 NEW Master specs (compute-module-abi.md 463 lines + wasm-host.md 365 lines) + 4 amendments. QC 3/3 Approve. mid-QA PASS. Closes R-V161P1-LOW-001.",
+        "P-mid": "PM meta-tracking across 3 waves.",
+        "P-last": "Daemon sanity + clippy auto-fix closing R-V161P0-LOW-001 + Profile B compaction + status finalize + PR."
+      },
+      "residuals_closed": [
+        "R-V161P0-INFO-001",
+        "R-V161P0-LOW-001",
+        "R-V161P0-LOW-004",
+        "R-V161P0-LOW-005",
+        "R-V161P1-LOW-001"
+      ],
+      "residuals_deferred": {
+        "R-V161P3-ARCH-001": "V1.63+",
+        "R-V161P3-CORR-001": "V2 only"
+      },
+      "integration_branch": "iteration/v1.62",
+      "integration_merge_target": "main",
+      "pr": null,
+      "merge_commit": null
     }
   },
   "metadata": {
