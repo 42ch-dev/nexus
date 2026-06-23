@@ -230,6 +230,11 @@
       "at": "2026-06-23T15:55:00Z",
       "message": "AGENTS.md rule promotion: promoted the 2026-04-14 'status.json field discipline' policy from this write-mostly log into .mstar/AGENTS.md as a first-class subsection under 'Project-Specific Deviations'. Rule was originally recorded only as a notes.json entry, which agents (including PM) don't reliably read at session start — that's why v1_62_plan_registration_note slipped through in the previous prepare commit. The new AGENTS.md subsection makes the rule load-bearing: lists allowed structured fields, forbids the *_note / *_index narrative anti-patterns by name, gives a one-line test ('if the value is a sentence/paragraph → notes.json'), and explains audit-trail preservation when removing violations.",
       "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
+    },
+    {
+      "at": "2026-06-23T17:00:00Z",
+      "message": "V1.62 P0 implement complete → InReview. @fullstack-dev delivered 3 commits on feature/v1.62-schemas-reorganization (f8f22d0a..126f041d; 203 files; base 3cefb6d9). All gates PASS: pnpm validate-schemas (56/56), pnpm codegen, check-wire-drift, schema_drift_detection (52 schemas registered), cargo check --workspace, cargo +nightly fmt --all --check, TS typecheck. Pre-existing clippy -p nexus-contracts 8 errors verified against base (R-V161P0-LOW-001 → P-last T5; not P0-attributable). Codegen restructure decision: user chose NESTED module layout (generated::{common,domain,platform/{http_bff,sync},local_api/compute}/) with flat root re-exports for backwards compat. Implementer's 2 flagged findings both NOT registered as new residuals: R-V162P0-LOW-001 == R-V161P0-LOW-001 (duplicate); R-V162P0-INFO-001 (compass prose said 33 platform files / 55 total; actual 34 / 56) — purely doc drift already corrected in schemas-directory-layout.md §7. Tree: 56 schemas across common(3) + domain(10) + platform/http-bff(34) + platform/sync(7) + local-api/compute(2). QC tri-review dispatching next.",
+      "plan_id": "2026-06-23-v1.62-schemas-reorganization-and-envelope-move"
     }
   ]
 }
