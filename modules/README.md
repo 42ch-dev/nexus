@@ -67,6 +67,9 @@ the required input surface, the export names, and optional sandbox overrides.
 | `max_fuel` | integer | host `SandboxConfig` | Per-invocation fuel override. |
 | `max_memory_mib` | integer | host `SandboxConfig` | Per-invocation memory-cap override (MiB). |
 | `max_wall_time_ms` | integer | host `SandboxConfig` | Per-invocation wall-time override (ms). |
+| `schemas` | object | — | **V1.62+**: Inline JSON-Schema fragments for per-module input/output validation (see [The `schemas` block](#the-schemas-block-v162)). Omit for no validation (backward-compatible with V1.61). |
+
+### The `schemas` block (V1.62+)
 
 Example (`basic-combat/manifest.json`):
 
@@ -81,6 +84,94 @@ Example (`basic-combat/manifest.json`):
   "init_export": "init",
   "host_functions": [],
   "battle_report_kind": "combat"
+}
+```
+
+#### The `schemas` block (V1.62+)
+
+V1.62 adds an optional `schemas` field to `manifest.json`. When declared, the
+host validates the module's input and output against inline JSON-Schema
+fragments **before** and **after** each `compute()` call. This keeps per-module
+shape declarations self-contained in the module's own manifest (rather than
+centralized in product-level schemas).
+
+The `schemas` block contains four optional sub-fields:
+
+| Field | Validates | When |
+| --- | --- | --- |
+| `key_block_attributes` | `key_blocks[i].body.attributes` per `block_type` | Pre-invocation |
+| `key_block_state` | `key_blocks[i].body.state.<block_type>` per `block_type` | Pre-invocation |
+| `invocation` | `ComputeInput.invocation` (when non-null) | Pre-invocation |
+| `battle_report` | `ComputeOutput.battle_report` | Post-invocation |
+
+Each sub-field is a JSON-Schema object (fragment). The host validates only
+the sub-fields that are declared. If a sub-field is omitted or the entire
+`schemas` block is absent, **no validation** is performed for that aspect —
+manifests without `schemas` continue to work as in V1.61.
+
+**Validation failure**: on the first mismatch, the host returns
+`ComputeError::ManifestValidationFailed` with a JSON path (e.g.
+`key_blocks[1].body.attributes.base_atk: missing required field`) and
+aborts the invocation immediately. Only the first error is reported
+(fail-fast).
+
+The host supports a minimal JSON-Schema subset:
+`type`, `properties`, `required`, `additionalProperties`, `minimum`, `items`,
+`const`. This covers the needs of module input/output validation without
+pulling in a full validator.
+
+**Authoring example** (`basic-combat/manifest.json` schemas block):
+
+```json
+{
+  "schemas": {
+    "key_block_attributes": {
+      "character": {
+        "type": "object",
+        "properties": {
+          "max_hp": {"type": "integer", "minimum": 0},
+          "base_atk": {"type": "integer", "minimum": 0},
+          "base_def": {"type": "integer", "minimum": 0},
+          "speed": {"type": "integer", "minimum": 0},
+          "level": {"type": "integer", "minimum": 1}
+        },
+        "required": ["max_hp", "base_atk", "base_def"],
+        "additionalProperties": true
+      }
+    },
+    "key_block_state": {
+      "character": {
+        "type": "object",
+        "properties": {
+          "current_hp": {"type": "integer", "minimum": 0},
+          "status_effects": {"type": "array", "items": {"type": "string"}},
+          "is_alive": {"type": "boolean"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "properties": {
+        "attacker_id": {"type": "string"},
+        "defender_id": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "battle_report": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string", "const": "combat"},
+        "attacker_id": {"type": "string"},
+        "defender_id": {"type": "string"},
+        "damage": {"type": "integer"},
+        "defender_hp_before": {"type": "integer"},
+        "defender_hp_after": {"type": "integer"}
+      },
+      "required": ["kind", "attacker_id", "defender_id", "damage"],
+      "additionalProperties": true
+    }
+  }
 }
 ```
 
