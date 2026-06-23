@@ -28,6 +28,12 @@ use crate::{ComputeInput, ComputeOutput, HostContext, WasmEngine, WasmModule};
 /// modules without forcing a second round-trip.
 const OUTPUT_BUFFER_BYTES: u32 = 1 << 20; // 1 MiB
 
+/// Maximum recursion depth for JSON-Schema validation (qc3 W-001).
+/// Covers any realistic compute-envelope depth (`KeyBlocks` × attributes/state ×
+/// nested objects/arrays). Exceeding this returns `ManifestValidationFailed`
+/// instead of overflowing the stack.
+const MAX_VALIDATION_DEPTH: usize = 64;
+
 impl WasmEngine {
     /// Run a single stateless compute invocation.
     ///
@@ -212,7 +218,7 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                 let attrs = kb.get("body").and_then(|b| b.get("attributes"));
                 let instance = attrs.unwrap_or(&Value::Null);
                 let path = format!("key_blocks[{i}].body.attributes");
-                validate_against_schema(instance, &path, schema, &path)?;
+                validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
             }
         }
     }
@@ -233,7 +239,7 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                     .and_then(|s| s.get(block_type));
                 let instance = state.unwrap_or(&Value::Null);
                 let path = format!("key_blocks[{i}].body.state.{block_type}");
-                validate_against_schema(instance, &path, schema, &path)?;
+                validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
             }
         }
     }
@@ -245,7 +251,13 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
         // optional in ComputeInput).
         if let Some(inv) = inv {
             if !inv.is_null() {
-                validate_against_schema(inv, "invocation", invocation_schema, "invocation")?;
+                validate_against_schema(
+                    inv,
+                    "invocation",
+                    invocation_schema,
+                    "invocation",
+                    MAX_VALIDATION_DEPTH,
+                )?;
             }
         }
     }
@@ -262,7 +274,13 @@ fn validate_battle_report(output: &ComputeOutput, schema: &Value) -> Result<()> 
             detail: "battle_report must be an object".into(),
         });
     }
-    validate_against_schema(report, "battle_report", schema, "battle_report")?;
+    validate_against_schema(
+        report,
+        "battle_report",
+        schema,
+        "battle_report",
+        MAX_VALIDATION_DEPTH,
+    )?;
     Ok(())
 }
 
@@ -277,7 +295,14 @@ fn validate_against_schema(
     instance_path: &str,
     schema: &Value,
     _schema_path: &str,
+    depth_limit: usize,
 ) -> Result<()> {
+    if depth_limit == 0 {
+        return Err(ComputeError::ManifestValidationFailed {
+            path: instance_path.to_string(),
+            detail: "exceeded maximum validation depth (64)".to_string(),
+        });
+    }
     let Some(obj) = schema.as_object() else {
         return Ok(()); // empty / non-object schema → pass
     };
@@ -327,7 +352,13 @@ fn validate_against_schema(
                 for (prop_name, prop_schema) in properties {
                     if let Some(prop_val) = instance_obj.get(prop_name) {
                         let child_path = format!("{instance_path}.{prop_name}");
-                        validate_against_schema(prop_val, &child_path, prop_schema, &child_path)?;
+                        validate_against_schema(
+                            prop_val,
+                            &child_path,
+                            prop_schema,
+                            &child_path,
+                            depth_limit - 1,
+                        )?;
                     }
                 }
                 Some(properties.keys().map(String::as_str).collect())
@@ -366,7 +397,13 @@ fn validate_against_schema(
         if let Some(items_schema) = obj.get("items") {
             for (i, elem) in instance_arr.iter().enumerate() {
                 let child_path = format!("{instance_path}[{i}]");
-                validate_against_schema(elem, &child_path, items_schema, &child_path)?;
+                validate_against_schema(
+                    elem,
+                    &child_path,
+                    items_schema,
+                    &child_path,
+                    depth_limit - 1,
+                )?;
             }
         }
     }
@@ -537,15 +574,24 @@ mod tests {
     fn valid_object_passes_type_check() {
         let schema = json!({"type": "object"});
         let instance = json!({"a": 1});
-        assert!(validate_against_schema(&instance, "root", &schema, "root").is_ok());
+        assert!(
+            validate_against_schema(&instance, "root", &schema, "root", MAX_VALIDATION_DEPTH)
+                .is_ok()
+        );
     }
 
     #[test]
     fn wrong_type_fails_with_path() {
         let schema = json!({"type": "string"});
         let instance = json!(42);
-        let err =
-            validate_against_schema(&instance, "invocation.attacker_id", &schema, "x").unwrap_err();
+        let err = validate_against_schema(
+            &instance,
+            "invocation.attacker_id",
+            &schema,
+            "x",
+            MAX_VALIDATION_DEPTH,
+        )
+        .unwrap_err();
         match err {
             ComputeError::ManifestValidationFailed { path, detail } => {
                 assert_eq!(path, "invocation.attacker_id");
@@ -568,8 +614,14 @@ mod tests {
         });
         // Instance is missing `base_atk`.
         let instance = json!({"max_hp": 100});
-        let err = validate_against_schema(&instance, "key_blocks[0].body.attributes", &schema, "x")
-            .unwrap_err();
+        let err = validate_against_schema(
+            &instance,
+            "key_blocks[0].body.attributes",
+            &schema,
+            "x",
+            MAX_VALIDATION_DEPTH,
+        )
+        .unwrap_err();
         match err {
             ComputeError::ManifestValidationFailed { path, detail } => {
                 assert_eq!(path, "key_blocks[0].body.attributes");
@@ -591,14 +643,18 @@ mod tests {
             "required": ["base_atk", "max_hp"]
         });
         let instance = json!({"base_atk": 10, "max_hp": 100});
-        assert!(validate_against_schema(&instance, "root", &schema, "root").is_ok());
+        assert!(
+            validate_against_schema(&instance, "root", &schema, "root", MAX_VALIDATION_DEPTH)
+                .is_ok()
+        );
     }
 
     #[test]
     fn minimum_constraint_fails() {
         let schema = json!({"type": "integer", "minimum": 1});
         let instance = json!(0);
-        let err = validate_against_schema(&instance, "level", &schema, "x").unwrap_err();
+        let err = validate_against_schema(&instance, "level", &schema, "x", MAX_VALIDATION_DEPTH)
+            .unwrap_err();
         match err {
             ComputeError::ManifestValidationFailed { path, detail } => {
                 assert_eq!(path, "level");
@@ -612,8 +668,14 @@ mod tests {
     fn const_check_fails() {
         let schema = json!({"type": "string", "const": "combat"});
         let instance = json!("exploration");
-        let err =
-            validate_against_schema(&instance, "battle_report.kind", &schema, "x").unwrap_err();
+        let err = validate_against_schema(
+            &instance,
+            "battle_report.kind",
+            &schema,
+            "x",
+            MAX_VALIDATION_DEPTH,
+        )
+        .unwrap_err();
         match err {
             ComputeError::ManifestValidationFailed { path, detail } => {
                 assert_eq!(path, "battle_report.kind");
@@ -630,10 +692,11 @@ mod tests {
             "items": {"type": "string"}
         });
         let valid = json!(["a", "b"]);
-        assert!(validate_against_schema(&valid, "arr", &schema, "x").is_ok());
+        assert!(validate_against_schema(&valid, "arr", &schema, "x", MAX_VALIDATION_DEPTH).is_ok());
 
         let invalid = json!(["a", 42]);
-        let err = validate_against_schema(&invalid, "arr", &schema, "x").unwrap_err();
+        let err = validate_against_schema(&invalid, "arr", &schema, "x", MAX_VALIDATION_DEPTH)
+            .unwrap_err();
         match err {
             ComputeError::ManifestValidationFailed { path, detail } => {
                 assert!(path.starts_with("arr[1]"));
@@ -664,7 +727,14 @@ mod tests {
         });
         // Missing body.attributes.base_atk
         let instance = json!({"body": {"attributes": {}}});
-        let err = validate_against_schema(&instance, "key_blocks[0]", &schema, "x").unwrap_err();
+        let err = validate_against_schema(
+            &instance,
+            "key_blocks[0]",
+            &schema,
+            "x",
+            MAX_VALIDATION_DEPTH,
+        )
+        .unwrap_err();
         match err {
             ComputeError::ManifestValidationFailed { path, detail } => {
                 assert!(path.contains("body.attributes"));
@@ -811,5 +881,61 @@ mod tests {
         assert!(schemas.key_block_state.is_some());
         assert!(schemas.invocation.is_some());
         assert!(schemas.battle_report.is_some());
+    }
+
+    // ------------------------------------------------------------------
+    // Depth-limit tests (qc3 W-001 fix)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn deeply_nested_properties_rejected_by_depth_limit() {
+        // Adversarial schema: 100 levels of nested `properties`.
+        let mut schema = json!({"type": "integer"});
+        for _ in 0..100 {
+            schema = json!({"type": "object", "properties": {"a": schema}});
+        }
+        // Matching instance: 100 levels of nested objects.
+        let mut instance = json!(42);
+        for _ in 0..100 {
+            instance = json!({"a": instance});
+        }
+
+        let err = validate_against_schema(&instance, "root", &schema, "x", MAX_VALIDATION_DEPTH)
+            .unwrap_err();
+        match err {
+            ComputeError::ManifestValidationFailed { detail, .. } => {
+                assert!(
+                    detail.contains("exceeded maximum validation depth"),
+                    "expected depth-limit message, got: {detail}"
+                );
+            }
+            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deeply_nested_items_rejected_by_depth_limit() {
+        // Adversarial instance: 100 levels of nested arrays.
+        // Schema mirrors the depth so each level validates.
+        let mut schema = json!({"type": "integer"});
+        for _ in 0..100 {
+            schema = json!({"type": "array", "items": schema});
+        }
+        let mut instance = json!(42);
+        for _ in 0..100 {
+            instance = json!([instance]);
+        }
+
+        let err = validate_against_schema(&instance, "root", &schema, "x", MAX_VALIDATION_DEPTH)
+            .unwrap_err();
+        match err {
+            ComputeError::ManifestValidationFailed { detail, .. } => {
+                assert!(
+                    detail.contains("exceeded maximum validation depth"),
+                    "expected depth-limit message, got: {detail}"
+                );
+            }
+            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+        }
     }
 }
