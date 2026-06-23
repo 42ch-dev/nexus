@@ -21,11 +21,11 @@ use std::str::FromStr;
 /// ## Computable `BlockType` set
 ///
 /// The canonical set of `BlockType`s that participate in compute is:
-/// `Character`, `Item`, `Faction`, `Ability`, `Species`. These are the
-/// types for which per-`block_type` structured schemas exist in
-/// `schemas/compute/entity-attributes.schema.json` and
-/// `schemas/compute/entity-state.schema.json`. `environment` is NOT a
-/// valid `BlockType` enum variant and is not included.
+/// `Character`, `Item`, `Faction`, `Ability`, `Species`. Per-module
+/// attribute/state shapes are declared by each compute module's
+/// `manifest.json` `schemas` block (V1.62 — see `modules/README.md` and
+/// `.mstar/knowledge/specs/compute-module-abi.md`). `environment` is NOT
+/// a valid `BlockType` enum variant and is not included.
 ///
 /// When [`computable`](Self::computable) is `Some(true)`, the body SHOULD
 /// carry static `attributes` (immutable compute params) and MAY carry
@@ -41,8 +41,9 @@ pub struct KeyBlockBody {
     pub tags: Option<Vec<String>>,
     /// Dynamic runtime state for computable `KeyBlocks` (V1.61, compass Q4/Q5).
     /// Nested by `block_type` to avoid field-name collisions across module
-    /// types. Conform to `schemas/compute/entity-state.schema.json` keyed by
-    /// `block_type`. Only meaningful when [`computable`](Self::computable) is `Some(true)`.
+    /// types (e.g. `state.character.current_hp`). Per-module state shapes
+    /// are declared in each compute module's `manifest.json` (V1.62).
+    /// Only meaningful when [`computable`](Self::computable) is `Some(true)`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<serde_json::Value>,
     /// Marks this `KeyBlock` as participating in WASM compute (V1.61, compass Q4).

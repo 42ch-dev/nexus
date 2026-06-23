@@ -16,7 +16,7 @@ into. It does **not** wire itself into the daemon — that is P-last.
 | Q1 Runtime | `wasmtime` (Bytecode Alliance) |
 | Q6 Sandbox | **Per-invocation sandbox.** Stateless pure function. Fresh instance per `compute()` call. |
 | Q6 Limits | **Fuel** (default 10M instructions) + **memory cap** (default 64 MiB via `ResourceLimiter`) + **wall-time** (default 30s via epoch-interruption watchdog). |
-| Q8 Output | Standard 4-part envelope from `schemas/compute/`. |
+| Q8 Output | Standard 4-part envelope from `schemas/local-api/compute/`. |
 
 ## Module ABI (V1 envelope)
 
