@@ -226,17 +226,18 @@ async fn with_runtime_deps_registers_all_llm_capabilities() {
     };
     let registry = CapabilityRegistry::with_runtime_deps(&deps);
 
-    // 31 builtins: 21 V1.51 + essay.scaffold from V1.52 T-A P2 + game_bible.scaffold from V1.54 P1
+    // 32 builtins: 21 V1.51 + essay.scaffold from V1.52 T-A P2 + game_bible.scaffold from V1.54 P1
     // + script.scaffold from V1.55 P3 + nexus.game_bible.section_status.update from V1.56 P-last
     // (R-V155P2-F002 closure) + nexus.reference.refresh from V1.58 P3 fix-wave
     // + 5 V1.60 P0 DF-46 local-parity orchestration capabilities (world.state.query,
-    //   world.delta.propose, world.delta.apply, timeline.event.append, fork.create).
+    //   world.delta.propose, world.delta.apply, timeline.event.append, fork.create)
+    // + narrative.compute from V1.61 P3.
     // NOTE: when adding new builtins, update this count OR refactor to auto-derive
     // from the catalog (see catalog_registry_invariant_all_ids_present for the pattern).
     assert_eq!(
         registry.len(),
-        31,
-        "registry should have 31 builtins (21 V1.51 + essay.scaffold V1.52 + game_bible.scaffold V1.54 P1 + script.scaffold V1.55 P3 + nexus.game_bible.section_status.update V1.56 P-last + nexus.reference.refresh V1.58 P3 + 5 V1.60 P0 DF-46 orchestration capabilities)"
+        32,
+        "registry should have 32 builtins (21 V1.51 + essay.scaffold V1.52 + game_bible.scaffold V1.54 P1 + script.scaffold V1.55 P3 + nexus.game_bible.section_status.update V1.56 P-last + nexus.reference.refresh V1.58 P3 + 5 V1.60 P0 DF-46 orchestration capabilities + narrative.compute V1.61 P3)"
     );
 
     // LLM-backed caps must all be present.

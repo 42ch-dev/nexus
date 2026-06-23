@@ -16,6 +16,11 @@ pub struct KbQuery {
     pub canonical_name: Option<String>,
     /// Text search within block content (summary, tags, `canonical_name`).
     pub text_search: Option<String>,
+    /// Filter by computable flag (V1.61 P1).
+    /// - `Some(true)` — only blocks with `computable: true`
+    /// - `Some(false)` — only blocks with `computable: false` or absent
+    /// - `None` — no filter (default)
+    pub computable: Option<bool>,
     /// Maximum number of results.
     pub limit: Option<usize>,
     /// Number of results to skip (for pagination).
@@ -31,6 +36,7 @@ impl KbQuery {
             block_type: None,
             canonical_name: None,
             text_search: None,
+            computable: None,
             limit: None,
             offset: None,
         }
@@ -54,6 +60,17 @@ impl KbQuery {
     #[must_use]
     pub fn with_text_search(mut self, text: &str) -> Self {
         self.text_search = Some(text.to_string());
+        self
+    }
+
+    /// Filter by computable flag (V1.61 P1).
+    ///
+    /// - `Some(true)` — only blocks with `body.computable == true`
+    /// - `Some(false)` — only blocks with `body.computable` absent or false
+    /// - `None` — no filter (default)
+    #[must_use]
+    pub const fn with_computable(mut self, computable: Option<bool>) -> Self {
+        self.computable = computable;
         self
     }
 

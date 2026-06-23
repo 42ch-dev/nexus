@@ -142,7 +142,8 @@ impl CapabilityRegistry {
     /// `creator.read_memory`, `creator.write_memory`, `creator.inject_prompt`,
     /// `creator.write_brief`, `judge.rule`, `acp.prompt`, `acp.session_load`,
     /// `judge.llm`, `context.summarize`, `kb.extract_work`,
-    /// `nexus.llm.extract`, `soul.experience.aggregate`.
+    /// `nexus.llm.extract`, `soul.experience.aggregate`,
+    /// `narrative.compute`.
     ///
     /// `kb.extract_work` is created without a pool (placeholder mode).
     /// Use [`with_builtins_and_pool`] for full e2e support.
@@ -196,6 +197,8 @@ impl CapabilityRegistry {
             Box::new(builtins::WorldDeltaApply::new()),
             Box::new(builtins::TimelineEventAppend::new()),
             Box::new(builtins::ForkCreate::new()),
+            // V1.61 P3: narrative.compute — sandboxed WASM compute for world state.
+            Box::new(builtins::NarrativeCompute::new()),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -257,7 +260,9 @@ impl CapabilityRegistry {
             Box::new(builtins::WorldDeltaPropose::with_pool(pool.clone())),
             Box::new(builtins::WorldDeltaApply::with_pool(pool.clone())),
             Box::new(builtins::TimelineEventAppend::with_pool(pool.clone())),
-            Box::new(builtins::ForkCreate::with_pool(pool)),
+            Box::new(builtins::ForkCreate::with_pool(pool.clone())),
+            // V1.61 P3: narrative.compute with pool.
+            Box::new(builtins::NarrativeCompute::with_pool(pool)),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -272,9 +277,59 @@ impl CapabilityRegistry {
     /// Production daemon boot should use this constructor when both a pool
     /// and worker provider are available. Capabilities without runtime deps
     /// are constructed in their default (standalone) form.
+    ///
+    /// `narrative.compute` is constructed via [`builtins::NarrativeCompute::with_pool`],
+    /// which builds its own `WasmEngine` + per-instance module cache. For the
+    /// daemon-wide singleton engine + cache (P-last T1, closes
+    /// R-V161P3-PERF-001), use [`CapabilityRegistry::with_runtime_deps_and_wasm`].
     #[must_use]
     #[allow(clippy::too_many_lines)]
     pub fn with_runtime_deps(deps: &CapabilityRuntimeDeps) -> Self {
+        let narrative_compute = deps
+            .pool
+            .as_ref()
+            .map_or_else(builtins::NarrativeCompute::new, |pool| {
+                builtins::NarrativeCompute::with_pool(pool.clone())
+            });
+        Self::build_with_narrative_compute(deps, narrative_compute)
+    }
+
+    /// Create a registry with runtime dependencies **and** a daemon-wide
+    /// singleton `WasmEngine` + `ModuleCache` injected into `narrative.compute`
+    /// (P-last T1/T4 — closes R-V161P3-PERF-001/002).
+    ///
+    /// The daemon builds exactly one engine + one cache at boot (pre-warmed
+    /// with embedded and user-installed modules) and passes them here so module
+    /// compilation happens once process-wide and is reused by every compute
+    /// invocation. When `deps.pool` is absent, `narrative.compute` falls back
+    /// to its standalone (`WorkerUnavailable`) form.
+    #[must_use]
+    pub fn with_runtime_deps_and_wasm(
+        deps: &CapabilityRuntimeDeps,
+        engine: std::sync::Arc<nexus_wasm_host::WasmEngine>,
+        module_cache: std::sync::Arc<nexus_wasm_host::ModuleCache>,
+    ) -> Self {
+        let narrative_compute =
+            deps.pool
+                .as_ref()
+                .map_or_else(builtins::NarrativeCompute::new, |pool| {
+                    builtins::NarrativeCompute::with_pool_and_engine(
+                        pool.clone(),
+                        engine,
+                        module_cache,
+                    )
+                });
+        Self::build_with_narrative_compute(deps, narrative_compute)
+    }
+
+    /// Shared body of [`with_runtime_deps`] / [`with_runtime_deps_and_wasm`],
+    /// parameterized only by the `narrative.compute` instance to register.
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
+    fn build_with_narrative_compute(
+        deps: &CapabilityRuntimeDeps,
+        narrative_compute: builtins::NarrativeCompute,
+    ) -> Self {
         let kb = deps
             .pool
             .as_ref()
@@ -465,6 +520,10 @@ impl CapabilityRegistry {
                         builtins::ForkCreate::with_pool(pool.clone())
                     }),
             ),
+            // V1.61 P3: narrative.compute — injected by the caller
+            // (`with_runtime_deps` builds a per-instance engine + cache;
+            // `with_runtime_deps_and_wasm` injects the daemon-wide singleton).
+            Box::new(narrative_compute),
         ];
         let mut reg = Self {
             capabilities: caps,
@@ -529,15 +588,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_twenty_six_builtins() {
-        // 26 = 21 V1.51 + essay.scaffold (V1.52 T-A P2) + game_bible.scaffold (V1.54 P1)
-        // + script.scaffold (V1.55 P3) + game_bible.section_status.update (V1.56 P-last R-V155P2-F002)
-        // + nexus.reference.refresh (V1.58 P1 DF-44).
-        // V1.60 P0: +5 DF-46 orchestration capabilities (world.state.query,
-        // world.delta.propose, world.delta.apply, timeline.event.append,
-        // fork.create) → 26 + 5 = 31.
+    fn registry_has_32_builtins() {
+        // 31 V1.60 + 1 narrative.compute (V1.61 P3) = 32.
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 31);
+        assert_eq!(reg.len(), 32);
     }
 
     #[test]
@@ -576,6 +630,7 @@ mod tests {
             "nexus.world.delta.apply",
             "nexus.timeline.event.append",
             "nexus.fork.create",
+            "narrative.compute",
         ] {
             assert!(
                 reg.get(name).is_some(),
@@ -594,7 +649,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 31); // 26 (V1.58) + 5 (V1.60 P0 DF-46)
+        assert_eq!(names.len(), 32); // 31 (V1.60) + 1 (V1.61 P3 narrative.compute)
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -608,5 +663,7 @@ mod tests {
         // V1.60 P0 DF-46 orchestration capabilities.
         assert!(names.contains(&"nexus.world.state.query"));
         assert!(names.contains(&"nexus.fork.create"));
+        // V1.61 P3 narrative.compute.
+        assert!(names.contains(&"narrative.compute"));
     }
 }

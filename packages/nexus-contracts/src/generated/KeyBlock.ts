@@ -16,7 +16,7 @@ export interface KeyBlock {
   canonical_name: string;
   status: KeyBlockStatus;
   revision?: number;
-  body?: { summary?: string; attributes?: Record<string, unknown>; tags?: string[] };
+  body?: { summary?: string; attributes?: Record<string, unknown>; tags?: string[]; state?: Record<string, unknown>; computable?: boolean };
   source_anchor?: SourceAnchor;
   created_from_command_id?: string;
   created_at: string;

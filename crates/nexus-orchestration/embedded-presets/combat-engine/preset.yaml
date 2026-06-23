@@ -1,0 +1,69 @@
+# Combat-Engine Preset — WASM compute pipeline for narrative combat resolution
+#
+# V1.61 P3: First compute-enabled preset (compass Q7).
+# Runs a WASM compute module (default: basic-combat) against a world's computable
+# KeyBlocks to resolve combat, apply state deltas to character HP/status, and
+# advance the narrative timeline with battle events.
+#
+# State machine: load_world → compute → apply_delta → advance_timeline → done
+#
+# Input variables (passed via core_context / preset.input):
+#   world_id:      Target world ID for combat resolution (required).
+#   creator_id:    Creator owning the world (required).
+#   module_id:     Embedded WASM module to invoke (default: "basic-combat").
+#   rounds:        Number of combat rounds (default: 1, passed to invocation_params).
+#
+# This preset is one-shot (work_init only); it does NOT auto-chain. After
+# completion, the world's computable character state is updated and battle
+# events are appended to the timeline.
+
+preset:
+  id: combat-engine
+  version: 1
+  kind: creator
+  description: "WASM-powered combat resolution: load computable characters, run combat module, apply state deltas, record battle events"
+  requires_capabilities:
+    - narrative.compute
+    - nexus.timeline.event.append
+  run_intents:
+    - work_init
+  initial: load_world
+  terminal: done
+  world_binding:
+    mode: required
+  # Gates: a world_id must be provided and the creator must own it.
+  gates:
+    - kind: work_field
+      field: world_id
+      op: required
+
+states:
+  - id: load_world
+    description: "Read computable KeyBlocks and narrative position from the world"
+    enter:
+      - kind: capability
+        name: narrative.compute
+        args:
+          world_id: "{{preset.input.world_id}}"
+          creator_id: "{{preset.input.creator_id}}"
+          module_id: "{{preset.input.module_id}}"
+          invocation_params:
+            rounds: "{{preset.input.rounds}}"
+    exit_when:
+      kind: manual
+    next: apply_delta
+
+  - id: apply_delta
+    description: "Apply state deltas returned by the compute module to character state"
+    exit_when:
+      kind: manual
+    next: advance_timeline
+
+  - id: advance_timeline
+    description: "Advance the narrative timeline: append battle events and update position"
+    exit_when:
+      kind: manual
+    next: done
+
+  - id: done
+    terminal: true

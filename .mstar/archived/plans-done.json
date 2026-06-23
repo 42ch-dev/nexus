@@ -269,7 +269,14 @@
     "2026-06-22-v1.60-df46-local-parity",
     "2026-06-22-v1.60-script-depth-35",
     "2026-06-22-v1.60-mid-qc-and-fix-waves",
-    "2026-06-22-v1.60-hygiene-and-closeout"
+    "2026-06-22-v1.60-hygiene-and-closeout",
+    "2026-06-23-v1.61-compass-and-plan-stubs",
+    "2026-06-23-v1.61-schemas-and-codegen",
+    "2026-06-23-v1.61-kb-structured-layer",
+    "2026-06-23-v1.61-wasm-host-and-basic-combat",
+    "2026-06-23-v1.61-mid-qc-and-fix-waves",
+    "2026-06-23-v1.61-compute-capability-and-preset",
+    "2026-06-23-v1.61-daemon-integration-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

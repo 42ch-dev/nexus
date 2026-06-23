@@ -1,88 +1,69 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T23:30:00Z",
+  "updated_at": "2026-06-23T02:35:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.60",
-    "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.60 (retired, merged PR #82 @ 59982fc8)",
+    "integration_branch": "iteration/v1.62 (TBD)",
+    "integration_branch_retired": false,
+    "last_integration_branch": "iteration/v1.61 (pending PR to main)",
     "integration_merge_target": "main",
-    "latest_active_iteration": null,
+    "latest_active_iteration": "V1.62+",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "pending",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.60",
-      "compass": "v1.60-df46-local-parity-and-script-depth",
-      "shipped_at": "2026-06-23T02:00:00Z",
-      "plan_count": 5,
-      "plan_count_done": 5,
-      "open_at_ship": 9,
-      "deferred_to_next": 9,
+      "iteration": "V1.61",
+      "compass": "v1.61-programmable-narrative-progression-delivery-compass-v1",
+      "shipped_at": "2026-06-23T11:00:09Z",
+      "plan_count": 7,
+      "plan_count_done": 7,
+      "open_at_ship": 7,
+      "deferred_to_next": 7,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "DF-46: 5 orchestration-scope capabilities shipped (world.state.query + world.delta.propose/apply + timeline.event.append + fork.create; roster 27→32 shipped). Script profile: Depth 3.5 promotion (Draft→Master; script-writing preset + 五问 + section completion + KB extraction). New Master specs: world-delta-propose-apply.md + script-profile.md (promoted). DB migration 202606230001 (work_profile CHECK +='script'). catalog_registry_invariant_all_ids_present auto-derived (R-V159P0-002 closed).",
+      "wire_contracts_note": "V1.61: key-block.schema.json extended (state + computable additive fields); 4 new schemas in schemas/compute/ (compute-input, compute-output, entity-attributes, entity-state). Codegen cascade to Rust + TS. No DB migration (body_json TEXT). npm @42ch/nexus-contracts major bump. New crate nexus-wasm-host (wasmtime runtime). New capability narrative.compute (orchestration-scope, roster 32→33). New preset combat-engine.",
       "profile_b_compaction": "done",
-      "spec_promotions": [
-        {
-          "spec": "world-delta-propose-apply.md",
-          "from": "Draft (V1.60 P0)",
-          "to": "Master (V1.60 P-last)",
-          "plan": "2026-06-22-v1.60-hygiene-and-closeout"
-        },
-        {
-          "spec": "script-profile.md",
-          "from": "Draft (V1.60 P1)",
-          "to": "Master (V1.60 P-last)",
-          "plan": "2026-06-22-v1.60-hygiene-and-closeout"
-        }
-      ],
       "plan_ids": [
-        "2026-06-22-v1.60-compass-and-plan-stubs",
-        "2026-06-22-v1.60-df46-local-parity",
-        "2026-06-22-v1.60-script-depth-35",
-        "2026-06-22-v1.60-mid-qc-and-fix-waves",
-        "2026-06-22-v1.60-hygiene-and-closeout"
+        "2026-06-23-v1.61-compass-and-plan-stubs",
+        "2026-06-23-v1.61-schemas-and-codegen",
+        "2026-06-23-v1.61-kb-structured-layer",
+        "2026-06-23-v1.61-wasm-host-and-basic-combat",
+        "2026-06-23-v1.61-mid-qc-and-fix-waves",
+        "2026-06-23-v1.61-compute-capability-and-preset",
+        "2026-06-23-v1.61-daemon-integration-and-closeout"
       ],
       "highlights": {
-        "P-1": "Compass PM-locked (14 grill decisions) + forensic status.json bulk-resolve (28 V1.57+ rows lifecycle corrected) + 5 plan stubs",
-        "P0_DF46": "5 orchestration-scope capabilities shipped (world.state.query + world.delta.propose/apply + timeline.event.append + fork.create). Roster 27→32 shipped. world-delta-propose-apply.md Draft overlay. Fix-wave: QC1 W-001 metadata_json bug → routes through SqliteKbStore DAO. catalog_registry_invariant auto-derived (R-V159P0-002 closed).",
-        "P1_SCRIPT": "Script Depth 3.5 promotion: script-writing preset + prompts + 五问 rubric + section completion + KB extraction + DB migration + 16 hermetic tests. script-profile.md Draft→Master.",
-        "P-mid": "Tri-review 6 reports. P0: QC1 Request Changes → fix-wave → resolved. P1: all 3 seats Approve. Mid-QA: 1 regression (hardcoded registry count 26→31) fixed.",
-        "P-last": "11 code residuals closed by @fullstack-dev batch + 13 doc-only PM closures + 3 deferred to V1.61+. Spec promotions (world-delta + script → Master). DF-46 tracker updated. Profile B compaction."
+        "P-1": "Compass PM-locked (12 grill decisions: wasmtime, embedded+user modules, V1 envelope ABI, KB structured layer attributes/state/computable, per-invocation sandbox, combat-engine preset). 7 plan stubs.",
+        "P0": "4 new compute schemas + key-block extension (state, computable additive). Codegen → Rust + TS. Tri-review 3/3 Approve. mid-QA PASS.",
+        "P1": "KB structured layer: KeyBlockBody state/computable fields, ValidationMode::Structured, KbQuery computable filter (InMemory + Sqlite). 24 new tests. Tri-review 3/3 Approve.",
+        "P2": "nexus-wasm-host crate (wasmtime engine, sandbox fuel/memory/wall-time, host ABI kb_read + narrative_query). basic-combat module (ATK-DEF). build.rs compile-from-source (user-requested gitignore fix). 17 tests. Tri-review 3/3 Approve + qc3 revalidation.",
+        "P-mid": "Meta tracking across 4 waves. No product code.",
+        "P3": "narrative.compute capability (WasmEngine compute + state delta apply add/sub/set + battle_report 64KB cap + compute_error graceful handling). combat-engine preset (load_world→compute→apply_delta→advance_timeline→done). Registry 32 builtins. Tri-review 3/3 Approve.",
+        "P-last": "Daemon singleton WasmEngine + module cache at boot. Embedded + user module loading. 3 E2E tests. Full regression 4375 pass. 8 residuals closed. Report-only QA PASS."
       },
-      "residual_lifecycle": {
-        "closed_in_v160": [
-          "DF-46 local scope (5 capabilities shipped; roster 27→32)",
-          "Script profile Depth 3.5 (Draft→Master)",
-          "R-V159P0-002 (auto-derive closed)",
-          "R-V160P0-QC1-W001 (metadata_json bug fix-wave)",
-          "24 P-last residuals closed (11 code + 13 doc-only)"
-        ],
-        "open_at_ship": [
-          "9 V1.61+ residuals (all low severity)"
-        ],
-        "deferred_to_next": 9
-      },
-      "qc_tri_review_outcome": "Wave 1: P0 QC1 Request Changes (3W) → fix-wave (W-001 resolved) → QC1 self-approved re-review. P0 QC2/QC3 Approve. P1 all 3 seats Approve (clean first-pass). Total: 6 QC reports + 1 fix-wave + 1 mid-QA regression fix.",
-      "note": "V1.60 shipped 2026-06-23. 5 plans all Done. DF-46 local scope complete (32 shipped; 4 sync.* platform-blocked; 2 publish.* OUT). Script profile trilogy complete (novel/game-bible/script all Master). 9 low-severity residuals deferred to V1.61+.",
-      "merge_commit": "59982fc8",
-      "pr": 82,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/82"
+      "qc_tri_review_outcome": "Wave 1 P0: 3/3 Approve (0C/0W). Wave 2 P1: 3/3 Approve (0C/0W). P2: 3/3 Approve (0C/3W V1-acceptable) + qc3 fix-wave revalidation. Wave 3 P3: 3/3 Approve (0C/3W V1-acceptable). Wave 4 P-last: report-only QA PASS. Total: 12 QC reports + 1 fix-wave revalidation + 2 mid-QA.",
+      "note": "V1.61 ships Programmable Narrative Progression: WASM compute modules for timeline-based narrative iteration. XL iteration (largest since novel-writing). 7 plans, 4 waves. New crate nexus-wasm-host + new capability narrative.compute + new preset combat-engine + KB structured layer (state/computable) + 4 compute ABI schemas. User-requested design fix: embedded-modules gitignored + build.rs compile-from-source. 7 low residuals deferred to V1.62+/advisory.",
+      "merge_commit": null,
+      "pr": 83,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/83"
     },
     "tech_debt_summary": {
-      "total_open": 9,
+      "total_open": 7,
       "total_deferred": 0,
-      "total_resolved": 89,
+      "total_resolved": 168,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 9,
+        "low": 7,
         "medium": 0,
         "high": 0
       },
       "by_target_active": {
-        "V1.61+": 9
+        "V1.61+": 1,
+        "V1.61 P1": 2,
+        "V1.61 P2/P3": 1,
+        "V1.61 P-last": 9,
+        "V1.62+": 2
       },
       "v1_60_ship_note": "V1.60 shipped with 9 open residuals (all low, V1.61+). 24 P-last residuals closed (11 code via @fullstack-dev batch @ 257b354a + 13 PM doc-only). 3 V1.52-era residuals deferred to V1.61+ (S001 drift detection needs stateful tracking; S006 heuristic not in production path; S008 stale). 7 QC residuals stay V1.61+."
     },
@@ -107,10 +88,301 @@
       "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
       "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
     },
-    "updated_at": "2026-06-23T02:30:00Z",
+    "updated_at": "2026-06-23T04:00:00Z",
     "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
   },
   "residual_findings": {
+    "2026-06-23-v1.61-compute-capability-and-preset": [
+      {
+        "id": "R-V161P3-ARCH-001",
+        "title": "Preset state machine has no-op wait states (apply_delta, advance_timeline); full cycle collapses into single capability call on load_world",
+        "severity": "low",
+        "source": "qc1 (architecture) W-1",
+        "scope": "crates/nexus-orchestration/embedded-presets/combat-engine/preset.yaml state machine stages",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.62+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-ARCH-001]",
+        "note": "Functional (full_cycle test passes) but state-machine surface misrepresents execution semantics. Cleanup: split capability per stage OR collapse to compute→done.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P3-CORR-001",
+        "title": "Partial apply on batch state_delta error — no enclosing transaction; earlier deltas may apply before a later one fails",
+        "severity": "low",
+        "source": "qc2 (security/correctness) W-1",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/narrative_compute.rs apply_state_delta batch loop",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.62+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-CORR-001]",
+        "note": "Low risk under current threat model (embedded trusted modules, same-creator worlds). Add transactional apply for untrusted modules in V2.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P3-CORR-002",
+        "title": "new_key_blocks world_id not re-asserted against admitted world before creation",
+        "severity": "low",
+        "source": "qc2 (security/correctness) W-2",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/narrative_compute.rs new_key_blocks handling",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P-last",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-CORR-002]",
+        "note": "Add world_id assertion before KeyBlock creation in P-last hardening pass.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      },
+      {
+        "id": "R-V161P3-PERF-001",
+        "title": "WasmEngine constructed per-pool, not singleton at daemon boot",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) + P3 dev risk note",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/narrative_compute.rs with_pool()",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P-last",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-PERF-001]",
+        "note": "P-last T1 daemon wiring MUST address: inject single daemon-wide WasmEngine at boot. Engine construction is the expensive part.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      },
+      {
+        "id": "R-V161P3-PERF-002",
+        "title": "WASM module recompiled on every run() call — no compilation cache",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) + P3 dev risk note",
+        "scope": "crates/nexus-orchestration/src/capability/builtins/narrative_compute.rs run()",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P-last",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-PERF-002]",
+        "note": "P-last T1 daemon wiring MUST address: add Arc<RwLock<HashMap>> module cache. WasmModule compiled once, reused.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      },
+      {
+        "id": "R-V161P3-MAINT-001",
+        "title": "Dead prompt files — 5 markdown files in combat-engine/prompts/ unreferenced by preset.yaml",
+        "severity": "low",
+        "source": "qc1 (architecture) S-x",
+        "scope": "crates/nexus-orchestration/embedded-presets/combat-engine/prompts/*.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P-last",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-MAINT-001]",
+        "note": "Either wire the prompts into preset.yaml stages or remove if the state machine doesn't use per-stage prompts. P-last cleanup.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      },
+      {
+        "id": "R-V161P3-MAINT-002",
+        "title": "Stale test function name registry_has_twenty_six_builtins (asserts 32)",
+        "severity": "low",
+        "source": "qc1 (architecture) S-x",
+        "scope": "crates/nexus-orchestration/tests/capability_registry.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P-last",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-MAINT-002]",
+        "note": "Mechanical rename to registry_has_thirty_two_builtins. P-last hygiene.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      }
+    ],
+    "2026-06-23-v1.61-kb-structured-layer": [
+      {
+        "id": "R-V161P1-LOW-001",
+        "title": "entity-scope-model.md §5.5 spec amendment (computable flag semantics + structured validation mode) not yet committed",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-001",
+        "scope": ".mstar/knowledge/specs/entity-scope-model.md §5.5 (Master spec; compass §2 marks it as P1 normative work)",
+        "decision": "defer",
+        "owner": "@project-manager",
+        "target": "V1.61 P-last",
+        "target_date": "V1.61 P-last spec hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-kb-structured-layer][R-V161P1-LOW-001]",
+        "note": "Compass §2 Normative specs table lists entity-scope-model.md §5.5 as 'Amend — computable flag semantics + structured validation mode' for P1. Implementation is complete; the spec doc amendment was not done in P1. Doc-only — defer to P-last spec hygiene pass.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-23-v1.61-wasm-host-and-basic-combat": [
+      {
+        "id": "R-V161P2-LOW-001",
+        "title": "modules/README.md §'Embedding a module' still describes old pre-compile+commit strategy (doc drift after build.rs switched to compile-from-source)",
+        "severity": "low",
+        "source": "P2 fix-wave implementer (doc drift)",
+        "scope": "modules/README.md lines 166-195",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P-last",
+        "target_date": "V1.61 P-last hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-wasm-host-and-basic-combat][R-V161P2-LOW-001]",
+        "note": "Doc still describes manual rebuild + commit strategy. build.rs now auto-compiles from source. Quick doc pass needed.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      },
+      {
+        "id": "R-V161P2-LOW-002",
+        "title": "src/embedded.rs doc comment says 'committed .wasm blobs' — outdated after gitignore change",
+        "severity": "low",
+        "source": "P2 fix-wave implementer (doc drift)",
+        "scope": "crates/nexus-wasm-host/src/embedded.rs lines 1-8, 52",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P-last",
+        "target_date": "V1.61 P-last hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-wasm-host-and-basic-combat][R-V161P2-LOW-002]",
+        "note": "Doc comment references 'committed' blobs; should say 'compiled by build.rs'. Runtime behavior unchanged.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      },
+      {
+        "id": "R-V161P2-LOW-003",
+        "title": "nexus-wasm-host not in CI rust-tests matrix — 17 tests only exercised by clippy --all, not cargo test in CI",
+        "severity": "low",
+        "source": "P2 implementer (pre-existing from P2) + fix-wave confirmation",
+        "scope": ".github/workflows/ci.yml rust-tests job matrix",
+        "decision": "defer",
+        "owner": "@ops-engineer or @fullstack-dev",
+        "target": "V1.61 P-last",
+        "target_date": "V1.61 P-last",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-wasm-host-and-basic-combat][R-V161P2-LOW-003]",
+        "note": "Pre-existing from P2: the crate is in the workspace but its test binary isn't in the CI test matrix. wasm32 target is now installed in all Rust CI jobs (fix-wave). Add nexus-wasm-host to the test matrix in P-last.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+          "commit": "da02291c"
+        }
+      }
+    ],
+    "2026-06-23-v1.61-schemas-and-codegen": [
+      {
+        "id": "R-V161P0-LOW-001",
+        "title": "Pre-existing clippy lints in test targets (7 unnecessary_hashes in preset.rs, 1 redundant_clone in http.rs) — not in default CI gate",
+        "severity": "low",
+        "source": "P0 implementer (out-of-scope, pre-existing)",
+        "scope": "crates/nexus-contracts/src/local/orchestration/preset.rs (7), src/local/schedule/http.rs (1) — test targets only",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61+",
+        "target_date": "V1.61 P-last hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-001]",
+        "note": "Surfaced by `cargo clippy -p nexus-contracts --tests`. Not caught by CI `cargo clippy --all -- -D warnings` (default targets). Pre-existing on iteration base. P0 surgical-scope: left untouched.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-INFO-001",
+        "title": "BlockType enum does not include `environment` — P0 entity-attributes/state schemas substituted valid combat-relevant types (character/item/faction/ability/species)",
+        "severity": "low",
+        "source": "P0 implementer (design note for P1)",
+        "scope": "schemas/compute/entity-attributes.schema.json, schemas/compute/entity-state.schema.json — block_type definitions",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P1",
+        "target_date": "V1.61 P1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-INFO-001]",
+        "note": "Compass §1.1 P0 T3/T4 named `environment` as a computable BlockType, but `environment` is not a BlockType enum value. P0 substituted character (fully specified) + item/faction/ability/species (permissive placeholders). P1 must confirm the canonical computable BlockType set when wiring the local KeyBlockBody fields.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-LOW-002",
+        "title": "state_delta.op serializes as plain String in generated Rust (codegen maps inline string-enums to String); P3 may promote to a real enum",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-001",
+        "scope": "schemas/compute/compute-output.schema.json state_delta.op; crates/nexus-contracts/src/generated/compute_output.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P3",
+        "target_date": "V1.61 P3",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-002]",
+        "note": "Schema is additive (inline enum in JSON Schema). Generated Rust uses String. P3 (state delta apply) is the consumer — may promote to enum for exhaustive matching. Non-blocking.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "P3 addressed: state_delta.op kept as String per wire contract, validated at runtime with VALID_OPS constant in narrative_compute.rs. Decision documented in P3 Completion Report.",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-compute-capability-and-preset",
+          "commit": "c5cc060f"
+        }
+      },
+      {
+        "id": "R-V161P0-LOW-003",
+        "title": "battle_report is freeform (additionalProperties: true) with no size guard — add runtime cap (e.g. 64 KB) in P3 apply path",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-001",
+        "scope": "schemas/compute/compute-output.schema.json battle_report; P3 narrative.compute apply path",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P3",
+        "target_date": "V1.61 P3",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-003]",
+        "note": "V1 envelope design (compass Q8) intentionally freeform; module-declared fields. Runtime size guard belongs in P3 apply path, not schema (V2 may add per-kind shape enforcement).",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "P3 addressed: BATTLE_REPORT_MAX_BYTES = 64 KB cap enforced in narrative_compute.rs apply path. Rejects oversized battle_report payloads.",
+        "resolution": {
+          "plan_id": "2026-06-23-v1.61-compute-capability-and-preset",
+          "commit": "c5cc060f"
+        }
+      },
+      {
+        "id": "R-V161P0-LOW-004",
+        "title": "KeyBlock body.state growth in SQLite body_json — document expectation + assess json_extract index need in P1 SqliteKbStore",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-002",
+        "scope": "crates/nexus-local-db SqliteKbStore::query (P1 scope); schemas/domain/key-block.schema.json state field",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P1",
+        "target_date": "V1.61 P1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-004]",
+        "note": "No DB migration (body_json TEXT). Computable KeyBlocks accumulate mutable state over compute invocations. P1 should document body_json growth expectation and assess whether json_extract queries on computable need indexing. Not blocking for V1.61 additive rollout.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-LOW-005",
+        "title": "Permissive placeholder schemas (item/faction/ability/species) — module manifest validation should declare expected shapes in P2/P3",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-003",
+        "scope": "schemas/compute/entity-attributes.schema.json, entity-state.schema.json placeholder definitions",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61 P2/P3",
+        "target_date": "V1.61 P2/P3",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-005]",
+        "note": "Non-character BlockTypes use additionalProperties: true (intentional V1 placeholders). Runtime validation cost is deferred to module contract enforcement (manifest.json). P2/P3 should document that manifest declares BlockType + attribute/state shapes.",
+        "lifecycle": "open"
+      }
+    ],
     "2026-06-22-v1.54-game-bible-scaffold": [
       {
         "id": "R-V154P1-W001",

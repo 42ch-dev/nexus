@@ -113,6 +113,19 @@ pub enum ValidationMode {
     /// in `body.attributes` and validates it against the mapping table.
     /// Rejects `novel_category` and `game_bible_category` when active.
     Script,
+    /// Structured compute validation (V1.61 P1) — validates computable
+    /// `KeyBlock`s against per-`block_type` structured schemas from
+    /// `schemas/compute/entity-state.schema.json` and
+    /// `schemas/compute/entity-attributes.schema.json`.
+    ///
+    /// When a `KeyBlock` has `computable: true`, this mode checks:
+    /// 1. `attributes` is present and is a JSON object (immutable compute params)
+    /// 2. `state` is present and is a JSON object with a block_type-nested key
+    ///    (e.g., `state.character.current_hp` per compass Q5)
+    ///
+    /// Non-computable blocks (computable absent or false) are skipped —
+    /// backward compatible with existing `KeyBlock`s.
+    Structured,
 }
 
 impl fmt::Display for ValidationMode {
@@ -122,6 +135,7 @@ impl fmt::Display for ValidationMode {
             Self::Novel => write!(f, "novel"),
             Self::GameBible => write!(f, "game_bible"),
             Self::Script => write!(f, "script"),
+            Self::Structured => write!(f, "structured"),
         }
     }
 }
@@ -264,6 +278,7 @@ pub fn validate_body(
         ValidationMode::Novel => validate_novel_body(block_type, body),
         ValidationMode::GameBible => validate_game_bible_body(block_type, body),
         ValidationMode::Script => validate_script_body(block_type, body),
+        ValidationMode::Structured => validate_structured_body(block_type, body),
     }
 }
 
@@ -502,6 +517,126 @@ fn validate_script_body(block_type: BlockType, body: Option<&KeyBlockBody>) -> R
     Ok(())
 }
 
+/// Validate computable `KeyBlock` body against per-BlockType structured schema (V1.61 P1).
+///
+/// When `body.computable` is `Some(true)`:
+/// 1. `attributes` must be present and a JSON object (immutable compute params, compass Q4).
+/// 2. `state` must be present and a JSON object with a `block_type`-nested key
+///    (e.g., `state.character.current_hp` per compass Q5).
+///
+/// Non-computable blocks (computable absent or false) are skipped — backward compatible.
+///
+/// ## Computable `BlockType` to state-key mapping
+///
+/// | `BlockType`    | State key     |
+/// |----------------|---------------|
+/// | `Character`    | `character`   |
+/// | `Item`         | `item`        |
+/// | `Faction`      | `faction`     |
+/// | `Ability`      | `ability`     |
+/// | `Species`      | `species`     |
+fn validate_structured_body(
+    block_type: BlockType,
+    body: Option<&KeyBlockBody>,
+) -> Result<(), KbError> {
+    let Some(b) = body else {
+        return Ok(()); // no body → nothing to validate
+    };
+
+    // Only validate computable KeyBlocks; non-computable blocks pass through
+    match b.computable {
+        Some(true) => {}
+        _ => return Ok(()),
+    }
+
+    // Gate 1: attributes must be present and an object (immutable compute params)
+    let _attrs = b.attributes.as_ref().ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingStructuredAttributes,
+            field: Some("body.attributes".to_string()),
+            message:
+                "body.attributes is required for computable KeyBlocks (holds immutable compute params)"
+                    .to_string(),
+        })
+    })?;
+
+    // Gate 2: state must be present and an object
+    let state_val = b.state.as_ref().ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::MissingStructuredState,
+            field: Some("body.state".to_string()),
+            message:
+                "body.state is required for computable KeyBlocks (holds dynamic runtime state)"
+                    .to_string(),
+        })
+    })?;
+
+    let state_obj = state_val.as_object().ok_or_else(|| {
+        KbError::Validation(ValidationError {
+            kind: ValidationKind::NonObjectStructuredState,
+            field: Some("body.state".to_string()),
+            message: "body.state must be a JSON object for computable KeyBlocks".to_string(),
+        })
+    })?;
+
+    // Gate 3: state must contain the per-block_type nested key (compass Q5)
+    let expected_state_key = block_type_state_key(block_type);
+    if let Some(expected_key) = expected_state_key {
+        if !state_obj.contains_key(expected_key) {
+            return Err(KbError::Validation(ValidationError {
+                kind: ValidationKind::InvalidStructuredStateKey,
+                field: Some(format!("body.state.{expected_key}")),
+                message: format!(
+                    "body.state must contain the per-block_type key '{expected_key}' \
+                     for computable KeyBlocks (compass Q5: state.{expected_key}.field_name)"
+                ),
+            }));
+        }
+    }
+    // If the block_type is not in the computable set, we don't enforce a
+    // specific state key — the block is computable but the state shape is
+    // module-defined (additionalProperties: true in the wire schema).
+
+    Ok(())
+}
+
+/// Return the expected state-object key for a computable `BlockType`.
+///
+/// Returns `None` if the `BlockType` is not in the canonical computable set
+/// (the state shape is then module-defined with no required key).
+///
+/// # Computable set (compass open design item #5, locked P1 T2)
+///
+/// The canonical computable `BlockType` set is `Character`, `Item`, `Faction`,
+/// `Ability`, `Species`. These are the types for which per-`block_type` structured
+/// schemas exist in `schemas/compute/entity-state.schema.json` and
+/// `schemas/compute/entity-attributes.schema.json`.
+/// `environment` is NOT a valid `BlockType` enum variant and is not included.
+#[must_use]
+pub const fn block_type_state_key(block_type: BlockType) -> Option<&'static str> {
+    match block_type {
+        BlockType::Character => Some("character"),
+        BlockType::Item => Some("item"),
+        BlockType::Faction => Some("faction"),
+        BlockType::Ability => Some("ability"),
+        BlockType::Species => Some("species"),
+        // Not in the computable set — state shape is module-defined
+        BlockType::Scene
+        | BlockType::Organization
+        | BlockType::Conflict
+        | BlockType::InfoPoint
+        | BlockType::Event
+        | BlockType::MagicSystem
+        | BlockType::Technology
+        | BlockType::Deity
+        | BlockType::Level
+        | BlockType::EconomyTier
+        | BlockType::Dialogue
+        | BlockType::Beat
+        | BlockType::Act => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,6 +651,7 @@ mod tests {
                 })
             }),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         }
     }
 
@@ -524,6 +660,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["brave"]})),
             tags: None,
+            ..Default::default()
         }
     }
 
@@ -540,6 +677,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: None,
             tags: None,
+            ..Default::default()
         };
         assert!(validate_body(BlockType::Character, Some(&body), ValidationMode::Generic).is_ok());
     }
@@ -550,6 +688,7 @@ mod tests {
             summary: None,
             attributes: Some(serde_json::json!("not an object")),
             tags: None,
+            ..Default::default()
         };
         assert!(validate_body(BlockType::Character, Some(&body), ValidationMode::Generic).is_err());
     }
@@ -595,6 +734,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: None,
             tags: None,
+            ..Default::default()
         };
         let result = validate_body(BlockType::Character, Some(&body), ValidationMode::Novel);
         assert!(result.is_err());
@@ -626,6 +766,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"novel_category": 42})),
             tags: None,
+            ..Default::default()
         };
         let result = validate_body(BlockType::Character, Some(&body), ValidationMode::Novel);
         assert!(result.is_err());
@@ -681,6 +822,7 @@ mod tests {
             summary: None,
             attributes: Some(serde_json::json!("not an object")),
             tags: None,
+            ..Default::default()
         };
         let err =
             validate_body(BlockType::Character, Some(&body), ValidationMode::Generic).unwrap_err();
@@ -704,6 +846,7 @@ mod tests {
                 })
             }),
             tags: Some(vec!["game_bible".to_string()]),
+            ..Default::default()
         }
     }
 
@@ -748,6 +891,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["ancient"]})),
             tags: None,
+            ..Default::default()
         };
         let result = validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
         assert!(result.is_err());
@@ -773,6 +917,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"game_bible_category": 42})),
             tags: None,
+            ..Default::default()
         };
         let result = validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible);
         assert!(result.is_err());
@@ -799,6 +944,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["ancient"]})),
             tags: None,
+            ..Default::default()
         };
         let err =
             validate_body(BlockType::Species, Some(&body), ValidationMode::GameBible).unwrap_err();
@@ -1042,6 +1188,7 @@ mod tests {
                 })
             }),
             tags: Some(vec!["script".to_string()]),
+            ..Default::default()
         }
     }
 
@@ -1090,6 +1237,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["cinematic"]})),
             tags: None,
+            ..Default::default()
         };
         let result = validate_body(BlockType::Dialogue, Some(&body), ValidationMode::Script);
         assert!(result.is_err());
@@ -1115,6 +1263,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"script_category": 42})),
             tags: None,
+            ..Default::default()
         };
         let result = validate_body(BlockType::Dialogue, Some(&body), ValidationMode::Script);
         assert!(result.is_err());
@@ -1136,6 +1285,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: None,
             tags: None,
+            ..Default::default()
         };
         let result = validate_body(BlockType::Dialogue, Some(&body), ValidationMode::Script);
         assert!(result.is_err());
@@ -1163,6 +1313,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({"traits": ["cinematic"]})),
             tags: None,
+            ..Default::default()
         };
         let err =
             validate_body(BlockType::Dialogue, Some(&body), ValidationMode::Script).unwrap_err();
@@ -1221,5 +1372,221 @@ mod tests {
             Some(BlockType::Act)
         );
         assert_eq!(default_block_type_for_script_category("unknown"), None);
+    }
+
+    // ── Structured validation (V1.61 P1) ──────────────────────────
+
+    fn make_computable_body(block_type: BlockType) -> KeyBlockBody {
+        let state_key = block_type_state_key(block_type).unwrap_or("unknown");
+        KeyBlockBody {
+            summary: Some("computable test".to_string()),
+            attributes: Some(serde_json::json!({"max_hp": 100, "base_atk": 30})),
+            tags: None,
+            computable: Some(true),
+            state: Some(
+                serde_json::json!({ state_key: { "current_hp": 80, "status_effects": [] } }),
+            ),
+        }
+    }
+
+    fn make_non_computable_body() -> KeyBlockBody {
+        KeyBlockBody {
+            summary: Some("non-computable".to_string()),
+            attributes: None,
+            tags: None,
+            ..Default::default()
+        }
+    }
+
+    fn make_computable_no_state_body() -> KeyBlockBody {
+        KeyBlockBody {
+            summary: Some("computable no state".to_string()),
+            attributes: Some(serde_json::json!({"max_hp": 100})),
+            tags: None,
+            computable: Some(true),
+            state: None,
+        }
+    }
+
+    fn make_computable_no_attrs_body() -> KeyBlockBody {
+        KeyBlockBody {
+            summary: Some("computable no attrs".to_string()),
+            attributes: None,
+            tags: None,
+            computable: Some(true),
+            state: Some(serde_json::json!({"character": {"current_hp": 80}})),
+        }
+    }
+
+    fn make_computable_bad_state_key_body() -> KeyBlockBody {
+        KeyBlockBody {
+            summary: Some("bad state key".to_string()),
+            attributes: Some(serde_json::json!({"max_hp": 100})),
+            tags: None,
+            computable: Some(true),
+            state: Some(serde_json::json!({"wrong_key": {"current_hp": 80}})),
+        }
+    }
+
+    #[test]
+    fn structured_mode_skips_non_computable() {
+        let body = make_non_computable_body();
+        assert!(validate_body(
+            BlockType::Character,
+            Some(&body),
+            ValidationMode::Structured
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn structured_mode_skips_computable_false() {
+        let body = KeyBlockBody {
+            computable: Some(false),
+            ..make_non_computable_body()
+        };
+        assert!(validate_body(
+            BlockType::Character,
+            Some(&body),
+            ValidationMode::Structured
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn structured_mode_accepts_none_body() {
+        assert!(validate_body(BlockType::Character, None, ValidationMode::Structured).is_ok());
+    }
+
+    #[test]
+    fn structured_mode_accepts_character_computable() {
+        let body = make_computable_body(BlockType::Character);
+        assert!(validate_body(
+            BlockType::Character,
+            Some(&body),
+            ValidationMode::Structured
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn structured_mode_accepts_item_computable() {
+        let body = make_computable_body(BlockType::Item);
+        assert!(validate_body(BlockType::Item, Some(&body), ValidationMode::Structured).is_ok());
+    }
+
+    #[test]
+    fn structured_mode_accepts_faction_computable() {
+        let body = make_computable_body(BlockType::Faction);
+        assert!(validate_body(BlockType::Faction, Some(&body), ValidationMode::Structured).is_ok());
+    }
+
+    #[test]
+    fn structured_mode_accepts_ability_computable() {
+        let body = make_computable_body(BlockType::Ability);
+        assert!(validate_body(BlockType::Ability, Some(&body), ValidationMode::Structured).is_ok());
+    }
+
+    #[test]
+    fn structured_mode_accepts_species_computable() {
+        let body = make_computable_body(BlockType::Species);
+        assert!(validate_body(BlockType::Species, Some(&body), ValidationMode::Structured).is_ok());
+    }
+
+    #[test]
+    fn structured_mode_rejects_missing_state() {
+        let body = make_computable_no_state_body();
+        let err = validate_body(
+            BlockType::Character,
+            Some(&body),
+            ValidationMode::Structured,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            KbError::Validation(ValidationError {
+                kind: ValidationKind::MissingStructuredState,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn structured_mode_rejects_missing_attributes() {
+        let body = make_computable_no_attrs_body();
+        let err = validate_body(
+            BlockType::Character,
+            Some(&body),
+            ValidationMode::Structured,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            KbError::Validation(ValidationError {
+                kind: ValidationKind::MissingStructuredAttributes,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn structured_mode_rejects_wrong_state_key() {
+        let body = make_computable_bad_state_key_body();
+        let err = validate_body(
+            BlockType::Character,
+            Some(&body),
+            ValidationMode::Structured,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            KbError::Validation(ValidationError {
+                kind: ValidationKind::InvalidStructuredStateKey,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn structured_mode_rejects_non_object_state() {
+        let body = KeyBlockBody {
+            computable: Some(true),
+            attributes: Some(serde_json::json!({"max_hp": 100})),
+            state: Some(serde_json::json!("not an object")),
+            ..Default::default()
+        };
+        let err = validate_body(
+            BlockType::Character,
+            Some(&body),
+            ValidationMode::Structured,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            KbError::Validation(ValidationError {
+                kind: ValidationKind::NonObjectStructuredState,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn block_type_state_key_returns_correct_keys() {
+        assert_eq!(
+            block_type_state_key(BlockType::Character),
+            Some("character")
+        );
+        assert_eq!(block_type_state_key(BlockType::Item), Some("item"));
+        assert_eq!(block_type_state_key(BlockType::Faction), Some("faction"));
+        assert_eq!(block_type_state_key(BlockType::Ability), Some("ability"));
+        assert_eq!(block_type_state_key(BlockType::Species), Some("species"));
+        // Non-computable types return None
+        assert_eq!(block_type_state_key(BlockType::Scene), None);
+        assert_eq!(block_type_state_key(BlockType::Event), None);
+    }
+
+    #[test]
+    fn structured_mode_display() {
+        assert_eq!(ValidationMode::Structured.to_string(), "structured");
     }
 }
