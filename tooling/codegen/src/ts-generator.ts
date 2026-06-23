@@ -1,7 +1,35 @@
 import { LoadedSchema, COMMON_DEFINITIONS } from './schema-loader';
 import { resolveRef, isCommonEnum, getCommonBaseType } from './schema-loader';
-import { resolveFromRoot, writeFile, logger, removeStaleGeneratedFiles, maxSchemaVersion } from './utils';
+import { resolveFromRoot, writeFile, logger, maxSchemaVersion } from './utils';
 import path from 'path';
+import fs from 'fs';
+
+/**
+ * Compute the TS folder segments (raw schemas/ folder names, hyphens preserved) for a schema.
+ * Mirrors the consumer-scope `schemas/` tree. E.g. `platform/http-bff/context-assembly-v1.schema.json` → `['platform', 'http-bff']`.
+ */
+function tsFolderSegments(schema: LoadedSchema): string[] {
+  return schema.modulePath.slice(0, -1).map((seg, i) => {
+    // modulePath folder segments are underscored; restore hyphens from the original relPath folders
+    const raw = schema.relPath.split('/').slice(0, -1);
+    return raw[i] ?? seg;
+  });
+}
+
+/**
+ * Compute a relative TS import path (no extension) from one schema's folder to another type's file.
+ * E.g. from ['platform','http-bff'] to type in ['common'] named 'CommonTypes' → '../../common/CommonTypes'.
+ */
+function relativeTsImport(fromFolder: string[], toFolder: string[], toTypeName: string): string {
+  let common = 0;
+  while (common < fromFolder.length && common < toFolder.length && fromFolder[common] === toFolder[common]) {
+    common++;
+  }
+  const ups = fromFolder.length - common;
+  const downs = toFolder.slice(common);
+  const prefix = '../'.repeat(ups) || './';
+  return prefix + [...downs, toTypeName].join('/');
+}
 
 /**
  * Check if a schema has object definitions with properties.
@@ -24,16 +52,25 @@ function getDefinitions(schema: LoadedSchema): Record<string, Record<string, unk
 
 /**
  * Generate TypeScript types from schemas.
+ *
+ * Emits a nested file tree mirroring the consumer-scope `schemas/` layout:
+ *   generated/{common,domain,platform/{http-bff,sync},local-api/compute}/<PascalType>.ts
+ * The root `index.ts` re-exports every leaf module so the package public API stays flat.
  */
 export function generateTSTypes(schemas: LoadedSchema[]): void {
   const outputDir = resolveFromRoot('packages', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating TypeScript types to: ${outputDir}`);
 
-  // Generate common types file first
+  // CommonTypes file under generated/common/
   generateCommonTypesFile(outputDir);
 
   // Collect schemas that produce type files
   const schemasWithTypes: LoadedSchema[] = [];
+
+  // Build map: typeName → tsFolderSegments for relative import resolution
+  const typeFolderMap = new Map<string, string[]>();
+  typeFolderMap.set('SourceAnchor', ['common']);
+  typeFolderMap.set('SourceSummaryRef', ['common']);
 
   for (const schema of schemas) {
     if (schema.isExplicitlySkipped) continue;
@@ -44,58 +81,99 @@ export function generateTSTypes(schemas: LoadedSchema[]): void {
     if (!hasTopLevel && !hasDefs && !schema.isStandaloneEnum) continue;
 
     schemasWithTypes.push(schema);
+    typeFolderMap.set(schema.typeName, tsFolderSegments(schema));
+  }
 
+  for (const schema of schemasWithTypes) {
     if (schema.isStandaloneEnum) {
-      generateTSEnumFile(schema, outputDir);
+      generateTSEnumFile(schema, outputDir, typeFolderMap);
     } else {
-      // Generate individual type files
-      generateTSTypeFile(schema, outputDir, hasTopLevel, hasDefs);
+      generateTSTypeFile(schema, outputDir, hasTopLevelFor(schema), hasDefsFor(schema), typeFolderMap);
     }
   }
 
-  // Generate index.ts with re-exports
+  // Generate index.ts with flat re-exports (nested relative paths)
   generateTSIndex(schemasWithTypes, outputDir);
 
-  const keepTs = new Set(['index.ts', 'CommonTypes.ts']);
-  for (const s of schemasWithTypes) {
-    keepTs.add(`${s.typeName}.ts`);
-  }
-  removeStaleGeneratedFiles(outputDir, keepTs, '.ts');
+  // Clean stale files recursively
+  cleanupStaleTsFiles(outputDir, schemasWithTypes);
 
   logger.success(`Generated TypeScript types for ${schemasWithTypes.length} schema(s) (+ common types)`);
 }
 
+// Helpers to re-derive hasTopLevel/hasDefs without a second pass (kept inline-equivalent)
+function hasTopLevelFor(schema: LoadedSchema): boolean {
+  return !schema.isDefinitionsOnly && !schema.isStandaloneEnum;
+}
+function hasDefsFor(schema: LoadedSchema): boolean {
+  return schemaHasObjectDefinitions(schema);
+}
+
 /**
- * Generate index.ts with re-exports
+ * Walk the generated TS tree and remove any .ts file not in the expected output.
+ */
+function cleanupStaleTsFiles(outputDir: string, schemasWithTypes: LoadedSchema[]): void {
+  const keep = new Set<string>([path.join(outputDir, 'index.ts'), path.join(outputDir, 'common', 'CommonTypes.ts')]);
+  for (const s of schemasWithTypes) {
+    keep.add(path.join(outputDir, ...tsFolderSegments(s), `${s.typeName}.ts`));
+  }
+  const root = resolveFromRoot();
+  let removed = 0;
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        walk(full);
+      } else if (ent.isFile() && ent.name.endsWith('.ts') && !keep.has(full)) {
+        fs.unlinkSync(full);
+        logger.warn(`Removed stale generated file: ${path.relative(root, full)}`);
+        removed++;
+      }
+    }
+  };
+  walk(outputDir);
+  if (removed > 0) logger.info(`Stale TS file cleanup removed ${removed} file(s)`);
+}
+
+/**
+ * Generate index.ts with flat re-exports using nested relative paths.
  */
 function generateTSIndex(schemas: LoadedSchema[], outputDir: string): void {
-  const perSchemaExports = schemas.map(s => `export * from './${s.typeName}';`).join('\n');
-  const latest = maxSchemaVersion(schemas.map(s => s.schemaVersion));
+  const lines: string[] = [];
+  lines.push(`/**`);
+  lines.push(` * Nexus Wire Contracts - Generated TypeScript Types`);
+  lines.push(` *`);
+  lines.push(` * AUTO-GENERATED FROM JSON SCHEMA - DO NOT MODIFY MANUALLY`);
+  lines.push(` * Source: schemas/*.schema.json`);
+  lines.push(` * Generated by: pnpm run codegen`);
+  lines.push(` */`);
+  lines.push('');
+  lines.push(`// Common types (type aliases, enums, SourceAnchor)`);
+  lines.push(`export * from './common/CommonTypes';`);
+  lines.push('');
+  lines.push(`// Per-schema modules (stable order: sorted schema paths at load time)`);
+  for (const s of schemas) {
+    const rel = relativeTsImport([], tsFolderSegments(s), s.typeName);
+    lines.push(`export * from '${rel}';`);
+  }
+  lines.push('');
+  lines.push(`// Schema version constants`);
+  lines.push(`export const SCHEMA_VERSIONS: Record<string, number> = {`);
+  for (const s of schemas) {
+    lines.push(`  ${s.typeName}: ${s.schemaVersion},`);
+  }
+  lines.push(`};`);
+  lines.push('');
+  lines.push(`// Highest schema_version among emitted contract schemas`);
+  lines.push(`export const LATEST_SCHEMA_VERSION = ${maxSchemaVersion(schemas.map(s => s.schemaVersion))};`);
 
-  const content = `/**
- * Nexus Wire Contracts - Generated TypeScript Types
- *
- * AUTO-GENERATED FROM JSON SCHEMA - DO NOT MODIFY MANUALLY
- * Source: schemas/*.schema.json
- * Generated by: pnpm run codegen
- */
-
-// Common types (type aliases, enums, SourceAnchor)
-export * from './CommonTypes';
-
-// Per-schema modules (stable order: sorted schema paths at load time)
-${perSchemaExports}
-
-// Schema version constants
-export const SCHEMA_VERSIONS: Record<string, number> = {
-${schemas.map(s => `  ${s.typeName}: ${s.schemaVersion},`).join('\n')}
-};
-
-// Highest schema_version among emitted contract schemas
-export const LATEST_SCHEMA_VERSION = ${latest};
-`;
-
-  writeFile(path.join(outputDir, 'index.ts'), content);
+  writeFile(path.join(outputDir, 'index.ts'), lines.join('\n') + '\n');
 }
 
 /**
@@ -104,7 +182,7 @@ export const LATEST_SCHEMA_VERSION = ${latest};
  * Produces a `type X = 'a' | 'b' | 'c';` from a JSON Schema with
  * `type: "string"` and `enum: [...]`.
  */
-function generateTSEnumFile(schema: LoadedSchema, outputDir: string): void {
+function generateTSEnumFile(schema: LoadedSchema, outputDir: string, _typeFolderMap: Map<string, string[]>): void {
   const values = schema.schemaContent.enum as string[];
   const content = `/**
  * ${schema.schemaContent.title || schema.typeName}
@@ -119,7 +197,7 @@ function generateTSEnumFile(schema: LoadedSchema, outputDir: string): void {
 export type ${schema.typeName} = ${values.map(v => `'${v}'`).join(' | ')};
 `;
 
-  writeFile(path.join(outputDir, `${schema.typeName}.ts`), content);
+  writeFile(path.join(outputDir, ...tsFolderSegments(schema), `${schema.typeName}.ts`), content);
 }
 
 /**
@@ -135,7 +213,9 @@ function generateTSTypeFile(
   outputDir: string,
   hasTopLevel: boolean,
   hasDefs: boolean,
+  typeFolderMap: Map<string, string[]>,
 ): void {
+  const thisFolder = tsFolderSegments(schema);
   let content = `/**
  * ${schema.schemaContent.title || schema.typeName}
  *
@@ -202,17 +282,20 @@ function generateTSTypeFile(
     }
   }
 
-  // Build imports
+  // Build imports with nested relative paths
   const commonImports = [...commonTypeImports].sort();
   const crossImports = [...crossFileImports].sort();
 
   if (commonImports.length > 0) {
-    content = `import type { ${commonImports.join(', ')} } from './CommonTypes';\n` + content;
+    const commonRel = relativeTsImport(thisFolder, ['common'], 'CommonTypes');
+    content = `import type { ${commonImports.join(', ')} } from '${commonRel}';\n` + content;
   }
   if (crossImports.length > 0) {
-    const crossLines = crossImports.map(
-      name => `import type { ${name} } from './${name}';`,
-    );
+    const crossLines = crossImports.map(name => {
+      const targetFolder = typeFolderMap.get(name) ?? ['common'];
+      const rel = relativeTsImport(thisFolder, targetFolder, name);
+      return `import type { ${name} } from '${rel}';`;
+    });
     content = `${crossLines.join('\n')}\n` + content;
   }
 
@@ -231,7 +314,7 @@ function generateTSTypeFile(
     }
   }
 
-  writeFile(path.join(outputDir, `${schema.typeName}.ts`), content);
+  writeFile(path.join(outputDir, ...thisFolder, `${schema.typeName}.ts`), content);
 }
 
 /**
@@ -551,5 +634,5 @@ export interface SourceSummaryRef {
 }
 `;
 
-  writeFile(path.join(outputDir, 'CommonTypes.ts'), content);
+  writeFile(path.join(outputDir, 'common', 'CommonTypes.ts'), content);
 }

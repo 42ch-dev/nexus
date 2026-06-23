@@ -7,88 +7,78 @@
  */
 
 // Common types (type aliases, enums, SourceAnchor)
-export * from './CommonTypes';
+export * from './common/CommonTypes';
 
 // Per-schema modules (stable order: sorted schema paths at load time)
-export * from './ConflictResponse';
-export * from './SyncPullRequest';
-export * from './SyncPullResponse';
-export * from './VersionRef';
-export * from './ComputeInput';
-export * from './ComputeOutput';
-export * from './EntityAttributes';
-export * from './EntityState';
-export * from './Bundle';
-export * from './Creator';
-export * from './Delta';
-export * from './ForkBranch';
-export * from './KeyBlock';
-export * from './Memory';
-export * from './Pairing';
-export * from './StoryManifest';
-export * from './SyncCommand';
-export * from './TimelineEvent';
-export * from './User';
-export * from './WorldMembership';
-export * from './World';
-export * from './ContextAssemblyV1';
-export * from './CreatorRuntimePolicyResponse';
-export * from './ExploreAiAnswerRequest';
-export * from './ExploreAiAnswerResponse';
-export * from './ExploreAiSummaryRequest';
-export * from './ExploreAiSummaryResponse';
-export * from './ExploreBrowseRequest';
-export * from './ExploreCreatorCard';
-export * from './ExploreFeedResponse';
-export * from './ExploreHit';
-export * from './ExploreSearchRequest';
-export * from './MeEntitlementsResponse';
-export * from './MemoryWebListRequest';
-export * from './MemoryWebListResponse';
-export * from './NotificationsInboxItem';
-export * from './NotificationsListRequest';
-export * from './NotificationsListResponse';
-export * from './NotificationsMarkReadRequest';
-export * from './NotificationsMarkReadResponse';
-export * from './OfficialCreatorQuotaResponse';
-export * from './PublishChapterRequest';
-export * from './PublishHistoryEntry';
-export * from './PublishHistoryRequest';
-export * from './PublishHistoryResponse';
-export * from './PublishStoryRequest';
-export * from './PublishStoryResponse';
-export * from './SocialGraphFeedRequest';
-export * from './SocialGraphFeedResponse';
-export * from './SocialGraphRelationshipRequest';
-export * from './SocialGraphRelationshipResponse';
-export * from './WorldForkRequest';
-export * from './WorldForkResponse';
-export * from './WorldSnapshotRequest';
-export * from './WorldSnapshotResponse';
+export * from './common/VersionRef';
+export * from './domain/Creator';
+export * from './domain/ForkBranch';
+export * from './domain/KeyBlock';
+export * from './domain/Memory';
+export * from './domain/Pairing';
+export * from './domain/StoryManifest';
+export * from './domain/TimelineEvent';
+export * from './domain/User';
+export * from './domain/WorldMembership';
+export * from './domain/World';
+export * from './local-api/compute/ComputeInput';
+export * from './local-api/compute/ComputeOutput';
+export * from './platform/http-bff/ContextAssemblyV1';
+export * from './platform/http-bff/CreatorRuntimePolicyResponse';
+export * from './platform/http-bff/ExploreAiAnswerRequest';
+export * from './platform/http-bff/ExploreAiAnswerResponse';
+export * from './platform/http-bff/ExploreAiSummaryRequest';
+export * from './platform/http-bff/ExploreAiSummaryResponse';
+export * from './platform/http-bff/ExploreBrowseRequest';
+export * from './platform/http-bff/ExploreCreatorCard';
+export * from './platform/http-bff/ExploreFeedResponse';
+export * from './platform/http-bff/ExploreHit';
+export * from './platform/http-bff/ExploreSearchRequest';
+export * from './platform/http-bff/MeEntitlementsResponse';
+export * from './platform/http-bff/MemoryWebListRequest';
+export * from './platform/http-bff/MemoryWebListResponse';
+export * from './platform/http-bff/NotificationsInboxItem';
+export * from './platform/http-bff/NotificationsListRequest';
+export * from './platform/http-bff/NotificationsListResponse';
+export * from './platform/http-bff/NotificationsMarkReadRequest';
+export * from './platform/http-bff/NotificationsMarkReadResponse';
+export * from './platform/http-bff/OfficialCreatorQuotaResponse';
+export * from './platform/http-bff/PublishChapterRequest';
+export * from './platform/http-bff/PublishHistoryEntry';
+export * from './platform/http-bff/PublishHistoryRequest';
+export * from './platform/http-bff/PublishHistoryResponse';
+export * from './platform/http-bff/PublishStoryRequest';
+export * from './platform/http-bff/PublishStoryResponse';
+export * from './platform/http-bff/SocialGraphFeedRequest';
+export * from './platform/http-bff/SocialGraphFeedResponse';
+export * from './platform/http-bff/SocialGraphRelationshipRequest';
+export * from './platform/http-bff/SocialGraphRelationshipResponse';
+export * from './platform/http-bff/WorldForkRequest';
+export * from './platform/http-bff/WorldForkResponse';
+export * from './platform/http-bff/WorldSnapshotRequest';
+export * from './platform/http-bff/WorldSnapshotResponse';
+export * from './platform/sync/Bundle';
+export * from './platform/sync/ConflictResponse';
+export * from './platform/sync/Delta';
+export * from './platform/sync/SyncCommand';
+export * from './platform/sync/SyncPullRequest';
+export * from './platform/sync/SyncPullResponse';
 
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
-  ConflictResponse: 1,
-  SyncPullRequest: 1,
-  SyncPullResponse: 1,
   VersionRef: 1,
-  ComputeInput: 1,
-  ComputeOutput: 1,
-  EntityAttributes: 1,
-  EntityState: 1,
-  Bundle: 1,
   Creator: 1,
-  Delta: 1,
   ForkBranch: 1,
   KeyBlock: 1,
   Memory: 1,
   Pairing: 1,
   StoryManifest: 1,
-  SyncCommand: 1,
   TimelineEvent: 1,
   User: 1,
   WorldMembership: 1,
   World: 1,
+  ComputeInput: 1,
+  ComputeOutput: 1,
   ContextAssemblyV1: 1,
   CreatorRuntimePolicyResponse: 1,
   ExploreAiAnswerRequest: 1,
@@ -123,6 +113,12 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldForkResponse: 1,
   WorldSnapshotRequest: 1,
   WorldSnapshotResponse: 1,
+  Bundle: 1,
+  ConflictResponse: 1,
+  Delta: 1,
+  SyncCommand: 1,
+  SyncPullRequest: 1,
+  SyncPullResponse: 1,
 };
 
 // Highest schema_version among emitted contract schemas

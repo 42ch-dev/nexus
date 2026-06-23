@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generated::common_types::DeliveryState;
+use crate::generated::common::common_types::DeliveryState;
 
 /// `OutboxEntry` entity representing a local send queue item.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
