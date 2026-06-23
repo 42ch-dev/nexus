@@ -50,6 +50,7 @@ async fn fresh_pool_with_block() -> (sqlx::SqlitePool, String, tempfile::TempDir
         summary: Some("Alias test summary".to_string()),
         attributes: Some(serde_json::json!({"novel_category": "character"})),
         tags: Some(vec!["test".to_string()]),
+        ..Default::default()
     });
     let result = store.insert_key_block(kb).await.unwrap();
     (pool, result.key_block_id, dir)
@@ -236,6 +237,7 @@ active_workspace_slug_by_creator = { ctr_alias_test = "default" }
             summary: Some("Alias command test summary".to_string()),
             attributes: Some(serde_json::json!({"novel_category": "character"})),
             tags: Some(vec!["alias-test".to_string()]),
+            ..Default::default()
         });
         let _result = store.insert_key_block(kb).await.unwrap();
     });
