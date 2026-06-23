@@ -13,7 +13,7 @@ name = "basic-combat"
 version = "1.0.0"
 edition = "2021"
 authors = ["42ch"]
-license = "GPL-3.0-only"
+license = "Apache-2.0"
 description = "Sample Nexus WASM compute module: simple ATK−DEF combat resolution."
 publish = false
 

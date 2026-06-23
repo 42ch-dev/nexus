@@ -2,7 +2,7 @@
   "name": "nexus-schema-validator",
   "version": "0.1.0",
   "private": true,
-  "license": "GPL-3.0-only",
+  "license": "Apache-2.0",
   "description": "JSON Schema validation tool for Nexus schemas",
   "main": "schema-validator.js",
   "scripts": {
