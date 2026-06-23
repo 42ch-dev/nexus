@@ -60,6 +60,13 @@ pub enum ComputeError {
     /// An I/O error from the embedded-module guard or similar.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Aggregated failures while warming the module cache at boot
+    /// (R-V161P3-PERF-002). Individual module compile/parse errors are joined
+    /// so a single bad module surfaces all problems at once without aborting
+    /// the rest of the warmup.
+    #[error("module cache warmup error: {0}")]
+    CacheWarmup(String),
 }
 
 /// Result alias used across the crate.
