@@ -16,7 +16,7 @@
     },
     {
       "id": "2026-06-23-v1.61-schemas-and-codegen",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-23-v1.61-schemas-and-codegen.md",
       "metadata": {
         "iteration": "V1.61",
@@ -24,7 +24,9 @@
         "effort": "M",
         "owner": "@fullstack-dev",
         "description": "Compute I/O schemas (4 new) + key-block schema extension (state, computable)",
-        "dependency": "P-1 PM signoff"
+        "dependency": "P-1 PM signoff",
+        "working_branch": "feature/v1.61-schemas-and-codegen",
+        "merge_target": "iteration/v1.61"
       }
     },
     {
@@ -161,17 +163,19 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/82"
     },
     "tech_debt_summary": {
-      "total_open": 9,
+      "total_open": 11,
       "total_deferred": 0,
       "total_resolved": 89,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 9,
+        "low": 11,
         "medium": 0,
         "high": 0
       },
       "by_target_active": {
-        "V1.61+": 9
+        "V1.61+": 9,
+        "V1.61 P1": 1,
+        "V1.61 P-last": 1
       },
       "v1_60_ship_note": "V1.60 shipped with 9 open residuals (all low, V1.61+). 24 P-last residuals closed (11 code via @fullstack-dev batch @ 257b354a + 13 PM doc-only). 3 V1.52-era residuals deferred to V1.61+ (S001 drift detection needs stateful tracking; S006 heuristic not in production path; S008 stale). 7 QC residuals stay V1.61+."
     },
@@ -200,6 +204,36 @@
     "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
   },
   "residual_findings": {
+    "2026-06-23-v1.61-schemas-and-codegen": [
+      {
+        "id": "R-V161P0-LOW-001",
+        "title": "Pre-existing clippy lints in test targets (7 unnecessary_hashes in preset.rs, 1 redundant_clone in http.rs) — not in default CI gate",
+        "severity": "low",
+        "source": "P0 implementer (out-of-scope, pre-existing)",
+        "scope": "crates/nexus-contracts/src/local/orchestration/preset.rs (7), src/local/schedule/http.rs (1) — test targets only",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.61+",
+        "target_date": "V1.61 P-last hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-001]",
+        "note": "Surfaced by `cargo clippy -p nexus-contracts --tests`. Not caught by CI `cargo clippy --all -- -D warnings` (default targets). Pre-existing on iteration base. P0 surgical-scope: left untouched.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V161P0-INFO-001",
+        "title": "BlockType enum does not include `environment` — P0 entity-attributes/state schemas substituted valid combat-relevant types (character/item/faction/ability/species)",
+        "severity": "low",
+        "source": "P0 implementer (design note for P1)",
+        "scope": "schemas/compute/entity-attributes.schema.json, schemas/compute/entity-state.schema.json — block_type definitions",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.61 P1",
+        "target_date": "V1.61 P1",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-INFO-001]",
+        "note": "Compass §1.1 P0 T3/T4 named `environment` as a computable BlockType, but `environment` is not a BlockType enum value. P0 substituted character (fully specified) + item/faction/ability/species (permissive placeholders). P1 must confirm the canonical computable BlockType set when wiring the local KeyBlockBody fields.",
+        "lifecycle": "open"
+      }
+    ],
     "2026-06-22-v1.54-game-bible-scaffold": [
       {
         "id": "R-V154P1-W001",
