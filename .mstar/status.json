@@ -1,14 +1,95 @@
 {
   "version": 1,
-  "updated_at": "2026-06-23T02:35:00Z",
-  "plans": [],
+  "updated_at": "2026-06-23T15:30:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs",
+      "title": "V1.62 Compass & Plan Stubs (P-1)",
+      "iteration": "V1.62",
+      "slot": "P-1",
+      "status": "Done",
+      "effort": "M",
+      "owner": "@project-manager",
+      "review": "QC skipped (prepare)",
+      "working_branch": "feature/v1.62-prepare",
+      "merge_target": "iteration/v1.62",
+      "closed_at": "2026-06-23"
+    },
+    {
+      "plan_id": "2026-06-23-v1.62-schemas-reorganization-and-envelope-move",
+      "title": "V1.62 P0 — Schemas Reorganization + Envelope Move + Boundary Docs",
+      "iteration": "V1.62",
+      "slot": "P0",
+      "status": "Todo",
+      "effort": "XL",
+      "owner": "@fullstack-dev",
+      "review": "Tri-review + mid-QA",
+      "wave": 1,
+      "dependency": "P-1 PM signoff",
+      "working_branch": "feature/v1.62-schemas-reorganization",
+      "merge_target": "iteration/v1.62"
+    },
+    {
+      "plan_id": "2026-06-23-v1.62-manifest-schemas-and-host-validation",
+      "title": "V1.62 P1 — manifest.json schemas Block + Host Validation + basic-combat Enrichment",
+      "iteration": "V1.62",
+      "slot": "P1",
+      "status": "Todo",
+      "effort": "L",
+      "owner": "@fullstack-dev-2",
+      "review": "Tri-review + mid-QA",
+      "wave": 2,
+      "dependency": "P0 merged to integration",
+      "working_branch": "feature/v1.62-manifest-schemas-and-host-validation",
+      "merge_target": "iteration/v1.62"
+    },
+    {
+      "plan_id": "2026-06-23-v1.62-spec-extraction-compute-abi-and-wasm-host",
+      "title": "V1.62 P2 — Spec Extraction: compute-module-abi.md + wasm-host.md + 4 Amendments",
+      "iteration": "V1.62",
+      "slot": "P2",
+      "status": "Todo",
+      "effort": "L",
+      "owner": "@writing-specialist",
+      "review": "Tri-review (docs-only — may skip QC with explicit PM waiver) + mid-QA",
+      "wave": 2,
+      "dependency": "P0 merged to integration",
+      "working_branch": "feature/v1.62-spec-extraction",
+      "merge_target": "iteration/v1.62"
+    },
+    {
+      "plan_id": "2026-06-23-v1.62-mid-qc-and-fix-waves",
+      "title": "V1.62 P-mid — Meta Tracking Across Waves",
+      "iteration": "V1.62",
+      "slot": "P-mid",
+      "status": "Todo",
+      "effort": "M",
+      "owner": "@project-manager",
+      "review": "Meta tracking (no product code)",
+      "wave": "across"
+    },
+    {
+      "plan_id": "2026-06-23-v1.62-daemon-verification-and-closeout",
+      "title": "V1.62 P-last — Daemon Verification + Closeout",
+      "iteration": "V1.62",
+      "slot": "P-last",
+      "status": "Todo",
+      "effort": "M",
+      "owner": "@project-manager",
+      "review": "Report-only QA",
+      "wave": 3,
+      "dependency": "P1 + P2 merged to integration",
+      "working_branch": "feature/v1.62-daemon-verification-and-closeout",
+      "merge_target": "iteration/v1.62"
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.62 (TBD)",
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.62",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.61 (retired, merged PR #83 @ 140f2594)",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.62+",
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.62",
+    "latest_active_compass": "v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "pending",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -88,8 +169,9 @@
       "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
       "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
     },
-    "updated_at": "2026-06-23T04:00:00Z",
-    "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
+    "updated_at": "2026-06-23T15:30:00Z",
+    "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction).",
+    "v1_62_plan_registration_note": "6 V1.62 plans registered in plans[]: P-1 (Done; Prepare complete — grill-me locked 6 decisions, writing-specialist authored compass, PM resolved bundle-collision open question + 3 revisions); P0/P1/P2/P-mid/P-last (Todo; chained dependencies — P0 Wave 1, P1+P2 Wave 2 parallel, P-last Wave 3). Profile B invariant: P-1 stays Done for one cycle; archived at P-last compaction. Integration branch locked: iteration/v1.62 (created from main HEAD 4db51a90 post-V1.61 PR #83 merge)."
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
