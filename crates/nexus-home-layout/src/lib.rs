@@ -62,6 +62,18 @@ pub fn user_preset_base_dir(home: &Path) -> PathBuf {
     nexus_root_from_home(home).join("presets")
 }
 
+/// `$HOME/.nexus42/modules/` — base directory for user-installed compute
+/// modules (V1.61 P-last T3; compass Q2 User layer).
+///
+/// Each subdirectory `<id>/` is expected to contain `<id>.wasm` +
+/// `manifest.json`. The daemon warms these into the daemon-wide module cache
+/// at boot (see `nexus_wasm_host::ModuleCache::warm_dir`). A missing
+/// directory is treated as empty (user modules are optional).
+#[must_use]
+pub fn user_modules_dir(home: &Path) -> PathBuf {
+    nexus_root_from_home(home).join("modules")
+}
+
 /// `$HOME/.nexus42/presets/<name>/` — path to a specific user preset bundle.
 #[must_use]
 pub fn user_preset_bundle_dir(home: &Path, name: &str) -> PathBuf {
