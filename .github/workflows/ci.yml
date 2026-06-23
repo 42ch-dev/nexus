@@ -211,6 +211,7 @@ jobs:
               -p nexus-narrative
               -p nexus-moment-context-assembly
               -p nexus-cloud-sync
+              -p nexus-wasm-host
           - group: daemon
             packages: >-
               -p nexus-daemon-runtime
