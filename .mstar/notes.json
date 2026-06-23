@@ -225,6 +225,11 @@
       "at": "2026-06-23T15:45:00Z",
       "message": "harness hygiene: status.json metadata de-cruft. Removed 5 fields that violated the 2026-04-14 policy ('avoid metadata.*_note fields in .mstar/status.json — keep status.json focused on machine-readable structured fields; write timeline/context notes in notes.json'): tech_debt_summary.v1_60_ship_note (narrative), v1_57_carry_forward_index (V1.56/V1.57 closed-residual narrative — actual residual state preserved in residual_findings + archived/residuals/), v1_58_carry_forward_index (V1.58 closed-residual narrative — same), v1_60_plan_registration_note (V1.60 prepare narrative — superseded by archived/plans/<id>.json snapshots), v1_62_plan_registration_note (V1.62 prepare narrative I introduced in the previous commit — direct policy violation caught by user). All V1.62 plan-registration facts remain machine-readable in plans[] (6 rows with status/owner/wave/dependency fields). Carry-forward plan narratives are not needed once the residuals themselves carry lifecycle state in residual_findings. No data lost: residual rows in residual_findings + per-plan snapshots in archived/plans/ remain the SSOT.",
       "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
+    },
+    {
+      "at": "2026-06-23T15:55:00Z",
+      "message": "AGENTS.md rule promotion: promoted the 2026-04-14 'status.json field discipline' policy from this write-mostly log into .mstar/AGENTS.md as a first-class subsection under 'Project-Specific Deviations'. Rule was originally recorded only as a notes.json entry, which agents (including PM) don't reliably read at session start — that's why v1_62_plan_registration_note slipped through in the previous prepare commit. The new AGENTS.md subsection makes the rule load-bearing: lists allowed structured fields, forbids the *_note / *_index narrative anti-patterns by name, gives a one-line test ('if the value is a sentence/paragraph → notes.json'), and explains audit-trail preservation when removing violations.",
+      "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
     }
   ]
 }
