@@ -14,6 +14,10 @@ export * from './ConflictResponse';
 export * from './SyncPullRequest';
 export * from './SyncPullResponse';
 export * from './VersionRef';
+export * from './ComputeInput';
+export * from './ComputeOutput';
+export * from './EntityAttributes';
+export * from './EntityState';
 export * from './Bundle';
 export * from './Creator';
 export * from './Delta';
@@ -68,6 +72,10 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SyncPullRequest: 1,
   SyncPullResponse: 1,
   VersionRef: 1,
+  ComputeInput: 1,
+  ComputeOutput: 1,
+  EntityAttributes: 1,
+  EntityState: 1,
   Bundle: 1,
   Creator: 1,
   Delta: 1,
