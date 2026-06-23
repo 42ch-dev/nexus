@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/explore-ai-answer-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ExploreAiAnswerResponse",
+  "description": "Response for Explore AI Q&A with optional citations envelope (platform plan 19).",
+  "type": "object",
+  "required": ["schema_version", "answer"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "answer": {
+      "type": "string",
+      "description": "Model answer text"
+    },
+    "citations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Citation title or source label"
+          },
+          "snippet": {
+            "type": "string",
+            "description": "Quoted or summarized excerpt"
+          },
+          "source_ref": {
+            "type": "string",
+            "description": "Opaque source key or stable URI fragment for drill-down"
+          },
+          "entity_id": {
+            "type": "string",
+            "description": "Related entity id when citation maps to a Nexus object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Grounding citations when the platform returns them"
+    },
+    "model": {
+      "type": "string",
+      "description": "Optional model identifier for debugging / compliance"
+    }
+  },
+  "additionalProperties": false
+}
