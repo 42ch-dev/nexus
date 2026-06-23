@@ -45,8 +45,8 @@
       "qc_tri_review_outcome": "Wave 1 P0: 3/3 Approve (0C/0W). Wave 2 P1: 3/3 Approve (0C/0W). P2: 3/3 Approve (0C/3W V1-acceptable) + qc3 fix-wave revalidation. Wave 3 P3: 3/3 Approve (0C/3W V1-acceptable). Wave 4 P-last: report-only QA PASS. Total: 12 QC reports + 1 fix-wave revalidation + 2 mid-QA.",
       "note": "V1.61 ships Programmable Narrative Progression: WASM compute modules for timeline-based narrative iteration. XL iteration (largest since novel-writing). 7 plans, 4 waves. New crate nexus-wasm-host + new capability narrative.compute + new preset combat-engine + KB structured layer (state/computable) + 4 compute ABI schemas. User-requested design fix: embedded-modules gitignored + build.rs compile-from-source. 7 low residuals deferred to V1.62+/advisory.",
       "merge_commit": null,
-      "pr": null,
-      "pr_url": null
+      "pr": 83,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/83"
     },
     "tech_debt_summary": {
       "total_open": 7,
@@ -88,7 +88,7 @@
       "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
       "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
     },
-    "updated_at": "2026-06-23T02:35:00Z",
+    "updated_at": "2026-06-23T04:00:00Z",
     "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
   },
   "residual_findings": {
