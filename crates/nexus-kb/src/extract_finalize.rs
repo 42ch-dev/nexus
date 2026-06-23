@@ -78,6 +78,7 @@ mod tests {
                 "traits": ["brave"]
             })),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         }
     }
 
@@ -131,6 +132,7 @@ mod tests {
             summary: Some("test".to_string()),
             attributes: Some(serde_json::json!({})),
             tags: None,
+            ..Default::default()
         };
         let input = ExtractFinalizeInput {
             world_id: "wld_1".to_string(),
@@ -155,6 +157,7 @@ mod tests {
             summary: Some("generic entity".to_string()),
             attributes: None,
             tags: None,
+            ..Default::default()
         };
         let input = ExtractFinalizeInput {
             world_id: "wld_1".to_string(),

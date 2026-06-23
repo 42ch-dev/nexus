@@ -313,6 +313,14 @@ impl KbStore for InMemoryKbStore {
                                 return false;
                             }
                         }
+                        // V1.61 P1: filter by computable flag
+                        if let Some(want) = query.computable {
+                            let is_computable =
+                                kb.body.as_ref().and_then(|b| b.computable).unwrap_or(false);
+                            if is_computable != want {
+                                return false;
+                            }
+                        }
                         true
                     })
                     .cloned()
@@ -587,6 +595,7 @@ mod tests {
             summary: Some("A brooding hero".to_string()),
             attributes: None,
             tags: Some(vec!["gothic".to_string()]),
+            ..Default::default()
         })
         .unwrap();
         store.insert_key_block(kb1).await.unwrap();
@@ -596,6 +605,7 @@ mod tests {
             summary: Some("A magical woodland".to_string()),
             attributes: None,
             tags: Some(vec!["fantasy".to_string()]),
+            ..Default::default()
         })
         .unwrap();
         store.insert_key_block(kb2).await.unwrap();
@@ -831,6 +841,7 @@ mod tests {
                 "traits": ["test"]
             })),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         })
         .unwrap();
         kb
@@ -907,6 +918,7 @@ mod tests {
             summary: Some("A character without category".to_string()),
             attributes: Some(serde_json::json!({"aliases": ["NoCat"]})),
             tags: Some(vec!["novel".to_string()]),
+            ..Default::default()
         })
         .unwrap();
 
@@ -1006,6 +1018,7 @@ mod tests {
             summary: Some("A generic character".to_string()),
             attributes: None,
             tags: None,
+            ..Default::default()
         })
         .unwrap();
 
@@ -1024,6 +1037,7 @@ mod tests {
             summary: Some("updated".to_string()),
             attributes: Some(serde_json::json!({"traits": ["old"]})),
             tags: None,
+            ..Default::default()
         })
         .unwrap();
 
@@ -1031,5 +1045,110 @@ mod tests {
         assert!(
             matches!(err, KbStoreError::Validation(ref ve) if ve.message.contains("novel_category is required"))
         );
+    }
+
+    // ── Computable query filter (V1.61 P1) ─────────────────────────
+
+    fn make_computable_block(world_id: &str, name: &str, computable: bool) -> KeyBlock {
+        let mut kb = KeyBlock::new(world_id, BlockType::Character, name);
+        kb.set_body(KeyBlockBody {
+            summary: Some(format!("{name} summary")),
+            attributes: if computable {
+                Some(serde_json::json!({"max_hp": 100}))
+            } else {
+                None
+            },
+            tags: None,
+            computable: Some(computable),
+            state: if computable {
+                Some(serde_json::json!({"character": {"current_hp": 80}}))
+            } else {
+                None
+            },
+        })
+        .unwrap();
+        kb
+    }
+
+    #[tokio::test]
+    async fn query_computable_true_filters_only_computable_blocks() {
+        let store = InMemoryKbStore::new();
+        store
+            .insert_key_block(make_computable_block("wld_1", "Hero", true))
+            .await
+            .unwrap();
+        store
+            .insert_key_block(make_computable_block("wld_1", "NPC", false))
+            .await
+            .unwrap();
+        store
+            .insert_key_block(make_computable_block("wld_1", "Place", false))
+            .await
+            .unwrap();
+
+        let q = KbQuery::new("wld_1").with_computable(Some(true));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.items[0].canonical_name, "Hero");
+    }
+
+    #[tokio::test]
+    async fn query_computable_false_filters_only_non_computable() {
+        let store = InMemoryKbStore::new();
+        store
+            .insert_key_block(make_computable_block("wld_1", "Hero", true))
+            .await
+            .unwrap();
+        store
+            .insert_key_block(make_computable_block("wld_1", "NPC", false))
+            .await
+            .unwrap();
+
+        let q = KbQuery::new("wld_1").with_computable(Some(false));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 1);
+        assert_eq!(result.items[0].canonical_name, "NPC");
+    }
+
+    #[tokio::test]
+    async fn query_computable_none_returns_all() {
+        let store = InMemoryKbStore::new();
+        store
+            .insert_key_block(make_computable_block("wld_1", "Hero", true))
+            .await
+            .unwrap();
+        store
+            .insert_key_block(make_computable_block("wld_1", "NPC", false))
+            .await
+            .unwrap();
+
+        let q = KbQuery::new("wld_1"); // computable defaults to None
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 2);
+    }
+
+    #[tokio::test]
+    async fn query_computable_with_computable_absent_in_body() {
+        let store = InMemoryKbStore::new();
+        // Insert a block with no computable field at all (legacy block)
+        let mut kb = KeyBlock::new("wld_1", BlockType::Character, "Legacy");
+        kb.set_body(KeyBlockBody {
+            summary: Some("legacy".to_string()),
+            attributes: None,
+            tags: None,
+            ..Default::default()
+        })
+        .unwrap();
+        store.insert_key_block(kb).await.unwrap();
+
+        // Filtering for computable=true should exclude the legacy block
+        let q = KbQuery::new("wld_1").with_computable(Some(true));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 0);
+
+        // Filtering for computable=false should include the legacy block
+        let q = KbQuery::new("wld_1").with_computable(Some(false));
+        let result = store.query(&q).await.unwrap();
+        assert_eq!(result.total_count, 1);
     }
 }
