@@ -2,7 +2,7 @@
   "name": "nexus-codegen",
   "version": "0.1.0",
   "private": true,
-  "license": "GPL-3.0-only",
+  "license": "Apache-2.0",
   "description": "Nexus schema-to-code generation pipeline (TS + Rust)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
