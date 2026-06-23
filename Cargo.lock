@@ -2850,6 +2850,7 @@ dependencies = [
  "nexus-kb",
  "nexus-local-db",
  "nexus-narrative",
+ "nexus-wasm-host",
  "nix 0.29.0",
  "regex",
  "reqwest",
