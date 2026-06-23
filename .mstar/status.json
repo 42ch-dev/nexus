@@ -16,7 +16,7 @@
     },
     {
       "id": "2026-06-23-v1.61-schemas-and-codegen",
-      "status": "InReview",
+      "status": "Done",
       "file": ".mstar/plans/2026-06-23-v1.61-schemas-and-codegen.md",
       "metadata": {
         "iteration": "V1.61",
