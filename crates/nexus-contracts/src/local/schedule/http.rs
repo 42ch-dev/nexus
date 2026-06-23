@@ -233,7 +233,7 @@ mod tests {
             depends_on: None,
             concurrency: None,
             scheduled_at: None,
-            input: Some(input.clone()),
+            input: Some(input),
             force_gates: false,
             reason: None,
         };
