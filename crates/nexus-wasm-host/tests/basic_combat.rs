@@ -87,7 +87,7 @@ fn basic_combat_resolves_attack_into_four_part_output() {
     let ev = &output.timeline_events[0];
     assert_eq!(
         ev.event_type,
-        nexus_contracts::generated::common_types::TimelineEventType::StateUpdate
+        nexus_contracts::generated::common::common_types::TimelineEventType::StateUpdate
     );
     assert!(
         ev.summary

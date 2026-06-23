@@ -108,7 +108,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         entry!("schemas/domain/world.schema.json", Strict, World),
         entry!("schemas/domain/memory.schema.json", Strict, Memory),
         entry!("schemas/domain/creator.schema.json", Strict, Creator),
-        entry!("schemas/domain/delta.schema.json", Strict, Delta),
         entry!("schemas/domain/fork-branch.schema.json", Strict, ForkBranch),
         entry!("schemas/domain/key-block.schema.json", Strict, KeyBlock),
         entry!("schemas/domain/pairing.schema.json", Strict, Pairing),
@@ -116,11 +115,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             "schemas/domain/story-manifest.schema.json",
             Strict,
             StoryManifest
-        ),
-        entry!(
-            "schemas/domain/sync-command.schema.json",
-            Strict,
-            SyncCommand
         ),
         entry!(
             "schemas/domain/timeline-event.schema.json",
@@ -133,34 +127,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorldMembership
         ),
-        // Bundle: generated ONLY from domain/bundle.schema.json (cloud-sync variant is
-        // allOf-only, skipped by codegen per SKIP_STRUCT_GENERATION_REL_PATHS)
-        entry!("schemas/domain/bundle.schema.json", Strict, Bundle),
-        // ── compute/ ────────────────────────────────────────────────────
-        // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
-        // struct of each schema is registered; inline/definition structs
-        // (ComputeOutputStateDelta, CharacterAttributes, CharacterState) are
-        // emitted by codegen but validated indirectly via their parent schema.
-        entry!(
-            "schemas/compute/compute-input.schema.json",
-            Strict,
-            ComputeInput
-        ),
-        entry!(
-            "schemas/compute/compute-output.schema.json",
-            Strict,
-            ComputeOutput
-        ),
-        entry!(
-            "schemas/compute/entity-attributes.schema.json",
-            Strict,
-            EntityAttributes
-        ),
-        entry!(
-            "schemas/compute/entity-state.schema.json",
-            Strict,
-            EntityState
-        ),
         // ── common/ ──────────────────────────────────────────────────────
         entry!("schemas/common/version-ref.schema.json", Strict, VersionRef),
         // SourceAnchor lives in common_types.rs, generated from source-anchor.schema.json
@@ -169,190 +135,221 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SourceAnchor
         ),
-        // ── cloud-sync/ ──────────────────────────────────────────────────
+        // ── platform/sync/ ───────────────────────────────────────────────
+        // V1.62 reorganization: bundle/delta/sync-command moved here from domain/;
+        // conflict-response/sync-pull-* moved here from cloud-sync/.
+        // Bundle: generated ONLY from platform/sync/bundle.schema.json
+        // (platform/sync/bundle-refinement.schema.json is allOf-only, skipped by
+        // codegen per SKIP_STRUCT_GENERATION_REL_PATHS).
+        entry!("schemas/platform/sync/bundle.schema.json", Strict, Bundle),
+        entry!("schemas/platform/sync/delta.schema.json", Strict, Delta),
         entry!(
-            "schemas/cloud-sync/conflict-response.schema.json",
+            "schemas/platform/sync/sync-command.schema.json",
+            Strict,
+            SyncCommand
+        ),
+        entry!(
+            "schemas/platform/sync/conflict-response.schema.json",
             Strict,
             ConflictResponse
         ),
         entry!(
-            "schemas/cloud-sync/sync-pull-request.schema.json",
+            "schemas/platform/sync/sync-pull-request.schema.json",
             Strict,
             SyncPullRequest
         ),
         entry!(
-            "schemas/cloud-sync/sync-pull-response.schema.json",
+            "schemas/platform/sync/sync-pull-response.schema.json",
             Strict,
             SyncPullResponse
         ),
-        // ── platform/ ────────────────────────────────────────────────────
+        // ── local-api/compute/ ───────────────────────────────────────────
+        // V1.62 reorganization: compute envelopes moved here from compute/.
+        // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
+        // struct of each schema is registered; inline/definition structs
+        // (ComputeOutputStateDelta) are emitted by codegen but validated
+        // indirectly via their parent schema.
+        // (entity-attributes/entity-state schemas were DELETED in V1.62 P0;
+        // per-module shapes now live in modules/<id>/manifest.json per P1.)
         entry!(
-            "schemas/platform/context-assembly-v1.schema.json",
+            "schemas/local-api/compute/compute-input.schema.json",
+            Strict,
+            ComputeInput
+        ),
+        entry!(
+            "schemas/local-api/compute/compute-output.schema.json",
+            Strict,
+            ComputeOutput
+        ),
+        // ── platform/http-bff/ ───────────────────────────────────────────
+        // V1.62 reorganization: platform HTTP bodies moved here from platform/.
+        entry!(
+            "schemas/platform/http-bff/context-assembly-v1.schema.json",
             Strict,
             [ContextAssembleRequestV1, ContextAssembleResponseV1,]
         ),
         entry!(
-            "schemas/platform/creator-runtime-policy-response.schema.json",
+            "schemas/platform/http-bff/creator-runtime-policy-response.schema.json",
             Strict,
             CreatorRuntimePolicyResponse
         ),
         entry!(
-            "schemas/platform/explore-ai-answer-request.schema.json",
+            "schemas/platform/http-bff/explore-ai-answer-request.schema.json",
             Strict,
             ExploreAiAnswerRequest
         ),
         entry!(
-            "schemas/platform/explore-ai-answer-response.schema.json",
+            "schemas/platform/http-bff/explore-ai-answer-response.schema.json",
             Strict,
             ExploreAiAnswerResponse
         ),
         entry!(
-            "schemas/platform/explore-ai-summary-request.schema.json",
+            "schemas/platform/http-bff/explore-ai-summary-request.schema.json",
             Strict,
             ExploreAiSummaryRequest
         ),
         entry!(
-            "schemas/platform/explore-ai-summary-response.schema.json",
+            "schemas/platform/http-bff/explore-ai-summary-response.schema.json",
             Strict,
             ExploreAiSummaryResponse
         ),
         entry!(
-            "schemas/platform/explore-browse-request.schema.json",
+            "schemas/platform/http-bff/explore-browse-request.schema.json",
             Strict,
             ExploreBrowseRequest
         ),
         entry!(
-            "schemas/platform/explore-creator-card.schema.json",
+            "schemas/platform/http-bff/explore-creator-card.schema.json",
             Strict,
             ExploreCreatorCard
         ),
         entry!(
-            "schemas/platform/explore-feed-response.schema.json",
+            "schemas/platform/http-bff/explore-feed-response.schema.json",
             Strict,
             ExploreFeedResponse
         ),
         entry!(
-            "schemas/platform/explore-hit.schema.json",
+            "schemas/platform/http-bff/explore-hit.schema.json",
             Strict,
             ExploreHit
         ),
         entry!(
-            "schemas/platform/explore-search-request.schema.json",
+            "schemas/platform/http-bff/explore-search-request.schema.json",
             Strict,
             ExploreSearchRequest
         ),
         entry!(
-            "schemas/platform/me-entitlements-response.schema.json",
+            "schemas/platform/http-bff/me-entitlements-response.schema.json",
             Strict,
             MeEntitlementsResponse
         ),
         entry!(
-            "schemas/platform/memory-web-list-request.schema.json",
+            "schemas/platform/http-bff/memory-web-list-request.schema.json",
             Strict,
             MemoryWebListRequest
         ),
         entry!(
-            "schemas/platform/memory-web-list-response.schema.json",
+            "schemas/platform/http-bff/memory-web-list-response.schema.json",
             Strict,
             MemoryWebListResponse
         ),
         entry!(
-            "schemas/platform/notifications-inbox-item.schema.json",
+            "schemas/platform/http-bff/notifications-inbox-item.schema.json",
             Strict,
             NotificationsInboxItem
         ),
         entry!(
-            "schemas/platform/notifications-list-request.schema.json",
+            "schemas/platform/http-bff/notifications-list-request.schema.json",
             Strict,
             NotificationsListRequest
         ),
         entry!(
-            "schemas/platform/notifications-list-response.schema.json",
+            "schemas/platform/http-bff/notifications-list-response.schema.json",
             Strict,
             NotificationsListResponse
         ),
         entry!(
-            "schemas/platform/notifications-mark-read-request.schema.json",
+            "schemas/platform/http-bff/notifications-mark-read-request.schema.json",
             Strict,
             NotificationsMarkReadRequest
         ),
         entry!(
-            "schemas/platform/notifications-mark-read-response.schema.json",
+            "schemas/platform/http-bff/notifications-mark-read-response.schema.json",
             Strict,
             NotificationsMarkReadResponse
         ),
         entry!(
-            "schemas/platform/official-creator-quota-response.schema.json",
+            "schemas/platform/http-bff/official-creator-quota-response.schema.json",
             Strict,
             OfficialCreatorQuotaResponse
         ),
         entry!(
-            "schemas/platform/publish-chapter-request.schema.json",
+            "schemas/platform/http-bff/publish-chapter-request.schema.json",
             Strict,
             PublishChapterRequest
         ),
         entry!(
-            "schemas/platform/publish-history-entry.schema.json",
+            "schemas/platform/http-bff/publish-history-entry.schema.json",
             Strict,
             PublishHistoryEntry
         ),
         entry!(
-            "schemas/platform/publish-history-request.schema.json",
+            "schemas/platform/http-bff/publish-history-request.schema.json",
             Strict,
             PublishHistoryRequest
         ),
         entry!(
-            "schemas/platform/publish-history-response.schema.json",
+            "schemas/platform/http-bff/publish-history-response.schema.json",
             Strict,
             PublishHistoryResponse
         ),
         entry!(
-            "schemas/platform/publish-story-request.schema.json",
+            "schemas/platform/http-bff/publish-story-request.schema.json",
             Strict,
             PublishStoryRequest
         ),
         entry!(
-            "schemas/platform/publish-story-response.schema.json",
+            "schemas/platform/http-bff/publish-story-response.schema.json",
             Strict,
             PublishStoryResponse
         ),
         entry!(
-            "schemas/platform/social-graph-feed-request.schema.json",
+            "schemas/platform/http-bff/social-graph-feed-request.schema.json",
             Strict,
             SocialGraphFeedRequest
         ),
         entry!(
-            "schemas/platform/social-graph-feed-response.schema.json",
+            "schemas/platform/http-bff/social-graph-feed-response.schema.json",
             Strict,
             SocialGraphFeedResponse
         ),
         entry!(
-            "schemas/platform/social-graph-relationship-request.schema.json",
+            "schemas/platform/http-bff/social-graph-relationship-request.schema.json",
             Strict,
             SocialGraphRelationshipRequest
         ),
         entry!(
-            "schemas/platform/social-graph-relationship-response.schema.json",
+            "schemas/platform/http-bff/social-graph-relationship-response.schema.json",
             Strict,
             SocialGraphRelationshipResponse
         ),
         entry!(
-            "schemas/platform/world-fork-request.schema.json",
+            "schemas/platform/http-bff/world-fork-request.schema.json",
             Strict,
             WorldForkRequest
         ),
         entry!(
-            "schemas/platform/world-fork-response.schema.json",
+            "schemas/platform/http-bff/world-fork-response.schema.json",
             Strict,
             WorldForkResponse
         ),
         entry!(
-            "schemas/platform/world-snapshot-request.schema.json",
+            "schemas/platform/http-bff/world-snapshot-request.schema.json",
             Strict,
             WorldSnapshotRequest
         ),
         entry!(
-            "schemas/platform/world-snapshot-response.schema.json",
+            "schemas/platform/http-bff/world-snapshot-response.schema.json",
             Strict,
             WorldSnapshotResponse
         ),

@@ -1,13 +1,21 @@
 import fs from 'fs';
 import { globSync } from 'glob';
 import path from 'path';
-import { readJSON, resolveFromRoot, extractSchemaVersion, schemaToTypeName, logger } from './utils';
+import { readJSON, resolveFromRoot, extractSchemaVersion, schemaToTypeName, toSnakeCase, logger } from './utils';
 
 export interface LoadedSchema {
   filePath: string;
   fileName: string;
+  /** Path relative to schemas/, POSIX slashes (e.g. `platform/http-bff/context-assembly-v1.schema.json`) */
+  relPath: string;
   /** PascalCase type name derived from file name */
   typeName: string;
+  /**
+   * Generated module path segments derived from the schema's folder location, mirroring the
+   * `schemas/` tree (e.g. `['platform', 'http_bff', 'context_assembly_v1']`).
+   * Folder hyphens become underscores; the leaf segment is `toSnakeCase(typeName)`.
+   */
+  modulePath: string[];
   /** Integer schema version */
   schemaVersion: number;
   schemaContent: Record<string, unknown>;
@@ -27,10 +35,29 @@ const SKIP_STRUCT_GENERATION = new Set([
 
 /**
  * Schema paths (relative to schemas/, POSIX slashes) that must not emit TS/Rust structs.
- * Used when a JSON Schema refines another file with the same basename (e.g. cloud-sync/bundle
- * allOf domain/bundle): codegen only produces types from the canonical envelope schema.
+ * Used when a JSON Schema refines another file with the same basename (e.g. platform/sync/bundle-refinement
+ * allOf platform/sync/bundle): codegen only produces types from the canonical envelope schema.
  */
-const SKIP_STRUCT_GENERATION_REL_PATHS = new Set(['cloud-sync/bundle.schema.json']);
+const SKIP_STRUCT_GENERATION_REL_PATHS = new Set(['platform/sync/bundle-refinement.schema.json']);
+
+/**
+ * Compute the generated module path segments for a schema from its path relative to `schemas/`.
+ * Mirrors the consumer-scope `schemas/` tree: folder hyphens → underscores, leaf = snake_case type name.
+ * Examples:
+ *   `domain/world.schema.json`                          → `['domain', 'world']`
+ *   `common/version-ref.schema.json`                    → `['common', 'version_ref']`
+ *   `platform/http-bff/context-assembly-v1.schema.json` → `['platform', 'http_bff', 'context_assembly_v1']`
+ *   `platform/sync/bundle.schema.json`                  → `['platform', 'sync', 'bundle']`
+ *   `local-api/compute/compute-input.schema.json`       → `['local_api', 'compute', 'compute_input']`
+ */
+export function computeModulePath(relPath: string, typeName: string): string[] {
+  const parts = relPath.split('/');
+  const folders = parts.slice(0, -1).map(seg => seg.replace(/-/g, '_'));
+  return [...folders, toSnakeCase(typeName)];
+}
+
+/** Canonical module path for the synthetic common_types module (aggregates common.schema.json definitions). */
+export const COMMON_TYPES_MODULE_PATH = ['common', 'common_types'];
 
 /**
  * Map of definition names from common.schema.json to their base types.
@@ -107,7 +134,9 @@ export function loadAllSchemas(): LoadedSchema[] {
     loadedSchemas.push({
       filePath,
       fileName,
+      relPath,
       typeName,
+      modulePath: computeModulePath(relPath, typeName),
       schemaVersion,
       schemaContent,
       isDefinitionsOnly,
