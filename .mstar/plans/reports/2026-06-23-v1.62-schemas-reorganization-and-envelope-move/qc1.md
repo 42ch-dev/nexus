@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-23-v1.62-schemas-reorganization-and-envelope-move"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-23"
 ---
 
@@ -165,3 +165,58 @@ The architectural foundation is **sound**: the nested + flat codegen pattern wor
 ---
 
 *QC Reviewer #1 (qc-specialist) — Architecture coherence + maintainability focus. Pre-existing clippy lints (`R-V161P0-LOW-001`) and compass §1.3 file-count prose drift intentionally not raised per Assignment NEVER rule; verified pre-existing / corrected in `schemas-directory-layout.md` §7.*
+
+---
+
+## Revalidation (2026-06-23, targeted re-review)
+
+**Re-review trigger**: PM fix commit `502809c3` (`fix(v1.62-P0 qc1): doc-drift cleanup — 3 Warnings from qc1`) addressing W-001, W-002, and W-003.
+
+**Re-review range**: only the fix commit `502809c3` on top of `126f041d` (current HEAD = `502809c3`); the original 3 commits (`f8f22d0a..126f041d`) remain in scope as the full review baseline.
+
+**Pre-flight alignment (re-verified)**:
+- `git branch --show-current` → `feature/v1.62-schemas-reorganization` ✓
+- `git rev-parse HEAD` → `502809c3040561682dc33f5e63b436d9509c69c1` ✓
+- `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus` ✓
+- Fix-commit scope: 4 files changed, 20 insertions(+), 16 deletions(-). Files: `crates/nexus-kb/src/key_block.rs`, `crates/nexus-kb/src/validation.rs`, `crates/nexus-wasm-host/AGENTS.md`, `.mstar/knowledge/specs/canonical-hash.md`. **No generated/, no `Cargo.toml`, no codegen pipeline, no `status.json`** — all doc-only edits. ✓
+
+### W-001 (`nexus-kb` doc-comment drift) — RESOLVED
+
+- **Fix verified at the cited file:line**:
+  - `crates/nexus-kb/src/key_block.rs:24-28`: Replaces the deleted `schemas/compute/entity-{attributes,state}.schema.json` pointer with "Per-module attribute/state shapes are declared by each compute module's `manifest.json` `schemas` block (V1.62 — see `modules/README.md` and `.mstar/knowledge/specs/compute-module-abi.md`)." — the Q5 block_type-nesting explanation is retained ("`environment` is NOT a valid `BlockType` enum variant and is not included").
+  - `crates/nexus-kb/src/key_block.rs:42-46`: `state` field doc-comment now reads "Per-module state shapes are declared in each compute module's `manifest.json` (V1.62)." — keeps the compass Q5 example (`state.character.current_hp`).
+  - `crates/nexus-kb/src/validation.rs:116-131`: `ValidationMode::Structured` doc-comment now describes the structural shape and points at `modules/README.md`; the 2-level checklist (1. `attributes` is JSON object; 2. `state` is block_type-nested JSON object) is preserved.
+  - `crates/nexus-kb/src/validation.rs:611-617`: `block_type_state_key` doc-comment updated with the same forward-pointer wording.
+- **Architectural assessment of the new wording**:
+  - The pointer to `manifest.json` `schemas` block matches the V1.62 compass P0 T5 + P1 T5 + P1 T7 plan (P0 deletes the old `schemas/compute/entity-{attributes,state}.schema.json` files; P1 adds the `schemas` block to `manifest.json`; P1 T7 updates `modules/README.md` to document the new block). The doc-comment is **forward-looking** — it describes the target architectural state with a parenthetical "V1.62" qualifier. The P0 plan itself explicitly disclaims touching `compute-module-abi.md` ("P2 territory", per `2026-06-23-v1.62-schemas-reorganization-and-envelope-move.md` §P0 scope), so the absence of that spec file is **expected**, not a defect.
+  - The forward reference pattern ("V1.62 — see `modules/README.md` and `.mstar/knowledge/specs/compute-module-abi.md`") is **consistent with the existing repo pattern**: `schemas-directory-layout.md:112` says "Compute ABI normative detail: `.mstar/knowledge/specs/compute-module-abi.md` (V1.62 P2)" and `schemas/local-api/compute/README.md:17` says "**Compute ABI normative spec:** `.mstar/knowledge/specs/compute-module-abi.md` (V1.62 P2 — placeholder until authored)". The new doc-comments follow the same idiom. **Not a new architectural confusion.**
+  - `rg 'schemas/compute/entity-(attributes|state)' crates/nexus-kb/src/` → **0 hits** (verified post-fix). The 7 stale doc-comment sites are all replaced.
+- **No new architectural concern.** The forward-pointer wording is appropriate for the V1.62 transition window (P0 done; P1/P2 pending) and matches the established convention for V1.62 forward references.
+
+### W-002 (`nexus-wasm-host/AGENTS.md` Q8 row) — RESOLVED
+
+- **Fix verified at the cited file:line**:
+  - `crates/nexus-wasm-host/AGENTS.md:19`: Q8 row now reads "Standard 4-part envelope from `schemas/local-api/compute/`." This matches the actual codegen output path (`generated::local_api::compute::*` in `crates/nexus-wasm-host/src/lib.rs:52-54`) and matches the directory on disk (`ls schemas/local-api/compute/` → `compute-input.schema.json`, `compute-output.schema.json`, plus `README.md`).
+- `rg 'schemas/compute/' crates/nexus-wasm-host/AGENTS.md` → **0 hits** (verified post-fix). The stale Q8 row is gone.
+- **No new architectural concern.** The fix is a 1-character surgical path correction (`schemas/compute/` → `schemas/local-api/compute/`), exactly matching the qc1 recommendation. The Q8 row now agrees with both the crate's own source wiring and the on-disk layout.
+
+### W-003 (`canonical-hash.md` bundle path) — RESOLVED
+
+- **Fix verified at the cited file:line**:
+  - `.mstar/knowledge/specs/canonical-hash.md:20`: "Wire shapes: `schemas/platform/sync/` (`delta.schema.json`, `bundle.schema.json`)." — matches the P0 T2 move.
+  - `.mstar/knowledge/specs/canonical-hash.md:49`: "`schemas/platform/sync/bundle.schema.json`" — matches the on-disk file (`ls schemas/platform/sync/bundle.schema.json` exists).
+- `rg 'schemas/domain/(bundle|delta)' .mstar/knowledge/specs/canonical-hash.md` → **0 hits** (verified post-fix). Both stale path references are gone.
+- **No new architectural concern.** Both edits are surgical path corrections; no wording changes were made. The Companion spec (per `.mstar/knowledge/specs/AGENTS.md`) now correctly points at the post-P0 platform sync wire shapes.
+
+### Verification (re-run on `502809c3`)
+
+- `cargo check -p nexus-kb -p nexus-wasm-host`: **PASS** — `Finished 'dev' profile [unoptimized + debuginfo] target(s) in 0.40s`, no errors, no warnings.
+- `pnpm run codegen`: **PASS** — re-run produced 0 diff on `*/generated/` (verified via `git diff --exit-code crates/nexus-contracts/src/generated/ packages/nexus-contracts/src/generated/` → exit 0, no output). Codegen output unchanged, confirming the fix is doc-only with no behavior impact.
+- `cargo test -p nexus-contracts --test schema_drift_detection`: **PASS** — 4/4 tests pass (`drift_detection_known_matched_passes`, `drift_detection_type_mismatch_fails`, `drift_detection_deliberate_missing_field_fails`, `schema_drift_detection`). Drift detection stable.
+- `git show --stat 502809c3`: 4 files changed (+20/-16 LOC), all in the doc-comment / AGENTS.md / knowledge spec surface as expected.
+
+### Updated Verdict
+
+**Approve**
+
+(Rationale: All 3 Warnings from the initial review are resolved at the cited file:line with surgical, behavior-neutral edits. The new doc-comment wording in `nexus-kb` uses a forward-reference pattern (`manifest.json` `schemas` block + `compute-module-abi.md` spec) that is **consistent with the existing V1.62 forward-reference pattern** in `schemas-directory-layout.md:112` and `schemas/local-api/compute/README.md:17`. The `compute-module-abi.md` file is correctly not yet authored — that work is scoped to V1.62 P2 per the iteration compass. Build, codegen idempotency, and drift detection all pass. No new architectural concern was introduced by the fix wording.)
