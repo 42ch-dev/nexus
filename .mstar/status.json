@@ -1,7 +1,96 @@
 {
   "version": 1,
-  "updated_at": "2026-06-22T23:30:00Z",
-  "plans": [],
+  "updated_at": "2026-06-23T00:00:00Z",
+  "plans": [
+    {
+      "id": "2026-06-23-v1.61-compass-and-plan-stubs",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-23-v1.61-compass-and-plan-stubs.md",
+      "metadata": {
+        "iteration": "V1.61",
+        "slot": "P-1",
+        "effort": "M",
+        "owner": "@project-manager",
+        "description": "V1.61 delivery compass + 6 plan stubs + iteration index registration"
+      }
+    },
+    {
+      "id": "2026-06-23-v1.61-schemas-and-codegen",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-23-v1.61-schemas-and-codegen.md",
+      "metadata": {
+        "iteration": "V1.61",
+        "slot": "P0",
+        "effort": "M",
+        "owner": "@fullstack-dev",
+        "description": "Compute I/O schemas (4 new) + key-block schema extension (state, computable)",
+        "dependency": "P-1 PM signoff"
+      }
+    },
+    {
+      "id": "2026-06-23-v1.61-kb-structured-layer",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-23-v1.61-kb-structured-layer.md",
+      "metadata": {
+        "iteration": "V1.61",
+        "slot": "P1",
+        "effort": "M",
+        "owner": "@fullstack-dev-2",
+        "description": "KB structured layer: state field, computable flag, ValidationMode::Structured, KbQuery filter",
+        "dependency": "P0 merged to integration"
+      }
+    },
+    {
+      "id": "2026-06-23-v1.61-wasm-host-and-basic-combat",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-23-v1.61-wasm-host-and-basic-combat.md",
+      "metadata": {
+        "iteration": "V1.61",
+        "slot": "P2",
+        "effort": "L",
+        "owner": "@fullstack-dev",
+        "description": "nexus-wasm-host crate (wasmtime engine, sandbox, ABI) + basic-combat sample module",
+        "dependency": "P0 merged to integration"
+      }
+    },
+    {
+      "id": "2026-06-23-v1.61-mid-qc-and-fix-waves",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-23-v1.61-mid-qc-and-fix-waves.md",
+      "metadata": {
+        "iteration": "V1.61",
+        "slot": "P-mid",
+        "effort": "M",
+        "owner": "@project-manager",
+        "description": "Meta tracking: verify wave gates, tri-review coordination, fix-wave dispatch"
+      }
+    },
+    {
+      "id": "2026-06-23-v1.61-compute-capability-and-preset",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-23-v1.61-compute-capability-and-preset.md",
+      "metadata": {
+        "iteration": "V1.61",
+        "slot": "P3",
+        "effort": "L",
+        "owner": "@fullstack-dev-2",
+        "description": "narrative.compute capability + combat-engine preset + state delta apply",
+        "dependency": "P1 + P2 merged to integration"
+      }
+    },
+    {
+      "id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-06-23-v1.61-daemon-integration-and-closeout.md",
+      "metadata": {
+        "iteration": "V1.61",
+        "slot": "P-last",
+        "effort": "M",
+        "owner": "@project-manager",
+        "description": "Daemon integration + E2E test + closeout (Profile B compaction, PR to main)"
+      }
+    }
+  ],
   "metadata": {
     "integration_branch": "iteration/v1.60",
     "integration_branch_retired": true,
