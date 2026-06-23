@@ -24,7 +24,7 @@ async fn registry_has_twenty_six_builtins() {
     //   timeline.event.append, fork.create.
     // UPDATE THIS TEST when adding a new builtin.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 31);
+    assert_eq!(reg.len(), 32);
 }
 
 #[tokio::test]
