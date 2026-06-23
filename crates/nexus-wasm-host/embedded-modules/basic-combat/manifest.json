@@ -1,0 +1,13 @@
+{
+  "module_id": "basic-combat",
+  "name": "Basic Combat",
+  "version": "1.0.0",
+  "nexus_abi_version": 1,
+  "description": "Sample Nexus compute module: simple ATK−DEF combat resolution between two characters. Reference implementation of the V1 compute envelope ABI (compass Q9).",
+  "author": "42ch",
+  "required_key_block_types": ["character"],
+  "compute_export": "compute",
+  "init_export": "init",
+  "host_functions": [],
+  "battle_report_kind": "combat"
+}

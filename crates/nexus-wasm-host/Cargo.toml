@@ -1,0 +1,34 @@
+[package]
+name = "nexus-wasm-host"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Sandboxed WASM compute host (wasmtime) for Nexus narrative compute modules (V1.61)."
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+# wasmtime: Bytecode Alliance runtime (compass Q1). Pinned to the v46 line.
+# cranelift is the default compiler; fuel + epoch interruption provide the
+# compute-bound and wall-time sandbox guards (compass Q6).
+wasmtime = { version = "46", default-features = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Embeds pre-built .wasm artifacts at compile time (compass Q10; mirrors the
+# `embedded-presets/` pattern in nexus-orchestration). The committed .wasm blobs
+# live under `embedded-modules/` and are rebuilt via the procedure in
+# `modules/README.md` (open design item #6: pre-compile + commit).
+include_dir = "0.7"
+
+[dev-dependencies]
+nexus-contracts = { path = "../nexus-contracts" }
+serde_json = { workspace = true }
+# `wat` compiles WebAssembly text → binary for unit tests that exercise
+# validation/sandbox paths without shipping a real module.
+wat = "1"
