@@ -9,5 +9,53 @@
   "compute_export": "compute",
   "init_export": "init",
   "host_functions": [],
-  "battle_report_kind": "combat"
+  "battle_report_kind": "combat",
+  "schemas": {
+    "key_block_attributes": {
+      "character": {
+        "type": "object",
+        "properties": {
+          "max_hp": {"type": "integer", "minimum": 0},
+          "base_atk": {"type": "integer", "minimum": 0},
+          "base_def": {"type": "integer", "minimum": 0},
+          "speed": {"type": "integer", "minimum": 0},
+          "level": {"type": "integer", "minimum": 1}
+        },
+        "required": ["max_hp", "base_atk", "base_def"],
+        "additionalProperties": true
+      }
+    },
+    "key_block_state": {
+      "character": {
+        "type": "object",
+        "properties": {
+          "current_hp": {"type": "integer", "minimum": 0},
+          "status_effects": {"type": "array", "items": {"type": "string"}},
+          "is_alive": {"type": "boolean"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "properties": {
+        "attacker_id": {"type": "string"},
+        "defender_id": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "battle_report": {
+      "type": "object",
+      "properties": {
+        "kind": {"type": "string", "const": "combat"},
+        "attacker_id": {"type": "string"},
+        "defender_id": {"type": "string"},
+        "damage": {"type": "integer"},
+        "defender_hp_before": {"type": "integer"},
+        "defender_hp_after": {"type": "integer"}
+      },
+      "required": ["kind", "attacker_id", "defender_id", "damage"],
+      "additionalProperties": true
+    }
+  }
 }
