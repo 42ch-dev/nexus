@@ -73,7 +73,7 @@
     },
     {
       "id": "2026-06-23-v1.61-compute-capability-and-preset",
-      "status": "Todo",
+      "status": "InReview",
       "file": ".mstar/plans/2026-06-23-v1.61-compute-capability-and-preset.md",
       "metadata": {
         "iteration": "V1.61",
@@ -81,7 +81,9 @@
         "effort": "L",
         "owner": "@fullstack-dev-2",
         "description": "narrative.compute capability + combat-engine preset + state delta apply",
-        "dependency": "P1 + P2 merged to integration"
+        "dependency": "P1 + P2 merged to integration",
+        "working_branch": "feature/v1.61-compute-capability-and-preset",
+        "merge_target": "iteration/v1.61"
       }
     },
     {
@@ -167,9 +169,9 @@
       "pr_url": "https://github.com/42ch-dev/nexus/pull/82"
     },
     "tech_debt_summary": {
-      "total_open": 19,
+      "total_open": 17,
       "total_deferred": 0,
-      "total_resolved": 89,
+      "total_resolved": 91,
       "total_archived": 5,
       "by_severity_active": {
         "low": 19,
@@ -311,7 +313,10 @@
         "target_date": "V1.61 P3",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-002]",
         "note": "Schema is additive (inline enum in JSON Schema). Generated Rust uses String. P3 (state delta apply) is the consumer — may promote to enum for exhaustive matching. Non-blocking.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "P3 addressed: state_delta.op kept as String per wire contract, validated at runtime with VALID_OPS constant in narrative_compute.rs. Decision documented in P3 Completion Report.",
+        "resolution": { "plan_id": "2026-06-23-v1.61-compute-capability-and-preset", "commit": "c5cc060f" }
       },
       {
         "id": "R-V161P0-LOW-003",
@@ -325,7 +330,10 @@
         "target_date": "V1.61 P3",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-003]",
         "note": "V1 envelope design (compass Q8) intentionally freeform; module-declared fields. Runtime size guard belongs in P3 apply path, not schema (V2 may add per-kind shape enforcement).",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-23",
+        "closure_note": "P3 addressed: BATTLE_REPORT_MAX_BYTES = 64 KB cap enforced in narrative_compute.rs apply path. Rejects oversized battle_report payloads.",
+        "resolution": { "plan_id": "2026-06-23-v1.61-compute-capability-and-preset", "commit": "c5cc060f" }
       },
       {
         "id": "R-V161P0-LOW-004",
