@@ -246,7 +246,10 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
         new_fm
     };
 
-    Ok(format!("---\n{new_fm}\n---{rest}"))
+    // `rest` already starts with `\n---` (it's the slice from the closing
+    // delimiter onward), so we must NOT add another `\n---` here — that
+    // would produce a double closing delimiter and corrupt the frontmatter.
+    Ok(format!("---\n{new_fm}{rest}"))
 }
 
 /// Reorder frontmatter so `title` comes first.
@@ -346,5 +349,57 @@ mod tests {
         assert_eq!(count_body_words("one two three"), 3);
         assert_eq!(count_body_words(""), 0);
         assert_eq!(count_body_words("a b c d e f g h i j"), 10);
+    }
+
+    #[test]
+    fn update_frontmatter_no_double_closing_delimiter() {
+        // Regression: PR #86 Greptile review found that the format string
+        // emitted a redundant `\n---` because `rest` already carries the
+        // closing delimiter. This produced malformed YAML frontmatter:
+        // `---\n<fm>\n---\n---\n<body>` (double closing delimiter).
+        let content = "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\none two three";
+        let result = update_frontmatter_status(content).unwrap();
+
+        // Count occurrences of lines that are exactly `---`.
+        let delimiter_count = result.lines().filter(|l| *l == "---").count();
+        assert_eq!(
+            delimiter_count, 2,
+            "expected exactly 2 `---` delimiters (opening + closing), got {delimiter_count}.\nResult:\n{result}"
+        );
+    }
+
+    #[test]
+    fn update_frontmatter_idempotent_on_retry() {
+        // Regression: re-running the capability on an already-finalized
+        // file must not compound corruption. Running twice should produce
+        // the same well-formed output as running once.
+        let content = "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\none two three";
+        let once = update_frontmatter_status(content).unwrap();
+        let twice = update_frontmatter_status(&once).unwrap();
+
+        // Both runs should have exactly 2 `---` delimiters.
+        for (label, text) in [("once", &once), ("twice", &twice)] {
+            let count = text.lines().filter(|l| *l == "---").count();
+            assert_eq!(
+                count, 2,
+                "idempotent run {label}: expected 2 delimiters, got {count}.\n{text}"
+            );
+        }
+        // Body content preserved across both runs.
+        assert!(twice.contains("one two three"));
+        assert!(twice.contains("status: finalized"));
+    }
+
+    #[test]
+    fn update_frontmatter_word_count_not_off_by_one() {
+        // Regression: the double `---` bug caused count_body_words to
+        // find the spurious first `---` and then count `---` as a word.
+        let content = "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\nalpha beta gamma";
+        let result = update_frontmatter_status(content).unwrap();
+        // 3 words in body; the bug would have counted 4 (--- as a word).
+        assert!(
+            result.contains("word_count: 3"),
+            "expected word_count: 3, result has wrong count.\n{result}"
+        );
     }
 }
