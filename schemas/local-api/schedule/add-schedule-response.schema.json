@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/add-schedule-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AddScheduleResponse",
+  "description": "Response for POST /v1/local/orchestration/schedules.",
+  "type": "object",
+  "required": ["schedule_id", "status", "core_context_version"],
+  "properties": {
+    "schedule_id": { "type": "string", "description": "Created schedule ID." },
+    "status": { "type": "string", "description": "Initial schedule status." },
+    "core_context_version": { "type": "integer", "description": "Initial core context version." }
+  },
+  "additionalProperties": false
+}

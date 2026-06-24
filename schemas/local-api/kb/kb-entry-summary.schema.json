@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/kb/kb-entry-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus KbEntrySummary",
+  "description": "Summary row for a KB entry in list responses.",
+  "type": "object",
+  "required": ["entry_id", "title", "created_at"],
+  "properties": {
+    "entry_id": { "type": "string" },
+    "title": { "type": "string" },
+    "created_at": { "type": "string" }
+  },
+  "additionalProperties": false
+}

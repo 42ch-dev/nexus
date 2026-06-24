@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/findings/finding-detail-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus FindingDetailResponse",
+  "description": "Response for GET /v1/local/works/{work_id}/findings/{finding_id} and create/update responses.",
+  "type": "object",
+  "required": ["finding_id", "work_id", "severity", "status", "title", "description", "target_executor", "kind", "created_at", "updated_at"],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "work_id": { "type": "string" },
+    "chapter": { "type": "integer" },
+    "severity": { "type": "string" },
+    "status": { "type": "string" },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "target_executor": { "type": "string" },
+    "kind": { "type": "string" },
+    "rule_suggestion": { "type": "string" },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" },
+    "routing_hint": { "type": "string" }
+  },
+  "additionalProperties": false
+}

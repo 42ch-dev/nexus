@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/inspect-schedule-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus InspectScheduleResponse",
+  "description": "Response for GET /v1/local/orchestration/schedules/{schedule_id}.",
+  "type": "object",
+  "required": ["schedule", "depends_on", "concurrency_kind"],
+  "properties": {
+    "schedule": { "$ref": "https://nexus42.invalid/schemas/local-api/schedule/schedule-summary.schema.json", "description": "The full schedule summary." },
+    "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Schedule IDs this schedule depends on." },
+    "concurrency_kind": { "type": "string", "description": "Concurrency mode description string." }
+  },
+  "additionalProperties": false
+}

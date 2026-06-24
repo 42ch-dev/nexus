@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/work-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorkSummary",
+  "description": "Summary row for a work in list responses.",
+  "type": "object",
+  "required": ["work_id", "title", "status", "intake_status", "primary_preset_id", "updated_at"],
+  "properties": {
+    "work_id": { "type": "string" },
+    "title": { "type": "string" },
+    "status": { "type": "string" },
+    "intake_status": { "type": "string" },
+    "primary_preset_id": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "completion_locked_at": { "type": "string" }
+  },
+  "additionalProperties": false
+}
