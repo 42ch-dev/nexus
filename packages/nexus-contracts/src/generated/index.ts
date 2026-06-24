@@ -23,6 +23,60 @@ export * from './domain/WorldMembership';
 export * from './domain/World';
 export * from './local-api/compute/ComputeInput';
 export * from './local-api/compute/ComputeOutput';
+export * from './local-api/creators/ActiveCreatorResponse';
+export * from './local-api/creators/CreatorDetail';
+export * from './local-api/creators/CreatorInfo';
+export * from './local-api/creators/ListCreatorsQuery';
+export * from './local-api/creators/ListCreatorsResponse';
+export * from './local-api/creators/LogoutResponse';
+export * from './local-api/creators/SetActiveCreatorRequest';
+export * from './local-api/creators/SetActiveCreatorResponse';
+export * from './local-api/findings/CreateFindingRequest';
+export * from './local-api/findings/FindingDetailResponse';
+export * from './local-api/findings/ListFindingsQuery';
+export * from './local-api/findings/StaleFindingsResponse';
+export * from './local-api/findings/UpdateFindingRequest';
+export * from './local-api/kb/AddKbEntryRequest';
+export * from './local-api/kb/AddKbEntryResponse';
+export * from './local-api/kb/DeleteKbEntryResponse';
+export * from './local-api/kb/GetKbEntryResponse';
+export * from './local-api/kb/KbEntrySummary';
+export * from './local-api/kb/ListKbEntriesQuery';
+export * from './local-api/kb/ListKbEntriesResponse';
+export * from './local-api/kb/PaginationInfo';
+export * from './local-api/schedule/AddScheduleRequest';
+export * from './local-api/schedule/AddScheduleResponse';
+export * from './local-api/schedule/CoreContextHistoryEntry';
+export * from './local-api/schedule/CoreContextHistoryResponse';
+export * from './local-api/schedule/CoreContextResponse';
+export * from './local-api/schedule/DeleteScheduleResponse';
+export * from './local-api/schedule/EditCoreContextRequest';
+export * from './local-api/schedule/EditCoreContextResponse';
+export * from './local-api/schedule/InspectScheduleResponse';
+export * from './local-api/schedule/ListSchedulesQuery';
+export * from './local-api/schedule/ListSchedulesResponse';
+export * from './local-api/schedule/ScheduleConcurrencyRequest';
+export * from './local-api/schedule/ScheduleSummary';
+export * from './local-api/schedule/SignalScheduleRequest';
+export * from './local-api/schedule/SignalScheduleResponse';
+export * from './local-api/works/AppendInspirationRequest';
+export * from './local-api/works/AppendInspirationResponse';
+export * from './local-api/works/CreateWorkRequest';
+export * from './local-api/works/CreateWorkResponse';
+export * from './local-api/works/ListWorksQuery';
+export * from './local-api/works/ListWorksResponse';
+export * from './local-api/works/PatchWorkRequest';
+export * from './local-api/works/ReleaseCompletionLockRequest';
+export * from './local-api/works/WorkDetailResponse';
+export * from './local-api/works/WorkSummary';
+export * from './local-api/workspace/ActiveWorkspaceResponse';
+export * from './local-api/workspace/CreateWorkspaceRequest';
+export * from './local-api/workspace/CreateWorkspaceResponse';
+export * from './local-api/workspace/ListWorkspacesQuery';
+export * from './local-api/workspace/ListWorkspacesResponse';
+export * from './local-api/workspace/SetActiveWorkspaceRequest';
+export * from './local-api/workspace/SetActiveWorkspaceResponse';
+export * from './local-api/workspace/WorkspaceSummary';
 export * from './platform/http-bff/ContextAssemblyV1';
 export * from './platform/http-bff/CreatorRuntimePolicyResponse';
 export * from './platform/http-bff/ExploreAiAnswerRequest';
@@ -79,6 +133,60 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   World: 1,
   ComputeInput: 1,
   ComputeOutput: 1,
+  ActiveCreatorResponse: 1,
+  CreatorDetail: 1,
+  CreatorInfo: 1,
+  ListCreatorsQuery: 1,
+  ListCreatorsResponse: 1,
+  LogoutResponse: 1,
+  SetActiveCreatorRequest: 1,
+  SetActiveCreatorResponse: 1,
+  CreateFindingRequest: 1,
+  FindingDetailResponse: 1,
+  ListFindingsQuery: 1,
+  StaleFindingsResponse: 1,
+  UpdateFindingRequest: 1,
+  AddKbEntryRequest: 1,
+  AddKbEntryResponse: 1,
+  DeleteKbEntryResponse: 1,
+  GetKbEntryResponse: 1,
+  KbEntrySummary: 1,
+  ListKbEntriesQuery: 1,
+  ListKbEntriesResponse: 1,
+  PaginationInfo: 1,
+  AddScheduleRequest: 1,
+  AddScheduleResponse: 1,
+  CoreContextHistoryEntry: 1,
+  CoreContextHistoryResponse: 1,
+  CoreContextResponse: 1,
+  DeleteScheduleResponse: 1,
+  EditCoreContextRequest: 1,
+  EditCoreContextResponse: 1,
+  InspectScheduleResponse: 1,
+  ListSchedulesQuery: 1,
+  ListSchedulesResponse: 1,
+  ScheduleConcurrencyRequest: 1,
+  ScheduleSummary: 1,
+  SignalScheduleRequest: 1,
+  SignalScheduleResponse: 1,
+  AppendInspirationRequest: 1,
+  AppendInspirationResponse: 1,
+  CreateWorkRequest: 1,
+  CreateWorkResponse: 1,
+  ListWorksQuery: 1,
+  ListWorksResponse: 1,
+  PatchWorkRequest: 1,
+  ReleaseCompletionLockRequest: 1,
+  WorkDetailResponse: 1,
+  WorkSummary: 1,
+  ActiveWorkspaceResponse: 1,
+  CreateWorkspaceRequest: 1,
+  CreateWorkspaceResponse: 1,
+  ListWorkspacesQuery: 1,
+  ListWorkspacesResponse: 1,
+  SetActiveWorkspaceRequest: 1,
+  SetActiveWorkspaceResponse: 1,
+  WorkspaceSummary: 1,
   ContextAssemblyV1: 1,
   CreatorRuntimePolicyResponse: 1,
   ExploreAiAnswerRequest: 1,
