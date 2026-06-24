@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/workspace/list-workspaces-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListWorkspacesQuery",
+  "description": "Query parameters for GET /v1/local/workspaces.",
+  "type": "object",
+  "properties": {
+    "creator_id": { "type": "string" },
+    "limit": { "type": "integer" },
+    "cursor": { "type": "string" }
+  },
+  "additionalProperties": false
+}

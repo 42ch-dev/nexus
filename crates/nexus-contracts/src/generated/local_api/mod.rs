@@ -1,3 +1,19 @@
 pub mod compute;
+pub mod creators;
+pub mod findings;
+pub mod kb;
+pub mod orchestration;
+pub mod preset_management;
+pub mod schedule;
+pub mod works;
+pub mod workspace;
 
 pub use compute::*;
+pub use creators::*;
+pub use findings::*;
+pub use kb::*;
+pub use orchestration::*;
+pub use preset_management::*;
+pub use schedule::*;
+pub use works::*;
+pub use workspace::*;

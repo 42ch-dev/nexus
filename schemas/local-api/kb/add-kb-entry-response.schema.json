@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/kb/add-kb-entry-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AddKbEntryResponse",
+  "description": "Response for POST /v1/local/kb/entries.",
+  "type": "object",
+  "required": ["entry_id", "title"],
+  "properties": {
+    "entry_id": { "type": "string" },
+    "title": { "type": "string" }
+  },
+  "additionalProperties": false
+}

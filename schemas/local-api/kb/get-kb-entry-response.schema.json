@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/kb/get-kb-entry-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus GetKbEntryResponse",
+  "description": "Response for GET /v1/local/kb/entries/{entry_id}.",
+  "type": "object",
+  "required": ["entry_id", "title", "created_at", "content"],
+  "properties": {
+    "entry_id": { "type": "string" },
+    "title": { "type": "string" },
+    "created_at": { "type": "string" },
+    "content": { "type": "string" }
+  },
+  "additionalProperties": false
+}

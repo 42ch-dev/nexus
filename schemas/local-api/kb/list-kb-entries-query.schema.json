@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/kb/list-kb-entries-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListKbEntriesQuery",
+  "description": "Query parameters for GET /v1/local/kb/entries.",
+  "type": "object",
+  "properties": {
+    "creator_id": { "type": "string" },
+    "workspace_slug": { "type": "string" },
+    "scope": { "type": "string" },
+    "q": { "type": "string" },
+    "limit": { "type": "integer" },
+    "cursor": { "type": "string" }
+  },
+  "additionalProperties": false
+}

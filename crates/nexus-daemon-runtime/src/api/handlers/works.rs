@@ -828,6 +828,61 @@ pub async fn get_work(
         }
     }
 
+    // V1.63 P0: auto-promote essay works.status to 'completed' when
+    // Drafts/draft.md frontmatter status == finalized AND intake complete.
+    if record.status != "completed" && record.work_profile.as_deref() == Some("essay") {
+        let workspace_path = state.workspace_path().unwrap_or_default();
+        if !workspace_path.is_empty() {
+            let workspace_dir = std::path::Path::new(&workspace_path);
+            match nexus_local_db::work_chapters::is_essay_complete(
+                state.pool(),
+                &work_id,
+                workspace_dir,
+            )
+            .await
+            {
+                Ok(true) => {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let patch = WorkPatch {
+                        status: Some("completed".to_string()),
+                        ..Default::default()
+                    };
+                    match works::patch_work(state.pool(), &creator_id, &work_id, &patch, &now).await
+                    {
+                        Ok(updated) => {
+                            tracing::info!(
+                                target: "completion",
+                                work_id = %work_id,
+                                creator_id = %creator_id,
+                                work_ref = ?updated.work_ref,
+                                "essay: Auto-promoted work to 'completed' \
+                                 (draft finalized + intake complete)"
+                            );
+                            record = updated;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "completion",
+                                work_id = %work_id,
+                                error = %e,
+                                "essay: Failed to auto-promote work to 'completed'"
+                            );
+                        }
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        target: "completion",
+                        work_id = %work_id,
+                        error = %e,
+                        "essay: Failed to check essay completion status"
+                    );
+                }
+            }
+        }
+    }
+
     Ok(Json(enrich_with_chapters(&state, record).await))
 }
 

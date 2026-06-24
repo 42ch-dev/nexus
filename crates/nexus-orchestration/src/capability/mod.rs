@@ -180,6 +180,9 @@ impl CapabilityRegistry {
             // V1.52 T-A P2: register essay.project_scaffold for
             // embedded preset validation.
             Box::new(builtins::EssayProjectScaffold::new()),
+            // V1.63 P2: register essay.draft_status.finalize for
+            // essay-writing preset finalize_commit state.
+            Box::new(builtins::EssayDraftStatusFinalize::new()),
             // V1.54 P1: register game_bible.project_scaffold for
             // embedded preset validation.
             Box::new(builtins::GameBibleProjectScaffold::new()),
@@ -247,6 +250,8 @@ impl CapabilityRegistry {
             Box::new(builtins::NovelChapterTransition::with_pool(pool.clone())),
             // V1.52 T-A P2: essay.project_scaffold with pool.
             Box::new(builtins::EssayProjectScaffold::with_pool(pool.clone())),
+            // V1.63 P2: essay.draft_status.finalize (pool-less; FS-only).
+            Box::new(builtins::EssayDraftStatusFinalize::new()),
             // V1.54 P1: game_bible.project_scaffold with pool.
             Box::new(builtins::GameBibleProjectScaffold::with_pool(pool.clone())),
             // V1.55 P3: script.project_scaffold with pool.
@@ -588,10 +593,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_32_builtins() {
-        // 31 V1.60 + 1 narrative.compute (V1.61 P3) = 32.
+    fn registry_has_33_builtins() {
+        // 31 V1.60 + 1 narrative.compute (V1.61 P3) + 1 essay.draft_status.finalize (V1.63 P2) = 33.
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 32);
+        assert_eq!(reg.len(), 33);
     }
 
     #[test]
@@ -620,6 +625,7 @@ mod tests {
             "novel.project_scaffold",
             "novel.chapter_transition",
             "essay.project_scaffold",
+            "essay.draft_status.finalize",
             "game_bible.project_scaffold",
             "script.project_scaffold",
             "game_bible.section_status.update",
@@ -649,7 +655,7 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 32); // 31 (V1.60) + 1 (V1.61 P3 narrative.compute)
+        assert_eq!(names.len(), 33); // 31 (V1.60) + 1 (V1.61 P3 narrative.compute) + 1 (V1.63 P2 essay.draft_status.finalize)
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -665,5 +671,7 @@ mod tests {
         assert!(names.contains(&"nexus.fork.create"));
         // V1.61 P3 narrative.compute.
         assert!(names.contains(&"narrative.compute"));
+        // V1.63 P2 essay.draft_status.finalize.
+        assert!(names.contains(&"essay.draft_status.finalize"));
     }
 }
