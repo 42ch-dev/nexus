@@ -10,6 +10,7 @@
 import { http, HttpResponse } from 'msw';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
@@ -85,7 +86,9 @@ describe('CreateWorkDialog CRUD round-trip', () => {
 
   it('blocks submission until all required fields are filled', async () => {
     const user = userEvent.setup();
-    useHandlers(http.post('/v1/local/works', HttpResponse.json({ work_id: 'x', status: 'intake' })));
+    useHandlers(
+      http.post('/v1/local/works', () => HttpResponse.json({ work_id: 'x', status: 'intake' })),
+    );
 
     renderDialog();
     const submit = screen.getByRole('button', { name: /Create Work/i });
