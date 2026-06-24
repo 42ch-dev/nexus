@@ -5,7 +5,7 @@
   "metadata": {
     "integration_branch": "iteration/v1.62",
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.62 (pending PR — to be retired post-merge)",
+    "last_integration_branch": "iteration/v1.62 (retired, merged PR #85 @ 6a600ea9)",
     "integration_merge_target": "main",
     "latest_active_iteration": "V1.63+",
     "latest_active_compass": null,
@@ -40,7 +40,7 @@
         "P-last": "Daemon sanity + clippy auto-fix closing R-V161P0-LOW-001 + Profile B compaction + status finalize + PR."
       },
       "note": "V1.62 ships Compute Architecture Course-Correction + schemas/ Long-Term Reorganization. XL iteration (6 plans, 3 waves). Closes the user-identified architectural debt from PR #83 review (compute module per-module shapes moved OUT of product-level schemas INTO module manifest.json). Establishes schemas/local-api/ subtree for future WebApp Local API client (post-1.0). 5 V1.61 residuals closed; 2 deferred. PM whitelist used for: P0 qc1 fix-wave (doc drift), P1 qc3 revalidation (host glitch recovery), P-last T5 clippy auto-fix (test-only).",
-      "merge_commit": null,
+      "merge_commit": "6a600ea9",
       "pr": 85,
       "pr_url": "https://github.com/42ch-dev/nexus/pull/85",
       "predecessor_merge_commit": "140f2594"
