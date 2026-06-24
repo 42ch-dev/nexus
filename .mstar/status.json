@@ -7,7 +7,7 @@
       "title": "V1.63 Compass & Plan Stubs (P-1)",
       "iteration": "V1.63",
       "slot": "P-1",
-      "status": "InProgress",
+      "status": "Done",
       "effort": "M",
       "owner": "@project-manager",
       "review": "QC skipped (prepare)",
@@ -105,7 +105,7 @@
     "latest_active_iteration": "V1.63",
     "latest_active_compass": "v1.63-essay-profile-and-local-api-foundation-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.63)",
+    "pre_implement_gate": "passed (V1.63 P-1 Done; compass PM-signed 2026-06-24)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
