@@ -71,6 +71,7 @@ pub struct ListKbEntriesResponse {
 pub struct PaginationInfo {
     pub limit: usize,
     pub next_cursor: Option<String>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -414,7 +415,11 @@ pub async fn list_entries(
 
     Ok(Json(ListKbEntriesResponse {
         items,
-        pagination: PaginationInfo { limit, next_cursor },
+        pagination: PaginationInfo {
+            limit,
+            has_more: next_cursor.is_some(),
+            next_cursor,
+        },
     }))
 }
 

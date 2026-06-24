@@ -2,7 +2,7 @@
 //!
 //! Endpoints:
 //! - `POST   /v1/local/works/{work_id}/findings` — Create finding
-//! - `GET    /v1/local/works/{work_id}/findings` — List findings (filters: status, severity, limit, offset)
+//! - `GET    /v1/local/works/{work_id}/findings` — List findings (filters: status, severity, cursor pagination — F-P2)
 //! - `GET    /v1/local/works/{work_id}/findings/{finding_id}` — Get one finding
 //! - `PATCH  /v1/local/works/{work_id}/findings/{finding_id}` — Update finding
 //! - `DELETE /v1/local/works/{work_id}/findings/{finding_id}` — Delete finding
@@ -13,11 +13,13 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
 use crate::stale_findings_watcher::{DEFAULT_STALE_THRESHOLD_SECS, ENV_STALE_THRESHOLD_SECS};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use nexus_contracts::PaginationInfo;
 use nexus_local_db::findings::{
     self, Finding, FindingListFilters, FindingPatch, ReviewVerdictFinding,
 };
@@ -147,13 +149,26 @@ pub struct UpdateFindingRequest {
 /// R-V149P0-01 (V1.50): `status` accepts either a single status or a
 /// comma-separated list (e.g. `?status=open,triaged`). Unknown tokens
 /// surface as `INVALID_INPUT` (422).
+///
+/// F-P2 (V1.64): pagination switched from `offset` to an opaque `cursor`.
 #[derive(Debug, Deserialize)]
 pub struct ListFindingsQuery {
     pub chapter: Option<i64>,
     pub status: Option<String>,
     pub severity: Option<String>,
     pub limit: Option<u32>,
-    pub offset: Option<u32>,
+    /// Opaque cursor returned by the previous response's `pagination.next_cursor`.
+    pub cursor: Option<String>,
+}
+
+/// F-P2 (V1.64): cursor-paginated findings list response.
+///
+/// New list endpoints use the canonical `items` array key (convention §4);
+/// the `pagination` envelope reuses the shared `PaginationInfo`.
+#[derive(Debug, Serialize)]
+pub struct ListFindingsResponse {
+    pub items: Vec<FindingApiDto>,
+    pub pagination: PaginationInfo,
 }
 
 /// Findings summary for status endpoint (T5).
@@ -242,22 +257,34 @@ pub async fn create_finding_handler(
 /// consumer can fetch the V1.49 actionable set in one round trip. Unknown
 /// status tokens surface as `INVALID_INPUT` (422), mirroring the
 /// `update_finding_handler` enum-error mapping.
+///
+/// F-P2 (V1.64): the response is now cursor-paginated (`{ items, pagination }`)
+/// instead of a bare array. Callers that previously deserialized the body as a
+/// `Vec` must read the `items` field. The opaque cursor encodes the row offset;
+/// clients MUST NOT parse it (convention §2).
 pub async fn list_findings_handler(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
     Query(query): Query<ListFindingsQuery>,
-) -> Result<Json<Vec<FindingApiDto>>, NexusApiError> {
+) -> Result<Json<ListFindingsResponse>, NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // F-P2 (V1.64): cursor-based pagination. Decode the opaque cursor into the
+    // underlying offset, fetch `limit + 1` to detect `has_more`.
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = query.limit.unwrap_or(100).min(500);
+    let fetch_limit = limit.saturating_add(1);
+
     let filters = FindingListFilters {
         work_id: Some(work_id),
         chapter: query.chapter,
         status: query.status,
         severity: query.severity,
-        limit: query.limit,
-        offset: query.offset,
+        limit: Some(fetch_limit),
+        offset: Some(offset),
     };
-    let rows = findings::list_findings(state.pool(), &creator_id, &filters)
+    let mut rows = findings::list_findings(state.pool(), &creator_id, &filters)
         .await
         .map_err(|err| match err {
             nexus_local_db::LocalDbError::InvalidEnum {
@@ -282,7 +309,19 @@ pub async fn list_findings_handler(
             }
             other => other.into(),
         })?;
-    Ok(Json(rows.into_iter().map(FindingApiDto::from).collect()))
+
+    let (next_cursor, has_more) = offset_page_meta(rows.len(), limit, offset);
+    rows.truncate(usize::try_from(limit).unwrap_or(rows.len()));
+
+    let items: Vec<FindingApiDto> = rows.into_iter().map(FindingApiDto::from).collect();
+    Ok(Json(ListFindingsResponse {
+        items,
+        pagination: PaginationInfo {
+            limit: i64::from(limit),
+            next_cursor,
+            has_more,
+        },
+    }))
 }
 
 /// `GET /v1/local/works/{work_id}/findings/{finding_id}` — get one finding.

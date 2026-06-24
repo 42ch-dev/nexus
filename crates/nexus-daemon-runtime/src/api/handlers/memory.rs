@@ -46,6 +46,7 @@ pub struct PaginationEnvelope {
     pub limit: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    pub has_more: bool,
 }
 
 /// Pending review info for API responses.
@@ -286,7 +287,11 @@ pub async fn list_pending_reviews(
 
     Ok(Json(ListPendingReviewsResponse {
         items,
-        pagination: PaginationEnvelope { limit, next_cursor },
+        pagination: PaginationEnvelope {
+            limit,
+            has_more: next_cursor.is_some(),
+            next_cursor,
+        },
     }))
 }
 

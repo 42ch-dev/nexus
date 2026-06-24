@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/findings/list-findings-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListFindingsResponse",
+  "description": "Response for GET /v1/local/works/{work_id}/findings (cursor-based pagination, F-P2). New list endpoints use the canonical `items` array key (convention §4); the `pagination` envelope reuses the shared `PaginationInfo`.",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "properties": {
+    "items": { "type": "array", "items": { "$ref": "https://nexus42.invalid/schemas/local-api/findings/finding-detail-response.schema.json" } },
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json" }
+  },
+  "additionalProperties": false
+}

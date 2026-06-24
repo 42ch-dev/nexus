@@ -14,6 +14,7 @@ pub mod auth_middleware;
 pub mod errors;
 pub mod handlers;
 pub mod middleware;
+pub mod pagination;
 
 use crate::api::auth_middleware::DaemonApiConfig;
 use crate::workspace::WorkspaceState;

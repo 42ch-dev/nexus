@@ -5,10 +5,17 @@
   "title": "Nexus PaginationInfo",
   "description": "Cursor-based pagination metadata.",
   "type": "object",
-  "required": ["limit"],
+  "required": ["limit", "has_more"],
   "properties": {
     "limit": { "type": "integer" },
-    "next_cursor": { "type": "string" }
+    "next_cursor": {
+      "type": "string",
+      "description": "Opaque cursor returned by the previous page. Clients MUST NOT parse it. Non-null only when another page exists."
+    },
+    "has_more": {
+      "type": "boolean",
+      "description": "True when the client may request another page (equivalent to `next_cursor` being non-null)."
+    }
   },
   "additionalProperties": false
 }
