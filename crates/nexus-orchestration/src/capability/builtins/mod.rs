@@ -8,6 +8,7 @@ mod acp_prompt;
 mod acp_session_load;
 mod context_summarize;
 mod creator;
+mod essay_draft_status;
 mod essay_scaffold;
 mod fork;
 mod game_bible_scaffold;
@@ -38,6 +39,7 @@ pub use creator::{
     CreatorCapabilityStore, CreatorInjectPrompt, CreatorReadMemory, CreatorWriteBrief,
     CreatorWriteMemory,
 };
+pub use essay_draft_status::EssayDraftStatusFinalize;
 pub use essay_scaffold::EssayProjectScaffold;
 pub use fork::ForkCreate;
 pub use game_bible_scaffold::GameBibleProjectScaffold;

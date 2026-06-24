@@ -3,7 +3,7 @@
 **Status**: Draft (V1.52 — Feature line body initialized in P-1; implementation authored in plan `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`)  
 **Document class**: Feature line  
 **Created**: 2026-06-19  
-**Last updated**: 2026-06-19 (V1.52 P-1 draft)  
+**Last updated**: 2026-06-19 (V1.52 P-1 draft). **V1.63 P2**: `essay-writing` production preset shipped with 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway).
 **Scope**: `work_profile: essay` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, stage chain, completion semantics  
 **Coordinates with**:
 
@@ -117,9 +117,9 @@ intake → outline → draft → revise → finalize
 | `outline` | `Outlines/outline.md` | Thesis + audience + structure present |
 | `draft` | `Drafts/draft.md` status `draft` | Outline exists |
 | `revise` | `Drafts/draft.md` status `revised` | Draft exists; review notes optional |
-| `finalize` | `Drafts/draft.md` status `finalized` | Lightweight quality check passes or explicit override |
+| `finalize` | `Drafts/draft.md` status `finalized` | 4-dimension quality rubric passes or explicit `--force-gates` override (V1.63 P2) |
 
-Essay finalization does **not** run the novel 五问 finalize gate. It may run a lightweight quality check focused on thesis clarity, evidence support, coherence, and ending takeaway. The check is advisory unless the V1.52 implementation plan explicitly chooses a blocking gate.
+Essay finalization runs a 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) — a **blocking gate** with `--force-gates` override (parity with game-bible/script Depth 3.5). All four dimensions must pass for the `finalize_commit` state to write `status: finalized` to the draft frontmatter.
 
 ---
 
