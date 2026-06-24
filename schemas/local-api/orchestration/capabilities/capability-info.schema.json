@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/orchestration/capabilities/capability-info.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CapabilityInfo",
+  "description": "Description of a single registered capability (name + I/O schemas).",
+  "type": "object",
+  "required": ["name", "input_schema", "output_schema"],
+  "properties": {
+    "name": { "type": "string" },
+    "input_schema": { "type": "string" },
+    "output_schema": { "type": "string" }
+  },
+  "additionalProperties": false
+}

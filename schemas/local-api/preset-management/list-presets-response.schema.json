@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/preset-management/list-presets-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListPresetsResponse",
+  "description": "Response for GET /v1/local/presets — presets grouped by source (embedded, system, user).",
+  "type": "object",
+  "required": ["embedded", "system", "user"],
+  "properties": {
+    "embedded": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/local-api/preset-management/preset-summary.schema.json" }
+    },
+    "system": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/local-api/preset-management/preset-summary.schema.json" }
+    },
+    "user": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/local-api/preset-management/preset-summary.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}

@@ -7,7 +7,7 @@
 | **Status** | Normative — V1.63 Shipped (expanded local-api surface) |
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
-| **Last updated** | 2026-06-24 — V1.63 P1 (local-api core CRUD subtrees) |
+| **Last updated** | 2026-06-24 — V1.63 P3 (local-api orchestration + preset-management subtrees) |
 | **Related** | [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
@@ -37,7 +37,11 @@ schemas/
     ├── findings/          # quality findings CRUD schemas (V1.63 P1)
     ├── schedule/          # schedule + core-context CRUD schemas (V1.63 P1)
     ├── workspace/         # workspace management CRUD schemas (V1.63 P1)
-    └── creators/          # creator management CRUD schemas (V1.63 P1)
+    ├── creators/          # creator management CRUD schemas (V1.63 P1)
+    ├── orchestration/     # orchestration engine READ schemas (V1.63 P3)
+    │   ├── sessions/      # session list + detail-status schemas
+    │   └── capabilities/  # capability registry schemas
+    └── preset-management/ # preset management full-surface schemas (V1.63 P3)
 ```
 
 **Removed paths (do not recreate):**
@@ -47,7 +51,7 @@ schemas/
 - `schemas/cli-sync/` — renamed `cloud-sync/` (2026-05-20); `cloud-sync/` folded into `platform/sync/` (2026-06-23, V1.62 P0)
 - `schemas/cloud-sync/` — → `platform/sync/` (2026-06-23, V1.62 P0)
 - `schemas/compute/` — compute envelopes → `local-api/compute/`; entity-attributes/entity-state **deleted** (per-module shapes → `modules/<id>/manifest.json`, V1.62 P1) (2026-06-23, V1.62 P0)
-- Previously local-only daemon `/v1/local/*` DTOs — **V1.63 P1 promoted** core CRUD DTOs (works, kb, findings, schedule, workspace, creators) to `schemas/local-api/<resource>/` for cross-language consumption by future WebApp/Web-UI. Internal types (orchestration internals, ACP registry, daemon status) remain in `src/local/`.
+- Previously local-only daemon `/v1/local/*` DTOs — **V1.63 P1 promoted** core CRUD DTOs (works, kb, findings, schedule, workspace, creators) to `schemas/local-api/<resource>/` for cross-language consumption by future WebApp/Web-UI. **V1.63 P3 promoted** orchestration sessions/capabilities + preset management DTOs. Internal types (orchestration internals, ACP registry, daemon status) remain in `src/local/`.
 
 ---
 
@@ -66,8 +70,10 @@ schemas/
 | **`local-api/schedule/`** | Local API — schedule + core-context CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 | **`local-api/workspace/`** | Local API — workspace management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 | **`local-api/creators/`** | Local API — creator management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/orchestration/`** | Local API — orchestration engine READ | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/preset-management/`** | Local API — preset management full surface | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 
-**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Local API contracts (one subfolder per concern; V1.62 seeded `compute/`; V1.63 added the six core CRUD resources).
+**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Local API contracts (one subfolder per concern; V1.62 seeded `compute/`; V1.63 P1 added the six core CRUD resources; V1.63 P3 added orchestration + preset-management).
 
 ---
 

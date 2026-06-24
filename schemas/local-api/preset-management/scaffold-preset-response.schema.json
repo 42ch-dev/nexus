@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/preset-management/scaffold-preset-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ScaffoldPresetResponse",
+  "description": "Response for POST /v1/local/presets — scaffold result with created paths.",
+  "type": "object",
+  "required": ["id", "path"],
+  "properties": {
+    "id": { "type": "string" },
+    "path": { "type": "string" }
+  },
+  "additionalProperties": false
+}
