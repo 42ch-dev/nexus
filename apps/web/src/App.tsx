@@ -1,20 +1,22 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { RootLayout } from '@/components/layout/root-layout';
-import {
-  CapabilitiesPage,
-  FindingsPage,
-  NotFoundPage,
-  PresetsPage,
-  SchedulePage,
-  SessionsPage,
-  WorkDetailPage,
-  WorksPage,
-} from '@/pages/screens';
+import { CapabilitiesPage } from '@/pages/capabilities-page';
+import { FindingsPage } from '@/pages/findings-page';
+import { NotFoundPage } from '@/pages/not-found-page';
+import { PresetsPage } from '@/pages/presets-page';
+import { SchedulePage } from '@/pages/schedule-page';
+import { SessionsPage } from '@/pages/sessions-page';
+import { WorkDetailPage } from '@/pages/work-detail-page';
+import { WorksPage } from '@/pages/works-page';
 
 /**
- * App routes — Control Room + Setup shell (plan P1). All screens are
- * placeholders; P2 fills them against the hardened Local API (web-ui.md §6).
+ * App routes — Control Room + Setup shell.
+ *
+ * Seven screen groups (web-ui.md §6): Works dashboard + detail, Sessions,
+ * Schedule, Capabilities, Findings (Control Room — READ), Work CRUD + Preset
+ * management (Setup — writes). All screens consume the hardened Local API via
+ * the NexusClient interface (transport-agnostic, Tauri-ready).
  */
 export function App() {
   return (
