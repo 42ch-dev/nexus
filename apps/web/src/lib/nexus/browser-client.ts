@@ -14,6 +14,8 @@ import type {
   CreateWorkResponse,
   InspectScheduleResponse,
   ListCapabilitiesResponse,
+  ListFindingsQuery,
+  ListFindingsResponse,
   ListPresetsResponse,
   ListSchedulesQuery,
   ListSchedulesResponse,
@@ -117,6 +119,14 @@ export class BrowserClient implements NexusClient {
   // ── Capabilities ───────────────────────────────────────────────────────────
   listCapabilities(): Promise<ListCapabilitiesResponse> {
     return this.get<ListCapabilitiesResponse>('/v1/local/orchestration/capabilities');
+  }
+
+  // ── Findings ───────────────────────────────────────────────────────────────
+  listFindings(workId: string, query?: ListFindingsQuery): Promise<ListFindingsResponse> {
+    return this.get<ListFindingsResponse>(
+      `/v1/local/works/${encodeURIComponent(workId)}/findings`,
+      query,
+    );
   }
 
   // ── Preset management ──────────────────────────────────────────────────────
