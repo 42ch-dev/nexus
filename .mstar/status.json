@@ -19,7 +19,7 @@
       "title": "V1.64 P0 — Track B: Local API Data-Layer Hardening (DTO Drift + F-E1 + F-P1 + F-P2)",
       "iteration": "V1.64",
       "slot": "P0",
-      "status": "InReview",
+      "status": "Done",
       "effort": "L",
       "owner": "@fullstack-dev",
       "review": "Tri-review + QA",
@@ -33,7 +33,7 @@
       "title": "V1.64 P1 — Track A: Web App Scaffold (apps/web + Vite/React + tauri-api Adapter)",
       "iteration": "V1.64",
       "slot": "P1",
-      "status": "InReview",
+      "status": "Done",
       "effort": "L",
       "owner": "@frontend-dev",
       "review": "Tri-review + QA",
@@ -149,7 +149,7 @@
       },
       "by_target_active": {}
     },
-    "updated_at": "2026-06-25T00:05:00Z"
+    "updated_at": "2026-06-25T00:20:00Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
