@@ -16,6 +16,7 @@ pub mod db;
 pub mod lifecycle;
 pub mod refresh_scheduler;
 pub mod stale_findings_watcher;
+pub mod static_assets;
 pub mod worker_provider;
 pub mod workspace;
 
