@@ -10,7 +10,7 @@ async fn registry_lookup_builtin_workspace_open() {
 }
 
 #[tokio::test]
-async fn registry_has_thirty_two_builtins() {
+async fn registry_has_thirty_three_builtins() {
     // V1.36 P1 added `novel.project_scaffold` (18→19);
     // P3 added `novel.chapter_transition` (19→20);
     // V1.51 T-A P0 added `nexus.llm.extract` (20→21);
@@ -23,9 +23,10 @@ async fn registry_has_thirty_two_builtins() {
     //   world.state.query, world.delta.propose, world.delta.apply,
     //   timeline.event.append, fork.create.
     // V1.61 P3 added `narrative.compute` (31→32).
+    // V1.63 P2 added `essay.draft_status.finalize` (32→33).
     // UPDATE THIS TEST when adding a new builtin.
     let reg = CapabilityRegistry::with_builtins();
-    assert_eq!(reg.len(), 32);
+    assert_eq!(reg.len(), 33);
 }
 
 #[tokio::test]
