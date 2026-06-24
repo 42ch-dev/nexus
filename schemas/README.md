@@ -12,10 +12,11 @@
 | [domain/](domain/) | 10 | Wire entities (Creator, World, KeyBlock, …) |
 | [platform/http-bff/](platform/http-bff/) | 34 | Platform HTTP request/response bodies |
 | [platform/sync/](platform/sync/) | 7 | CLI ↔ platform sync protocol (bundle, delta, pull, conflict) |
+| [local-api/common/](local-api/common/) | 1 | Shared Local API envelopes — `ErrorResponse` (F-E1, V1.64) |
 | [local-api/compute/](local-api/compute/) | 2 | WASM compute ABI envelopes (ComputeInput / ComputeOutput). V1.61 origin, V1.62 moved. |
 | [local-api/works/](local-api/works/) | 10 | Works CRUD request/response schemas (V1.63) |
-| [local-api/kb/](local-api/kb/) | 8 | Work-scope KB entry CRUD schemas (V1.63) |
-| [local-api/findings/](local-api/findings/) | 5 | Quality findings CRUD schemas (V1.63) |
+| [local-api/kb/](local-api/kb/) | 8 | Work-scope KB entry CRUD schemas + shared `PaginationInfo` (V1.63) |
+| [local-api/findings/](local-api/findings/) | 6 | Quality findings CRUD schemas + cursor list response (V1.63; list-response F-P2 V1.64) |
 | [local-api/schedule/](local-api/schedule/) | 14 | Schedule + core-context CRUD schemas (V1.63) |
 | [local-api/workspace/](local-api/workspace/) | 8 | Workspace management CRUD schemas (V1.63) |
 | [local-api/creators/](local-api/creators/) | 8 | Creator management CRUD schemas (V1.63) |
@@ -46,7 +47,7 @@ After any edit under `schemas/`, run **codegen** and commit `crates/nexus-contra
 | Line | Uses `schemas/`? |
 | --- | --- |
 | **Cloud** (CLI `sync` / `platform`, `nexus-cloud-sync`) | **Yes** — `platform/{http-bff,sync}/`, `domain/`, `common/` |
-| **Local API** (external WASM modules; future WebApp/Web-UI) | **Yes** — `local-api/compute/` (V1.62), `local-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1), `local-api/{orchestration,preset-management}/` (V1.63 P3) |
+| **Local API** (external WASM modules; future WebApp/Web-UI) | **Yes** — `local-api/compute/` (V1.62), `local-api/common/` (F-E1 V1.64), `local-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1), `local-api/{orchestration,preset-management}/` (V1.63 P3) |
 | **Local** (daemon `/v1/local/*`, orchestration, ACP) | **No** — `nexus-contracts/src/local/` |
 
 See [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md).

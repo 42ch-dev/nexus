@@ -9,7 +9,7 @@ V1.63 P1 — promoted from inline handler DTOs in `crates/nexus-daemon-runtime/s
 | Endpoint | Schema files |
 |----------|-------------|
 | `POST /v1/local/works/{id}/findings` | `create-finding-request.schema.json` |
-| `GET /v1/local/works/{id}/findings` | `list-findings-query.schema.json` |
+| `GET /v1/local/works/{id}/findings` | `list-findings-query.schema.json`, `list-findings-response.schema.json` (F-P2 V1.64, cursor pagination) |
 | `GET/POST response` | `finding-detail-response.schema.json` |
 | `PATCH /v1/local/works/{id}/findings/{fid}` | `update-finding-request.schema.json` |
 | `GET /v1/local/findings/stale` | `stale-findings-response.schema.json` |
