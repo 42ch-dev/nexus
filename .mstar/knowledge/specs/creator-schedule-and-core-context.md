@@ -8,7 +8,7 @@
 
 - [orchestration-engine.md](orchestration-engine.md) — Task/Capability/Session primitives this spec builds on
 - [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) — program-level scope and milestones
-- [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) — confirms Schedule / core_context types are **local** (not wire)
+- [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — confirms Schedule / core_context types are **local** (not wire)
 
 **Answers for open questions originally parked in `orchestration-engine.md` §11**: OQ-1, OQ-2, OQ-3, OQ-4, OQ-5 are resolved here (see §2 "Confirmed Decisions"). OQ-6 is scoped for V1.4; OQ-7/OQ-8 remain V1.5+.
 
@@ -58,7 +58,7 @@ From the 2026-04-17 brainstorming and its follow-up (item 3 of the 2026-04-17 PM
 - **`iterated_experience` in V1.4 is "preset `context_update` hook only"** (Q1=D answer, 2026-04-17) — the derivation trace enum **reserves** `kind: "llm_summarize"` but V1.4 does not emit that kind; **V1.5 implemented** a `context.summarize` capability (`crates/nexus-orchestration/src/capability/builtins/context_summarize.rs`) that writes this kind without schema migration.
 - **Seed → first `core_context` semantics governed by preset** (Q2=C answer, 2026-04-17) — preset YAML declares the initial-action behaviour; V1.4 built-in presets default to "seed content becomes `core_context` v0 verbatim"; a future preset may declare a one-shot LLM expansion step and the engine will execute it.
 - **Trigger model**: V1.4 supported on-demand triggers (`schedule start`, auto-advance, `timer.wait_until`). **V1.5 WS-D added wall-clock / cron triggers** via a hand-rolled clock poller in `crates/nexus-orchestration/src/scheduler/` using `cron` + `chrono-tz` (see [`crate-selection-best-practices.md`](crate-selection-best-practices.md) §2.7 for the four hard constraints this implementation satisfies).
-- **Schedule and core_context types are local** — per [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) §2, platform never observes these; they live as hand-coded Rust in `crates/nexus-contracts/src/local/schedule/` (or the appropriate local submodule).
+- **Schedule and core_context types are local** — per [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) §2, platform never observes these; they live as hand-coded Rust in `crates/nexus-contracts/src/local/schedule/` (or the appropriate local submodule).
 - **Auto-chain side-input (V1.39)** — inspiration append (`creator run continue --note`, agent `nexus.work.patch`) and research KB writes during an active FL-E driver schedule produce new `core_context` versions or external KB artifacts but **must not** create a second active stage driver or cancel the current one. The running session completes the current state on the prior snapshot; enriched context is visible at the **next** state transition. See [creator-workflow.md](creator-workflow.md) §5.5.
 
 ## 3. Data Model
@@ -397,7 +397,7 @@ Following the pattern established in [acp-client-tech-spec.md](local/acp-client-
 | GET    | `/v1/local/orchestration/schedules/{schedule_id}/core-context-history`| Full derivation trace (meta by default, content with flag)  |
 | DELETE | `/v1/local/orchestration/schedules/{schedule_id}`                     | Remove Schedule (if terminal)                               |
 
-Per [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) §2, these request/response types are **local** (platform never observes them). Request/response Rust types live in `crates/nexus-contracts/src/local/schedule/http.rs` — hand-written, no JSON Schema file.
+Per [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) §2, these request/response types are **local** (platform never observes them). Request/response Rust types live in `crates/nexus-contracts/src/local/schedule/http.rs` — hand-written, no JSON Schema file.
 
 ## 10. SQLite Schema Additions
 
@@ -560,7 +560,7 @@ Internal:
 
 - [orchestration-engine.md](orchestration-engine.md) — engine primitives; §11 OQ list now answered here
 - [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) — program scope (WS7)
-- [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md) — confirms Schedule types are local
+- [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — confirms Schedule types are local
 - [acp-client-tech-spec.md](local/acp-client-tech-spec.md) §4.3 — orchestration HTTP surface pattern
 - [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — supervisor start/stop coupled to `Running`/`Stopping`
 

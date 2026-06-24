@@ -43,11 +43,13 @@ pub use embedded::{embedded_module_bytes, embedded_module_ids, embedded_module_m
 pub use engine::{WasmEngine, WasmModule};
 pub use error::{ComputeError, Result};
 pub use host::HostContext;
-pub use manifest::{HostFunction, ModuleManifest};
+pub use manifest::{HostFunction, ModuleManifest, ModuleSchemas};
 pub use module_cache::{CachedModule, ModuleCache};
 pub use sandbox::SandboxConfig;
 
 // Re-export the compute ABI types from nexus-contracts so consumers depend on a
-// single crate. These are the generated wire types for `schemas/compute/`.
-pub use nexus_contracts::generated::compute_input::ComputeInput;
-pub use nexus_contracts::generated::compute_output::{ComputeOutput, ComputeOutputStateDelta};
+// single crate. These are the generated wire types for `schemas/local-api/compute/`.
+pub use nexus_contracts::generated::local_api::compute::compute_input::ComputeInput;
+pub use nexus_contracts::generated::local_api::compute::compute_output::{
+    ComputeOutput, ComputeOutputStateDelta,
+};

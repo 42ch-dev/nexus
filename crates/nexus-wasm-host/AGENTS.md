@@ -16,7 +16,7 @@ into. It does **not** wire itself into the daemon — that is P-last.
 | Q1 Runtime | `wasmtime` (Bytecode Alliance) |
 | Q6 Sandbox | **Per-invocation sandbox.** Stateless pure function. Fresh instance per `compute()` call. |
 | Q6 Limits | **Fuel** (default 10M instructions) + **memory cap** (default 64 MiB via `ResourceLimiter`) + **wall-time** (default 30s via epoch-interruption watchdog). |
-| Q8 Output | Standard 4-part envelope from `schemas/compute/`. |
+| Q8 Output | Standard 4-part envelope from `schemas/local-api/compute/`. |
 
 ## Module ABI (V1 envelope)
 
@@ -52,6 +52,13 @@ The host whitelists two imported host functions (module namespace `nexus`):
 - **Sandbox limits are non-negotiable**: a module that exhausts fuel, exceeds the
   memory cap, or runs past the wall-time deadline traps and is reported as a
   `ComputeError`, never crashing the host.
+- **Manifest-driven validation** (V1.62): When `manifest.schemas` is declared,
+  the host validates `ComputeInput.key_blocks` (per
+  `key_block_attributes[block_type]` and `key_block_state[block_type]`),
+  `ComputeInput.invocation`, and `ComputeOutput.battle_report` against the
+  declared JSON-Schema fragments. Validation failure →
+  `ComputeError::ManifestValidationFailed { path, detail }`. Omitted schemas
+  fields → no validation for that aspect (backward-compatible with V1.61).
 
 ## Dependencies
 

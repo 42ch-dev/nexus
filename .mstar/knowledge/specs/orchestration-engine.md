@@ -1,9 +1,9 @@
 # Orchestration Engine — Design Specification
 
-**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. FL-D (DF-29/31/56) remain in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
+**Status**: Shipped (V1.4–V1.34 — orchestration engine SSOT, preset loader, worker IPC, capability registry). **V1.39 target**: DF-53 on_complete auto-chain + DF-68 boot resume policy. **V1.62 Shipped**: §5.2 `narrative.compute` capability + §8.4 `combat-engine` preset (deferred from V1.61 P3). FL-D (DF-29/31/56) remain in [`deferred-features-cross-version-tracker.md`](deferred-features-cross-version-tracker.md) §3.3.  
 **Document class**: Master  
 **Author**: @project-manager (brainstorm consolidation) / to be co-authored by @architect before first implement
-**Date**: 2026-04-17
+**Date**: 2026-04-17; **Last updated**: 2026-06-23 — V1.62 P2 §5.2 + §8.4
 **Scope**: daemon runtime (daemon), new `crates/nexus-acp-host`, new `crates/nexus-orchestration`, `nexus42` CLI additions, preset bundle format.
 **Supersedes**: — (new topic)
 **Coordinates with**:
@@ -349,13 +349,14 @@ All capabilities below are registered at daemon runtime startup. Adding a new ca
 | `judge.llm`                 | Evaluate a go/nogo prompt using a *judge* agent                | `nexus-orchestration`  | **Real** — worker-backed `acp.prompt` with `deny_all`, GO/NOGO parse (V1.31 DF-33/37) |
 | `judge.rule`                | Evaluate a pure rule over `contextData`                        | `nexus-orchestration`  | **Real** — boolean literals, field equality/inequality, numeric comparisons (V1.31 DF-32) |
 | `context.summarize`         | Summarize context through a worker-backed ACP prompt           | `nexus-orchestration`  | **Real** — returns `{ summary, prompt_hash }` (V1.31 DF-34/37) |
+| `narrative.compute`         | Invoke WASM compute module; apply state_delta, timeline_events, new_key_blocks, return battle_report | `nexus-orchestration`  | **Real** — calls `nexus-wasm-host::compute()` (V1.61 P3; spec-seal V1.62 P2); see §8.4.1 |
 | `timer.wait_until`          | Schedule a wake-up signal (requires B-track clock)             | `nexus-orchestration`  | Deferred clock integration |
 
 > **V1.31 de-stub note:** `creator.*`, `judge.rule`, `judge.llm`, and `context.summarize` are real runtime capabilities as of V1.31. DF-37 reduces worker-backed fallback to explicit standalone/test construction paths; daemon/preset execution injects runtime dependencies through the registry factory.
 
 ### 5.3 Capability input/output schemas
 
-Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-wire-platform-sync-boundary.md](../schemas-wire-platform-sync-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
+Each capability ships its `input_schema` and `output_schema` as constants (JSON Schema draft 2020-12) in Rust. **These schemas are local** (per [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md)) and live under `crates/nexus-contracts/src/local/orchestration/` (or adjacent module), **not** under `schemas/` — they are not wire contracts.
 
 > **Daemon builds:** `sync.*` MUST NOT call `nexus-cloud-sync` on the daemon hot path; see [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §7. `outbox.flush` / `outbox.compact` (V1.59) are local-only pool-backed capabilities that operate directly on `outbox_entries` via `nexus-local-db` — they do not depend on `nexus-cloud-sync`.
 
@@ -911,6 +912,104 @@ CLI and daemon `POST /v1/local/presets:validate` call these functions directly w
 - Loader caches `LoadedPreset` keyed by `source_hash`.
 - On `registry.refresh` capability call or the shipped Local API `POST /v1/local/presets/{id}:reload`, loader recomputes hash; if changed, invalidates cache and rebuilds. There is currently no top-level `nexus42 preset reload` CLI.
 - Running sessions continue on the previous graph (snapshot semantics); new sessions pick up the new graph.
+
+### 8.4 `narrative.compute` capability and `combat-engine` preset (V1.62 P2 — Normative)
+
+**Status**: Normative — V1.62 Shipped (deferred from V1.61 P3).
+
+V1.61 introduced the `nexus-wasm-host` crate and the `narrative.compute`
+orchestration capability; the capability registration and preset were deferred
+to V1.61 P3 and are now documented here as shipped.
+
+#### 8.4.1 `narrative.compute` capability
+
+**Name (registry key):** `narrative.compute`
+
+**Crate:** `nexus-orchestration` (`capability::builtins::NarrativeCompute`).
+
+**Scope:** orchestration-scope capability. Registered in the `CapabilityRegistry`
+at daemon boot.
+
+**Input:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `world_ref` | object | yes | World and timeline locator for the compute invocation. |
+| `module_id` | string | yes | ID of the compute module to invoke (e.g., `"basic-combat"`). |
+| `key_block_ids` | array of string | no | Specific KeyBlock IDs to include in `ComputeInput.key_blocks`. When omitted, the capability queries for all computable KeyBlocks matching the module's `required_key_block_types`. |
+| `invocation` | object | no | Module-declared freeform input parameters. Passed through to `ComputeInput.invocation`. |
+
+**Output:**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `state_delta_applied` | array of `StateDelta` | Deltas applied to computable KeyBlock bodies. |
+| `timeline_events_appended` | array of `TimelineEvent` | Events appended to the timeline. |
+| `new_key_blocks_upserted` | array of `KeyBlock` | New KeyBlocks created. |
+| `battle_report` | object | Module-declared freeform report. |
+
+**Execution flow:**
+
+```text
+1. Resolve module_id → WasmModule from the host's module cache (wasm-host.md §2.2).
+2. Query computable KeyBlocks from the World KB filtered by module's
+   required_key_block_types (see compute-module-abi.md §7.1).
+3. Build ComputeInput envelope: world_ref + key_blocks snapshot +
+   narrative_state + invocation.
+4. Call WasmEngine::compute(module, input) → ComputeOutput.
+5. Apply state_delta to computable KeyBlock bodies (atomic; no partial apply).
+6. Upsert new_key_blocks into the World KB.
+7. Append timeline_events to the timeline.
+8. Return battle_report to the caller.
+```
+
+**Error handling:** compute failure (any `ComputeError` variant) is surfaced as a
+`CapabilityError` and a `TimelineEvent` with `event_type: "compute_error"` is
+appended to the timeline. The daemon does not crash on compute failure.
+
+**Related:** [compute-module-abi.md](./compute-module-abi.md) (module ABI contract),
+[wasm-host.md](./wasm-host.md) (host runtime), [entity-scope-model.md](./entity-scope-model.md)
+§5.5.9 (computable-flag semantics).
+
+#### 8.4.2 `combat-engine` preset
+
+**Preset ID:** `combat-engine`
+
+**Pattern / role:** User-triggered combat resolution (V1.61 Q7).
+
+**State flow:**
+
+```text
+load_world → compute → apply_delta → advance_timeline → done
+```
+
+| State | Description |
+| --- | --- |
+| `load_world` | Load world context: resolve combatants from the World KB, validate they are computable (`computable: true`), select the `basic-combat` module. |
+| `compute` | Invoke `narrative.compute` capability with `module_id: "basic-combat"` and the selected combatant KeyBlock IDs. |
+| `apply_delta` | The `narrative.compute` capability applies the state delta, upserts new KeyBlocks, and appends timeline events. This state is a no-op in the preset (the capability already performed the side effects); it exists as an explicit checkpoint for observability. |
+| `advance_timeline` | Advance the world timeline past the combat outcome. Append a `story_advance` timeline event summarizing the combat result. |
+| `done` | Terminal state. |
+
+**Primary capabilities:** `narrative.compute`
+
+**Prompt templates (per state, under `embedded-presets/combat-engine/prompts/`):**
+
+| State | Template | Purpose |
+| --- | --- | --- |
+| `load_world` | `prompts/load-world.md` | World context assembly prompt (combatant selection, narrative framing). |
+| `compute` | (none — invokes capability directly) | The `compute` state delegates entirely to `narrative.compute`. |
+| `apply_delta` | `prompts/apply-delta.md` | Summarize the applied deltas for the user. |
+| `advance_timeline` | `prompts/advance-timeline.md` | Narrative framing for the combat outcome timeline event. |
+
+**Registration:** `combat-engine` is registered in `preset_version_for_id` and
+included in the preset sync test suite. The preset is **not** embedded in the
+binary in V1.62 — it is a filesystem-loaded preset under
+`crates/nexus-orchestration/embedded-presets/combat-engine/`.
+
+**Related:** [compute-module-abi.md](./compute-module-abi.md) §7.4 (basic-combat
+manifest example), [wasm-host.md](./wasm-host.md) (sandbox limits applied during
+`compute`).
 
 ---
 

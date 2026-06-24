@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generated::common_types::{ReferenceSourceType, ScanStatus};
+use crate::generated::common::common_types::{ReferenceSourceType, ScanStatus};
 
 /// Local-only registration of research/reference sources.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

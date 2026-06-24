@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/social-graph-relationship-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus SocialGraphRelationshipRequest",
+  "description": "Request body for social graph mutations: follow / unfollow / favorite / unfavorite (platform plan 17).",
+  "type": "object",
+  "required": ["schema_version", "action", "target_creator_id"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "action": {
+      "type": "string",
+      "enum": ["follow", "unfollow", "favorite", "unfavorite"],
+      "description": "Mutation to apply relative to the authenticated creator"
+    },
+    "target_creator_id": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/CreatorId",
+      "description": "Other creator the edge refers to"
+    },
+    "collection_id": {
+      "type": "string",
+      "pattern": "^col_[a-zA-Z0-9]+$",
+      "description": "Optional collection scope when action involves curated lists (platform extension)"
+    }
+  },
+  "additionalProperties": false
+}

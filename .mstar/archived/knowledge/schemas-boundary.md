@@ -2,7 +2,7 @@
 
 > **Superseded for directory layout (2026-05-20):** Current OSS tree and folder names → [schemas-directory-layout.md](../../knowledge/specs/schemas-directory-layout.md). Sync wire lives under **`schemas/cloud-sync/`** (formerly `schemas/cli-sync/`). **`schemas/meta/`** removed (type in `src/local/meta.rs`). The audit table in §5.2 below uses updated paths where mechanically aligned; treat this file as historical boundary methodology + audit snapshot.
 
-**Status**: Archived — boundary methodology; layout SSOT is [schemas-directory-layout.md](../../knowledge/specs/schemas-directory-layout.md) + [schemas-wire-platform-sync-boundary.md](../../knowledge/schemas-wire-platform-sync-boundary.md).
+**Status**: Archived — boundary methodology; layout SSOT is [schemas-directory-layout.md](../../knowledge/specs/schemas-directory-layout.md) + [schemas-external-consumer-boundary.md](../../knowledge/schemas-external-consumer-boundary.md).
 **Author**: @project-manager (2026-04-17 prep-phase spec) — to be co-signed by @architect before WS5 implement.
 **Scope**: The **boundary rule** and **local-type placement convention** for nexus OSS contracts.
 **Alignment source**: `{v1-spec}/schema/codegen-strategy-v1.md` §3 — this document is the in-repo SSOT for the decision that v1-spec §3 explicitly **delegates to the contract repo** ("是否在 `nexus` JSON Schema + `@42ch/nexus-contracts` 生成，由合约仓单独推进并对齐本稿"). No v1-spec update is required for the boundary rule itself; a future v1.4 roadmap / ADR update may cite this doc for traceability.

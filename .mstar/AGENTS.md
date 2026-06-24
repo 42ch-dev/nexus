@@ -37,6 +37,23 @@ Git-tracked docs and plans must be openable after a fresh `git clone`: no `.giti
 
 ## Project-Specific Deviations
 
+### `status.json` field discipline (narrative vs structured)
+
+`status.json` is **machine-readable structured state only** — the SSOT for active plans, residuals, gates, and iteration pointers. **Narrative belongs in `notes.json`** (append-only timeline), git commit messages, or plan/compass docs — not in `metadata` prose fields.
+
+**Forbidden in `metadata`** (narrative — write to `notes.json` instead):
+
+- ❌ `metadata.<iter>_plan_registration_note` — plan-registration facts live in `plans[]` rows.
+- ❌ `metadata.<iter>_carry_forward_index` — residual lifecycle lives in `residual_findings` (and `archived/residuals/` when closed).
+- ❌ `metadata.tech_debt_summary.<iter>_ship_note` — narrative ship summaries live in `notes.json` or `archived/shipped-features-tracker.md`.
+- ❌ Any new `*_note`, `*_index`, `*_narrative` field whose value is a paragraph of prose.
+
+**Test before adding a field**: if the value is a sentence/paragraph rather than an ID, count, enum, date, or path, it goes in `notes.json`. If the facts it expresses are already derivable from `plans[]`, `residual_findings`, or `archived/plans/<id>.json`, the field is redundant and forbidden.
+
+**Audit trail preservation**: removing a forbidden narrative field never loses information — the underlying facts remain in `plans[]` (structured), `residual_findings` (per-finding lifecycle), `archived/plans/` (per-plan snapshots), and `notes.json` (timeline). Record the removal in `notes.json` for traceability.
+
+This rule was originally established 2026-04-14 (see `notes.json` entry of that date); promoted to `AGENTS.md` 2026-06-23 after `v1_62_plan_registration_note` violated it because the rule lived in a write-mostly log agents don't read.
+
 ### Multi-plan iteration branches (harness convention)
 
 When an active delivery compass has **two or more** locked implement plans in the **same repo**, this project uses a **two-tier branch model** (aligned with Morning Star `mstar-branch-worktree` — plan integration branch + per-plan topic branches):

@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::generated::common_types::BindingStatus;
+use crate::generated::common::common_types::BindingStatus;
 
 /// Binding between a local workspace and a remote world.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

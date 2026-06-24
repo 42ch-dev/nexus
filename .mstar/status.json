@@ -1,57 +1,54 @@
 {
   "version": 1,
-  "updated_at": "2026-06-23T02:35:00Z",
+  "updated_at": "2026-06-23T16:53:26Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.62 (TBD)",
+    "integration_branch": "iteration/v1.62",
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.61 (retired, merged PR #83 @ 140f2594)",
+    "last_integration_branch": "iteration/v1.62 (pending PR — to be retired post-merge)",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.62+",
+    "latest_active_iteration": "V1.63+",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending",
+    "pre_implement_gate": "pending (V1.63+)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.61",
-      "compass": "v1.61-programmable-narrative-progression-delivery-compass-v1",
-      "shipped_at": "2026-06-23T11:00:09Z",
-      "plan_count": 7,
-      "plan_count_done": 7,
-      "open_at_ship": 7,
-      "deferred_to_next": 7,
+      "iteration": "V1.62",
+      "compass": "v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1",
+      "shipped_at": "2026-06-24T02:00:00Z",
+      "plan_count": 6,
+      "plan_count_done": 6,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.61: key-block.schema.json extended (state + computable additive fields); 4 new schemas in schemas/compute/ (compute-input, compute-output, entity-attributes, entity-state). Codegen cascade to Rust + TS. No DB migration (body_json TEXT). npm @42ch/nexus-contracts major bump. New crate nexus-wasm-host (wasmtime runtime). New capability narrative.compute (orchestration-scope, roster 32→33). New preset combat-engine.",
+      "wire_contracts_note": "V1.62: schemas/ reorganized to consumer-scope tree (common + domain + platform/{http-bff,sync} + local-api/compute). 56 schemas. Per-module entity-attributes/entity-state schemas DELETED (content migrated to module manifest.json schemas block). Compute envelope moved schemas/compute/ → schemas/local-api/compute/. Codegen restructured to nested modules with flat root re-exports. npm @42ch/nexus-contracts major bump (deleted EntityAttributes/EntityState exports + renamed internal module paths). New narrative.compute capability manifest validation: ManifestValidationFailed error variant. 2 NEW Master specs + 4 amendments. key-block.schema.json unchanged (V1.61 state/computable extension stays).",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-23-v1.61-compass-and-plan-stubs",
-        "2026-06-23-v1.61-schemas-and-codegen",
-        "2026-06-23-v1.61-kb-structured-layer",
-        "2026-06-23-v1.61-wasm-host-and-basic-combat",
-        "2026-06-23-v1.61-mid-qc-and-fix-waves",
-        "2026-06-23-v1.61-compute-capability-and-preset",
-        "2026-06-23-v1.61-daemon-integration-and-closeout"
+        "2026-06-23-v1.62-compass-and-plan-stubs",
+        "2026-06-23-v1.62-schemas-reorganization-and-envelope-move",
+        "2026-06-23-v1.62-manifest-schemas-and-host-validation",
+        "2026-06-23-v1.62-spec-extraction-compute-abi-and-wasm-host",
+        "2026-06-23-v1.62-mid-qc-and-fix-waves",
+        "2026-06-23-v1.62-daemon-verification-and-closeout"
       ],
+      "qc_tri_review_outcome": "P0: qc1 Approve (after fix-wave) + qc2 Approve + qc3 Approve. P1: qc1 Approve + qc2 Approve + qc3 Approve (after fix-wave for W-001 unbounded-recursion + PM-pressed revalidation). P2: qc1 Approve + qc2 Approve (exact-match content correctness) + qc3 Approve. P-last: PM closeout (no QC). Total: 9 QC reports + 1 PM-pressed revalidation + 3 mid-QA PASS.",
       "highlights": {
-        "P-1": "Compass PM-locked (12 grill decisions: wasmtime, embedded+user modules, V1 envelope ABI, KB structured layer attributes/state/computable, per-invocation sandbox, combat-engine preset). 7 plan stubs.",
-        "P0": "4 new compute schemas + key-block extension (state, computable additive). Codegen → Rust + TS. Tri-review 3/3 Approve. mid-QA PASS.",
-        "P1": "KB structured layer: KeyBlockBody state/computable fields, ValidationMode::Structured, KbQuery computable filter (InMemory + Sqlite). 24 new tests. Tri-review 3/3 Approve.",
-        "P2": "nexus-wasm-host crate (wasmtime engine, sandbox fuel/memory/wall-time, host ABI kb_read + narrative_query). basic-combat module (ATK-DEF). build.rs compile-from-source (user-requested gitignore fix). 17 tests. Tri-review 3/3 Approve + qc3 revalidation.",
-        "P-mid": "Meta tracking across 4 waves. No product code.",
-        "P3": "narrative.compute capability (WasmEngine compute + state delta apply add/sub/set + battle_report 64KB cap + compute_error graceful handling). combat-engine preset (load_world→compute→apply_delta→advance_timeline→done). Registry 32 builtins. Tri-review 3/3 Approve.",
-        "P-last": "Daemon singleton WasmEngine + module cache at boot. Embedded + user module loading. 3 E2E tests. Full regression 4375 pass. 8 residuals closed. Report-only QA PASS."
+        "P-1": "Compass PM-locked via grill-me (6 decisions); writing-specialist authored; PM-resolved bundle-collision open question.",
+        "P0": "schemas/ reorganized to consumer-scope tree (common + domain + platform/{http-bff,sync} + local-api/compute); 56 schemas; codegen nested-modules decision; boundary docs rewritten. QC 3/3 Approve (after fix-wave). mid-QA PASS.",
+        "P1": "manifest.json schemas block + host validation + basic-combat enrichment. Hand-rolled JSON-Schema validator with MAX_VALIDATION_DEPTH=64. 42 tests. QC 3/3 Approve (after fix-wave for qc3 W-001). mid-QA PASS.",
+        "P2": "2 NEW Master specs (compute-module-abi.md 463 lines + wasm-host.md 365 lines) + 4 amendments. QC 3/3 Approve. mid-QA PASS. Closes R-V161P1-LOW-001.",
+        "P-mid": "PM meta-tracking across 3 waves.",
+        "P-last": "Daemon sanity + clippy auto-fix closing R-V161P0-LOW-001 + Profile B compaction + status finalize + PR."
       },
-      "qc_tri_review_outcome": "Wave 1 P0: 3/3 Approve (0C/0W). Wave 2 P1: 3/3 Approve (0C/0W). P2: 3/3 Approve (0C/3W V1-acceptable) + qc3 fix-wave revalidation. Wave 3 P3: 3/3 Approve (0C/3W V1-acceptable). Wave 4 P-last: report-only QA PASS. Total: 12 QC reports + 1 fix-wave revalidation + 2 mid-QA.",
-      "note": "V1.61 ships Programmable Narrative Progression: WASM compute modules for timeline-based narrative iteration. XL iteration (largest since novel-writing). 7 plans, 4 waves. New crate nexus-wasm-host + new capability narrative.compute + new preset combat-engine + KB structured layer (state/computable) + 4 compute ABI schemas. User-requested design fix: embedded-modules gitignored + build.rs compile-from-source. 7 low residuals deferred to V1.62+/advisory.",
-      "merge_commit": "140f2594",
-      "pr": 83,
-      "pr_url": "https://github.com/42ch-dev/nexus/pull/83"
+      "note": "V1.62 ships Compute Architecture Course-Correction + schemas/ Long-Term Reorganization. XL iteration (6 plans, 3 waves). Closes the user-identified architectural debt from PR #83 review (compute module per-module shapes moved OUT of product-level schemas INTO module manifest.json). Establishes schemas/local-api/ subtree for future WebApp Local API client (post-1.0). 5 V1.61 residuals closed; 2 deferred. PM whitelist used for: P0 qc1 fix-wave (doc drift), P1 qc3 revalidation (host glitch recovery), P-last T5 clippy auto-fix (test-only).",
+      "merge_commit": null,
+      "pr": 85,
+      "pr_url": "https://github.com/42ch-dev/nexus/pull/85",
+      "predecessor_merge_commit": "140f2594"
     },
     "tech_debt_summary": {
-      "total_open": 7,
+      "total_open": 2,
       "total_deferred": 0,
-      "total_resolved": 168,
+      "total_resolved": 173,
       "total_archived": 5,
       "by_severity_active": {
         "low": 7,
@@ -59,37 +56,11 @@
         "high": 0
       },
       "by_target_active": {
-        "V1.61+": 1,
-        "V1.61 P1": 2,
-        "V1.61 P2/P3": 1,
-        "V1.61 P-last": 9,
-        "V1.62+": 2
-      },
-      "v1_60_ship_note": "V1.60 shipped with 9 open residuals (all low, V1.61+). 24 P-last residuals closed (11 code via @fullstack-dev batch @ 257b354a + 13 PM doc-only). 3 V1.52-era residuals deferred to V1.61+ (S001 drift detection needs stateful tracking; S006 heuristic not in production path; S008 stale). 7 QC residuals stay V1.61+."
+        "V1.63+": 1,
+        "V2+": 1
+      }
     },
-    "v1_57_carry_forward_index": {
-      "note": "V1.56 P1+P3 medium/low residuals absorbed into V1.57 plan slots. After Wave 2: ALL 3 V1.57 carry-forwards CLOSED (R-V156P1-M001 in P2 commit 28005f11; R-V156P1-M002 in P1 commit 64c0b245; R-V156P3-S003 in P0+P1 commits 7e9932ce + fc0e250a). 3 new V1.57+ residuals filed post-Wave 1: R-V157P0-L001 (low; AC wording), R-V157P0-L002 (medium; per-ID test vectors), R-V157P1-W001 (medium; host-call smoke `#[ignore]`). Wave 3 (P3) adds more V1.57+ residuals if surfaced.",
-      "R-V156P1-M001": "P2 — schema rename: capability_count — CLOSED in P2 (commit 28005f11) with backward-compat serde aliases",
-      "R-V156P1-M002": "P1 — global state → constructor injection for CdnConfig — CLOSED in P1 (commit 64c0b245)",
-      "R-V156P3-S003": "P0+P1 — field drops — CLOSED in P0+P1 (commits 7e9932ce + fc0e250a)"
-    },
-    "v1_58_carry_forward_index": {
-      "note": "V1.58 absorbs 33 of 35 V1.57+/V1.58+ open residuals (Track A: P0 closes 19, P2 closes 14). DF-44 closure split across P1 (capability + DB migration) + P3 (CLI + cross-cut tests). V1.52-era WL-A polish residuals (14 items: R-V150KBED-02, R-V151Q1-10, R-V152TA-S001..S011, R-V152TB-W006/W007/W008) explicitly OUT of V1.58 scope; deferred to V1.59+ WL-A sweep.",
-      "R-V156P0-M001..M006": "P0 T1-T6 — workspace OCC hardening (6 mediums)",
-      "R-V156P1-M003..M005": "P0 T7-T9 — capability handler quality (3 mediums)",
-      "R-V156P1-L001..L007": "P0 T10-T16 — capability surface polish (7 lows)",
-      "R-V156-PROCESS-01 + R-V156P1-CACHE-01": "P0 T18 — .sqlx/ cache hygiene (workspace AND test macros)",
-      "R-V156-MIDQA-01": "P0 T17 — fmt drift",
-      "R-V157P0-L001 + R-V157P0-L002": "P0 T19-T20 — V1.57-new residual closure",
-      "R-V156P2-M001..M003 + R-V156P2-L001..L004": "P2 T1-T7 — DF-56 independent slice polish (3 mediums + 4 lows)",
-      "R-V156P2-CACHE-01": "P2 T15 — engine test fidelity (1 medium)",
-      "R-V156P3-W001/W002 + R-V156P3-S001/S002/S004": "P2 T8-T12 — DF-56 dependent slice polish (2 mediums + 3 lows)",
-      "R-V157P1-W001": "P2 T13 — host-call smoke un-ignore (1 medium)",
-      "R-V157P0-L002 carry-forward": "P2 T14 — remaining per-ID failure-path test vectors",
-      "DF-44": "P1 T1-T11 + P3 T1-T9 — reference body refreshable pipeline (capability + DB migration + CLI + cross-cut tests)"
-    },
-    "updated_at": "2026-06-23T04:00:00Z",
-    "v1_60_plan_registration_note": "5 V1.60 plans registered in plans[]: P-1 (Done; Prepare complete); P0 + P1 (Todo; Wave 1 dispatch-ready after pre_implement_gate=approved); P-mid + P-last (Todo; chained dependencies). Profile B invariant: plans[] holds non-Done plans only — but P-1 stays as Done for one cycle to document Prepare completion (will be archived to plans-done.json at P-last compaction)."
+    "updated_at": "2026-06-23T16:53:26Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
