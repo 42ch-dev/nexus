@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/preset-management/preset-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PresetSummary",
+  "description": "Summary of a single preset entry (id, source, run intents).",
+  "type": "object",
+  "required": ["id", "source"],
+  "properties": {
+    "id": { "type": "string" },
+    "source": { "type": "string", "enum": ["embedded", "system", "user"] },
+    "run_intents": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

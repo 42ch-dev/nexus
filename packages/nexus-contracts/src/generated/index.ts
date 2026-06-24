@@ -44,6 +44,19 @@ export * from './local-api/kb/KbEntrySummary';
 export * from './local-api/kb/ListKbEntriesQuery';
 export * from './local-api/kb/ListKbEntriesResponse';
 export * from './local-api/kb/PaginationInfo';
+export * from './local-api/orchestration/capabilities/CapabilityInfo';
+export * from './local-api/orchestration/capabilities/ListCapabilitiesResponse';
+export * from './local-api/orchestration/sessions/ListSessionsQuery';
+export * from './local-api/orchestration/sessions/ListSessionsResponse';
+export * from './local-api/orchestration/sessions/SessionDetailResponse';
+export * from './local-api/orchestration/sessions/SessionSummary';
+export * from './local-api/preset-management/ListPresetsResponse';
+export * from './local-api/preset-management/PresetSummary';
+export * from './local-api/preset-management/ReloadPresetResponse';
+export * from './local-api/preset-management/ScaffoldPresetRequest';
+export * from './local-api/preset-management/ScaffoldPresetResponse';
+export * from './local-api/preset-management/ValidatePresetRequest';
+export * from './local-api/preset-management/ValidatePresetResponse';
 export * from './local-api/schedule/AddScheduleRequest';
 export * from './local-api/schedule/AddScheduleResponse';
 export * from './local-api/schedule/CoreContextHistoryEntry';
@@ -154,6 +167,19 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListKbEntriesQuery: 1,
   ListKbEntriesResponse: 1,
   PaginationInfo: 1,
+  CapabilityInfo: 1,
+  ListCapabilitiesResponse: 1,
+  ListSessionsQuery: 1,
+  ListSessionsResponse: 1,
+  SessionDetailResponse: 1,
+  SessionSummary: 1,
+  ListPresetsResponse: 1,
+  PresetSummary: 1,
+  ReloadPresetResponse: 1,
+  ScaffoldPresetRequest: 1,
+  ScaffoldPresetResponse: 1,
+  ValidatePresetRequest: 1,
+  ValidatePresetResponse: 1,
   AddScheduleRequest: 1,
   AddScheduleResponse: 1,
   CoreContextHistoryEntry: 1,

@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/orchestration/sessions/session-detail-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus OrchestrationSessionDetailResponse",
+  "description": "Response for GET /v1/local/orchestration/sessions/{session_id} — full session detail with status.",
+  "type": "object",
+  "required": ["session"],
+  "properties": {
+    "session": { "$ref": "https://nexus42.invalid/schemas/local-api/orchestration/sessions/session-summary.schema.json" }
+  },
+  "additionalProperties": false
+}
