@@ -26,22 +26,20 @@ Tauri-ready. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
   on `fetch`/`invoke` directly — that is what keeps the V1.65 Tauri shell a
   one-impl swap (web-ui.md §5, §9).
 
-## Pending contracts alignment
+## Contracts status (post Wave-1 merge)
 
-This scaffold builds against the **V1.63 contract base**. The following land
-with Track-B / plan P0 on the integration branch and unlock corresponding client
-methods (deliberately omitted now to avoid handwritten wire shapes):
+This app builds against the **V1.64 hardened contract base** (Track B / plan P0
+merged on the integration branch). Cursor pagination (F-P1), the shared
+`ErrorResponse` (F-E1), and the findings list endpoint (F-P2) are all available
+and consumed by the screens. Remaining gaps the UI adapts around:
 
-| Method | Blocked on | Note |
+| Gap | Adaptation | Target |
 | --- | --- | --- |
-| `listFindings` | `ListFindingsResponse` (F-P2 endpoint) | Findings screen stays a placeholder until then. |
-| Works cursor list | F-P1 migration of `ListWorksResponse` | `listWorks` currently uses offset/limit `{ works, total }`. |
-| Preset get/update/delete | No daemon routes / request types yet | Only list/scaffold/validate/reload are wired. |
-| `getWork`/`patchWork` return | drift `R-V163-P1-T6` (handler emits `WorkApiDto`) | Typed against generated `WorkDetailResponse`; P0 makes reality match. |
-| Error body parsing | shared `ErrorResponse` schema (F-E1) | `NexusClientError` is an app-side abstraction that already matches the planned `{ code, message, details? }` shape; tighten parsing when the generated type lands. |
-
-PM re-verifies `pnpm --filter web typecheck` after the Wave-1 merge reconciles
-these.
+| List arrays not unified to `items` (F-P3) | `normalizeList` adapter at the query boundary (`src/lib/nexus/adapters.ts`) maps `works`/`sessions`/`schedules`/`capabilities` → `items`. Findings already uses `items`. | V1.66+ structural closure |
+| No `sort_by`/`sort_order` (F-F1) | Client-side `sortByDate` for small un-paginated lists; cursor-paginated lists keep server order. | V1.66+ server-side sort |
+| `CreateWorkRequest` has no `work_profile` field | Create/Update Work forms offer foundational fields only; profile is assigned by the daemon internally. | Future profile-aware create contract |
+| Preset get/update/delete (no routes/contracts) | Presets page offers list/scaffold/validate/reload only (the daemon surface that exists). | Future preset-CRUD plan |
+| Capability admission gates not in list response | Capabilities page shows name + I/O schemas only; admission-gate logic is daemon-side. | Future capability-detail endpoint |
 
 ## Build / typecheck contract
 
