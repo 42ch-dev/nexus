@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { ClientProvider } from '@/lib/client-context';
 import type { NexusClient } from '@/lib/nexus';
+import { ToastProvider, Toaster } from '@/lib/use-toast';
 
 /**
  * Build a fresh QueryClient per test. Defaults are overridden so retries do not
@@ -48,7 +49,10 @@ export function renderInApp(
     return (
       <QueryClientProvider client={qc}>
         <ClientProvider client={activeClient}>
-          <MemoryRouter initialEntries={initialRouterEntries}>{children}</MemoryRouter>
+          <ToastProvider>
+            <MemoryRouter initialEntries={initialRouterEntries}>{children}</MemoryRouter>
+            <Toaster />
+          </ToastProvider>
         </ClientProvider>
       </QueryClientProvider>
     );
