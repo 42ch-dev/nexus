@@ -66,29 +66,47 @@ When converting a legacy endpoint:
 
 ## 3. Error envelope
 
-### 3.1 Canonical schema
+### 3.1 Canonical wire shape
 
-All Local API JSON error responses MUST converge on:
+All Local API JSON error responses are emitted by the daemon runtime as a
+**wrapped envelope** (see `ApiErrorResponse` in
+`crates/nexus-daemon-runtime/src/api/errors.rs`):
 
 ```json
 {
-  "code": "work_not_found",
-  "message": "Work not found. Check the Work ID and try again.",
-  "details": {
-    "work_id": "..."
+  "success": false,
+  "error": {
+    "code": "work_not_found",
+    "message": "Work not found. Check the Work ID and try again.",
+    "details": { "work_id": "..." },
+    "request_id": "req_01h..."
   }
 }
 ```
 
-Schema path: `schemas/local-api/common/error-response.schema.json`.
+- `success`: always `false` for errors.
+- `error`: the canonical detail object. The inner `{ code, message, details? }`
+  is what the shared `ErrorResponse` schema models
+  (`schemas/local-api/common/error-response.schema.json`); the schema describes
+  the **inner detail**, not the full wire body.
+- `error.request_id`: correlation ID injected by the request-tracing middleware
+  when active (`crates/nexus-daemon-runtime/src/api/middleware.rs`); absent when
+  the middleware is not installed. It lives under `error`, not at the top level.
 
-Fields:
+Inner detail fields:
 
 | Field | Required | Rule |
 | --- | --- | --- |
 | `code` | yes | Stable, machine-readable string. |
 | `message` | yes | Human-readable and actionable. |
 | `details` | no | JSON object for structured values such as IDs, validation paths, or field names. Do not put unstructured stack traces here. |
+| `request_id` | no | Correlation ID; set by middleware, not by handlers. |
+
+> **Implementation note:** transport adapters and consumers MUST read
+> `code`/`message`/`details` from `body.error`, not from the top level. A
+> handful of orchestration handlers still return ad-hoc `(StatusCode, String)`
+> bodies (deferred under `R-V164-FE1-ORCH`); those do not carry a structured
+> code and clients must fall back to `http_<status>`.
 
 ### 3.2 Error-code naming
 
