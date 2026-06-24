@@ -1,0 +1,167 @@
+# Essay-Writing Preset — Essay Production (V1.63 P2)
+#
+# LLM-driven essay drafting + 4-dimension quality rubric for essay Works.
+# Stage chain: intake → outline → draft → revise → finalize.
+# On finalize, the 4-dimension essay rubric evaluates thesis clarity,
+# evidence support, coherence, and ending takeaway. All four must pass (GO)
+# for the essay to be considered complete.
+#
+# V1.63 P2: finalize_commit state auto-writes frontmatter status: finalized
+# on rubric GO, triggering works.status = completed via is_essay_complete().
+#
+# Input variables (passed via schedule/CLI input):
+#   work_ref:        Work slug (directory under Works/)
+#   title:           Working title of the essay
+#   thesis:          Central thesis statement
+#   audience:        Target audience description
+#   structure:       Essay structure outline
+#   work_id:         Work entity ID (required)
+#   creator_id:      Creator owning the Work (required)
+#
+# Stage chain:
+#   intake → outline → draft → revise → finalize → finalize_commit → done
+#
+# After finalize, the 4-dim rubric exit judge fires; GO = all four pass;
+# NOGO = at least one dimension failed, triggering revise loop.
+
+preset:
+  id: essay-writing
+  version: 1
+  kind: creator
+  description: "LLM-driven essay drafting + 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) for essay Works (V1.63: Depth 3.5)"
+  requires_capabilities:
+    - creator.inject_prompt
+    - acp.prompt
+    - judge.llm
+    - essay.draft_status.finalize
+  run_intents:
+    - work_continue
+  initial: intake
+  terminal: done
+  # Preset gates — enforced at enqueue time.
+  gates:
+    - kind: work_field
+      field: work_profile
+      op: equals
+      value: essay
+    - kind: work_field
+      field: work_ref
+      op: required
+    - kind: work_field
+      field: intake_status
+      op: equals
+      value: complete
+    - kind: filesystem
+      path: "Works/{{work_ref}}/Drafts/"
+      must_exist: true
+
+states:
+  - id: intake
+    description: "Review creative brief and intake context; prepare writing direction"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/intake.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            title: "{{preset.input.title}}"
+            thesis: "{{preset.input.thesis}}"
+            audience: "{{preset.input.audience}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: outline
+
+  - id: outline
+    description: "Generate a structured essay outline with thesis, evidence, and takeaway"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/outline.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            title: "{{preset.input.title}}"
+            thesis: "{{preset.input.thesis}}"
+            audience: "{{preset.input.audience}}"
+            structure: "{{preset.input.structure}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: draft
+
+  - id: draft
+    description: "Write the full essay draft from the outline"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/draft.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            title: "{{preset.input.title}}"
+            thesis: "{{preset.input.thesis}}"
+            audience: "{{preset.input.audience}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: revise
+
+  - id: revise
+    description: "Apply review feedback to the draft; strengthen argument and prose"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/revise.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            title: "{{preset.input.title}}"
+            thesis: "{{preset.input.thesis}}"
+            audience: "{{preset.input.audience}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+      min_interval: "PT1H"
+    next: finalize
+
+  - id: finalize
+    description: "Polish essay + KB extraction hint + 4-dim rubric exit judgment"
+    enter:
+      - kind: capability
+        name: creator.inject_prompt
+        args:
+          prompt_file: prompts/finalize.md
+          vars:
+            work_ref: "{{preset.input.work_ref}}"
+            title: "{{preset.input.title}}"
+            thesis: "{{preset.input.thesis}}"
+            audience: "{{preset.input.audience}}"
+    exit_when:
+      kind: llm_judge
+      template_file: prompts/finalize-exit.md
+      judge_capability: judge.llm
+    next: finalize_commit
+
+  - id: finalize_commit
+    description: "Write frontmatter status: finalized after rubric GO; triggers completion"
+    enter:
+      - kind: capability
+        name: essay.draft_status.finalize
+        args:
+          work_ref: "{{preset.input.work_ref}}"
+          word_count: auto
+    exit_when:
+      kind: rule
+    next: done
+
+  - id: done
+    terminal: true
