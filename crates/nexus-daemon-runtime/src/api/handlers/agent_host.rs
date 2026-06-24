@@ -87,6 +87,7 @@ pub struct PaginationInfo {
     pub limit: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -313,7 +314,11 @@ pub async fn list_sessions(
 
     Ok(Json(SessionListResponse {
         items,
-        pagination: PaginationInfo { limit, next_cursor },
+        pagination: PaginationInfo {
+            limit,
+            has_more: next_cursor.is_some(),
+            next_cursor,
+        },
     }))
 }
 

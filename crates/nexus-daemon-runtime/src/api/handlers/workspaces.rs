@@ -49,6 +49,7 @@ pub struct PaginationEnvelope {
     pub limit: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -517,7 +518,11 @@ pub async fn list_workspaces(
 
     Ok(Json(ListWorkspacesResponse {
         items,
-        pagination: PaginationEnvelope { limit, next_cursor },
+        pagination: PaginationEnvelope {
+            limit,
+            has_more: next_cursor.is_some(),
+            next_cursor,
+        },
     }))
 }
 

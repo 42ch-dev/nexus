@@ -21,6 +21,7 @@ export * from './domain/TimelineEvent';
 export * from './domain/User';
 export * from './domain/WorldMembership';
 export * from './domain/World';
+export * from './local-api/common/ErrorResponse';
 export * from './local-api/compute/ComputeInput';
 export * from './local-api/compute/ComputeOutput';
 export * from './local-api/creators/ActiveCreatorResponse';
@@ -34,6 +35,7 @@ export * from './local-api/creators/SetActiveCreatorResponse';
 export * from './local-api/findings/CreateFindingRequest';
 export * from './local-api/findings/FindingDetailResponse';
 export * from './local-api/findings/ListFindingsQuery';
+export * from './local-api/findings/ListFindingsResponse';
 export * from './local-api/findings/StaleFindingsResponse';
 export * from './local-api/findings/UpdateFindingRequest';
 export * from './local-api/kb/AddKbEntryRequest';
@@ -144,6 +146,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   User: 1,
   WorldMembership: 1,
   World: 1,
+  ErrorResponse: 1,
   ComputeInput: 1,
   ComputeOutput: 1,
   ActiveCreatorResponse: 1,
@@ -157,6 +160,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   CreateFindingRequest: 1,
   FindingDetailResponse: 1,
   ListFindingsQuery: 1,
+  ListFindingsResponse: 1,
   StaleFindingsResponse: 1,
   UpdateFindingRequest: 1,
   AddKbEntryRequest: 1,

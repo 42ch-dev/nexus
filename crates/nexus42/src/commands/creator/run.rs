@@ -665,6 +665,14 @@ async fn assemble_open_findings_block(
     chapter: i32,
     chapter_label: &str,
 ) -> crate::errors::Result<Option<String>> {
+    // F-P2 (V1.64): the findings list endpoint now returns `{ items, pagination }`
+    // instead of a bare array. Read the `items` field; pagination is unused here
+    // (the produce-prompt path requests a single large page).
+    #[derive(serde::Deserialize)]
+    struct FindingsListResponse {
+        items: Vec<nexus_local_db::findings::Finding>,
+    }
+
     use nexus_orchestration::findings_block::{build_open_findings_block, sort_open_findings};
 
     // R-V149P0-01 (V1.50): widen the client-side request from `?status=open`
@@ -673,7 +681,8 @@ async fn assemble_open_findings_block(
     // on the comma to a dynamic `IN (?, ?)` query.
     let actionable_statuses = nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES.join(",");
     let path = format!("/v1/local/works/{work_id}/findings?status={actionable_statuses}&limit=200");
-    let resp: Vec<nexus_local_db::findings::Finding> = client.get(&path).await?;
+    let resp: FindingsListResponse = client.get(&path).await?;
+    let resp = resp.items;
 
     // Overlay §2.1 scope: chapter == N OR chapter IS NULL (Work-level).
     let chapter_i64 = i64::from(chapter);
