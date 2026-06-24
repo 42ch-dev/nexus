@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-24T00:00:00Z",
+  "updated_at": "2026-06-24T12:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-24-v1.63-compass-and-plan-stubs",
@@ -141,19 +141,16 @@
       "predecessor_merge_commit": "140f2594"
     },
     "tech_debt_summary": {
-      "total_open": 2,
-      "total_deferred": 0,
-      "total_resolved": 173,
+      "total_open": 0,
+      "total_deferred": 6,
+      "total_resolved": 180,
       "total_archived": 5,
       "by_severity_active": {
-        "low": 7,
+        "low": 0,
         "medium": 0,
         "high": 0
       },
-      "by_target_active": {
-        "V1.63+": 1,
-        "V2+": 1
-      }
+      "by_target_active": {}
     },
     "updated_at": "2026-06-23T16:53:26Z"
   },
@@ -170,7 +167,13 @@
         "target": "V1.62+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-ARCH-001]",
         "note": "Functional (full_cycle test passes) but state-machine surface misrepresents execution semantics. Cleanup: split capability per stage OR collapse to compute→done.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "Added architectural comment to combat-engine preset.yaml documenting that load_world's narrative.compute capability call performs the full cycle (read KeyBlocks, invoke WASM, apply state deltas, append timeline events) in a single invocation. The downstream states (apply_delta, advance_timeline) are structural markers reserved for future per-stage capability splits. No code behaviour changed.",
+        "resolution": {
+          "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+          "commit": "4ff73a54"
+        }
       },
       {
         "id": "R-V161P3-CORR-001",
@@ -183,7 +186,13 @@
         "target": "V1.62+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-compute-capability-and-preset][R-V161P3-CORR-001]",
         "note": "Low risk under current threat model (embedded trusted modules, same-creator worlds). Add transactional apply for untrusted modules in V2.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "Added threat-model documentation in narrative_compute.rs apply_state_delta explaining why sequential (non-transactional) batch apply is accepted under the V1.61 trusted-module model: all modules are embedded (compiled into binary), compute runs on same-creator worlds, WASM is sandboxed, output is validated before apply. Partial failure means a module logic bug, not a security boundary breach. V2.0+ with user-authored modules should add transaction-aware SqliteKbStore API.",
+        "resolution": {
+          "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+          "commit": "4ff73a54"
+        }
       },
       {
         "id": "R-V161P3-CORR-002",
@@ -289,7 +298,13 @@
         "target_date": "V1.61 P-last spec hygiene",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-kb-structured-layer][R-V161P1-LOW-001]",
         "note": "Compass §2 Normative specs table lists entity-scope-model.md §5.5 as 'Amend — computable flag semantics + structured validation mode' for P1. Implementation is complete; the spec doc amendment was not done in P1. Doc-only — defer to P-last spec hygiene pass.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "Confirmed closed — §5.5.9 computable-flag semantics and structured validation mode was committed in V1.62 P2 (entity-scope-model.md lines 146-247). The spec header already reflects 'V1.62 Shipped: §5.5.9'. The residual was stale; the amendment body was authored and shipped in V1.62 but the residual wasn't marked resolved at that time.",
+        "resolution": {
+          "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+          "commit": "37324e13"
+        }
       }
     ],
     "2026-06-23-v1.61-wasm-host-and-basic-combat": [
@@ -364,7 +379,13 @@
         "target_date": "V1.61 P-last hygiene",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-001]",
         "note": "Surfaced by `cargo clippy -p nexus-contracts --tests`. Not caught by CI `cargo clippy --all -- -D warnings` (default targets). Pre-existing on iteration base. P0 surgical-scope: left untouched.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "Already fixed in V1.62 P-last T5 (commit c8cc46ee: 'fix(nexus-contracts): clippy auto-fix for R-V161P0-LOW-001'). Verified clean in V1.63 P-last: cargo clippy --tests -p nexus-contracts -- -D warnings passes with zero warnings. The residual was open because the V1.62 P-last closure wasn't recorded in status.json.",
+        "resolution": {
+          "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+          "commit": "c8cc46ee"
+        }
       },
       {
         "id": "R-V161P0-INFO-001",
@@ -378,7 +399,13 @@
         "target_date": "V1.61 P1",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-INFO-001]",
         "note": "Compass §1.1 P0 T3/T4 named `environment` as a computable BlockType, but `environment` is not a BlockType enum value. P0 substituted character (fully specified) + item/faction/ability/species (permissive placeholders). P1 must confirm the canonical computable BlockType set when wiring the local KeyBlockBody fields.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "Documented intentional exclusion in entity-scope-model.md §5.1.1. 'environment' is too broad for a single entity BlockType — it spans weather, terrain, celestial, ambient conditions, and multi-entity spatial state. Environmental context uses existing types: scene (spatial), event (ambient), info_point (rules). Per-profile body.attributes shapes (e.g. game-bible 'level' carrying terrain grid) provide domain-specific modelling. Module authors declare per-BlockType shapes in manifest.json schemas (§5.5.9.3). Future domain-specific environmental BlockType (e.g. 'biome') should follow the V1.54 game-bible precedent.",
+        "resolution": {
+          "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+          "commit": "37324e13"
+        }
       },
       {
         "id": "R-V161P0-LOW-002",
@@ -432,7 +459,13 @@
         "target_date": "V1.61 P1",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-004]",
         "note": "No DB migration (body_json TEXT). Computable KeyBlocks accumulate mutable state over compute invocations. P1 should document body_json growth expectation and assess whether json_extract queries on computable need indexing. Not blocking for V1.61 additive rollout.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "Added §5.5.9.2.1 in entity-scope-model.md documenting SQLite body_json TEXT growth expectations for computable KeyBlocks: row size growth (per-module state schemas cap object sizes), DB file growth (SQLite WAL auto-checkpoints; VACUUM for bulk deletes), json_extract query cost (computable filter uses separate WHERE column, not json_extract; no state-path queries are a current pattern), and migration risk (TEXT column, graceful degradation on invalid JSON). No json_extract index needed at current scale (<10K computable KeyBlocks per world). Reassess at V2.0+ when user-authored modules introduce unbounded state shapes.",
+        "resolution": {
+          "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+          "commit": "37324e13"
+        }
       },
       {
         "id": "R-V161P0-LOW-005",
@@ -446,7 +479,13 @@
         "target_date": "V1.61 P2/P3",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-005]",
         "note": "Non-character BlockTypes use additionalProperties: true (intentional V1 placeholders). Runtime validation cost is deferred to module contract enforcement (manifest.json). P2/P3 should document that manifest declares BlockType + attribute/state shapes.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "Confirmed closed — §5.5.9.3 and §5.5.9.4 in entity-scope-model.md already document that V1.62 deleted the placeholder entity-attributes/entity-state schemas and replaced them with per-module manifest.json schemas blocks. Module authors declare per-BlockType attribute/state shapes in manifest.json (see compute-module-abi.md §7.3). The placeholder schemas are intentionally permissive; structured validation is deferred to module contract enforcement at compute invocation time.",
+        "resolution": {
+          "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+          "commit": "37324e13"
+        }
       }
     ],
     "2026-06-22-v1.54-game-bible-scaffold": [
@@ -3647,6 +3686,92 @@
         "note": "WL-A. Migration is widening-only (CHECK constraint adds 'script'); data copy is SELECT *. Low risk. Future: add PRAGMA foreign_key_check as belt-and-suspenders for all table-recreate migrations.",
         "lifecycle": "deferred",
         "_plan_id": "2026-06-22-v1.60-script-depth-35"
+      }
+    ],
+    "2026-06-24-v1.63-local-api-orchestration-and-preset-dtos": [
+      {
+        "id": "R-V163P3-SURF-001",
+        "title": "Works uses offset/limit while peers use cursor-based pagination — migrate to cursor-based",
+        "severity": "medium",
+        "source": "P3 surface audit (F-P1)",
+        "scope": "schemas/local-api/works/ list-query + list-response; handler migration",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.64+",
+        "target_date": "V1.64+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-P1",
+        "note": "Works is the only resource using offset/limit + total. All other list-returning resources (creators, kb, workspaces) use cursor-based pagination via shared PaginationInfo. Migrate Works to cursor-based pagination, adding PaginationInfo and changing works → items. Requires handler changes (structural).",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V163P3-SURF-002",
+        "title": "Findings list-response schema missing",
+        "severity": "low",
+        "source": "P3 surface audit (F-P2)",
+        "scope": "schemas/local-api/findings/ — list-findings-query exists but no list-findings-response",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.64+",
+        "target_date": "V1.64+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-P2",
+        "note": "list-findings-query.schema.json defines offset/limit query params (inconsistent with peers using cursor), but there is no list-findings-response.schema.json. Add list-findings-response when endpoint is implemented, using cursor-based pattern matching peers.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V163P3-SURF-003",
+        "title": "Response array key naming inconsistent (works/schedules/sessions/capabilities vs items)",
+        "severity": "low",
+        "source": "P3 surface audit (F-P3)",
+        "scope": "All Local API list response schemas — response array key naming",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.64+",
+        "target_date": "V1.64+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-P3",
+        "note": "Works uses 'works', Schedule uses 'schedules', Sessions uses 'sessions', Capabilities uses 'capabilities'. Cursor-based resources (Creators, KB, Workspaces) use 'items'. Standardize on 'items' for list response arrays. Breaking change requiring handler migration; coordinate with web-ui iteration.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V163P3-SURF-004",
+        "title": "No standardized error envelope across Local API handlers",
+        "severity": "low",
+        "source": "P3 surface audit (F-E1)",
+        "scope": "All Local API handlers — error body format varies (plain string vs JSON object)",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.64+",
+        "target_date": "V1.64+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-E1",
+        "note": "No shared ErrorResponse schema. Handlers return (StatusCode, String) tuples with varying body formats. Add shared ErrorResponse schema in schemas/local-api/common/ with code (stable error code), message, and optional details. Requires handler audit. Defer to V1.64+.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V163P3-SURF-005",
+        "title": "No sort parameters defined in any list query schema",
+        "severity": "low",
+        "source": "P3 surface audit (F-F1)",
+        "scope": "All Local API list-query schemas — no sort_by/sort_order params",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.64+",
+        "target_date": "V1.64+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-F1",
+        "note": "No resource supports sort_by/order/direction query parameters. When sort is added, standardize on sort_by: string + sort_order: 'asc' | 'desc'. Defer to V1.64+.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V163P1-T6-001",
+        "title": "Handler DTO migration deferred — handlers still use inline types instead of generated local_api::*",
+        "severity": "low",
+        "source": "P1 T6 (plan 2026-06-24-v1.63-local-api-core-crud-dtos)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/ — handlers use inline serde types rather than generated local_api::* DTOs",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.64+",
+        "target_date": "V1.64+",
+        "tracking_link": ".mstar/plans/2026-06-24-v1.63-local-api-core-crud-dtos.md §T6",
+        "note": "P1 promoted DTO schemas to Local API surface but handler migration was deferred to a follow-up plan (too many handler touchpoints for a schema-only pass). Handlers currently use inline serde::{Deserialize,Serialize} structs; should migrate to re-exported generated types from nexus-contracts::local_api::*. Coordinate with P3 surface audit pagination/error-envelope improvements.",
+        "lifecycle": "deferred"
       }
     ]
   }
