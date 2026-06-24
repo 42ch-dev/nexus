@@ -132,12 +132,12 @@ async fn findings_list_filter_by_work_id() {
             status: None,
             severity: None,
             limit: None,
-            offset: None,
+            cursor: None,
         }),
     )
     .await
     .unwrap();
-    let list = result.0;
+    let list = result.0.items;
     assert_eq!(list.len(), 2);
 
     // Filter by severity
@@ -149,12 +149,12 @@ async fn findings_list_filter_by_work_id() {
             status: None,
             severity: Some("blocker".to_string()),
             limit: None,
-            offset: None,
+            cursor: None,
         }),
     )
     .await
     .unwrap();
-    let filtered = result.0;
+    let filtered = result.0.items;
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].severity, "blocker");
 }
@@ -209,12 +209,12 @@ async fn findings_list_filter_by_comma_separated_status() {
             status: Some("open".to_string()),
             severity: None,
             limit: None,
-            offset: None,
+            cursor: None,
         }),
     )
     .await
     .unwrap();
-    let only_open = result.0;
+    let only_open = result.0.items;
     assert_eq!(only_open.len(), 1, "expected just the open finding");
     assert_eq!(only_open[0].finding_id, open.finding_id);
 
@@ -227,12 +227,12 @@ async fn findings_list_filter_by_comma_separated_status() {
             status: Some("open,triaged".to_string()),
             severity: None,
             limit: None,
-            offset: None,
+            cursor: None,
         }),
     )
     .await
     .unwrap();
-    let actionable = result.0;
+    let actionable = result.0.items;
     assert_eq!(
         actionable.len(),
         2,
@@ -267,13 +267,13 @@ async fn findings_list_filter_by_comma_separated_status() {
             status: Some("open, triaged".to_string()),
             severity: None,
             limit: None,
-            offset: None,
+            cursor: None,
         }),
     )
     .await
     .unwrap();
     assert_eq!(
-        result.0.len(),
+        result.0.items.len(),
         2,
         "comma + whitespace tolerant parse should still return 2"
     );
@@ -290,7 +290,7 @@ async fn findings_list_filter_by_comma_separated_status() {
             status: Some("open,bogus".to_string()),
             severity: None,
             limit: None,
-            offset: None,
+            cursor: None,
         }),
     )
     .await
@@ -435,12 +435,12 @@ async fn findings_creator_isolation_cross_creator_404() {
             status: None,
             severity: None,
             limit: None,
-            offset: None,
+            cursor: None,
         }),
     )
     .await
     .unwrap();
-    assert!(result.0.is_empty());
+    assert!(result.0.items.is_empty());
 }
 
 #[tokio::test]

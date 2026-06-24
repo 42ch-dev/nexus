@@ -212,7 +212,10 @@ async fn list_works_returns_200() {
     let body: Value = resp.json();
     assert!(body["works"].is_array());
     assert!(!body["works"].as_array().unwrap().is_empty());
-    assert_eq!(body["total"], 1);
+    // F-P1 (V1.64): `total` removed; cursor `pagination` envelope present.
+    assert!(body["pagination"].is_object());
+    assert_eq!(body["pagination"]["has_more"], false);
+    assert!(body["total"].is_null());
 }
 
 #[tokio::test]
