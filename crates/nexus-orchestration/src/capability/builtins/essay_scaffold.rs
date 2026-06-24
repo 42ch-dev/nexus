@@ -560,8 +560,7 @@ mod tests {
         assert!(outline_content.contains("status: outline"));
         assert!(outline_content.contains("# Thesis"));
 
-        let draft_content =
-            std::fs::read_to_string(scaffold_path.join("Drafts/draft.md")).unwrap();
+        let draft_content = std::fs::read_to_string(scaffold_path.join("Drafts/draft.md")).unwrap();
         assert!(draft_content.contains("status: draft"));
         assert!(draft_content.contains("word_count: 0"));
     }

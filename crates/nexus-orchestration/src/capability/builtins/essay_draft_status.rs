@@ -107,9 +107,9 @@ impl Capability for EssayDraftStatusFinalize {
         let draft_path = works_root.join(&work_ref).join("Drafts").join("draft.md");
 
         // Read current draft
-        let content = tokio::fs::read_to_string(&draft_path).await.map_err(|e| {
-            CapabilityError::Internal(format!("read draft.md: {e}"))
-        })?;
+        let content = tokio::fs::read_to_string(&draft_path)
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("read draft.md: {e}")))?;
 
         // Parse and update YAML frontmatter
         let updated_content = update_frontmatter_status(&content)?;
@@ -121,14 +121,14 @@ impl Capability for EssayDraftStatusFinalize {
         let tmp_path = draft_path.with_extension("md.tmp");
         tokio::fs::write(&tmp_path, &updated_content)
             .await
+            .map_err(|e| CapabilityError::Internal(format!("write tmp draft.md: {e}")))?;
+        tokio::fs::rename(&tmp_path, &draft_path)
+            .await
             .map_err(|e| {
-                CapabilityError::Internal(format!("write tmp draft.md: {e}"))
+                // Clean up temp on rename failure
+                let _ = std::fs::remove_file(&tmp_path);
+                CapabilityError::Internal(format!("rename tmp to draft.md: {e}"))
             })?;
-        tokio::fs::rename(&tmp_path, &draft_path).await.map_err(|e| {
-            // Clean up temp on rename failure
-            let _ = std::fs::remove_file(&tmp_path);
-            CapabilityError::Internal(format!("rename tmp to draft.md: {e}"))
-        })?;
 
         info!(
             work_ref = %work_ref,
@@ -162,7 +162,9 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
 
     // Find the closing `---` after the opening.
     let after_open = &trimmed[3..]; // skip opening ---
-    let closing_idx = after_open.find("\n---").or_else(|| after_open.find("\r\n---"));
+    let closing_idx = after_open
+        .find("\n---")
+        .or_else(|| after_open.find("\r\n---"));
     let Some(closing_idx) = closing_idx else {
         return Err(CapabilityError::InputInvalid(
             "draft.md frontmatter is not closed (missing closing '---')".into(),
@@ -234,10 +236,7 @@ fn update_frontmatter_status(content: &str) -> Result<String, CapabilityError> {
         new_fm.push_str("\nstatus: finalized");
     }
     if !found_word_count {
-        let _ = std::fmt::Write::write_fmt(
-            &mut new_fm,
-            format_args!("\nword_count: {word_count}"),
-        );
+        let _ = std::fmt::Write::write_fmt(&mut new_fm, format_args!("\nword_count: {word_count}"));
     }
 
     // Ensure title comes first if present (simple reorder)
@@ -303,7 +302,8 @@ mod tests {
 
     #[test]
     fn update_frontmatter_updates_word_count() {
-        let content = "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\none two three four five";
+        let content =
+            "---\ntitle: Test\nstatus: draft\nword_count: 0\n---\n\none two three four five";
         let result = update_frontmatter_status(content).unwrap();
         // word_count should be recalculated
         assert!(
