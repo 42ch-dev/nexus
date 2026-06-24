@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/core-context-history-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CoreContextHistoryResponse",
+  "description": "Response for GET /v1/local/orchestration/schedules/{schedule_id}/core-context-history.",
+  "type": "object",
+  "required": ["entries"],
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/local-api/schedule/core-context-history-entry.schema.json" },
+      "description": "Ordered list of core context versions."
+    }
+  },
+  "additionalProperties": false
+}

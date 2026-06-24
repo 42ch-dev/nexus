@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/workspace/create-workspace-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CreateWorkspaceResponse",
+  "description": "Response for POST /v1/local/workspaces.",
+  "type": "object",
+  "required": ["creator_id", "workspace_slug", "creative_root", "operational_dir", "state_db_path"],
+  "properties": {
+    "creator_id": { "type": "string" },
+    "workspace_slug": { "type": "string" },
+    "creative_root": { "type": "string" },
+    "operational_dir": { "type": "string" },
+    "state_db_path": { "type": "string" }
+  },
+  "additionalProperties": false
+}

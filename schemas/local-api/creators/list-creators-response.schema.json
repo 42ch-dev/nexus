@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/creators/list-creators-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCreatorsResponse",
+  "description": "Response for GET /v1/local/creators.",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "properties": {
+    "items": { "type": "array", "items": { "$ref": "https://nexus42.invalid/schemas/local-api/creators/creator-info.schema.json" } },
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/list-works-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListWorksQuery",
+  "description": "Query parameters for GET /v1/local/works.",
+  "type": "object",
+  "properties": {
+    "status": { "type": "string" },
+    "intake_status": { "type": "string" },
+    "limit": { "type": "integer" },
+    "offset": { "type": "integer" }
+  },
+  "additionalProperties": false
+}

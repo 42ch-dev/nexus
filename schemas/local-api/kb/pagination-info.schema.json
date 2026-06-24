@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PaginationInfo",
+  "description": "Cursor-based pagination metadata.",
+  "type": "object",
+  "required": ["limit"],
+  "properties": {
+    "limit": { "type": "integer" },
+    "next_cursor": { "type": "string" }
+  },
+  "additionalProperties": false
+}

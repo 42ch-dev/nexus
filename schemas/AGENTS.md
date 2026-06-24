@@ -17,10 +17,10 @@ Committed schemas use `https://nexus42.invalid` in `$id`/`$ref` (RFC 6761 reserv
 `schemas/` → `pnpm run codegen` → Rust (`crates/nexus-contracts/src/generated/`) + TypeScript (`packages/nexus-contracts/src/generated/`).
 
 Generated modules are **nested** to mirror the consumer-scope tree:
-- Rust: `generated::{common, domain, platform::{http_bff, sync}, local_api::compute}::<module>` (e.g. `generated::local_api::compute::compute_input::ComputeInput`). The root `generated::mod.rs` also re-exports all leaf types flat, so `generated::ComputeInput` resolves too.
-- TypeScript: mirrors the same folders (hyphenated: `platform/http-bff`, `local-api/compute`); `index.ts` re-exports flat for the package public API.
+- Rust: `generated::{common, domain, platform::{http_bff, sync}, local_api::{compute, works, kb, findings, schedule, workspace, creators}}::<module>` (e.g. `generated::local_api::works::work_summary::WorkSummary`). The root `generated::mod.rs` also re-exports all leaf types flat, so `generated::WorkSummary` resolves too.
+- TypeScript: mirrors the same folders (hyphenated: `platform/http-bff`, `local-api/works`, `local-api/kb`, etc.); `index.ts` re-exports flat for the package public API.
 
-The `local-api/` subtree runs through the same codegen as wire types — it is a cross-language contract surface.
+The `local-api/` subtree runs through the same codegen as wire types — it is a cross-language contract surface. V1.63 added `local-api/{works,kb,findings,schedule,workspace,creators}/` for the daemon's core CRUD Local API surface, consumed by future WebApp/Web-UI clients.
 
 ## ⚠️ Mandatory: Run Codegen After Any Schema Change
 
