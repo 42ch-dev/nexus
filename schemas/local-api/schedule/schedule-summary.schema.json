@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/schedule-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ScheduleSummary",
+  "description": "Summary row for a schedule in list/inspect responses.",
+  "type": "object",
+  "required": ["schedule_id", "creator_id", "preset_id", "status", "current_core_context_version", "created_at", "updated_at"],
+  "properties": {
+    "schedule_id": { "type": "string", "description": "Unique schedule identifier." },
+    "creator_id": { "type": "string", "description": "Owning creator ID." },
+    "preset_id": { "type": "string", "description": "Preset ID this schedule runs." },
+    "status": { "type": "string", "description": "Current schedule status." },
+    "label": { "type": "string", "description": "Human-readable label." },
+    "current_core_context_version": { "type": "integer", "description": "Current core context version number." },
+    "created_at": { "type": "string", "description": "ISO-8601 creation timestamp." },
+    "updated_at": { "type": "string", "description": "ISO-8601 last-update timestamp." }
+  },
+  "additionalProperties": false
+}

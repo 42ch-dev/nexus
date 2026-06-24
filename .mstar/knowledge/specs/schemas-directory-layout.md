@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.62 Shipped (consumer-scope reorganization) |
+| **Status** | Normative — V1.63 Shipped (expanded local-api surface) |
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
-| **Last updated** | 2026-06-23 — V1.62 P2 (spec-seal polish) |
+| **Last updated** | 2026-06-24 — V1.63 P1 (local-api core CRUD subtrees) |
 | **Related** | [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
@@ -31,7 +31,13 @@ schemas/
 │   ├── http-bff/          # platform HTTP request/response bodies (BFF contracts)
 │   └── sync/              # CLI ↔ platform sync protocol (bundle, delta, pull, conflict)
 └── local-api/             # external Local API clients (e.g. future WebApp/Web-UI, WASM modules)
-    └── compute/           # compute module ABI envelopes (ComputeInput / ComputeOutput)
+    ├── compute/           # compute module ABI envelopes (ComputeInput / ComputeOutput)
+    ├── works/             # works CRUD schemas (V1.63 P1)
+    ├── kb/                # work-scope KB entry CRUD schemas (V1.63 P1)
+    ├── findings/          # quality findings CRUD schemas (V1.63 P1)
+    ├── schedule/          # schedule + core-context CRUD schemas (V1.63 P1)
+    ├── workspace/         # workspace management CRUD schemas (V1.63 P1)
+    └── creators/          # creator management CRUD schemas (V1.63 P1)
 ```
 
 **Removed paths (do not recreate):**
@@ -41,7 +47,7 @@ schemas/
 - `schemas/cli-sync/` — renamed `cloud-sync/` (2026-05-20); `cloud-sync/` folded into `platform/sync/` (2026-06-23, V1.62 P0)
 - `schemas/cloud-sync/` — → `platform/sync/` (2026-06-23, V1.62 P0)
 - `schemas/compute/` — compute envelopes → `local-api/compute/`; entity-attributes/entity-state **deleted** (per-module shapes → `modules/<id>/manifest.json`, V1.62 P1) (2026-06-23, V1.62 P0)
-- Any daemon `/v1/local/*` DTO as JSON Schema — use `src/local/` (orchestration, schedule, daemon status, registry manifest)
+- Previously local-only daemon `/v1/local/*` DTOs — **V1.63 P1 promoted** core CRUD DTOs (works, kb, findings, schedule, workspace, creators) to `schemas/local-api/<resource>/` for cross-language consumption by future WebApp/Web-UI. Internal types (orchestration internals, ACP registry, daemon status) remain in `src/local/`.
 
 ---
 
@@ -54,8 +60,14 @@ schemas/
 | **`domain/`** | Wire entities embedded in bundles & platform bodies | `nexus-platform` (transitive via `$ref`) | All cloud-line crates + generated imports | **Yes** |
 | **`common/`** | Shared wire value objects | `nexus-platform` (when `$ref`'d) | Generated | **Yes** |
 | **`local-api/compute/`** | Local API — compute module ABI | External WASM modules + future WebApp | `nexus-wasm-host` (re-exports), compute modules | **Yes** |
+| **`local-api/works/`** | Local API — works CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/kb/`** | Local API — KB entries CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/findings/`** | Local API — quality findings CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/schedule/`** | Local API — schedule + core-context CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/workspace/`** | Local API — workspace management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/creators/`** | Local API — creator management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 
-**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Local API contracts (one subfolder per concern; V1.62 seeded `compute/`).
+**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Local API contracts (one subfolder per concern; V1.62 seeded `compute/`; V1.63 added the six core CRUD resources).
 
 ---
 
@@ -110,6 +122,16 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/local-api/compute/...`.
 - Maintain [`local-api/compute/README.md`](../../../schemas/local-api/compute/README.md). Compute ABI normative detail: [compute-module-abi.md](./compute-module-abi.md). Host-side runtime detail: [wasm-host.md](./wasm-host.md).
 
+### 3.6 `local-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1)
+
+- Core CRUD Local API schemas for the daemon's `/v1/local/*` endpoints, promoted from inline handler DTOs to cross-language JSON Schema so the future WebApp/Web-UI can consume typed request/response shapes.
+- **Per-resource subfolder** pattern (`local-api/works/`, `local-api/kb/`, etc.) — one folder per daemon resource, each with per-operation request/response schemas (e.g. `create-work-request.schema.json`, `list-works-response.schema.json`).
+- All schemas use `$id` / `$ref` URIs in `https://nexus42.invalid/schemas/local-api/<resource>/...`.
+- Cross-resource `$ref` uses the full URI (e.g. `https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json`), consistent with `platform/http-bff/` convention.
+- Each subdirectory maintains its own `README.md` with endpoint→schema mapping.
+- **Codegen**: these schemas are auto-discovered by the schema loader (`**/*.schema.json` glob); generated Rust types live under `generated::local_api::{works,kb,...}`, TypeScript under `local-api/{works,kb,...}/`.
+- **Drift detection**: all schemas registered in `build_schema_map()` with `CheckMode::Strict`.
+
 ---
 
 ## 4. Content hygiene
@@ -149,9 +171,9 @@ Platform prose may still say `v1-spec/cli-sync/` for sync **protocol** documents
 
 ---
 
-## 7. Wire file inventory (2026-06, post-V1.62 P0)
+## 7. Wire file inventory (2026-06, post-V1.63 P1)
 
-Authoritative count: run `pnpm run validate-schemas` (currently **56** `*.schema.json`).
+Authoritative count: run `pnpm run validate-schemas` (currently **110** `*.schema.json`).
 
 | Directory | Files | Notes |
 | --- | --- | --- |
@@ -160,6 +182,14 @@ Authoritative count: run `pnpm run validate-schemas` (currently **56** `*.schema
 | `platform/http-bff/` | 34 | Platform HTTP bodies (flat; prefix grouping in [http-bff/README.md](../../../schemas/platform/http-bff/README.md)) |
 | `platform/sync/` | 7 | `bundle`, `bundle-refinement` (codegen-skipped), `delta`, `sync-command`, `sync-pull-request`, `sync-pull-response`, `conflict-response` |
 | `local-api/compute/` | 2 | `compute-input`, `compute-output` |
+| `local-api/works/` | 10 | CRUD + inspiration + completion-lock (V1.63 P1) |
+| `local-api/kb/` | 8 | Work-scope KB entry CRUD + pagination (V1.63 P1) |
+| `local-api/findings/` | 5 | Quality findings CRUD + stale endpoint (V1.63 P1) |
+| `local-api/schedule/` | 14 | Schedule + core-context CRUD + signal (V1.63 P1) |
+| `local-api/workspace/` | 8 | Workspace management CRUD (V1.63 P1) |
+| `local-api/creators/` | 8 | Creator management CRUD (V1.63 P1) |
+
+Total: **109** checking schemas + `schedule-concurrency-request` (standalone enum, auto-skipped) = **110**.
 
 **Not in tree:** `acp-runtime/`, `meta/`, `cli-sync/`, `cloud-sync/`, `compute/` (all removed/renamed).
 

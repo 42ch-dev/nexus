@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/edit-core-context-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus EditCoreContextRequest",
+  "description": "Request body for PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context.",
+  "type": "object",
+  "required": ["op"],
+  "properties": {
+    "op": { "type": "string", "description": "Edit operation: append, replace, struct_merge, struct_remove." },
+    "body": { "type": "string", "description": "Body text for append/replace operations." },
+    "patch": { "description": "JSON patch for struct_merge operation." },
+    "path": { "type": "string", "description": "Key path for struct_remove operation." }
+  },
+  "additionalProperties": false
+}

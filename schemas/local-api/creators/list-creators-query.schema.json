@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/creators/list-creators-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListCreatorsQuery",
+  "description": "Query parameters for GET /v1/local/creators.",
+  "type": "object",
+  "properties": {
+    "limit": { "type": "integer" },
+    "cursor": { "type": "string" }
+  },
+  "additionalProperties": false
+}

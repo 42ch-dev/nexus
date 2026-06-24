@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/list-works-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListWorksResponse",
+  "description": "Response for GET /v1/local/works.",
+  "type": "object",
+  "required": ["works", "total"],
+  "properties": {
+    "works": { "type": "array", "items": { "$ref": "https://nexus42.invalid/schemas/local-api/works/work-summary.schema.json" } },
+    "total": { "type": "integer" }
+  },
+  "additionalProperties": false
+}

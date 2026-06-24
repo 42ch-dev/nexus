@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/edit-core-context-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus EditCoreContextResponse",
+  "description": "Response for PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context.",
+  "type": "object",
+  "required": ["new_version"],
+  "properties": {
+    "new_version": { "type": "integer", "description": "New core context version after edit." }
+  },
+  "additionalProperties": false
+}

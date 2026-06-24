@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/kb/delete-kb-entry-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus DeleteKbEntryResponse",
+  "description": "Response for DELETE /v1/local/kb/entries/{entry_id}.",
+  "type": "object",
+  "required": ["entry_id", "deleted"],
+  "properties": {
+    "entry_id": { "type": "string" },
+    "deleted": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

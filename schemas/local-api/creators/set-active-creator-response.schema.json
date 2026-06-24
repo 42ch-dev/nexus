@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/creators/set-active-creator-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus SetActiveCreatorResponse",
+  "description": "Response for POST /v1/local/creators/active.",
+  "type": "object",
+  "required": ["creator_id"],
+  "properties": {
+    "creator_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

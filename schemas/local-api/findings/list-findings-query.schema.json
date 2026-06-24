@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/findings/list-findings-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListFindingsQuery",
+  "description": "Query parameters for GET /v1/local/works/{work_id}/findings.",
+  "type": "object",
+  "properties": {
+    "chapter": { "type": "integer" },
+    "status": { "type": "string" },
+    "severity": { "type": "string" },
+    "limit": { "type": "integer" },
+    "offset": { "type": "integer" }
+  },
+  "additionalProperties": false
+}
