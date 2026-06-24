@@ -1739,9 +1739,8 @@ pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
         || lower.contains("however")
         || lower.contains("first")
         || lower.contains("second");
-    let thesis_clarity = has_thesis_language
-        && has_argument_structure
-        && non_empty_lines.len() >= 5;
+    let thesis_clarity =
+        has_thesis_language && has_argument_structure && non_empty_lines.len() >= 5;
 
     // 2. evidence_support: specific evidence markers vs vague authority.
     let evidence_signals = [
@@ -2683,7 +2682,10 @@ mod tests {
         // Should fail on multiple dimensions: no specific thesis language,
         // no evidence, poor coherence.
         assert!(!verdict.go);
-        assert!(!verdict.dimensions.thesis_clarity, "should fail thesis clarity");
+        assert!(
+            !verdict.dimensions.thesis_clarity,
+            "should fail thesis clarity"
+        );
         assert!(!verdict.dimensions.evidence_support, "should fail evidence");
     }
 
@@ -2699,7 +2701,10 @@ mod tests {
         let verdict = essay_four_dim_check(essay);
         // Has thesis language and coherence, but no specific evidence
         // (no named studies, data, percentages, specific examples).
-        assert!(!verdict.dimensions.evidence_support, "should fail evidence: no studies/data/citations");
+        assert!(
+            !verdict.dimensions.evidence_support,
+            "should fail evidence: no studies/data/citations"
+        );
     }
 
     #[test]
@@ -2727,7 +2732,10 @@ mod tests {
         let verdict = essay_four_dim_check(essay);
         // Has thesis, evidence, and coherence, but ending lacks insight -
         // merely descriptively restates without "so what?" or forward-looking language.
-        assert!(!verdict.dimensions.ending_takeaway, "should fail ending takeaway: ending is purely descriptive");
+        assert!(
+            !verdict.dimensions.ending_takeaway,
+            "should fail ending takeaway: ending is purely descriptive"
+        );
     }
 
     #[test]
