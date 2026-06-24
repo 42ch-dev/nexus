@@ -237,9 +237,18 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
                     .get("body")
                     .and_then(|b| b.get("state"))
                     .and_then(|s| s.get(block_type));
-                let instance = state.unwrap_or(&Value::Null);
-                let path = format!("key_blocks[{i}].body.state.{block_type}");
-                validate_against_schema(instance, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
+                // Skip validation if state is absent or null. State may not
+                // yet be initialized for newly-created computable blocks
+                // (e.g. a character participating in its first combat scene);
+                // modules handle missing state via their own fallback chains
+                // (see `basic-combat/src/lib.rs` HP fallback logic). This
+                // mirrors the `invocation` null-skip just below.
+                if let Some(state) = state {
+                    if !state.is_null() {
+                        let path = format!("key_blocks[{i}].body.state.{block_type}");
+                        validate_against_schema(state, &path, schema, &path, MAX_VALIDATION_DEPTH)?;
+                    }
+                }
             }
         }
     }
@@ -268,20 +277,17 @@ fn validate_compute_input(input: &Value, schemas: &ModuleSchemas) -> Result<()> 
 /// Validate `ComputeOutput.battle_report` against the manifest-declared schema.
 fn validate_battle_report(output: &ComputeOutput, schema: &Value) -> Result<()> {
     let report = &output.battle_report;
-    if report.is_null() {
-        return Err(ComputeError::ManifestValidationFailed {
-            path: "battle_report".into(),
-            detail: "battle_report must be an object".into(),
-        });
-    }
+    // Let validate_against_schema derive the correct error from the schema's
+    // own `type` constraint rather than short-circuiting with a hardcoded
+    // message. An empty schema `{}` accepts null per JSON-Schema semantics;
+    // an `"type": "array"` schema should reject null with its own message.
     validate_against_schema(
         report,
         "battle_report",
         schema,
         "battle_report",
         MAX_VALIDATION_DEPTH,
-    )?;
-    Ok(())
+    )
 }
 
 /// Core hand-rolled validator. Walks `instance` against `schema` (a JSON-Schema
@@ -933,6 +939,105 @@ mod tests {
                 assert!(
                     detail.contains("exceeded maximum validation depth"),
                     "expected depth-limit message, got: {detail}"
+                );
+            }
+            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // PR-review fixes (Issue 1 + Issue 2)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn empty_battle_report_schema_accepts_null() {
+        // Issue 1 regression: an empty schema `{}` accepts null per
+        // JSON-Schema semantics. Previously, validate_battle_report short-
+        // circuited with a hardcoded "must be an object" message before
+        // validate_against_schema could apply the schema's own constraints.
+        let empty_schema = json!({});
+        let result = validate_against_schema(
+            &Value::Null,
+            "battle_report",
+            &empty_schema,
+            "battle_report",
+            MAX_VALIDATION_DEPTH,
+        );
+        assert!(
+            result.is_ok(),
+            "empty schema should accept null: {result:?}"
+        );
+
+        // Sanity: an object-typed schema still rejects null (the legitimate
+        // case the pre-check was trying to handle, now handled by the
+        // schema's own `type` keyword).
+        let object_schema = json!({"type": "object"});
+        let err = validate_against_schema(
+            &Value::Null,
+            "battle_report",
+            &object_schema,
+            "battle_report",
+            MAX_VALIDATION_DEPTH,
+        )
+        .unwrap_err();
+        match err {
+            ComputeError::ManifestValidationFailed { detail, .. } => {
+                assert!(
+                    detail.contains("expected type object"),
+                    "expected 'expected type object' message, got: {detail}"
+                );
+            }
+            other => panic!("expected ManifestValidationFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn state_schema_skipped_when_state_absent() {
+        // Issue 2 regression: a key block whose body.state.{block_type} is
+        // absent (e.g. a newly-created character entering its first combat
+        // scene) must skip state validation rather than fail with a cryptic
+        // "expected type object, got null" type-mismatch. Mirrors the
+        // invocation null-skip pattern.
+        let mut state_map = std::collections::HashMap::new();
+        state_map.insert(
+            "character".to_string(),
+            json!({"type": "object", "properties": {"current_hp": {"type": "integer"}}}),
+        );
+        let schemas = ModuleSchemas {
+            key_block_state: Some(state_map),
+            ..Default::default()
+        };
+
+        // Block with NO state initialized — must pass validation.
+        let input = json!({
+            "key_blocks": [{
+                "block_type": "character",
+                "body": {"attributes": {"max_hp": 100}}
+            }]
+        });
+        let result = validate_compute_input(&input, &schemas);
+        assert!(
+            result.is_ok(),
+            "absent state should skip validation, got: {result:?}"
+        );
+
+        // Sanity: block with state PRESENT but wrong type still fails
+        // (skipping null doesn't disable validation for non-null bad shapes).
+        let input_bad = json!({
+            "key_blocks": [{
+                "block_type": "character",
+                "body": {
+                    "attributes": {"max_hp": 100},
+                    "state": {"character": "not-an-object"}
+                }
+            }]
+        });
+        let err = validate_compute_input(&input_bad, &schemas).unwrap_err();
+        match err {
+            ComputeError::ManifestValidationFailed { detail, .. } => {
+                assert!(
+                    detail.contains("expected type object"),
+                    "expected 'expected type object' for non-null bad shape, got: {detail}"
                 );
             }
             other => panic!("expected ManifestValidationFailed, got {other:?}"),
