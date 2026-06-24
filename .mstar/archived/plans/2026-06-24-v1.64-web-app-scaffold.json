@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.64-web-app-scaffold",
+  "title": "V1.64 P1 — Track A: Web App Scaffold (apps/web + Vite/React + tauri-api Adapter)",
+  "iteration": "V1.64",
+  "slot": "P1",
+  "status": "Done",
+  "effort": "L",
+  "owner": "@frontend-dev",
+  "review": "Tri-review + QA",
+  "wave": 1,
+  "dependency": "P-1 PM signoff AND DESIGN.md present (Prepare gate)",
+  "working_branch": "feature/v1.64-web-app-scaffold",
+  "merge_target": "iteration/v1.64"
+}

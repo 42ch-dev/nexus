@@ -1,145 +1,47 @@
 {
   "version": 1,
   "updated_at": "2026-06-24T23:30:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-24-v1.64-compass-and-plan-stubs",
-      "title": "V1.64 Compass & Plan Stubs (P-1)",
-      "iteration": "V1.64",
-      "slot": "P-1",
-      "status": "Todo",
-      "effort": "M",
-      "owner": "@project-manager",
-      "review": "PM self-review (prepare)",
-      "working_branch": "iteration/v1.64",
-      "merge_target": "iteration/v1.64"
-    },
-    {
-      "plan_id": "2026-06-24-v1.64-local-api-hardening",
-      "title": "V1.64 P0 — Track B: Local API Data-Layer Hardening (DTO Drift + F-E1 + F-P1 + F-P2)",
-      "iteration": "V1.64",
-      "slot": "P0",
-      "status": "Done",
-      "effort": "L",
-      "owner": "@fullstack-dev",
-      "review": "Tri-review + QA",
-      "wave": 1,
-      "dependency": "P-1 PM signoff",
-      "working_branch": "feature/v1.64-local-api-hardening",
-      "merge_target": "iteration/v1.64"
-    },
-    {
-      "plan_id": "2026-06-24-v1.64-web-app-scaffold",
-      "title": "V1.64 P1 — Track A: Web App Scaffold (apps/web + Vite/React + tauri-api Adapter)",
-      "iteration": "V1.64",
-      "slot": "P1",
-      "status": "Done",
-      "effort": "L",
-      "owner": "@frontend-dev",
-      "review": "Tri-review + QA",
-      "wave": 1,
-      "dependency": "P-1 PM signoff AND DESIGN.md present (Prepare gate)",
-      "working_branch": "feature/v1.64-web-app-scaffold",
-      "merge_target": "iteration/v1.64"
-    },
-    {
-      "plan_id": "2026-06-24-v1.64-control-room-and-setup-screens",
-      "title": "V1.64 P2 — Track A: Control Room + Setup Screens",
-      "iteration": "V1.64",
-      "slot": "P2",
-      "status": "InReview",
-      "effort": "XL",
-      "owner": "@frontend-dev",
-      "review": "Tri-review + QA",
-      "wave": 2,
-      "dependency": "P0 merged AND P1 merged AND DESIGN.md",
-      "working_branch": "feature/v1.64-control-room-and-setup-screens",
-      "merge_target": "iteration/v1.64"
-    },
-    {
-      "plan_id": "2026-06-24-v1.64-daemon-serving-wiring",
-      "title": "V1.64 P3 — Track A (backend): Daemon Web UI Serving Wiring (ServeDir + rust-embed)",
-      "iteration": "V1.64",
-      "slot": "P3",
-      "status": "InReview",
-      "effort": "M",
-      "owner": "@fullstack-dev-2",
-      "review": "Tri-review + QA",
-      "wave": 2,
-      "dependency": "P1 merged (apps/web dist to embed)",
-      "working_branch": "feature/v1.64-daemon-serving-wiring",
-      "merge_target": "iteration/v1.64"
-    },
-    {
-      "plan_id": "2026-06-24-v1.64-mid-meta-tracking",
-      "title": "V1.64 P-mid — Meta Tracking",
-      "iteration": "V1.64",
-      "slot": "P-mid",
-      "status": "Todo",
-      "effort": "S",
-      "owner": "@project-manager",
-      "review": "PM self-review (meta)",
-      "wave": 3,
-      "dependency": "P2 + P3 merged",
-      "working_branch": "iteration/v1.64",
-      "merge_target": "iteration/v1.64"
-    },
-    {
-      "plan_id": "2026-06-24-v1.64-residual-convergence-and-closeout",
-      "title": "V1.64 P-last — Residual Convergence + Spec Promotion + Profile B + PR",
-      "iteration": "V1.64",
-      "slot": "P-last",
-      "status": "Todo",
-      "effort": "M",
-      "owner": "@fullstack-dev + @project-manager",
-      "review": "Tri-review + QA (closeout)",
-      "wave": 3,
-      "dependency": "P-mid",
-      "working_branch": "feature/v1.64-residual-convergence-and-closeout",
-      "merge_target": "iteration/v1.64"
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.64",
     "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.63 (retired, merged via PR #86 @ c94a7d70)",
+    "last_integration_branch": "iteration/v1.64 (PR open to main)",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.64",
-    "latest_active_compass": "v1.64-local-web-ui-kickoff-delivery-compass-v1",
+    "latest_active_iteration": "V1.65+ (pending)",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.64 — DESIGN.md Prepare gate for Track A)",
+    "pre_implement_gate": "pending (V1.65+)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.63",
-      "compass": "v1.63-essay-profile-and-local-api-foundation-delivery-compass-v1",
-      "shipped_at": "2026-06-24T12:00:00Z",
+      "iteration": "V1.64",
+      "compass": "v1.64-local-web-ui-kickoff-delivery-compass-v1",
+      "shipped_at": "2026-06-25T02:30:00Z",
       "plan_count": 7,
       "plan_count_done": 7,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.63: 67 new schemas under schemas/local-api/ (6 core CRUD resources + orchestration sessions/capabilities READ + preset_management). Codegen Rust generated::local_api::* + TS packages/nexus-contracts/src/generated/local-api/. Essay profile: work_profile:essay enum + essay.draft_status.finalize capability (additive). npm @42ch/nexus-contracts minor bump. No existing wire shape removed/renamed.",
+      "wire_contracts_note": "V1.64: @42ch/nexus-contracts 0.4.0->0.5.0. Breaking (pre-1.0): ListWorksResponse {works,total}->{works,pagination:PaginationInfo} + Works query offset->cursor; ListFindingsResponse new ({items,pagination}). Additive: schemas/local-api/common/error-response.schema.json (ErrorResponse F-E1) + findings/list-findings-response.schema.json (F-P2). PaginationInfo +has_more (shared kb/pagination-info). Handler DTO drift closure (R-V163P1-T6). No existing wire shape removed beyond the Works/findings list shape change.",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-24-v1.63-compass-and-plan-stubs",
-        "2026-06-24-v1.63-essay-scaffold-and-profile-enum",
-        "2026-06-24-v1.63-local-api-core-crud-dtos",
-        "2026-06-24-v1.63-essay-preset-and-rubric",
-        "2026-06-24-v1.63-local-api-orchestration-and-preset-dtos",
-        "2026-06-24-v1.63-mid-meta-tracking",
-        "2026-06-24-v1.63-residual-convergence-and-closeout"
+        "2026-06-24-v1.64-compass-and-plan-stubs",
+        "2026-06-24-v1.64-local-api-hardening",
+        "2026-06-24-v1.64-web-app-scaffold",
+        "2026-06-24-v1.64-control-room-and-setup-screens",
+        "2026-06-24-v1.64-daemon-serving-wiring",
+        "2026-06-24-v1.64-mid-meta-tracking",
+        "2026-06-24-v1.64-residual-convergence-and-closeout"
       ],
       "highlights": {
-        "Track A": "Essay Profile Closure — PF-ESSAY shipped. Scaffold + essay-writing preset (7-state) + 4-dim rubric (thesis/evidence/coherence/takeaway, blocking with --force-gates) + completion + optional KB. Writing-profile product line complete.",
-        "Track C": "Local API Foundation — 67 schemas promoted from inline handler types to schemas/local-api/ for cross-language codegen. Surface audit produced 5 findings (deferred V1.64+). Handler DTO migration deferred (P1 T6).",
-        "Track B": "Residual convergence — 7 V1.61 open lows closed; 6 V1.64+ deferrals registered.",
-        "P-last": "Spec promotion (essay-profile.md Draft→Shipped) + tracker update (PF-ESSAY→shipped) + Profile B compaction."
+        "Track A": "Local Web UI Kickoff — apps/web React 18/Vite/TS/Tailwind/shadcn/TanStack Query SPA. Control Room (Works dashboard/detail, Sessions, Schedule, Capabilities, Findings) + Setup (Work CRUD, Preset mgmt w/ validate dry-run). DESIGN.md tokens consumed (light+dark). NexusClient/BrowserClient/TauriClient adapter (Tauri-ready). 30 vitest tests. Daemon-served via rust-embed (static_assets.rs) + SPA fallback + cache headers. CLI daemon ui/web convenience.",
+        "Track B": "Local API Data-Layer Hardening — closed 4 prerequisites: Handler DTO drift closure (R-V163P1-T6), F-E1 shared ErrorResponse schema + handler envelope, F-P1 Works cursor pagination (pre-1.0 breaking), F-P2 findings list endpoint.",
+        "QC": "Tri-review both waves. Wave 1: qc1 Request Changes (W-1 error-envelope mismatch) -> fix-wave (errors.ts wrapped-envelope parse + convention §3.1) -> qc1 re-review Approve; qc2/qc3 Approve. Wave 2: qc1/qc2/qc3 Approve (qc3 host-glitch wrote to wrong path, relocated)."
       },
-      "note": "V1.63 ships Essay Profile Closure + Local API Foundation. Closes the writing-profile product line (novel+game-bible+script+essay all Depth 3.5). Promotes 67 Local API DTOs to cross-language schemas for the upcoming web-ui/native webApp. S-B dual track, 3 waves, 7 plans. PM-skipped formal QC tri-review (both tracks individually verified + CI gate green + additive changes).",
-      "predecessor_merge_commit": "6a600ea9"
+      "note": "V1.64 ships Local Web UI Kickoff (CLI-only -> CLI + local Web UI). Writing-profile product line remains complete. Tauri desktop shell + content-authoring UI deferred to V1.65+. Platform paused (PD-05).",
+      "predecessor_merge_commit": "c94a7d70"
     },
     "tech_debt_summary": {
       "total_open": 0,
-      "total_deferred": 12,
+      "total_deferred": 20,
       "total_resolved": 179,
       "total_archived": 5,
       "by_severity_active": {
@@ -149,7 +51,7 @@
       },
       "by_target_active": {}
     },
-    "updated_at": "2026-06-25T01:50:00Z"
+    "updated_at": "2026-06-25T02:30:00Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [

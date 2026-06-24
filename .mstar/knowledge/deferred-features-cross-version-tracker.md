@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.64 Active prepare (2026-06-24)** — Local Web UI Kickoff: `apps/web` React/Vite SPA (Control Room + Setup MVP), daemon-served (ServeDir + rust-embed), Tauri-ready (desktop shell = V1.65 roadmap). Track B closes 4 Local API data-layer prerequisites (Handler DTO drift + F-E1 ErrorResponse + F-P1 Works cursor + F-P2 findings endpoint); F-P3/F-F1 deferred with UI adapter. Writing-profile product line complete (V1.63). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.64 Shipped (2026-06-25, PR open to main)** — Local Web UI Kickoff: `apps/web` React/Vite SPA (Control Room + Setup MVP), daemon-served (rust-embed + SPA fallback), Tauri-ready (desktop shell = V1.65 roadmap). Track B closed 4 Local API prerequisites (Handler DTO drift + F-E1 ErrorResponse + F-P1 Works cursor + F-P2 findings endpoint); F-P3/F-F1 deferred V1.65+ (UI adapter covers). CLI goes from CLI-only → CLI + local Web UI. Next: V1.65 (Tauri desktop shell + content-authoring UI lead = chapter rich-text editor). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
@@ -86,7 +86,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.64 — Local Web UI Kickoff](../iterations/v1.64-local-web-ui-kickoff-delivery-compass-v1.md) (Active prepare)
+**Active iteration**: V1.64 shipped (PR open to main, 2026-06-25) — next: V1.65 (Tauri desktop shell + content-authoring UI)
 
 **Latest shipped**: [V1.63](../iterations/v1.63-essay-profile-and-local-api-foundation-delivery-compass-v1.md) (Essay Profile Closure & Local API Foundation, PR #86)
 

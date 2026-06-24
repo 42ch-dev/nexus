@@ -1,6 +1,6 @@
 # Local Web UI (Control Room + Setup) — Specification v1
 
-**Status**: Draft (V1.64) — authored in Prepare Phase 2b; promotes to Shipped (V1.64) at P-last  
+**Status**: Shipped (V1.64) — Control Room + Setup MVP delivered (7 screen groups + TanStack Query data layer + F-P3/F-F1 adapters + W-1 error-envelope toasts + vitest baseline); daemon-served via rust-embed + SPA fallback (P3); QC tri-review Approve (Wave 2). Evidence: `apps/web/screenshots/`. Tauri desktop shell + content-authoring UI → V1.65+.  
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Tauri / content-authoring roadmap, and strict separation from the private cloud SaaS  

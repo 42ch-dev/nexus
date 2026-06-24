@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Draft (V1.64) — conventions established by Track B this iteration; promote to `Normative — V1.64 Shipped` at P-last once handlers conform |
+| **Status** | Normative — V1.64 Shipped (conventions established by Track B: cursor pagination canonical; shared `ErrorResponse` envelope; `items` for new list endpoints; sort convention documented for V1.65+) |
 | **Document class** | Master |
 | **Scope** | Cross-resource Local API response/query conventions for schemas under `schemas/local-api/` and handlers under `nexus-daemon-runtime` |
 | **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md) |

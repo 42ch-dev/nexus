@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.64-control-room-and-setup-screens",
+  "title": "V1.64 P2 — Track A: Control Room + Setup Screens",
+  "iteration": "V1.64",
+  "slot": "P2",
+  "status": "InReview",
+  "effort": "XL",
+  "owner": "@frontend-dev",
+  "review": "Tri-review + QA",
+  "wave": 2,
+  "dependency": "P0 merged AND P1 merged AND DESIGN.md",
+  "working_branch": "feature/v1.64-control-room-and-setup-screens",
+  "merge_target": "iteration/v1.64"
+}
