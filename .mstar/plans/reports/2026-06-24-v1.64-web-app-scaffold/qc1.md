@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-24-v1.64-web-app-scaffold"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-25"
 ---
 
@@ -233,3 +233,81 @@ Per-finding machine severity (for PM residual registration):
 - S-6 → `nit` (confirmation only; no action)
 - S-7 → `low` (P2 ownership boundary for F-P3 adapter needs to be assigned)
 - S-8 → `nit` (confirmation only; no action)
+
+---
+
+## Revalidation (qc1, W-1 fix-wave)
+
+**Targeted re-review** of W-1 only. No new full-tri-review required. The other two QC seats (qc2, qc3) returned Approve in Wave-1 and raised no blocking findings — only qc1 raised W-1 (cross-track: bug is in P1's `errors.ts`; consequence falls on P2's screens).
+
+### Scope of this re-review
+
+- **plan_id**: `2026-06-24-v1.64-web-app-scaffold`
+- **Review range / Diff basis**: `0afa42b2..94a570f6` — the qc1 W-1 fix-wave (`fix/v1.64-error-envelope-parse` merged + status residual registration).
+- **Working branch (verified)**: `iteration/v1.64` (`git branch --show-current` = `iteration/v1.64`)
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus` (`git rev-parse --show-toplevel`)
+- **HEAD at re-review**: `94a570f6`
+- **Tools run**: `git diff 0afa42b2..94a570f6 --stat`, `git diff 0afa42b2..94a570f6 -- apps/web/src/lib/nexus/errors.ts .mstar/knowledge/specs/local-api-surface-conventions.md`, `pnpm --filter web typecheck`, `pnpm --filter web build`, `cargo clippy -p nexus-daemon-runtime --no-deps -- -D warnings`, plus targeted reads of `apps/web/src/lib/nexus/errors.ts`, `apps/web/src/lib/nexus/browser-client.ts` (caller), and `crates/nexus-daemon-runtime/src/api/errors.rs` + `middleware.rs` (runtime envelope).
+
+### What was re-checked (only W-1)
+
+1. **Does `apps/web/src/lib/nexus/errors.ts` `fromBody` now correctly extract `code`/`message`/`details` from the wrapped `{success, error:{...}, request_id?}` body?** — **Yes (RESOLVED).**
+   - Current implementation (lines 47–63): unwraps `body.error` first with defensive top-level fallback. Verified by manual trace against the runtime `ApiErrorResponse { success: false, error: ApiErrorDetail { code, message, details?, request_id? } }` (`crates/nexus-daemon-runtime/src/api/errors.rs:55-73,196-218`) and the middleware-injected `error.request_id` (`api/middleware.rs:111-147`).
+   - `BrowserClient.request` at `apps/web/src/lib/nexus/browser-client.ts:185` calls `NexusClientError.fromBody(response.status, errorBody)` — the fix flows through the single parser site without changes to the caller, exactly as proposed in Wave-1's "Fix" snippet.
+
+2. **Are the defensive fallbacks sound for ad-hoc `(StatusCode,String)` emitters (`R-V164-FE1-ORCH` deferral)?** — **Yes (graceful).**
+   - Three paths verified:
+     - **Wrapped envelope** (P0 handlers): `inner.code` wins → returns daemon-stable code.
+     - **Ad-hoc bare-object** (`{ code: ..., message: ... }`): `inner.code` undefined, falls through to `parsed.code` → still extracts structured code.
+     - **Ad-hoc plain string** (`R-V164-FE1-ORCH` orchestration handlers): `inner` and `parsed` both lack `code`/`message` → falls back to `http_<status>` / `"Request failed with status <status>"`. No crash, no `Cannot read properties of undefined`.
+   - The proposal I made in Wave-1 (`inner.code ?? parsed.code ?? http_<status>`) is faithfully implemented at lines 59–61 with the exact same fallback chain.
+
+3. **Does `local-api-surface-conventions.md` §3.1 correction now match runtime reality?** — **Partially (structural layer YES; casing example NO — separate drift).**
+   - §3.1 now correctly documents the wrapped envelope, the inner-detail schema model boundary, the `request_id` placement under `error` (not top-level), and the implementation note that consumers MUST read from `body.error`. All structurally aligned with `ApiErrorResponse` + middleware behavior.
+   - Caveat (F-2 below): the §3.1 example uses `code: "work_not_found"` (and §3.2's table is fully lowercase snake_case), but the runtime emits UPPER_SNAKE_CASE. The implementer correctly identified this as a separate drift and registered `R-V164-QC1-CASING` (low, defer V1.65+, owner `@architect`) in commit `94a570f6`. **qc1 concurs with this disposition.**
+
+4. **Did the fix stay surgical (only the 2 claimed files)?** — **Yes.**
+   - Implementation commit `41a11887` (merged via `3ac68224`) touched exactly 2 files:
+     - `apps/web/src/lib/nexus/errors.ts` (28 lines diff)
+     - `.mstar/knowledge/specs/local-api-surface-conventions.md` (34 lines diff)
+   - `git diff 0afa42b2..41a11887 --name-only` confirms only those 2 implementation files. No edits to `browser-client.ts`, no edits to handlers, schemas, or generated code. Commit `94a570f6` registered the §3.2 casing residual in `.mstar/status.json` (expected; required by residual lifecycle).
+   - Matches `mstar-coding-behavior` surgical-change discipline: every hunk traces to the W-1 fix or the registered residual note.
+
+5. **CI / build verification:** — **PASS.**
+   - `pnpm --filter web typecheck` → PASS (exit 0; no output).
+   - `pnpm --filter web build` → PASS (1647 modules transformed; 232.67 kB JS / 15.65 kB CSS gzip-compressed; matches Wave-1 baseline `232.62 kB` within normal jitter).
+   - `cargo clippy -p nexus-daemon-runtime --no-deps -- -D warnings` → PASS (`Finished dev profile`; no warnings).
+   - No new CI failures; nothing the gate treats as `>= Warning` introduced.
+
+### Per-finding disposition
+
+| Wave-1 finding | Disposition | Evidence |
+| --- | --- | --- |
+| **W-1** (F-E1 wire envelope — P1 side, parser) | **RESOLVED** | `fromBody` unwraps `body.error` defensively; `BrowserClient` caller unchanged; CI green. |
+| S-1 (apps/web ships zero test files — `BrowserClient`/`TauriClient`/`NexusClientError` parsing untested) | Open — unchanged from Wave-1 (registered as `R-V164-P1-QC1-NO-TESTS`); out of scope for W-1 fix-wave; P2 implementer should pick up. | — |
+| S-2 (transport-agnostic interface) | Open — unchanged from Wave-1; informational. | — |
+| S-3 (DESIGN.md token consumption clean) | Open — unchanged from Wave-1; informational. | — |
+| S-4 (apps/web/AGENTS.md quality) | Open — unchanged from Wave-1; informational. | — |
+| S-5 (UI primitive components) | Open — unchanged from Wave-1; informational. | — |
+| S-6 (Vite dev-proxy + CI web-build) | Open — unchanged from Wave-1; informational. | — |
+| S-7 (F-P3 deferral acknowledged in `types.ts`) | Open — unchanged from Wave-1; informational. | — |
+| S-8 (package.json hygiene) | Open — unchanged from Wave-1; informational. | — |
+
+### New finding from fix-wave
+
+**F-2 (NEW, low, Suggestion tier; concur with `R-V164-QC1-CASING`):** `local-api-surface-conventions.md` §3.1 example uses `code: "work_not_found"` and §3.2 table examples are lowercase snake_case, while the runtime emits `UPPER_SNAKE_CASE` (verified at `crates/nexus-daemon-runtime/src/api/errors.rs:196-218,338-362,384,539` — `INVALID_INPUT`, `INTERNAL`, `AUTH_REQUIRED`, `NOT_FOUND`, `FORBIDDEN`, `INVALID_TRANSITION`). This is a latent doc-vs-runtime casing drift that was **pre-existing** in V1.63 (the convention was newly introduced; the runtime code strings were unchanged) and was correctly surfaced by the fix-wave implementer. Properly registered as `R-V164-QC1-CASING` (low, defer, `@architect`, V1.65+) in commit `94a570f6`. **qc1 concurs**: right disposition. Not a Wave-1 blocker; architect decision in V1.65+ (either align runtime to lowercase convention per §3.2, or update §3.2 to UPPER_SNAKE_CASE to match runtime). **Not registered against the P1 plan** — it is a documentation drift that the P0 implementer flagged, owned by `@architect`, scoped against `local-api-surface-conventions.md` (a Master-spec under `knowledge/specs/`, not a P1 surface).
+
+### Updated Summary
+
+| Severity | Wave-1 | This re-review |
+|----------|--------|----------------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning | 1 (W-1) | **0 (W-1 RESOLVED)** |
+| 🟢 Suggestion | 8 (S-1..S-8) | 9 (S-1..S-8 + new F-2) |
+| Open residuals | S-1 (`R-V164-P1-QC1-NO-TESTS`, P2 ownership) + new `R-V164-QC1-CASING` (low, defer, `@architect`) + P0-shared `R-V164-FE1-ORCH` | — |
+
+**Verdict**: **Approve** (updated from Wave-1's `Request Changes`).
+
+Rationale: W-1 is structurally resolved. The fix-wave is surgical (2 implementation files only; expected status.json residual registration), the new `fromBody` parser correctly unwraps the daemon runtime's wrapped envelope with defensive top-level fallback for `R-V164-FE1-ORCH` ad-hoc emitters, the §3.1 convention doc correction matches runtime reality for the structural layer (envelope vs bare; `request_id` placement), and `pnpm --filter web typecheck/build` + `cargo clippy -p nexus-daemon-runtime` all pass. The §3.2 casing drift (`R-V164-QC1-CASING`) is a pre-existing latent doc-vs-runtime mismatch that the implementer correctly separated and registered at `low` with `@architect` / V1.65+ — not a regression, not blocking. No new Critical/Warning introduced.
+
+PM should be ready to consolidate Wave-1 once qc2 and qc3 either re-affirm their Wave-1 Approve verdicts or have no fresh input (targeted re-review was qc1 only).
