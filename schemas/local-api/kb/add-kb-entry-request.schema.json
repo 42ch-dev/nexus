@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/kb/add-kb-entry-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AddKbEntryRequest",
+  "description": "Request body for POST /v1/local/kb/entries.",
+  "type": "object",
+  "required": ["creator_id"],
+  "properties": {
+    "creator_id": { "type": "string" },
+    "workspace_slug": { "type": "string" },
+    "scope": { "type": "string" },
+    "title": { "type": "string" },
+    "content": { "type": "string" },
+    "file_path": { "type": "string" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/schedule-concurrency-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ScheduleConcurrencyRequest",
+  "description": "Concurrency mode for schedule creation. Serial runs alone; ParallelWith groups schedules; ParallelAny allows any concurrency.",
+  "type": "string",
+  "enum": ["serial", "parallel_with", "parallel_any"]
+}

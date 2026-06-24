@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/add-schedule-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AddScheduleRequest",
+  "description": "Request body for POST /v1/local/orchestration/schedules — create a new schedule.",
+  "type": "object",
+  "required": ["creator_id", "preset_id"],
+  "properties": {
+    "creator_id": {
+      "type": "string",
+      "description": "Creator ID that owns this schedule."
+    },
+    "preset_id": {
+      "type": "string",
+      "description": "Preset ID to run (e.g. novel-writing, game-bible, script-writing)."
+    },
+    "seed": {
+      "type": "string",
+      "description": "Optional seed text for the preset's initial context."
+    },
+    "label": {
+      "type": "string",
+      "description": "Human-readable label for this schedule run."
+    },
+    "depends_on": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Schedule IDs this schedule depends on (must complete before this starts)."
+    },
+    "concurrency": {
+      "$ref": "https://nexus42.invalid/schemas/local-api/schedule/schedule-concurrency-request.schema.json",
+      "description": "Concurrency mode for this schedule."
+    },
+    "scheduled_at": {
+      "type": "string",
+      "description": "Unix timestamp string for deferred execution."
+    },
+    "input": {
+      "description": "Structured input context for the preset (key-value pairs)."
+    },
+    "force_gates": {
+      "type": "boolean",
+      "description": "When true, bypass preset gate evaluation. Requires reason."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Audit reason for force_gates (required when force_gates is true)."
+    }
+  },
+  "additionalProperties": false
+}
