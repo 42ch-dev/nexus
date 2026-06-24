@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.63-essay-scaffold-and-profile-enum",
+  "title": "V1.63 P0 \u2014 Essay Scaffold + work_profile:essay Enum + Completion Semantics",
+  "iteration": "V1.63",
+  "slot": "P0",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@fullstack-dev",
+  "review": "Tri-review + mid-QA",
+  "wave": 1,
+  "dependency": "P-1 PM signoff",
+  "working_branch": "feature/v1.63-essay-scaffold",
+  "merge_target": "iteration/v1.63"
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/append-inspiration-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AppendInspirationResponse",
+  "description": "Response for POST /v1/local/works/{work_id}/inspiration.",
+  "type": "object",
+  "required": ["work_id", "inspiration_count"],
+  "properties": {
+    "work_id": { "type": "string" },
+    "inspiration_count": { "type": "integer" }
+  },
+  "additionalProperties": false
+}

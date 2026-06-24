@@ -16,6 +16,7 @@ A JSON Schema file belongs in `schemas/` **only if it is consumed by an external
   - Any payload the OSS CLI/daemon sends to platform that platform must parse
 - **Local API** — an **external** client (separate process / language boundary) consumes the type via the daemon Local API:
   - Compute module ABI envelopes (`schemas/local-api/compute/*`) — consumed by external WASM compute modules and the future WebApp/Web-UI.
+  - Core CRUD Local API schemas (`schemas/local-api/{works,kb,findings,schedule,workspace,creators}/*`) — consumed by the future WebApp/Web-UI (V1.63 P1). These were promoted from inline handler DTOs to cross-language JSON Schema so the TypeScript web-client can consume typed request/response shapes without duplicating Rust handler definitions.
 
 Everything else is **local**: hand-written Rust under `crates/nexus-contracts/src/local/` — **no** `pnpm run codegen` entry in `@42ch/nexus-contracts` npm surface for those types.
 
@@ -34,6 +35,7 @@ Folder names, consumer-scope tree, and product-line mapping: **[specs/schemas-di
 | `schemas/domain/*` | **Yes** — `nexus-platform` (transitive via `$ref`) | Wire entities embedded in sync bundles & platform bodies — **not** the Rust `nexus-domain`/`nexus-cloud-domain` logic crates |
 | `schemas/common/*` | **Yes** (when `$ref`'d by wire) | Shared identifiers, enums, value objects (`SourceAnchor`, `VersionRef`) |
 | `schemas/local-api/compute/*` | **Yes** — external WASM modules + future WebApp | Compute module ABI envelopes (`ComputeInput`/`ComputeOutput`). V1.62 added the `local-api/` tree for cross-language Local API contracts. |
+| `schemas/local-api/{works,kb,findings,schedule,workspace,creators}/*` | **Yes** — future WebApp/Web-UI | Core CRUD Local API request/response schemas for the daemon's `/v1/local/*` endpoints (V1.63 P1).
 | *(removed from `schemas/`)* | **No** | `cli-sync/` (→ `cloud-sync/` → `platform/sync/`), `acp-runtime/`, `meta/`, `cloud-sync/`, `compute/` (entity-attributes/entity-state → `modules/<id>/manifest.json` in P1), `outbox_entry`, daemon/orchestration types → `src/local/` |
 
 V1.20 removed **daemon local HTTP proxies** for `world/*` and `explore/*`; those operations use **platform HTTP** directly. The `schemas/platform/http-bff/world-*` and `.../explore-*` files remain **wire** for platform — they were never "daemon-only" contracts.

@@ -513,7 +513,7 @@ Locations searched (in order):
 
 1. `$XDG_CONFIG_HOME/nexus42/presets/<id>/` (user-installed)
 2. `$HOME/.nexus42/presets/<id>/`             (legacy / dev)
-3. Preset shipped in the binary (via `include_dir!`) under `nexus-orchestration/embedded-presets/<id>/` (currently `_system.maintenance`, `novel-writing`, `novel-chapter-review`, `memory-augmented`)
+3. Preset shipped in the binary (via `include_dir!`) under `nexus-orchestration/embedded-presets/<id>/` (currently `essay-writing`, `_system.maintenance`, `novel-writing`, `novel-chapter-review`, `memory-augmented`)
 
 ### 7.2 `preset.yaml` schema (v1)
 
@@ -749,6 +749,7 @@ The binary includes embedded presets under `crates/nexus-orchestration/embedded-
 | `novel-chapter-review` | FL-E `review` stage — novel/work/chapter-aware review producer (findings writer, V1.47) | load_chapter → review → done | `creator.inject_prompt`, `acp.prompt` |
 | `memory-augmented` | Memory demonstrator | recall → generate → persist → done | `creator.*`, `judge.rule` |
 | `creative-brief-intake` | **V1.33 Shipped** (`2026-06-04-v1.33-creative-brief-intake-preset` P2 plan) — grill-me intake preset | intake → done | `acp.prompt` |
+| `essay-writing` | **V1.63 P2 Shipped** — essay production preset with 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway) | intake → outline → draft → revise → finalize → finalize_commit → done | `creator.inject_prompt`, `acp.prompt`, `judge.llm`, `essay.draft_status.finalize` |
 
 All shipped presets use **linear** `next` transitions unless noted; conditional routing remains deferred (§7.5).
 

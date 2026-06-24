@@ -364,6 +364,26 @@ async fn apply_state_delta(
     _world_id: &str,
     deltas: &[ComputeOutputStateDelta],
 ) -> Result<usize, CapabilityError> {
+    // Batch-apply threat-model note (R-V161P3-CORR-001):
+    // State deltas are applied sequentially without an enclosing SQLite
+    // transaction. If delta N of M fails, deltas 0..N-1 are already
+    // committed and NOT rolled back. This is accepted under the V1.61
+    // trusted-module threat model:
+    //
+    //   1. All compute modules are embedded (compiled into the binary).
+    //   2. Compute runs on same-creator worlds (no cross-author attack).
+    //   3. WASM execution is sandboxed; output is validated before this
+    //      function is called.
+    //   4. A partial failure means the module produced a structurally
+    //      valid but semantically inconsistent output — a logic bug in
+    //      the module, not a security boundary.
+    //
+    // For V2.0+ with user-authored modules, this should be replaced by
+    // a transaction-aware `SqliteKbStore` API (collect deltas → validate
+    // all → apply atomically via pool.begin()). The current incremental
+    // apply preserves the coherent state that was written before failure,
+    // which is safer than silently discarding it (the module may have
+    // been designed for eventual consistency).
     let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let mut applied = 0usize;
 

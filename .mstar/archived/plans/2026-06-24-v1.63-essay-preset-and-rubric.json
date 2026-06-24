@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.63-essay-preset-and-rubric",
+  "title": "V1.63 P2 \u2014 Essay essay-writing Preset + 4-dim Rubric + Completion Detection + Optional KB",
+  "iteration": "V1.63",
+  "slot": "P2",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@fullstack-dev",
+  "review": "Tri-review + mid-QA",
+  "wave": 2,
+  "dependency": "P0 merged to iteration/v1.63",
+  "working_branch": "feature/v1.63-essay-preset-and-rubric",
+  "merge_target": "iteration/v1.63"
+}

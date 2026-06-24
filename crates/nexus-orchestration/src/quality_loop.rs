@@ -1662,6 +1662,244 @@ pub fn design_five_q_check(section_body: &str) -> DesignFiveQVerdict {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// V1.63 P2 — Essay 4-dimension quality rubric
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Per-dimension results of the essay 4-dimension quality rubric.
+///
+/// The four dimensions evaluate the essay as a complete artifact:
+///
+/// 1. **Thesis clarity**: the central argument is specific, arguable, and
+///    prominently stated early in the essay.
+/// 2. **Evidence support**: every major claim is backed by specific, credible
+///    evidence — named sources, data, or concrete examples.
+/// 3. **Coherence**: the essay flows logically from introduction to conclusion
+///    with clear topic sentences, smooth transitions, and integrated counterargument.
+/// 4. **Ending takeaway**: the conclusion delivers a clear, memorable insight
+///    beyond mere summary — a "so what?" that lingers.
+// The four boolean dimensions are a natural DTO for the gate result.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EssayFourDimDimensions {
+    pub thesis_clarity: bool,
+    pub evidence_support: bool,
+    pub coherence: bool,
+    pub ending_takeaway: bool,
+}
+
+/// Verdict returned by [`essay_four_dim_check`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EssayFourDimVerdict {
+    pub go: bool,
+    pub dimensions: EssayFourDimDimensions,
+    pub reason: String,
+}
+
+/// Pure heuristic evaluation of an essay against the 4-dimension quality
+/// rubric (V1.63 P2).
+///
+/// Deterministic / no-worker complement to the `llm_judge` gate for the
+/// `essay-writing` preset. All four dimensions must pass for GO. The
+/// rubric is intentionally stricter than a simple length check because
+/// essays serve as standalone persuasive artifacts.
+// Four-dimension check is a single concept (quality gate), not a god function.
+#[allow(clippy::too_many_lines)]
+#[must_use]
+pub fn essay_four_dim_check(essay_body: &str) -> EssayFourDimVerdict {
+    let trimmed = essay_body.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let non_empty_lines: Vec<&str> = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    // 1. thesis_clarity: identifiable thesis statement with argumentative language.
+    let thesis_signals = [
+        "argue",
+        "thesis",
+        "claim",
+        "contend",
+        "position",
+        "this essay",
+        "i argue",
+        "i contend",
+        "my argument",
+        "central claim",
+        "main argument",
+    ];
+    let has_thesis_language = thesis_signals.iter().any(|s| lower.contains(s));
+    // Also check: essay has enough substance (not a stub) and contains declarative
+    // language suggesting a specific argument.
+    let has_argument_structure = lower.contains("because")
+        || lower.contains("therefore")
+        || lower.contains("thus")
+        || lower.contains("consequently")
+        || lower.contains("however")
+        || lower.contains("first")
+        || lower.contains("second");
+    let thesis_clarity =
+        has_thesis_language && has_argument_structure && non_empty_lines.len() >= 5;
+
+    // 2. evidence_support: specific evidence markers vs vague authority.
+    let evidence_signals = [
+        "according to",
+        "study by",
+        "research from",
+        "data from",
+        "survey",
+        "percent",
+        "%",
+        "for example",
+        "for instance",
+        "specifically",
+        "in particular",
+        "cites",
+        "reports that",
+        "found that",
+        "demonstrates",
+        "shows that",
+        "published in",
+        "case study",
+        "experiment",
+        "statistic",
+    ];
+    let has_specific_evidence = evidence_signals.iter().any(|s| lower.contains(s));
+    // Vague authority patterns that should lower confidence.
+    let vague_signals = [
+        "studies show",
+        "research shows",
+        "experts say",
+        "many people",
+        "it is known",
+        "everyone knows",
+        "obviously",
+    ];
+    let vague_count = vague_signals.iter().filter(|s| lower.contains(*s)).count();
+    // Evidence passes if specific markers present AND not relying solely on vague authority.
+    let evidence_support =
+        has_specific_evidence && (vague_count < 3 || char_count_range(trimmed, 500, 50_000));
+
+    // 3. coherence: logical flow markers and paragraph structure.
+    let coherence_signals = [
+        "first",
+        "second",
+        "third",
+        "finally",
+        "moreover",
+        "furthermore",
+        "in addition",
+        "on the other hand",
+        "conversely",
+        "in contrast",
+        "similarly",
+        "likewise",
+        "for this reason",
+        "as a result",
+        "consequently",
+        "therefore",
+        "thus",
+        "however",
+    ];
+    let coherence_signal_count = coherence_signals
+        .iter()
+        .filter(|s| lower.contains(*s))
+        .count();
+    // Also check: the essay has paragraphs (multi-line structure).
+    let has_paragraphs = non_empty_lines.len() >= 6;
+    // Counterargument language: essay engages with opposing views.
+    let counterarg_signals = [
+        "objection",
+        "counterargument",
+        "opposing",
+        "critics",
+        "some may argue",
+        "one might",
+        "admittedly",
+        "granted",
+        "to be fair",
+        "while it is true",
+        "on the other hand",
+        "conversely",
+        "some argue",
+    ];
+    let has_counterarg = counterarg_signals.iter().any(|s| lower.contains(s));
+    let coherence = coherence_signal_count >= 3 && has_paragraphs && has_counterarg;
+
+    // 4. ending_takeaway: conclusion delivers insight beyond summary.
+    let takeaway_signals = [
+        "conclusion",
+        "in summary",
+        "to conclude",
+        "ultimately",
+        "in the end",
+        "the takeaway",
+        "what this means",
+        "the implication",
+        "this suggests",
+        "looking ahead",
+        "moving forward",
+        "call to action",
+        "we must",
+        "we should",
+        "it is time",
+        "so what",
+        "why this matters",
+        "the point is",
+    ];
+    let has_takeaway_language = takeaway_signals.iter().any(|s| lower.contains(s));
+    // Also check: the last non-empty lines contain forward-looking or
+    // insight-oriented language, not just mechanical restatement.
+    let last_few_lines: String = non_empty_lines
+        .iter()
+        .rev()
+        .take(5)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let last_lines_lower = last_few_lines.to_ascii_lowercase();
+    let ending_has_insight = last_lines_lower.contains("therefore")
+        || last_lines_lower.contains("thus")
+        || last_lines_lower.contains("means")
+        || last_lines_lower.contains("suggests")
+        || last_lines_lower.contains("must")
+        || last_lines_lower.contains("should")
+        || last_lines_lower.contains("matters");
+    let ending_takeaway = has_takeaway_language && ending_has_insight;
+
+    let dimensions = EssayFourDimDimensions {
+        thesis_clarity,
+        evidence_support,
+        coherence,
+        ending_takeaway,
+    };
+    let go = thesis_clarity && evidence_support && coherence && ending_takeaway;
+    let reason = if go {
+        "essay 4-dim: all dimensions pass (thesis clarity, evidence support, coherence, ending takeaway)".to_string()
+    } else {
+        let mut failed = Vec::new();
+        if !thesis_clarity {
+            failed.push("thesis clarity");
+        }
+        if !evidence_support {
+            failed.push("evidence support");
+        }
+        if !coherence {
+            failed.push("coherence");
+        }
+        if !ending_takeaway {
+            failed.push("ending takeaway");
+        }
+        format!("essay 4-dim: failed on {}", failed.join(", "))
+    };
+    EssayFourDimVerdict {
+        go,
+        dimensions,
+        reason,
+    }
+}
+
 /// Check whether the character count of `text` falls within `[min, max]`.
 fn char_count_range(text: &str, min: usize, max: usize) -> bool {
     let count = text.chars().count();
@@ -2378,5 +2616,181 @@ mod tests {
     #[test]
     fn block_type_to_game_bible_category_unknown_defaults_species() {
         assert_eq!(block_type_to_game_bible_category("nonsense"), "species");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // V1.63 P2 — Essay 4-dimension rubric tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn essay_four_dim_passes_on_good_essay() {
+        let essay = "# The Case for Remote Work\n\n\
+            This essay argues that remote work improves productivity and \
+            well-being for knowledge workers. I contend that companies should \
+            adopt remote-first policies because the evidence overwhelmingly \
+            supports this model.\n\n\
+            First, according to a 2023 Stanford study by Bloom et al., \
+            remote workers are 13% more productive than office-based \
+            counterparts. For example, a two-year study of 16,000 workers \
+            found that attrition dropped by 50%. Specifically, call center \
+            employees at Ctrip handled 13.5% more calls from home.\n\n\
+            Second, remote work reduces environmental impact. Research from \
+            Global Workplace Analytics found that if everyone who could work \
+            remotely did so half the time, greenhouse gas emissions would \
+            drop by 54 million tons annually. For instance, commuting accounts \
+            for 28% of transportation emissions in the US.\n\n\
+            However, some argue that remote work reduces collaboration and \
+            innovation. Admittedly, spontaneous interactions decrease in \
+            remote settings. But research from Microsoft's 2022 study of \
+            61,000 employees suggests that scheduled collaboration sessions \
+            are more effective than serendipitous encounters. Furthermore, \
+            tools like Slack and Zoom enable asynchronous deep work.\n\n\
+            Therefore, remote work is a net positive for knowledge workers. \
+            Ultimately, companies must embrace remote-first policies to stay \
+            competitive. What this means for the future of work is that the \
+            office-centric model is obsolete — and we should act accordingly.\n";
+        let verdict = essay_four_dim_check(essay);
+        assert!(
+            verdict.go,
+            "expected GO for good essay, got: {} — {:?}",
+            verdict.reason, verdict.dimensions
+        );
+        assert!(verdict.dimensions.thesis_clarity);
+        assert!(verdict.dimensions.evidence_support);
+        assert!(verdict.dimensions.coherence);
+        assert!(verdict.dimensions.ending_takeaway);
+    }
+
+    #[test]
+    fn essay_four_dim_fails_on_empty_stub() {
+        let verdict = essay_four_dim_check("");
+        assert!(!verdict.go);
+        assert!(!verdict.dimensions.thesis_clarity);
+        assert!(!verdict.dimensions.evidence_support);
+        assert!(!verdict.dimensions.coherence);
+        assert!(!verdict.dimensions.ending_takeaway);
+        assert!(verdict.reason.contains("thesis clarity"));
+    }
+
+    #[test]
+    fn essay_four_dim_fails_on_weak_thesis() {
+        let essay = "# Some Thoughts\n\n\
+            This is a topic that matters. Many people think about it. \
+            It is important to consider. Some say one thing, others say another. \
+            In conclusion, this is a complex topic that deserves more thought.\n";
+        let verdict = essay_four_dim_check(essay);
+        // Should fail on multiple dimensions: no specific thesis language,
+        // no evidence, poor coherence.
+        assert!(!verdict.go);
+        assert!(
+            !verdict.dimensions.thesis_clarity,
+            "should fail thesis clarity"
+        );
+        assert!(!verdict.dimensions.evidence_support, "should fail evidence");
+    }
+
+    #[test]
+    fn essay_four_dim_fails_on_no_evidence() {
+        let essay = "# Why Dogs Are Better Than Cats\n\n\
+            This essay argues that dogs make superior pets. Dogs are loyal. \
+            They are also friendly. Furthermore, they are playful. In addition, \
+            dogs protect their owners. Moreover, dogs are trainable. \
+            However, some people prefer cats. Admittedly, cats are independent. \
+            But dogs offer more companionship. Therefore, dogs are the best pets. \
+            In the end, choosing a dog is the right decision.\n";
+        let verdict = essay_four_dim_check(essay);
+        // Has thesis language and coherence, but no specific evidence
+        // (no named studies, data, percentages, specific examples).
+        assert!(
+            !verdict.dimensions.evidence_support,
+            "should fail evidence: no studies/data/citations"
+        );
+    }
+
+    #[test]
+    fn essay_four_dim_fails_on_weak_takeaway() {
+        let essay = "# The Impact of Social Media\n\n\
+            This essay argues that social media has changed communication \
+            patterns. I contend that the effects are significant and wide-ranging.\n\n\
+            First, according to a 2022 Pew Research study, 72% of adults \
+            use social media daily. For example, platforms like Twitter enable \
+            real-time news sharing. Specifically, 53% of users get news from \
+            social media according to the same report.\n\n\
+            Second, social media enables rapid information dissemination. \
+            Research published in Nature in 2021 found that false news spreads \
+            six times faster than true news on Twitter. For instance, during \
+            breaking events, social media often outpaces traditional outlets.\n\n\
+            However, some argue that social media causes polarization and \
+            echo chambers. Admittedly, algorithms can amplify extreme content. \
+            But a 2023 study in Science found that exposure to diverse \
+            viewpoints is actually higher on social media than in traditional \
+            news consumption.\n\n\
+            Social media has both positive and negative aspects. \
+            In conclusion, social media is a complex phenomenon that has \
+            altered communication habits. The topic is multifaceted and \
+            continues to be studied by researchers worldwide.\n";
+        let verdict = essay_four_dim_check(essay);
+        // Has thesis, evidence, and coherence, but ending lacks insight -
+        // merely descriptively restates without "so what?" or forward-looking language.
+        assert!(
+            !verdict.dimensions.ending_takeaway,
+            "should fail ending takeaway: ending is purely descriptive"
+        );
+    }
+
+    #[test]
+    fn essay_four_dim_is_deterministic() {
+        let essay = "# The Value of Education\n\n\
+            I argue that liberal arts education is undervalued. \
+            According to a 2021 AAC&U report, 93% of employers value critical \
+            thinking over specific majors. For example, history majors score \
+            higher on analytical reasoning tests. First, liberal arts teach \
+            adaptable thinking. Second, they foster communication skills. \
+            However, some argue STEM degrees are more practical. \
+            Admittedly, STEM salaries are higher initially. But liberal arts \
+            graduates catch up within 10 years according to Burning Glass data. \
+            Therefore, liberal arts education provides lasting value. \
+            Ultimately, we must stop treating education as job training.\n";
+        let v1 = essay_four_dim_check(essay);
+        let v2 = essay_four_dim_check(essay);
+        assert_eq!(v1.go, v2.go);
+        assert_eq!(v1.reason, v2.reason);
+    }
+
+    #[test]
+    fn essay_four_dim_passes_on_persuasive_essay() {
+        let essay = "# Cities Must Ban Single-Use Plastics\n\n\
+            This essay argues that cities should ban single-use plastics \
+            because the environmental benefits decisively outweigh short-term \
+            economic costs. I contend that policy action is urgent and \
+            evidence-based.\n\n\
+            First, according to the UN Environment Programme, 300 million \
+            tons of plastic waste are produced annually. For example, Rwanda \
+            banned plastic bags in 2008 and saw a 15% reduction in litter \
+            within one year according to government data. Specifically, a \
+            2020 study in Science found that countries with bans had 40% \
+            less plastic in waterways within three years.\n\n\
+            Second, plastic pollution has severe ecological consequences. \
+            Research published in Nature Communications in 2023 found that \
+            microplastics were detected in 80% of human blood samples tested. \
+            For instance, the Great Pacific Garbage Patch now covers 1.6 \
+            million square kilometers — three times the size of France.\n\n\
+            However, some argue that plastic bans hurt small businesses. \
+            Admittedly, alternative packaging costs 10-15% more initially. \
+            But research from the Ellen MacArthur Foundation suggests that \
+            reusable systems are cheaper over a 5-year horizon, saving \
+            businesses an average of 20% on packaging costs. Furthermore, \
+            consumer demand for sustainable products is growing at 8% annually.\n\n\
+            Therefore, the environmental benefits of plastic bans outweigh \
+            temporary economic disruptions. What this means is that cities \
+            must act now — delaying only worsens the ecological debt we leave \
+            to future generations. Ultimately, we should treat plastic pollution \
+            with the same urgency as climate change.\n";
+        let verdict = essay_four_dim_check(essay);
+        assert!(
+            verdict.go,
+            "persuasive essay should pass all dimensions, got: {}",
+            verdict.reason
+        );
     }
 }

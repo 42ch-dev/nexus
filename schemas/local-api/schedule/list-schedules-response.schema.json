@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/schedule/list-schedules-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListSchedulesResponse",
+  "description": "Response for GET /v1/local/orchestration/schedules.",
+  "type": "object",
+  "required": ["schedules"],
+  "properties": {
+    "schedules": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/local-api/schedule/schedule-summary.schema.json" },
+      "description": "List of schedule summaries."
+    }
+  },
+  "additionalProperties": false
+}

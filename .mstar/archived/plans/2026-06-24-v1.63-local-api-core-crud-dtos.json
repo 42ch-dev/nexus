@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.63-local-api-core-crud-dtos",
+  "title": "V1.63 P1 \u2014 Local API DTO Promotion: F0 Core CRUD Schemas + Codegen + Drift Detection",
+  "iteration": "V1.63",
+  "slot": "P1",
+  "status": "Done",
+  "effort": "L",
+  "owner": "@fullstack-dev-2",
+  "review": "Tri-review + mid-QA",
+  "wave": 1,
+  "dependency": "P-1 PM signoff",
+  "working_branch": "feature/v1.63-local-api-core-crud-dtos",
+  "merge_target": "iteration/v1.63"
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/orchestration/sessions/session-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus OrchestrationSessionSummary",
+  "description": "Summary of an active orchestration engine session.",
+  "type": "object",
+  "required": ["session_id", "creator_id", "preset_id", "status"],
+  "properties": {
+    "session_id": { "type": "string" },
+    "creator_id": { "type": "string" },
+    "preset_id": { "type": "string" },
+    "status": { "type": "string" },
+    "current_task_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}
