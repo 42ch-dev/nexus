@@ -128,9 +128,9 @@ pub use findings::{
 // Re-export works types
 pub use works::{
     advance_work_stage_atomic, append_inspiration, count_works, create_work,
-    find_work_by_client_request_id, get_work, has_active_fl_e_schedule, is_game_bible_profile,
-    is_novel_profile, is_script_profile, list_works, patch_work, record_idempotency,
-    InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
+    find_work_by_client_request_id, get_work, has_active_fl_e_schedule, is_essay_profile,
+    is_game_bible_profile, is_novel_profile, is_script_profile, list_works, patch_work,
+    record_idempotency, InspirationLogEntry, WorkListFilters, WorkPatch, WorkRecord,
 };
 
 // Re-export novel_pool_entries types
@@ -150,8 +150,8 @@ pub use inspiration_items::{
 // Re-export work_chapters types
 pub use work_chapters::{
     apply_reconcile_diff, compute_reconcile_diff, count_chapters, get_chapter, insert_chapter,
-    is_game_bible_design_complete, is_script_complete, is_work_completed, next_chapter,
-    next_chapter_volume_aware, reconcile_from_filesystem, seed_chapters,
+    is_essay_complete, is_game_bible_design_complete, is_script_complete, is_work_completed,
+    next_chapter, next_chapter_volume_aware, reconcile_from_filesystem, seed_chapters,
     seed_chapters_multi_volume, seed_chapters_multi_volume_tx, update_paths, update_status,
     InsertChapterParams, ReconcileDiff, ReconcileOp, ReconcileReport, WorkChapterRecord,
 };
