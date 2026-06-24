@@ -17,6 +17,7 @@ pub mod middleware;
 pub mod pagination;
 
 use crate::api::auth_middleware::DaemonApiConfig;
+use crate::static_assets;
 use crate::workspace::WorkspaceState;
 use axum::{
     middleware as axum_mw,
@@ -388,7 +389,13 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             auth_middleware::require_api_key,
         ));
 
+    // ── Top-level router with SPA fallback ─────────────────────────
+    // The SPA fallback is set first so it acts as the default handler;
+    // explicit /v1/local/* routes merged afterward take priority.
+    // The SPA shell carries no data; all data access is through the
+    // protected /v1/local/* routes.
     Router::new()
+        .fallback(static_assets::serve_embedded_app)
         .merge(runtime_routes)
         .merge(protected_routes)
         .layer(CorsLayer::permissive())

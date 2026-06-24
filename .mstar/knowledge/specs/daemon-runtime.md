@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.64 amendment: bundled local Web UI static-asset serving |
+| **Status** | Normative — V1.64 P3 amendment: bundled local Web UI static-asset serving (rust-embed, ServeDir-style semantics, cache headers, CLI URL logging, `daemon ui` convenience command) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -79,6 +79,58 @@ Normative serving model:
 5. **Tauri readiness**: the future Tauri shell loads the same `apps/web` build output and swaps the frontend transport implementation behind the `NexusClient` boundary. The daemon runtime remains the local supervisor and is still not an ACP Agent/Server.
 
 The router integration point is the top-level `create_router` composition in `crates/nexus-daemon-runtime/src/api/mod.rs`: static serving is added beside the unguarded runtime routes and protected Local API route tree, without moving the auth middleware boundary for data endpoints.
+
+#### 4.4.1 Embed implementation (V1.64 P3)
+
+The static assets are embedded via a `#[derive(RustEmbed)]` struct in `crates/nexus-daemon-runtime/src/static_assets.rs`:
+
+```rust
+#[derive(RustEmbed)]
+#[folder = "../../apps/web/dist"]
+pub struct WebAssets;
+```
+
+The struct is placed in `nexus-daemon-runtime` (not `nexus42`) because the daemon runtime library owns the axum router. The `rust-embed` macro reads `apps/web/dist` relative to the crate's `Cargo.toml` (i.e., `<repo_root>/apps/web/dist`) and triggers a rebuild when the dist changes.
+
+#### 4.4.2 Router mount
+
+The SPA handler `serve_embedded_app` is mounted as the top-level `Router::fallback()` inside `create_router()` — added BEFORE merging the API routes. This means explicit `/v1/local/*` routes (network routes + protected routes) take priority over the catch-all SPA fallback.
+
+**Route resolution order:**
+1. Unguarded runtime routes (`/v1/local/runtime/health`, etc.)
+2. Protected Local API routes (`/v1/local/works`, etc., behind `require_api_key`)
+3. SPA fallback (serves `index.html` for unmatched `GET`/`HEAD` requests)
+
+Non-`GET`/`HEAD` requests hitting the fallback return `405 Method Not Allowed`.
+
+#### 4.4.3 Cache headers
+
+| Path pattern | `Cache-Control` | Rationale |
+|---|---|---|
+| `/assets/*` (hashed Vite output) | `public, max-age=31536000, immutable` | Content-hashed filenames guarantee cache-busting |
+| `index.html` (SPA entry point) | `no-cache` | Must always revalidate so new deploys are picked up |
+
+#### 4.4.4 Release build sequence
+
+1. `pnpm --filter web build` — produces `apps/web/dist/` (Vite + TypeScript)
+2. `cargo build --release -p nexus42` — `rust-embed` macro reads dist at compile time
+
+The dist is NOT committed to git (`apps/web/dist/` is gitignored per the Vite scaffold). The release CI pipeline must run step 1 before step 2. A stale or missing dist at build time is a compile error (the `#[folder]` path must exist).
+
+#### 4.4.5 CLI URL logging
+
+On startup (both foreground and background modes), the daemon logs the Web UI URL alongside the Local API base URL:
+
+- **Foreground** (`boot.rs`): `tracing::info!("Web UI available at http://{}", addr);`
+- **Background** (`nexus42 daemon start` stdout):
+  ```
+  ✓ Daemon started successfully on port 8420
+    PID: 12345
+    Local API: http://127.0.0.1:8420
+    Web UI:    http://127.0.0.1:8420/
+  ```
+
+A convenience command `nexus42 daemon ui` (alias `nexus42 daemon web`) starts the daemon in background if not already running and opens the OS default browser via `open` (macOS) / `xdg-open` (Linux) / `start` (Windows).
 
 ---
 

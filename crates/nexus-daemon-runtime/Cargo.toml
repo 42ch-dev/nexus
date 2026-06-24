@@ -54,6 +54,8 @@ tokio-stream = { workspace = true }
 regex = { workspace = true }
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
+rust-embed = { version = "8.11.0", default-features = false, features = ["mime-guess"] }
+mime_guess = "2.0.5"
 
 [dev-dependencies]
 axum-test = "15"
