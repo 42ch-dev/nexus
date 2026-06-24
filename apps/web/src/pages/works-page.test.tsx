@@ -7,6 +7,7 @@
  * baseline P-last can extend to the remaining screens.
  */
 import { http, HttpResponse } from 'msw';
+import { describe, expect, it } from 'vitest';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -86,7 +87,6 @@ describe('WorksPage', () => {
       ),
     );
 
-    const { user } = { user: undefined };
     renderWorks();
     await waitFor(() => expect(screen.getByText('No works yet')).toBeInTheDocument());
 

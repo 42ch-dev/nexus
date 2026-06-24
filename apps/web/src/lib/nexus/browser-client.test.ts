@@ -8,6 +8,7 @@
  * → thrown NexusClientError chain.
  */
 import { http, HttpResponse } from 'msw';
+import { describe, expect, it } from 'vitest';
 
 import { BrowserClient, NexusClientError } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
@@ -108,9 +109,15 @@ describe('BrowserClient cursor list', () => {
     );
 
     const client = new BrowserClient();
-    const error = await client.listSessions().catch((e) => e as NexusClientError);
+    let error: unknown;
+    try {
+      await client.listSessions();
+    } catch (e) {
+      error = e;
+    }
     expect(error).toBeInstanceOf(NexusClientError);
-    expect(error.status).toBe(502);
-    expect(error.code).toBe('http_502');
+    const nexusError = error as NexusClientError;
+    expect(nexusError.status).toBe(502);
+    expect(nexusError.code).toBe('http_502');
   });
 });
