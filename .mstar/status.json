@@ -47,7 +47,7 @@
       "title": "V1.64 P2 — Track A: Control Room + Setup Screens",
       "iteration": "V1.64",
       "slot": "P2",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "XL",
       "owner": "@frontend-dev",
       "review": "Tri-review + QA",
@@ -61,7 +61,7 @@
       "title": "V1.64 P3 — Track A (backend): Daemon Web UI Serving Wiring (ServeDir + rust-embed)",
       "iteration": "V1.64",
       "slot": "P3",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "M",
       "owner": "@fullstack-dev-2",
       "review": "Tri-review + QA",
@@ -149,7 +149,7 @@
       },
       "by_target_active": {}
     },
-    "updated_at": "2026-06-25T00:20:00Z"
+    "updated_at": "2026-06-25T01:50:00Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
@@ -3868,6 +3868,64 @@
         "target_date": "V1.64 P2",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-web-app-scaffold/qc1.md S-3",
         "note": "P2 data hooks should own the F-P3 normalization adapter (thin TanStack Query transformer). P-last verifies the F-P3 deferral boundary holds against the live UI.",
+        "lifecycle": "deferred"
+      }
+    ],
+    "2026-06-24-v1.64-control-room-and-setup-screens": [
+      {
+        "id": "R-V164-P2-G1",
+        "title": "CreateWorkRequest/PatchWorkRequest lack work_profile field — UI cannot select profile at create/update; daemon assigns internally",
+        "severity": "low",
+        "source": "P2 implementer (scope gap, surfaced not faked)",
+        "scope": "schemas/local-api/works/ create/patch request DTOs + apps/web create-work-dialog",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.65+",
+        "target_date": "V1.65+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
+        "note": "Profile-aware create contract needed for full Work-CRUD parity with CLI. V1.64 MVP creates with daemon-default profile; patch status/stage works.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V164-P2-G2",
+        "title": "Preset get/update/delete have no daemon routes/contracts — UI delivers list/scaffold/validate/reload only (not full CRUD)",
+        "severity": "low",
+        "source": "P2 implementer (scope gap)",
+        "scope": "crates/nexus-daemon-runtime preset-management handlers + schemas/local-api/preset-management/",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.65+",
+        "target_date": "V1.65+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
+        "note": "Preset management MVP = list/scaffold/validate/reload (validate dry-run is the high-trust affordance shipped). Full CRUD (get/update/delete routes) deferred to a future preset-CRUD plan.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V164-P2-G3",
+        "title": "CapabilityInfo carries no admission-gate data — Capabilities page shows name + I/O schemas only (not admission gates)",
+        "severity": "low",
+        "source": "P2 implementer (scope gap)",
+        "scope": "schemas/local-api/capabilities/ CapabilityInfo + daemon capability-registry handler",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.65+",
+        "target_date": "V1.65+",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
+        "note": "Future capability-detail endpoint should expose admission gates. MVP browse = name + description + I/O schemas.",
+        "lifecycle": "deferred"
+      },
+      {
+        "id": "R-V164-P2-S1",
+        "title": "Live served-UI smoke (against running daemon binary) deferred to P-mid/QA — frontend path covered by msw + preview smoke",
+        "severity": "low",
+        "source": "P2 implementer (blocked on P3 binary)",
+        "scope": "apps/web end-to-end smoke vs rust-embed daemon binary",
+        "decision": "defer",
+        "owner": "@qa-engineer",
+        "target": "V1.64 P-mid/QA",
+        "target_date": "V1.64 P-mid",
+        "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
+        "note": "P3 owns the rust-embed binary that serves apps/web/dist. P2 verified via msw + vite-preview (offline error handling, CRUD round-trip). Live binary smoke at P-mid/QA.",
         "lifecycle": "deferred"
       }
     ]
