@@ -452,6 +452,74 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             LogoutResponse
         ),
+        // ── local-api/orchestration/sessions/ (V1.63 P3) ──────────────────
+        entry!(
+            "schemas/local-api/orchestration/sessions/session-summary.schema.json",
+            Strict,
+            SessionSummary
+        ),
+        entry!(
+            "schemas/local-api/orchestration/sessions/list-sessions-query.schema.json",
+            Strict,
+            ListSessionsQuery
+        ),
+        entry!(
+            "schemas/local-api/orchestration/sessions/list-sessions-response.schema.json",
+            Strict,
+            ListSessionsResponse
+        ),
+        entry!(
+            "schemas/local-api/orchestration/sessions/session-detail-response.schema.json",
+            Strict,
+            SessionDetailResponse
+        ),
+        // ── local-api/orchestration/capabilities/ (V1.63 P3) ───────────────
+        entry!(
+            "schemas/local-api/orchestration/capabilities/capability-info.schema.json",
+            Strict,
+            CapabilityInfo
+        ),
+        entry!(
+            "schemas/local-api/orchestration/capabilities/list-capabilities-response.schema.json",
+            Strict,
+            ListCapabilitiesResponse
+        ),
+        // ── local-api/preset-management/ (V1.63 P3) ────────────────────────
+        entry!(
+            "schemas/local-api/preset-management/preset-summary.schema.json",
+            Strict,
+            PresetSummary
+        ),
+        entry!(
+            "schemas/local-api/preset-management/list-presets-response.schema.json",
+            Strict,
+            ListPresetsResponse
+        ),
+        entry!(
+            "schemas/local-api/preset-management/scaffold-preset-request.schema.json",
+            Strict,
+            ScaffoldPresetRequest
+        ),
+        entry!(
+            "schemas/local-api/preset-management/scaffold-preset-response.schema.json",
+            Strict,
+            ScaffoldPresetResponse
+        ),
+        entry!(
+            "schemas/local-api/preset-management/validate-preset-request.schema.json",
+            Strict,
+            ValidatePresetRequest
+        ),
+        entry!(
+            "schemas/local-api/preset-management/validate-preset-response.schema.json",
+            Strict,
+            ValidatePresetResponse
+        ),
+        entry!(
+            "schemas/local-api/preset-management/reload-preset-response.schema.json",
+            Strict,
+            ReloadPresetResponse
+        ),
         // ── platform/http-bff/ ───────────────────────────────────────────
         // V1.62 reorganization: platform HTTP bodies moved here from platform/.
         entry!(

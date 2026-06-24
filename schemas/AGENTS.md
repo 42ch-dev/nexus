@@ -20,7 +20,7 @@ Generated modules are **nested** to mirror the consumer-scope tree:
 - Rust: `generated::{common, domain, platform::{http_bff, sync}, local_api::{compute, works, kb, findings, schedule, workspace, creators}}::<module>` (e.g. `generated::local_api::works::work_summary::WorkSummary`). The root `generated::mod.rs` also re-exports all leaf types flat, so `generated::WorkSummary` resolves too.
 - TypeScript: mirrors the same folders (hyphenated: `platform/http-bff`, `local-api/works`, `local-api/kb`, etc.); `index.ts` re-exports flat for the package public API.
 
-The `local-api/` subtree runs through the same codegen as wire types — it is a cross-language contract surface. V1.63 added `local-api/{works,kb,findings,schedule,workspace,creators}/` for the daemon's core CRUD Local API surface, consumed by future WebApp/Web-UI clients.
+The `local-api/` subtree runs through the same codegen as wire types — it is a cross-language contract surface. V1.63 P1 added `local-api/{works,kb,findings,schedule,workspace,creators}/` for the daemon's core CRUD Local API surface; V1.63 P3 added `local-api/{orchestration,preset-management}/` for orchestration sessions/capabilities and preset management. Consumed by future WebApp/Web-UI clients.
 
 ## ⚠️ Mandatory: Run Codegen After Any Schema Change
 
