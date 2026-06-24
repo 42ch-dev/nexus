@@ -755,6 +755,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 let listener = tokio::net::TcpListener::bind(&addr).await?;
 
                 tracing::info!("Local API listening on http://{}", addr);
+                tracing::info!("Web UI available at http://{}", addr);
                 tracing::info!("Press Ctrl+C to stop");
 
                 axum::serve(listener, app)

@@ -92,6 +92,14 @@ pub enum DaemonCommand {
         #[command(subcommand)]
         command: Box<ScheduleCommand>,
     },
+
+    /// Open the Web UI in the default browser (starts daemon if not running)
+    #[command(visible_alias = "web")]
+    Ui {
+        /// Port to use (default: 8420)
+        #[arg(long, default_value_t = DAEMON_PORT)]
+        port: u16,
+    },
 }
 
 /// Run daemon command
@@ -119,6 +127,7 @@ pub async fn run(cmd: DaemonCommand, config: &CliConfig) -> Result<()> {
         DaemonCommand::Logs { port, lines } => daemon_logs(port, lines).await,
         DaemonCommand::Doctor { port } => daemon_doctor(port).await,
         DaemonCommand::Schedule { command } => schedule::run(*command, config).await,
+        DaemonCommand::Ui { port } => open_ui(port).await,
     }
 }
 
@@ -241,6 +250,8 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
             if client.health_check().await? {
                 println!("✓ Daemon started successfully on port {port}");
                 println!("  PID: {child_pid}");
+                println!("  Local API: http://127.0.0.1:{port}");
+                println!("  Web UI:    http://127.0.0.1:{port}/");
                 return Ok(());
             }
             if i == max_retries {
@@ -763,6 +774,55 @@ fn validate_cdn_url(url: &str) -> Result<()> {
              got {url:?}: {e}"
         ))
     })
+}
+
+/// Open the Web UI in the default OS browser.
+///
+/// Starts the daemon in background mode if it is not already running,
+/// then opens `http://127.0.0.1:<port>/` with the platform-appropriate
+/// command (`open` on macOS, `xdg-open` on Linux, `start` on Windows).
+async fn open_ui(port: u16) -> Result<()> {
+    let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
+
+    // Start daemon in background if not already running.
+    if !client.health_check().await? {
+        println!("Daemon is not running — starting on port {port}...");
+        // Reuse the self-spawn path (no --foreground).
+        start_daemon(port, false, None).await?;
+    }
+
+    let url = format!("http://127.0.0.1:{port}/");
+    println!("Opening Web UI: {url}");
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| CliError::Daemon {
+                message: format!("Failed to open browser: {e}"),
+            })?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| CliError::Daemon {
+                message: format!("Failed to open browser: {e}"),
+            })?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/c", "start", &url])
+            .spawn()
+            .map_err(|e| CliError::Daemon {
+                message: format!("Failed to open browser: {e}"),
+            })?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
