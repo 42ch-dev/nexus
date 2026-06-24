@@ -1165,7 +1165,7 @@ roles:
 
     #[test]
     fn parse_labeled_next_n_way_from_yaml_list() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: n-way
   version: 1
@@ -1195,7 +1195,7 @@ states:
     next: judge
   - id: done
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         match &p.states[0].next {
             Some(NextTarget::Labeled(edges)) => {
@@ -1214,7 +1214,7 @@ states:
     #[test]
     fn parse_labeled_next_two_way_like_binary_gonogo() {
         // New form: 2-way labeled edges (equivalent to old binary GoNogo).
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: labeled-2way
   version: 1
@@ -1242,7 +1242,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         match &p.states[0].next {
             Some(NextTarget::Labeled(edges)) => {
@@ -1259,7 +1259,7 @@ states:
     #[test]
     fn backward_compat_binary_gonogo_still_parses() {
         // Old binary GoNogo shape should still parse as GoNogo.
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: binary-gonogo
   version: 1
@@ -1285,7 +1285,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         match &p.states[0].next {
             Some(NextTarget::GoNogo(gonogo)) => {
@@ -1353,7 +1353,7 @@ states:
 
     #[test]
     fn parse_merge_all() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-all
   version: 1
@@ -1376,7 +1376,7 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.states.len(), 3);
         assert_eq!(p.states[1].merge, Some(MergeKind::All));
@@ -1384,7 +1384,7 @@ states:
 
     #[test]
     fn parse_merge_any() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-any
   version: 1
@@ -1407,14 +1407,14 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.states[1].merge, Some(MergeKind::Any));
     }
 
     #[test]
     fn parse_merge_quorum() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: merge-quorum
   version: 1
@@ -1439,14 +1439,14 @@ states:
     next: done
   - id: done
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.states[1].merge, Some(MergeKind::Quorum { n: 2, m: 3 }));
     }
 
     #[test]
     fn merge_defaults_to_none_when_absent() {
-        let yaml = r#"
+        let yaml = r"
 preset:
   id: no-merge
   version: 1
@@ -1462,7 +1462,7 @@ states:
     next: b
   - id: b
     terminal: true
-"#;
+";
         let p: PresetManifest = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(p.states[0].merge, None);
         assert_eq!(p.states[1].merge, None);

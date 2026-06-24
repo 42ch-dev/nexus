@@ -1,12 +1,12 @@
-# Schemas — JSON Schema Wire Contracts
+# Schemas — JSON Schema External-Consumer Contracts
 
-This directory is the **single truth source** for **wire** types (CLI ↔ platform sync and platform HTTP). All Rust and TypeScript types here are generated from JSON Schema.
+This directory is the **single truth source** for types consumed by an **external client** (cross-language / cross-process boundary): `nexus-platform` (wire) and external Local API clients (e.g. the future WebApp/Web-UI; WASM compute modules). All Rust and TypeScript types here are generated from JSON Schema.
 
 **Layout (folders):** [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md) — tree index in [README.md](README.md).
 
-**Not in `schemas/`**: local-only types (`/v1/local/*`, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. See [`.mstar/knowledge/schemas-wire-platform-sync-boundary.md`](../.mstar/knowledge/schemas-wire-platform-sync-boundary.md).
+**Not in `schemas/`**: a type belongs here **only if** an external client consumes it. Local-only types (`/v1/local/*` daemon DTOs, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
 
-**Cloud line only:** daemon Local API must not add schemas here; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md).
+**Cloud line only:** daemon internal Local API must not add schemas here; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md). The `local-api/` subtree is reserved for cross-language Local API contracts (e.g. `local-api/compute/` for the WASM compute ABI).
 
 ## Schema URI Placeholder
 
@@ -15,6 +15,12 @@ Committed schemas use `https://nexus42.invalid` in `$id`/`$ref` (RFC 6761 reserv
 ## Codegen Flow
 
 `schemas/` → `pnpm run codegen` → Rust (`crates/nexus-contracts/src/generated/`) + TypeScript (`packages/nexus-contracts/src/generated/`).
+
+Generated modules are **nested** to mirror the consumer-scope tree:
+- Rust: `generated::{common, domain, platform::{http_bff, sync}, local_api::compute}::<module>` (e.g. `generated::local_api::compute::compute_input::ComputeInput`). The root `generated::mod.rs` also re-exports all leaf types flat, so `generated::ComputeInput` resolves too.
+- TypeScript: mirrors the same folders (hyphenated: `platform/http-bff`, `local-api/compute`); `index.ts` re-exports flat for the package public API.
+
+The `local-api/` subtree runs through the same codegen as wire types — it is a cross-language contract surface.
 
 ## ⚠️ Mandatory: Run Codegen After Any Schema Change
 
@@ -28,10 +34,10 @@ Committed schemas use `https://nexus42.invalid` in `$id`/`$ref` (RFC 6761 reserv
 
 CI gate `cargo test --test schema_drift_detection` validates that registered schemas match their Rust struct definitions. Two check modes:
 
-- **`Strict`** (wire types): exact bidirectional property match — every schema property maps to a Rust field and vice versa.
+- **`Strict`** (external-consumer types): exact bidirectional property match — every schema property maps to a Rust field and vice versa.
 - **`Subset`** (local-only types): only required schema fields enforced; Rust struct may have extra internal fields.
 
-Register new schemas by adding an `entry!` macro to `build_schema_map()` in `crates/nexus-contracts/tests/schema_drift_detection.rs`, then run `./tooling/check-wire-drift.sh`.
+Register new schemas by adding an `entry!` macro to `build_schema_map()` in `crates/nexus-contracts/tests/schema_drift_detection.rs` (use the schema's path under `schemas/`), then run `./tooling/check-wire-drift.sh`.
 
 ## Wire `schema_version`
 

@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/platform/http-bff/notifications-inbox-item.schema.json",
+  "schema_version": 1,
+  "title": "Nexus NotificationsInboxItem",
+  "description": "Single inbox notification row (platform plan 20).",
+  "type": "object",
+  "required": ["schema_version", "notification_id", "kind", "title", "created_at"],
+  "properties": {
+    "schema_version": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/SchemaVersion"
+    },
+    "notification_id": {
+      "type": "string",
+      "pattern": "^ntf_[a-zA-Z0-9]+$",
+      "description": "Notification id"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["system", "social", "publish", "workspace", "other"],
+      "description": "Category for routing and UI"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "body": {
+      "type": "string",
+      "maxLength": 8192,
+      "description": "Optional detail body"
+    },
+    "read_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp",
+      "description": "When marked read; omit when unread"
+    },
+    "created_at": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/Timestamp"
+    },
+    "link_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "description": "Deep link for clients when safe to expose"
+    }
+  },
+  "additionalProperties": false
+}

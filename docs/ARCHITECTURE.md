@@ -27,7 +27,7 @@ schemas/*.json
         → packages/nexus-contracts/               (TypeScript / npm)
 ```
 
-Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written under `crates/nexus-contracts/src/local/` and are **not** generated from `schemas/`. See [`.mstar/knowledge/schemas-wire-platform-sync-boundary.md`](../.mstar/knowledge/schemas-wire-platform-sync-boundary.md) and [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md).
+Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written under `crates/nexus-contracts/src/local/` and are **not** generated from `schemas/`. See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md) and [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md).
 
 **Design principles**
 

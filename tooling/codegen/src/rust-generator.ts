@@ -1,7 +1,8 @@
-import { LoadedSchema, COMMON_DEFINITIONS } from './schema-loader';
+import { LoadedSchema, COMMON_DEFINITIONS, COMMON_TYPES_MODULE_PATH } from './schema-loader';
 import { resolveRef, isCommonEnum } from './schema-loader';
-import { resolveFromRoot, writeFile, logger, toSnakeCase, removeStaleGeneratedFiles, maxSchemaVersion } from './utils';
+import { resolveFromRoot, writeFile, logger, toSnakeCase, maxSchemaVersion } from './utils';
 import path from 'path';
+import fs from 'fs';
 
 /** Rust reserved words that cannot be used as field names without r# prefix */
 const RUST_RESERVED_WORDS = new Set([
@@ -110,13 +111,46 @@ function rustFieldName(propName: string): string {
 }
 
 /**
+ * Build a map from PascalCase type name → generated module path segments, for resolving
+ * cross-module `use` statements. Includes common types (→ common_types module) and SourceAnchor.
+ */
+function buildTypeModuleMap(schemas: LoadedSchema[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const s of schemas) {
+    if (s.isExplicitlySkipped) continue;
+    map.set(s.typeName, s.modulePath);
+    // Also register any inline definition struct names emitted in the same module file
+    const defs = s.schemaContent.definitions || s.schemaContent.$defs;
+    if (defs && typeof defs === 'object') {
+      for (const defName of Object.keys(defs as Record<string, unknown>)) {
+        if (!map.has(defName)) map.set(defName, s.modulePath);
+      }
+    }
+  }
+  // Common definitions (type aliases + enums) and SourceAnchor live in common_types
+  for (const name of COMMON_DEFINITIONS.keys()) {
+    map.set(name, COMMON_TYPES_MODULE_PATH);
+  }
+  map.set('SourceAnchor', COMMON_TYPES_MODULE_PATH);
+  map.set('SourceSummaryRef', COMMON_TYPES_MODULE_PATH);
+  return map;
+}
+
+/**
  * Generate Rust types from schemas.
+ *
+ * Emits a nested module tree mirroring the consumer-scope `schemas/` layout:
+ *   generated/{common,domain,platform/{http_bff,sync},local_api/compute}/<module>.rs
+ * Each folder gets a `mod.rs` declaring its children and re-exporting them; the root
+ * `mod.rs` additionally re-exports every leaf type flat so `generated::TypeName` still resolves.
  */
 export function generateRustTypes(schemas: LoadedSchema[]): void {
   const outputDir = resolveFromRoot('crates', 'nexus-contracts', 'src', 'generated');
   logger.info(`Generating Rust types to: ${outputDir}`);
 
-  // Generate common types module first
+  const typeModuleMap = buildTypeModuleMap(schemas);
+
+  // Generate common types module first (under generated/common/)
   generateRustCommonTypes(outputDir);
 
   // Collect schemas that produce type files
@@ -133,59 +167,178 @@ export function generateRustTypes(schemas: LoadedSchema[]): void {
     schemasWithTypes.push(schema);
 
     if (schema.isStandaloneEnum) {
-      generateRustEnumFile(schema, outputDir);
+      generateRustEnumFile(schema, outputDir, typeModuleMap);
     } else {
-      // Generate individual type files
-      generateRustTypeFile(schema, outputDir, hasTopLevel, hasDefs);
+      // Generate individual type files into nested folders
+      generateRustTypeFile(schema, outputDir, hasTopLevel, hasDefs, typeModuleMap);
     }
   }
 
-  // Generate mod.rs with module declarations
-  generateRustMod(schemasWithTypes, outputDir);
+  // Generate hierarchical mod.rs files (root + per-folder)
+  generateRustModTree(schemasWithTypes, outputDir);
 
-  const keepRs = new Set(['mod.rs', 'common_types.rs']);
-  for (const s of schemasWithTypes) {
-    keepRs.add(`${toSnakeCase(s.typeName)}.rs`);
-  }
-  removeStaleGeneratedFiles(outputDir, keepRs, '.rs');
+  // Clean stale files across the whole generated tree (recursive)
+  cleanupStaleRustFiles(outputDir, schemasWithTypes);
 
   logger.success(`Generated Rust types for ${schemasWithTypes.length} schema(s) (+ common types)`);
 }
 
 /**
- * Generate mod.rs with module declarations and re-exports.
+ * Walk the generated tree and remove any .rs file (or now-empty subtree) that is not part of
+ * the expected output. Expected outputs: mod.rs at each folder, common_types.rs under common/,
+ * and one <module>.rs per emitting schema at its nested location.
  */
-function generateRustMod(schemas: LoadedSchema[], outputDir: string): void {
-  const modules: string[] = ['pub mod common_types;'];
+function cleanupStaleRustFiles(outputDir: string, schemasWithTypes: LoadedSchema[]): void {
+  // Build the allowlist of expected absolute file paths
+  const keep = new Set<string>([path.join(outputDir, 'mod.rs')]);
+  // common_types under common/
+  keep.add(path.join(outputDir, 'common', 'mod.rs'));
+  keep.add(path.join(outputDir, 'common', 'common_types.rs'));
+  for (const s of schemasWithTypes) {
+    const rel = [...s.modulePath.slice(0, -1), `${s.modulePath[s.modulePath.length - 1]}.rs`];
+    keep.add(path.join(outputDir, ...rel));
+  }
+  // Every intermediate folder needs a mod.rs
+  const folderSet = new Set<string>();
+  folderSet.add(outputDir);
+  folderSet.add(path.join(outputDir, 'common'));
+  for (const s of schemasWithTypes) {
+    let acc = outputDir;
+    for (const seg of s.modulePath.slice(0, -1)) {
+      acc = path.join(acc, seg);
+      folderSet.add(acc);
+    }
+  }
+  for (const f of folderSet) keep.add(path.join(f, 'mod.rs'));
 
-  for (const schema of schemas) {
-    const moduleName = toSnakeCase(schema.typeName);
-    modules.push(`pub mod ${moduleName};`);
+  const root = resolveFromRoot();
+  let removed = 0;
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        walk(full);
+      } else if (ent.isFile() && ent.name.endsWith('.rs') && !keep.has(full)) {
+        fs.unlinkSync(full);
+        logger.warn(`Removed stale generated file: ${path.relative(root, full)}`);
+        removed++;
+      }
+    }
+  };
+  walk(outputDir);
+  if (removed > 0) logger.info(`Stale Rust file cleanup removed ${removed} file(s)`);
+}
+
+/**
+ * Generate the hierarchical mod.rs tree: root mod.rs + one mod.rs per folder.
+ * Root mod.rs declares the top-level consumer-scope submodules and re-exports all leaf types flat.
+ */
+function generateRustModTree(schemas: LoadedSchema[], outputDir: string): void {
+  // Group schemas by their folder path (modulePath minus the leaf segment)
+  // Build the folder tree structure.
+  type FolderNode = { children: Map<string, FolderNode>; schemas: LoadedSchema[] };
+  const root: FolderNode = { children: new Map(), schemas: [] };
+
+  const getFolder = (segs: string[]): FolderNode => {
+    let node = root;
+    for (const seg of segs) {
+      let child = node.children.get(seg);
+      if (!child) {
+        child = { children: new Map(), schemas: [] };
+        node.children.set(seg, child);
+      }
+      node = child;
+    }
+    return node;
+  };
+
+  for (const s of schemas) {
+    const folderSegs = s.modulePath.slice(0, -1);
+    const folder = getFolder(folderSegs);
+    folder.schemas.push(s);
   }
 
-  const content = `//! Nexus Wire Contracts - Generated Rust Types
-//!
-//! AUTO-GENERATED FROM JSON SCHEMA - DO NOT MODIFY MANUALLY
-//! Source: schemas/*.schema.json
-//! Generated by: \`pnpm run codegen\`
+  // Recursively write mod.rs for each folder.
+  // `relSegs` is the path segments from outputDir to this folder (e.g. ['platform', 'http_bff']).
+  const writeFolderMod = (node: FolderNode, relSegs: string[]) => {
+    const folderDir = path.join(outputDir, ...relSegs);
+    const lines: string[] = [];
 
-${modules.join('\n')}
+    // Header
+    if (relSegs.length === 0) {
+      lines.push('//! Nexus Wire Contracts - Generated Rust Types');
+      lines.push('//!');
+      lines.push('//! AUTO-GENERATED FROM JSON SCHEMA - DO NOT MODIFY MANUALLY');
+      lines.push('//! Source: schemas/*.schema.json');
+      lines.push('//! Generated by: `pnpm run codegen`');
+      lines.push('');
+    }
 
-// Re-export all types at the generated module level
-pub use common_types::*;
+    // Declare child modules
+    const childNames = [...node.children.keys()].sort();
+    for (const child of childNames) {
+      lines.push(`pub mod ${child};`);
+    }
 
-${schemas.map(s => `pub use ${toSnakeCase(s.typeName)}::*;`).join('\n')}
+    // Special: root declares common_types is under common/, but root itself has the synthetic
+    // common_types only via the common/ subtree. Handle the common/ folder's common_types module.
+    // For the common/ folder, also declare common_types module.
+    if (relSegs.length === 1 && relSegs[0] === 'common') {
+      // common_types.rs lives here but is not in schemas list; declare it explicitly
+      if (!lines.includes('pub mod common_types;')) {
+        // Insert common_types declaration (keep sorted-ish: common_types before version_ref)
+        lines.splice(childNames.length === 0 ? lines.length : 0, 0, 'pub mod common_types;');
+      }
+    }
 
-/// Schema version constants
-pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
-${schemas.map(s => `    ("${s.typeName}", ${s.schemaVersion}),`).join('\n')}
-];
+    // Declare leaf schema modules in this folder
+    const leafModules = node.schemas.map(s => s.modulePath[s.modulePath.length - 1]).sort();
+    for (const leaf of leafModules) {
+      lines.push(`pub mod ${leaf};`);
+    }
 
-/// Highest \`schema_version\` among emitted contract schemas
-pub const LATEST_SCHEMA_VERSION: u32 = ${maxSchemaVersion(schemas.map(s => s.schemaVersion))};
-`;
+    lines.push('');
 
-  writeFile(path.join(outputDir, 'mod.rs'), content);
+    // Re-exports: re-export each declared child module + leaf module contents
+    for (const child of childNames) {
+      lines.push(`pub use ${child}::*;`);
+    }
+    if (relSegs.length === 1 && relSegs[0] === 'common') {
+      lines.push('pub use common_types::*;');
+    }
+    for (const leaf of leafModules) {
+      lines.push(`pub use ${leaf}::*;`);
+    }
+
+    // Root-only: schema version constants
+    if (relSegs.length === 0) {
+      lines.push('');
+      lines.push('/// Schema version constants');
+      lines.push('pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[');
+      for (const s of schemas) {
+        lines.push(`    ("${s.typeName}", ${s.schemaVersion}),`);
+      }
+      lines.push('];');
+      lines.push('');
+      lines.push(`/// Highest \`schema_version\` among emitted contract schemas`);
+      lines.push(`pub const LATEST_SCHEMA_VERSION: u32 = ${maxSchemaVersion(schemas.map(s => s.schemaVersion))};`);
+    }
+
+    writeFile(path.join(folderDir, 'mod.rs'), lines.join('\n') + '\n');
+
+    // Recurse into children
+    for (const [childName, childNode] of node.children) {
+      writeFolderMod(childNode, [...relSegs, childName]);
+    }
+  };
+
+  writeFolderMod(root, []);
 }
 
 /**
@@ -205,9 +358,8 @@ function snakeToPascal(snakeStr: string): string {
  * Produces a `#[derive(...)] pub enum X { A, B, C }` from a JSON Schema with
  * `type: "string"` and `enum: [...]`.
  */
-function generateRustEnumFile(schema: LoadedSchema, outputDir: string): void {
+function generateRustEnumFile(schema: LoadedSchema, outputDir: string, _typeModuleMap: Map<string, string[]>): void {
   const values = schema.schemaContent.enum as string[];
-  const moduleName = toSnakeCase(schema.typeName);
 
   const variants = values.map(v => {
     const pascal = snakeToPascal(v);
@@ -235,7 +387,8 @@ ${variants.join('\n')}
 }
 `;
 
-  writeFile(path.join(outputDir, `${moduleName}.rs`), content);
+  const leafFile = path.join(outputDir, ...schema.modulePath.slice(0, -1), `${schema.modulePath[schema.modulePath.length - 1]}.rs`);
+  writeFile(leafFile, content);
 }
 
 /**
@@ -251,8 +404,8 @@ function generateRustTypeFile(
   outputDir: string,
   hasTopLevel: boolean,
   hasDefs: boolean,
+  typeModuleMap: Map<string, string[]>,
 ): void {
-  const moduleName = toSnakeCase(schema.typeName);
   const localDefinitions = hasDefs ? getDefinitions(schema) : undefined;
 
   // Collect all structs to generate
@@ -299,16 +452,22 @@ function generateRustTypeFile(
 use serde::{Deserialize, Serialize};
 `;
 
-  // Add use statements for common types
+  // Add use statements for common types (live in generated::common::common_types)
   if (allCommonImports.size > 0) {
     const importsArr = [...allCommonImports].sort();
-    content += `use crate::generated::common_types::{${importsArr.join(', ')}};\n`;
+    content += `use crate::generated::common::common_types::{${importsArr.join(', ')}};\n`;
   }
 
-  // Add use statements for cross-module types (e.g., Delta)
+  // Add use statements for cross-module types (resolve each type's nested module path)
   if (allCrossModuleImports.size > 0) {
     for (const imp of [...allCrossModuleImports].sort()) {
-      content += `use crate::generated::${toSnakeCase(imp)}::${imp};\n`;
+      const modPath = typeModuleMap.get(imp);
+      if (!modPath) {
+        logger.warn(`Cross-module import "${imp}" in ${schema.fileName} has no known module path; emitting crate::generated root glob`);
+        content += `use crate::generated::${imp};\n`;
+      } else {
+        content += `use crate::generated::${modPath.join('::')}::${imp};\n`;
+      }
     }
   }
 
@@ -318,7 +477,8 @@ use serde::{Deserialize, Serialize};
     content += s.content + '\n';
   }
 
-  writeFile(path.join(outputDir, `${moduleName}.rs`), content);
+  const leafFile = path.join(outputDir, ...schema.modulePath.slice(0, -1), `${schema.modulePath[schema.modulePath.length - 1]}.rs`);
+  writeFile(leafFile, content);
 }
 
 /**
@@ -582,7 +742,7 @@ function generateInlineArrayItemStruct(
   const importsArr = [...commonImports].sort();
   let useLine = '';
   if (importsArr.length > 0) {
-    useLine = `use crate::generated::common_types::{${importsArr.join(', ')}};\n`;
+    useLine = `use crate::generated::common::common_types::{${importsArr.join(', ')}};\n`;
   }
 
   return `${useLine}/// Inline array item type (auto-generated from schema)
@@ -596,6 +756,8 @@ ${fields.join('\n')}
 /**
  * Generate common_types.rs with shared Rust types and enums.
  * Driven from COMMON_DEFINITIONS map (populated from common.schema.json).
+ *
+ * Emitted at `generated/common/common_types.rs` to mirror `schemas/common/common.schema.json`.
  */
 function generateRustCommonTypes(outputDir: string): void {
   const typeAliases: Array<{ name: string; rustType: string; desc: string }> = [];
@@ -677,5 +839,5 @@ pub struct SourceSummaryRef {
 }
 `;
 
-  writeFile(path.join(outputDir, 'common_types.rs'), content);
+  writeFile(path.join(outputDir, 'common', 'common_types.rs'), content);
 }

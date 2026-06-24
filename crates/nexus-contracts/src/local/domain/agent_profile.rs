@@ -5,7 +5,9 @@
 use serde::{Deserialize, Serialize};
 
 // Re-use wire common types for enums that live in common.schema.json
-use crate::generated::common_types::{AgentProfileStatus, ProfileKind, SelectionMode, Transport};
+use crate::generated::common::common_types::{
+    AgentProfileStatus, ProfileKind, SelectionMode, Transport,
+};
 
 /// Configuration for an ACP agent in a workspace.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

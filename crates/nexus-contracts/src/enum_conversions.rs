@@ -3,7 +3,7 @@
 //! Provides `Display`, `as_str()`, and `FromStr` implementations for enum types
 //! generated from JSON Schema. This file extends generated types without modifying them.
 
-use crate::generated::common_types::{
+use crate::generated::common::common_types::{
     AccountStatus, AgentProfileStatus, BindingStatus, BlockType, CommandOrigin, CommandStatus,
     CommandType, CreatorStatus, DeliveryState, DeltaOperation, DeltaType, ForkBranchStatus,
     KeyBlockStatus, ManifestType, ManuscriptStorage, MembershipRole, MembershipStatus, MemoryKind,
