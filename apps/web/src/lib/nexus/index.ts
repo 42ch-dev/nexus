@@ -10,4 +10,5 @@
 export { BrowserClient, type BrowserClientOptions } from './browser-client';
 export { NexusClientError, type NexusErrorBody } from './errors';
 export { TauriClient } from './tauri-client';
+export { normalizeList, sortByDate, type ListArrayKey, type NormalizedList } from './adapters';
 export type { DaemonHealth, NexusClient } from './types';

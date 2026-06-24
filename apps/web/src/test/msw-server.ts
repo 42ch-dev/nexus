@@ -8,11 +8,12 @@
  * The daemon base URL is the same origin (relative paths) in the BrowserClient
  * default config, so handlers match relative `/v1/local/*` paths.
  */
-import { setupServer, type HttpHandler } from 'msw/node';
+import type { RequestHandler } from 'msw';
+import { setupServer } from 'msw/node';
 
 export const server = setupServer();
 
 /** Register handlers for a single test (replaces the previous test's handlers). */
-export function useHandlers(...handlers: HttpHandler[]): void {
+export function useHandlers(...handlers: RequestHandler[]): void {
   server.use(...handlers);
 }

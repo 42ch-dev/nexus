@@ -6,30 +6,28 @@
  * directly. This is what makes the V1.65 Tauri desktop shell a one-impl swap
  * (`BrowserClient` → `TauriClient`) instead of a rewrite.
  *
- * Method coverage reflects the MVP screen groups (web-ui.md §6) **constrained
- * to contracts types that exist at the V1.63 contract base this scaffold
- * builds against**. Methods that depend on Track-B hardening (V1.64 plan P0)
- * are intentionally omitted and tracked below; they land with their contracts
- * types so no handwritten wire shapes are introduced (web-ui.md §12.6).
+ * Method coverage reflects the MVP screen groups (web-ui.md §6) against the
+ * V1.64 hardened contract base (Track B / plan P0 merged): cursor pagination
+ * (F-P1), the shared `ErrorResponse` (F-E1), and the findings list endpoint
+ * (F-P2) are all available. Methods are typed against generated contracts so
+ * no handwritten wire shapes are introduced (web-ui.md §12.6).
  *
- * Pending contracts alignment (lands with plan P0 on the integration branch):
- *  - `listFindings` → blocked on `ListFindingsResponse` (F-P2 endpoint). The
- *    Findings screen is a placeholder route until then.
- *  - Works list cursor → `ListWorksResponse` is offset/limit `{ works, total }`
- *    at this base; P0 migrates it to cursor + `PaginationInfo`. `listWorks`
- *    takes the current `ListWorksQuery` and returns the current shape.
+ * Still-pending daemon surface (not in this interface; tracked as residuals):
  *  - Preset full CRUD (get/update/delete) → no daemon routes / request types
- *    yet; only list/scaffold/validate/reload are wired.
- *  - `getWork`/`patchWork` typed against generated `WorkDetailResponse`; the
- *    daemon currently emits hand-written `WorkApiDto` (drift R-V163-P1-T6),
- *    which P0 closes.
+ *    exist yet; only list/scaffold/validate/reload are wired (P2 surfaces the
+ *    gap; show/update/delete land in a future plan with their contracts).
+ *  - Capability admission gates → CapabilityInfo carries name + I/O schemas
+ *    only; admission-gate logic is not exposed in the list response.
  */
 import type {
   CapabilityInfo,
   CreateWorkRequest,
   CreateWorkResponse,
+  FindingDetailResponse,
   InspectScheduleResponse,
   ListCapabilitiesResponse,
+  ListFindingsQuery,
+  ListFindingsResponse,
   ListPresetsResponse,
   ListSchedulesQuery,
   ListSchedulesResponse,
@@ -71,7 +69,7 @@ export interface NexusClient {
   health(): Promise<DaemonHealth>;
 
   // ── Works (dashboard + Work CRUD) ─────────────────────────────────────────
-  /** `GET /v1/local/works` — cursor list (offset/limit until P0 F-P1). */
+  /** `GET /v1/local/works` — cursor list (F-P1; `works` array key, F-P3 deferred). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
   /** `GET /v1/local/works/{work_id}` — full detail. */
   getWork(workId: string): Promise<WorkDetailResponse>;
@@ -96,6 +94,10 @@ export interface NexusClient {
   /** `GET /v1/local/orchestration/capabilities`. */
   listCapabilities(): Promise<ListCapabilitiesResponse>;
 
+  // ── Findings ───────────────────────────────────────────────────────────────
+  /** `GET /v1/local/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
+  listFindings(workId: string, query?: ListFindingsQuery): Promise<ListFindingsResponse>;
+
   // ── Preset management ─────────────────────────────────────────────────────
   /** `GET /v1/local/presets` — grouped by source. */
   listPresets(): Promise<ListPresetsResponse>;
@@ -108,4 +110,4 @@ export interface NexusClient {
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
-export type { CapabilityInfo };
+export type { CapabilityInfo, FindingDetailResponse };

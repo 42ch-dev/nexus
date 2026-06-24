@@ -53,6 +53,9 @@ export class TauriClient implements NexusClient {
   listCapabilities(): never {
     return NOT_IMPLEMENTED();
   }
+  listFindings(): never {
+    return NOT_IMPLEMENTED();
+  }
   listPresets(): never {
     return NOT_IMPLEMENTED();
   }
