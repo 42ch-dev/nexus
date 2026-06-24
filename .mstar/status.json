@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-24T22:45:00Z",
+  "updated_at": "2026-06-24T23:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-24-v1.64-compass-and-plan-stubs",
@@ -19,7 +19,7 @@
       "title": "V1.64 P0 \u2014 Track B: Local API Data-Layer Hardening (DTO Drift + F-E1 + F-P1 + F-P2)",
       "iteration": "V1.64",
       "slot": "P0",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "L",
       "owner": "@fullstack-dev",
       "review": "Tri-review + QA",
@@ -33,7 +33,7 @@
       "title": "V1.64 P1 \u2014 Track A: Web App Scaffold (apps/web + Vite/React + tauri-api Adapter)",
       "iteration": "V1.64",
       "slot": "P1",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "L",
       "owner": "@frontend-dev",
       "review": "Tri-review + QA",
@@ -139,8 +139,8 @@
     },
     "tech_debt_summary": {
       "total_open": 0,
-      "total_deferred": 6,
-      "total_resolved": 180,
+      "total_deferred": 12,
+      "total_resolved": 179,
       "total_archived": 5,
       "by_severity_active": {
         "low": 0,
@@ -3698,7 +3698,10 @@
         "target_date": "V1.64+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md \u00a7F-P1",
         "note": "Works is the only resource using offset/limit + total. All other list-returning resources (creators, kb, workspaces) use cursor-based pagination via shared PaginationInfo. Migrate Works to cursor-based pagination, adding PaginationInfo and changing works \u2192 items. Requires handler changes (structural).",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "V1.64 P0 (Track B): Works list migrated to cursor-based pagination ({works, pagination: PaginationInfo}); opaque offset-token cursor (v1:<offset>), limit+1 has_more probe. Pagination only \u2014 the works\u2192items rename is F-P3 (SURF-003), still deferred. All in-repo consumers (CLI, tests) updated.",
+        "resolution": { "plan_id": "2026-06-24-v1.64-local-api-hardening", "commit": "4aa0be79" }
       },
       {
         "id": "R-V163P3-SURF-002",
@@ -3712,7 +3715,10 @@
         "target_date": "V1.64+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md \u00a7F-P2",
         "note": "list-findings-query.schema.json defines offset/limit query params (inconsistent with peers using cursor), but there is no list-findings-response.schema.json. Add list-findings-response when endpoint is implemented, using cursor-based pattern matching peers.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "V1.64 P0 (Track B): list-findings-response.schema.json authored + /v1/local/works/{work_id}/findings endpoint implemented (cursor-based, returns {items, pagination}).",
+        "resolution": { "plan_id": "2026-06-24-v1.64-local-api-hardening", "commit": "4aa0be79" }
       },
       {
         "id": "R-V163P3-SURF-003",
@@ -3726,7 +3732,10 @@
         "target_date": "V1.64+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md \u00a7F-P3",
         "note": "Works uses 'works', Schedule uses 'schedules', Sessions uses 'sessions', Capabilities uses 'capabilities'. Cursor-based resources (Creators, KB, Workspaces) use 'items'. Standardize on 'items' for list response arrays. Breaking change requiring handler migration; coordinate with web-ui iteration.",
-        "lifecycle": "deferred"
+        "lifecycle": "deferred",
+        "target": "V1.65+",
+        "target_date": "V1.65+",
+        "deferral_note": "V1.64 P0 closed the pagination half (SURF-001) but explicitly deferred the array rename to V1.65+ per compass \u00a75 item #2; the V1.64 Web UI (P2) covers via a thin TanStack Query transformer adapter."
       },
       {
         "id": "R-V163P3-SURF-004",
@@ -3740,7 +3749,10 @@
         "target_date": "V1.64+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md \u00a7F-E1",
         "note": "No shared ErrorResponse schema. Handlers return (StatusCode, String) tuples with varying body formats. Add shared ErrorResponse schema in schemas/local-api/common/ with code (stable error code), message, and optional details. Requires handler audit. Defer to V1.64+.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "V1.64 P0 (Track B): schemas/local-api/common/error-response.schema.json authored ({code, message, details?}) + drift entry. Core CRUD handlers route via NexusApiError\u2192ApiErrorResponse. Orchestration handlers (schedules/sessions/presets) still use ad-hoc (StatusCode, String) \u2014 registered as R-V164-FE1-ORCH (V1.65+ refactor). Schema-level standardization complete.",
+        "resolution": { "plan_id": "2026-06-24-v1.64-local-api-hardening", "commit": "4aa0be79" }
       },
       {
         "id": "R-V163P3-SURF-005",
@@ -3754,7 +3766,10 @@
         "target_date": "V1.64+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md \u00a7F-F1",
         "note": "No resource supports sort_by/order/direction query parameters. When sort is added, standardize on sort_by: string + sort_order: 'asc' | 'desc'. Defer to V1.64+.",
-        "lifecycle": "deferred"
+        "lifecycle": "deferred",
+        "target": "V1.65+",
+        "target_date": "V1.65+",
+        "deferral_note": "V1.64 Web UI (P2) covers via client-side sort for small lists; structural server-side sort deferred to V1.65+ per compass \u00a75 item #1 (Track C)."
       },
       {
         "id": "R-V163P1-T6-001",
@@ -3768,6 +3783,25 @@
         "target_date": "V1.64+",
         "tracking_link": ".mstar/plans/2026-06-24-v1.63-local-api-core-crud-dtos.md \u00a7T6",
         "note": "P1 promoted DTO schemas to Local API surface but handler migration was deferred to a follow-up plan (too many handler touchpoints for a schema-only pass). Handlers currently use inline serde::{Deserialize,Serialize} structs; should migrate to re-exported generated types from nexus-contracts::local_api::*. Coordinate with P3 surface audit pagination/error-envelope improvements.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-24",
+        "closure_note": "V1.64 P0 (Track B): schema_drift_detection.rs CheckMode::Strict registered for ErrorResponse + ListFindingsResponse; 122 schemas / 121 structs drift-clean. Core CRUD handlers emit generated::local_api::* shapes. (Orchestration-handler full migration is R-V164-FE1-ORCH.)",
+        "resolution": { "plan_id": "2026-06-24-v1.64-local-api-hardening", "commit": "4aa0be79" }
+      }
+    ],
+    "2026-06-24-v1.64-local-api-hardening": [
+      {
+        "id": "R-V164-FE1-ORCH",
+        "title": "Orchestration handlers (schedules.rs ~1300 LoC / sessions.rs / presets.rs) still use ad-hoc (StatusCode, String) error tuples instead of NexusApiError\u2192ApiErrorResponse envelope",
+        "severity": "low",
+        "source": "V1.64 P0 implementer (scope decision \u2014 F-E1 partial)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{schedules,sessions,presets}.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.65+",
+        "target_date": "V1.65+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-24-v1.64-local-api-hardening][R-V164-FE1-ORCH]",
+        "note": "F-E1 schema-level standardization (ErrorResponse schema + core CRUD handlers) is complete. Migrating orchestration handlers to NexusApiError is an independent refactor (large surface, L-item risk); deferred to V1.65+. Non-blocking for V1.64 Web UI data layer (UI parses the shared ErrorResponse where emitted; orchestration endpoints are READ-only in the MVP).",
         "lifecycle": "deferred"
       }
     ]
