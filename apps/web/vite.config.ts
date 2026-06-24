@@ -1,0 +1,48 @@
+import path from 'node:path';
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+// Vite config for the Nexus local Web UI.
+//
+// Dev: the SPA runs on the Vite dev server and proxies Local API requests to
+// the running daemon (default http://127.0.0.1:8420, the daemon HTTP transport
+// default — see crates/nexus-daemon-runtime/src/boot.rs). Override the target
+// with VITE_DAEMON_URL, e.g. VITE_DAEMON_URL=http://127.0.0.1:9000 pnpm dev.
+//
+// Release: the built dist/ is embedded into the nexus42 binary (plan P3,
+// rust-embed); no Node runtime ships. The proxy is dev-only.
+const daemonUrl = process.env.VITE_DAEMON_URL ?? 'http://127.0.0.1:8420';
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+  // Modern-only target: the local-first app ships in a current browser or a
+  // V1.65 Tauri system webview, so esbuild need not lower syntax. esbuild 0.28
+  // (pinned via the workspace override) fails its destructuring transform on
+  // the default `modules` target; `esnext` skips that pass everywhere esbuild
+  // runs (build, dev source transform, and dep pre-bundling).
+  esbuild: { target: 'esnext' },
+  build: {
+    target: 'esnext',
+  },
+  optimizeDeps: {
+    esbuildOptions: { target: 'esnext' },
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    port: 5173,
+    proxy: {
+      // Local API — keyless on loopback (V1.20 model). BrowserClient is
+      // same-origin against this proxy in dev; in release it is same-origin
+      // against the daemon port that serves the embedded SPA.
+      '/v1/local': {
+        target: daemonUrl,
+        changeOrigin: false,
+      },
+    },
+  },
+});
