@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative |
+| **Status** | Normative — V1.64 amendment: bundled local Web UI static-asset serving |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -65,6 +65,20 @@ Default `nexus42 daemon start`: preflight → spawn internal daemon-run mode →
 ### 4.3 Control plane
 
 `status`, `stop`, `restart` coordinate via runtime health and process supervision (parity with prior daemon product behavior).
+
+### 4.4 Bundled local Web UI static assets (V1.64)
+
+The daemon runtime may serve the bundled local Web UI SPA from the same loopback listener as the Local API. The Web UI is a local product surface, not a cloud platform application.
+
+Normative serving model:
+
+1. **Release build**: `apps/web/dist` is embedded into the user-facing `nexus42` binary using `rust-embed` and exposed by the daemon router through `tower-http::ServeDir`-style static serving semantics. The release artifact remains a single `nexus42` product binary; no separate web server process is introduced.
+2. **SPA shell route**: the static Web UI shell (`index.html` plus assets) is unauthenticated so a local browser can load the app and present setup/auth guidance. This does not grant data access.
+3. **Data boundary**: all `/v1/local/*` data routes remain protected according to the existing `require_api_key` model except the explicitly unguarded runtime/daemon health and status routes listed in §2/§4 acceptance. The SPA obtains data only through those Local API routes.
+4. **Dev mode**: during frontend development, Vite serves `apps/web` and proxies `/v1/local/*` to a running daemon. Dev proxy behavior is a development convenience only; release behavior is daemon-served embedded static assets.
+5. **Tauri readiness**: the future Tauri shell loads the same `apps/web` build output and swaps the frontend transport implementation behind the `NexusClient` boundary. The daemon runtime remains the local supervisor and is still not an ACP Agent/Server.
+
+The router integration point is the top-level `create_router` composition in `crates/nexus-daemon-runtime/src/api/mod.rs`: static serving is added beside the unguarded runtime routes and protected Local API route tree, without moving the auth middleware boundary for data endpoints.
 
 ---
 

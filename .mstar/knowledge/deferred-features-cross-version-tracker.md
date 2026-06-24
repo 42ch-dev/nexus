@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.63 Shipped (2026-06-24)** — Essay Profile closure (PF-ESSAY shipped: scaffold + `essay-writing` preset + 4-dim rubric + completion + optional KB) + Local API Foundation (67 schemas promoted to `schemas/local-api/` for cross-language codegen; surface audit done). Writing-profile product line complete (novel + game-bible + script + essay all Depth 3.5). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.64 Active prepare (2026-06-24)** — Local Web UI Kickoff: `apps/web` React/Vite SPA (Control Room + Setup MVP), daemon-served (ServeDir + rust-embed), Tauri-ready (desktop shell = V1.65 roadmap). Track B closes 4 Local API data-layer prerequisites (Handler DTO drift + F-E1 ErrorResponse + F-P1 Works cursor + F-P2 findings endpoint); F-P3/F-F1 deferred with UI adapter. Writing-profile product line complete (V1.63). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-06-24 (V1.63 Shipped: PF-ESSAY closed; 67 local-api schemas promoted; 7 V1.61 residuals closed; 6 V1.64+ residuals opened)
+**Created**: 2026-04-21 · **Last updated**: 2026-06-24 (V1.64 Active prepare: Local Web UI kickoff — apps/web React/Vite SPA + Track B 4-prerequisite hardening; F-P3/F-F1 deferred with adapter)
 
 ---
 
@@ -86,9 +86,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.61 — Programmable Narrative Progression](../iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md) (Prepare)
+**Active iteration**: [V1.64 — Local Web UI Kickoff](../iterations/v1.64-local-web-ui-kickoff-delivery-compass-v1.md) (Active prepare)
 
-**Latest shipped**: [V1.60](../iterations/v1.60-df46-local-parity-and-script-depth-delivery-compass-v1.md) (DF-46 local complete + Script Depth 3.5 Master, PR #82)
+**Latest shipped**: [V1.63](../iterations/v1.63-essay-profile-and-local-api-foundation-delivery-compass-v1.md) (Essay Profile Closure & Local API Foundation, PR #86)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

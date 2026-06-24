@@ -63,7 +63,8 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) | Master | Active |
 | [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1; V1.51 Shipped §5.5.6; **V1.62 Shipped** §5.5.9 (computable-flag + structured validation) |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
-| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.62 Shipped (consumer-scope tree) |
+| [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
+| [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Draft (V1.64) — promote to Normative at P-last |
 
 Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) (knowledge root).
 
@@ -71,7 +72,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 
 | Document | Class | Status |
 | --- | --- | --- |
-| [daemon-runtime.md](daemon-runtime.md) | Master | Normative |
+| [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.64 amendment (bundled local Web UI static serving) |
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
@@ -110,6 +111,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
 | **[novel-writing/](novel-writing/README.md)** | Feature subtree | **`work_profile: novel`** — see [novel-writing/README.md](novel-writing/README.md) for per-file index (workflow-profile, quality-loop, author-experience, overlays, …) |
 | [essay-profile.md](essay-profile.md) | Feature line | Draft (V1.52) — `work_profile: essay` first non-novel profile |
+| [web-ui.md](web-ui.md) | Feature line | **Draft (V1.64)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup MVP |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

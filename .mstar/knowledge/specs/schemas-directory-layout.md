@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.63 Shipped (expanded local-api surface) |
+| **Status** | Normative — V1.64 Shipped (local-api common error envelope + findings list response) |
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
-| **Last updated** | 2026-06-24 — V1.63 P3 (local-api orchestration + preset-management subtrees) |
+| **Last updated** | 2026-06-24 — V1.64 P-1 (local-api common + findings list-response conventions) |
 | **Related** | [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
@@ -17,7 +17,7 @@
 
 ---
 
-## 1. Normative tree (2026-06, post-V1.62 P0)
+## 1. Normative tree (2026-06, post-V1.64 target)
 
 All paths are under repository root `schemas/`. Only **external-consumer** files belong here (see boundary doc): platform wire OR Local API cross-language contracts.
 
@@ -31,6 +31,7 @@ schemas/
 │   ├── http-bff/          # platform HTTP request/response bodies (BFF contracts)
 │   └── sync/              # CLI ↔ platform sync protocol (bundle, delta, pull, conflict)
 └── local-api/             # external Local API clients (e.g. future WebApp/Web-UI, WASM modules)
+    ├── common/            # shared Local API envelopes (ErrorResponse, future common fragments)
     ├── compute/           # compute module ABI envelopes (ComputeInput / ComputeOutput)
     ├── works/             # works CRUD schemas (V1.63 P1)
     ├── kb/                # work-scope KB entry CRUD schemas (V1.63 P1)
@@ -64,6 +65,7 @@ schemas/
 | **`domain/`** | Wire entities embedded in bundles & platform bodies | `nexus-platform` (transitive via `$ref`) | All cloud-line crates + generated imports | **Yes** |
 | **`common/`** | Shared wire value objects | `nexus-platform` (when `$ref`'d) | Generated | **Yes** |
 | **`local-api/compute/`** | Local API — compute module ABI | External WASM modules + future WebApp | `nexus-wasm-host` (re-exports), compute modules | **Yes** |
+| **`local-api/common/`** | Local API — shared envelopes | Bundled local Web UI + future external Local API clients | `nexus-daemon-runtime` handlers via generated contracts | **Yes** |
 | **`local-api/works/`** | Local API — works CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 | **`local-api/kb/`** | Local API — KB entries CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 | **`local-api/findings/`** | Local API — quality findings CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
@@ -73,7 +75,7 @@ schemas/
 | **`local-api/orchestration/`** | Local API — orchestration engine READ | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 | **`local-api/preset-management/`** | Local API — preset management full surface | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 
-**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Local API contracts (one subfolder per concern; V1.62 seeded `compute/`; V1.63 P1 added the six core CRUD resources; V1.63 P3 added orchestration + preset-management).
+**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Local API contracts (one subfolder per concern; V1.62 seeded `compute/`; V1.63 P1 added the six core CRUD resources; V1.63 P3 added orchestration + preset-management; V1.64 adds `common/` for shared Local API envelopes consumed by the bundled local Web UI and future clients).
 
 ---
 
@@ -128,6 +130,13 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/local-api/compute/...`.
 - Maintain [`local-api/compute/README.md`](../../../schemas/local-api/compute/README.md). Compute ABI normative detail: [compute-module-abi.md](./compute-module-abi.md). Host-side runtime detail: [wasm-host.md](./wasm-host.md).
 
+### 3.5A `local-api/common/` (V1.64)
+
+- Shared Local API envelopes consumed across resource handlers and the bundled local Web UI.
+- `error-response.schema.json` defines the canonical `ErrorResponse { code, message, details? }` envelope for non-2xx JSON responses.
+- `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/local-api/common/...`.
+- Maintain `local-api/common/README.md` when the subtree is materialized. Surface conventions: [local-api-surface-conventions.md](./local-api-surface-conventions.md).
+
 ### 3.6 `local-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1)
 
 - Core CRUD Local API schemas for the daemon's `/v1/local/*` endpoints, promoted from inline handler DTOs to cross-language JSON Schema so the future WebApp/Web-UI can consume typed request/response shapes.
@@ -137,6 +146,8 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 - Each subdirectory maintains its own `README.md` with endpoint→schema mapping.
 - **Codegen**: these schemas are auto-discovered by the schema loader (`**/*.schema.json` glob); generated Rust types live under `generated::local_api::{works,kb,...}`, TypeScript under `local-api/{works,kb,...}/`.
 - **Drift detection**: all schemas registered in `build_schema_map()` with `CheckMode::Strict`.
+
+V1.64 amendment for `local-api/findings/`: add `list-findings-response.schema.json` for `GET /v1/local/works/{work_id}/findings`, using cursor pagination and the canonical `items` list-array key. This closes the V1.63 surface-audit F-P2 gap for the local Web UI findings view.
 
 ---
 
@@ -177,9 +188,9 @@ Platform prose may still say `v1-spec/cli-sync/` for sync **protocol** documents
 
 ---
 
-## 7. Wire file inventory (2026-06, post-V1.63 P1)
+## 7. Wire file inventory (2026-06, post-V1.64 target)
 
-Authoritative count: run `pnpm run validate-schemas` (currently **110** `*.schema.json`).
+Authoritative count: run `pnpm run validate-schemas` after materializing V1.64 schemas. The table below is the target inventory shape; the command output remains the count SSOT.
 
 | Directory | Files | Notes |
 | --- | --- | --- |
@@ -187,15 +198,19 @@ Authoritative count: run `pnpm run validate-schemas` (currently **110** `*.schem
 | `domain/` | 10 | Wire entities (see §3.3 table) |
 | `platform/http-bff/` | 34 | Platform HTTP bodies (flat; prefix grouping in [http-bff/README.md](../../../schemas/platform/http-bff/README.md)) |
 | `platform/sync/` | 7 | `bundle`, `bundle-refinement` (codegen-skipped), `delta`, `sync-command`, `sync-pull-request`, `sync-pull-response`, `conflict-response` |
+| `local-api/common/` | 1 | `error-response` (V1.64 F-E1) |
 | `local-api/compute/` | 2 | `compute-input`, `compute-output` |
-| `local-api/works/` | 10 | CRUD + inspiration + completion-lock (V1.63 P1) |
+| `local-api/works/` | 11 | CRUD + inspiration + completion-lock (V1.63 P1) + cursor migration shape (V1.64 F-P1) |
 | `local-api/kb/` | 8 | Work-scope KB entry CRUD + pagination (V1.63 P1) |
-| `local-api/findings/` | 5 | Quality findings CRUD + stale endpoint (V1.63 P1) |
-| `local-api/schedule/` | 14 | Schedule + core-context CRUD + signal (V1.63 P1) |
+| `local-api/findings/` | 6 | Quality findings CRUD + stale endpoint (V1.63 P1) + list response (V1.64 F-P2) |
+| `local-api/schedule/` | 16 | Schedule + core-context CRUD + signal (V1.63 P1) |
 | `local-api/workspace/` | 8 | Workspace management CRUD (V1.63 P1) |
 | `local-api/creators/` | 8 | Creator management CRUD (V1.63 P1) |
+| `local-api/orchestration/sessions/` | 4 | Session list + detail-status schemas (V1.63 P3) |
+| `local-api/orchestration/capabilities/` | 2 | Capability registry schemas (V1.63 P3) |
+| `local-api/preset-management/` | 7 | Preset management full surface (V1.63 P3) |
 
-Total: **109** checking schemas + `schedule-concurrency-request` (standalone enum, auto-skipped) = **110**.
+Do not hand-maintain an exact total here; `schemas/README.md` and `pnpm run validate-schemas` are the count authorities. This inventory records expected directory membership and notable V1.64 deltas.
 
 **Not in tree:** `acp-runtime/`, `meta/`, `cli-sync/`, `cloud-sync/`, `compute/` (all removed/renamed).
 
@@ -203,4 +218,4 @@ Historical audit (pre-rename paths): [archived schemas-boundary §5.2](../archiv
 
 ---
 
-*Normative Master. V1.62 P0 consumer-scope reorganization (2026-06-23); V1.62 P2 spec-seal polish. Boundary rule: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md).*
+*Normative Master. V1.62 P0 consumer-scope reorganization (2026-06-23); V1.62 P2 spec-seal polish; V1.63 local-api expansion; V1.64 common ErrorResponse + findings list-response amendment. Boundary rule: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md).*
