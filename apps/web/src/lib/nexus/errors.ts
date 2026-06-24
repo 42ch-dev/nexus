@@ -2,12 +2,14 @@
  * Client-side error model for the Nexus local Web UI.
  *
  * This is an **app-side** error abstraction — NOT a wire DTO duplicate. The
- * shared Local API `ErrorResponse` schema (residual F-E1, landed by Track B /
- * plan P0 in V1.64) defines the daemon's error wire shape as
- * `{ code, message, details? }`. `BrowserClient` parses the response body
- * defensively into this type; once F-E1's generated `ErrorResponse` type is
- * available on the merged integration branch, the parsing can be tightened to
- * validate against it (see apps/web/AGENTS.md §Pending contracts alignment).
+ * shared Local API `ErrorResponse` schema (landed by Track B / plan P0 in
+ * V1.64, residual F-E1) models the daemon's **inner** error detail as
+ * `{ code, message, details? }`. The daemon runtime **wraps** that detail in
+ * an envelope `{ success: false, error: ErrorResponse }` (see
+ * `ApiErrorResponse` in `crates/nexus-daemon-runtime/src/api/errors.rs`).
+ * `BrowserClient.fromBody` unwraps `body.error` defensively so the stable
+ * `code` + actionable `message` reach the UI instead of a generic
+ * `http_<status>` fallback.
  */
 export interface NexusErrorBody {
   /** Stable machine-readable error code (e.g. `not_found`, `validation_failed`). */
@@ -43,12 +45,20 @@ export class NexusClientError extends Error {
   }
 
   static fromBody(status: number, body: unknown): NexusClientError {
+    // The daemon runtime wraps the canonical ErrorResponse under `error`:
+    //   { success: false, error: { code, message, details?, request_id? } }
+    // (see `ApiErrorResponse` in
+    // crates/nexus-daemon-runtime/src/api/errors.rs). Some orchestration
+    // handlers still emit ad-hoc (StatusCode, String) bodies
+    // (R-V164-FE1-ORCH deferral); the top-level fallback keeps those working.
     const parsed = (body ?? {}) as Partial<NexusErrorBody>;
+    const inner =
+      (parsed as { error?: Partial<NexusErrorBody> }).error ?? parsed;
     return new NexusClientError(
       status,
-      parsed.code ?? `http_${status}`,
-      parsed.message ?? `Request failed with status ${status}`,
-      parsed.details,
+      inner.code ?? parsed.code ?? `http_${status}`,
+      inner.message ?? parsed.message ?? `Request failed with status ${status}`,
+      inner.details ?? parsed.details,
     );
   }
 }
