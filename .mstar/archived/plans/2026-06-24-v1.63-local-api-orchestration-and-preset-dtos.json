@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.63-local-api-orchestration-and-preset-dtos",
+  "title": "V1.63 P3 \u2014 Local API DTO Promotion: F1+F2+F3 Orchestration/Preset Schemas + Surface Audit",
+  "iteration": "V1.63",
+  "slot": "P3",
+  "status": "Done",
+  "effort": "L",
+  "owner": "@fullstack-dev-2",
+  "review": "Tri-review + mid-QA",
+  "wave": 2,
+  "dependency": "P1 merged to iteration/v1.63",
+  "working_branch": "feature/v1.63-local-api-orchestration-and-preset-dtos",
+  "merge_target": "iteration/v1.63"
+}

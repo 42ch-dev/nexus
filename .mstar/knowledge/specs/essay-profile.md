@@ -1,9 +1,9 @@
-# Essay Profile — Draft Specification v1
+# Essay Profile — Specification v1
 
-**Status**: Draft (V1.52 — Feature line body initialized in P-1; implementation authored in plan `2026-06-19-v1.52-work-keyblock-provenance-and-essay-profile`)  
+**Status**: Shipped (V1.63) — essay profile production-ready: scaffold (ScaffoldTransaction), `essay-writing` preset (7-state chain), 4-dimension quality rubric (blocking with `--force-gates` override), completion detection, optional KB extraction.  
 **Document class**: Feature line  
 **Created**: 2026-06-19  
-**Last updated**: 2026-06-19 (V1.52 P-1 draft). **V1.63 P2**: `essay-writing` production preset shipped with 4-dimension quality rubric (thesis clarity, evidence support, coherence, ending takeaway).
+**Last updated**: 2026-06-24 (V1.63 Shipped — Draft → Shipped promotion).  
 **Scope**: `work_profile: essay` on generic **Work** — artifact layout under `Works/<work_ref>/`, templates, stage chain, completion semantics  
 **Coordinates with**:
 
