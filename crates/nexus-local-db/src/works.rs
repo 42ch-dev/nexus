@@ -49,6 +49,17 @@ pub fn is_script_profile(profile: Option<&str>) -> bool {
     profile == Some("script")
 }
 
+/// Returns `true` if `profile` indicates an essay Work.
+///
+/// V1.63 P0: essay Works do not use `work_chapters`, `Stories/`,
+/// or novel completion logic. Essay completion is evaluated via
+/// [`is_essay_complete`] which inspects `Drafts/draft.md` frontmatter
+/// in the workspace filesystem.
+#[must_use]
+pub fn is_essay_profile(profile: Option<&str>) -> bool {
+    profile == Some("essay")
+}
+
 /// Map a sqlx row to [`WorkRecord`].
 #[must_use]
 pub fn row_to_work_record(r: &sqlx::sqlite::SqliteRow) -> WorkRecord {

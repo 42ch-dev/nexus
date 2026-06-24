@@ -1243,6 +1243,20 @@ pub async fn is_work_completed(pool: &SqlitePool, work_id: &str) -> Result<bool,
         return Ok(false);
     }
 
+    // SAFETY: essay profile gate (V1.63 P0).
+    // The novel chapter-completion logic must never apply to essay Works.
+    // Essay completion is evaluated via [is_essay_complete] which inspects
+    // Drafts/draft.md frontmatter in the workspace filesystem.
+    if crate::is_essay_profile(work_profile.as_deref()) {
+        tracing::info!(
+            target: "completion",
+            work_id,
+            "essay profile: bypassing novel chapter-completion; \
+             essay-draft evaluation handled by is_essay_complete"
+        );
+        return Ok(false);
+    }
+
     // Non-novel Works: keep the legacy early exit (V1.36 backwards compat).
     // Novel-profile Works: always fall through to the full §6.1 check.
     if status == "completed" && !crate::is_novel_profile(work_profile.as_deref()) {
@@ -1529,6 +1543,115 @@ pub async fn is_script_complete(
         work_id,
         work_ref,
         "script: all critical script sections accepted + intake complete; script complete"
+    );
+    Ok(true)
+}
+
+/// V1.63 P0 — Essay completion check.
+///
+/// An essay Work is complete when:
+/// 1. `works.intake_status == 'complete'`
+/// 2. `Drafts/draft.md` frontmatter `status == finalized`
+///
+/// Returns `Ok(false)` when:
+/// - The Work or `work_ref` is missing
+/// - `intake_status` is not `'complete'`
+/// - `Drafts/draft.md` is missing or its frontmatter `status` is not `finalized`
+///
+/// This function reads files from the workspace filesystem. It is designed to
+/// be called from the daemon handler layer (which has access to `workspace_dir`)
+/// rather than from the pure-DB `is_work_completed` function.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::Io` if the draft file cannot be read.
+///
+/// # Tracing
+///
+/// - `info!` at meaningful gate transitions (intake not complete; draft finalized).
+/// - `debug!` for per-section evaluations.
+/// - `warn!` for unexpected states (e.g. missing rows).
+pub async fn is_essay_complete(
+    pool: &SqlitePool,
+    work_id: &str,
+    workspace_dir: &std::path::Path,
+) -> Result<bool, LocalDbError> {
+    // Resolve work_ref and intake_status from the works table.
+    // SAFETY: SELECT work_ref, intake_status — runtime query.
+    let row = sqlx::query("SELECT work_ref, intake_status FROM works WHERE work_id = ?")
+        .bind(work_id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(row) = row else {
+        tracing::warn!(work_id, "is_essay_complete: work not found");
+        return Ok(false);
+    };
+
+    let intake_status: String = row.get("intake_status");
+    if intake_status != "complete" {
+        tracing::info!(
+            target: "completion",
+            work_id,
+            intake_status,
+            "essay: intake_status is not complete; essay not complete"
+        );
+        return Ok(false);
+    }
+
+    let work_ref: Option<String> = row.get("work_ref");
+    let Some(ref work_ref) = work_ref else {
+        tracing::debug!(work_id, "is_essay_complete: work_ref is NULL");
+        return Ok(false);
+    };
+
+    // Read Drafts/draft.md and check frontmatter status.
+    let draft_path = workspace_dir
+        .join("Works")
+        .join(work_ref)
+        .join("Drafts")
+        .join("draft.md");
+    let content = match tokio::fs::read_to_string(&draft_path).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::debug!(
+                target = "completion",
+                work_id,
+                work_ref,
+                error = %e,
+                "essay: Drafts/draft.md unreadable; essay not complete"
+            );
+            return Ok(false);
+        }
+    };
+
+    let fm = parse_frontmatter(&content);
+    let status = fm.get("status").map_or("draft", String::as_str);
+
+    tracing::debug!(
+        target = "completion",
+        work_id,
+        work_ref,
+        draft_status = status,
+        "essay: draft evaluated"
+    );
+
+    if status != "finalized" {
+        tracing::info!(
+            target = "completion",
+            work_id,
+            work_ref,
+            draft_status = status,
+            "essay: draft not yet finalized; essay not complete"
+        );
+        return Ok(false);
+    }
+
+    tracing::info!(
+        target = "completion",
+        work_id,
+        work_ref,
+        "essay: draft finalized + intake complete; essay complete"
     );
     Ok(true)
 }
