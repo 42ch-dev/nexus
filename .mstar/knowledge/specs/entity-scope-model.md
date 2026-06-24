@@ -195,6 +195,25 @@ storage layer (compass V1.61 design item #2). Growth is expected as modules
 add per-block state, but individual state objects are small (character-scale
 combat state is < 1 KiB).
 
+##### 5.5.9.2.1 SQLite `body_json` growth expectations (R-V161P0-LOW-004)
+
+The `body_json` TEXT column in `kb_key_blocks` stores the full `KeyBlockBody`
+(including `state`) as serialized JSON. Computable KeyBlocks accumulate mutable
+state across compute invocations — each `state_delta` apply writes back the
+updated `body_json` via `SqliteKbStore::update_key_block`.
+
+| Concern | Assessment | Mitigation |
+| --- | --- | --- |
+| Row size growth | Each computable KeyBlock's `body_json` grows proportionally to its state object. Typical character state (< 1 KiB) is negligible. Larger state shapes (e.g., 10 KiB terrain grids) would still be within SQLite's 1 GiB default `max_page_count`. | Per-module state schemas cap individual state objects (see `manifest.json` `schemas.key_block_state`). No per-row growth cap is needed at current scale. |
+| DB file growth | The `kb_key_blocks` table is append-mostly (inserts on adopt/add; updates on state delta apply). Updates rewrite the row in-place via SQLite's B-tree (no append-only bloat beyond WAL). | SQLite WAL auto-checkpoints. `VACUUM` recovers space after bulk deletes — not needed for normal operations. |
+| `json_extract` query cost | Computable query filters (`KbQuery::with_computable(true)`) use `computable` as a separate `WHERE` clause column (extracted from `body_json` during insert, not via `json_extract` at query time). State-path lookups (e.g. "all characters with `current_hp < 10`") are not a current query pattern. | No `json_extract` index is needed. If state-path queries become a hot path (≥ 10K computable KeyBlocks per world), add a per-`block_type` computed column or a `state_summary_json` denormalization column. Reassess at V2.0+ when user-authored compute modules introduce unbounded state shapes. |
+| Migration risk | `body_json` is TEXT (no schema migration needed if the body shape evolves). Invalid JSON on read returns `None` for `body` — the KeyBlock is still returned but without a parsed body. | Serialization is validated at insert/update time. Existing rows with old shapes degrade gracefully (missing fields = `None` in the deserialized struct). |
+
+The current design intentionally trades query flexibility for schema simplicity.
+Post-1.0, if state-path queries emerge as a product requirement, a dedicated
+`key_block_state` table (normalized, indexed) should be considered as a
+replacement, not a supplement — avoiding two sources of truth for the same state.
+
 ##### 5.5.9.3 Structured validation mode
 
 Per-module attribute and state shapes are **not** declared in product-level
@@ -265,6 +284,14 @@ replacement is `manifest.json` `schemas` as documented in
 The generic `nexus-kb` persistence model stores World-scoped KeyBlocks with `block_type`, `canonical_name`, `body`, provenance anchors, and active uniqueness under `(world_id, block_type, canonical_name)` (see [local-db-schema.md](./local-db-schema.md) §4.1.2).
 
 **SSOT for `block_type` (wire enum):** `schemas/common/common.schema.json` → `BlockType` → `@42ch/nexus-contracts` / `nexus-contracts`. Shipped values (snake_case on wire): `character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`. Implementations MUST NOT introduce a parallel `block_type` enum in `nexus-kb` or orchestration presets. `kb-extract`, `SqliteKbStore`, and `assemble_moment` / `fetch_world_kb` already use this vocabulary.
+
+**Design decision: `environment` NOT in `BlockType` (R-V161P0-INFO-001).** The V1.61 compass initially named `environment` as a potential computable BlockType for environmental context (weather, terrain, lighting). After evaluation, `environment` was intentionally excluded from the wire enum:
+
+1. `environment` is too broad for a single entity BlockType — it spans weather, terrain, celestial, ambient conditions, and multi-entity spatial state, all of which benefit from separate `KeyBlock` instances with different `block_type` values.
+2. Environmental context is served by existing types: `scene` (spatial descriptions), `event` (ambient occurrences), `info_point` (environmental rules), and `location` (a novel category carried in `body.attributes`, not a wire enum variant).
+3. Future profile-specific environmental modelling (e.g., game-bible `level` carrying terrain grid state, script `scene` carrying lighting cues) uses per-profile `body.attributes` shapes rather than a dedicated wire enum variant.
+
+Module authors should use the `scene` + `info_point` BlockType combination to model environmental KeyBlocks, with per-module shape declarations in `manifest.json` `schemas` (see §5.5.9.3). If a future profile introduces a domain-specific environmental BlockType (e.g. `biome` for game-bible), it should follow the V1.54 game-bible precedent: extend `BlockType` as a new wire variant with a corresponding body-layer category.
 
 **Novel profile semantics (body layer):** The V1.37 novel "seven categories" (`foundation`, `background`, `character`, `location`, `society`, `rules`, `economy`) are carried in `KeyBlock.body.attributes.novel_category` (string) plus type-specific fields in `body.attributes` / `body.summary`. They do **not** replace wire `block_type`.
 
