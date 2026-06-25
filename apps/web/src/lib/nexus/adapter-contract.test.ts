@@ -1,18 +1,25 @@
 /**
- * NexusClient adapter-contract enforcement (R-V164-QC1-S1-P1 T1).
+ * NexusClient adapter-contract enforcement.
  *
- * Two concerns live here:
+ * Three concerns live here:
  *
  * 1. **Contract guard (architectural invariant).** web-ui.md §5 + apps/web
  *    AGENTS.md: every screen/component/query must depend on the `NexusClient`
  *    *interface* — never on `fetch`/`invoke` directly. That boundary is what
- *    keeps the V1.65 Tauri desktop shell a one-impl swap instead of a rewrite.
+ *    keeps the V1.66 Tauri desktop shell a one-impl swap instead of a rewrite.
  *    The guard scans every non-test source module outside the adapter
  *    implementations and fails if any calls the global `fetch` (the browser
- *    transport). The two adapter impls (`browser-client.ts`, `tauri-client.ts`)
- *    are the only modules permitted to touch transport primitives.
+ *    transport). The adapter impls (`browser-client.ts`, `tauri-client.ts`,
+ *    `desktop-capabilities.ts`) are the only modules permitted to touch transport
+ *    primitives (`fetch` / `window.__TAURI__`).
  *
- * 2. **Adapter contract enforcement.** The success/envelope/network paths are
+ * 2. **TauriClient transport parity (V1.66 §5 #1).** `TauriClient` is thin-over-
+ *    `BrowserClient`: the 21 data methods reuse the identical HTTP transport to
+ *    the resolved desktop loopback origin. This pins that contract — every data
+ *    method hits the same `/v1/local/*` path as `BrowserClient`, just against
+ *    `http://127.0.0.1:<port>`.
+ *
+ * 3. **Adapter contract enforcement.** The success/envelope/network paths are
  *    covered in browser-client.test.ts; here we pin the *contract* edges those
  *    tests do not: the `fetchImpl` injection seam, query serialization through
  *    the public API, and the 204 No-Content path. Together they make the
@@ -22,6 +29,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
 import { BrowserClient, NexusClientError } from '@/lib/nexus';
+import { TauriClient, resolveDesktopPort } from '@/lib/nexus/tauri-client';
 import { useHandlers } from '@/test/msw-server';
 import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
 
@@ -29,12 +37,14 @@ import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
 
 /**
  * Modules allowed to use transport primitives. The browser adapter owns
- * `fetch`; the (stub) Tauri adapter will own `invoke`. Everything else must go
- * through the `NexusClient` interface.
+ * `fetch`; the Tauri adapter + desktop-capabilities own `window.__TAURI__` +
+ * the loopback `fetch`. Everything else must go through the `NexusClient` /
+ * `DesktopCapabilities` interfaces.
  */
 const ADAPTER_IMPLS = new Set([
   '/src/lib/nexus/browser-client.ts',
   '/src/lib/nexus/tauri-client.ts',
+  '/src/lib/nexus/desktop-capabilities.ts',
 ]);
 
 /** Raw sources for every source module (tests excluded by the glob pattern). */
@@ -65,48 +75,90 @@ describe('NexusClient adapter contract guard', () => {
     }
     expect(offenders).toEqual([]);
   });
+});
 
-  it('every NexusClient method on TauriClient throws in the browser build', async () => {
-    // The stub freezes the boundary: the desktop impl is selected only in the
-    // Tauri shell. In the browser build it must fail loud, not silently no-op.
-    const { TauriClient } = await import('@/lib/nexus/tauri-client');
-    const client = new TauriClient();
-    for (const method of [
-      'health',
-      'listWorks',
-      'getWork',
-      'createWork',
-      'listSessions',
-      'listSchedules',
-      'listCapabilities',
-      'listFindings',
-      'listPresets',
-      'scaffoldPreset',
-      'validatePreset',
-      'reloadPreset',
-      'listChapters',
-      'getChapter',
-      'getChapterOutline',
-      'putChapterOutline',
-      'patchChapter',
-      'getChapterBody',
-    ] as const) {
-      await expect(
-        // Every method is either async-throws or returns-then-throws; both
-        // surface as a rejected promise from the call site's perspective.
-        Promise.resolve().then(() => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (client as any)[method]();
+// ── 2. TauriClient transport parity (V1.66 §5 #1) ───────────────────────────
+
+describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
+  it('resolves the desktop port per §5 #3 (explicit → NEXUS_DAEMON_PORT → 8420)', () => {
+    expect(resolveDesktopPort()).toBe(8420);
+    expect(resolveDesktopPort(9000)).toBe(9000);
+    expect(resolveDesktopPort('invalid')).toBe(8420);
+  });
+
+  it('fixes the transport origin to the resolved desktop loopback port', async () => {
+    const captured: { url?: string } = {};
+    const fetchImpl: typeof fetch = (input) => {
+      captured.url = String(input);
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: 'ok', version: 'desk' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
         }),
-      ).rejects.toMatchObject({
-        name: 'NexusClientError',
-        code: 'not_implemented_in_browser_build',
-      });
-    }
+      );
+    };
+
+    const client = new TauriClient({ port: 8421, fetchImpl });
+    expect(client.port).toBe(8421);
+    await client.health();
+    // The desktop origin is the resolved loopback — NOT same-origin (the
+    // browser-tab BrowserClient uses relative `/v1/local/*`).
+    expect(captured.url).toBe('http://127.0.0.1:8421/v1/local/runtime/health');
+  });
+
+  it('delegates every NexusClient data method to the same /v1/local/* path as BrowserClient', async () => {
+    // Capture every request URL TauriClient issues; assert each maps to the
+    // identical Local API path the browser transport uses. This is the §5 #1
+    // "reuse the identical HTTP transport" invariant, pinned method-by-method.
+    const seen = new Set<string>();
+    const fetchImpl: typeof fetch = (input, init) => {
+      const url = new URL(String(input));
+      seen.add(`${init?.method ?? 'GET'} ${url.pathname}`);
+      return Promise.resolve(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    };
+    const client = new TauriClient({ fetchImpl });
+    const workId = 'w1';
+    // Exercise all 21 NexusClient methods (health + 20 data).
+    await client.health();
+    await client.listWorks();
+    await client.getWork(workId);
+    await client.createWork({ title: '', long_term_goal: '', initial_idea: '' });
+    await client.patchWork(workId, { status: 'draft' });
+    await client.listSessions();
+    await client.getSession('s1');
+    await client.listSchedules();
+    await client.inspectSchedule('sch1');
+    await client.listCapabilities();
+    await client.listFindings(workId);
+    await client.listPresets();
+    await client.scaffoldPreset({ name: 'foo' });
+    await client.validatePreset({ path: '/p.yaml' });
+    await client.reloadPreset('foo');
+    await client.listChapters(workId);
+    await client.getChapter(workId, 1);
+    await client.getChapterOutline(workId, 1);
+    await client.putChapterOutline(workId, 1, { content: '' });
+    await client.patchChapter(workId, 1, { slug: 'ch' });
+    await client.getChapterBody(workId, 1);
+
+    // Every method must have hit a /v1/local/* path (transport parity with the
+    // browser client). If a method silently no-op'd or threw — as the V1.65
+    // stub did — its path would be missing and this set would be smaller.
+    const paths = [...seen].sort();
+    expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
+    expect(seen.size).toBe(21);
+    // Spot-check the chapter surface (the Q5 action target).
+    expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
+    expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');
   });
 });
 
-// ── 2. Adapter contract enforcement ─────────────────────────────────────────
+// ── 3. Adapter contract enforcement ─────────────────────────────────────────
 
 describe('BrowserClient adapter contract', () => {
   it('delegates transport to the injected fetchImpl (diagnostics seam)', async () => {
