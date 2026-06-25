@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/preset-management/update-preset-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus UpdatePresetResponse",
+  "description": "Response for PATCH /v1/local/presets/{id} (V1.65 P0).",
+  "type": "object",
+  "required": ["id", "updated"],
+  "properties": {
+    "id": { "type": "string" },
+    "updated": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

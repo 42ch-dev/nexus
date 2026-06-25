@@ -37,4 +37,6 @@ pub struct PatchWorkRequest {
     pub auto_review_master_on_timeout: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_chain_interrupted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_profile: Option<String>,
 }

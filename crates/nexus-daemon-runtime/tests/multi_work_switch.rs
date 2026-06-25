@@ -38,6 +38,7 @@ fn minimal_patch() -> PatchWorkRequest {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     }
 }
 
@@ -59,6 +60,7 @@ async fn create_and_patch_work(
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, create_resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),

@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-content-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ChapterContentQuery",
+  "description": "Query parameters for GET/PUT/PATCH chapter detail, outline, and body routes (V1.65 P0).",
+  "type": "object",
+  "properties": {
+    "volume": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Volume number; defaults to 1 for single-volume Works."
+    }
+  },
+  "additionalProperties": false
+}

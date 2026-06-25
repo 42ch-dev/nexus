@@ -240,6 +240,62 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ReleaseCompletionLockRequest
         ),
+        // ── local-api/works/chapters/ (V1.65 P0) ─────────────────────────
+        entry!(
+            "schemas/local-api/works/chapters/chapter-status.schema.json",
+            Strict,
+            ChapterStatus
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/chapter-protection.schema.json",
+            Strict,
+            ChapterProtection
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/chapter-summary.schema.json",
+            Strict,
+            ChapterSummary
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/chapter-detail.schema.json",
+            Strict,
+            ChapterDetail
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/chapter-outline.schema.json",
+            Strict,
+            ChapterOutline
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/put-chapter-outline-request.schema.json",
+            Strict,
+            PutChapterOutlineRequest
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/patch-chapter-request.schema.json",
+            Strict,
+            PatchChapterRequest
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/chapter-body.schema.json",
+            Strict,
+            ChapterBody
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/list-chapters-query.schema.json",
+            Strict,
+            ListChaptersQuery
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/chapter-content-query.schema.json",
+            Strict,
+            ChapterContentQuery
+        ),
+        entry!(
+            "schemas/local-api/works/chapters/list-chapters-response.schema.json",
+            Strict,
+            ListChaptersResponse
+        ),
         // ── local-api/kb/ (V1.63 P1) ─────────────────────────────────────
         entry!(
             "schemas/local-api/kb/list-kb-entries-query.schema.json",
@@ -533,6 +589,22 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             "schemas/local-api/preset-management/reload-preset-response.schema.json",
             Strict,
             ReloadPresetResponse
+        ),
+        // V1.65 P0: full preset CRUD additions
+        entry!(
+            "schemas/local-api/preset-management/get-preset-response.schema.json",
+            Strict,
+            GetPresetResponse
+        ),
+        entry!(
+            "schemas/local-api/preset-management/update-preset-request.schema.json",
+            Strict,
+            UpdatePresetRequest
+        ),
+        entry!(
+            "schemas/local-api/preset-management/update-preset-response.schema.json",
+            Strict,
+            UpdatePresetResponse
         ),
         // ── platform/http-bff/ ───────────────────────────────────────────
         // V1.62 reorganization: platform HTTP bodies moved here from platform/.

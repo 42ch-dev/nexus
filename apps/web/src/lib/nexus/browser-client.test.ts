@@ -121,3 +121,111 @@ describe('BrowserClient cursor list', () => {
     expect(nexusError.code).toBe('http_502');
   });
 });
+
+describe('BrowserClient chapter content routes (V1.65)', () => {
+  it('lists chapters with the canonical { items, pagination } shape', async () => {
+    useHandlers(
+      http.get('/v1/local/works/:workId/chapters', () =>
+        HttpResponse.json({
+          items: [{ work_id: 'w1', chapter: 1, volume: 1, planned_word_count: 4000, status: 'not_started', created_at: '2026-06-25T00:00:00Z', updated_at: '2026-06-25T00:00:00Z' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.listChapters('w1');
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]!.chapter).toBe(1);
+  });
+
+  it('reads a chapter outline', async () => {
+    useHandlers(
+      http.get('/v1/local/works/:workId/chapters/:n/outline', ({ params }) =>
+        HttpResponse.json({
+          work_id: params.workId,
+          chapter: Number(params.n),
+          volume: 1,
+          outline_path: 'Works/WRK/Outlines/chapters/ch01-outline.md',
+          content: '# Chapter 1',
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getChapterOutline('w1', 1);
+    expect(res.content).toBe('# Chapter 1');
+  });
+
+  it('writes a chapter outline via PUT', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.put('/v1/local/works/:workId/chapters/:n/outline', async ({ request, params }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          work_id: params.workId,
+          chapter: Number(params.n),
+          volume: 1,
+          outline_path: 'Works/WRK/Outlines/chapters/ch01-outline.md',
+          content: (receivedBody as { content?: string }).content ?? '',
+          updated_at: '2026-06-25T00:00:00Z',
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.putChapterOutline('w1', 1, { content: '# Updated' });
+    expect(receivedBody).toEqual({ content: '# Updated' });
+    expect(res.content).toBe('# Updated');
+  });
+
+  it('patches chapter structure with confirm flag for finalized chapters', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.patch('/v1/local/works/:workId/chapters/:n', async ({ request, params }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          work_id: params.workId,
+          chapter: Number(params.n),
+          volume: 1,
+          planned_word_count: 5000,
+          status: 'finalized',
+          can_edit_outline: true,
+          can_edit_structure: true,
+          body_read_only: true,
+          protection: { level: 'confirm_structure_edit', reason: 'Chapter is finalized.' },
+          created_at: '2026-06-25T00:00:00Z',
+          updated_at: '2026-06-25T00:00:00Z',
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.patchChapter('w1', 1, { planned_word_count: 5000, confirm_structural_edit: true });
+    expect(receivedBody).toEqual({ planned_word_count: 5000, confirm_structural_edit: true });
+    expect(res.planned_word_count).toBe(5000);
+  });
+
+  it('reads a chapter body', async () => {
+    useHandlers(
+      http.get('/v1/local/works/:workId/chapters/:n/body', ({ params }) =>
+        HttpResponse.json({
+          work_id: params.workId,
+          chapter: Number(params.n),
+          volume: 1,
+          body_path: 'Works/WRK/Stories/ch01-ch01.md',
+          content: 'Body prose.',
+          frontmatter: { status: 'draft' },
+          read_only: true,
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getChapterBody('w1', 1);
+    expect(res.content).toBe('Body prose.');
+    expect(res.read_only).toBe(true);
+  });
+});

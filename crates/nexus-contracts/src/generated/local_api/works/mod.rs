@@ -1,3 +1,4 @@
+pub mod chapters;
 pub mod append_inspiration_request;
 pub mod append_inspiration_response;
 pub mod create_work_request;
@@ -9,6 +10,7 @@ pub mod release_completion_lock_request;
 pub mod work_detail_response;
 pub mod work_summary;
 
+pub use chapters::*;
 pub use append_inspiration_request::*;
 pub use append_inspiration_response::*;
 pub use create_work_request::*;

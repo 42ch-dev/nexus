@@ -15,7 +15,8 @@
     "primary_preset_id": { "type": "string" },
     "client_request_id": { "type": "string" },
     "lineage_from_work_id": { "type": "string" },
-    "set_pool_active": { "type": "boolean" }
+    "set_pool_active": { "type": "boolean" },
+    "work_profile": { "type": "string" }
   },
   "additionalProperties": false
 }

@@ -173,6 +173,8 @@ impl NexusApiError {
                     // status membership / target_executor) return 422 with the
                     // stable `INVALID_INPUT` code, distinct from transitions.
                     "INVALID_TRANSITION" | "INVALID_INPUT" => StatusCode::UNPROCESSABLE_ENTITY,
+                    // V1.65: chapter bodies above the size cap return 413.
+                    "CHAPTER_BODY_TOO_LARGE" => StatusCode::PAYLOAD_TOO_LARGE,
                     _ => StatusCode::BAD_REQUEST,
                 }
             }

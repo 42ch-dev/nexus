@@ -11,6 +11,7 @@ use crate::generated::common::common_types::{
     ReferenceSourceType, RegistrationSource, ScanStatus, SelectionMode, StoryManifestStatus,
     SubscriptionTier, TimelineEventStatus, TimelineEventType, VerificationStatus, WorldStatus,
 };
+use crate::generated::local_api::works::chapters::chapter_status::ChapterStatus;
 use crate::local::domain::runtime_mode::RuntimeMode;
 use std::fmt;
 use std::str::FromStr;
@@ -490,6 +491,35 @@ impl RuntimeMode {
     }
 }
 
+impl ChapterStatus {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotStarted => "not_started",
+            Self::Outlined => "outlined",
+            Self::Draft => "draft",
+            Self::Finalized => "finalized",
+            Self::Published => "published",
+        }
+    }
+}
+
+// The generated `ChapterStatus` enum does not derive `Default` (codegen does not
+// annotate enums with `#[default]`), so we provide the impl here rather than
+// hand-editing generated source.
+#[allow(clippy::derivable_impls)]
+impl Default for ChapterStatus {
+    fn default() -> Self {
+        Self::NotStarted
+    }
+}
+
+impl fmt::Display for ChapterStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 // ── FromStr implementations ───────────────────────────────────────────────
 
 impl FromStr for CreatorStatus {
@@ -949,6 +979,23 @@ impl FromStr for RuntimeMode {
             "cloud_enhanced" => Ok(Self::CloudEnhanced),
             _ => Err(format!(
                 "unknown runtime mode: '{s}'; expected local_only, local_first, or cloud_enhanced"
+            )),
+        }
+    }
+}
+
+impl FromStr for ChapterStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "not_started" => Ok(Self::NotStarted),
+            "outlined" => Ok(Self::Outlined),
+            "draft" => Ok(Self::Draft),
+            "finalized" => Ok(Self::Finalized),
+            "published" => Ok(Self::Published),
+            _ => Err(format!(
+                "unknown chapter status: '{s}'; expected not_started, outlined, draft, finalized, or published"
             )),
         }
     }

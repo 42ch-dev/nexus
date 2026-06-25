@@ -21,11 +21,17 @@
  */
 import type {
   CapabilityInfo,
+  ChapterBody,
+  ChapterContentQuery,
+  ChapterDetail,
+  ChapterOutline,
   CreateWorkRequest,
   CreateWorkResponse,
   FindingDetailResponse,
   InspectScheduleResponse,
   ListCapabilitiesResponse,
+  ListChaptersQuery,
+  ListChaptersResponse,
   ListFindingsQuery,
   ListFindingsResponse,
   ListPresetsResponse,
@@ -35,7 +41,9 @@ import type {
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  PatchChapterRequest,
   PatchWorkRequest,
+  PutChapterOutlineRequest,
   ReloadPresetResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
@@ -107,6 +115,25 @@ export interface NexusClient {
   validatePreset(request: ValidatePresetRequest): Promise<ValidatePresetResponse>;
   /** `POST /v1/local/presets/{id}:reload`. */
   reloadPreset(presetId: string): Promise<ReloadPresetResponse>;
+
+  // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
+  /** `GET /v1/local/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */
+  listChapters(workId: string, query?: ListChaptersQuery): Promise<ListChaptersResponse>;
+  /** `GET /v1/local/works/{work_id}/chapters/{n}` — detail + protection metadata. */
+  getChapter(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterDetail>;
+  /** `GET /v1/local/works/{work_id}/chapters/{n}/outline` — read outline markdown. */
+  getChapterOutline(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterOutline>;
+  /** `PUT /v1/local/works/{work_id}/chapters/{n}/outline` — atomic outline write. */
+  putChapterOutline(
+    workId: string,
+    chapter: number,
+    request: PutChapterOutlineRequest,
+    query?: ChapterContentQuery,
+  ): Promise<ChapterOutline>;
+  /** `PATCH /v1/local/works/{work_id}/chapters/{n}` — structure/status update. */
+  patchChapter(workId: string, chapter: number, request: PatchChapterRequest, query?: ChapterContentQuery): Promise<ChapterDetail>;
+  /** `GET /v1/local/works/{work_id}/chapters/{n}/body` — read-only body markdown. */
+  getChapterBody(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterBody>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
