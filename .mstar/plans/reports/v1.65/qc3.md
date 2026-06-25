@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "v1.65"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-25"
 ---
 
@@ -156,3 +156,37 @@ _None._
 **Verdict**: Request Changes
 
 Rationale: No Critical findings, but W-1 (OFFSET pagination), W-2 (unbounded body read), and W-3 (FS/DB inconsistency on outline save) are substantive performance/reliability issues on the P0 hot path. W-4 is a real frontend resource leak. These must be fixed or explicitly risk-accepted before approval per the performance/reliability focus.
+
+## Revalidation (fix-wave-1)
+
+- **Review range**: `43be4b52..9c50481f` (4 fix commits on `iteration/v1.65`)
+- **Overall regression range**: `merge-base origin/main ... HEAD 9c50481f`
+- **Working branch (verified)**: `iteration/v1.65`
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus`
+
+### Per-finding disposition
+
+| Finding | Commit | Status | Evidence |
+|---------|--------|--------|----------|
+| **W-1 — OFFSET pagination** | `9c9945a7` | ✅ Resolved | `decode_chapter_cursor` / `encode_chapter_cursor` now produce opaque `v2:<volume>:<chapter>` cursors. `list_chapters_paginated` uses `WHERE work_id = ? AND (volume, chapter) > (?, ?) ORDER BY volume, chapter LIMIT ?`. The table PRIMARY KEY is `(work_id, volume, chapter)` (migration `202606110001_v142_multi_volume_pk.sql`), so the predicate is index-covered with no scan regression. `chapter_page_meta` fetches `limit + 1` rows and returns `has_more = true` plus `next_cursor` only when an overflow row exists. Test `list_chapters_keyset_pagination` exercises first/second page navigation and asserts `v2:` prefix, `has_more`, and final-page `next_cursor: None`. |
+| **W-2 — unbounded body read** | `15d5f145` | ✅ Resolved | `read_guarded_file` now calls `tokio::fs::metadata` and compares `metadata.len()` against `CHAPTER_BODY_MAX_BYTES = 10 * 1024 * 1024` **before** `tokio::fs::read_to_string`, so the cap is enforced prior to full read. The oversized path returns `NexusApiError::BadRequest { code: "CHAPTER_BODY_TOO_LARGE" }`, which `crates/nexus-daemon-runtime/src/api/errors.rs:177` maps to `StatusCode::PAYLOAD_TOO_LARGE` (HTTP 413). Test `get_chapter_body_rejects_oversized_file` writes `TEST_MAX_BYTES + 1` and asserts the `CHAPTER_BODY_TOO_LARGE` code. |
+| **W-3 — FS/DB inconsistency on outline PUT** | `1407b16a` | ✅ Resolved | `put_chapter_outline` now calls `work_chapters::update_outline_path` **before** `atomic_write_outline`. A test-only failpoint (`TEST_UPDATE_OUTLINE_PATH_FAIL`) simulates DB failure; in that path the runtime lock is released and no file is written. Test `put_outline_db_failure_does_not_write_file` asserts the file does not exist when the DB update fails. If DB commits but file write fails, the DB points to the intended path and a retry PUT is idempotent, as documented in the code comment. |
+| **W-4 — leaking keydown listener** | `6e14fb13` | ✅ Resolved | `chapter-page.tsx` now declares a named `handleKeyDown` function and the `useEffect` cleanup removes both `click` and `keydown` listeners. The effect depends on `menuOpen`, so listeners are added on open and removed on close/unmount. Test `closes the context menu with Escape and does not leak keydown listeners` opens/closes the menu twice and asserts `keydown` `addListener` calls == `removeListener` calls == 2. |
+
+### No-regression sanity
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| `cargo test -p nexus-daemon-runtime --lib` | ✅ pass | 308 tests |
+| `cargo clippy -p nexus-daemon-runtime -- -D warnings` | ✅ pass | |
+| `pnpm --filter @42ch/nexus-contracts build` | ✅ pass | 3.53 kB mjs / 80.53 kB dts |
+| `pnpm --filter web typecheck` | ✅ pass | |
+| `pnpm --filter web test` (run 1) | ✅ pass | 81 tests, 4.06s |
+| `pnpm --filter web test` (run 2) | ✅ pass | 81 tests, 5.91s — stable |
+| `pnpm --filter web build` | ✅ pass | 942.24 kB chunk (expected); no type/build errors |
+
+### Updated verdict
+
+All four qc3 blocking findings are resolved. No new performance/reliability regressions were observed. The previously noted S-1 through S-4 suggestions remain low-priority follow-ups outside this fix wave.
+
+**Verdict**: Approve
