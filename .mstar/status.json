@@ -95,7 +95,7 @@
     "latest_active_iteration": "V1.66",
     "latest_active_compass": "v1.66-tauri-desktop-shell-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.66 Prepare — Phase 2b/2c + PM lock before Wave 1 dispatch)",
+    "pre_implement_gate": "compass Locked (Phase 2b @architect + 2b @product-manager + 2c @writing-specialist integrated; 10 §5 design items LOCKED; wire_contracts_changed: false; 6 spec amendments applied). Wave 1 (P0 ‖ P-sec) awaits: PM Task Board published + user branch-policy confirmation (§4) + Pre-implement Gate Check.",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -136,7 +136,7 @@
       "refreshed_at": "2026-06-25T13:57:50Z",
       "refreshed_reason": "V1.66 Prepare: prior total_open=0 was stale (V1.65 closeout registered 4 open residuals after the V1.65 P-last summary was computed). Recomputed from residual_findings."
     },
-    "updated_at": "2026-06-25T13:57:50Z",
+    "updated_at": "2026-06-25T14:28:08Z",
     "spec_integration_branch": "iteration/v1.66"
   },
   "residual_findings": {

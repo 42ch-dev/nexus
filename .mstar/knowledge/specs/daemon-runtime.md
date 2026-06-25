@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment: bundled local Web UI serving plus chapter-content Local API route family |
+| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Local API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |

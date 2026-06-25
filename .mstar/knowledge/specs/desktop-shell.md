@@ -10,8 +10,9 @@
 
 - [web-ui.md](web-ui.md) §14 (Desktop Shell stage — product UX + user stories + capability table delta)
 - [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
-- [daemon-runtime.md](daemon-runtime.md) §4.6 (Tauri sidecar mode — daemon-side launch/readiness/lifecycle)
+- [daemon-runtime.md](daemon-runtime.md) §12 (Tauri sidecar mode — daemon-side launch/readiness/lifecycle)
 - [local-api-surface-conventions.md](local-api-surface-conventions.md) §9 (local daemon port discovery)
+- [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) / `host_tool_handlers.rs` (W-002 path-guard reference for `openWith`/`revealInFinder` scope)
 - `apps/web/DESIGN.md` (Desktop Shell Supplement — window/menu/dialog/context-menu/status tokens)
 - [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Local API wire
@@ -82,7 +83,7 @@ Owned by the Tauri app while the desktop session is alive. **Daemon-side detail 
 - **Runtime canonicalize + prefix-check against the active workspace root is AUTHORITATIVE** — mirrors the W-002 guard intent from `host_tool_handlers.rs`.
 - **Tauri capability/opener scope is defense-in-depth ONLY** — Tauri permissions are *static* capability scopes and **cannot** encode a *dynamic* active workspace root.
 - **Prefer custom Tauri commands** (`open_with`, `reveal_in_finder`) that validate the path (canonicalize + prefix-check) **before** calling opener functionality — over relying solely on the static opener scope.
-- On rejection: plain-language disabled state ("Path not opened. The file is outside the active workspace."), not a silent no-op.
+- On rejection: plain-language disabled state (`Path not opened. The file is outside the active workspace.`), not a silent no-op.
 - **Coordinate with P-sec `R-V165-QC-SUGG-DEFENSE`** — `host_tool_handlers.rs` body-write path gets parity hardening in V1.66; the openWith guard shares the canonicalize+prefix-check pattern.
 
 Browser build: "Copy Path" only (no greyed-out teasing of unavailable actions).
