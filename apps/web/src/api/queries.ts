@@ -18,13 +18,18 @@ import {
 } from '@tanstack/react-query';
 import type {
   CapabilityInfo,
+  ChapterContentQuery,
+  ChapterSummary,
   CreateWorkRequest,
   FindingDetailResponse,
+  ListChaptersQuery,
   ListFindingsQuery,
   ListWorksQuery,
   PaginationInfo,
+  PatchChapterRequest,
   PatchWorkRequest,
   PresetSummary,
+  PutChapterOutlineRequest,
   ScaffoldPresetRequest,
   ScheduleSummary,
   SessionSummary,
@@ -249,5 +254,89 @@ export function useReloadPreset() {
       void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
     },
     onError: (error) => errorToast(error, 'Could not reload preset'),
+  });
+}
+
+// ── Chapters (V1.65 Content-Authoring) ───────────────────────────────────────
+
+/** Cursor-paginated chapter list for a Work (F-P3 `items` key). */
+export function useChapters(workId: string | undefined, query?: ListChaptersQuery) {
+  const client = useNexusClient();
+  const limit = query?.limit ?? DEFAULT_PAGE_SIZE;
+  return useInfiniteQuery({
+    queryKey: queryKeys.chapters.list(workId ?? '', { ...query, limit }),
+    initialPageParam: FIRST_PAGE,
+    queryFn: async ({ pageParam }): Promise<CursorPage<ChapterSummary>> => {
+      const res = await client.listChapters(workId!, { ...query, limit, cursor: pageParam });
+      return toPage<ChapterSummary>(res, 'items');
+    },
+    enabled: Boolean(workId),
+    getNextPageParam: (lastPage: CursorPage<ChapterSummary>): Cursor =>
+      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+  });
+}
+
+export function useChapter(workId: string | undefined, chapter: number | undefined, query?: ChapterContentQuery) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.chapters.detail(workId ?? '', chapter ?? 0, query),
+    queryFn: () => client.getChapter(workId!, chapter!, query),
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+  });
+}
+
+export function useChapterOutline(
+  workId: string | undefined,
+  chapter: number | undefined,
+  query?: ChapterContentQuery,
+) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.chapters.outline(workId ?? '', chapter ?? 0, query),
+    queryFn: () => client.getChapterOutline(workId!, chapter!, query),
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+  });
+}
+
+export function useChapterBody(
+  workId: string | undefined,
+  chapter: number | undefined,
+  query?: ChapterContentQuery,
+) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.chapters.body(workId ?? '', chapter ?? 0, query),
+    queryFn: () => client.getChapterBody(workId!, chapter!, query),
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+  });
+}
+
+export function usePutChapterOutline(workId: string | undefined, chapter: number | undefined) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: PutChapterOutlineRequest) =>
+      client.putChapterOutline(workId!, chapter!, request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.chapters.outlines() });
+      void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
+    },
+    onError: (error) => errorToast(error, 'Could not save outline'),
+  });
+}
+
+export function usePatchChapter(workId: string | undefined) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { chapter: number; request: PatchChapterRequest; query?: ChapterContentQuery }) =>
+      client.patchChapter(workId!, vars.chapter, vars.request, vars.query),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
+      void qc.invalidateQueries({ queryKey: queryKeys.chapters.detail(workId!, vars.chapter) });
+    },
+    onError: (error) => errorToast(error, 'Could not update chapter'),
   });
 }
