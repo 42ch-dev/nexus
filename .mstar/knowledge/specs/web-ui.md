@@ -304,7 +304,7 @@ A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plu
 - **Bundled `nexus42` sidecar** (transparent daemon autostart): Tauri `externalBin` + `plugin-shell` Sidecar (compass §5 #2 LOCKED); auto-start on launch, stop on quit, health probe + restart-on-crash. The user double-clicks the `.app` and the daemon comes up — **no terminal**. In-process lib link deferred V1.67+.
 - **macOS CI unsigned `.app` build leg**: `desktop-build` workflow job (unsigned `.app` + `.dmg` artifacts uploaded). **No signing/notarization/auto-update/GitHub Releases** in V1.66.
 
-**Stage status**: **Draft** (flips to **Shipped (V1.66)** at P-last, on QC tri-review + QA pass).
+**Stage status**: **Shipped (V1.66)** — QC tri-review Approve (after fix-wave-1: port-exposure-to-SPA + attached-daemon-probe + dev-prereq docs + CI cache/path-filter + error-label split) + QA Pass.
 
 ### 14.2 The desktop loop this enables
 

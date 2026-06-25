@@ -1,6 +1,6 @@
 # Desktop Shell (Tauri) — Specification v1
 
-**Status**: Draft — V1.66 Tauri Desktop Shell (flips to **Shipped (V1.66)** at P-last on QC tri-review + QA pass)
+**Status**: Shipped (V1.66) — Tauri Desktop Shell delivered (QC tri-review Approve after fix-wave-1 + QA Pass)
 **Document class**: Feature line
 **Created**: 2026-06-25 (Phase 2b, `@architect`)
 **Scope**: Nexus desktop shell contract — `apps/desktop` Tauri v2 wrapper, SPA adapter selection (`TauriClient`), desktop-only `NexusClient` extensions, native file actions + path guard, bundled `nexus42` sidecar lifecycle, port discovery, capability detection, macOS-first unsigned dev build. V1.67+ deferrals (signing, multi-OS, auto-update, in-process lib link, body editor) recorded in §2.
