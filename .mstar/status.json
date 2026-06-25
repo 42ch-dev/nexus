@@ -39,14 +39,15 @@
       "title": "V1.66 P1 — Bundled nexus42 Sidecar Lifecycle + macOS CI unsigned .app build",
       "iteration": "V1.66",
       "slot": "P1",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "L",
       "owner": "@fullstack-dev",
       "review": "Tri-review + QA",
       "wave": 2,
       "dependency": "P0 merged + Phase 2b (sidecar mechanism + port discovery + asset serving + CI runner)",
       "working_branch": "feature/v1.66-sidecar-lifecycle-and-ci",
-      "merge_target": "iteration/v1.66"
+      "merge_target": "iteration/v1.66",
+      "inreview_at": "2026-06-25T17:06:26Z"
     },
     {
       "plan_id": "2026-06-25-v1.66-mid-meta-tracking",
@@ -126,7 +127,7 @@
       "refreshed_at": "2026-06-25T15:31:15Z",
       "refreshed_reason": "Recomputed after V1.66 P-sec residual closures."
     },
-    "updated_at": "2026-06-25T15:49:19Z",
+    "updated_at": "2026-06-25T17:06:26Z",
     "spec_integration_branch": "iteration/v1.66",
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
