@@ -1,13 +1,96 @@
 {
   "version": 1,
-  "updated_at": "2026-06-24T23:30:00Z",
-  "plans": [],
+  "updated_at": "2026-06-25T13:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-06-25-v1.65-compass-and-plan-stubs",
+      "title": "V1.65 P-1 — Prepare: Compass + Plan Stubs + Status + Index",
+      "iteration": "V1.65",
+      "slot": "P-1",
+      "status": "InProgress",
+      "effort": "M",
+      "owner": "@project-manager",
+      "review": "PM closeout (no QC)",
+      "wave": 0,
+      "dependency": "—",
+      "working_branch": "(direct commit to iteration/v1.65)",
+      "merge_target": "iteration/v1.65"
+    },
+    {
+      "plan_id": "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
+      "title": "V1.65 P0 — Local API Chapter-Content Surface + Track B Backend",
+      "iteration": "V1.65",
+      "slot": "P0",
+      "status": "Todo",
+      "effort": "L",
+      "owner": "@fullstack-dev",
+      "review": "Tri-review + QA",
+      "wave": 1,
+      "dependency": "P-1",
+      "working_branch": "feature/v1.65-local-api-chapter-surface-and-track-b",
+      "merge_target": "iteration/v1.65"
+    },
+    {
+      "plan_id": "2026-06-25-v1.65-web-test-baseline",
+      "title": "V1.65 P1 — apps/web Test Baseline (R-V164-QC1-S1-P1 closure)",
+      "iteration": "V1.65",
+      "slot": "P1",
+      "status": "Todo",
+      "effort": "S",
+      "owner": "@frontend-dev",
+      "review": "Tri-review + QA",
+      "wave": 1,
+      "dependency": "P-1",
+      "working_branch": "feature/v1.65-web-test-baseline",
+      "merge_target": "iteration/v1.65"
+    },
+    {
+      "plan_id": "2026-06-25-v1.65-outline-and-structure-editor",
+      "title": "V1.65 P2 — Outline & Structure Authoring UI",
+      "iteration": "V1.65",
+      "slot": "P2",
+      "status": "Todo",
+      "effort": "XL",
+      "owner": "@frontend-dev",
+      "review": "Tri-review + QA",
+      "wave": 2,
+      "dependency": "P0 merged + P1 merged + DESIGN.md increment",
+      "working_branch": "feature/v1.65-outline-and-structure-editor",
+      "merge_target": "iteration/v1.65"
+    },
+    {
+      "plan_id": "2026-06-25-v1.65-mid-meta-tracking",
+      "title": "V1.65 P-mid — Meta Tracking",
+      "iteration": "V1.65",
+      "slot": "P-mid",
+      "status": "Todo",
+      "effort": "S",
+      "owner": "@project-manager",
+      "review": "PM closeout (no QC)",
+      "wave": 3,
+      "dependency": "P0 + P1 + P2 merged to iteration/v1.65"
+    },
+    {
+      "plan_id": "2026-06-25-v1.65-residual-convergence-and-closeout",
+      "title": "V1.65 P-last — Residual Convergence + Spec Promotion + Profile B + PR",
+      "iteration": "V1.65",
+      "slot": "P-last",
+      "status": "Todo",
+      "effort": "M",
+      "owner": "@fullstack-dev + @project-manager",
+      "review": "Tri-review + QA (closeout)",
+      "wave": 3,
+      "dependency": "P-mid",
+      "working_branch": "feature/v1.65-residual-convergence-and-closeout",
+      "merge_target": "iteration/v1.65"
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.65",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.64 (merged via PR #87 @ d8be93a3)",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.65+ (pending)",
+    "latest_active_iteration": "V1.65",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "pending (V1.65+)",
@@ -52,7 +135,8 @@
       },
       "by_target_active": {}
     },
-    "updated_at": "2026-06-25T03:35:00Z"
+    "updated_at": "2026-06-25T03:35:00Z",
+    "spec_integration_branch": "iteration/v1.65"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
