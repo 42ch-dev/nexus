@@ -68,4 +68,22 @@ export class TauriClient implements NexusClient {
   reloadPreset(): never {
     return NOT_IMPLEMENTED();
   }
+  listChapters(): never {
+    return NOT_IMPLEMENTED();
+  }
+  getChapter(): never {
+    return NOT_IMPLEMENTED();
+  }
+  getChapterOutline(): never {
+    return NOT_IMPLEMENTED();
+  }
+  putChapterOutline(): never {
+    return NOT_IMPLEMENTED();
+  }
+  patchChapter(): never {
+    return NOT_IMPLEMENTED();
+  }
+  getChapterBody(): never {
+    return NOT_IMPLEMENTED();
+  }
 }

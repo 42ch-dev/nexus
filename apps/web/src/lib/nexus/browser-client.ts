@@ -10,10 +10,16 @@
  * so this client sends no credentials.
  */
 import type {
+  ChapterBody,
+  ChapterContentQuery,
+  ChapterDetail,
+  ChapterOutline,
   CreateWorkRequest,
   CreateWorkResponse,
   InspectScheduleResponse,
   ListCapabilitiesResponse,
+  ListChaptersQuery,
+  ListChaptersResponse,
   ListFindingsQuery,
   ListFindingsResponse,
   ListPresetsResponse,
@@ -23,7 +29,9 @@ import type {
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  PatchChapterRequest,
   PatchWorkRequest,
+  PutChapterOutlineRequest,
   ReloadPresetResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
@@ -145,6 +153,64 @@ export class BrowserClient implements NexusClient {
     );
   }
 
+  // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
+  listChapters(workId: string, query?: ListChaptersQuery): Promise<ListChaptersResponse> {
+    return this.get<ListChaptersResponse>(
+      `/v1/local/works/${encodeURIComponent(workId)}/chapters`,
+      query,
+    );
+  }
+  getChapter(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterDetail> {
+    return this.get<ChapterDetail>(
+      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}`,
+      query,
+    );
+  }
+  getChapterOutline(
+    workId: string,
+    chapter: number,
+    query?: ChapterContentQuery,
+  ): Promise<ChapterOutline> {
+    return this.get<ChapterOutline>(
+      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/outline`,
+      query,
+    );
+  }
+  putChapterOutline(
+    workId: string,
+    chapter: number,
+    request: PutChapterOutlineRequest,
+    query?: ChapterContentQuery,
+  ): Promise<ChapterOutline> {
+    return this.put<ChapterOutline>(
+      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/outline`,
+      request,
+      query,
+    );
+  }
+  patchChapter(
+    workId: string,
+    chapter: number,
+    request: PatchChapterRequest,
+    query?: ChapterContentQuery,
+  ): Promise<ChapterDetail> {
+    return this.patch<ChapterDetail>(
+      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}`,
+      request,
+      query,
+    );
+  }
+  getChapterBody(
+    workId: string,
+    chapter: number,
+    query?: ChapterContentQuery,
+  ): Promise<ChapterBody> {
+    return this.get<ChapterBody>(
+      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/body`,
+      query,
+    );
+  }
+
   // ── Transport core ─────────────────────────────────────────────────────────
 
   private get<T>(path: string, query?: object): Promise<T> {
@@ -155,8 +221,12 @@ export class BrowserClient implements NexusClient {
     return this.request<T>('POST', path, body);
   }
 
-  private patch<T>(path: string, body: unknown): Promise<T> {
-    return this.request<T>('PATCH', path, body);
+  private patch<T>(path: string, body: unknown, query?: object): Promise<T> {
+    return this.request<T>('PATCH', `${path}${toQueryString(query)}`, body);
+  }
+
+  private put<T>(path: string, body: unknown, query?: object): Promise<T> {
+    return this.request<T>('PUT', `${path}${toQueryString(query)}`, body);
   }
 
   private async request<T>(
