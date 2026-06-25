@@ -35,7 +35,7 @@
       "title": "V1.65 P-sec — Dependency Security Upgrade (Dependabot closure)",
       "iteration": "V1.65",
       "slot": "P-sec",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "S-M",
       "owner": "@ops-engineer",
       "review": "Tri-review + QA",
