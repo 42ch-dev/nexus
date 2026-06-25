@@ -69,7 +69,11 @@ export function ChaptersPage() {
       planned_word_count: edits.planned_word_count,
       volume: edits.volume,
     };
-    if ((row.status === 'finalized' || row.status === 'published') && !confirmed) {
+    // Only `finalized` is confirm-editable. `published` is server hard-blocked
+    // (`CHAPTER_STRUCTURE_EDIT_BLOCKED`) with no `confirm_structural_edit`
+    // override, so it must never reach an actionable confirm dialog — showing
+    // one would always end in an error toast after the user confirms.
+    if (row.status === 'finalized' && !confirmed) {
       setConfirmChapter(row);
       return;
     }
@@ -268,6 +272,21 @@ export function ChaptersPage() {
                                   <X className="h-4 w-4" aria-hidden />
                                 </Button>
                               </>
+                            ) : row.status === 'published' ? (
+                              // `published` chapters are server hard-blocked from
+                              // structural edits (CHAPTER_STRUCTURE_EDIT_BLOCKED,
+                              // no override). Render a disabled, informational
+                              // affordance instead of an actionable Edit button.
+                              <Button
+                                type="button"
+                                variant="tertiary"
+                                size="small"
+                                disabled
+                                title="Published chapters can't be structurally edited"
+                                aria-label="Published chapter — editing disabled"
+                              >
+                                <Pencil className="h-4 w-4 opacity-50" aria-hidden />
+                              </Button>
                             ) : (
                               <Button
                                 type="button"
