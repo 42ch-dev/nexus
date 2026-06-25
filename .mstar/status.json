@@ -3,20 +3,6 @@
   "updated_at": "2026-06-25T19:00:00Z",
   "plans": [
     {
-      "plan_id": "2026-06-25-v1.66-compass-and-plan-stubs",
-      "title": "V1.66 P-1 — Compass & Plan Stubs (Prepare)",
-      "iteration": "V1.66",
-      "slot": "P-1",
-      "status": "InProgress",
-      "effort": "M",
-      "owner": "@project-manager",
-      "review": "N/A (Prepare)",
-      "wave": 0,
-      "dependency": "—",
-      "working_branch": "(direct on iteration/v1.66)",
-      "merge_target": "iteration/v1.66"
-    },
-    {
       "plan_id": "2026-06-25-v1.66-desktop-shell-core",
       "title": "V1.66 P0 — Tauri Desktop Shell Core (TauriClient + Q5 open-with/reveal + DESIGN.md increment)",
       "iteration": "V1.66",
@@ -136,7 +122,7 @@
       "refreshed_at": "2026-06-25T13:57:50Z",
       "refreshed_reason": "V1.66 Prepare: prior total_open=0 was stale (V1.65 closeout registered 4 open residuals after the V1.65 P-last summary was computed). Recomputed from residual_findings."
     },
-    "updated_at": "2026-06-25T14:28:08Z",
+    "updated_at": "2026-06-25T14:34:47Z",
     "spec_integration_branch": "iteration/v1.66"
   },
   "residual_findings": {
