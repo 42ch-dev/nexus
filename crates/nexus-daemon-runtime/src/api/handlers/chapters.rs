@@ -7,7 +7,6 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
-use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -130,6 +129,64 @@ fn parse_chapter(n: &str) -> Result<i32, NexusApiError> {
                 Ok(v)
             }
         })
+}
+
+/// Prefix for chapter keyset cursors.
+const CHAPTER_CURSOR_PREFIX: &str = "v2:";
+
+/// Decode an opaque chapter-list cursor into the `(volume, chapter)` tuple
+/// that the next page must start after.
+///
+/// `None` decodes to `(1, 0)` so the first page includes all chapters.
+fn decode_chapter_cursor(cursor: Option<&String>) -> Result<(i32, i32), NexusApiError> {
+    match cursor {
+        None => Ok((1, 0)),
+        Some(raw) => {
+            let stripped = raw.strip_prefix(CHAPTER_CURSOR_PREFIX).ok_or_else(|| {
+                NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "invalid chapter_cursor; pass the next_cursor value unchanged"
+                        .to_string(),
+                }
+            })?;
+            let mut parts = stripped.splitn(2, ':');
+            let volume = parts
+                .next()
+                .and_then(|s| s.parse::<i32>().ok())
+                .filter(|v| *v >= 1)
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "invalid chapter_cursor volume".to_string(),
+                })?;
+            let chapter = parts
+                .next()
+                .and_then(|s| s.parse::<i32>().ok())
+                .filter(|v| *v >= 1)
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "invalid chapter_cursor chapter".to_string(),
+                })?;
+            Ok((volume, chapter))
+        }
+    }
+}
+
+/// Encode a `(volume, chapter)` tuple into an opaque cursor token.
+fn encode_chapter_cursor(volume: i32, chapter: i32) -> String {
+    format!("{CHAPTER_CURSOR_PREFIX}{volume}:{chapter}")
+}
+
+/// Compute `(next_cursor, has_more)` for a keyset-paginated chapter page.
+fn chapter_page_meta(records: &[WorkChapterRecord], limit: u32) -> (Option<String>, bool) {
+    let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
+    if records.len() > limit_us {
+        let last = records.get(limit_us - 1).expect("limit > 0");
+        let next_volume = last.volume.unwrap_or(1);
+        let next_cursor = encode_chapter_cursor(next_volume, last.chapter);
+        (Some(next_cursor), true)
+    } else {
+        (None, false)
+    }
 }
 
 /// Resolve the active workspace root.
@@ -394,7 +451,7 @@ pub async fn list_chapters(
     // Verify work exists and belongs to active creator.
     let _work = load_work(&state, &creator_id, &work_id).await?;
 
-    let offset = decode_offset_cursor(&query.cursor)?;
+    let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
     let limit = u32::try_from(query.limit.unwrap_or(50).min(100)).unwrap_or(100);
     let fetch_limit = i64::from(limit.saturating_add(1));
 
@@ -405,7 +462,8 @@ pub async fn list_chapters(
         &work_id,
         status_filter,
         fetch_limit,
-        i64::from(offset),
+        cursor_volume,
+        cursor_chapter,
     )
     .await
     .map_err(|e| NexusApiError::Internal {
@@ -413,7 +471,7 @@ pub async fn list_chapters(
         message: e.to_string(),
     })?;
 
-    let (next_cursor, has_more) = offset_page_meta(records.len(), limit, offset);
+    let (next_cursor, has_more) = chapter_page_meta(&records, limit);
     let items: Vec<ChapterSummary> = records
         .into_iter()
         .take(usize::try_from(limit).unwrap_or(usize::MAX))
@@ -857,6 +915,51 @@ mod tests {
             .expect("list chapters");
         assert_eq!(resp.items.len(), 3);
         assert_eq!(resp.pagination.limit, 50);
+    }
+
+    #[tokio::test]
+    async fn list_chapters_keyset_pagination() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+
+        // First page: limit 2 should return 2 items and a next cursor.
+        let first = list_chapters(
+            AxumState(state.clone()),
+            AxumPath(work_id.clone()),
+            AxumQuery(ListChaptersQuery {
+                cursor: None,
+                limit: Some(2),
+                status: None,
+            }),
+        )
+        .await
+        .expect("list first page");
+        assert_eq!(first.items.len(), 2);
+        assert!(first.pagination.has_more);
+        let cursor = first
+            .pagination
+            .next_cursor
+            .clone()
+            .expect("first page should have next_cursor");
+        assert!(
+            cursor.starts_with("v2:"),
+            "cursor should use v2 keyset encoding"
+        );
+
+        // Second page: should return the remaining chapter and no cursor.
+        let second = list_chapters(
+            AxumState(state),
+            AxumPath(work_id),
+            AxumQuery(ListChaptersQuery {
+                cursor: Some(cursor),
+                limit: Some(2),
+                status: None,
+            }),
+        )
+        .await
+        .expect("list second page");
+        assert_eq!(second.items.len(), 1);
+        assert!(!second.pagination.has_more);
+        assert!(second.pagination.next_cursor.is_none());
     }
 
     #[tokio::test]

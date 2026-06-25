@@ -272,11 +272,13 @@ fn map_row_to_record(r: &sqlx::sqlite::SqliteRow) -> WorkChapterRecord {
     }
 }
 
-/// List chapter rows for a Work with optional status filter and pagination.
+/// List chapter rows for a Work with optional status filter and keyset
+/// pagination.
 ///
-/// Returns rows ordered by `volume ASC, chapter ASC`. `limit` and `offset`
-/// are applied directly to the SQL query; callers should fetch `limit + 1`
-/// to detect `has_more`.
+/// Returns rows ordered by `volume ASC, chapter ASC`. `cursor_volume` and
+/// `cursor_chapter` encode the last row seen by the caller; the query returns
+/// rows strictly after that tuple (`(volume, chapter) > (?, ?)`). Callers
+/// should fetch `limit + 1` to detect `has_more`.
 ///
 /// # Errors
 ///
@@ -286,25 +288,29 @@ pub async fn list_chapters_paginated(
     work_id: &str,
     status_filter: Option<&str>,
     limit: i64,
-    offset: i64,
+    cursor_volume: i32,
+    cursor_chapter: i32,
 ) -> Result<Vec<WorkChapterRecord>, LocalDbError> {
     // SAFETY: Dynamic WHERE clause because status filter is optional.
     // All values are bound parameters, not interpolated.
     let mut sql = String::from(
         "SELECT work_id, chapter, volume, slug, planned_word_count, actual_word_count, \
          status, outline_path, body_path, created_at, updated_at \
-         FROM work_chapters WHERE work_id = ?",
+         FROM work_chapters WHERE work_id = ? AND (volume, chapter) > (?, ?)",
     );
     if status_filter.is_some() {
         sql.push_str(" AND status = ?");
     }
-    sql.push_str(" ORDER BY volume, chapter LIMIT ? OFFSET ?");
+    sql.push_str(" ORDER BY volume, chapter LIMIT ?");
 
-    let mut query = sqlx::query(&sql).bind(work_id);
+    let mut query = sqlx::query(&sql)
+        .bind(work_id)
+        .bind(cursor_volume)
+        .bind(cursor_chapter);
     if let Some(status) = status_filter {
         query = query.bind(status);
     }
-    query = query.bind(limit).bind(offset);
+    query = query.bind(limit);
 
     let rows = query.fetch_all(pool).await?;
     Ok(rows.iter().map(map_row_to_record).collect())
