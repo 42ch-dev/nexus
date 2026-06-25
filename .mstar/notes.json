@@ -1,14 +1,18 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-25T20:30:00+00:00",
+  "updated_at": "2026-06-25T15:31:51+00:00",
   "entries": [
+    {
+      "updated_at": "2026-06-25T15:31:51+00:00",
+      "message": "V1.66 P-sec hygiene residuals progress (2026-06-25): closed R-V165-QC1-W2 (chapter content handler-level integration tests, commit 699ac872), R-V165-QC-SUGG-DEFENSE (write-path guard parity + RuntimeLockGuard dedup + post-rename fsync, commit e7a1fd05), and R-V164-QC1-S1-P0 (PaginationInfo dedup across agent_host/kb/creators/memory/workspaces handlers, commit 689ddce3). Refreshed metadata.tech_debt_summary: 2 open (low), 18 deferred, 184 resolved. Remaining open: R-V165-QC3-VIRT (V1.66) and R-V165-QC-SUGG-DX (V1.66+)."
+    },
     {
       "updated_at": "2026-06-25T20:30:00+00:00",
       "message": "V1.65 Outline & Structure Authoring + Dependency Security SHIPPED (2026-06-25) via PR #89 -> main (merge 18223808). Track A: apps/web authoring surface (chapter structure table + TipTap outline editor w/ markdown round-trip + soft-concurrency warning banner + structure CRUD [slug/wc/volume/status; title display-only; finalized confirm + published hard-block] + body read-only render + Copy-path context menu); NexusClient adapter boundary preserved (Tauri-ready for V1.66). Track B: Local API chapter-content surface (6 endpoints, keyset cursor + items + ErrorResponse + W-002 path guard + runtime lock) + work_profile (additive optional) + preset full CRUD; closes R-V164-P2-G1/G2 + local F-P3. Track D: dependency security (vitest 2->3 critical, vite 5->6 high/med, wiremock 0.6 eliminates rand 0.7.3 low) -> 5 dependabot advisories auto-dismissed (0 open on main post-merge). apps/web test baseline 30->81 (R-V164-QC1-S1-P1 closed). QC tri-review 3/3 Approve after fix-wave-1 (outline PUT DB-first atomicity, keyset pagination, 10MiB body cap, keydown cleanup); QA Pass; Greptile review 0 comments (clean). PR review (7 Greptile issues) all fixed + regression tests. Deferred V1.66: Tauri desktop shell, body full-text editor + per-chapter lock, open-with desktop integration, drag-reorder/bulk/reconcile, 6 V1.64 carry-forwards, DESIGN.md->Production. Open residuals: R-V165-QC1-W2 (medium, HTTP integration tests) + 3 low (status.json residual_findings[v1.65]). Profile B compaction done (7 plans archived). Local branches + worktrees cleaned post-merge."
     },
     {
       "updated_at": "2026-06-08T22:45:00+08:00",
-      "message": "V1.37 Novel Writing Foundation SHIPPED (2026-06-08) via PR #47 → main. 5 plans archived under Profile B (snapshot files at .mstar/archived/plans/<plan-id>.json + minimal entries in .mstar/archived/plans-done.json; status.json.plans[] empty). P0 foundation-first: gate_evaluator + AddScheduleRequest.input + scaffold atomicity + --force-gates audit + novel-writing gates §5.3.2 — full implementation with QC tri-review + QA Approval (6/6 ACs, 981 tests, all CI gates clean). P1/P2/P3 spec/roadmap-only: multi-chapter chronology (DF-62), World KB continuity (DF-63), quality-loop backplane (DF-64/65/66/67) — single QC each, all Approve. Closed residuals: R-V136P1-01, R-V136P1-02, R-V136P3-02. Opened residual: R-V137P0-01 (serde strict-mode for misplaced YAML keys, low). Latest active compass: V1.37 (Shipped); next iteration (V1.38) TBD. Tracker/compass/iterations README/shipped archive all updated."
+      "message": "V1.37 Novel Writing Foundation SHIPPED (2026-06-08) via PR #47 \u2192 main. 5 plans archived under Profile B (snapshot files at .mstar/archived/plans/<plan-id>.json + minimal entries in .mstar/archived/plans-done.json; status.json.plans[] empty). P0 foundation-first: gate_evaluator + AddScheduleRequest.input + scaffold atomicity + --force-gates audit + novel-writing gates \u00a75.3.2 \u2014 full implementation with QC tri-review + QA Approval (6/6 ACs, 981 tests, all CI gates clean). P1/P2/P3 spec/roadmap-only: multi-chapter chronology (DF-62), World KB continuity (DF-63), quality-loop backplane (DF-64/65/66/67) \u2014 single QC each, all Approve. Closed residuals: R-V136P1-01, R-V136P1-02, R-V136P3-02. Opened residual: R-V137P0-01 (serde strict-mode for misplaced YAML keys, low). Latest active compass: V1.37 (Shipped); next iteration (V1.38) TBD. Tracker/compass/iterations README/shipped archive all updated."
     },
     {
       "updated_at": "2026-04-05",
@@ -20,7 +24,7 @@
     },
     {
       "updated_at": "2026-04-06",
-      "message": "V1.0-phase1 Wave 0-1.5 complete: Architecture review, domain-models implementation (15 aggregates, 133 tests), QC三审, Critical fixes (C-1, C-2) verified."
+      "message": "V1.0-phase1 Wave 0-1.5 complete: Architecture review, domain-models implementation (15 aggregates, 133 tests), QC\u4e09\u5ba1, Critical fixes (C-1, C-2) verified."
     },
     {
       "updated_at": "2026-04-06",
@@ -28,7 +32,7 @@
     },
     {
       "updated_at": "2026-04-06",
-      "message": "V1.0-phase1 Wave 2 architecture review complete. cli-daemon-foundation and sync-contract plans expanded. CLI-R1..R4, SYNC-R1..R3 upgraded from 'defer' to 'resolve'. Implementation order: cli-daemon → sync-contract → acp-client → context-assembly."
+      "message": "V1.0-phase1 Wave 2 architecture review complete. cli-daemon-foundation and sync-contract plans expanded. CLI-R1..R4, SYNC-R1..R3 upgraded from 'defer' to 'resolve'. Implementation order: cli-daemon \u2192 sync-contract \u2192 acp-client \u2192 context-assembly."
     },
     {
       "updated_at": "2026-04-06",
@@ -40,7 +44,7 @@
     },
     {
       "updated_at": "2026-04-06",
-      "message": "ACP Client Integration merged to main. 29 files changed, 6,638 insertions, 6 commits + merge. QC三审 APPROVE (ACP-C1/C2/H1 fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals tracked for V1.1. Context Assembly plan unblocked."
+      "message": "ACP Client Integration merged to main. 29 files changed, 6,638 insertions, 6 commits + merge. QC\u4e09\u5ba1 APPROVE (ACP-C1/C2/H1 fixed). QA CONDITIONAL PASS. 312+ tests passing. 19 residuals tracked for V1.1. Context Assembly plan unblocked."
     },
     {
       "updated_at": "2026-04-06",
@@ -48,19 +52,19 @@
     },
     {
       "updated_at": "2026-04-07",
-      "message": "Cleaned up 7 stale residuals resolved by Plan A: CLI-R9..R14 (6 HIGH) closed, DEBT-X4 closed. CLI-R15 updated as partially resolved. Archived to archived/residuals/. Total open: 49 → 42."
+      "message": "Cleaned up 7 stale residuals resolved by Plan A: CLI-R9..R14 (6 HIGH) closed, DEBT-X4 closed. CLI-R15 updated as partially resolved. Archived to archived/residuals/. Total open: 49 \u2192 42."
     },
     {
       "updated_at": "2026-04-08",
-      "message": "V1.1 tech debt mitigation plan created (2026-04-08-v1.1-tech-debt-mitigation.md) based on architecture gap analysis. 3-wave approach: Wave 1 (P0 — DM-R5 + 3 schemas), Wave 2 (P1 — ACP/Research/Manuscript/Context), Wave 3 (P2 — DEBT-X/SYNC-R/FH-R). Total: 27 residuals + 3 missing features. nexus-platform V1.0-phase2 confirmed complete."
+      "message": "V1.1 tech debt mitigation plan created (2026-04-08-v1.1-tech-debt-mitigation.md) based on architecture gap analysis. 3-wave approach: Wave 1 (P0 \u2014 DM-R5 + 3 schemas), Wave 2 (P1 \u2014 ACP/Research/Manuscript/Context), Wave 3 (P2 \u2014 DEBT-X/SYNC-R/FH-R). Total: 27 residuals + 3 missing features. nexus-platform V1.0-phase2 confirmed complete."
     },
     {
       "updated_at": "2026-04-08",
-      "message": "DM-R5 resolved: MembershipRole enum aligned with v1-spec §5.4, §7 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. Total open residuals: 42 → 41."
+      "message": "DM-R5 resolved: MembershipRole enum aligned with v1-spec \u00a75.4, \u00a77 (Owner/Maintainer/Collaborator/OfficialCreator). Permission methods updated. Contracts regenerated. Total open residuals: 42 \u2192 41."
     },
     {
       "updated_at": "2026-04-08",
-      "message": "V1.1 Wave 1 complete: DM-R5 resolved (MembershipRole aligned), 3 schemas created (delta/workspace-binding/agent-profile), W1-C1 fixed (AgentProfile enums), QC三审 APPROVE. 7 commits, 662 tests passing, 25 schemas valid. Ready for merge."
+      "message": "V1.1 Wave 1 complete: DM-R5 resolved (MembershipRole aligned), 3 schemas created (delta/workspace-binding/agent-profile), W1-C1 fixed (AgentProfile enums), QC\u4e09\u5ba1 APPROVE. 7 commits, 662 tests passing, 25 schemas valid. Ready for merge."
     },
     {
       "updated_at": "2026-04-08",
@@ -68,7 +72,7 @@
     },
     {
       "updated_at": "2026-04-08T12:00:00Z",
-      "message": "CTX-R6 resolved: MemoryKind enum expanded from 4 to 8 variants matching schema (ADR-001). Added strum::Display, FromStr implementation. CLI commands updated to use enum. Total open residuals: 41 → 40."
+      "message": "CTX-R6 resolved: MemoryKind enum expanded from 4 to 8 variants matching schema (ADR-001). Added strum::Display, FromStr implementation. CLI commands updated to use enum. Total open residuals: 41 \u2192 40."
     },
     {
       "updated_at": "2026-04-08",
@@ -76,23 +80,23 @@
     },
     {
       "updated_at": "2026-04-08",
-      "message": "Wave 2 Batch 1 merged to main: QC三审 APPROVE (consolidated: 0 Critical, 5 Warnings, 10 Suggestions). 10 commits, 23 files (3086 insertions). Residuals: ACP-R7 resolved, CTX-R2/R4/R5/R6/R7 resolved. Ready for Batch 2 in new session."
+      "message": "Wave 2 Batch 1 merged to main: QC\u4e09\u5ba1 APPROVE (consolidated: 0 Critical, 5 Warnings, 10 Suggestions). 10 commits, 23 files (3086 insertions). Residuals: ACP-R7 resolved, CTX-R2/R4/R5/R6/R7 resolved. Ready for Batch 2 in new session."
     },
     {
       "updated_at": "2026-04-08T21:00:00Z",
-      "message": "Wave 2 Batch 2 (Tasks 8-10) complete: CLI-R6 (manuscript strict mode), CLI-R7 (content verify), CLI-R8 (research extraction) resolved. 1 commit, 7 files (819 insertions), 232 tests passing. Total open residuals: 40 → 37."
+      "message": "Wave 2 Batch 2 (Tasks 8-10) complete: CLI-R6 (manuscript strict mode), CLI-R7 (content verify), CLI-R8 (research extraction) resolved. 1 commit, 7 files (819 insertions), 232 tests passing. Total open residuals: 40 \u2192 37."
     },
     {
       "updated_at": "2026-04-08T22:30:00Z",
-      "message": "Wave 2 Batch 2 extended (Tasks 16-18): SYNC-R6 (precheck auth match validation), SYNC-R11 (honor retry_after from conflict), SYNC-R12 (persist partial apply retry state) resolved. 1 commit, 6 files (837 insertions), 94 nexus-sync tests passing. Total open residuals: 37 → 34."
+      "message": "Wave 2 Batch 2 extended (Tasks 16-18): SYNC-R6 (precheck auth match validation), SYNC-R11 (honor retry_after from conflict), SYNC-R12 (persist partial apply retry state) resolved. 1 commit, 6 files (837 insertions), 94 nexus-sync tests passing. Total open residuals: 37 \u2192 34."
     },
     {
       "updated_at": "2026-04-08",
-      "message": "Wave 2 Batch 2 merged to main: QC三审 APPROVE (unanimous: 0 Critical, 6 Warnings). 4 commits, 14 files (1710 insertions). Residuals: CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. Wave 2 complete (14/14 tasks). Ready for Wave 3."
+      "message": "Wave 2 Batch 2 merged to main: QC\u4e09\u5ba1 APPROVE (unanimous: 0 Critical, 6 Warnings). 4 commits, 14 files (1710 insertions). Residuals: CLI-R6/R7/R8/SYNC-R6/R11/R12 resolved. Wave 2 complete (14/14 tasks). Ready for Wave 3."
     },
     {
       "updated_at": "2026-04-09",
-      "message": "Wave 3 Batch A merged to main: QC三审 APPROVE (0 Critical, 8 Warnings). 8 QC Warnings (W-1 through W-8) tracked as residuals for V1.1+. Total open residuals: 29 → 37. Progress: 90% (23/26 tasks complete). Ready for Batch B."
+      "message": "Wave 3 Batch A merged to main: QC\u4e09\u5ba1 APPROVE (0 Critical, 8 Warnings). 8 QC Warnings (W-1 through W-8) tracked as residuals for V1.1+. Total open residuals: 29 \u2192 37. Progress: 90% (23/26 tasks complete). Ready for Batch B."
     },
     {
       "updated_at": "2026-04-09",
@@ -100,7 +104,7 @@
     },
     {
       "updated_at": "2026-04-09",
-      "message": "Wave 3 Batch B QC三审 APPROVE (unanimous: 0 Critical, 3 Warnings, 6 Suggestions). All 26 tasks complete. FH-R1/R3/R6 resolved. 11 QC Warnings (W1-W11) tracked for V1.1+. Ready for merge to main. V1.1 GA ready."
+      "message": "Wave 3 Batch B QC\u4e09\u5ba1 APPROVE (unanimous: 0 Critical, 3 Warnings, 6 Suggestions). All 26 tasks complete. FH-R1/R3/R6 resolved. 11 QC Warnings (W1-W11) tracked for V1.1+. Ready for merge to main. V1.1 GA ready."
     },
     {
       "updated_at": "2026-04-09",
@@ -116,23 +120,23 @@
     },
     {
       "updated_at": "2026-04-09T00:00:00Z",
-      "message": "Major status.json cleanup per plan-convention.md: (1) Archived 15 closed residuals to archived/residuals/*.json (DM-R5, CLI-R6/R7/R8, SYNC-R4/R5/R6/R11/R12, ACP-R7, CTX-R6/R7, FH-R1/R3/R6). (2) Migrated metadata.notes to notes.json to reduce status.json size. (3) Updated tech_debt_summary to reflect 31 open residuals. All changes follow §248-286 (archival) and §105 (notes.json) of plan-convention.md."
+      "message": "Major status.json cleanup per plan-convention.md: (1) Archived 15 closed residuals to archived/residuals/*.json (DM-R5, CLI-R6/R7/R8, SYNC-R4/R5/R6/R11/R12, ACP-R7, CTX-R6/R7, FH-R1/R3/R6). (2) Migrated metadata.notes to notes.json to reduce status.json size. (3) Updated tech_debt_summary to reflect 31 open residuals. All changes follow \u00a7248-286 (archival) and \u00a7105 (notes.json) of plan-convention.md."
     },
     {
       "updated_at": "2026-04-09T11:30:00Z",
-      "message": "Compressed 15 Done plans per plan-convention.md §390-400: Removed redundant metadata fields (qc_status, tests, commits, etc.) and added archived_record pointers to archived/plans/*.json snapshots. Status.json reduced from 40.7KB to 26.4KB (-35%). Plans with open residuals retained residual_summary field."
+      "message": "Compressed 15 Done plans per plan-convention.md \u00a7390-400: Removed redundant metadata fields (qc_status, tests, commits, etc.) and added archived_record pointers to archived/plans/*.json snapshots. Status.json reduced from 40.7KB to 26.4KB (-35%). Plans with open residuals retained residual_summary field."
     },
     {
       "updated_at": "2026-04-09T12:00:00Z",
-      "message": "Ultra-compressed 15 Done plans per plan-convention.md §430-436: Reduced from 13 fields to 6 fields (id, status, file, metadata, title, done_at). Removed redundant fields (owner, agents, progress, tags, created_at, updated_at, notes) now available in archived/plans/*.json snapshots. status.json size: 26.4KB → 20.0KB (-24.5%)."
+      "message": "Ultra-compressed 15 Done plans per plan-convention.md \u00a7430-436: Reduced from 13 fields to 6 fields (id, status, file, metadata, title, done_at). Removed redundant fields (owner, agents, progress, tags, created_at, updated_at, notes) now available in archived/plans/*.json snapshots. status.json size: 26.4KB \u2192 20.0KB (-24.5%)."
     },
     {
       "updated_at": "2026-04-10",
-      "message": "v1-tech-debt-cleanup Batch D closed (TD-7 resolve; TD-8/10 waive + knowledge; TD-9 minimal GET /v1/local/daemon/status). Milestone snapshot later kept as archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json; Batch D residuals archived/residuals/v1-tech-debt-cleanup-batch-d.json; qc_self reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md. (Plan later restored InProgress 2026-04-11 — see next entry.)"
+      "message": "v1-tech-debt-cleanup Batch D closed (TD-7 resolve; TD-8/10 waive + knowledge; TD-9 minimal GET /v1/local/daemon/status). Milestone snapshot later kept as archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json; Batch D residuals archived/residuals/v1-tech-debt-cleanup-batch-d.json; qc_self reports/v1-tech-debt-cleanup/v1-tech-debt-cleanup-qc-self-20260410-batch-d.md. (Plan later restored InProgress 2026-04-11 \u2014 see next entry.)"
     },
     {
       "updated_at": "2026-04-11",
-      "message": "v1-tech-debt-cleanup restored to InProgress: long-term V1.x maintenance plan — Batch D is a completed milestone only; Batch E (V1.2) and follow-ons stay under this plan id. Milestone snapshot renamed to archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json (removed archived_record from live row)."
+      "message": "v1-tech-debt-cleanup restored to InProgress: long-term V1.x maintenance plan \u2014 Batch D is a completed milestone only; Batch E (V1.2) and follow-ons stay under this plan id. Milestone snapshot renamed to archived/plans/v1-tech-debt-cleanup-milestone-cd-2026-04-10.json (removed archived_record from live row)."
     },
     {
       "updated_at": "2026-04-11",
@@ -140,7 +144,7 @@
     },
     {
       "updated_at": "2026-04-11",
-      "message": "Plan 2026-04-11-codegen-ref-resolution Done: codegen resolves common $ref string-pattern defs and whole-schema refs; Rust/TS generated types for publish/fork/sync-pull/explore-feed; closed PUBLISH-CODEGEN-01 and FORK-SNAP-01 → archived/residuals/2026-04-10-cli-publish-workflow-parity.json and archived/residuals/2026-04-10-cli-fork-world-snapshot-parity.json; tech_debt_summary open count 0; qc_self reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md."
+      "message": "Plan 2026-04-11-codegen-ref-resolution Done: codegen resolves common $ref string-pattern defs and whole-schema refs; Rust/TS generated types for publish/fork/sync-pull/explore-feed; closed PUBLISH-CODEGEN-01 and FORK-SNAP-01 \u2192 archived/residuals/2026-04-10-cli-publish-workflow-parity.json and archived/residuals/2026-04-10-cli-fork-world-snapshot-parity.json; tech_debt_summary open count 0; qc_self reports/2026-04-11-codegen-ref-resolution/2026-04-11-codegen-ref-resolution-qc-self-20260411.md."
     },
     {
       "updated_at": "2026-04-10",
@@ -164,31 +168,31 @@
     },
     {
       "updated_at": "2026-04-17",
-      "message": "V1.4 compass scope extended: (a) schemas/ boundary refactor tightened to 'platform HTTP observability only' — local types move to crates/nexus-contracts/src/local/ (schemas-boundary.md); (b) B-track folded in as WS7 — Creator Schedule + immutable versioned core_context (creator-schedule-and-core-context.md) with V1.5 LlmSummarize forward-compat; (c) §10 SSOT allocation matrix formalised."
+      "message": "V1.4 compass scope extended: (a) schemas/ boundary refactor tightened to 'platform HTTP observability only' \u2014 local types move to crates/nexus-contracts/src/local/ (schemas-boundary.md); (b) B-track folded in as WS7 \u2014 Creator Schedule + immutable versioned core_context (creator-schedule-and-core-context.md) with V1.5 LlmSummarize forward-compat; (c) \u00a710 SSOT allocation matrix formalised."
     },
     {
       "updated_at": "2026-04-17",
-      "message": "V1.4 plans registered: 7 plan rows (WS1-WS7) replacing the single legacy V1.3 E2E backlog Todo. The prior 2026-04-17-v1.3-creator-register-e2e-tests row is superseded by 2026-04-17-v1.4-ws6-creator-register-e2e-tests (same work, promoted into V1.4 scope). Each plan file committed at .mstar/plans/2026-04-17-v1.4-wsN-*.md; plan-convention.md metadata fields populated (wave_0_spec, spec_refs, dependency/parallelism, effort_agent_oriented). Execution ordering: WS1 -> {WS2 || WS4 || WS5 || WS6} -> WS3 -> WS7; M1 through M4 + M3b per compass §5."
+      "message": "V1.4 plans registered: 7 plan rows (WS1-WS7) replacing the single legacy V1.3 E2E backlog Todo. The prior 2026-04-17-v1.3-creator-register-e2e-tests row is superseded by 2026-04-17-v1.4-ws6-creator-register-e2e-tests (same work, promoted into V1.4 scope). Each plan file committed at .mstar/plans/2026-04-17-v1.4-wsN-*.md; plan-convention.md metadata fields populated (wave_0_spec, spec_refs, dependency/parallelism, effort_agent_oriented). Execution ordering: WS1 -> {WS2 || WS4 || WS5 || WS6} -> WS3 -> WS7; M1 through M4 + M3b per compass \u00a75."
     },
     {
       "updated_at": "2026-04-18",
-      "message": "V1.4 COMPLETE: All 8 workstreams done (WS1-WS7 + sqlx compile-time macro migration added mid-stream). 141+ commits, 302+ files, PR #7. sqlx migration: ~79 runtime queries → compile-time macros across 5 crates, 97 .sqlx/ metadata files, CI verify-sqlx-offline green. AGENTS.md updated with DATABASE_URL convention and .sqlx/ commit/ignore rules. 19 open residual findings (13 medium, 4 low, 2 nit) tracked across 5 plans — all deferred to V1.5+."
+      "message": "V1.4 COMPLETE: All 8 workstreams done (WS1-WS7 + sqlx compile-time macro migration added mid-stream). 141+ commits, 302+ files, PR #7. sqlx migration: ~79 runtime queries \u2192 compile-time macros across 5 crates, 97 .sqlx/ metadata files, CI verify-sqlx-offline green. AGENTS.md updated with DATABASE_URL convention and .sqlx/ commit/ignore rules. 19 open residual findings (13 medium, 4 low, 2 nit) tracked across 5 plans \u2014 all deferred to V1.5+."
     },
     {
       "updated_at": "2026-04-19",
-      "message": "V1.5 COMPLETE: All 5 workstreams done (WS-A Schedule FSM hardening, WS-B Orch+DB residual cleanup, WS-C context.summarize capability, WS-D cron/wall-clock triggers, WS-E platform coordination). 25 commits, 47 files, +2848/-492 lines. PR #8. 19 V1.4 residuals resolved and archived. QC三审 consolidated: Approve with residuals (0 Critical, 7 open: 2 medium→V1.6, 4 low→V1.6/V1.7/V2.0, 1 nit→V1.7). Plans archived, status.json cleaned, compass marked Superseded."
+      "message": "V1.5 COMPLETE: All 5 workstreams done (WS-A Schedule FSM hardening, WS-B Orch+DB residual cleanup, WS-C context.summarize capability, WS-D cron/wall-clock triggers, WS-E platform coordination). 25 commits, 47 files, +2848/-492 lines. PR #8. 19 V1.4 residuals resolved and archived. QC\u4e09\u5ba1 consolidated: Approve with residuals (0 Critical, 7 open: 2 medium\u2192V1.6, 4 low\u2192V1.6/V1.7/V2.0, 1 nit\u2192V1.7). Plans archived, status.json cleaned, compass marked Superseded."
     },
     {
       "updated_at": "2026-04-20",
-      "message": "V1.6 delivery compass created (iterations/v1.6-delivery-compass-v1.md). 4 tracks: Track A (residual governance R1/R2/R3/R6), Track B (ACP SDK DTO decoupling — 16 hand-written DTOs + subscribe extraction), Track C (permission CLI — add/revoke/list/reset), Track D (multi-preset scheduler). Architect + PM dual review integrated. 8 risks registered. DEBT-RAND-073 moved from V1.6 to backlog (accept). Branch: feature/v1.6."
+      "message": "V1.6 delivery compass created (iterations/v1.6-delivery-compass-v1.md). 4 tracks: Track A (residual governance R1/R2/R3/R6), Track B (ACP SDK DTO decoupling \u2014 16 hand-written DTOs + subscribe extraction), Track C (permission CLI \u2014 add/revoke/list/reset), Track D (multi-preset scheduler). Architect + PM dual review integrated. 8 risks registered. DEBT-RAND-073 moved from V1.6 to backlog (accept). Branch: feature/v1.6."
     },
     {
       "updated_at": "2026-04-21",
-      "message": "V1.7 delivery compass drafted (iterations/v1.7-delivery-compass-v1.md) + deferred-features-cross-version-tracker.md committed. 6 workstreams: WS-A/B/C (close 8 residuals — DTO-C1/C2/W1, PERM-W1/W2/W3, R4, R7), WS-D (ACP SDK v0.11.0+ migration), WS-E (multi-agent worker — XL, OQ-7), WS-F (capability schema registry sharing — M). Branch: feature/v1.7. Draft — pending user confirmation."
+      "message": "V1.7 delivery compass drafted (iterations/v1.7-delivery-compass-v1.md) + deferred-features-cross-version-tracker.md committed. 6 workstreams: WS-A/B/C (close 8 residuals \u2014 DTO-C1/C2/W1, PERM-W1/W2/W3, R4, R7), WS-D (ACP SDK v0.11.0+ migration), WS-E (multi-agent worker \u2014 XL, OQ-7), WS-F (capability schema registry sharing \u2014 M). Branch: feature/v1.7. Draft \u2014 pending user confirmation."
     },
     {
       "updated_at": "2026-05-26",
-      "message": "V1.29 COMPLETE: Author Intelligence & Agent Hardening. 6 plans Done (FL-A1 session review, FL-A2 SOUL Experience, FL-A3 Stage0 delimiters, FL-B KB extract queue, Agent Host Batch 2, spec hygiene). 23 commits, 58 files, +3368/-305 lines. QC tri-review Approve, QA Pass with residuals (R14–R20 deferred to V1.30). FL-A/FL-B shipped; DF-21–23/27–28 closed; DF-35/36 partial; R11/R12/R13 closed. Integration branch merged to main. AGENTS.md merge discipline rule added (PR-only)."
+      "message": "V1.29 COMPLETE: Author Intelligence & Agent Hardening. 6 plans Done (FL-A1 session review, FL-A2 SOUL Experience, FL-A3 Stage0 delimiters, FL-B KB extract queue, Agent Host Batch 2, spec hygiene). 23 commits, 58 files, +3368/-305 lines. QC tri-review Approve, QA Pass with residuals (R14\u2013R20 deferred to V1.30). FL-A/FL-B shipped; DF-21\u201323/27\u201328 closed; DF-35/36 partial; R11/R12/R13 closed. Integration branch merged to main. AGENTS.md merge discipline rule added (PR-only)."
     },
     {
       "at": "2026-06-07",
@@ -202,52 +206,52 @@
     },
     {
       "at": "2026-06-17T12:00:00Z",
-      "message": "V1.49 SHIPPED (2026-06-17) via PR #62 → main at d160379ff5a6. 6 plans Done (P-1 + P0-P3 + P-last); 19 carry-forward to V1.50. 3 Draft overlays folded into Masters (findings-lifecycle.md, narrative-indexes.md, author-experience §8). Wire contracts unchanged (compass §0.1 #8). Profile B compaction done (5 plans archived). Integration branch iteration/v1.49 retired.",
+      "message": "V1.49 SHIPPED (2026-06-17) via PR #62 \u2192 main at d160379ff5a6. 6 plans Done (P-1 + P0-P3 + P-last); 19 carry-forward to V1.50. 3 Draft overlays folded into Masters (findings-lifecycle.md, narrative-indexes.md, author-experience \u00a78). Wire contracts unchanged (compass \u00a70.1 #8). Profile B compaction done (5 plans archived). Integration branch iteration/v1.49 retired.",
       "plan_id": "2026-06-17-v1.49-hygiene-and-closeout"
     },
     {
       "at": "2026-06-17T18:26:46Z",
-      "message": "V1.50 SHIPPED (2026-06-17) via PR #63 → main at 4db0a37b3e6a01836d8d90f968c75bcdd89754fc. 9 plans Done (P-1 + 4 cron/chronology + 3 KB + P-last); 16 residuals closed (6 V1.49 carry-forwards + 10 V1.50 WL-A); 8 carry-forward to V1.51+. 2 Draft overlays promoted (cron-staggering + auto-chronology) into workflow-profile.md §11 + entity-scope-model.md §5.5 Draft → Normative. Wire contracts unchanged. 8 DB migrations landed. Profile B compaction done (8 plans archived). Integration branch iteration/v1.50 retired.",
+      "message": "V1.50 SHIPPED (2026-06-17) via PR #63 \u2192 main at 4db0a37b3e6a01836d8d90f968c75bcdd89754fc. 9 plans Done (P-1 + 4 cron/chronology + 3 KB + P-last); 16 residuals closed (6 V1.49 carry-forwards + 10 V1.50 WL-A); 8 carry-forward to V1.51+. 2 Draft overlays promoted (cron-staggering + auto-chronology) into workflow-profile.md \u00a711 + entity-scope-model.md \u00a75.5 Draft \u2192 Normative. Wire contracts unchanged. 8 DB migrations landed. Profile B compaction done (8 plans archived). Integration branch iteration/v1.50 retired.",
       "plan_id": "2026-06-18-v1.50-hygiene-and-closeout"
     },
     {
       "at": "2026-06-19T07:52:26Z",
-      "message": "V1.51 SHIPPED (2026-06-19) via PR #64 → main at c57b927bbf8621adf7ec59095d274f17f429c9b7. 7 plans Done (P-1 + T-A P0-P2 + T-B P0-P1 + P-last); 8 residuals closed (4 V1.50 carry-forwards + 4 V1.51 WL-A); 6 deferred to V1.52+. 6 spec overlays promoted Draft → Normative (concurrency.md, llm-extract.md, quality-loop §12, entity-scope §5.5.2, cli-spec §6.2G, world-kb-runtime-architecture). Wire contracts unchanged (compass §0.1 #8). Profile B compaction done (7 plans archived). Post-merge CI fix: 4-leg rust-tests job matrix (commit 477aafbe, +32/-4 in .github/workflows/ci.yml only) to fit ephemeral runner disk budget. Integration branch iteration/v1.51 retired.",
+      "message": "V1.51 SHIPPED (2026-06-19) via PR #64 \u2192 main at c57b927bbf8621adf7ec59095d274f17f429c9b7. 7 plans Done (P-1 + T-A P0-P2 + T-B P0-P1 + P-last); 8 residuals closed (4 V1.50 carry-forwards + 4 V1.51 WL-A); 6 deferred to V1.52+. 6 spec overlays promoted Draft \u2192 Normative (concurrency.md, llm-extract.md, quality-loop \u00a712, entity-scope \u00a75.5.2, cli-spec \u00a76.2G, world-kb-runtime-architecture). Wire contracts unchanged (compass \u00a70.1 #8). Profile B compaction done (7 plans archived). Post-merge CI fix: 4-leg rust-tests job matrix (commit 477aafbe, +32/-4 in .github/workflows/ci.yml only) to fit ephemeral runner disk budget. Integration branch iteration/v1.51 retired.",
       "plan_id": "2026-06-18-v1.51-hygiene-and-closeout"
     },
     {
       "at": "2026-06-19T08:30:00Z",
-      "message": "harness hygiene: status.json metadata simplified (dropped 5 redundant fields, slimmed latest_ship 16→13 + tech_debt_summary 8→6); v1_49/v1_50/v1_51 root-level iteration_complete + status fields removed and migrated to .mstar/notes.json (structured data already in .mstar/archived/plans-done.json iteration_summaries). AGENTS.md branch_naming rule corrected: integration is iteration/{ver} (was feature/<ver>-<iteration-slug>); hotfix rule added (fix/{short-name} per V1.42.1 pattern).",
+      "message": "harness hygiene: status.json metadata simplified (dropped 5 redundant fields, slimmed latest_ship 16\u219213 + tech_debt_summary 8\u21926); v1_49/v1_50/v1_51 root-level iteration_complete + status fields removed and migrated to .mstar/notes.json (structured data already in .mstar/archived/plans-done.json iteration_summaries). AGENTS.md branch_naming rule corrected: integration is iteration/{ver} (was feature/<ver>-<iteration-slug>); hotfix rule added (fix/{short-name} per V1.42.1 pattern).",
       "plan_id": "2026-06-19-harness-status-json-simplify"
     },
     {
       "at": "2026-06-23T15:30:00Z",
-      "message": "V1.62 Prepare complete (P-1 Done). Compass: .mstar/iterations/v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1.md (289 lines). PM-locked via grill-me (6 decisions): Q1 theme=compute course-correction + schemas reorg; Q2 dynamics→manifest.json (PRIMARY) + boundary→schemas reorg; Q3 expand schemas/ to Local API surface (future WebApp); Q4 consumer-scope tree (common + domain + platform/{http-bff,sync} + local-api/compute); Q5 2 NEW Master specs (compute-module-abi + wasm-host) + 4 amendments; Q6 manifest.json gains inline JSON-Schema fragments in 'schemas' block (4 optional). XL iteration: 6 plans, 3 waves. Markdown authored by @writing-specialist; PM resolved 1 open question (bundle collision → bundle-refinement.schema.json) + 3 revisions. status.json preamble: integration_branch locked iteration/v1.62; latest_active_iteration V1.62; 6 plans registered (P-1 Done; P0/P1/P2/P-mid/P-last Todo). Predecessor V1.61 shipped via PR #83 @ 140f2594. Branch: iteration/v1.62 (from main HEAD 4db51a90); feature/v1.62-prepare merged + deleted.",
+      "message": "V1.62 Prepare complete (P-1 Done). Compass: .mstar/iterations/v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1.md (289 lines). PM-locked via grill-me (6 decisions): Q1 theme=compute course-correction + schemas reorg; Q2 dynamics\u2192manifest.json (PRIMARY) + boundary\u2192schemas reorg; Q3 expand schemas/ to Local API surface (future WebApp); Q4 consumer-scope tree (common + domain + platform/{http-bff,sync} + local-api/compute); Q5 2 NEW Master specs (compute-module-abi + wasm-host) + 4 amendments; Q6 manifest.json gains inline JSON-Schema fragments in 'schemas' block (4 optional). XL iteration: 6 plans, 3 waves. Markdown authored by @writing-specialist; PM resolved 1 open question (bundle collision \u2192 bundle-refinement.schema.json) + 3 revisions. status.json preamble: integration_branch locked iteration/v1.62; latest_active_iteration V1.62; 6 plans registered (P-1 Done; P0/P1/P2/P-mid/P-last Todo). Predecessor V1.61 shipped via PR #83 @ 140f2594. Branch: iteration/v1.62 (from main HEAD 4db51a90); feature/v1.62-prepare merged + deleted.",
       "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
     },
     {
       "at": "2026-06-23T15:45:00Z",
-      "message": "harness hygiene: status.json metadata de-cruft. Removed 5 fields that violated the 2026-04-14 policy ('avoid metadata.*_note fields in .mstar/status.json — keep status.json focused on machine-readable structured fields; write timeline/context notes in notes.json'): tech_debt_summary.v1_60_ship_note (narrative), v1_57_carry_forward_index (V1.56/V1.57 closed-residual narrative — actual residual state preserved in residual_findings + archived/residuals/), v1_58_carry_forward_index (V1.58 closed-residual narrative — same), v1_60_plan_registration_note (V1.60 prepare narrative — superseded by archived/plans/<id>.json snapshots), v1_62_plan_registration_note (V1.62 prepare narrative I introduced in the previous commit — direct policy violation caught by user). All V1.62 plan-registration facts remain machine-readable in plans[] (6 rows with status/owner/wave/dependency fields). Carry-forward plan narratives are not needed once the residuals themselves carry lifecycle state in residual_findings. No data lost: residual rows in residual_findings + per-plan snapshots in archived/plans/ remain the SSOT.",
+      "message": "harness hygiene: status.json metadata de-cruft. Removed 5 fields that violated the 2026-04-14 policy ('avoid metadata.*_note fields in .mstar/status.json \u2014 keep status.json focused on machine-readable structured fields; write timeline/context notes in notes.json'): tech_debt_summary.v1_60_ship_note (narrative), v1_57_carry_forward_index (V1.56/V1.57 closed-residual narrative \u2014 actual residual state preserved in residual_findings + archived/residuals/), v1_58_carry_forward_index (V1.58 closed-residual narrative \u2014 same), v1_60_plan_registration_note (V1.60 prepare narrative \u2014 superseded by archived/plans/<id>.json snapshots), v1_62_plan_registration_note (V1.62 prepare narrative I introduced in the previous commit \u2014 direct policy violation caught by user). All V1.62 plan-registration facts remain machine-readable in plans[] (6 rows with status/owner/wave/dependency fields). Carry-forward plan narratives are not needed once the residuals themselves carry lifecycle state in residual_findings. No data lost: residual rows in residual_findings + per-plan snapshots in archived/plans/ remain the SSOT.",
       "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
     },
     {
       "at": "2026-06-23T15:55:00Z",
-      "message": "AGENTS.md rule promotion: promoted the 2026-04-14 'status.json field discipline' policy from this write-mostly log into .mstar/AGENTS.md as a first-class subsection under 'Project-Specific Deviations'. Rule was originally recorded only as a notes.json entry, which agents (including PM) don't reliably read at session start — that's why v1_62_plan_registration_note slipped through in the previous prepare commit. The new AGENTS.md subsection makes the rule load-bearing: lists allowed structured fields, forbids the *_note / *_index narrative anti-patterns by name, gives a one-line test ('if the value is a sentence/paragraph → notes.json'), and explains audit-trail preservation when removing violations.",
+      "message": "AGENTS.md rule promotion: promoted the 2026-04-14 'status.json field discipline' policy from this write-mostly log into .mstar/AGENTS.md as a first-class subsection under 'Project-Specific Deviations'. Rule was originally recorded only as a notes.json entry, which agents (including PM) don't reliably read at session start \u2014 that's why v1_62_plan_registration_note slipped through in the previous prepare commit. The new AGENTS.md subsection makes the rule load-bearing: lists allowed structured fields, forbids the *_note / *_index narrative anti-patterns by name, gives a one-line test ('if the value is a sentence/paragraph \u2192 notes.json'), and explains audit-trail preservation when removing violations.",
       "plan_id": "2026-06-23-v1.62-compass-and-plan-stubs"
     },
     {
       "at": "2026-06-23T17:00:00Z",
-      "message": "V1.62 P0 implement complete → InReview. @fullstack-dev delivered 3 commits on feature/v1.62-schemas-reorganization (f8f22d0a..126f041d; 203 files; base 3cefb6d9). All gates PASS: pnpm validate-schemas (56/56), pnpm codegen, check-wire-drift, schema_drift_detection (52 schemas registered), cargo check --workspace, cargo +nightly fmt --all --check, TS typecheck. Pre-existing clippy -p nexus-contracts 8 errors verified against base (R-V161P0-LOW-001 → P-last T5; not P0-attributable). Codegen restructure decision: user chose NESTED module layout (generated::{common,domain,platform/{http_bff,sync},local_api/compute}/) with flat root re-exports for backwards compat. Implementer's 2 flagged findings both NOT registered as new residuals: R-V162P0-LOW-001 == R-V161P0-LOW-001 (duplicate); R-V162P0-INFO-001 (compass prose said 33 platform files / 55 total; actual 34 / 56) — purely doc drift already corrected in schemas-directory-layout.md §7. Tree: 56 schemas across common(3) + domain(10) + platform/http-bff(34) + platform/sync(7) + local-api/compute(2). QC tri-review dispatching next.",
+      "message": "V1.62 P0 implement complete \u2192 InReview. @fullstack-dev delivered 3 commits on feature/v1.62-schemas-reorganization (f8f22d0a..126f041d; 203 files; base 3cefb6d9). All gates PASS: pnpm validate-schemas (56/56), pnpm codegen, check-wire-drift, schema_drift_detection (52 schemas registered), cargo check --workspace, cargo +nightly fmt --all --check, TS typecheck. Pre-existing clippy -p nexus-contracts 8 errors verified against base (R-V161P0-LOW-001 \u2192 P-last T5; not P0-attributable). Codegen restructure decision: user chose NESTED module layout (generated::{common,domain,platform/{http_bff,sync},local_api/compute}/) with flat root re-exports for backwards compat. Implementer's 2 flagged findings both NOT registered as new residuals: R-V162P0-LOW-001 == R-V161P0-LOW-001 (duplicate); R-V162P0-INFO-001 (compass prose said 33 platform files / 55 total; actual 34 / 56) \u2014 purely doc drift already corrected in schemas-directory-layout.md \u00a77. Tree: 56 schemas across common(3) + domain(10) + platform/http-bff(34) + platform/sync(7) + local-api/compute(2). QC tri-review dispatching next.",
       "plan_id": "2026-06-23-v1.62-schemas-reorganization-and-envelope-move"
     },
     {
       "at": "2026-06-23T18:00:00Z",
-      "message": "V1.62 P0 Done. QC tri-review: qc1 Approve (after PM fix-wave 502809c3 addressing 3 doc-drift Warnings + revalidation 7834e29a), qc2 Approve (0C/0W/1S), qc3 Informational/Approve. mid-QA PASS (4375/4375 cargo test --all; nexus-wasm-host 23 tests; compute_e2e 3/3 tests; codegen idempotent; drift detection 4/4; clippy --all -D warnings clean; nightly fmt clean; TS typecheck clean). Merged to iteration/v1.62 @ c74ebfbf (no-ff). Wave 2 (P1 ∥ P2) dispatch-ready. PM whitelist used for fix-wave (doc-only edits in nexus-kb src comments + nexus-wasm-host AGENTS.md + canonical-hash.md).",
+      "message": "V1.62 P0 Done. QC tri-review: qc1 Approve (after PM fix-wave 502809c3 addressing 3 doc-drift Warnings + revalidation 7834e29a), qc2 Approve (0C/0W/1S), qc3 Informational/Approve. mid-QA PASS (4375/4375 cargo test --all; nexus-wasm-host 23 tests; compute_e2e 3/3 tests; codegen idempotent; drift detection 4/4; clippy --all -D warnings clean; nightly fmt clean; TS typecheck clean). Merged to iteration/v1.62 @ c74ebfbf (no-ff). Wave 2 (P1 \u2225 P2) dispatch-ready. PM whitelist used for fix-wave (doc-only edits in nexus-kb src comments + nexus-wasm-host AGENTS.md + canonical-hash.md).",
       "plan_id": "2026-06-23-v1.62-schemas-reorganization-and-envelope-move"
     },
     {
       "at": "2026-06-24T02:00:00Z",
-      "message": "V1.62 SHIPPED to integration (pending PR to main). All 6 plans Done across 3 waves: P0 (schemas reorg, XL) → P1 ∥ P2 (manifest dynamics + spec extraction) → P-last (daemon verify + clippy fix + Profile B compaction). Highlights: (1) schemas/ reorganized along consumer-scope lines (common + domain + platform/{http-bff,sync} + local-api/compute) — establishes foundation for future WebApp Local API client per the strategic-boundary decision; (2) basic-combat/manifest.json now declares its full per-module character + invocation + battle_report shape via inline JSON-Schema fragments — the user-identified design fix from PR #83 review; (3) 2 NEW Master specs (compute-module-abi.md + wasm-host.md) convert V1.61 scattered knowledge into durable institutional specs; (4) hand-rolled JSON-Schema validator with MAX_VALIDATION_DEPTH=64 (qc3 W-001 mitigation); (5) Closes 5 V1.61 residuals (R-V161P0-INFO-001, R-V161P0-LOW-001, R-V161P0-LOW-004, R-V161P0-LOW-005, R-V161P1-LOW-001); 2 deferred (R-V161P3-ARCH-001 V1.63+, R-V161P3-CORR-001 V2 only). QC: 9 reports + 1 PM-pressed revalidation + 3 mid-QA PASS. Profile B compaction done (6 plans archived). Integration iteration/v1.62 retired post-merge-prep. PM whitelist used for: P0 qc1 fix-wave, P1 qc3 revalidation (host glitch recovery), P-last T5 clippy auto-fix. Codegen nested-modules pattern (user choice during P0 implement) preserved backwards-compat via flat root re-exports.",
+      "message": "V1.62 SHIPPED to integration (pending PR to main). All 6 plans Done across 3 waves: P0 (schemas reorg, XL) \u2192 P1 \u2225 P2 (manifest dynamics + spec extraction) \u2192 P-last (daemon verify + clippy fix + Profile B compaction). Highlights: (1) schemas/ reorganized along consumer-scope lines (common + domain + platform/{http-bff,sync} + local-api/compute) \u2014 establishes foundation for future WebApp Local API client per the strategic-boundary decision; (2) basic-combat/manifest.json now declares its full per-module character + invocation + battle_report shape via inline JSON-Schema fragments \u2014 the user-identified design fix from PR #83 review; (3) 2 NEW Master specs (compute-module-abi.md + wasm-host.md) convert V1.61 scattered knowledge into durable institutional specs; (4) hand-rolled JSON-Schema validator with MAX_VALIDATION_DEPTH=64 (qc3 W-001 mitigation); (5) Closes 5 V1.61 residuals (R-V161P0-INFO-001, R-V161P0-LOW-001, R-V161P0-LOW-004, R-V161P0-LOW-005, R-V161P1-LOW-001); 2 deferred (R-V161P3-ARCH-001 V1.63+, R-V161P3-CORR-001 V2 only). QC: 9 reports + 1 PM-pressed revalidation + 3 mid-QA PASS. Profile B compaction done (6 plans archived). Integration iteration/v1.62 retired post-merge-prep. PM whitelist used for: P0 qc1 fix-wave, P1 qc3 revalidation (host glitch recovery), P-last T5 clippy auto-fix. Codegen nested-modules pattern (user choice during P0 implement) preserved backwards-compat via flat root re-exports.",
       "plan_id": "2026-06-23-v1.62-daemon-verification-and-closeout"
     },
     {
