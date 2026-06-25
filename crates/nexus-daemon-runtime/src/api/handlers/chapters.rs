@@ -480,7 +480,11 @@ pub async fn list_chapters(
     let _work = load_work(&state, &creator_id, &work_id).await?;
 
     let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
-    let limit = u32::try_from(query.limit.unwrap_or(50).min(100)).unwrap_or(100);
+    // Clamp to [1, 100]: the JSON schema declares `minimum: 1`, but Axum's Query
+    // extractor (serde) does not enforce schema constraints, so `?limit=0` would
+    // otherwise reach `chapter_page_meta` and underflow `limit_us - 1`, panicking
+    // with a 500. Default 50 when absent.
+    let limit = u32::try_from(query.limit.unwrap_or(50).clamp(1, 100)).unwrap_or(50);
     let fetch_limit = i64::from(limit.saturating_add(1));
 
     let status_filter = query.status.as_ref().map(ChapterStatus::as_str);
@@ -778,7 +782,9 @@ pub async fn patch_chapter(
                 code: "DATABASE_ERROR".to_string(),
                 message: e.to_string(),
             })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {fetch_volume}")))
+            .ok_or_else(|| {
+                NexusApiError::NotFound(format!("chapter {chapter} volume {fetch_volume}"))
+            })
     }
     .await;
 
@@ -983,6 +989,24 @@ mod tests {
             .expect("list chapters");
         assert_eq!(resp.items.len(), 3);
         assert_eq!(resp.pagination.limit, 50);
+    }
+
+    /// Regression: `?limit=0` used to reach `chapter_page_meta` and underflow
+    /// `limit_us - 1` (panic -> 500). The handler now clamps limit to [1, 100],
+    /// so limit=0 becomes 1 and returns a valid page instead of panicking.
+    #[tokio::test]
+    async fn list_chapters_limit_zero_is_clamped_not_panicked() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let query = ListChaptersQuery {
+            cursor: None,
+            limit: Some(0),
+            status: None,
+        };
+        let resp = list_chapters(AxumState(state), AxumPath(work_id), AxumQuery(query))
+            .await
+            .expect("limit=0 must be clamped, not panic");
+        assert_eq!(resp.pagination.limit, 1);
+        assert_eq!(resp.items.len(), 1);
     }
 
     #[tokio::test]

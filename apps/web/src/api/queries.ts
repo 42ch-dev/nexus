@@ -311,13 +311,17 @@ export function useChapterBody(
   });
 }
 
-export function usePutChapterOutline(workId: string | undefined, chapter: number | undefined) {
+export function usePutChapterOutline(
+  workId: string | undefined,
+  chapter: number | undefined,
+  query?: ChapterContentQuery,
+) {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
   return useMutation({
     mutationFn: (request: PutChapterOutlineRequest) =>
-      client.putChapterOutline(workId!, chapter!, request),
+      client.putChapterOutline(workId!, chapter!, request, query),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.chapters.outlines() });
       void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
