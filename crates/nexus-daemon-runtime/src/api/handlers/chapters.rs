@@ -243,9 +243,10 @@ fn resolve_guarded_path(
                 code: "CHAPTER_PATH_UNRESOLVABLE".to_string(),
                 message: format!("cannot resolve chapter path '{rel_path}': {e}"),
             })?;
-        let target_str = canonical_target.to_string_lossy();
-        let root_str = canonical_root.to_string_lossy();
-        if !target_str.starts_with(root_str.as_ref()) {
+        // Component-wise comparison (Path::starts_with). A plain string prefix
+        // match would let `/home/user-data/evil.md` slip past a `/home/user`
+        // root because the string starts with "/home/user".
+        if !canonical_target.starts_with(&canonical_root) {
             return Err(NexusApiError::BadRequest {
                 code: "CHAPTER_PATH_FORBIDDEN".to_string(),
                 message: format!("chapter path '{rel_path}' escapes workspace root"),
@@ -260,9 +261,8 @@ fn resolve_guarded_path(
         let mut probe = joined.as_path();
         loop {
             if let Ok(canonical) = probe.canonicalize() {
-                let probe_str = canonical.to_string_lossy();
-                let root_str = canonical_root.to_string_lossy();
-                if !probe_str.starts_with(root_str.as_ref()) {
+                // Component-wise comparison (Path::starts_with) — see read branch.
+                if !canonical.starts_with(&canonical_root) {
                     return Err(NexusApiError::BadRequest {
                         code: "CHAPTER_PATH_FORBIDDEN".to_string(),
                         message: format!("chapter path '{rel_path}' escapes workspace root"),
@@ -930,6 +930,42 @@ mod tests {
         );
     }
 
+    /// Regression: a sibling directory whose name extends the workspace-root
+    /// name (e.g. root `…/creative`, sibling `…/creative-evil`) must NOT pass
+    /// the guard via a `..` traversal. A plain string `starts_with` would accept
+    /// `…/creative-evil/evil.md` because the string starts with `…/creative`;
+    /// `Path::starts_with` compares components and rejects it. Covers both the
+    /// read path (`must_exist = true`) and the write path (`must_exist = false`).
+    #[test]
+    fn resolve_guarded_path_rejects_prefix_confusion_sibling() {
+        let base = tempfile::tempdir().unwrap().path().to_path_buf();
+        let root = base.join("creative");
+        std::fs::create_dir_all(&root).unwrap();
+        // Sibling whose name extends the root name.
+        let evil_dir = base.join("creative-evil");
+        std::fs::create_dir_all(&evil_dir).unwrap();
+        std::fs::write(evil_dir.join("evil.md"), "stolen").unwrap();
+
+        // Read path: target resolves into the sibling via `..`.
+        assert!(
+            resolve_guarded_path(&root, "../creative-evil/evil.md", true).is_err(),
+            "prefix-confusion sibling must be rejected on the read path: {:?}",
+            resolve_guarded_path(&root, "../creative-evil/evil.md", true)
+        );
+        // Write path: a creatable target whose nearest-existing parent is the
+        // sibling must also be rejected.
+        assert!(
+            resolve_guarded_path(&root, "../creative-evil/newfile.md", false).is_err(),
+            "prefix-confusion sibling must be rejected on the write path: {:?}",
+            resolve_guarded_path(&root, "../creative-evil/newfile.md", false)
+        );
+        // Sanity: a genuine inside-root path still passes (write path, creatable).
+        assert!(
+            resolve_guarded_path(&root, "Outlines/ch01.md", false).is_ok(),
+            "inside-root creatable path should be accepted"
+        );
+    }
+
     #[tokio::test]
     async fn list_chapters_returns_summaries() {
         let (state, _tmp, work_id) = setup_chapter_work().await;
@@ -1005,7 +1041,13 @@ mod tests {
         assert!(resp.slug.as_deref().is_some_and(|s| s.starts_with("ch01")));
     }
 
+    // Both outline-PUT tests share the global `TEST_UPDATE_OUTLINE_PATH_FAIL`
+    // failpoint (one sets it, the other is vulnerable to it). Serialize them so
+    // the flag cannot leak across threads under the default multi-threaded test
+    // runner — without this, `put_outline_creates_file_and_updates_path` flakes
+    // when the DB-failure test's guard is concurrently held.
     #[tokio::test]
+    #[serial_test::serial]
     async fn put_outline_creates_file_and_updates_path() {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let root = state.workspace_path().expect("workspace path");
@@ -1037,6 +1079,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn put_outline_db_failure_does_not_write_file() {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let root = state.workspace_path().expect("workspace path");

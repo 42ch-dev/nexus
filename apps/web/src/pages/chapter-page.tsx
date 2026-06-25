@@ -320,9 +320,12 @@ function BodyReadOnly({
 
   const bodyContent = useMemo(() => {
     if (!body) return '';
-    // If the API already stripped frontmatter into `frontmatter`, just return content.
+    // If the API already separated frontmatter into `body.frontmatter`, the
+    // `content` is already clean — return it directly. Calling stripFrontmatter
+    // here would double-strip (or mis-strip) content once the server populates
+    // `frontmatter`.
     if (body.frontmatter && Object.keys(body.frontmatter).length > 0) {
-      return stripFrontmatter(body.content);
+      return body.content;
     }
     return stripFrontmatter(body.content);
   }, [body]);
@@ -446,7 +449,11 @@ function BodyReadOnly({
 function stripFrontmatter(content: string): string {
   const trimmed = content.trimStart();
   if (!trimmed.startsWith('---')) return content;
-  const end = trimmed.indexOf('---', 3);
-  if (end === -1) return content;
-  return trimmed.slice(end + 3).replace(/^\n+/, '');
+  // The closing fence must appear at the beginning of a line (standard YAML
+  // front matter). A plain indexOf('---', 3) would match `---` embedded inside
+  // a YAML value such as `title: foo --- bar` and strip at the wrong offset,
+  // garbling the body handed to ReactMarkdown.
+  const match = /\n---[ \t]*(?:\r?\n|$)/.exec(trimmed);
+  if (!match) return content;
+  return trimmed.slice(match.index + match[0].length);
 }
