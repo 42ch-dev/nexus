@@ -1,10 +1,10 @@
-# Local Web UI (Control Room + Setup) — Specification v1
+# Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.64) — Control Room + Setup MVP delivered (7 screen groups + TanStack Query data layer + F-P3/F-F1 adapters + W-1 error-envelope toasts + vitest baseline); daemon-served via rust-embed + SPA fallback (P3); QC tri-review Approve (Wave 2). Evidence: `apps/web/screenshots/`. Tauri desktop shell + content-authoring UI → V1.65+.  
+**Status**: Shipped (V1.64) Control Room + Setup MVP (7 screen groups + TanStack Query data layer + F-P3/F-F1 adapters + W-1 error-envelope toasts + vitest baseline); daemon-served via rust-embed + SPA fallback (P3); QC tri-review Approve (Wave 2). Evidence: `apps/web/screenshots/`. **V1.65 amendment (Prepare → promote at P-last)** adds the **"Content-Authoring UI" stage** (§13): outline rich-text editor + chapter structure table + structure CRUD + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor → **V1.66** (compass §0 Q5).
 **Document class**: Feature line  
 **Created**: 2026-06-24  
-**Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Tauri / content-authoring roadmap, and strict separation from the private cloud SaaS  
-**Iteration compass**: [v1.64-local-web-ui-kickoff-delivery-compass-v1.md](../../iterations/v1.64-local-web-ui-kickoff-delivery-compass-v1.md)
+**Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
+**Iteration compass**: [v1.64-local-web-ui-kickoff-delivery-compass-v1.md](../../iterations/v1.64-local-web-ui-kickoff-delivery-compass-v1.md) (V1.64 ship) · [v1.65-outline-and-structure-authoring-delivery-compass-v1.md](../../iterations/v1.65-outline-and-structure-authoring-delivery-compass-v1.md) (V1.65 Content-Authoring stage — scope/roadmap SSOT)
 
 **Coordinates with**:
 
@@ -192,11 +192,12 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 
 | Version | Scope |
 | --- | --- |
-| **V1.64 (this spec)** | Control Room + Setup MVP (browser SPA), daemon-served via `rust-embed`, `tauri-api` adapter boundary frozen. |
-| **V1.65** | (a) **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start` first; in-process lib link V1.66+); per-OS webview deps / signing / CI matrix. (b) **Content-authoring UI** first slice (chapter rich-text editor as the lead surface; outline/KB editors follow). (c) Findings-remediation UI + schedule/cron editor. |
-| **V1.66+** | Mobile (Tauri v2 mobile targets); **F-P3** array-rename structural closure; **F-F1** server-side sort; `apps/web/DESIGN.md` → **Production** completeness level. |
+| **V1.64** | Control Room + Setup MVP (browser SPA), daemon-served via `rust-embed`, `tauri-api` adapter boundary frozen. |
+| **V1.65 (§13 stage)** | **Content-Authoring UI** (lead slice): outline rich-text editor + chapter structure table + structure CRUD + body read-only render + browser "Copy path"; **Track B** API hardening (chapter-content surface, `work_profile`, preset full CRUD, `items`+cursor). Tauri shell deliberately deferred to V1.66 (compass §0 Q1/Q5). |
+| **V1.66** | (a) **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start` first; in-process lib link V1.67+); per-OS webview deps / signing / CI matrix. (b) **"Open with" / "Reveal in file manager"** desktop integration (Tauri `shell.open`/`openWith`). (c) **Body full-text editor + per-chapter edit lock** (coordinates with orchestration's host-tool write path). (d) Drag-to-reorder / bulk chapter ops / outline template library. |
+| **V1.67+** | Mobile (Tauri v2 mobile targets); **F-P3** array-rename structural closure; **F-F1** server-side sort; remaining V1.64 Track-B carry-forwards; `apps/web/DESIGN.md` → **Production** completeness level. |
 
-The Tauri-ready boundary (§5) is what keeps V1.65 a thin shell rather than a rewrite.
+The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite, and keeps the V1.66 body-editor a new screen rather than a re-architecture.
 
 ---
 
@@ -232,4 +233,54 @@ Versioning, npm/Rust bumps, and the single breaking shape change (Works list) ar
 
 ---
 
-*Local-first Web UI product contract. Draft in V1.64 Prepare; promotes to Shipped (V1.64) at P-last. Design tokens: `apps/web/DESIGN.md`; design intent input: [web-ui-design-requirements.md](web-ui-design-requirements.md).*
+## 13. Next stage — Content-Authoring UI (V1.65 lead slice)
+
+V1.64 made the runtime **legible and configurable** (Control Room + Setup). V1.65 takes the next step: the UI becomes an **authoring entry surface** — authors can plan, review, and restructure chapter **outlines and structure** directly in the browser, with the chapter **body rendered read-only**. This is the single highest-leverage product-completeness move after V1.64: the runtime is feature-complete for writing and now UI-reachable, but the UI cannot yet *shape* the writing — only observe and configure it.
+
+> **Scope and roadmap SSOT**: [v1.65-outline-and-structure-authoring-delivery-compass-v1.md](../../iterations/v1.65-outline-and-structure-authoring-delivery-compass-v1.md) §0 (grill decisions) + §1.1 (Track A) + §1.2 (V1.66 roadmap) + §5 (open design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 13.1 What ships in V1.65 (Track A lead slice)
+
+The browser SPA gains an authoring surface layered on the V1.64 Control Room + Setup screens. All new screens route through the same `NexusClient` interface (§5) and consume the new V1.65 chapter-content Local API (Track B / P0 backend; conventions in [local-api-surface-conventions.md](local-api-surface-conventions.md)).
+
+- **Chapter structure table** (per-Work, multi-Work switcher reusing the V1.64 Works dashboard entry): columns — chapter #, title, slug, planned word count, volume, status (`not_started` / `outlined` / `draft` / `finalized` / `published`), actual word count. Sortable by chapter #.
+- **Outline rich-text editor**: edit a chapter's `outline_path` markdown in a rich-text editor; save writes the file atomically (reuse the reconcile atomic-write pattern) and updates DB metadata (`outline_path`, `updated_at`) in the same transaction. Restricted to a markdown subset (headings, lists, bold/italic, code, blockquote, links).
+- **Structure CRUD**: edit title / slug / planned word count / volume; advance status `not_started → outlined` (reverse transitions gated). `finalized` / `published` chapters are protected: structural edits require a confirmation dialog; **deletion is hard-blocked**.
+- **Body read-only rendering**: render a chapter's `body_path` markdown (frontmatter-aware — surface status/metadata in a read-only header strip, render body prose read-only). Right-click context menu offers **"Copy path"** only (browser clipboard write; path sourced from the API).
+- **Soft concurrency** (compass §0 Q2/Q3): no hard lock. The outline editor warns — non-blocking but unmissable — when editing the outline of a chapter already in `draft` or `finalized` status ("this chapter is already drafted; changing the outline will not auto-redraft; the next orchestration draft will be based on the new outline"). Orchestration reads the outline at draft-time (a natural snapshot of whatever is on disk).
+
+### 13.2 The authoring loop this enables
+
+The UI closes the **plan / review / restructure** loop for an author who is not terminal-fluent:
+
+1. **Plan** — draft and revise a chapter's outline in rich text; the outline is the author-facing planning document that orchestration reads to draft body prose.
+2. **Review** — read a chapter's rendered body read-only; copy its file path to open it in the author's own editor.
+3. **Restructure** — fix titles, slugs, volumes, planned word counts; advance a chapter from `not_started` to `outlined` once its outline is ready.
+
+**The CLI still owns body drafting.** Body prose is written by the orchestration engine through the V1.34 host-tool bridge; V1.65 gives the UI no body write path (see §13.3). The UI is the *planning and structure* surface; the CLI/runtime remains the *drafting* surface until V1.66.
+
+### 13.3 Non-goals for V1.65 (durable V1.66 roadmap)
+
+Explicitly deferred with rationale (compass §0 Q2/Q4/Q5, §1.2; satisfies the Durable Roadmap Gate):
+
+- **Body full-text editor (`body_path` write)** — V1.66. Requires a per-chapter edit-lock design (UI claims chapter N → orchestration skips/queues; lock-expiry policy), MD↔rich-text lossless round-trip, frontmatter/status sync, and a conflict policy with the orchestration co-writer. Lands only after the lock design is reviewed.
+- **"Open with" / "Reveal in file manager" right-click actions** — V1.66 Tauri desktop shell. Launching an OS process to open a file is a **native-shell** capability (Tauri `shell.open` / `openWith` with a scope whitelist), **not** a Web daemon responsibility (compass §0 Q5). The browser sandbox has no such capability; making the daemon a "process launcher" would be the wrong layering. V1.65 ships "Copy path" only.
+- **Tauri desktop shell (`apps/desktop`)** — V1.66. The SPA is Tauri-ready now (§5 adapter boundary; no browser-only APIs in editor core); the shell wraps the same `apps/web/dist`.
+- **Drag-to-reorder chapters / bulk chapter operations / manual reconcile trigger / outline template library** — V1.66+.
+
+### 13.4 User stories (V1.65 slice)
+
+- **Outline editor** — *As an author*, I can open a chapter and edit its outline in a rich-text editor, then save it back as markdown, so I can plan the chapter's shape without dropping into the terminal.
+- **Structure CRUD** — *As an author*, I can fix a chapter's title, slug, planned word count, and volume, and advance its status from `not_started` to `outlined`, so the structure of my Work reflects my plan.
+- **Protected edits** — *As an author*, when I edit the structure of a `finalized` or `published` chapter the UI asks me to confirm, and it refuses to delete one, so I cannot accidentally destroy settled work.
+- **Body read + copy path** — *As an author*, I can read a chapter's rendered body and copy its file path, so I can open it in my own editor to read or annotate.
+- **Soft-concurrency awareness** — *As an author*, when I edit the outline of a chapter that is already drafted, the UI clearly warns me that my change will not auto-redraft the body, so I am not surprised when the next draft uses my new outline.
+- **Multi-Work navigation** — *As an author*, I can switch between my Works while planning, so I can keep several projects in flight from one window.
+
+### 13.5 Wire contracts (V1.65)
+
+The authoring surface consumes new chapter-content schemas (additive, owned by Track B / P0; conventions in [local-api-surface-conventions.md](local-api-surface-conventions.md)): chapter list (cursor + `items`) / detail / outline GET+PUT (atomic write) / structure PATCH (status progression) / body GET (read-only), plus `work_profile` on Work requests and full preset CRUD routes. Versioning, npm/Rust bumps, and per-DTO `schema_version` increments are owned by compass §1.3.
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup); V1.65 §13 Content-Authoring stage amendment promotes at V1.65 P-last. Design tokens: `apps/web/DESIGN.md` (V1.64 Standard + V1.65 Standard+ editor/table/context-menu increment); design intent input: [web-ui-design-requirements.md](web-ui-design-requirements.md).*
