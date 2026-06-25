@@ -7,7 +7,6 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
-use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -19,6 +18,12 @@ use nexus_contracts::{
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
 use nexus_local_db::works;
 use std::path::{Path as StdPath, PathBuf};
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(test)]
+static TEST_UPDATE_OUTLINE_PATH_FAIL: AtomicBool = AtomicBool::new(false);
 
 // ─── Runtime Lock Guard (mirrors works.rs) ─────────────────────────────────
 
@@ -124,6 +129,64 @@ fn parse_chapter(n: &str) -> Result<i32, NexusApiError> {
                 Ok(v)
             }
         })
+}
+
+/// Prefix for chapter keyset cursors.
+const CHAPTER_CURSOR_PREFIX: &str = "v2:";
+
+/// Decode an opaque chapter-list cursor into the `(volume, chapter)` tuple
+/// that the next page must start after.
+///
+/// `None` decodes to `(1, 0)` so the first page includes all chapters.
+fn decode_chapter_cursor(cursor: Option<&String>) -> Result<(i32, i32), NexusApiError> {
+    match cursor {
+        None => Ok((1, 0)),
+        Some(raw) => {
+            let stripped = raw.strip_prefix(CHAPTER_CURSOR_PREFIX).ok_or_else(|| {
+                NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "invalid chapter_cursor; pass the next_cursor value unchanged"
+                        .to_string(),
+                }
+            })?;
+            let mut parts = stripped.splitn(2, ':');
+            let volume = parts
+                .next()
+                .and_then(|s| s.parse::<i32>().ok())
+                .filter(|v| *v >= 1)
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "invalid chapter_cursor volume".to_string(),
+                })?;
+            let chapter = parts
+                .next()
+                .and_then(|s| s.parse::<i32>().ok())
+                .filter(|v| *v >= 1)
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "INVALID_INPUT".to_string(),
+                    message: "invalid chapter_cursor chapter".to_string(),
+                })?;
+            Ok((volume, chapter))
+        }
+    }
+}
+
+/// Encode a `(volume, chapter)` tuple into an opaque cursor token.
+fn encode_chapter_cursor(volume: i32, chapter: i32) -> String {
+    format!("{CHAPTER_CURSOR_PREFIX}{volume}:{chapter}")
+}
+
+/// Compute `(next_cursor, has_more)` for a keyset-paginated chapter page.
+fn chapter_page_meta(records: &[WorkChapterRecord], limit: u32) -> (Option<String>, bool) {
+    let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
+    if records.len() > limit_us {
+        let last = records.get(limit_us - 1).expect("limit > 0");
+        let next_volume = last.volume.unwrap_or(1);
+        let next_cursor = encode_chapter_cursor(next_volume, last.chapter);
+        (Some(next_cursor), true)
+    } else {
+        (None, false)
+    }
 }
 
 /// Resolve the active workspace root.
@@ -281,12 +344,17 @@ fn to_detail(r: &WorkChapterRecord) -> ChapterDetail {
 }
 
 /// Read a text file after path-guard verification.
+///
+/// Enforces a 10 MiB size cap to prevent unbounded memory reads on
+/// unexpectedly large chapter bodies.
 async fn read_guarded_file(
     workspace_root: &StdPath,
     rel_path: &str,
     forbidden_code: &str,
     not_found_code: &str,
 ) -> Result<String, NexusApiError> {
+    const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
+
     let path = resolve_guarded_path(workspace_root, rel_path, true).map_err(|e| {
         if matches!(e, NexusApiError::BadRequest { ref code, .. } if code == "CHAPTER_PATH_FORBIDDEN")
         {
@@ -298,6 +366,29 @@ async fn read_guarded_file(
             e
         }
     })?;
+
+    let metadata = tokio::fs::metadata(&path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            NexusApiError::NotFound(format!("{not_found_code}: file not found at '{rel_path}'"))
+        } else {
+            NexusApiError::Internal {
+                code: "FILE_READ_ERROR".to_string(),
+                message: format!("failed to read metadata for '{rel_path}': {e}"),
+            }
+        }
+    })?;
+
+    let max_bytes = u64::try_from(CHAPTER_BODY_MAX_BYTES).unwrap_or(u64::MAX);
+    if metadata.len() > max_bytes {
+        return Err(NexusApiError::BadRequest {
+            code: "CHAPTER_BODY_TOO_LARGE".to_string(),
+            message: format!(
+                "chapter body at '{rel_path}' is {size} bytes, exceeding the maximum of {max} bytes",
+                size = metadata.len(),
+                max = CHAPTER_BODY_MAX_BYTES
+            ),
+        });
+    }
 
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => Ok(content),
@@ -388,7 +479,7 @@ pub async fn list_chapters(
     // Verify work exists and belongs to active creator.
     let _work = load_work(&state, &creator_id, &work_id).await?;
 
-    let offset = decode_offset_cursor(&query.cursor)?;
+    let (cursor_volume, cursor_chapter) = decode_chapter_cursor(query.cursor.as_ref())?;
     let limit = u32::try_from(query.limit.unwrap_or(50).min(100)).unwrap_or(100);
     let fetch_limit = i64::from(limit.saturating_add(1));
 
@@ -399,7 +490,8 @@ pub async fn list_chapters(
         &work_id,
         status_filter,
         fetch_limit,
-        i64::from(offset),
+        cursor_volume,
+        cursor_chapter,
     )
     .await
     .map_err(|e| NexusApiError::Internal {
@@ -407,7 +499,7 @@ pub async fn list_chapters(
         message: e.to_string(),
     })?;
 
-    let (next_cursor, has_more) = offset_page_meta(records.len(), limit, offset);
+    let (next_cursor, has_more) = chapter_page_meta(&records, limit);
     let items: Vec<ChapterSummary> = records
         .into_iter()
         .take(usize::try_from(limit).unwrap_or(usize::MAX))
@@ -542,8 +634,21 @@ pub async fn put_chapter_outline(
     // Acquire runtime lock before mutating file + DB.
     let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
 
+    // Test-only seam: simulate a DB-update failure to verify the file is not
+    // written before the metadata is persisted.
+    #[cfg(test)]
+    if TEST_UPDATE_OUTLINE_PATH_FAIL.load(Ordering::SeqCst) {
+        lock.release().await;
+        return Err(NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: "simulated update_outline_path failure".to_string(),
+        });
+    }
+
+    // Persist the metadata first, then write the file. If the DB update fails,
+    // no file is created; if the file write fails after the DB commit, the DB
+    // points to the intended path and a retry PUT is idempotent.
     let result: Result<(String, String, String), NexusApiError> = async {
-        atomic_write_outline(&workspace_root, &outline_path, &req.content).await?;
         let now = chrono::Utc::now().to_rfc3339();
         work_chapters::update_outline_path(
             state.pool(),
@@ -558,6 +663,7 @@ pub async fn put_chapter_outline(
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?;
+        atomic_write_outline(&workspace_root, &outline_path, &req.content).await?;
         Ok((now, outline_path, req.content))
     }
     .await;
@@ -738,6 +844,23 @@ mod tests {
     use crate::api::handlers::works::{create_work, CreateWorkRequest};
     use axum::extract::{Path as AxumPath, Query as AxumQuery, State as AxumState};
 
+    /// RAII guard that enables the simulated `update_outline_path` failure and
+    /// disables it when dropped, even if the test panics.
+    struct FailpointGuard;
+
+    impl FailpointGuard {
+        fn enable() -> Self {
+            TEST_UPDATE_OUTLINE_PATH_FAIL.store(true, Ordering::SeqCst);
+            Self
+        }
+    }
+
+    impl Drop for FailpointGuard {
+        fn drop(&mut self) {
+            TEST_UPDATE_OUTLINE_PATH_FAIL.store(false, Ordering::SeqCst);
+        }
+    }
+
     async fn setup_chapter_work() -> (
         crate::workspace::WorkspaceState,
         crate::test_utils::TestTempRoot,
@@ -823,6 +946,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_chapters_keyset_pagination() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+
+        // First page: limit 2 should return 2 items and a next cursor.
+        let first = list_chapters(
+            AxumState(state.clone()),
+            AxumPath(work_id.clone()),
+            AxumQuery(ListChaptersQuery {
+                cursor: None,
+                limit: Some(2),
+                status: None,
+            }),
+        )
+        .await
+        .expect("list first page");
+        assert_eq!(first.items.len(), 2);
+        assert!(first.pagination.has_more);
+        let cursor = first
+            .pagination
+            .next_cursor
+            .clone()
+            .expect("first page should have next_cursor");
+        assert!(
+            cursor.starts_with("v2:"),
+            "cursor should use v2 keyset encoding"
+        );
+
+        // Second page: should return the remaining chapter and no cursor.
+        let second = list_chapters(
+            AxumState(state),
+            AxumPath(work_id),
+            AxumQuery(ListChaptersQuery {
+                cursor: Some(cursor),
+                limit: Some(2),
+                status: None,
+            }),
+        )
+        .await
+        .expect("list second page");
+        assert_eq!(second.items.len(), 1);
+        assert!(!second.pagination.has_more);
+        assert!(second.pagination.next_cursor.is_none());
+    }
+
+    #[tokio::test]
     async fn get_chapter_returns_detail() {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let resp = get_chapter(
@@ -869,6 +1037,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn put_outline_db_failure_does_not_write_file() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let root = state.workspace_path().expect("workspace path");
+
+        // Enable simulated DB-update failure. The guard disables the failpoint
+        // on drop so subsequent tests are unaffected, even if this test panics.
+        let _guard = FailpointGuard::enable();
+
+        let req = PutChapterOutlineRequest {
+            content: "# Chapter 1\n\nOutline text.".to_string(),
+        };
+        let result = put_chapter_outline(
+            AxumState(state.clone()),
+            AxumPath((work_id, "1".to_string())),
+            AxumQuery(ChapterContentQuery { volume: None }),
+            axum::Json(req),
+        )
+        .await;
+
+        assert!(result.is_err(), "expected DB failure error");
+
+        let file_path = std::path::PathBuf::from(&root)
+            .join("Works/test-novel/Outlines/chapters/ch01-outline.md");
+        assert!(
+            !file_path.exists(),
+            "outline file should not be created when DB update fails"
+        );
+    }
+
+    #[tokio::test]
     async fn patch_chapter_updates_slug() {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let req = PatchChapterRequest {
@@ -909,5 +1107,36 @@ mod tests {
         .expect("get body");
         assert_eq!(resp.content, "body content");
         assert!(resp.read_only);
+    }
+
+    #[tokio::test]
+    async fn get_chapter_body_rejects_oversized_file() {
+        // The constant is private to the parent module; access it via the
+        // helper below which is also private and uses the same value.
+        const TEST_MAX_BYTES: usize = 10 * 1024 * 1024;
+
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let root = state.workspace_path().expect("workspace path");
+        let body_path =
+            std::path::PathBuf::from(&root).join("Works/test-novel/Stories/ch01-ch01.md");
+        std::fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let oversized = "x".repeat(TEST_MAX_BYTES + 1);
+        std::fs::write(&body_path, oversized).unwrap();
+
+        let result = get_chapter_body(
+            AxumState(state),
+            AxumPath((work_id, "1".to_string())),
+            AxumQuery(ChapterContentQuery { volume: None }),
+        )
+        .await;
+
+        assert!(result.is_err(), "expected error for oversized body");
+        match result {
+            Err(NexusApiError::BadRequest { code, .. }) => {
+                assert_eq!(code, "CHAPTER_BODY_TOO_LARGE");
+            }
+            Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => panic!("expected error"),
+        }
     }
 }
