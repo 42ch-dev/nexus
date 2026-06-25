@@ -1,14 +1,10 @@
 # `apps/desktop/src-tauri/binaries/`
 
-**Placeholder for the P1 `nexus42` sidecar** (compass §5 #2 — `bundle.externalBin` +
+**P1 `nexus42` sidecar binaries** (compass §5 #2 — `bundle.externalBin` +
 `@tauri-apps/plugin-shell` Sidecar).
 
-V1.66 **P0** runs the desktop shell against an **externally-started** daemon
-(`nexus42 daemon start --foreground`); no binary is bundled here and
-`tauri.conf.json` intentionally omits `bundle.externalBin` so `tauri dev`/`build`
-succeed without a sidecar present.
-
-**P1** populates this directory with target-triple-suffixed binaries:
+This directory contains the target-triple-suffixed `nexus42` binaries that the
+Tauri desktop shell bundles and lifecycle-manages:
 
 ```
 binaries/
@@ -16,7 +12,19 @@ binaries/
   nexus42-x86_64-apple-darwin
 ```
 
-and adds to `tauri.conf.json`:
+The binaries themselves are **not committed** (`/binaries/*` is gitignored);
+they are produced by:
+
+```bash
+pnpm -w run sidecar
+# or directly:
+bash scripts/fetch-sidecar.sh
+```
+
+which builds `cargo build --release -p nexus42` for both macOS architectures and
+copies/renames the artifacts here.
+
+`tauri.conf.json` declares:
 
 ```jsonc
 "bundle": {
@@ -24,6 +32,5 @@ and adds to `tauri.conf.json`:
 }
 ```
 
-Tauri resolves the correct arch suffix at bundle time (`-universal-apple-darwin`
-attempted first per compass §5 #10). See
+Tauri resolves the correct arch suffix at bundle time. See
 `.mstar/knowledge/specs/desktop-shell.md` §7 (sidecar lifecycle).
