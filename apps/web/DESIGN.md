@@ -1,15 +1,16 @@
 # Nexus Local Web UI Design System
 
-<!-- COMPLETENESS_LEVEL: 2 — Standard, last audited 2026-06-24 -->
+<!-- COMPLETENESS_LEVEL: 2 — Standard+, last audited 2026-06-25 -->
 
-Nexus Local Web UI is a restrained, author-focused design system for the local-first **Control Room + Setup** SPA. It should feel calm and trustworthy: quiet surfaces, dense but readable data, explicit status language, and high-confidence controls for local creative runtime work without making writers feel like they are operating infrastructure.
+Nexus Local Web UI is a restrained, author-focused design system for the local-first **Control Room + Setup + Authoring** SPA. It should feel calm and trustworthy: quiet surfaces, dense but readable data, explicit status language, and high-confidence controls for local creative runtime work without making writers feel like they are operating infrastructure.
 
-This file is the light/default theme and the token-name SSOT. Dark values are listed beside light values below using the **same token names** so P1 can map both themes to CSS custom properties or Tailwind tokens from one source. A separate `DESIGN.dark.md` can be split out in V1.65 if the UI graduates to Production completeness.
+This file is the light/default theme and the token-name SSOT. Dark values are listed beside light values below using the **same token names** so P1 can map both themes to CSS custom properties or Tailwind tokens from one source. A separate `DESIGN.dark.md` can be split out in V1.66 if the UI graduates to Production completeness.
 
 Product inputs from `.mstar/knowledge/specs/web-ui-design-requirements.md`:
 
 - Primary persona: writers/authors, not engineers; calm and focused over dashboard anxiety.
 - Control Room screens are data-dense; Setup screens are form-dense with first-class validation and destructive-action confirmation.
+- V1.65 Authoring screens add outline editing, chapter structure tables, and a body read-only context menu. Product-manager design requirements are being amended in parallel; this Standard+ increment assumes browser V1.65 ships `Copy path` only, while `Open with` / `Reveal in file manager` wait for the V1.66 Tauri shell.
 - WCAG 2.1 AA is the floor in both light and dark; focus rings, keyboard paths, status text, and reduced motion are non-negotiable.
 - Brand voice: helpful, plain, local-first, and consistent with CLI terms (`Work`, `preset`, `stage`, `finding`, `capability`).
 
@@ -284,6 +285,96 @@ Sidebar width: `248px`. Background `background-100`; divider `gray-alpha-400`. N
 
 Dialog: `background-100`, `radius-popover`, `shadow-modal`, max width `560px`, `space-6` padding. Popover/menu: `background-100`, border `gray-alpha-400`, `shadow-popover`, `radius-popover`, item height `36px`.
 
+### Editor (V1.65 Standard+)
+
+The outline editor is a planning surface, not the body manuscript editor. It should feel closer to an intentional note/workbench than a document processor: compact toolbar, clear save state, and no hidden background writes.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `editor-surface` | `background-100` | `background-100` | Main editor panel |
+| `editor-surface-muted` | `background-200` | `background-200` | Toolbar and footer strip |
+| `editor-border` | `gray-alpha-400` | `gray-alpha-400` | Editor frame and toolbar divider |
+| `editor-border-active` | `blue-700` | `blue-700` | Focused editor frame |
+| `editor-toolbar-control-bg` | `transparent` | `transparent` | Default toolbar button |
+| `editor-toolbar-control-hover` | `gray-alpha-100` | `gray-alpha-100` | Toolbar button hover |
+| `editor-toolbar-control-active` | `gray-alpha-200` | `gray-alpha-200` | Active mark/block button |
+| `editor-save-clean` | `green-700` | `green-700` | Saved indicator dot/icon |
+| `editor-save-dirty` | `amber-700` | `amber-700` | Unsaved changes indicator |
+| `editor-save-error` | `red-700` | `red-700` | Save failed indicator |
+| `editor-selection` | `rgba(0,107,255,0.14)` | `rgba(82,168,255,0.24)` | Text selection in editor |
+
+| Element | Token use | Size / rhythm | States |
+| --- | --- | --- | --- |
+| Editor frame | `editor-surface`, `editor-border`, `radius-card` | Min height `360px`; padding `space-6` | `:focus-within` swaps border to `editor-border-active` and uses global focus ring |
+| Toolbar | `editor-surface-muted`, bottom border `editor-border` | Height `44px`; gap `space-1`; horizontal padding `space-2` | Sticky within editor panel if content scrolls |
+| Toolbar button | `button-12`, `radius-control` | `32px` square or min-width `32px` | hover `editor-toolbar-control-hover`; active `editor-toolbar-control-active` |
+| Save-state indicator | `label-12`, semantic dot | Dot `8px`; gap `space-2` | `Saved` green, `Unsaved` amber, `Save failed` red; always include text, not color alone |
+| Markdown helper | `copy-13`, `gray-900` | Footer padding `space-3` | Explain that body writing is read-only/deferred when relevant |
+
+Editor content typography:
+
+- Prose defaults to `copy-16`; headings use `heading-24` / `heading-20` / `heading-16` in descending order.
+- Lists use `space-2` vertical rhythm and `space-6` indentation.
+- Inline code uses `copy-13-mono`, `gray-alpha-100` background, `radius-control`, horizontal padding `4px`.
+- Unknown markdown/frontmatter preservation warnings use `amber-700` icon + `copy-13` text.
+
+### Data Table (V1.65 Standard+)
+
+Chapter structure tables extend the base `Table` primitive with inline-edit and chapter-status semantics.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `table-row-hover` | `background-200` | `background-200` | Row hover |
+| `table-row-selected` | `background-300` | `background-300` | Selected/focused chapter row |
+| `table-row-edited` | `rgba(183,110,0,0.08)` | `rgba(255,192,67,0.14)` | Row with unsaved inline edits |
+| `table-row-protected` | `rgba(124,58,237,0.06)` | `rgba(183,148,255,0.12)` | Finalized/published protected row emphasis |
+| `table-cell-edit-bg` | `background-100` | `background-100` | Inline edit control background |
+| `table-cell-edit-border` | `blue-700` | `blue-700` | Active inline edit border |
+| `table-column-divider` | `gray-alpha-200` | `gray-alpha-200` | Optional dense-column separator |
+
+Chapter status badge mapping:
+
+| Chapter status | Badge variant | Notes |
+| --- | --- | --- |
+| `not_started` | `neutral` | Quiet default |
+| `outlined` | `queued` | Informational planning-ready state |
+| `draft` | `warning` | Body exists / may need review |
+| `finalized` | `running` | Positive terminal-ish local state; pair with lock/protection copy when edited |
+| `published` | `preset` | Rare protected/public state; hard-block destructive edits |
+
+Inline edit rules:
+
+- Editable cells keep row height at `44px` minimum; controls use `32px` height and `copy-14`.
+- Numeric columns (`planned_word_count`, `actual_word_count`, chapter number, volume) use tabular figures and right alignment.
+- Save/cancel controls appear at row end; use icon + accessible label. Do not rely on hover-only controls for keyboard users.
+- Validation errors render under the edited cell in `copy-13` + `red-700`; row remains in `table-row-edited` until resolved or canceled.
+- `finalized` edits require an explicit confirmation dialog; `published` edits surface a hard-block message.
+
+### Context Menu (V1.65 Standard+)
+
+The V1.65 browser context menu is intentionally narrow: **Copy path** only for body/outline path affordances. Native `Open with` and `Reveal in file manager` are V1.66 Tauri-shell capabilities.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `context-menu-bg` | `background-100` | `background-100` | Menu surface |
+| `context-menu-border` | `gray-alpha-400` | `gray-alpha-400` | Menu border |
+| `context-menu-item-hover` | `gray-alpha-100` | `gray-alpha-100` | Item hover/focus |
+| `context-menu-item-active` | `gray-alpha-200` | `gray-alpha-200` | Pressed item |
+| `context-menu-item-disabled` | `gray-700` | `gray-700` | Disabled future native actions if shown as roadmap hints |
+| `context-menu-shortcut` | `gray-700` | `gray-700` | Shortcut hint text |
+
+| Element | Token use | Size / rhythm | States |
+| --- | --- | --- | --- |
+| Menu surface | `context-menu-bg`, `context-menu-border`, `shadow-popover`, `radius-popover` | Min width `180px`; padding `space-1` | Opens near pointer/focused row; closes on Escape |
+| Menu item | `copy-14`, `gray-1000` | Height `36px`; horizontal padding `space-3`; gap `space-2` | hover/focus `context-menu-item-hover`; active `context-menu-item-active` |
+| Path preview | `copy-13-mono`, `gray-900` | Max width `320px`, truncates middle when needed | Read-only; never expose absolute path unless API returns it intentionally |
+
+Copy-path behavior:
+
+- The action label is `Copy Path`; success toast is `Path copied`.
+- If clipboard write fails, show `Path not copied. Copy it manually from the details panel.`
+- Menu items must be keyboard reachable from the row/body read-only surface.
+
 ---
 
 ## Voice & Content
@@ -311,4 +402,4 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 - Tailwind should reference CSS variables, not hard-coded hex values inside components.
 - Shadcn component defaults should read from the component primitive tables above.
 - `data-theme="dark"` or a root class may swap values; token names must remain identical.
-- Production-level split into `DESIGN.dark.md`, richer component specs, and rendered visual QA are deferred to V1.65.
+- Production-level split into `DESIGN.dark.md`, richer component specs, native desktop menu actions, and rendered visual QA are deferred to V1.66.
