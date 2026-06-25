@@ -41,6 +41,7 @@ async fn create_test_work(state: &WorkspaceState, title: &str) -> String {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),

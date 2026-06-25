@@ -259,9 +259,13 @@ This mirrors the W-002 defense-in-depth guard in
 V1.65 has no hard per-chapter edit lock. Outline writes are last-write-wins at
 the file level, and orchestration reads the outline at draft-time as a natural
 snapshot. UI consumers should warn when editing outlines for `draft` or
-`finalized` chapters, but the API does not acquire the Work runtime lock solely
-for outline content edits unless the implementation needs it for existing
-single-writer invariants.
+`finalized` chapters.
+
+The daemon **does** acquire the per-Work runtime lock for `PUT outline` and
+`PATCH structure` to honor the existing single-writer invariant
+(`multi-work-lifecycle.md` §4.2). The lock is released on both success and
+error paths. This is implementation-specific and does not change the contract's
+last-write-wins semantics for clients.
 
 ---
 

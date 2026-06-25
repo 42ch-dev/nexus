@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/chapters/list-chapters-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListChaptersResponse",
+  "description": "Response for GET /v1/local/works/{work_id}/chapters (V1.65 P0). Cursor-based pagination over ChapterSummary rows. Uses `items` key per F-P3.",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-summary.schema.json" }
+    },
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json" }
+  },
+  "additionalProperties": false
+}

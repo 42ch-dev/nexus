@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/chapters/patch-chapter-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatchChapterRequest",
+  "description": "Request body for PATCH /v1/local/works/{work_id}/chapters/{n} (V1.65 P0). All fields optional. `title` is rejected because it is display-only until P0 materializes a title column.",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Rejected in V1.65 — display-only until a title column is materialized."
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "description": "URL-safe chapter slug. Changing a published chapter slug is blocked."
+    },
+    "planned_word_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Target word count for the chapter."
+    },
+    "volume": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Volume the chapter belongs to. Must preserve (work_id, volume, chapter) uniqueness."
+    },
+    "status": {
+      "$ref": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-status.schema.json",
+      "description": "Status transition. Only `not_started -> outlined` is allowed automatically; other transitions may require explicit confirmation in future iterations."
+    },
+    "confirm_structural_edit": {
+      "type": "boolean",
+      "description": "Must be true when mutating structure of a finalized chapter."
+    },
+    "transition_reason": {
+      "type": "string",
+      "description": "Required for explicit reverse/terminal transitions when implemented."
+    }
+  },
+  "additionalProperties": false
+}
