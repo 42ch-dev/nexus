@@ -304,7 +304,12 @@
     "2026-06-25-v1.65-outline-and-structure-editor",
     "2026-06-25-v1.65-mid-meta-tracking",
     "2026-06-25-v1.65-residual-convergence-and-closeout",
-    "2026-06-25-v1.66-compass-and-plan-stubs"
+    "2026-06-25-v1.66-compass-and-plan-stubs",
+    "2026-06-25-v1.66-desktop-shell-core",
+    "2026-06-25-v1.66-hygiene-residuals",
+    "2026-06-25-v1.66-sidecar-lifecycle-and-ci",
+    "2026-06-25-v1.66-mid-meta-tracking",
+    "2026-06-25-v1.66-residual-convergence-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-25-v1.66-mid-meta-tracking",
+  "title": "V1.66 P-mid — Meta Tracking (integration green + QC tri-review + QA dispatch)",
+  "iteration": "V1.66",
+  "slot": "P-mid",
+  "status": "Done",
+  "effort": "S",
+  "owner": "@project-manager",
+  "review": "N/A (PM meta)",
+  "wave": 3,
+  "dependency": "P1 merged",
+  "working_branch": "(no branch — PM meta)",
+  "merge_target": "—",
+  "completed_at": "2026-06-25T19:05:28Z",
+  "done_reason": "QC tri-review Approve (after fix-wave-1) + QA Pass",
+  "archived_at": "2026-06-25T19:08:40Z"
+}
