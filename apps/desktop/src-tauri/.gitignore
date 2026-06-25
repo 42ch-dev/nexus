@@ -1,0 +1,12 @@
+# Tauri build artifacts (standalone crate — NOT in the root Cargo workspace).
+/target
+/gen
+
+# P1 sidecar binaries (target-triple-suffixed). The placeholder README stays.
+/binaries/*
+!/binaries/README.md
+
+# Generated icons (produced by `tauri icon`); the README stays.
+/icons/*.png
+/icons/*.icns
+/icons/*.ico

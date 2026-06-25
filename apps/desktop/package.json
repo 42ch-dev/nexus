@@ -1,0 +1,22 @@
+{
+  "name": "desktop",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Nexus Tauri v2 desktop shell — wraps the apps/web dist (macOS-first, unsigned dev build).",
+  "author": "42ch",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "_p1_runtime_deps_note": "P1 (sidecar lifecycle) adds @tauri-apps/plugin-shell + @tauri-apps/api as runtime deps for Command.sidecar(). P0 has no desktop-owned JS — the Tauri webview loads apps/web/dist, which detects desktop mode at runtime via window.__TAURI__ and invokes custom commands. No Tauri npm deps belong in apps/web (shared browser+desktop bundle)."
+}
