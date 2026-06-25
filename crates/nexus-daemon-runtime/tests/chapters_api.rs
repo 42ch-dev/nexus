@@ -219,8 +219,9 @@ async fn put_outline_creates_file_and_updates_metadata() {
     );
     assert!(!resp.updated_at.is_empty());
 
-    let file_path = std::path::PathBuf::from(&root)
-        .join(format!("Works/{work_ref}/Outlines/chapters/ch01-outline.md"));
+    let file_path = std::path::PathBuf::from(&root).join(format!(
+        "Works/{work_ref}/Outlines/chapters/ch01-outline.md"
+    ));
     assert!(file_path.exists(), "outline file should be created");
 
     let record = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
@@ -229,7 +230,9 @@ async fn put_outline_creates_file_and_updates_metadata() {
         .expect("chapter row");
     assert_eq!(
         record.outline_path,
-        Some(format!("Works/{work_ref}/Outlines/chapters/ch01-outline.md"))
+        Some(format!(
+            "Works/{work_ref}/Outlines/chapters/ch01-outline.md"
+        ))
     );
     assert!(!record.updated_at.is_empty());
 }
@@ -301,7 +304,10 @@ async fn patch_chapter_reverse_transition_is_rejected() {
     .await
     .expect_err("reverse transition should fail");
     assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
-    assert_eq!(bad_request_code(&err), Some("CHAPTER_STATUS_TRANSITION_INVALID"));
+    assert_eq!(
+        bad_request_code(&err),
+        Some("CHAPTER_STATUS_TRANSITION_INVALID")
+    );
 }
 
 #[tokio::test]
@@ -333,7 +339,10 @@ async fn patch_published_chapter_structure_is_hard_blocked() {
     .await
     .expect_err("published edit should fail");
     assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
-    assert_eq!(bad_request_code(&err), Some("CHAPTER_STRUCTURE_EDIT_BLOCKED"));
+    assert_eq!(
+        bad_request_code(&err),
+        Some("CHAPTER_STRUCTURE_EDIT_BLOCKED")
+    );
 }
 
 #[tokio::test]
@@ -365,7 +374,10 @@ async fn patch_finalized_chapter_structure_requires_confirmation() {
     .await
     .expect_err("finalized edit without confirmation should fail");
     assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
-    assert_eq!(bad_request_code(&err), Some("CHAPTER_STRUCTURE_CONFIRMATION_REQUIRED"));
+    assert_eq!(
+        bad_request_code(&err),
+        Some("CHAPTER_STRUCTURE_CONFIRMATION_REQUIRED")
+    );
 
     let resp = chapters::patch_chapter(
         State(state),
@@ -390,7 +402,8 @@ async fn get_body_returns_read_only_markdown_with_frontmatter() {
     let (work_id, work_ref) = create_work_with_chapters(&state, 3).await;
     let root = state.workspace_path().expect("workspace path");
 
-    let body_path = std::path::PathBuf::from(&root).join(format!("Works/{work_ref}/Stories/ch01-ch01.md"));
+    let body_path =
+        std::path::PathBuf::from(&root).join(format!("Works/{work_ref}/Stories/ch01-ch01.md"));
     std::fs::create_dir_all(body_path.parent().unwrap()).unwrap();
     let content = "---\ntitle: Chapter One\n---\n\nBody content here.";
     std::fs::write(&body_path, content).unwrap();

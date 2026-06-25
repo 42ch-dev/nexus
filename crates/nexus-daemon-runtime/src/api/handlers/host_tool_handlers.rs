@@ -1413,16 +1413,20 @@ async fn execute_manuscript_chapter_update(
                 message: format!("failed to write chapter body: {e}"),
             })?;
         // Durability: fsync temp file before the atomic rename.
-        let tmp_handle = tokio::fs::File::open(&tmp_file).await.map_err(|e| {
-            NexusApiError::Internal {
+        let tmp_handle =
+            tokio::fs::File::open(&tmp_file)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "FILE_SYNC_FAILED".into(),
+                    message: format!("failed to open temp file for fsync: {e}"),
+                })?;
+        tmp_handle
+            .sync_all()
+            .await
+            .map_err(|e| NexusApiError::Internal {
                 code: "FILE_SYNC_FAILED".into(),
-                message: format!("failed to open temp file for fsync: {e}"),
-            }
-        })?;
-        tmp_handle.sync_all().await.map_err(|e| NexusApiError::Internal {
-            code: "FILE_SYNC_FAILED".into(),
-            message: format!("failed to fsync temp file: {e}"),
-        })?;
+                message: format!("failed to fsync temp file: {e}"),
+            })?;
         // W-003: store the relative canonical path in the DB, matching
         // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
         Some(canonical_path)
@@ -1444,8 +1448,8 @@ async fn execute_manuscript_chapter_update(
                 code: "WORKSPACE_PATH_ERROR".to_string(),
                 message: "workspace path not available".to_string(),
             })?;
-        let abs_body = resolve_guarded_path(Path::new(&workspace_root), bp, false)
-            .map_err(|e| match e {
+        let abs_body =
+            resolve_guarded_path(Path::new(&workspace_root), bp, false).map_err(|e| match e {
                 NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
                     NexusApiError::InvalidInput {
                         field: "body_path".into(),
@@ -1495,16 +1499,20 @@ async fn execute_manuscript_chapter_update(
         })?;
         // Durability: fsync the final file after the atomic rename so a crash
         // after rename() returns does not leave the rename unflushed.
-        let final_handle = tokio::fs::File::open(&abs_body).await.map_err(|e| {
-            NexusApiError::Internal {
+        let final_handle =
+            tokio::fs::File::open(&abs_body)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "FILE_SYNC_FAILED".into(),
+                    message: format!("failed to open final file for fsync: {e}"),
+                })?;
+        final_handle
+            .sync_all()
+            .await
+            .map_err(|e| NexusApiError::Internal {
                 code: "FILE_SYNC_FAILED".into(),
-                message: format!("failed to open final file for fsync: {e}"),
-            }
-        })?;
-        final_handle.sync_all().await.map_err(|e| NexusApiError::Internal {
-            code: "FILE_SYNC_FAILED".into(),
-            message: format!("failed to fsync final file: {e}"),
-        })?;
+                message: format!("failed to fsync final file: {e}"),
+            })?;
         tx.commit().await.map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: format!("chapter update tx commit: {e}"),
@@ -2224,8 +2232,8 @@ async fn execute_manuscript_write(
     // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
     // within the workspace root before any FS op. Uses the same canonicalize +
     // component-wise prefix-check helper as the chapter PUT handler.
-    let abs_body = resolve_guarded_path(workspace_root_path, &body_path, false).map_err(|e| {
-        match e {
+    let abs_body =
+        resolve_guarded_path(workspace_root_path, &body_path, false).map_err(|e| match e {
             NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
                 NexusApiError::InvalidInput {
                     field: "body_path".into(),
@@ -2233,8 +2241,7 @@ async fn execute_manuscript_write(
                 }
             }
             other => other,
-        }
-    })?;
+        })?;
 
     // Ensure parent directory exists.
     if let Some(parent) = abs_body.parent() {
@@ -2255,16 +2262,20 @@ async fn execute_manuscript_write(
             message: format!("failed to write manuscript body: {e}"),
         })?;
     // Durability: fsync temp file before the atomic rename.
-    let tmp_handle = tokio::fs::File::open(&tmp_file).await.map_err(|e| {
-        NexusApiError::Internal {
+    let tmp_handle =
+        tokio::fs::File::open(&tmp_file)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_SYNC_FAILED".into(),
+                message: format!("failed to open temp file for fsync: {e}"),
+            })?;
+    tmp_handle
+        .sync_all()
+        .await
+        .map_err(|e| NexusApiError::Internal {
             code: "FILE_SYNC_FAILED".into(),
-            message: format!("failed to open temp file for fsync: {e}"),
-        }
-    })?;
-    tmp_handle.sync_all().await.map_err(|e| NexusApiError::Internal {
-        code: "FILE_SYNC_FAILED".into(),
-        message: format!("failed to fsync temp file: {e}"),
-    })?;
+            message: format!("failed to fsync temp file: {e}"),
+        })?;
 
     // W-001: wrap the DB word-count update + atomic rename in a single
     // transaction so the metadata update only commits when the final file is in
@@ -2310,16 +2321,20 @@ async fn execute_manuscript_write(
     })?;
     // Durability: fsync the final file after the atomic rename so a crash
     // after rename() returns does not leave the rename unflushed.
-    let final_handle = tokio::fs::File::open(&abs_body).await.map_err(|e| {
-        NexusApiError::Internal {
+    let final_handle =
+        tokio::fs::File::open(&abs_body)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_SYNC_FAILED".into(),
+                message: format!("failed to open final file for fsync: {e}"),
+            })?;
+    final_handle
+        .sync_all()
+        .await
+        .map_err(|e| NexusApiError::Internal {
             code: "FILE_SYNC_FAILED".into(),
-            message: format!("failed to open final file for fsync: {e}"),
-        }
-    })?;
-    final_handle.sync_all().await.map_err(|e| NexusApiError::Internal {
-        code: "FILE_SYNC_FAILED".into(),
-        message: format!("failed to fsync final file: {e}"),
-    })?;
+            message: format!("failed to fsync final file: {e}"),
+        })?;
     tx.commit().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".to_string(),
         message: format!("manuscript.write tx commit: {e}"),
