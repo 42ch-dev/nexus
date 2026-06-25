@@ -36,7 +36,7 @@ toml = "0.8"
 # Rust extension-trait API surface and is the canonical macOS mechanism.
 opener = "0.7"
 # Async runtime primitives for the sidecar lifecycle monitor (shared state + timers).
-tokio = { version = "1.35", features = ["sync", "time", "net", "rt"] }
+tokio = { version = "1.35", features = ["sync", "time", "net", "rt", "macros"] }
 # Lightweight loopback health probe; reuses the same HTTP endpoint as the SPA.
 reqwest = { version = "0.12", features = ["json"] }
 

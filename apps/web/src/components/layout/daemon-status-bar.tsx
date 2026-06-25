@@ -46,13 +46,19 @@ function displayFor(status: DaemonStatus): StateDisplay {
         label: 'Daemon stopped',
         helper: status.detail ?? 'Restart the daemon to use local workspace features.',
       };
-    case 'error':
+    case 'error': {
+      // Rust sets detail to a port-conflict message or the generic boot-failure
+      // copy per daemon-runtime.md §12.2. Surface the distinction in the pill.
+      const generic =
+        status.detail ??
+        'Nexus could not start its background service. Check the logs or try restarting.';
+      const isPortConflict =
+        typeof status.detail === 'string' && status.detail.includes('port') && status.detail.includes('already in use');
       return {
-        label: 'Port unavailable',
-        helper:
-          status.detail ??
-          'Nexus could not start its background service. Check the logs or try restarting.',
+        label: isPortConflict ? 'Port unavailable' : 'Daemon did not start',
+        helper: generic,
       };
+    }
     default:
       return {
         label: 'Daemon status unknown',

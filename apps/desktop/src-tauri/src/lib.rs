@@ -207,11 +207,21 @@ pub fn run() {
     let sidecar_manager = sidecar::SidecarManager::new(port);
     let setup_manager = sidecar_manager.clone();
 
+    // Inject the Rust-resolved daemon port into the webview before any page
+    // loads. This makes `window.__NEXUS_DAEMON_PORT__` the authoritative source
+    // for `TauriClient`; `process.env` is undefined in the Tauri webview so the
+    // SPA would otherwise always fall back to 8420 (daemon-runtime.md §12.3).
+    let port_script = format!("window.__NEXUS_DAEMON_PORT__ = {port};");
+    let port_plugin = tauri::plugin::Builder::<tauri::Wry>::new("nexus-desktop-port")
+        .js_init_script(port_script)
+        .build();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         // Shell plugin drives the bundled `nexus42` sidecar via
         // `tauri_plugin_shell::ShellExt::sidecar` (P1).
         .plugin(tauri_plugin_shell::init())
+        .plugin(port_plugin)
         .manage(workspace_root)
         .manage(sidecar_manager.clone())
         .setup(move |app| {

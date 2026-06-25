@@ -18,5 +18,5 @@
     "node": ">=20.0.0",
     "pnpm": ">=8.0.0"
   },
-  "_p1_runtime_deps_note": "P1 (sidecar lifecycle) adds @tauri-apps/plugin-shell + @tauri-apps/api as runtime deps for Command.sidecar(). P0 has no desktop-owned JS — the Tauri webview loads apps/web/dist, which detects desktop mode at runtime via window.__TAURI__ and invokes custom commands. No Tauri npm deps belong in apps/web (shared browser+desktop bundle)."
+  "_p1_runtime_deps_note": "V1.66 has no desktop-owned JS runtime dependencies. The Tauri webview loads apps/web/dist, which detects desktop mode at runtime via window.__TAURI_INTERNALS__ and invokes custom commands through window.__TAURI__.core.invoke. Transport primitives (opener, shell sidecar) live in the Rust crate, not in npm packages. apps/web remains a shared browser+desktop bundle with no Tauri npm deps."
 }
