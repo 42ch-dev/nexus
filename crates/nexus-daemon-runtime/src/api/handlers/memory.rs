@@ -6,6 +6,7 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use nexus_contracts::PaginationInfo;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 #[derive(Debug, Deserialize)]
@@ -37,16 +38,7 @@ pub struct CreatePendingReviewResponse {
 #[derive(Debug, Serialize)]
 pub struct ListPendingReviewsResponse {
     pub items: Vec<PendingReviewInfo>,
-    pub pagination: PaginationEnvelope,
-}
-
-/// Cursor-based pagination envelope.
-#[derive(Debug, Serialize)]
-pub struct PaginationEnvelope {
-    pub limit: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
-    pub has_more: bool,
+    pub pagination: PaginationInfo,
 }
 
 /// Pending review info for API responses.
@@ -287,8 +279,8 @@ pub async fn list_pending_reviews(
 
     Ok(Json(ListPendingReviewsResponse {
         items,
-        pagination: PaginationEnvelope {
-            limit,
+        pagination: PaginationInfo {
+            limit: i64::try_from(limit).unwrap_or(i64::MAX),
             has_more: next_cursor.is_some(),
             next_cursor,
         },
