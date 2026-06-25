@@ -49,6 +49,7 @@ pub struct PaginationEnvelope {
     pub limit: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    pub has_more: bool,
 }
 
 // ── Local creator detail types ──────────────────────────────────────
@@ -312,7 +313,11 @@ pub async fn list(
     info!("List creators completed");
     Ok(Json(ListCreatorsResponse {
         items,
-        pagination: PaginationEnvelope { limit, next_cursor },
+        pagination: PaginationEnvelope {
+            limit,
+            has_more: next_cursor.is_some(),
+            next_cursor,
+        },
     }))
 }
 

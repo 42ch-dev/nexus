@@ -163,6 +163,14 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SyncPullResponse
         ),
+        // ── local-api/common/ (V1.64 — shared envelopes) ───────────────────
+        // F-E1: canonical Local API error detail (the `error` object inside the
+        // daemon's `{ success, false, error: ErrorResponse }` wire body).
+        entry!(
+            "schemas/local-api/common/error-response.schema.json",
+            Strict,
+            ErrorResponse
+        ),
         // ── local-api/compute/ ───────────────────────────────────────────
         // V1.62 reorganization: compute envelopes moved here from compute/.
         // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
@@ -293,6 +301,12 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             "schemas/local-api/findings/list-findings-query.schema.json",
             Strict,
             ListFindingsQuery
+        ),
+        // F-P2 (V1.64): cursor-paginated findings list response.
+        entry!(
+            "schemas/local-api/findings/list-findings-response.schema.json",
+            Strict,
+            ListFindingsResponse
         ),
         entry!(
             "schemas/local-api/findings/stale-findings-response.schema.json",

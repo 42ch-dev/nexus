@@ -1,0 +1,30 @@
+# Build output (embedded into the nexus42 binary in release; plan P3)
+dist
+dist-ssr
+
+# Dependencies
+node_modules
+
+# Local env (dev daemon URL overrides, etc.)
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Vite / TS caches
+*.tsbuildinfo
+.vite
+
+# Test coverage
+coverage

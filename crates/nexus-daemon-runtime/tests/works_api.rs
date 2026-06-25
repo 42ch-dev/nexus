@@ -212,7 +212,10 @@ async fn list_works_returns_200() {
     let body: Value = resp.json();
     assert!(body["works"].is_array());
     assert!(!body["works"].as_array().unwrap().is_empty());
-    assert_eq!(body["total"], 1);
+    // F-P1 (V1.64): `total` removed; cursor `pagination` envelope present.
+    assert!(body["pagination"].is_object());
+    assert_eq!(body["pagination"]["has_more"], false);
+    assert!(body["total"].is_null());
 }
 
 #[tokio::test]
@@ -225,11 +228,10 @@ async fn list_works_returns_401_without_creator() {
 #[tokio::test]
 async fn get_work_by_id_returns_404_for_unknown() {
     let ctx = test_ctx().await;
-    // Use a simple non-UUID work_id (axum-test routing works for simple strings)
+    // The SPA static-asset fallback is release-only (cfg-gated out of test
+    // builds), so an unknown work path returns the handler's 404 directly.
     let resp = ctx.server.get("/v1/local/works/wrk_nonexistent").await;
     resp.assert_status(axum::http::StatusCode::NOT_FOUND);
-    // axum-test may return empty body for routing-level 404 on some versions;
-    // for handler-level 404 verification, see handler_get_work_returns_404_for_unknown
 }
 
 // ─── Handler-level: GET / PATCH / Inspiration (covers full status matrix) ───
