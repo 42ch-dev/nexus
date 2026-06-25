@@ -1,16 +1,101 @@
 {
   "version": 1,
   "updated_at": "2026-06-25T19:00:00Z",
-  "plans": [],
+  "plans": [
+    {
+      "plan_id": "2026-06-25-v1.66-compass-and-plan-stubs",
+      "title": "V1.66 P-1 — Compass & Plan Stubs (Prepare)",
+      "iteration": "V1.66",
+      "slot": "P-1",
+      "status": "InProgress",
+      "effort": "M",
+      "owner": "@project-manager",
+      "review": "N/A (Prepare)",
+      "wave": 0,
+      "dependency": "—",
+      "working_branch": "(direct on iteration/v1.66)",
+      "merge_target": "iteration/v1.66"
+    },
+    {
+      "plan_id": "2026-06-25-v1.66-desktop-shell-core",
+      "title": "V1.66 P0 — Tauri Desktop Shell Core (TauriClient + Q5 open-with/reveal + DESIGN.md increment)",
+      "iteration": "V1.66",
+      "slot": "P0",
+      "status": "Todo",
+      "effort": "L-XL",
+      "owner": "@frontend-dev",
+      "review": "Tri-review + QA",
+      "wave": 1,
+      "dependency": "P-1 locked + Phase 2b (TauriClient arch + DESIGN.md increment + open-with scope)",
+      "working_branch": "feature/v1.66-desktop-shell-core",
+      "merge_target": "iteration/v1.66"
+    },
+    {
+      "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+      "title": "V1.66 P-sec — Light Hygiene (R-V165-QC1-W2 medium + R-V165-QC-SUGG-DEFENSE + R-V164-QC1-S1-P0)",
+      "iteration": "V1.66",
+      "slot": "P-sec",
+      "status": "Todo",
+      "effort": "S-M",
+      "owner": "@fullstack-dev",
+      "review": "Tri-review + QA",
+      "wave": 1,
+      "dependency": "P-1 locked",
+      "working_branch": "feature/v1.66-hygiene-residuals",
+      "merge_target": "iteration/v1.66"
+    },
+    {
+      "plan_id": "2026-06-25-v1.66-sidecar-lifecycle-and-ci",
+      "title": "V1.66 P1 — Bundled nexus42 Sidecar Lifecycle + macOS CI unsigned .app build",
+      "iteration": "V1.66",
+      "slot": "P1",
+      "status": "Todo",
+      "effort": "L",
+      "owner": "@fullstack-dev",
+      "review": "Tri-review + QA",
+      "wave": 2,
+      "dependency": "P0 merged + Phase 2b (sidecar mechanism + port discovery + asset serving + CI runner)",
+      "working_branch": "feature/v1.66-sidecar-lifecycle-and-ci",
+      "merge_target": "iteration/v1.66"
+    },
+    {
+      "plan_id": "2026-06-25-v1.66-mid-meta-tracking",
+      "title": "V1.66 P-mid — Meta Tracking (integration green + QC tri-review + QA dispatch)",
+      "iteration": "V1.66",
+      "slot": "P-mid",
+      "status": "Todo",
+      "effort": "S",
+      "owner": "@project-manager",
+      "review": "N/A (PM meta)",
+      "wave": 3,
+      "dependency": "P1 merged",
+      "working_branch": "(no branch — PM meta)",
+      "merge_target": "—"
+    },
+    {
+      "plan_id": "2026-06-25-v1.66-residual-convergence-and-closeout",
+      "title": "V1.66 P-last — Residual Convergence, Spec Promotion, Profile B Compaction, PR",
+      "iteration": "V1.66",
+      "slot": "P-last",
+      "status": "Todo",
+      "effort": "M",
+      "owner": "@fullstack-dev + @project-manager",
+      "review": "N/A (closeout)",
+      "wave": 3,
+      "dependency": "P-mid (QC+QA returned, fixes resolved)",
+      "working_branch": "feature/v1.66-residual-convergence-and-closeout",
+      "merge_target": "iteration/v1.66"
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.66",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.65",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.66+ (pending)",
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.66",
+    "latest_active_compass": "v1.66-tauri-desktop-shell-delivery-compass-v1",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.65+)",
+    "pre_implement_gate": "pending (V1.66 Prepare — Phase 2b/2c + PM lock before Wave 1 dispatch)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -35,19 +120,24 @@
       "note": "V1.65 ships Outline & Structure Authoring (CLI+Web UI authoring entry surface) + Track B API closure + Track D dependency security. Body editor + Tauri shell + open-with deferred V1.66. Platform paused (PD-05)."
     },
     "tech_debt_summary": {
-      "total_open": 0,
-      "total_deferred": 20,
-      "total_resolved": 179,
-      "total_archived": 5,
+      "total_open": 4,
+      "total_deferred": 19,
+      "total_resolved": 181,
+      "total_archived": 0,
       "by_severity_active": {
-        "low": 0,
-        "medium": 0,
-        "high": 0
+        "high": 0,
+        "medium": 1,
+        "low": 3
       },
-      "by_target_active": {}
+      "by_target_active": {
+        "V1.66": 2,
+        "V1.66+": 2
+      },
+      "refreshed_at": "2026-06-25T13:57:50Z",
+      "refreshed_reason": "V1.66 Prepare: prior total_open=0 was stale (V1.65 closeout registered 4 open residuals after the V1.65 P-last summary was computed). Recomputed from residual_findings."
     },
-    "updated_at": "2026-06-25T03:35:00Z",
-    "spec_integration_branch": null
+    "updated_at": "2026-06-25T13:57:50Z",
+    "spec_integration_branch": "iteration/v1.66"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
