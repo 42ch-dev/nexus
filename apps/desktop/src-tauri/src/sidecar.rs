@@ -104,8 +104,31 @@ impl SidecarManager {
         self.0.lock().await.port
     }
 
-    /// Current status for the SPA indicator.
+    /// Current status for the SPA indicator. For attached (non-owned) daemons,
+    /// performs an active health probe so the UI does not stay "running" after
+    /// the external daemon has crashed.
     pub async fn status(&self) -> DaemonStatus {
+        let (port, should_probe) = {
+            let inner = self.0.lock().await;
+            (
+                inner.port,
+                inner.state == DaemonState::Running && !inner.owned,
+            )
+        };
+
+        if should_probe && probe_health(port).await.is_none() {
+            let mut inner = self.0.lock().await;
+            // Only mutate if the state is still the attached-running snapshot we
+            // probed under; a concurrent start/stop may have moved it already.
+            if inner.state == DaemonState::Running && !inner.owned {
+                inner.state = DaemonState::Error;
+                inner.version = None;
+                inner.detail = Some(
+                    "The external daemon stopped. Restart the daemon to resume local workspace features.".to_string(),
+                );
+            }
+        }
+
         let inner = self.0.lock().await;
         DaemonStatus {
             state: inner.state,
@@ -386,8 +409,63 @@ mod tests {
     use super::{backoff, resolve_port, DaemonState};
     use std::time::Duration;
 
+    // `resolve_port` reads `NEXUS_DAEMON_PORT`, which is process-global. These
+    // tests must run serially so one test's env mutation does not leak into the
+    // next. V1.66 added this guard while extending the sidecar test suite
+    // (qc3 W-2).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn clear_port_env() {
+        // SAFETY: called under ENV_LOCK.
+        unsafe { std::env::remove_var("NEXUS_DAEMON_PORT") };
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn attached_running_daemon_transitions_to_error_when_probe_fails() {
+        // Pick a port that is extremely unlikely to be listening so the active
+        // health probe in status() fails.
+        let port = 63333;
+        let manager = crate::sidecar::SidecarManager::new(port);
+
+        // Simulate a successful attach: state=Running, owned=false.
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Running;
+            inner.owned = false;
+            inner.version = Some("1.0.0".to_string());
+        }
+
+        let status = manager.status().await;
+        assert_eq!(status.state, DaemonState::Error);
+        assert!(status
+            .detail
+            .as_deref()
+            .unwrap_or("")
+            .contains("external daemon stopped"));
+        assert!(status.version.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn owned_running_daemon_does_not_probe_on_status() {
+        let manager = crate::sidecar::SidecarManager::new(63334);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Running;
+            inner.owned = true;
+            inner.version = Some("1.0.0".to_string());
+        }
+
+        let status = manager.status().await;
+        // No probe is sent for owned sidecars (they have a pid monitor); state
+        // is returned as-is even though nothing is listening on the port.
+        assert_eq!(status.state, DaemonState::Running);
+        assert_eq!(status.version.as_deref(), Some("1.0.0"));
+    }
+
     #[test]
     fn default_port_without_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_port_env();
         // Ensure the function returns the documented default when the override
         // env var is absent.
         assert_eq!(resolve_port(), 8420);
@@ -395,7 +473,9 @@ mod tests {
 
     #[test]
     fn port_override_from_env() {
-        // SAFETY: single-threaded test with no other env readers.
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_port_env();
+        // SAFETY: called under ENV_LOCK with no other env readers.
         unsafe { std::env::set_var("NEXUS_DAEMON_PORT", "9000") };
         assert_eq!(resolve_port(), 9000);
         unsafe { std::env::remove_var("NEXUS_DAEMON_PORT") };
@@ -403,6 +483,8 @@ mod tests {
 
     #[test]
     fn invalid_env_falls_back_to_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_port_env();
         unsafe { std::env::set_var("NEXUS_DAEMON_PORT", "not-a-port") };
         assert_eq!(resolve_port(), 8420);
         unsafe { std::env::remove_var("NEXUS_DAEMON_PORT") };
