@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-25T16:00:00Z",
+  "updated_at": "2026-06-25T18:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-25-v1.65-compass-and-plan-stubs",
@@ -49,7 +49,7 @@
       "title": "V1.65 P1 — apps/web Test Baseline (R-V164-QC1-S1-P1 closure)",
       "iteration": "V1.65",
       "slot": "P1",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "S",
       "owner": "@frontend-dev",
       "review": "Tri-review + QA",
@@ -63,7 +63,7 @@
       "title": "V1.65 P2 — Outline & Structure Authoring UI",
       "iteration": "V1.65",
       "slot": "P2",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "XL",
       "owner": "@frontend-dev",
       "review": "Tri-review + QA",
@@ -3934,6 +3934,64 @@
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
         "note": "P3 owns the rust-embed binary that serves apps/web/dist. P2 verified via msw + vite-preview (offline error handling, CRUD round-trip). Live binary smoke at P-mid/QA.",
         "lifecycle": "deferred"
+      }
+    ],
+    "v1.65": [
+      {
+        "id": "R-V165-QC1-W1",
+        "title": "Outline PUT FS/DB atomicity",
+        "severity": "high",
+        "lifecycle": "resolved",
+        "source": "qc1.md",
+        "scope": "chapters.rs put_chapter_outline",
+        "decision": "resolved",
+        "resolution": {
+          "commit": "1407b16a",
+          "plan_id": "fix-wave-1"
+        },
+        "target_iteration": "V1.65"
+      },
+      {
+        "id": "R-V165-QC1-W2",
+        "title": "Missing HTTP-level integration tests for chapter endpoints",
+        "severity": "medium",
+        "lifecycle": "open",
+        "source": "qc1.md",
+        "scope": "chapter API integration tests",
+        "decision": "defer",
+        "owner": "@qa-engineer/@fullstack-dev",
+        "target_iteration": "V1.66",
+        "tracking": "test-depth gap, not correctness"
+      },
+      {
+        "id": "R-V165-QC-SUGG-DEFENSE",
+        "title": "Write-path guard parity + RuntimeLockGuard dedup + post-rename fsync (qc1 S-1/S-4, qc2 S-001, qc3 S-3)",
+        "severity": "low",
+        "lifecycle": "open",
+        "source": "qc1/qc2/qc3",
+        "scope": "defense-in-depth + dedup",
+        "decision": "defer",
+        "target_iteration": "V1.66+"
+      },
+      {
+        "id": "R-V165-QC3-VIRT",
+        "title": "Chapter table virtualization for large chapter counts",
+        "severity": "low",
+        "lifecycle": "open",
+        "source": "qc3.md",
+        "scope": "apps/web chapters-page",
+        "decision": "defer",
+        "target_iteration": "V1.66"
+      },
+      {
+        "id": "R-V165-QC-SUGG-DX",
+        "title": "DX/UX polish (can_edit_outline probe, title 400 DX, route nesting, enum_conversions discoverability, TipTap inline-deps pinning, save-error/protected-edit web coverage)",
+        "severity": "low",
+        "lifecycle": "open",
+        "source": "qc1/qc3",
+        "scope": "cross-cutting DX",
+        "decision": "defer",
+        "target_iteration": "V1.66+"
       }
     ]
   }
