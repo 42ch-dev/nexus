@@ -3,9 +3,9 @@
   "updated_at": "2026-06-24T23:30:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.64",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.64 (PR open to main)",
+    "integration_branch": null,
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.64 (merged via PR #87 @ d8be93a3)",
     "integration_merge_target": "main",
     "latest_active_iteration": "V1.65+ (pending)",
     "latest_active_compass": null,
@@ -37,7 +37,8 @@
         "QC": "Tri-review both waves. Wave 1: qc1 Request Changes (W-1 error-envelope mismatch) -> fix-wave (errors.ts wrapped-envelope parse + convention §3.1) -> qc1 re-review Approve; qc2/qc3 Approve. Wave 2: qc1/qc2/qc3 Approve (qc3 host-glitch wrote to wrong path, relocated)."
       },
       "note": "V1.64 ships Local Web UI Kickoff (CLI-only -> CLI + local Web UI). Writing-profile product line remains complete. Tauri desktop shell + content-authoring UI deferred to V1.65+. Platform paused (PD-05).",
-      "predecessor_merge_commit": "c94a7d70"
+      "predecessor_merge_commit": "c94a7d70",
+      "merge_commit": "d8be93a3"
     },
     "tech_debt_summary": {
       "total_open": 0,
@@ -51,7 +52,7 @@
       },
       "by_target_active": {}
     },
-    "updated_at": "2026-06-25T02:30:00Z"
+    "updated_at": "2026-06-25T03:35:00Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
