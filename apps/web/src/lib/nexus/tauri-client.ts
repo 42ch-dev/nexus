@@ -22,18 +22,30 @@
  */
 import { BrowserClient, type BrowserClientOptions } from './browser-client';
 
+declare global {
+  interface Window {
+    /** Injected by the Tauri desktop shell before the SPA loads (authoritative). */
+    __NEXUS_DAEMON_PORT__?: number;
+  }
+}
+
 /**
  * Resolve the desktop daemon port (compass §5 #3 LOCKED).
  *
- * Order: explicit `port` argument → `NEXUS_DAEMON_PORT` (if a valid u16) →
- * `8420` (the daemon default, `crates/nexus42/src/config.rs` /
- * `nexus-daemon-runtime/src/boot.rs`). The Tauri app passes `--port <resolved>`
- * to the sidecar in P1 so CLI args + env cannot diverge.
+ * Order: explicit `port` argument → `window.__NEXUS_DAEMON_PORT__` (injected by
+ * the Tauri shell from the Rust-resolved value) → `NEXUS_DAEMON_PORT` env var
+ * (dev/browser fallback) → `8420`. The injected global is authoritative because
+ * `process.env` is unavailable inside the Tauri webview; the Rust launcher and
+ * SPA must agree on the same port when `NEXUS_DAEMON_PORT` is overridden
+ * (daemon-runtime.md §12.3).
  */
 export function resolveDesktopPort(explicit?: number | string): number {
   if (explicit !== undefined && explicit !== '') {
     const n = Number(explicit);
     if (Number.isInteger(n) && n > 0 && n < 65536) return n;
+  }
+  if (typeof window !== 'undefined' && typeof window.__NEXUS_DAEMON_PORT__ === 'number') {
+    return window.__NEXUS_DAEMON_PORT__;
   }
   const fromEnv =
     typeof process !== 'undefined' ? process.env?.NEXUS_DAEMON_PORT : undefined;
