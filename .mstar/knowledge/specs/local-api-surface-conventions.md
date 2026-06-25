@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.64 Shipped (conventions established by Track B: cursor pagination canonical; shared `ErrorResponse` envelope; `items` for new list endpoints; sort convention documented for V1.65+) |
+| **Status** | Normative — V1.65 Prepare amendment (V1.64 cursor/error/`items` conventions + chapter-content file-backed route rules) |
 | **Document class** | Master |
 | **Scope** | Cross-resource Local API response/query conventions for schemas under `schemas/local-api/` and handlers under `nexus-daemon-runtime` |
 | **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md) |
@@ -163,7 +163,109 @@ Do not introduce alternate names such as `order`, `direction`, `sort`, or `sortD
 
 ---
 
-## 6. Handler/schema drift closure
+## 6. File-backed chapter-content routes
+
+V1.65 introduces the chapter-content Local API surface under
+`/v1/local/works/{work_id}/chapters/*`; detailed field contracts live in
+[chapter-content-local-api.md](./chapter-content-local-api.md). This section is
+the normative cross-surface convention for any Local API route that exposes
+chapter outline/body files through DB-sourced paths.
+
+### 6.1 Chapter lists use `items` + cursor from day one
+
+`GET /v1/local/works/{work_id}/chapters` MUST use the canonical new-list shape:
+
+```json
+{
+  "items": [],
+  "pagination": {
+    "limit": 50,
+    "next_cursor": null,
+    "has_more": false
+  }
+}
+```
+
+Do not introduce a `chapters` array key. Chapter list ordering defaults to
+`volume ASC, chapter ASC`; optional filters such as `status` must preserve cursor
+semantics and return `chapter_cursor_invalid` / validation errors for bad input.
+
+### 6.2 Outline PUT is atomic file write + DB metadata update
+
+`PUT /v1/local/works/{work_id}/chapters/{n}/outline` is the only writable
+chapter-file route in V1.65. It MUST:
+
+1. Load the target `outline_path` from `work_chapters` after Work ownership is
+   verified. If absent, initialize the canonical seed path explicitly.
+2. Resolve that path under the active workspace root and apply the path guard in
+   §6.5 before creating directories or writing bytes.
+3. Write to a sibling temp file, flush/sync, then atomically rename over the
+   final outline file, mirroring the reconcile atomic write pattern in
+   `work_chapters::sync_frontmatter_status`.
+4. Update `work_chapters.outline_path` and `updated_at` in the same transactional
+   finalization path as the file rename. Failed DB update or failed rename must
+   clean up the temp file where possible and must not report success.
+5. Return the committed outline DTO, not a speculative echo.
+
+Successful outline PUT MUST NOT automatically change chapter `status`. Status is
+author-controlled through the explicit chapter structure route.
+
+### 6.3 Structure PATCH status and protection rules
+
+`PATCH /v1/local/works/{work_id}/chapters/{n}` is the V1.65 structure-edit route
+for metadata such as title/slug/planned word count/volume/status.
+
+Normative rules:
+
+- The only normal UI-driven status progression in V1.65 is
+  `not_started → outlined`.
+- Reverse transitions and terminal-state changes MUST be explicit actions with a
+  reason if implemented; they must never occur as side effects of outline PUT or
+  ordinary structure edits.
+- `draft` chapters may be structurally edited, but consumers should warn that a
+  body already exists.
+- `finalized` structural edits require explicit confirmation from the caller.
+- `published` structural edits are hard-blocked in V1.65 unless a future
+  publish-retraction design changes the policy.
+- Chapter deletion is out of scope for V1.65; any future delete route MUST
+  hard-block `finalized` and `published` chapters.
+
+### 6.4 Body markdown is read-only in V1.65
+
+`GET /v1/local/works/{work_id}/chapters/{n}/body` may return body markdown and
+optional parsed frontmatter for rendering, but V1.65 MUST NOT add a body write
+route. The orchestration host-tool path remains the body writer until V1.66
+designs a per-chapter edit lock and conflict policy.
+
+### 6.5 DB-sourced path guard is mandatory
+
+`outline_path` and `body_path` are DB-sourced and must be treated as untrusted
+until resolved. Every outline/body read or write route MUST:
+
+1. Join the relative DB path to the daemon workspace root.
+2. Canonicalize the workspace root.
+3. For existing targets, canonicalize the target and require it to start with
+   the canonical workspace root.
+4. For missing-but-creatable targets, validate the normalized target or nearest
+   existing parent cannot escape the workspace root before creating directories.
+5. Reject traversal/symlink escape with a stable validation error, not by falling
+   through to an arbitrary filesystem error.
+
+This mirrors the W-002 defense-in-depth guard in
+`host_tool_handlers.rs` for body reads and applies it to the new outline PUT.
+
+### 6.6 Soft concurrency semantics
+
+V1.65 has no hard per-chapter edit lock. Outline writes are last-write-wins at
+the file level, and orchestration reads the outline at draft-time as a natural
+snapshot. UI consumers should warn when editing outlines for `draft` or
+`finalized` chapters, but the API does not acquire the Work runtime lock solely
+for outline content edits unless the implementation needs it for existing
+single-writer invariants.
+
+---
+
+## 7. Handler/schema drift closure
 
 Handlers that serve schema-promoted Local API routes MUST emit `generated::local_api::*` response shapes or structurally equivalent types verified by `schema_drift_detection.rs` in `CheckMode::Strict`.
 
@@ -177,7 +279,7 @@ Future endpoint acceptance requires:
 
 ---
 
-## 7. Evidence and V1.64 decisions
+## 8. Evidence and V1.64 decisions
 
 The V1.63 Local API surface audit identified:
 

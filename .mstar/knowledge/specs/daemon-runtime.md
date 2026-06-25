@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.64 P3 amendment: bundled local Web UI static-asset serving (rust-embed, ServeDir-style semantics, cache headers, CLI URL logging, `daemon ui` convenience command) |
+| **Status** | Normative — V1.65 Prepare amendment: bundled local Web UI serving plus chapter-content Local API route family |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -131,6 +131,34 @@ On startup (both foreground and background modes), the daemon logs the Web UI UR
   ```
 
 A convenience command `nexus42 daemon ui` (alias `nexus42 daemon web`) starts the daemon in background if not already running and opens the OS default browser via `open` (macOS) / `xdg-open` (Linux) / `start` (Windows).
+
+### 4.5 Chapter-content Local API routes (V1.65)
+
+The daemon runtime owns the chapter-content route family consumed by the bundled
+Web UI authoring surface:
+
+```text
+/v1/local/works/{work_id}/chapters
+/v1/local/works/{work_id}/chapters/{n}
+/v1/local/works/{work_id}/chapters/{n}/outline
+/v1/local/works/{work_id}/chapters/{n}/body
+```
+
+Route responsibilities:
+
+1. List/detail chapter metadata from `work_chapters` using the Local API
+   `items` + cursor convention for the list route.
+2. Read and atomically replace outline markdown at DB-sourced `outline_path`.
+3. PATCH chapter structure metadata (`title` if supported, `slug`,
+   `planned_word_count`, `volume`, and explicit status progression).
+4. Read body markdown from DB-sourced `body_path` only; V1.65 introduces no body
+   write route.
+
+All outline/body file routes MUST apply the same W-002-style workspace path
+guard used by host-tool body reads before reading or writing. Outline PUT uses a
+sibling temp file + flush + atomic rename and updates `outline_path`/`updated_at`
+through the same finalization path. The body writer remains the orchestration
+host-tool path until the V1.66 per-chapter body-editor lock design lands.
 
 ---
 
