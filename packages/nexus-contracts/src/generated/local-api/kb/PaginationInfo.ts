@@ -11,4 +11,5 @@ import type { SchemaVersion } from '../../common/CommonTypes';
 export interface PaginationInfo {
   limit: number;
   next_cursor?: string;
+  has_more: boolean;
 }

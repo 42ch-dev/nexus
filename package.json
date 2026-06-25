@@ -10,6 +10,7 @@
     "url": "https://github.com/42ch/nexus"
   },
   "workspaces": [
+    "apps/*",
     "packages/*",
     "tooling/*"
   ],

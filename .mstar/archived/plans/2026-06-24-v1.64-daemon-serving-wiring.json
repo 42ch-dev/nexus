@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.64-daemon-serving-wiring",
+  "title": "V1.64 P3 — Track A (backend): Daemon Web UI Serving Wiring (ServeDir + rust-embed)",
+  "iteration": "V1.64",
+  "slot": "P3",
+  "status": "InReview",
+  "effort": "M",
+  "owner": "@fullstack-dev-2",
+  "review": "Tri-review + QA",
+  "wave": 2,
+  "dependency": "P1 merged (apps/web dist to embed)",
+  "working_branch": "feature/v1.64-daemon-serving-wiring",
+  "merge_target": "iteration/v1.64"
+}

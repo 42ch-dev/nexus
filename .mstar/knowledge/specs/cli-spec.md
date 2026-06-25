@@ -11,6 +11,7 @@
 **V1.51 Shipped amendments:** §6.2K `creator world kb adopt` LLM metadata surfaces; `creator kb rescan --work <work_ref>` cross-chapter reconciliation; `creator world kb pending --missing-only` (T-A P0/P1/P2).
 **V1.52 T-A P1 Draft overlay:** §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01).
 **V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
+**V1.64 P3 Draft overlay:** §6.3 daemon Web UI serving — `daemon start` logs Web UI URL; new `daemon ui`/`daemon web` convenience command; §7.1 first-run path updated. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4.
 
 ## 0. 文档定位
 
@@ -342,7 +343,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 ### 6.3 `nexus42 daemon`（运行态控制命令组）
 
-- `nexus42 daemon start|stop|restart|status|logs|doctor`
+- `nexus42 daemon start|stop|restart|status|logs|doctor|ui|web`
 - `nexus42 daemon schedule add|edit|remove|list|inspect|context|context-history|start|pause|resume|cancel|advance|timeline`
 
 说明：
@@ -376,6 +377,33 @@ Acceptable examples: `https://registry.cdn.example.com/v1/registry.json`.
 Rejected examples: `http://...` (insecure scheme); `https://localhost:8443/...` (loopback); `https://10.0.0.5/...` (private IP); `https://169.254.169.254/...` (cloud metadata); `https://...` with N>0 redirects; empty / whitespace.
 
 These rejections happen **at daemon start**, not per-invocation — once the daemon boots with a `--cdn-url`, that URL is locked. Reconfiguration requires daemon restart. This ensures sandbox/air-gap environments are not silently compromised by an attacker modifying a flag at runtime.
+
+**V1.64 P3 amendment — Web UI serving and CLI entry:**
+
+`nexus42 daemon start` now serves the bundled local Web UI SPA at the server root (`http://localhost:<port>/`) from embedded assets (`rust-embed`). On startup the daemon logs both the Local API base URL and the Web UI URL:
+
+```
+$ nexus42 daemon start
+✓ Daemon started successfully on port 8420
+  PID: 12345
+  Local API: http://127.0.0.1:8420
+  Web UI:    http://127.0.0.1:8420/
+```
+
+A new convenience subcommand `nexus42 daemon ui` (alias `nexus42 daemon web`) starts the daemon in background mode if it is not already running, then opens the Web UI in the OS default browser (`open`/`xdg-open`/`start`).
+
+| Command | Purpose |
+| --- | --- |
+| `nexus42 daemon ui` | Start daemon (if needed) + open browser to `http://127.0.0.1:<port>/` |
+| `nexus42 daemon ui --port <N>` | Use a specific port (default: 8420) |
+| `nexus42 daemon web` | Alias for `nexus42 daemon ui` |
+
+The static SPA shell (HTML/JS/CSS) is unauthenticated — it carries no data. All data flows through the existing loopback Local API (`/v1/local/*`), which remains keyless on `localhost` per the V1.20 model. See [daemon-runtime.md](./daemon-runtime.md) §4.4 and [web-ui.md](./web-ui.md) §4 for the full serving model.
+
+The `daemon` command group now includes:
+
+- `nexus42 daemon start|stop|restart|status|logs|doctor|ui|web`
+- `nexus42 daemon schedule add|edit|remove|list|inspect|context|context-history|start|pause|resume|cancel|advance|timeline`
 
 ### 6.2D `nexus42 creator run` (Work experience — V1.33 target, V1.45 generic runner)
 
@@ -731,6 +759,8 @@ V1.35 将首次使用拆为 **纯本地**（默认，`platform_integration = pau
 5. `nexus42 creator workspace init`
 6. `nexus42 daemon start` + `nexus42 acp agent use <agent>`
 7. `nexus42 creator bootstrap --idea "..."`
+
+**V1.64:** After step 6, the Web UI is available at `http://localhost:<port>/` (reported in daemon start output). Users may also run `nexus42 daemon ui` to start the daemon and open the browser in one step.
 
 **不需要** `platform auth login` 或 sync。`daemon schedule` 不是首次使用入口。
 

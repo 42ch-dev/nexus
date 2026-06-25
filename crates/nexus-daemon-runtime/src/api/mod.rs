@@ -14,8 +14,11 @@ pub mod auth_middleware;
 pub mod errors;
 pub mod handlers;
 pub mod middleware;
+pub mod pagination;
 
 use crate::api::auth_middleware::DaemonApiConfig;
+#[cfg(not(debug_assertions))]
+use crate::static_assets;
 use crate::workspace::WorkspaceState;
 use axum::{
     middleware as axum_mw,
@@ -387,9 +390,20 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             auth_middleware::require_api_key,
         ));
 
-    Router::new()
-        .merge(runtime_routes)
-        .merge(protected_routes)
+    // ── Top-level router ────────────────────────────────────────────
+    // Explicit /v1/local/* + agent-host routes take priority over the SPA
+    // fallback. The SPA shell carries no data; all data access is through
+    // the protected /v1/local/* routes.
+    let router = Router::new().merge(runtime_routes).merge(protected_routes);
+
+    // SPA fallback is **release-only**: serves the embedded Web UI at
+    // unmatched non-API paths. Excluded in debug/test builds so unmatched
+    // paths return the framework 404 (avoids masking API routing bugs in
+    // tests; dev uses the Vite dev-server proxy, never the daemon's `/`).
+    #[cfg(not(debug_assertions))]
+    let router = router.fallback(static_assets::serve_embedded_app);
+
+    router
         .layer(CorsLayer::permissive())
         // Request ID middleware: runs on ALL requests (before auth),
         // so error responses from auth middleware also include request_id.

@@ -2,7 +2,7 @@
 //!
 //! Endpoints:
 //! - `POST   /v1/local/works` — Create Work (idempotent on `client_request_id`)
-//! - `GET    /v1/local/works` — List Works (filters: status, `intake_status`, limit, offset)
+//! - `GET    /v1/local/works` — List Works (filters: status, `intake_status`, cursor pagination — F-P1)
 //! - `GET    /v1/local/works/{work_id}` — Get one Work
 //! - `PATCH  /v1/local/works/{work_id}` — Partial update
 //! - `POST   /v1/local/works/{work_id}/inspiration` — Append inspiration log entry
@@ -12,10 +12,12 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
+use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use nexus_contracts::PaginationInfo;
 use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
 use nexus_local_db::SqlitePool;
 use serde::{Deserialize, Serialize};
@@ -279,13 +281,16 @@ pub struct ListWorksQuery {
     pub status: Option<String>,
     pub intake_status: Option<String>,
     pub limit: Option<u32>,
-    pub offset: Option<u32>,
+    /// F-P1 (V1.64): opaque cursor returned by the previous response's
+    /// `pagination.next_cursor`. Replaces the legacy `offset` query param.
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ListWorksResponse {
     pub works: Vec<WorkSummary>,
-    pub total: usize,
+    /// F-P1 (V1.64): cursor-based pagination envelope (replaces `total`).
+    pub pagination: PaginationInfo,
 }
 
 #[derive(Debug, Serialize)]
@@ -570,31 +575,36 @@ pub async fn list_works(
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
         .ok_or(NexusApiError::AuthRequired)?;
 
+    // F-P1 (V1.64): cursor-based pagination (convention §2). The opaque cursor
+    // encodes the underlying row offset; clients MUST NOT parse it. We fetch
+    // `limit + 1` rows so a single overflow row detects `has_more` without a
+    // separate count query (the legacy `total` field is removed).
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = query.limit.unwrap_or(100).min(500);
+    let fetch_limit = limit.saturating_add(1);
+
     let filters = WorkListFilters {
         status: query.status,
         intake_status: query.intake_status,
-        limit: query.limit,
-        offset: query.offset,
+        limit: Some(fetch_limit),
+        offset: Some(offset),
     };
 
-    // R-V133P1-11 v2: list + count in a shared transaction so total and
-    // records are consistent even under concurrent writes.
-    // R-V133P1-11 v3: warn on failure for observability before mapping to error response.
-    let (records, total) =
-        works::list_and_count_works(state.pool(), &creator_id, &workspace_slug, &filters)
-            .await
-            .map_err(|e| {
-                tracing::warn!(
-                    error = %e,
-                    "list_and_count_works failed for creator {creator_id} — \
-                     pagination metadata unavailable"
-                );
-                NexusApiError::Internal {
-                    code: "DATABASE_ERROR".to_string(),
-                    message: e.to_string(),
-                }
-            })?;
-    let total: usize = total as usize;
+    let mut records = works::list_works(state.pool(), &creator_id, &workspace_slug, &filters)
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                error = %e,
+                "list_works failed for creator {creator_id} — pagination unavailable"
+            );
+            NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            }
+        })?;
+
+    let (next_cursor, has_more) = offset_page_meta(records.len(), limit, offset);
+    records.truncate(usize::try_from(limit).unwrap_or(records.len()));
 
     let works_list: Vec<WorkSummary> = records
         .into_iter()
@@ -611,7 +621,11 @@ pub async fn list_works(
 
     Ok(Json(ListWorksResponse {
         works: works_list,
-        total,
+        pagination: PaginationInfo {
+            limit: i64::from(limit),
+            next_cursor,
+            has_more,
+        },
     }))
 }
 

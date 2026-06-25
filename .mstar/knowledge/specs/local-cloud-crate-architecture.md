@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Active — long-term normative SSOT, reconciled with the V1.23 entity scope model |
+| **Status** | Active — V1.64 amendment: local Web UI workspace member + embedded asset edge |
 | **Document class** | Master |
 | **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Local API *classes* allowed/forbidden |
 | **Scope model SSOT** | [entity-scope-model.md](./entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
@@ -29,6 +29,8 @@
 **Verified current Cargo reality (2026-05-22):** `cargo tree -p nexus-daemon-runtime --edges normal --depth 1` shows direct local-domain edges to `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge`, and `nexus-moment-context-assembly`, and no `nexus-cloud-sync` or `nexus-cloud-domain` edge. The daemon/cloud forbidden-edge boundary remains satisfied.
 
 **Agent identity:** Operational actor for agents and orchestration is **`Creator`** (`creator_id`). `User` / `Pairing` are platform-bridge concepts only.
+
+**Local Web UI (V1.64):** `apps/web` is part of the **local product** line. It is a bundled React/Vite SPA that consumes `/v1/local/*` through generated `@42ch/nexus-contracts` TypeScript types. It is not `nexus-platform`, does not call platform HTTP directly, and must not import or mirror private platform app assumptions.
 
 ---
 
@@ -79,6 +81,22 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 | **`nexus-daemon-runtime`** | Runtime host, not entity owner | Local API, lifecycle, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. | **Forbidden** |
 | **`nexus-orchestration`** | Execution sessions/schedules, not hierarchy owner | Presets, schedules, workers, and capability registry. Carries `creator_id`/workspace/world references as execution context; does not redefine entity ownership. | No cloud-sync (sync capabilities stubbed locally) |
 | **`nexus42`** | CLI surface | User-facing command routing and wording. It invokes owning crates; it MUST NOT become a second domain implementation for scope rules. | CLI may use cloud-sync for cloud commands |
+
+### 3.2A Local Web UI app (V1.64)
+
+| App | Product line | Responsibility boundary | Cloud/platform dep? |
+| --- | --- | --- | --- |
+| **`apps/web`** | Local product | Browser SPA for Control Room + Setup. Consumes daemon `/v1/local/*` via `@42ch/nexus-contracts` generated TS types and a `NexusClient` transport boundary. Build output (`dist/`) is served by the daemon in release and proxied to the daemon in dev. | **No** direct platform/cloud dependency; no private `nexus-platform` imports or assumptions. |
+
+Embedding edge:
+
+```text
+apps/web (Vite build → dist/)
+  └─ embedded by rust-embed at release build
+      └─ nexus42 binary / nexus-daemon-runtime router static serving
+```
+
+`rust-embed` is a build-time/static-asset edge only. It does not make the Web UI an owning Rust crate and does not permit the frontend to bypass the daemon Local API. `tower-http::ServeDir`-style serving may expose the unauthenticated SPA shell, but data remains behind `/v1/local/*` auth boundaries (see [daemon-runtime.md](./daemon-runtime.md) §4.4).
 
 ### 3.3 Why `nexus-cloud-domain` (not `nexus-domain`)
 
@@ -142,6 +160,7 @@ This section describes the current `Cargo.toml` and `cargo tree` reality. It is 
 | --- | --- | --- |
 | `nexus42` | `nexus-acp-host`, `nexus-cloud-sync` with `legacy-sync`, `nexus-contracts`, `nexus-creator`, `nexus-creator-memory`, `nexus-daemon-runtime`, `nexus-home-layout`, `nexus-local-db`, `nexus-moment-context-assembly` with `cloud-stage`, `nexus-orchestration` | CLI currently reaches cloud-sync and moment assembly. Because the CLI enables `cloud-stage`, `cargo tree -p nexus42` shows `nexus-moment-context-assembly -> nexus-cloud-sync`; this is CLI/cloud-line reachability, not daemon reachability. |
 | `nexus-daemon-runtime` | `nexus-agent-host`, `nexus-contracts`, `nexus-creator`, `nexus-creator-memory`, `nexus-home-layout`, `nexus-kb`, `nexus-knowledge`, `nexus-local-db`, `nexus-moment-context-assembly`, `nexus-narrative`, `nexus-orchestration` | Cargo-wired to the local domain graph with `nexus-moment-context-assembly` default features only. No daemon edge to `nexus-cloud-sync` or `nexus-cloud-domain`. Product wiring remains partial: daemon handlers do not expose moment assembly or narrative/user-knowledge domain HTTP yet. |
+| `apps/web` | npm workspace app consuming `@42ch/nexus-contracts` via workspace version and browser build tooling | Local Web UI product surface. Runtime data access is `/v1/local/*` only; release assets are embedded into `nexus42`/`nexus-daemon-runtime` static serving. Not a cloud app and not part of private `nexus-platform`. |
 | `nexus-moment-context-assembly` | `nexus-contracts`, `nexus-creator-memory`, `nexus-kb`, `nexus-knowledge`, `nexus-narrative`; optional `nexus-cloud-sync` behind `cloud-stage` | Four-domain Moment library dependencies are wired. Current CLI Stage-0/TwoStage product flow remains narrower and does not call `assemble_moment`; CLI can enable `cloud-stage`, daemon default build does not. |
 | `nexus-narrative` | `nexus-contracts`, `nexus-kb` | World/Timeline/Event domain library wired to World KB. No dedicated daemon narrative routes yet. |
 | `nexus-kb` | `nexus-contracts` | World KB graph library; reachable from narrative, moment assembly, and daemon Cargo graph. Daemon `/v1/local/kb/*` remains the CLI local work KB file index, not `nexus-kb`. |
@@ -178,6 +197,9 @@ nexus42 ──┬── nexus-daemon-runtime ──┬── nexus-agent-host
           ├── nexus-local-db
           └── nexus-orchestration
 
+apps/web ──► @42ch/nexus-contracts (workspace TS types)
+         └── build dist ──► rust-embed ──► nexus42/nexus-daemon-runtime static route
+
 nexus-narrative ──► nexus-kb ──► nexus-contracts
 nexus-knowledge ──► nexus-contracts
 nexus-cloud-domain ──► nexus-contracts
@@ -185,6 +207,8 @@ nexus-cloud-sync ──► nexus-cloud-domain, nexus-contracts, nexus-home-layou
 ```
 
 **Current daemon/cloud boundary:** `nexus-daemon-runtime` has no `nexus-cloud-sync` or `nexus-cloud-domain` edge. This matches the forbidden-edge policy.
+
+**Current Web/cloud boundary (V1.64):** `apps/web` is local-only. It consumes generated Local API contracts and daemon loopback routes; it must not share code or runtime dependencies with private `nexus-platform` cloud surfaces.
 
 ---
 

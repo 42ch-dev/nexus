@@ -3,12 +3,12 @@
   "$id": "https://nexus42.invalid/schemas/local-api/works/list-works-response.schema.json",
   "schema_version": 1,
   "title": "Nexus ListWorksResponse",
-  "description": "Response for GET /v1/local/works.",
+  "description": "Response for GET /v1/local/works (cursor-based pagination, F-P1). The legacy `total` field is removed; array field name `works` is retained (the `works` -> `items` rename is deferred to F-P3).",
   "type": "object",
-  "required": ["works", "total"],
+  "required": ["works", "pagination"],
   "properties": {
     "works": { "type": "array", "items": { "$ref": "https://nexus42.invalid/schemas/local-api/works/work-summary.schema.json" } },
-    "total": { "type": "integer" }
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json" }
   },
   "additionalProperties": false
 }
