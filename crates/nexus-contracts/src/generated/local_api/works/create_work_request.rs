@@ -26,4 +26,6 @@ pub struct CreateWorkRequest {
     pub lineage_from_work_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub set_pool_active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_profile: Option<String>,
 }

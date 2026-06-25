@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-25-v1.65-dependency-security-upgrade",
+  "title": "V1.65 P-sec — Dependency Security Upgrade (Dependabot closure)",
+  "iteration": "V1.65",
+  "slot": "P-sec",
+  "status": "Done",
+  "effort": "S-M",
+  "owner": "@ops-engineer",
+  "review": "Tri-review + QA",
+  "wave": 1,
+  "dependency": "P-1 (blocks P1 — vitest 2->3 must land before test baseline)",
+  "working_branch": "feature/v1.65-dep-security-upgrade",
+  "merge_target": "iteration/v1.65"
+}

@@ -25,5 +25,31 @@ export default defineConfig({
     // Keep the baseline fast and deterministic; no watch by default in CI.
     clearMocks: true,
     restoreMocks: true,
+    // Architectural-surface coverage baseline (R-V164-QC1-S1-P1 T5). Scope is
+    // deliberately narrow — the adapter boundary, error parsing, theme/provider,
+    // and the notification hook — because those are the surfaces P2 builds on.
+    // No `thresholds` gate: the plan records the actual number rather than
+    // blocking on cosmetic lines. Run via `pnpm --filter web test:coverage`.
+    coverage: {
+      provider: 'v8',
+      include: [
+        'src/lib/nexus/browser-client.ts',
+        'src/lib/nexus/tauri-client.ts',
+        'src/lib/nexus/adapters.ts',
+        'src/lib/nexus/errors.ts',
+        'src/lib/nexus/types.ts',
+        'src/lib/nexus/query-keys.ts',
+        'src/lib/client-context.tsx',
+        'src/lib/use-toast.tsx',
+        'src/api/queries.ts',
+        'src/components/status-badge.tsx',
+        'src/components/theme-provider.tsx',
+        'src/components/ui/tabs.tsx',
+        'src/pages/chapters-page.tsx',
+        'src/pages/chapter-page.tsx',
+      ],
+      exclude: ['src/**/*.{test,spec}.{ts,tsx}', 'src/test/**'],
+      reporter: ['text', 'text-summary', 'html'],
+    },
   },
 });

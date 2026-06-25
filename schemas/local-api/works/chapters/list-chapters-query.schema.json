@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/chapters/list-chapters-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListChaptersQuery",
+  "description": "Query parameters for GET /v1/local/works/{work_id}/chapters (V1.65 P0). Cursor-based pagination with optional status filter.",
+  "type": "object",
+  "properties": {
+    "status": {
+      "$ref": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-status.schema.json",
+      "description": "Filter chapters by status."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Page size. Default set by handler."
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque pagination cursor returned by the previous response's `pagination.next_cursor`."
+    }
+  },
+  "additionalProperties": false
+}

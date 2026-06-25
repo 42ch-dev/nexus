@@ -12,6 +12,7 @@
 **V1.52 T-A P1 Draft overlay:** §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01).
 **V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
 **V1.64 P3 Draft overlay:** §6.3 daemon Web UI serving — `daemon start` logs Web UI URL; new `daemon ui`/`daemon web` convenience command; §7.1 first-run path updated. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4.
+**V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Local API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
 
 ## 0. 文档定位
 
@@ -399,6 +400,14 @@ A new convenience subcommand `nexus42 daemon ui` (alias `nexus42 daemon web`) st
 | `nexus42 daemon web` | Alias for `nexus42 daemon ui` |
 
 The static SPA shell (HTML/JS/CSS) is unauthenticated — it carries no data. All data flows through the existing loopback Local API (`/v1/local/*`), which remains keyless on `localhost` per the V1.20 model. See [daemon-runtime.md](./daemon-runtime.md) §4.4 and [web-ui.md](./web-ui.md) §4 for the full serving model.
+
+**V1.65 authoring note:** chapter outline and structure editing is exposed first
+through the daemon-served Web UI (`/v1/local/works/{work_id}/chapters/*`). This
+does not remove CLI parity for existing `creator run`, Work status, reconcile, or
+chapter-oriented orchestration flows. The CLI remains the power-user and
+automation surface; the Web UI becomes the primary author-facing surface for
+outline/structure planning. Body full-text editing and native `Open with` actions
+are deferred to the V1.66 Tauri shell/body-editor design.
 
 The `daemon` command group now includes:
 

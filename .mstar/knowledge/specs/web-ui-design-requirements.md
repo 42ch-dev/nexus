@@ -3,7 +3,7 @@
 **Status**: Input brief (Prepare Phase 2b) — **not** the DESIGN.md itself  
 **Author**: `@product-manager`  
 **Consumer**: `@architect` (authors `apps/web/DESIGN.md`, the design-token SSOT; completeness level **Standard** per compass §5 item #6)  
-**Iteration**: V1.64  
+**Iteration**: V1.64 (V1.65 authoring-surface amendment appended in §5)  
 **Drives**: [web-ui.md](web-ui.md) §6 (MVP surface) — the screens whose look/feel this brief constrains
 
 > This document captures the **product and design intent** the design system must serve. It deliberately does **not** specify token values (colors, type scale, spacing units) — those are `@architect`'s job in `apps/web/DESIGN.md`. It states *what the UI must feel like and for whom*, so the token system can be derived rather than guessed.
@@ -53,11 +53,48 @@ Dark mode is **first-class**: the token system must define light **and** dark fr
 
 ---
 
+## 5. V1.65 authoring surface — component design requirements
+
+V1.65 adds the first **authoring-write** surfaces to the UI (see [web-ui.md](web-ui.md) §13). These introduce three new component classes whose look/feel the design system must serve. As in §1–§4, this section fixes *product intent and constraints* — token values remain `@architect`'s job in `apps/web/DESIGN.md` (a **Standard+ increment** this iteration; Production-level polish/animations stay V1.66 per compass §5 item #6/#7).
+
+### 5.1 Rich-text outline editor
+
+The editor is where an author plans a chapter's shape. It must feel like a calm writing surface, not a configuration form.
+
+- **Toolbar scope (markdown subset)**: headings, lists, bold, italic, code, blockquote, link. This is the **boundary** of the supported markdown subset (compass §5 item #1); the design must make unsupported nodes visibly out-of-scope (e.g. preserved as raw blocks) rather than silently mangling them.
+- **Save-state indicator**: a persistent, glanceable status — `clean` / `dirty` / `saving` / `saved-error`. The author must always know whether their outline is on disk. `saved-error` must surface the parsed `ErrorResponse` one-liner, not a raw failure.
+- **Soft-concurrency warning surface**: when the chapter being edited is in `draft` or `finalized` status, show a persistent banner stating plainly that editing the outline will **not** re-draft the body, and guiding the author to the explicit next step: reverse-transition the chapter status to `outlined` (then advance to `draft`) via the structure table to trigger a re-draft. Suggested copy: *"This chapter already has a draft body. Editing the outline will not re-draft it — the orchestration engine re-drafts only when the chapter transitions to `draft` status. To trigger a re-draft after saving: reverse the chapter status to `outlined` in the structure table, then advance it back to `draft`."*
+  - **Product priority: non-blocking but unmissable.** It must not block the save (the model is soft — orchestration takes a fresh snapshot), but it must not be dismissible-to-invisible either. Lean: a persistent banner/strip attached to the editor chrome, not a one-time toast.
+- **A11y**: the editor is a writing surface — full keyboard operability, visible focus, and `prefers-reduced-motion`-respectful transitions (§4) apply at full strength.
+
+### 5.2 Chapter structure data table
+
+A data-dense table (same register as the Control Room dashboards in §1) with an inline-edit affordance layered on top.
+
+- **Columns**: chapter #, title (**display-only** — derived from outline frontmatter or slug/chapter# fallback; no `title` DB column in V1.65), slug, planned word count, volume, status, actual word count. Status renders as a **meaningful badge** (not decorative color — exposes its text to assistive tech, §4).
+- **Inline edit affordance**: slug / planned word count / volume are editable in place (`title` is display-only — title text is shaped in the outline editor); status progression is an explicit action (not free-form typing) so reverse transitions can be gated.
+- **Multi-Work switcher reuse**: the per-Work table reuses the V1.64 Works dashboard entry as the Work selector; the design must make "which Work am I editing" unambiguous at all times.
+- **Confirmation-dialog policy (protected chapters)**:
+  - Structural edits on `finalized` / `published` chapters → **confirmation dialog** (warn, do not silently apply).
+  - **Deletion → hard-block** (refuse, with a plain-language reason). There is no "confirm to delete" path; deletion is not offered for settled chapters.
+- **Destructive-action visual language** for the confirmation path should match the V1.64 preset/Work destructive language (§2 trust) so the author recognises it across the app.
+
+### 5.3 Body read-only context menu
+
+- **"Copy path" only.** The body is rendered read-only (frontmatter-aware header strip + rendered prose). The right-click menu offers **Copy path** (browser clipboard write; path sourced from the API).
+- **Explicitly out of scope (V1.66 Tauri)**: "Open with…" and "Reveal in file manager" are **native-shell** desktop-integration actions (compass §0 Q5), not browser capabilities. The V1.65 design must not imply them — no greyed-out "Open with…" entries that tease an unavailable action. When the Tauri shell lands in V1.66 these become real entries via `TauriClient`; the V1.65 browser menu simply does not contain them.
+
+### 5.4 Light + dark theme parity (carried from V1.64)
+
+All three V1.65 component classes — editor, table, context menu — must ship with **light and dark** token parity from day one (shared token names, different values — `mstar-design-md` dual-theme rule; §4). The author persona writes across both; the editor especially must hold up over long sessions in dark mode.
+
+---
+
 ## What this brief deliberately does NOT decide
 
 - Token values (colors, type scale, spacing, radii, elevation, motion durations) → `apps/web/DESIGN.md` (`@architect`).
-- Component inventory beyond "strong tables + strong forms + status/severity primitives + loading/empty/error states" → `apps/web/DESIGN.md`.
-- Completeness level beyond **Standard** (Production-level polish/animations are V1.65+, compass §5 item #6).
+- Component inventory beyond "strong tables + strong forms + status/severity primitives + loading/empty/error states" (V1.64) plus the V1.65 "editor + structure table + read-only context menu" increment (§5) → `apps/web/DESIGN.md`.
+- Completeness level beyond **Standard** for V1.64 + **Standard+ increment** for V1.65 authoring components (Production-level polish/animations are V1.66, compass §5 item #6/#7).
 
 ## Open inputs `@architect` should resolve in DESIGN.md
 
@@ -65,6 +102,8 @@ Dark mode is **first-class**: the token system must define light **and** dark fr
 2. Focus-ring and destructive-action visual language (§2 trust, §4 a11y).
 3. The Voice & Content token section mirroring CLI copy (§3).
 4. Light + dark dual-theme token tables sharing names (§4).
+5. The V1.65 authoring component tokens — editor (toolbar, surface, save-state indicator, soft-concurrency banner), data-table (structure rows, status badges, inline edit, confirmation / hard-block dialog), context-menu (copy-path) — appended as a **Standard+ increment**, light + dark (§5).
+6. The **non-blocking-but-unmissable** visual treatment for the outline-editor soft-concurrency warning (§5.1) — this is the highest product-priority design decision in the V1.65 increment.
 
 ---
 

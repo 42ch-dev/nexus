@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/preset-management/update-preset-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus UpdatePresetRequest",
+  "description": "Request body for PATCH /v1/local/presets/{id} (V1.65 P0). Replaces the user preset's preset.yaml content after validation.",
+  "type": "object",
+  "required": ["yaml"],
+  "properties": {
+    "yaml": {
+      "type": "string",
+      "description": "Complete replacement preset.yaml content."
+    }
+  },
+  "additionalProperties": false
+}

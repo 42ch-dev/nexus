@@ -52,11 +52,14 @@ export * from './local-api/orchestration/sessions/ListSessionsQuery';
 export * from './local-api/orchestration/sessions/ListSessionsResponse';
 export * from './local-api/orchestration/sessions/SessionDetailResponse';
 export * from './local-api/orchestration/sessions/SessionSummary';
+export * from './local-api/preset-management/GetPresetResponse';
 export * from './local-api/preset-management/ListPresetsResponse';
 export * from './local-api/preset-management/PresetSummary';
 export * from './local-api/preset-management/ReloadPresetResponse';
 export * from './local-api/preset-management/ScaffoldPresetRequest';
 export * from './local-api/preset-management/ScaffoldPresetResponse';
+export * from './local-api/preset-management/UpdatePresetRequest';
+export * from './local-api/preset-management/UpdatePresetResponse';
 export * from './local-api/preset-management/ValidatePresetRequest';
 export * from './local-api/preset-management/ValidatePresetResponse';
 export * from './local-api/schedule/AddScheduleRequest';
@@ -76,6 +79,17 @@ export * from './local-api/schedule/SignalScheduleRequest';
 export * from './local-api/schedule/SignalScheduleResponse';
 export * from './local-api/works/AppendInspirationRequest';
 export * from './local-api/works/AppendInspirationResponse';
+export * from './local-api/works/chapters/ChapterBody';
+export * from './local-api/works/chapters/ChapterContentQuery';
+export * from './local-api/works/chapters/ChapterDetail';
+export * from './local-api/works/chapters/ChapterOutline';
+export * from './local-api/works/chapters/ChapterProtection';
+export * from './local-api/works/chapters/ChapterStatus';
+export * from './local-api/works/chapters/ChapterSummary';
+export * from './local-api/works/chapters/ListChaptersQuery';
+export * from './local-api/works/chapters/ListChaptersResponse';
+export * from './local-api/works/chapters/PatchChapterRequest';
+export * from './local-api/works/chapters/PutChapterOutlineRequest';
 export * from './local-api/works/CreateWorkRequest';
 export * from './local-api/works/CreateWorkResponse';
 export * from './local-api/works/ListWorksQuery';
@@ -177,11 +191,14 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListSessionsResponse: 1,
   SessionDetailResponse: 1,
   SessionSummary: 1,
+  GetPresetResponse: 1,
   ListPresetsResponse: 1,
   PresetSummary: 1,
   ReloadPresetResponse: 1,
   ScaffoldPresetRequest: 1,
   ScaffoldPresetResponse: 1,
+  UpdatePresetRequest: 1,
+  UpdatePresetResponse: 1,
   ValidatePresetRequest: 1,
   ValidatePresetResponse: 1,
   AddScheduleRequest: 1,
@@ -201,6 +218,17 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SignalScheduleResponse: 1,
   AppendInspirationRequest: 1,
   AppendInspirationResponse: 1,
+  ChapterBody: 1,
+  ChapterContentQuery: 1,
+  ChapterDetail: 1,
+  ChapterOutline: 1,
+  ChapterProtection: 1,
+  ChapterStatus: 1,
+  ChapterSummary: 1,
+  ListChaptersQuery: 1,
+  ListChaptersResponse: 1,
+  PatchChapterRequest: 1,
+  PutChapterOutlineRequest: 1,
   CreateWorkRequest: 1,
   CreateWorkResponse: 1,
   ListWorksQuery: 1,

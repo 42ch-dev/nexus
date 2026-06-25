@@ -52,6 +52,7 @@ async fn create_work(state: &WorkspaceState) -> String {
             client_request_id: None,
             lineage_from_work_id: None,
             set_pool_active: None,
+            work_profile: None,
         }),
     )
     .await

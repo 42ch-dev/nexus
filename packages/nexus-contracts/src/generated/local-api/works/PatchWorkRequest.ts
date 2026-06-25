@@ -22,4 +22,5 @@ export interface PatchWorkRequest {
   force?: boolean;
   auto_review_master_on_timeout?: boolean;
   auto_chain_interrupted?: boolean;
+  work_profile?: string;
 }

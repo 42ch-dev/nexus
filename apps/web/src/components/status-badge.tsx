@@ -1,5 +1,6 @@
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { humanizeStatus } from '@/lib/format';
+import type { ChapterStatus } from '@42ch/nexus-contracts';
 
 /**
  * Map a free-string status to a Badge variant by keyword.
@@ -30,6 +31,28 @@ export function severityVariant(severity: string | undefined | null): BadgeProps
   return 'neutral';
 }
 
+/**
+ * DESIGN.md §Data Table — explicit chapter-status badge mapping.
+ *
+ * `not_started` neutral, `outlined` queued, `draft` warning, `finalized` running,
+ * `published` preset.
+ */
+export function chapterStatusVariant(status: ChapterStatus | undefined | null): BadgeProps['variant'] {
+  switch (status) {
+    case 'outlined':
+      return 'queued';
+    case 'draft':
+      return 'warning';
+    case 'finalized':
+      return 'running';
+    case 'published':
+      return 'preset';
+    case 'not_started':
+    default:
+      return 'neutral';
+  }
+}
+
 interface StatusBadgeProps {
   status?: string | null;
   /** Show the raw value verbatim instead of humanizing. */
@@ -44,6 +67,20 @@ export function StatusBadge({ status, raw, variant, className }: StatusBadgeProp
   return (
     <Badge variant={resolved} className={className}>
       {raw ? status ?? '—' : humanizeStatus(status)}
+    </Badge>
+  );
+}
+
+interface ChapterStatusBadgeProps {
+  status?: ChapterStatus | null;
+  className?: string;
+}
+
+/** Chapter status pill with the DESIGN.md mapping. */
+export function ChapterStatusBadge({ status, className }: ChapterStatusBadgeProps) {
+  return (
+    <Badge variant={chapterStatusVariant(status)} className={className}>
+      {humanizeStatus(status)}
     </Badge>
   );
 }

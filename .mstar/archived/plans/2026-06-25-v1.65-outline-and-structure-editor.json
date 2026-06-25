@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-25-v1.65-outline-and-structure-editor",
+  "title": "V1.65 P2 — Outline & Structure Authoring UI",
+  "iteration": "V1.65",
+  "slot": "P2",
+  "status": "Done",
+  "effort": "XL",
+  "owner": "@frontend-dev",
+  "review": "Tri-review + QA",
+  "wave": 2,
+  "dependency": "P0 merged + P1 merged + DESIGN.md increment",
+  "working_branch": "feature/v1.65-outline-and-structure-editor",
+  "merge_target": "iteration/v1.65"
+}

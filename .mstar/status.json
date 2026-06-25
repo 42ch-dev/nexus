@@ -1,44 +1,38 @@
 {
   "version": 1,
-  "updated_at": "2026-06-24T23:30:00Z",
+  "updated_at": "2026-06-25T19:00:00Z",
   "plans": [],
   "metadata": {
     "integration_branch": null,
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.64 (merged via PR #87 @ d8be93a3)",
+    "last_integration_branch": "iteration/v1.65",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.65+ (pending)",
+    "latest_active_iteration": "V1.66+ (pending)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "pending (V1.65+)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.64",
-      "compass": "v1.64-local-web-ui-kickoff-delivery-compass-v1",
-      "shipped_at": "2026-06-25T02:30:00Z",
+      "iteration": "V1.65",
+      "compass": "v1.65-outline-and-structure-authoring-delivery-compass-v1",
+      "shipped_at": "2026-06-25T19:00:00Z",
       "plan_count": 7,
       "plan_count_done": 7,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.64: @42ch/nexus-contracts 0.4.0->0.5.0. Breaking (pre-1.0): ListWorksResponse {works,total}->{works,pagination:PaginationInfo} + Works query offset->cursor; ListFindingsResponse new ({items,pagination}). Additive: schemas/local-api/common/error-response.schema.json (ErrorResponse F-E1) + findings/list-findings-response.schema.json (F-P2). PaginationInfo +has_more (shared kb/pagination-info). Handler DTO drift closure (R-V163P1-T6). No existing wire shape removed beyond the Works/findings list shape change.",
+      "wire_contracts_note": "V1.65: @42ch/nexus-contracts additive-dominant. New schemas/local-api/works/chapters/* (list/detail/outline/patch/body + content-query) + preset CRUD (get/update response + delete 204) + work_profile additive optional on CreateWorkRequest/PatchWorkRequest. Cursor keyset (v2: opaque) on chapter list. No breaking change to existing shapes. Track D (vitest/vite/wiremock) dev-dep only, no wire change.",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-24-v1.64-compass-and-plan-stubs",
-        "2026-06-24-v1.64-local-api-hardening",
-        "2026-06-24-v1.64-web-app-scaffold",
-        "2026-06-24-v1.64-control-room-and-setup-screens",
-        "2026-06-24-v1.64-daemon-serving-wiring",
-        "2026-06-24-v1.64-mid-meta-tracking",
-        "2026-06-24-v1.64-residual-convergence-and-closeout"
+        "2026-06-25-v1.65-compass-and-plan-stubs",
+        "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
+        "2026-06-25-v1.65-dependency-security-upgrade",
+        "2026-06-25-v1.65-web-test-baseline",
+        "2026-06-25-v1.65-outline-and-structure-editor",
+        "2026-06-25-v1.65-mid-meta-tracking",
+        "2026-06-25-v1.65-residual-convergence-and-closeout"
       ],
-      "highlights": {
-        "Track A": "Local Web UI Kickoff — apps/web React 18/Vite/TS/Tailwind/shadcn/TanStack Query SPA. Control Room (Works dashboard/detail, Sessions, Schedule, Capabilities, Findings) + Setup (Work CRUD, Preset mgmt w/ validate dry-run). DESIGN.md tokens consumed (light+dark). NexusClient/BrowserClient/TauriClient adapter (Tauri-ready). 30 vitest tests. Daemon-served via rust-embed (static_assets.rs) + SPA fallback + cache headers. CLI daemon ui/web convenience.",
-        "Track B": "Local API Data-Layer Hardening — closed 4 prerequisites: Handler DTO drift closure (R-V163P1-T6), F-E1 shared ErrorResponse schema + handler envelope, F-P1 Works cursor pagination (pre-1.0 breaking), F-P2 findings list endpoint.",
-        "QC": "Tri-review both waves. Wave 1: qc1 Request Changes (W-1 error-envelope mismatch) -> fix-wave (errors.ts wrapped-envelope parse + convention §3.1) -> qc1 re-review Approve; qc2/qc3 Approve. Wave 2: qc1/qc2/qc3 Approve (qc3 host-glitch wrote to wrong path, relocated)."
-      },
-      "note": "V1.64 ships Local Web UI Kickoff (CLI-only -> CLI + local Web UI). Writing-profile product line remains complete. Tauri desktop shell + content-authoring UI deferred to V1.65+. Platform paused (PD-05).",
-      "predecessor_merge_commit": "c94a7d70",
-      "merge_commit": "d8be93a3"
+      "predecessor_merge_commit": "644acbc5",
+      "note": "V1.65 ships Outline & Structure Authoring (CLI+Web UI authoring entry surface) + Track B API closure + Track D dependency security. Body editor + Tauri shell + open-with deferred V1.66. Platform paused (PD-05)."
     },
     "tech_debt_summary": {
       "total_open": 0,
@@ -52,7 +46,8 @@
       },
       "by_target_active": {}
     },
-    "updated_at": "2026-06-25T03:35:00Z"
+    "updated_at": "2026-06-25T03:35:00Z",
+    "spec_integration_branch": null
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
@@ -3753,11 +3748,17 @@
         "scope": "apps/web/src/lib/nexus/{types,errors,browser-client,tauri-client}.ts + components/{theme-provider,layout}",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "P2",
+        "target": "V1.65 P1 (closed early)",
         "target_date": "V1.64 P2",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-web-app-scaffold/qc1.md S-1",
         "note": "P2 (screens) is the natural place to establish the apps/web test baseline (vitest + testing-library + msw for BrowserClient). Adapter + error-parsing tests should land with the screens that exercise them.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-25",
+        "closure_note": "apps/web architectural-surface test baseline established in V1.65 P1 (feature/v1.65-web-test-baseline): NexusClient adapter-contract guard + transport coverage (T1), ThemeProvider light/dark (T2), toast hook + error-envelope path (T3), msw handlers registry (T4), v8 coverage config (T5). 30 -> 62 vitest tests, all green; 94.57% statement / 96.77% branch coverage on the architectural surface, every file >= 80%. Closed ahead of the original P2 target so the outline editor builds on a tested scaffold.",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.65-web-test-baseline",
+          "commit": "13c5ec3f"
+        }
       },
       {
         "id": "R-V164-QC1-S3-P1",
@@ -3830,6 +3831,64 @@
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
         "note": "P3 owns the rust-embed binary that serves apps/web/dist. P2 verified via msw + vite-preview (offline error handling, CRUD round-trip). Live binary smoke at P-mid/QA.",
         "lifecycle": "deferred"
+      }
+    ],
+    "v1.65": [
+      {
+        "id": "R-V165-QC1-W1",
+        "title": "Outline PUT FS/DB atomicity",
+        "severity": "high",
+        "lifecycle": "resolved",
+        "source": "qc1.md",
+        "scope": "chapters.rs put_chapter_outline",
+        "decision": "resolved",
+        "resolution": {
+          "commit": "1407b16a",
+          "plan_id": "fix-wave-1"
+        },
+        "target_iteration": "V1.65"
+      },
+      {
+        "id": "R-V165-QC1-W2",
+        "title": "Missing HTTP-level integration tests for chapter endpoints",
+        "severity": "medium",
+        "lifecycle": "open",
+        "source": "qc1.md",
+        "scope": "chapter API integration tests",
+        "decision": "defer",
+        "owner": "@qa-engineer/@fullstack-dev",
+        "target_iteration": "V1.66",
+        "tracking": "test-depth gap, not correctness"
+      },
+      {
+        "id": "R-V165-QC-SUGG-DEFENSE",
+        "title": "Write-path guard parity + RuntimeLockGuard dedup + post-rename fsync (qc1 S-1/S-4, qc2 S-001, qc3 S-3)",
+        "severity": "low",
+        "lifecycle": "open",
+        "source": "qc1/qc2/qc3",
+        "scope": "defense-in-depth + dedup",
+        "decision": "defer",
+        "target_iteration": "V1.66+"
+      },
+      {
+        "id": "R-V165-QC3-VIRT",
+        "title": "Chapter table virtualization for large chapter counts",
+        "severity": "low",
+        "lifecycle": "open",
+        "source": "qc3.md",
+        "scope": "apps/web chapters-page",
+        "decision": "defer",
+        "target_iteration": "V1.66"
+      },
+      {
+        "id": "R-V165-QC-SUGG-DX",
+        "title": "DX/UX polish (can_edit_outline probe, title 400 DX, route nesting, enum_conversions discoverability, TipTap inline-deps pinning, save-error/protected-edit web coverage)",
+        "severity": "low",
+        "lifecycle": "open",
+        "source": "qc1/qc3",
+        "scope": "cross-cutting DX",
+        "decision": "defer",
+        "target_iteration": "V1.66+"
       }
     ]
   }

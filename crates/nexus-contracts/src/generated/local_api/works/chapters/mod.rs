@@ -1,0 +1,23 @@
+pub mod chapter_body;
+pub mod chapter_content_query;
+pub mod chapter_detail;
+pub mod chapter_outline;
+pub mod chapter_protection;
+pub mod chapter_status;
+pub mod chapter_summary;
+pub mod list_chapters_query;
+pub mod list_chapters_response;
+pub mod patch_chapter_request;
+pub mod put_chapter_outline_request;
+
+pub use chapter_body::*;
+pub use chapter_content_query::*;
+pub use chapter_detail::*;
+pub use chapter_outline::*;
+pub use chapter_protection::*;
+pub use chapter_status::*;
+pub use chapter_summary::*;
+pub use list_chapters_query::*;
+pub use list_chapters_response::*;
+pub use patch_chapter_request::*;
+pub use put_chapter_outline_request::*;

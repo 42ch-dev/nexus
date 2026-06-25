@@ -4,10 +4,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.64 Shipped (local-api common error envelope + findings list response) |
+| **Status** | Normative — V1.65 Prepare amendment (chapter-content `local-api/works/chapters/` subtree + preset CRUD completion target) |
 | **Document class** | Master |
 | **Scope** | Folder names, consumer-scope mapping, README rules, rename policy; **not** field-level DTO definitions (those stay in platform `v1-spec` + `data-model-v1`) |
-| **Last updated** | 2026-06-24 — V1.64 P-1 (local-api common + findings list-response conventions) |
+| **Last updated** | 2026-06-25 — V1.65 Prepare (chapter-content subtree + preset CRUD completion target) |
 | **Related** | [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md), [compute-module-abi.md](./compute-module-abi.md) §4–§5, [wasm-host.md](./wasm-host.md) §6–§7, [schemas/AGENTS.md](../../../schemas/AGENTS.md), [tooling/AGENTS.md](../../../tooling/AGENTS.md) |
 
 **Do not confuse:**
@@ -34,6 +34,7 @@ schemas/
     ├── common/            # shared Local API envelopes (ErrorResponse, future common fragments)
     ├── compute/           # compute module ABI envelopes (ComputeInput / ComputeOutput)
     ├── works/             # works CRUD schemas (V1.63 P1)
+    │   └── chapters/      # chapter-content schemas (V1.65 target)
     ├── kb/                # work-scope KB entry CRUD schemas (V1.63 P1)
     ├── findings/          # quality findings CRUD schemas (V1.63 P1)
     ├── schedule/          # schedule + core-context CRUD schemas (V1.63 P1)
@@ -67,6 +68,7 @@ schemas/
 | **`local-api/compute/`** | Local API — compute module ABI | External WASM modules + future WebApp | `nexus-wasm-host` (re-exports), compute modules | **Yes** |
 | **`local-api/common/`** | Local API — shared envelopes | Bundled local Web UI + future external Local API clients | `nexus-daemon-runtime` handlers via generated contracts | **Yes** |
 | **`local-api/works/`** | Local API — works CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/works/chapters/`** | Local API — chapter content and structure | Bundled local Web UI authoring surface + future Tauri shell | `nexus-daemon-runtime` chapter handlers | **Yes** |
 | **`local-api/kb/`** | Local API — KB entries CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 | **`local-api/findings/`** | Local API — quality findings CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 | **`local-api/schedule/`** | Local API — schedule + core-context CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
@@ -149,6 +151,30 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 
 V1.64 amendment for `local-api/findings/`: add `list-findings-response.schema.json` for `GET /v1/local/works/{work_id}/findings`, using cursor pagination and the canonical `items` list-array key. This closes the V1.63 surface-audit F-P2 gap for the local Web UI findings view.
 
+V1.65 amendment for `local-api/works/chapters/`: add a nested chapter-content
+subtree for `/v1/local/works/{work_id}/chapters/*`. Target files are:
+
+```text
+local-api/works/chapters/
+├── README.md
+├── chapter-body.schema.json
+├── chapter-detail.schema.json
+├── chapter-outline.schema.json
+├── chapter-summary.schema.json
+├── list-chapters-query.schema.json
+├── list-chapters-response.schema.json
+└── patch-chapter-request.schema.json
+```
+
+The list response uses `items` + cursor pagination from day one. Body is
+read-only in V1.65; outline PUT and structure PATCH are writable surfaces.
+Detailed semantics: [chapter-content-local-api.md](./chapter-content-local-api.md).
+
+V1.65 also completes the preset-management Local API CRUD schema target by adding
+schemas for get/update/delete response surfaces under `local-api/preset-management/`
+(for example `get-preset-response`, `update-preset-request`,
+`update-preset-response`, and a delete/204 response convention if materialized).
+
 ---
 
 ## 4. Content hygiene
@@ -200,7 +226,7 @@ Authoritative count: run `pnpm run validate-schemas` after materializing V1.64 s
 | `platform/sync/` | 7 | `bundle`, `bundle-refinement` (codegen-skipped), `delta`, `sync-command`, `sync-pull-request`, `sync-pull-response`, `conflict-response` |
 | `local-api/common/` | 1 | `error-response` (V1.64 F-E1) |
 | `local-api/compute/` | 2 | `compute-input`, `compute-output` |
-| `local-api/works/` | 11 | CRUD + inspiration + completion-lock (V1.63 P1) + cursor migration shape (V1.64 F-P1) |
+| `local-api/works/` | 11 + chapter subtree target | CRUD + inspiration + completion-lock (V1.63 P1) + cursor migration shape (V1.64 F-P1); V1.65 adds `works/chapters/` schemas for chapter content/structure |
 | `local-api/kb/` | 8 | Work-scope KB entry CRUD + pagination (V1.63 P1) |
 | `local-api/findings/` | 6 | Quality findings CRUD + stale endpoint (V1.63 P1) + list response (V1.64 F-P2) |
 | `local-api/schedule/` | 16 | Schedule + core-context CRUD + signal (V1.63 P1) |
@@ -208,7 +234,7 @@ Authoritative count: run `pnpm run validate-schemas` after materializing V1.64 s
 | `local-api/creators/` | 8 | Creator management CRUD (V1.63 P1) |
 | `local-api/orchestration/sessions/` | 4 | Session list + detail-status schemas (V1.63 P3) |
 | `local-api/orchestration/capabilities/` | 2 | Capability registry schemas (V1.63 P3) |
-| `local-api/preset-management/` | 7 | Preset management full surface (V1.63 P3) |
+| `local-api/preset-management/` | 7 + CRUD completion target | Preset management full surface (V1.63 P3); V1.65 target adds get/update/delete contract schemas |
 
 Do not hand-maintain an exact total here; `schemas/README.md` and `pnpm run validate-schemas` are the count authorities. This inventory records expected directory membership and notable V1.64 deltas.
 

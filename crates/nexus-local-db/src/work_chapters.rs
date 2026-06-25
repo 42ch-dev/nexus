@@ -241,6 +241,173 @@ pub async fn insert_chapter(
     Ok(())
 }
 
+/// Parameters for patching a chapter row.
+#[derive(Debug, Default)]
+pub struct PatchChapterParams {
+    /// New slug.
+    pub slug: Option<String>,
+    /// New planned word count.
+    pub planned_word_count: Option<i32>,
+    /// New volume.
+    pub volume: Option<i32>,
+    /// New status.
+    pub status: Option<String>,
+}
+
+/// Map a sqlite row to a [`WorkChapterRecord`].
+#[must_use]
+fn map_row_to_record(r: &sqlx::sqlite::SqliteRow) -> WorkChapterRecord {
+    WorkChapterRecord {
+        work_id: r.get("work_id"),
+        chapter: r.get("chapter"),
+        volume: r.get("volume"),
+        slug: r.get("slug"),
+        planned_word_count: r.get("planned_word_count"),
+        actual_word_count: r.get("actual_word_count"),
+        status: r.get("status"),
+        outline_path: r.get("outline_path"),
+        body_path: r.get("body_path"),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+    }
+}
+
+/// List chapter rows for a Work with optional status filter and keyset
+/// pagination.
+///
+/// Returns rows ordered by `volume ASC, chapter ASC`. `cursor_volume` and
+/// `cursor_chapter` encode the last row seen by the caller; the query returns
+/// rows strictly after that tuple (`(volume, chapter) > (?, ?)`). Callers
+/// should fetch `limit + 1` to detect `has_more`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn list_chapters_paginated(
+    pool: &SqlitePool,
+    work_id: &str,
+    status_filter: Option<&str>,
+    limit: i64,
+    cursor_volume: i32,
+    cursor_chapter: i32,
+) -> Result<Vec<WorkChapterRecord>, LocalDbError> {
+    // SAFETY: Dynamic WHERE clause because status filter is optional.
+    // All values are bound parameters, not interpolated.
+    let mut sql = String::from(
+        "SELECT work_id, chapter, volume, slug, planned_word_count, actual_word_count, \
+         status, outline_path, body_path, created_at, updated_at \
+         FROM work_chapters WHERE work_id = ? AND (volume, chapter) > (?, ?)",
+    );
+    if status_filter.is_some() {
+        sql.push_str(" AND status = ?");
+    }
+    sql.push_str(" ORDER BY volume, chapter LIMIT ?");
+
+    let mut query = sqlx::query(&sql)
+        .bind(work_id)
+        .bind(cursor_volume)
+        .bind(cursor_chapter);
+    if let Some(status) = status_filter {
+        query = query.bind(status);
+    }
+    query = query.bind(limit);
+
+    let rows = query.fetch_all(pool).await?;
+    Ok(rows.iter().map(map_row_to_record).collect())
+}
+
+/// Update a chapter's `outline_path` and `updated_at`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn update_outline_path(
+    pool: &SqlitePool,
+    work_id: &str,
+    chapter: i32,
+    volume: i32,
+    outline_path: Option<&str>,
+    now: &str,
+) -> Result<(), LocalDbError> {
+    // SAFETY: UPDATE against work_chapters — runtime query.
+    sqlx::query(
+        "UPDATE work_chapters SET outline_path = ?, updated_at = ? \
+         WHERE work_id = ? AND volume = ? AND chapter = ?",
+    )
+    .bind(outline_path)
+    .bind(now)
+    .bind(work_id)
+    .bind(volume)
+    .bind(chapter)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Apply a partial patch to a chapter row.
+///
+/// Only fields present in `patch` are updated. `updated_at` is refreshed
+/// if any field changes. Returns `Ok(true)` if a row was updated.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn patch_chapter(
+    pool: &SqlitePool,
+    work_id: &str,
+    chapter: i32,
+    volume: i32,
+    patch: &PatchChapterParams,
+    now: &str,
+) -> Result<bool, LocalDbError> {
+    let mut set_clauses = Vec::new();
+    if patch.slug.is_some() {
+        set_clauses.push("slug = ?");
+    }
+    if patch.planned_word_count.is_some() {
+        set_clauses.push("planned_word_count = ?");
+    }
+    if patch.volume.is_some() {
+        set_clauses.push("volume = ?");
+    }
+    if patch.status.is_some() {
+        set_clauses.push("status = ?");
+    }
+
+    if set_clauses.is_empty() {
+        // Still verify the row exists so the caller can distinguish not-found.
+        let existing = get_chapter(pool, work_id, chapter, volume).await?;
+        return Ok(existing.is_some());
+    }
+
+    set_clauses.push("updated_at = ?");
+    let set_sql = set_clauses.join(", ");
+
+    // SAFETY: Dynamic SQL required for partial update.
+    // All values are bound parameters, not interpolated.
+    let sql = format!(
+        "UPDATE work_chapters SET {set_sql} WHERE work_id = ? AND volume = ? AND chapter = ?"
+    );
+
+    let mut query = sqlx::query(&sql);
+    if let Some(ref v) = patch.slug {
+        query = query.bind(v);
+    }
+    if let Some(v) = patch.planned_word_count {
+        query = query.bind(v);
+    }
+    if let Some(v) = patch.volume {
+        query = query.bind(v);
+    }
+    if let Some(ref v) = patch.status {
+        query = query.bind(v);
+    }
+    query = query.bind(now).bind(work_id).bind(volume).bind(chapter);
+
+    let result = query.execute(pool).await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Get a single chapter row by `work_id`, `volume`, and chapter number.
 ///
 /// V1.42: PK is now `(work_id, volume, chapter)`. Pass `volume = 1` for

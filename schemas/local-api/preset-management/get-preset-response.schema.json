@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/preset-management/get-preset-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus GetPresetResponse",
+  "description": "Response for GET /v1/local/presets/{id} (V1.65 P0). Returns the preset manifest as raw YAML so clients can edit and PATCH it back.",
+  "type": "object",
+  "required": ["id", "source", "yaml"],
+  "properties": {
+    "id": { "type": "string" },
+    "source": { "type": "string", "enum": ["embedded", "system", "user"] },
+    "path": {
+      "type": "string",
+      "description": "Absolute filesystem path for system/user presets; empty for embedded presets."
+    },
+    "yaml": {
+      "type": "string",
+      "description": "Raw preset.yaml content."
+    }
+  },
+  "additionalProperties": false
+}

@@ -5,6 +5,7 @@ import {
   CalendarClock,
   Layers,
   ListChecks,
+  NotebookText,
   Sparkles,
   type LucideIcon,
 } from 'lucide-react';
@@ -27,6 +28,7 @@ interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/works', label: 'Works', icon: Layers },
+  { to: '/works/chapters', label: 'Chapters', icon: NotebookText },
   { to: '/sessions', label: 'Sessions', icon: ListChecks },
   { to: '/schedule', label: 'Schedule', icon: CalendarClock },
   { to: '/capabilities', label: 'Capabilities', icon: Boxes },
