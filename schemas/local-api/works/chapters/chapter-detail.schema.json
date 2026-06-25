@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-detail.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ChapterDetailResponse",
+  "description": "Response for GET /v1/local/works/{work_id}/chapters/{n} (V1.65 P0). Mirrors ChapterSummary plus content metadata. Does not read outline/body content.",
+  "type": "object",
+  "required": ["work_id", "chapter", "volume", "planned_word_count", "status", "created_at", "updated_at", "can_edit_outline", "can_edit_structure", "body_read_only", "protection"],
+  "properties": {
+    "work_id": { "type": "string" },
+    "chapter": { "type": "integer", "minimum": 1 },
+    "volume": { "type": "integer", "minimum": 1 },
+    "title": {
+      "type": "string",
+      "description": "Human title if materialized by P0; otherwise clients may derive display text from slug/chapter number. V1.65 returns null."
+    },
+    "slug": { "type": "string" },
+    "planned_word_count": { "type": "integer", "minimum": 0 },
+    "actual_word_count": { "type": "integer", "minimum": 0 },
+    "status": { "$ref": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-status.schema.json" },
+    "outline_path": { "type": "string", "description": "Relative path to outline file, or empty string if not initialized." },
+    "body_path": { "type": "string", "description": "Relative path to body file, or empty string if not initialized. Body is read-only." },
+    "created_at": { "type": "string" },
+    "updated_at": { "type": "string" },
+    "can_edit_outline": { "type": "boolean" },
+    "can_edit_structure": { "type": "boolean" },
+    "body_read_only": { "type": "boolean" },
+    "protection": { "$ref": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-protection.schema.json" }
+  },
+  "additionalProperties": false
+}

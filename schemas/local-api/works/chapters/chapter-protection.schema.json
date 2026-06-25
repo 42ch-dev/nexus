@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/works/chapters/chapter-protection.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ChapterProtection",
+  "description": "Protection level describing what UI actions are allowed for a chapter (V1.65 P0).",
+  "type": "object",
+  "required": ["level", "reason"],
+  "properties": {
+    "level": {
+      "type": "string",
+      "enum": ["none", "confirm_structure_edit", "hard_block_delete"],
+      "description": "none = free edit; confirm_structure_edit = UI must show confirmation before structural edits; hard_block_delete = structural edits are blocked."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable explanation for the protection level."
+    }
+  },
+  "additionalProperties": false
+}

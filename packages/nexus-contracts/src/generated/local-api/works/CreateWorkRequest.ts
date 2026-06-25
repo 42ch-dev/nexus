@@ -18,4 +18,5 @@ export interface CreateWorkRequest {
   client_request_id?: string;
   lineage_from_work_id?: string;
   set_pool_active?: boolean;
+  work_profile?: string;
 }
