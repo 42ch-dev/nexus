@@ -15,6 +15,8 @@ pub mod errors;
 pub mod handlers;
 pub mod middleware;
 pub mod pagination;
+pub mod path_guard;
+pub mod runtime_lock;
 
 use crate::api::auth_middleware::DaemonApiConfig;
 #[cfg(not(debug_assertions))]
