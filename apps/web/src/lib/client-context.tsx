@@ -42,12 +42,7 @@ export function selectClients(): ResolvedClients {
     return { client: new BrowserClient(), desktop: null };
   }
   const tauri = new TauriClient();
-  const desktop = new TauriDesktopCapabilities({
-    // Reuse the same HTTP health probe as the data transport (thin-over-
-    // BrowserClient): no second health code path.
-    daemonHealth: () => tauri.health(),
-    port: tauri.port,
-  });
+  const desktop = new TauriDesktopCapabilities();
   return { client: tauri, desktop };
 }
 

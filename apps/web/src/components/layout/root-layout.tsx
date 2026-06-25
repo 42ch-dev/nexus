@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { Header } from '@/components/layout/header';
 import { NAV_ITEMS } from '@/components/layout/sidebar';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -70,6 +71,8 @@ export function RootLayout() {
             <Outlet />
           </div>
         </main>
+
+        <DaemonStatusBar />
       </div>
     </div>
   );

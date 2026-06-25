@@ -6,7 +6,7 @@
 /binaries/*
 !/binaries/README.md
 
-# Generated icons (produced by `tauri icon`); the README stays.
-/icons/*.png
-/icons/*.icns
-/icons/*.ico
+# Generated icons are checked in for V1.66 P1 unsigned dev builds so CI can
+# bundle the .app without a designer asset pipeline. Replace with real artwork
+# before the first public release.
+# If you regenerate locally, commit the resulting set.

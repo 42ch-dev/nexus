@@ -20,7 +20,9 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
+
+mod sidecar;
 
 /// Path-guard rejection reason surfaced to the JS layer. Serializes as
 /// `{ code, message }` so the SPA reads a stable envelope (mirrors the Local
@@ -175,23 +177,66 @@ fn get_workspace_root(workspace_root: State<'_, WorkspaceRoot>) -> Option<String
         .map(|p| p.to_string_lossy().to_string())
 }
 
+/// `get_daemon_status` — surface the resolved port + lifecycle state to the SPA.
+#[tauri::command]
+async fn get_daemon_status(
+    manager: State<'_, sidecar::SidecarManager>,
+) -> Result<sidecar::DaemonStatus, String> {
+    Ok(manager.status().await)
+}
+
+/// `start_daemon` — manual (re)start of the owned sidecar.
+#[tauri::command]
+async fn start_daemon(
+    manager: State<'_, sidecar::SidecarManager>,
+    app: AppHandle,
+) -> Result<(), String> {
+    manager.start(&app).await
+}
+
+/// `stop_daemon` — graceful stop of the owned sidecar.
+#[tauri::command]
+async fn stop_daemon(manager: State<'_, sidecar::SidecarManager>) -> Result<(), String> {
+    manager.stop().await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let workspace_root = WorkspaceRoot(resolve_workspace_root());
+    let port = sidecar::resolve_port();
+    let sidecar_manager = sidecar::SidecarManager::new(port);
+    let setup_manager = sidecar_manager.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // Shell plugin is registered now (P0); the sidecar lifecycle that drives
-        // it lands in P1 (bundle.externalBin + Command::sidecar).
+        // Shell plugin drives the bundled `nexus42` sidecar via
+        // `tauri_plugin_shell::ShellExt::sidecar` (P1).
         .plugin(tauri_plugin_shell::init())
         .manage(workspace_root)
+        .manage(sidecar_manager.clone())
+        .setup(move |app| {
+            let manager = setup_manager.clone();
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = manager.start(&handle).await {
+                    eprintln!("nexus-desktop: sidecar failed to start: {e}");
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_with,
             reveal_in_finder,
             get_workspace_root,
+            get_daemon_status,
+            start_daemon,
+            stop_daemon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nexus desktop shell");
+
+    // App is exiting; request graceful termination of any sidecar we own.
+    let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
 }
 
 #[cfg(test)]
