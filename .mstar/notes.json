@@ -1,7 +1,11 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-25T20:30:00+00:00",
+  "updated_at": "2026-06-25T15:31:51+00:00",
   "entries": [
+    {
+      "updated_at": "2026-06-25T15:31:51+00:00",
+      "message": "V1.66 P-sec hygiene residuals progress (2026-06-25): closed R-V165-QC1-W2 (chapter content handler-level integration tests, commit 699ac872), R-V165-QC-SUGG-DEFENSE (write-path guard parity + RuntimeLockGuard dedup + post-rename fsync, commit e7a1fd05), and R-V164-QC1-S1-P0 (PaginationInfo dedup across agent_host/kb/creators/memory/workspaces handlers, commit 689ddce3). Refreshed metadata.tech_debt_summary: 2 open (low), 18 deferred, 184 resolved. Remaining open: R-V165-QC3-VIRT (V1.66) and R-V165-QC-SUGG-DX (V1.66+)."
+    },
     {
       "updated_at": "2026-06-25T20:30:00+00:00",
       "message": "V1.65 Outline & Structure Authoring + Dependency Security SHIPPED (2026-06-25) via PR #89 -> main (merge 18223808). Track A: apps/web authoring surface (chapter structure table + TipTap outline editor w/ markdown round-trip + soft-concurrency warning banner + structure CRUD [slug/wc/volume/status; title display-only; finalized confirm + published hard-block] + body read-only render + Copy-path context menu); NexusClient adapter boundary preserved (Tauri-ready for V1.66). Track B: Local API chapter-content surface (6 endpoints, keyset cursor + items + ErrorResponse + W-002 path guard + runtime lock) + work_profile (additive optional) + preset full CRUD; closes R-V164-P2-G1/G2 + local F-P3. Track D: dependency security (vitest 2->3 critical, vite 5->6 high/med, wiremock 0.6 eliminates rand 0.7.3 low) -> 5 dependabot advisories auto-dismissed (0 open on main post-merge). apps/web test baseline 30->81 (R-V164-QC1-S1-P1 closed). QC tri-review 3/3 Approve after fix-wave-1 (outline PUT DB-first atomicity, keyset pagination, 10MiB body cap, keydown cleanup); QA Pass; Greptile review 0 comments (clean). PR review (7 Greptile issues) all fixed + regression tests. Deferred V1.66: Tauri desktop shell, body full-text editor + per-chapter lock, open-with desktop integration, drag-reorder/bulk/reconcile, 6 V1.64 carry-forwards, DESIGN.md->Production. Open residuals: R-V165-QC1-W2 (medium, HTTP integration tests) + 3 low (status.json residual_findings[v1.65]). Profile B compaction done (7 plans archived). Local branches + worktrees cleaned post-merge."

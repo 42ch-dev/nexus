@@ -7,28 +7,32 @@
       "title": "V1.66 P0 — Tauri Desktop Shell Core (TauriClient + Q5 open-with/reveal + DESIGN.md increment)",
       "iteration": "V1.66",
       "slot": "P0",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "L-XL",
       "owner": "@frontend-dev",
       "review": "Tri-review + QA",
       "wave": 1,
       "dependency": "P-1 locked + Phase 2b (TauriClient arch + DESIGN.md increment + open-with scope)",
       "working_branch": "feature/v1.66-desktop-shell-core",
-      "merge_target": "iteration/v1.66"
+      "merge_target": "iteration/v1.66",
+      "inreview_at": "2026-06-25T15:49:19Z",
+      "merge_commit": "pending-integration-merge"
     },
     {
       "plan_id": "2026-06-25-v1.66-hygiene-residuals",
       "title": "V1.66 P-sec — Light Hygiene (R-V165-QC1-W2 medium + R-V165-QC-SUGG-DEFENSE + R-V164-QC1-S1-P0)",
       "iteration": "V1.66",
       "slot": "P-sec",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "S-M",
       "owner": "@fullstack-dev",
       "review": "Tri-review + QA",
       "wave": 1,
       "dependency": "P-1 locked",
       "working_branch": "feature/v1.66-hygiene-residuals",
-      "merge_target": "iteration/v1.66"
+      "merge_target": "iteration/v1.66",
+      "inreview_at": "2026-06-25T15:49:19Z",
+      "merge_commit": "pending-integration-merge"
     },
     {
       "plan_id": "2026-06-25-v1.66-sidecar-lifecycle-and-ci",
@@ -106,24 +110,25 @@
       "note": "V1.65 ships Outline & Structure Authoring (CLI+Web UI authoring entry surface) + Track B API closure + Track D dependency security. Body editor + Tauri shell + open-with deferred V1.66. Platform paused (PD-05)."
     },
     "tech_debt_summary": {
-      "total_open": 4,
-      "total_deferred": 19,
-      "total_resolved": 181,
+      "total_open": 2,
+      "total_deferred": 18,
+      "total_resolved": 184,
       "total_archived": 0,
       "by_severity_active": {
         "high": 0,
-        "medium": 1,
-        "low": 3
+        "medium": 0,
+        "low": 2
       },
       "by_target_active": {
-        "V1.66": 2,
-        "V1.66+": 2
+        "V1.66": 1,
+        "V1.66+": 1
       },
-      "refreshed_at": "2026-06-25T13:57:50Z",
-      "refreshed_reason": "V1.66 Prepare: prior total_open=0 was stale (V1.65 closeout registered 4 open residuals after the V1.65 P-last summary was computed). Recomputed from residual_findings."
+      "refreshed_at": "2026-06-25T15:31:15Z",
+      "refreshed_reason": "Recomputed after V1.66 P-sec residual closures."
     },
-    "updated_at": "2026-06-25T14:34:47Z",
-    "spec_integration_branch": "iteration/v1.66"
+    "updated_at": "2026-06-25T15:49:19Z",
+    "spec_integration_branch": "iteration/v1.66",
+    "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
@@ -3798,7 +3803,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-local-api-hardening/qc1.md S-1",
         "note": "Drift risk; compounds when F-P3 (items rename) sweeps every list endpoint. Align the shared canonical PaginationInfo construction with the F-P3 sweep in V1.65+.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-25",
+        "closure_note": "Closed in V1.66 P-sec hygiene residuals (689ddce3).",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+          "commit": "689ddce3"
+        }
       },
       {
         "id": "R-V164-QC1-CASING",
@@ -3928,23 +3939,35 @@
         "id": "R-V165-QC1-W2",
         "title": "Missing HTTP-level integration tests for chapter endpoints",
         "severity": "medium",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "qc1.md",
         "scope": "chapter API integration tests",
         "decision": "defer",
         "owner": "@qa-engineer/@fullstack-dev",
         "target_iteration": "V1.66",
-        "tracking": "test-depth gap, not correctness"
+        "tracking": "test-depth gap, not correctness",
+        "closed_at": "2026-06-25",
+        "closure_note": "Closed in V1.66 P-sec hygiene residuals (699ac872).",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+          "commit": "699ac872"
+        }
       },
       {
         "id": "R-V165-QC-SUGG-DEFENSE",
         "title": "Write-path guard parity + RuntimeLockGuard dedup + post-rename fsync (qc1 S-1/S-4, qc2 S-001, qc3 S-3)",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "qc1/qc2/qc3",
         "scope": "defense-in-depth + dedup",
         "decision": "defer",
-        "target_iteration": "V1.66+"
+        "target_iteration": "V1.66+",
+        "closed_at": "2026-06-25",
+        "closure_note": "Closed in V1.66 P-sec hygiene residuals (e7a1fd05).",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+          "commit": "e7a1fd05"
+        }
       },
       {
         "id": "R-V165-QC3-VIRT",
