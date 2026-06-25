@@ -7,6 +7,8 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
+use crate::api::path_guard::resolve_guarded_path;
+use crate::api::runtime_lock::RuntimeLockGuard;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
@@ -24,91 +26,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(test)]
 static TEST_UPDATE_OUTLINE_PATH_FAIL: AtomicBool = AtomicBool::new(false);
-
-// ─── Runtime Lock Guard (mirrors works.rs) ─────────────────────────────────
-
-/// RAII guard that acquires a runtime lock on creation and releases on drop.
-struct RuntimeLockGuard {
-    pool: nexus_local_db::SqlitePool,
-    creator_id: String,
-    work_id: String,
-    holder: String,
-    armed: bool,
-}
-
-impl RuntimeLockGuard {
-    /// Acquire a runtime lock for a mutating HTTP handler.
-    async fn acquire(
-        pool: &nexus_local_db::SqlitePool,
-        creator_id: &str,
-        work_id: &str,
-    ) -> Result<Self, NexusApiError> {
-        let holder = nexus_local_db::cli_holder("http");
-        let ttl = nexus_local_db::ttl_from_env();
-        match nexus_local_db::acquire_runtime_lock(pool, creator_id, work_id, &holder, ttl, true)
-            .await
-        {
-            Ok(nexus_local_db::AcquireResult::Acquired { .. }) => Ok(Self {
-                pool: pool.clone(),
-                creator_id: creator_id.to_string(),
-                work_id: work_id.to_string(),
-                holder,
-                armed: true,
-            }),
-            Ok(nexus_local_db::AcquireResult::Locked {
-                holder: existing, ..
-            }) => Err(NexusApiError::Locked {
-                resource: "work".to_string(),
-                reason: format!(
-                    "work {work_id} is locked by '{existing}'; \
-                     wait for release or check 'creator works status'"
-                ),
-            }),
-            Err(e) => Err(NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("runtime_lock acquire failed: {e}"),
-            }),
-        }
-    }
-
-    /// Release the lock early (before drop).
-    async fn release(mut self) {
-        self.disarm().await;
-    }
-
-    async fn disarm(&mut self) {
-        if self.armed {
-            self.armed = false;
-            if let Err(e) = nexus_local_db::release_runtime_lock(
-                &self.pool,
-                &self.creator_id,
-                &self.work_id,
-                &self.holder,
-            )
-            .await
-            {
-                tracing::warn!(
-                    work_id = %self.work_id,
-                    holder = %self.holder,
-                    error = %e,
-                    "runtime_lock: failed to release on drop"
-                );
-            }
-        }
-    }
-}
-
-impl Drop for RuntimeLockGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            tracing::warn!(
-                work_id = %self.work_id,
-                holder = %self.holder,
-                "runtime_lock: guard dropped without explicit release; TTL will clean up stale lock"
-            );
-        }
-    }
-}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -211,78 +128,6 @@ async fn load_work(
             message: e.to_string(),
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))
-}
-
-/// Resolve a relative DB path under the workspace root and enforce the
-/// W-002-style path guard: the resolved absolute path must remain inside
-/// the canonical workspace root. `must_exist` controls whether the target
-/// itself must exist (read paths) or whether a missing-but-creatable target
-/// is allowed (write paths).
-fn resolve_guarded_path(
-    workspace_root: &StdPath,
-    rel_path: &str,
-    must_exist: bool,
-) -> Result<PathBuf, NexusApiError> {
-    if rel_path.is_empty() {
-        return Err(NexusApiError::BadRequest {
-            code: "CHAPTER_PATH_EMPTY".to_string(),
-            message: "chapter path is empty".to_string(),
-        });
-    }
-
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-
-    let joined = canonical_root.join(rel_path);
-
-    if must_exist {
-        let canonical_target = joined
-            .canonicalize()
-            .map_err(|e| NexusApiError::BadRequest {
-                code: "CHAPTER_PATH_UNRESOLVABLE".to_string(),
-                message: format!("cannot resolve chapter path '{rel_path}': {e}"),
-            })?;
-        // Component-wise comparison (Path::starts_with). A plain string prefix
-        // match would let `/home/user-data/evil.md` slip past a `/home/user`
-        // root because the string starts with "/home/user".
-        if !canonical_target.starts_with(&canonical_root) {
-            return Err(NexusApiError::BadRequest {
-                code: "CHAPTER_PATH_FORBIDDEN".to_string(),
-                message: format!("chapter path '{rel_path}' escapes workspace root"),
-            });
-        }
-        Ok(canonical_target)
-    } else {
-        // For creatable targets, normalize the joined path and verify it stays
-        // within the workspace root. We walk up to the nearest existing parent
-        // so that missing intermediate directories are still allowed as long
-        // as they would be created inside the root.
-        let mut probe = joined.as_path();
-        loop {
-            if let Ok(canonical) = probe.canonicalize() {
-                // Component-wise comparison (Path::starts_with) — see read branch.
-                if !canonical.starts_with(&canonical_root) {
-                    return Err(NexusApiError::BadRequest {
-                        code: "CHAPTER_PATH_FORBIDDEN".to_string(),
-                        message: format!("chapter path '{rel_path}' escapes workspace root"),
-                    });
-                }
-                return Ok(joined);
-            }
-            match probe.parent() {
-                Some(parent) => probe = parent,
-                None => {
-                    return Err(NexusApiError::BadRequest {
-                        code: "CHAPTER_PATH_FORBIDDEN".to_string(),
-                        message: format!(
-                            "chapter path '{rel_path}' has no parent inside workspace root"
-                        ),
-                    });
-                }
-            }
-        }
-    }
 }
 
 /// Compute protection metadata for a chapter based on its status.
@@ -432,6 +277,10 @@ async fn atomic_write_outline(
         let file = tokio::fs::File::open(&temp_path).await?;
         file.sync_all().await?;
         tokio::fs::rename(&temp_path, &target).await?;
+        // Durability: fsync the final file after the atomic rename so a crash
+        // after rename() returns does not leave the rename unflushed.
+        let final_file = tokio::fs::File::open(&target).await?;
+        final_file.sync_all().await?;
         Ok::<(), std::io::Error>(())
     }
     .await;
