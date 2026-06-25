@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "v1.65"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-25"
 ---
 
@@ -175,3 +175,89 @@ This review focuses on **architecture coherence and maintainability**. Cross-che
 - Suggestions are all light; the QC2 reviewer's S-001 (path-guard hardening) overlaps with my S-4 and is left as the security-track finding.
 
 PM consolidation: register R-1 (W-1) and R-2 (W-2) as `high` / `medium` open residuals; R-1 must close before merge, R-2 can defer to a follow-up test-baseline plan if scoped.
+
+---
+
+## Revalidation (fix-wave-1)
+
+**Targeted re-review** for V1.65 fix-wave-1 — focus: verify the **qc1 W-1 (high)** blocking finding is resolved, accept the **W-2 (medium)** deferral, and run a no-regression sanity check across the 4 fix commits. **Not** a re-review of the whole iteration; the 7 Suggestions (S-1..S-7) and 308-test baseline are out of scope here.
+
+### Scope
+- plan_id: v1.65 (unchanged)
+- Fix-wave range (focus): `43be4b52..9c50481f` (= the 4 fix commits on `iteration/v1.65`)
+- Overall range (regression sanity): `merge-base origin/main ... HEAD 9c50481f`
+- Working branch (verified): `iteration/v1.65` (HEAD `9c50481f`)
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus` (main worktree, on `iteration/v1.65`)
+- Files re-checked: `crates/nexus-daemon-runtime/src/api/handlers/chapters.rs` (1142 LOC — W-1 fix + W-1 regression test + test failpoint + `FailpointGuard` RAII), `crates/nexus-daemon-runtime/src/api/errors.rs` (413 mapping for `CHAPTER_BODY_TOO_LARGE` — lane-cross check, no architectural concern), `crates/nexus-local-db/src/work_chapters.rs` (keyset cursor changes — lane-cross check, covered by new pagination test), `apps/web/src/pages/chapter-page.tsx` (keydown listener cleanup — lane-cross check).
+- Tools run:
+  - `pnpm --filter nexus-contracts build` (clean — prerequisite for `pnpm --filter web typecheck`)
+  - `cargo test -p nexus-daemon-runtime --lib` → **308 passed; 0 failed; 0 ignored** (matches expected count: 305 baseline + `put_outline_db_failure_does_not_write_file` + `list_chapters_keyset_pagination` + `get_chapter_body_rejects_oversized_file` = 308)
+  - `cargo clippy -p nexus-daemon-runtime -- -D warnings` → **clean**
+  - `pnpm --filter web test` → **81 passed (81)** across 10 test files (matches expected count: 80 baseline + keydown-balance regression test = 81)
+  - `pnpm --filter web typecheck` → **clean**
+  - `git show 1407b16a -- chapters.rs` (W-1 fix diff), `git show 9c9945a7 15d5f145 6e14fb13` (other 3 fix stats, for regression check)
+
+### W-1 (high) — outline PUT FS/DB atomicity: RESOLVED
+
+**Diff (`1407b16a`, +68/-1 in `chapters.rs`):** `put_chapter_outline` now writes the DB metadata **before** the file. The reorder is a 1:1 swap of two lines within the existing `async { ... }` block:
+
+| Step | Before (file-then-DB) | After (DB-first) |
+|------|----------------------|-------------------|
+| 1 | `atomic_write_outline(...)` | `work_chapters::update_outline_path(...)` |
+| 2 | `work_chapters::update_outline_path(...)` | `atomic_write_outline(...)` |
+
+**Verifying the new ordering is safe in both failure directions:**
+
+1. **DB-update fails (the original bug)**: with the reorder, the file write is **after** the `?` on `update_outline_path`. The early-return on DB error now occurs **before** any file system call → no orphan file. The test failpoint is placed between `acquire` and the DB call (line 639-646) and returns the simulated `Internal { code: "DATABASE_ERROR", ... }` after explicitly `lock.release().await` (preserves the V1.42.1 hotfix rule from `crates/nexus-daemon-runtime/AGENTS.md` §"Rule 2").
+2. **File write fails after DB commit (the new gap)**: `atomic_write_outline` (line 407-448) is itself **idempotent on retry** — it writes to a unique `temp_path = target.with_extension("md.tmp.{pid}.{ms}")` (line 423-428) and renames onto the target. The DB now has `outline_path` pointing to the intended path, the file is missing or partially written, but a retry PUT will re-call the same code path: the DB update becomes a no-op-equivalent (`update_outline_path` with the same value), and `atomic_write_outline` overwrites any partial target. The spec language from §6.2 ("Failed DB update or failed rename must clean up the temp file where possible and must not report success") is satisfied: rename failure leaves the **temp** file (which `atomic_write_outline` removes at line 440), and the handler returns `OUTLINE_WRITE_ERROR` (not Ok), so the response is an error.
+
+**Verifying the regression test `put_outline_db_failure_does_not_write_file` is sound:**
+
+- It uses a `static TEST_UPDATE_OUTLINE_PATH_FAIL: AtomicBool` failpoint (test-only via `#[cfg(test)]`) plus a `FailpointGuard` RAII wrapper with `Drop` to reset the failpoint even on panic — the right pattern for a shared atomic test seam (no leftover state leaking into `list_chapters_keyset_pagination` or any sibling test).
+- The failpoint is at line 639-646, **before** `work_chapters::update_outline_path` — i.e. it simulates the DB update never being called. This is the strongest possible regression guard: if a future refactor reorders back to file-then-DB, the assertion `!file_path.exists()` will fail because the file would have been written before the failpoint fires.
+- The test asserts both the error (`result.is_err()`) and the file absence — both invariants of the fix.
+- Test placement in the same `mod tests` block (line 1040-1067) follows the established chapter-handler test pattern (uses `setup_chapter_work`, `AxumState`/`AxumPath`/`AxumQuery` extractors, no router).
+
+**Verifying no new gap was introduced by the reorder:**
+
+- The V1.42.1 hotfix rule (`acquire` → explicit `release().await` on every exit path) is preserved at lines 635 (acquire), 641 (failpoint early-return), 671 (normal return).
+- `lock.release().await` runs **before** `let (now, outline_path, content) = result?;` — i.e. even if `result?` propagates an error from the inner async block (the "DB succeeded, file failed" case), the lock is already released. This is the correct ordering because the inner block's `?` on `atomic_write_outline` returns an `Internal` error and we want the lock released before the function returns to the caller.
+- The runtime lock still guards single-writer (the original purpose) — atomicity for the "no orphan file" property comes from the reorder, not the lock.
+
+**Disposition: W-1 RESOLVED.** The original "transactional finalization path" gap is closed in the direction the spec was concerned about. The new "DB succeeds, file fails" case is a self-healing state on retry and the spec is met ("must not report success" — the handler returns `OUTLINE_WRITE_ERROR`).
+
+### W-2 (medium) — missing HTTP integration tests: DEFER ACCEPTED
+
+PM accepted the deferral to a follow-up test-baseline slice. Rationale from my prior report: in-mod unit tests cover handler correctness, and the path-guard tests cover the negative path. The remaining gap (route registration, axum extractor parsing, JSON serialization, middleware ordering) is a test-depth concern, not a correctness one — the existing 308 lib tests + 81 web tests give strong coverage of the handler logic. Registered as a `medium` open residual; the W-2 finding carries forward as a known test-baseline item, **not** a V1.65 merge blocker.
+
+**Disposition: W-2 deferral ACCEPTED.** I confirm this is a reasonable test-depth gate, not a V1.65 architectural blocker.
+
+### No-regression sanity check on the other 3 fixes
+
+Glanced the other 3 fixes for architecture/coherence regressions in my lane (architecture/maintainability). All three are clean.
+
+| Fix commit | QC3 finding | Lane-cross architectural check |
+|------------|-------------|--------------------------------|
+| `9c9945a7` (keyset pagination) | W-1 | Keyset cursor is opaque (`v2:<volume>:<chapter>`); uses the existing `PRIMARY KEY (work_id, volume, chapter)` index — no new index, no schema drift. The cursor is encoded in the handler (not in `nexus-contracts`) which is appropriate for an opaque pagination token. **`pagination.rs` offset helpers are no longer used by chapters** — confirmed by the diff (line 10 removed the import); works.rs still uses the offset helpers (out of scope here). No architectural concern. |
+| `15d5f145` (10 MiB body cap) | W-2 | The cap is centralized in `read_guarded_file` (one place, all chapter read paths inherit the cap). The 413 mapping is in the same `errors.rs` dispatch arm — consistent with the other `CHAPTER_*` code mappings. The test creates an oversized file (not a failpoint) — direct but slower; acceptable for a 10 MiB test. No architectural concern. |
+| `6e14fb13` (keydown cleanup) | W-4 | The fix names the keydown handler and adds cleanup — pure React effect hygiene. The test asserts `addEventListener`/`removeEventListener` are balanced via mock calls. No architectural concern. |
+
+**No new architecture/coherence regression** in the architecture/maintainability lane introduced by any of the 4 fix commits. The 7 Suggestions (S-1..S-7) from my prior report remain as-is; they are test-baseline and code-organization items, not blockers.
+
+### Verdict
+
+| Finding | Severity | Disposition |
+|---------|----------|-------------|
+| W-1 (outline PUT FS/DB atomicity) | high | **RESOLVED** (DB-first reorder + `put_outline_db_failure_does_not_write_file` regression test) |
+| W-2 (missing HTTP integration tests) | medium | **DEFER ACCEPTED** (test-baseline follow-up; registered residual) |
+| S-1..S-7 | low | Unchanged; not re-reviewed in this targeted pass |
+
+**Re-verdict**: **Approve**. The single blocking architectural finding (W-1) is closed with a sound fix and a strong regression test. The W-2 deferral is reasonable. All static checks and test suites pass on the post-fix-wave-1 HEAD (`9c50481f`).
+
+### Reviewer Notes (revalidation)
+
+- **Why the W-1 fix is sufficient (architecture)**: The DB-first reorder is the simplest of the three fix approaches I listed in my prior finding (option 1, "compute and persist the canonical `outline_path` in DB, then write file"). The DB here only stores a path string + `updated_at` — the actual content is always derived from the file. By ordering metadata-first, the system converges to a consistent state on retry: either the path is recorded AND the file exists (success), or the path is recorded AND the file is missing (retry re-creates it idempotently), or neither (failure, no orphan). The runtime lock is still required for single-writer but the **atomicity** property is now derived from the file-system rename primitive (`tokio::fs::rename` is atomic on the same filesystem), not from the lock.
+- **Why the W-2 deferral is acceptable (architecture)**: The chapter routes are registered alongside works routes in `api/mod.rs:312-329` (per my prior S-5 finding). The same V1.42.1 hotfix pattern is reused, and the in-mod unit tests exercise the handler functions directly. A future `tests/chapters_api.rs` would close the routing/serialization gap; it does not change the architectural integrity of V1.65.
+- **Coordination with QC3**: My lane (architecture/maintainability) does not overlap with QC3's W-1 (pagination), W-2 (body cap), W-3 (also W-1 in my lane — outline PUT atomicity, jointly closed by the same fix), W-4 (keydown leak). The fix-wave is jointly owned by qc1+qc3; the per-finding coverage is clean.
+
+PM consolidation: **close R-1 (W-1, high)** in `residual_findings` (no `archived/residuals/` write needed; that is PM/QA lifecycle work per `mstar-plan-artifacts`); **keep R-2 (W-2, medium) open** with the test-baseline target date. The 7 Suggestions remain in the suggestions row; the architectural layer is healthy.
