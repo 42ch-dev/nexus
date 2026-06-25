@@ -768,13 +768,17 @@ pub async fn patch_chapter(
             .then_some(())
             .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-        work_chapters::get_chapter(state.pool(), &work_id, chapter, volume)
+        // Re-fetch using the POST-patch volume. If `req.volume` changed it, the
+        // row now lives at the new volume; re-fetching with the original query
+        // `volume` would miss it and return 404 on a fully-committed write.
+        let fetch_volume = patch.volume.unwrap_or(volume);
+        work_chapters::get_chapter(state.pool(), &work_id, chapter, fetch_volume)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
                 message: e.to_string(),
             })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))
+            .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {fetch_volume}")))
     }
     .await;
 
@@ -1130,6 +1134,34 @@ mod tests {
         .await
         .expect("patch chapter");
         assert_eq!(resp.slug, Some("new-slug".to_string()));
+    }
+
+    /// Regression: `patch_chapter` used to re-fetch the row using the ORIGINAL
+    /// query volume after a volume change. The UPDATE committed (row moved to
+    /// the new volume) but the re-fetch `WHERE volume = <old>` found nothing and
+    /// the handler returned 404 on a successful write. The re-fetch must use the
+    /// patched volume.
+    #[tokio::test]
+    async fn patch_chapter_volume_change_returns_updated_row() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let req = PatchChapterRequest {
+            title: None,
+            slug: None,
+            planned_word_count: None,
+            volume: Some(2),
+            status: None,
+            confirm_structural_edit: None,
+            transition_reason: None,
+        };
+        let resp = patch_chapter(
+            AxumState(state),
+            AxumPath((work_id, "1".to_string())),
+            AxumQuery(ChapterContentQuery { volume: None }),
+            axum::Json(req),
+        )
+        .await
+        .expect("patch with volume change must not 404 after the write");
+        assert_eq!(resp.volume, 2);
     }
 
     #[tokio::test]
