@@ -153,6 +153,12 @@ fn preset_routes() -> Router<WorkspaceState> {
             "/v1/local/presets/{id}:reload",
             post(handlers::preset_management::reload_preset),
         )
+        .route(
+            "/v1/local/presets/{id}",
+            get(handlers::preset_management::get_preset)
+                .patch(handlers::preset_management::update_preset)
+                .delete(handlers::preset_management::delete_preset),
+        )
 }
 
 /// Work-scope KB routes — local work file index only (V1.20 Batch 5, T39; KCA-003 C2).
@@ -302,6 +308,24 @@ fn works_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/local/works/{work_id}/reconcile-chapters",
             post(handlers::works::reconcile_chapters),
+        )
+        // ── Chapter content sub-routes (V1.65 P0) ────────────────────────
+        .route(
+            "/v1/local/works/{work_id}/chapters",
+            get(handlers::chapters::list_chapters),
+        )
+        .route(
+            "/v1/local/works/{work_id}/chapters/{n}",
+            get(handlers::chapters::get_chapter).patch(handlers::chapters::patch_chapter),
+        )
+        .route(
+            "/v1/local/works/{work_id}/chapters/{n}/outline",
+            get(handlers::chapters::get_chapter_outline)
+                .put(handlers::chapters::put_chapter_outline),
+        )
+        .route(
+            "/v1/local/works/{work_id}/chapters/{n}/body",
+            get(handlers::chapters::get_chapter_body),
         )
         // ── Findings sub-routes (V1.39 P1) ───────────────────────────
         .route(

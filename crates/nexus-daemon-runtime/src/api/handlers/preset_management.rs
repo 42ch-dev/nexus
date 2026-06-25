@@ -12,6 +12,7 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
+use nexus_contracts::{GetPresetResponse, UpdatePresetRequest, UpdatePresetResponse};
 use nexus_home_layout::{user_preset_base_dir, user_preset_bundle_dir};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -493,6 +494,165 @@ pub async fn reload_preset(
         id: preset_id,
         reloaded: true,
     }))
+}
+
+/// Locate a preset by ID and return its source + filesystem path.
+fn locate_preset(
+    nexus_home: &std::path::Path,
+    preset_id: &str,
+) -> Result<(String, Option<std::path::PathBuf>), NexusApiError> {
+    if list_embedded_ids().contains(&preset_id.to_string()) {
+        return Ok(("embedded".to_string(), None));
+    }
+
+    let user_dir = user_preset_bundle_dir(nexus_home, preset_id);
+    if user_dir.join("preset.yaml").exists() {
+        return Ok(("user".to_string(), Some(user_dir)));
+    }
+
+    let system_dir = user_preset_base_dir(nexus_home)
+        .join("_system")
+        .join(preset_id);
+    if system_dir.join("preset.yaml").exists() {
+        return Ok(("system".to_string(), Some(system_dir)));
+    }
+
+    Err(NexusApiError::NotFound(format!(
+        "Preset '{preset_id}' not found"
+    )))
+}
+
+/// Load the raw YAML content for a preset.
+async fn load_preset_yaml(
+    _nexus_home: &std::path::Path,
+    preset_id: &str,
+    source: &str,
+    path: Option<&std::path::Path>,
+) -> Result<String, NexusApiError> {
+    match source {
+        "embedded" => {
+            let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
+            let loaded = nexus_orchestration::preset::load_embedded_preset(preset_id, &caps)
+                .map_err(|e| NexusApiError::Internal {
+                    code: "PRESET_LOAD_ERROR".to_string(),
+                    message: e.to_string(),
+                })?;
+            serde_yaml::to_string(&loaded.manifest).map_err(|e| NexusApiError::Internal {
+                code: "YAML_SERIALIZE_ERROR".to_string(),
+                message: e.to_string(),
+            })
+        }
+        "system" | "user" => {
+            let dir = path.ok_or_else(|| NexusApiError::Internal {
+                code: "PRESET_PATH_MISSING".to_string(),
+                message: format!("{source} preset '{preset_id}' has no path"),
+            })?;
+            let yaml_path = dir.join("preset.yaml");
+            tokio::fs::read_to_string(&yaml_path).await.map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    NexusApiError::NotFound(format!("Preset '{preset_id}' not found"))
+                } else {
+                    NexusApiError::Internal {
+                        code: "FILE_READ_ERROR".to_string(),
+                        message: e.to_string(),
+                    }
+                }
+            })
+        }
+        _ => Err(NexusApiError::Internal {
+            code: "UNKNOWN_PRESET_SOURCE".to_string(),
+            message: format!("unknown preset source '{source}'"),
+        }),
+    }
+}
+
+/// `GET /v1/local/presets/{id}` — fetch preset manifest YAML.
+pub async fn get_preset(
+    State(state): State<WorkspaceState>,
+    Path(preset_id): Path<String>,
+) -> Result<Json<GetPresetResponse>, NexusApiError> {
+    let nexus_home = state.nexus_home();
+    let (source, path) = locate_preset(nexus_home, &preset_id)?;
+    let yaml = load_preset_yaml(nexus_home, &preset_id, &source, path.as_deref()).await?;
+
+    Ok(Json(GetPresetResponse {
+        id: preset_id,
+        source,
+        path: path.map(|p| p.display().to_string()),
+        yaml,
+    }))
+}
+
+/// `PATCH /v1/local/presets/{id}` — update user preset YAML.
+pub async fn update_preset(
+    State(state): State<WorkspaceState>,
+    Path(preset_id): Path<String>,
+    Json(req): Json<UpdatePresetRequest>,
+) -> Result<Json<UpdatePresetResponse>, NexusApiError> {
+    let nexus_home = state.nexus_home();
+    let (source, path) = locate_preset(nexus_home, &preset_id)?;
+
+    if source != "user" {
+        return Err(NexusApiError::BadRequest {
+            code: "PRESET_UPDATE_FORBIDDEN".to_string(),
+            message: format!("only user presets can be updated; '{preset_id}' is {source}"),
+        });
+    }
+
+    // Validate YAML before writing.
+    parse_and_check_manifest(&req.yaml)?;
+
+    let dir = path.ok_or_else(|| NexusApiError::Internal {
+        code: "PRESET_PATH_MISSING".to_string(),
+        message: format!("user preset '{preset_id}' has no path"),
+    })?;
+    let yaml_path = dir.join("preset.yaml");
+
+    tokio::fs::write(&yaml_path, req.yaml)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "FILE_WRITE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(UpdatePresetResponse {
+        id: preset_id,
+        updated: true,
+    }))
+}
+
+/// `DELETE /v1/local/presets/{id}` — delete a user preset bundle.
+pub async fn delete_preset(
+    State(state): State<WorkspaceState>,
+    Path(preset_id): Path<String>,
+) -> Result<axum::http::StatusCode, NexusApiError> {
+    let nexus_home = state.nexus_home();
+    let (source, path) = locate_preset(nexus_home, &preset_id)?;
+
+    if source != "user" {
+        return Err(NexusApiError::BadRequest {
+            code: "PRESET_DELETE_FORBIDDEN".to_string(),
+            message: format!("only user presets can be deleted; '{preset_id}' is {source}"),
+        });
+    }
+
+    let dir = path.ok_or_else(|| NexusApiError::Internal {
+        code: "PRESET_PATH_MISSING".to_string(),
+        message: format!("user preset '{preset_id}' has no path"),
+    })?;
+
+    tokio::fs::remove_dir_all(&dir).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            NexusApiError::NotFound(format!("Preset '{preset_id}' not found"))
+        } else {
+            NexusApiError::Internal {
+                code: "DIRECTORY_REMOVE_ERROR".to_string(),
+                message: e.to_string(),
+            }
+        }
+    })?;
+
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -1010,5 +1170,193 @@ states:
             "id matches dirname: errors={:?}, warnings={:?}",
             resp.errors, resp.warnings
         );
+    }
+
+    // ── Full CRUD tests ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_preset_returns_user_bundle() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        let _ = scaffold_preset(
+            State(state.clone()),
+            axum::Json(ScaffoldPresetRequest {
+                name: "crud-test".to_string(),
+            }),
+        )
+        .await
+        .expect("scaffold");
+
+        let resp = get_preset(State(state), Path("crud-test".to_string()))
+            .await
+            .expect("get preset")
+            .0;
+        assert_eq!(resp.id, "crud-test");
+        assert_eq!(resp.source, "user");
+        assert!(resp.yaml.contains("crud-test"));
+    }
+
+    #[tokio::test]
+    async fn get_preset_returns_embedded_preset() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        let resp = get_preset(State(state), Path("novel-writing".to_string()))
+            .await
+            .expect("get embedded preset")
+            .0;
+        assert_eq!(resp.id, "novel-writing");
+        assert_eq!(resp.source, "embedded");
+        assert!(resp.yaml.contains("novel-writing"));
+        assert!(resp.path.is_none());
+    }
+
+    #[tokio::test]
+    async fn update_preset_mutates_user_yaml() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        let _ = scaffold_preset(
+            State(state.clone()),
+            axum::Json(ScaffoldPresetRequest {
+                name: "update-test".to_string(),
+            }),
+        )
+        .await
+        .expect("scaffold");
+
+        let new_yaml = r#"preset:
+  id: update-test
+  version: 1
+  kind: creator
+  description: updated description
+  requires_capabilities: []
+  run_intents: [work_init]
+  initial: a
+  terminal: b
+states:
+  - id: a
+    enter: []
+    exit_when: { kind: manual }
+    next: b
+  - id: b
+    terminal: true
+"#
+        .to_string();
+        let resp = update_preset(
+            State(state.clone()),
+            Path("update-test".to_string()),
+            axum::Json(UpdatePresetRequest { yaml: new_yaml }),
+        )
+        .await
+        .expect("update preset")
+        .0;
+        assert!(resp.updated);
+
+        let yaml_path =
+            user_preset_bundle_dir(state.nexus_home(), "update-test").join("preset.yaml");
+        let written = std::fs::read_to_string(yaml_path).expect("read yaml");
+        assert!(written.contains("updated description"));
+    }
+
+    #[tokio::test]
+    async fn update_preset_rejects_embedded() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        let result = update_preset(
+            State(state),
+            Path("novel-writing".to_string()),
+            axum::Json(UpdatePresetRequest {
+                yaml: "preset:\n".to_string(),
+            }),
+        )
+        .await;
+        assert!(result.is_err(), "embedded preset update must be rejected");
+    }
+
+    #[tokio::test]
+    async fn delete_preset_removes_user_bundle() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        let _ = scaffold_preset(
+            State(state.clone()),
+            axum::Json(ScaffoldPresetRequest {
+                name: "delete-test".to_string(),
+            }),
+        )
+        .await
+        .expect("scaffold");
+
+        let status = delete_preset(State(state.clone()), Path("delete-test".to_string()))
+            .await
+            .expect("delete preset");
+        assert_eq!(status, axum::http::StatusCode::NO_CONTENT);
+        assert!(!bundle_dir_exists(state.nexus_home(), "delete-test"));
+    }
+
+    #[tokio::test]
+    async fn delete_preset_rejects_embedded() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        let result = delete_preset(State(state), Path("novel-writing".to_string())).await;
+        assert!(result.is_err(), "embedded preset delete must be rejected");
     }
 }

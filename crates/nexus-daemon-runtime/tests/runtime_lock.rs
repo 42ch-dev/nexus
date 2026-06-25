@@ -49,6 +49,7 @@ async fn create_test_work(state: &WorkspaceState) -> String {
             client_request_id: None,
             lineage_from_work_id: None,
             set_pool_active: None,
+            work_profile: None,
         }),
     )
     .await
@@ -71,6 +72,7 @@ fn minimal_patch(title: &str) -> PatchWorkRequest {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     }
 }
 

@@ -253,6 +253,7 @@ async fn handler_get_work_returns_record() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (status, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -324,6 +325,7 @@ async fn handler_patch_work_updates_record() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -347,6 +349,7 @@ async fn handler_patch_work_updates_record() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -376,6 +379,7 @@ async fn handler_patch_work_returns_404_for_unknown() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -403,6 +407,7 @@ async fn handler_append_inspiration_returns_count() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -564,6 +569,7 @@ async fn get_work_response_includes_stage_fields() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -594,6 +600,7 @@ async fn patch_work_updates_stage_fields() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -617,6 +624,7 @@ async fn patch_work_updates_stage_fields() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let _ = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -640,6 +648,7 @@ async fn patch_work_updates_stage_fields() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -686,6 +695,7 @@ async fn patch_work_stage_returns_401_without_creator() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -717,6 +727,7 @@ async fn patch_work_stage_returns_404_for_unknown() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -746,6 +757,7 @@ async fn create_work_response_has_parsed_json_fields() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -793,6 +805,7 @@ async fn append_inspiration_response_has_parsed_arrays() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -856,6 +869,7 @@ async fn creator_isolation_get_work_returns_404_for_other_creator() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state_a), axum::Json(req))
@@ -890,6 +904,7 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state_a), axum::Json(req))
@@ -915,6 +930,7 @@ async fn creator_isolation_patch_work_returns_404_for_other_creator() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let state_b = WorkspaceState::new_for_testing(nh_b, db_b, None).await;
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
@@ -950,6 +966,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -975,6 +992,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -1005,6 +1023,7 @@ async fn patch_work_intake_status_independent_of_stage_status() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let advanced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1035,6 +1054,7 @@ async fn patch_work_stage_change_is_auditable() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1059,6 +1079,7 @@ async fn patch_work_stage_change_is_auditable() {
         force: Some(true),
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let updated = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -1084,6 +1105,7 @@ async fn patch_work_stage_change_is_auditable() {
         force: Some(true),
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let forced = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1127,6 +1149,7 @@ async fn patch_work_stage_path_releases_runtime_lock() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1151,6 +1174,7 @@ async fn patch_work_stage_path_releases_runtime_lock() {
         force: Some(true),
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state.clone()),
@@ -1197,6 +1221,7 @@ async fn patch_work_stage_path_releases_runtime_lock() {
         force: Some(true),
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result2 = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1226,6 +1251,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, _resp) =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
@@ -1245,6 +1271,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp2) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1268,6 +1295,7 @@ async fn patch_work_invalid_stage_value_returns_400() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1341,6 +1369,7 @@ async fn patch_stage_status_complete_without_stage_is_rejected() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1387,6 +1416,7 @@ async fn patch_stage_status_complete_with_force_is_allowed() {
         force: Some(true),
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1429,6 +1459,7 @@ async fn patch_stage_status_active_without_force_is_allowed() {
         force: None,
         auto_review_master_on_timeout: None,
         auto_chain_interrupted: None,
+        work_profile: None,
     };
     let result = nexus_daemon_runtime::api::handlers::works::patch_work(
         State(state),
@@ -1472,6 +1503,7 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_status, resp) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1582,6 +1614,7 @@ async fn create_work_with_valid_lineage_succeeds() {
         client_request_id: None,
         lineage_from_work_id: None,
         set_pool_active: None,
+        work_profile: None,
     };
     let (_, resp_a) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1602,6 +1635,7 @@ async fn create_work_with_valid_lineage_succeeds() {
         client_request_id: None,
         lineage_from_work_id: Some(work_id_a.clone()),
         set_pool_active: None,
+        work_profile: None,
     };
     let (status_b, resp_b) = nexus_daemon_runtime::api::handlers::works::create_work(
         State(state.clone()),
@@ -1640,6 +1674,7 @@ async fn create_work_with_nonexistent_lineage_returns_400() {
         client_request_id: None,
         lineage_from_work_id: Some("wrk_nonexistent_12345".to_string()),
         set_pool_active: None,
+        work_profile: None,
     };
     let result =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
@@ -1672,6 +1707,7 @@ async fn create_work_with_empty_lineage_returns_400() {
         client_request_id: None,
         lineage_from_work_id: Some(String::new()),
         set_pool_active: None,
+        work_profile: None,
     };
     let result =
         nexus_daemon_runtime::api::handlers::works::create_work(State(state), axum::Json(req))
