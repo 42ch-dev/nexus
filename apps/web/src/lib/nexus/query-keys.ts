@@ -36,4 +36,19 @@ export const queryKeys = {
     all: ['presets'] as const,
     list: () => [...queryKeys.presets.all, 'list'] as const,
   },
+  chapters: {
+    all: ['chapters'] as const,
+    lists: () => [...queryKeys.chapters.all, 'list'] as const,
+    list: (workId: string, query?: object) =>
+      [...queryKeys.chapters.lists(), workId, query ?? {}] as const,
+    details: () => [...queryKeys.chapters.all, 'detail'] as const,
+    detail: (workId: string, chapter: number, query?: object) =>
+      [...queryKeys.chapters.details(), workId, chapter, query ?? {}] as const,
+    outlines: () => [...queryKeys.chapters.all, 'outline'] as const,
+    outline: (workId: string, chapter: number, query?: object) =>
+      [...queryKeys.chapters.outlines(), workId, chapter, query ?? {}] as const,
+    bodies: () => [...queryKeys.chapters.all, 'body'] as const,
+    body: (workId: string, chapter: number, query?: object) =>
+      [...queryKeys.chapters.bodies(), workId, chapter, query ?? {}] as const,
+  },
 } as const;

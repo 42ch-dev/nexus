@@ -84,6 +84,12 @@ describe('NexusClient adapter contract guard', () => {
       'scaffoldPreset',
       'validatePreset',
       'reloadPreset',
+      'listChapters',
+      'getChapter',
+      'getChapterOutline',
+      'putChapterOutline',
+      'patchChapter',
+      'getChapterBody',
     ] as const) {
       await expect(
         // Every method is either async-throws or returns-then-throws; both
