@@ -80,7 +80,7 @@ export function ChaptersPage() {
     if (row.status === 'finalized') {
       request.confirm_structural_edit = true;
     }
-    await patch.mutateAsync({ chapter: row.chapter, request });
+    await patch.mutateAsync({ chapter: row.chapter, request, query: { volume: row.volume ?? 1 } });
     setEditing(null);
     setEdits({});
   }
@@ -90,6 +90,7 @@ export function ChaptersPage() {
     await patch.mutateAsync({
       chapter: row.chapter,
       request: { status: 'outlined' },
+      query: { volume: row.volume ?? 1 },
     });
   }
 
@@ -175,7 +176,7 @@ export function ChaptersPage() {
                         <TableCell className="text-right tabular-nums">{row.chapter}</TableCell>
                         <TableCell>
                           <Link
-                            to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}`}
+                            to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume ?? 1}`}
                             className="font-medium text-blue-700 hover:text-blue-800 hover:underline"
                           >
                             {row.title || `Chapter ${row.chapter}`}
@@ -245,7 +246,7 @@ export function ChaptersPage() {
                               asChild
                             >
                               <Link
-                                to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}`}
+                                to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume ?? 1}`}
                                 aria-label={`Open chapter ${row.chapter}`}
                               >
                                 <FileText className="h-4 w-4" aria-hidden />

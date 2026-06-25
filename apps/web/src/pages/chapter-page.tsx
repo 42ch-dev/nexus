@@ -7,7 +7,7 @@
  * context menu offering "Copy path" only.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Bold,
@@ -48,10 +48,19 @@ type SaveState = 'clean' | 'dirty' | 'saving' | 'saved-error';
 export function ChapterPage() {
   const { workId = '', chapter: chapterParam = '' } = useParams();
   const chapterNumber = Number(chapterParam);
-  const chapter = useChapter(workId || undefined, chapterNumber || undefined);
-  const outline = useChapterOutline(workId || undefined, chapterNumber || undefined);
-  const body = useChapterBody(workId || undefined, chapterNumber || undefined);
-  const putOutline = usePutChapterOutline(workId || undefined, chapterNumber || undefined);
+  // Thread the chapter's volume (from the list link's ?volume=N) through every
+  // chapter-content hook. Without this, volume>1 chapters 404 because the
+  // server defaults the volume query param to 1.
+  const [searchParams] = useSearchParams();
+  const volumeQuery = useMemo(() => {
+    const raw = searchParams.get('volume');
+    const n = raw === null ? undefined : Number(raw);
+    return n !== undefined && n > 0 ? { volume: n } : undefined;
+  }, [searchParams]);
+  const chapter = useChapter(workId || undefined, chapterNumber || undefined, volumeQuery);
+  const outline = useChapterOutline(workId || undefined, chapterNumber || undefined, volumeQuery);
+  const body = useChapterBody(workId || undefined, chapterNumber || undefined, volumeQuery);
+  const putOutline = usePutChapterOutline(workId || undefined, chapterNumber || undefined, volumeQuery);
 
   const [activeTab, setActiveTab] = useState('outline');
   const [saveState, setSaveState] = useState<SaveState>('clean');
