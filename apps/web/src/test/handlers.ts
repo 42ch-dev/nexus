@@ -73,3 +73,125 @@ export function createWorkCreated(): RequestHandler {
     );
   });
 }
+
+// ── Chapters ─────────────────────────────────────────────────────────────────
+
+/** Canonical chapter summary fixture builders for P2 screen tests. */
+export function chapterSummary(
+  chapter: number,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    work_id: 'w-123',
+    chapter,
+    volume: 1,
+    title: null,
+    slug: `ch${String(chapter).padStart(2, '0')}`,
+    planned_word_count: 4000,
+    actual_word_count: null,
+    status: 'not_started',
+    outline_path: `Works/WRK/Outlines/chapters/ch${String(chapter).padStart(2, '0')}-outline.md`,
+    body_path: `Works/WRK/Stories/ch${String(chapter).padStart(2, '0')}-ch${String(chapter).padStart(2, '0')}.md`,
+    created_at: '2026-06-25T00:00:00Z',
+    updated_at: '2026-06-25T00:00:00Z',
+    ...over,
+  };
+}
+
+/** `GET /v1/local/works/:workId/chapters` → 200 `{ items, pagination }`. */
+export function chaptersList(
+  rows: Record<string, unknown>[],
+  over: Partial<PaginationInfo> = {},
+): RequestHandler {
+  return http.get('/v1/local/works/:workId/chapters', () =>
+    HttpResponse.json({ items: rows, pagination: pagination(over) }),
+  );
+}
+
+/** `GET /v1/local/works/:workId/chapters/:n` → 200 `ChapterDetail`. */
+export function chapterDetail(
+  _chapter: number,
+  over: Record<string, unknown> = {},
+): RequestHandler {
+  return http.get('/v1/local/works/:workId/chapters/:n', ({ params }) => {
+    const n = Number(params.n);
+    return HttpResponse.json({
+      ...chapterSummary(n),
+      can_edit_outline: true,
+      can_edit_structure: true,
+      body_read_only: true,
+      protection: { level: 'none', reason: '' },
+      ...over,
+    });
+  });
+}
+
+/** `GET /v1/local/works/:workId/chapters/:n/outline` → 200 `ChapterOutline`. */
+export function chapterOutline(
+  chapter: number,
+  content: string,
+  over: Record<string, unknown> = {},
+): RequestHandler {
+  return http.get('/v1/local/works/:workId/chapters/:n/outline', ({ params }) =>
+    HttpResponse.json({
+      work_id: 'w-123',
+      chapter: Number(params.n),
+      volume: 1,
+      outline_path: `Works/WRK/Outlines/chapters/ch${String(chapter).padStart(2, '0')}-outline.md`,
+      content,
+      updated_at: '2026-06-25T00:00:00Z',
+      ...over,
+    }),
+  );
+}
+
+/** `PUT /v1/local/works/:workId/chapters/:n/outline` → 200 `ChapterOutline`. */
+export function chapterOutlineUpdated(): RequestHandler {
+  return http.put('/v1/local/works/:workId/chapters/:n/outline', async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { content?: string };
+    return HttpResponse.json({
+      work_id: params.workId ?? 'w-123',
+      chapter: Number(params.n),
+      volume: 1,
+      outline_path: `Works/WRK/Outlines/chapters/ch${String(params.n).padStart(2, '0')}-outline.md`,
+      content: body.content ?? '',
+      updated_at: '2026-06-25T00:00:00Z',
+    });
+  });
+}
+
+/** `PATCH /v1/local/works/:workId/chapters/:n` → 200 `ChapterDetail`. */
+export function chapterPatched(): RequestHandler {
+  return http.patch('/v1/local/works/:workId/chapters/:n', async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    return HttpResponse.json({
+      ...chapterSummary(Number(params.n)),
+      ...body,
+      can_edit_outline: true,
+      can_edit_structure: true,
+      body_read_only: true,
+      protection: { level: 'none', reason: '' },
+    });
+  });
+}
+
+/** `GET /v1/local/works/:workId/chapters/:n/body` → 200 `ChapterBody`. */
+export function chapterBody(
+  chapter: number,
+  content: string,
+  over: Record<string, unknown> = {},
+): RequestHandler {
+  return http.get('/v1/local/works/:workId/chapters/:n/body', ({ params }) =>
+    HttpResponse.json({
+      work_id: 'w-123',
+      chapter: Number(params.n),
+      volume: 1,
+      body_path: `Works/WRK/Stories/ch${String(chapter).padStart(2, '0')}-ch${String(chapter).padStart(2, '0')}.md`,
+      content,
+      frontmatter: { status: 'draft' },
+      read_only: true,
+      updated_at: '2026-06-25T00:00:00Z',
+      ...over,
+    }),
+  );
+}
