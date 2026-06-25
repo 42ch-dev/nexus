@@ -338,4 +338,62 @@ describe('ChapterPage', () => {
     await userEvent.click(screen.getByRole('menuitem', { name: /Copy Path/i }));
     expect(writeText).toHaveBeenCalledWith('Works/WRK/Stories/ch01-ch01.md');
   });
+
+  it('closes the context menu with Escape and does not leak keydown listeners', async () => {
+    const addListener = vi.spyOn(window, 'addEventListener');
+    const removeListener = vi.spyOn(window, 'removeEventListener');
+
+    useHandlers(
+      chapterDetail('draft'),
+      http.get('/v1/local/works/:workId/chapters/:n/outline', () =>        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          outline_path: 'Works/WRK/Outlines/chapters/ch01-outline.md',
+          content: '# Chapter 1',
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+      http.get('/v1/local/works/:workId/chapters/:n/body', () =>        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          body_path: 'Works/WRK/Stories/ch01-ch01.md',
+          content: 'Body prose.',
+          read_only: true,
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+    );
+
+    renderChapter();
+    await screen.findByRole('heading', { name: 'Outline' });
+    await userEvent.click(screen.getByRole('tab', { name: /Body/i }));
+    await screen.findByText('Body prose.');
+    const bodyRegion = screen.getByRole('region', { name: 'Chapter body' });
+
+    addListener.mockClear();
+    removeListener.mockClear();
+
+    await userEvent.pointer([{ keys: '[MouseRight]', target: bodyRegion }]);
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
+
+    // Escape closes the menu.
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+
+    // Re-open and close again to confirm the listener is re-attached cleanly.
+    await userEvent.pointer([{ keys: '[MouseRight]', target: bodyRegion }]);
+    expect(await screen.findByRole('menu')).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+
+    const keydownAdds = addListener.mock.calls.filter(([type]) => type === 'keydown').length;
+    const keydownRemoves = removeListener.mock.calls.filter(([type]) => type === 'keydown').length;
+    expect(keydownAdds).toBe(2);
+    expect(keydownRemoves).toBe(2);
+
+    addListener.mockRestore();
+    removeListener.mockRestore();
+  });
 });
