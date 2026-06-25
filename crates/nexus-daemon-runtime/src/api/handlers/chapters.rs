@@ -344,12 +344,17 @@ fn to_detail(r: &WorkChapterRecord) -> ChapterDetail {
 }
 
 /// Read a text file after path-guard verification.
+///
+/// Enforces a 10 MiB size cap to prevent unbounded memory reads on
+/// unexpectedly large chapter bodies.
 async fn read_guarded_file(
     workspace_root: &StdPath,
     rel_path: &str,
     forbidden_code: &str,
     not_found_code: &str,
 ) -> Result<String, NexusApiError> {
+    const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
+
     let path = resolve_guarded_path(workspace_root, rel_path, true).map_err(|e| {
         if matches!(e, NexusApiError::BadRequest { ref code, .. } if code == "CHAPTER_PATH_FORBIDDEN")
         {
@@ -361,6 +366,29 @@ async fn read_guarded_file(
             e
         }
     })?;
+
+    let metadata = tokio::fs::metadata(&path).await.map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            NexusApiError::NotFound(format!("{not_found_code}: file not found at '{rel_path}'"))
+        } else {
+            NexusApiError::Internal {
+                code: "FILE_READ_ERROR".to_string(),
+                message: format!("failed to read metadata for '{rel_path}': {e}"),
+            }
+        }
+    })?;
+
+    let max_bytes = u64::try_from(CHAPTER_BODY_MAX_BYTES).unwrap_or(u64::MAX);
+    if metadata.len() > max_bytes {
+        return Err(NexusApiError::BadRequest {
+            code: "CHAPTER_BODY_TOO_LARGE".to_string(),
+            message: format!(
+                "chapter body at '{rel_path}' is {size} bytes, exceeding the maximum of {max} bytes",
+                size = metadata.len(),
+                max = CHAPTER_BODY_MAX_BYTES
+            ),
+        });
+    }
 
     match tokio::fs::read_to_string(&path).await {
         Ok(content) => Ok(content),
@@ -1079,5 +1107,36 @@ mod tests {
         .expect("get body");
         assert_eq!(resp.content, "body content");
         assert!(resp.read_only);
+    }
+
+    #[tokio::test]
+    async fn get_chapter_body_rejects_oversized_file() {
+        // The constant is private to the parent module; access it via the
+        // helper below which is also private and uses the same value.
+        const TEST_MAX_BYTES: usize = 10 * 1024 * 1024;
+
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let root = state.workspace_path().expect("workspace path");
+        let body_path =
+            std::path::PathBuf::from(&root).join("Works/test-novel/Stories/ch01-ch01.md");
+        std::fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let oversized = "x".repeat(TEST_MAX_BYTES + 1);
+        std::fs::write(&body_path, oversized).unwrap();
+
+        let result = get_chapter_body(
+            AxumState(state),
+            AxumPath((work_id, "1".to_string())),
+            AxumQuery(ChapterContentQuery { volume: None }),
+        )
+        .await;
+
+        assert!(result.is_err(), "expected error for oversized body");
+        match result {
+            Err(NexusApiError::BadRequest { code, .. }) => {
+                assert_eq!(code, "CHAPTER_BODY_TOO_LARGE");
+            }
+            Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => panic!("expected error"),
+        }
     }
 }
