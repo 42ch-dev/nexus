@@ -57,3 +57,23 @@ generated_at: "2026-06-26"
 | 🟢 Suggestion | 5 |
 
 **Verdict**: **Request Changes** — 3 unresolved Warnings (W-1 intersects the `cargo clippy --all` CI gate; W-2/W-3 are doc drift). All fixable in <30 LoC doc + 5-line pre-check. Architecture itself is sound (clean `TauriClient extends BrowserClient`, single capability-detection seam, authoritative runtime path guard, zero-behavior-change PaginationInfo extraction).
+
+---
+
+## Revalidation (fix-wave-1, 2026-06-26)
+
+- **Re-review mode**: targeted (qc1 blocking findings; qc2 already Approve, excluded)
+- **Fix-wave diff verified**: `766a2582..1e595fb5` (5 commits, 11 files, +237/-24)
+- **Fix→finding mapping**: `f81b001e`→F3/F4/F5 (W-1/W-2/W-3); `b0a714c2`→F8 (S-3)
+
+### Finding re-validation
+- **W-1 (F3): resolved** — `apps/desktop/src-tauri/build.rs` panics with actionable "run `pnpm -w run sidecar`" *before* `tauri_build::build()` when sidecar binaries missing (both macOS targets, matches §5 #1); `apps/desktop/AGENTS.md` adds "Development prerequisites" block cross-referencing the guard. No more opaque error; fresh-checkout `cargo clippy --all` gate unblocked.
+- **W-2 (F4): resolved** — `_p1_runtime_deps_note` rewritten to as-built (no JS runtime deps; `window.__TAURI_INTERNALS__` for detection + `window.__TAURI__.core.invoke` for commands; transport in Rust crate). Factually tighter than original W-2 cite. AGENTS.md "Conventions" forbids adding `@tauri-apps/plugin-shell`/`api` to package.json.
+- **W-3 (F5): resolved** — AGENTS.md scope table: bundled sidecar lifecycle moved to **In**; in-process `nexus-daemon-runtime` lib link noted as the actual V1.67+ deferral. Doc/code drift gone.
+- **S-3 (F8): resolved** — `daemon-status-bar.tsx::displayFor` branches on `status.detail`: "Port unavailable" only when detail contains `port`+`already in use`; otherwise "Daemon did not start". Verified against `sidecar.rs::start` (lines 213-220) — the two detail strings the heuristic discriminates are exactly the two Rust emits. (Note: F2's new attached-crash detail shows "Daemon did not start" — strictly safer than old "Port unavailable" mislabel; out of F8 scope.)
+
+### New findings introduced by the fix-wave
+**None.** Fix-wave is scoped + surgical + architecturally neutral (additive guard clause, doc rewrites, label branch). qc3-scope changes (F1/F2/F6/F7) don't touch any qc1 finding or §5 LOCKED decision (surface-level diff confirmed).
+
+### Updated verdict
+**Approve** — all 3 blocking Warnings (W-1/W-2/W-3) + promoted S-3 (F8) resolved with evidence. Doc/UX surface now matches as-built design; fresh-checkout dev experience unblocked. No new Critical/Warning; no §5 decision re-opened.
