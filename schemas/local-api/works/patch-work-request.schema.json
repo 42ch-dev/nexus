@@ -18,7 +18,8 @@
     "stage_status": { "type": "string" },
     "force": { "type": "boolean" },
     "auto_review_master_on_timeout": { "type": "boolean" },
-    "auto_chain_interrupted": { "type": "boolean" }
+    "auto_chain_interrupted": { "type": "boolean" },
+    "work_profile": { "type": "string" }
   },
   "additionalProperties": false
 }

@@ -268,6 +268,8 @@ pub struct CreateWorkRequest {
     /// DF-60 §5.3: If true, after creation, set this Work as pool `active`.
     #[serde(default)]
     pub set_pool_active: Option<bool>,
+    /// V1.65: explicit work profile classification (additive optional).
+    pub work_profile: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -330,6 +332,8 @@ pub struct PatchWorkRequest {
     /// R-V139P0-W-C: also triggers a supervisor tick so the resumed Work
     /// progresses immediately rather than waiting for the next cycle.
     pub auto_chain_interrupted: Option<bool>,
+    /// V1.65: explicit work profile classification (additive optional).
+    pub work_profile: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -509,7 +513,7 @@ pub async fn create_work(
         updated_at: now.clone(),
         current_stage: "intake".to_string(),
         stage_status: "pending".to_string(),
-        work_profile: None,
+        work_profile: req.work_profile,
         work_ref: None,
         total_planned_chapters: None,
         current_chapter: 0,
@@ -990,7 +994,8 @@ async fn apply_non_stage_fields(
         || req.world_id.is_some()
         || req.story_ref.is_some()
         || req.primary_preset_id.is_some()
-        || req.auto_review_master_on_timeout.is_some();
+        || req.auto_review_master_on_timeout.is_some()
+        || req.work_profile.is_some();
 
     if !has_non_stage {
         return Ok(());
@@ -1008,7 +1013,7 @@ async fn apply_non_stage_fields(
         schedule_ids: None,
         current_stage: None,
         stage_status: None,
-        work_profile: None,
+        work_profile: req.work_profile.clone().map(Some),
         work_ref: None,
         total_planned_chapters: None,
         current_chapter: None,
@@ -2389,6 +2394,7 @@ mod tests_fix_d {
             client_request_id: None,
             lineage_from_work_id: None,
             set_pool_active: None,
+            work_profile: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -2434,6 +2440,7 @@ mod tests_fix_d {
             client_request_id: None,
             lineage_from_work_id: None,
             set_pool_active: None,
+            work_profile: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -2493,6 +2500,7 @@ mod tests_fix_d {
             client_request_id: None,
             lineage_from_work_id: None,
             set_pool_active: None,
+            work_profile: None,
         };
 
         let result = create_work(State(state), Json(req)).await;
@@ -2529,6 +2537,7 @@ mod tests_fix_d {
             client_request_id: None,
             lineage_from_work_id: None,
             set_pool_active: None,
+            work_profile: None,
         };
 
         let (_, resp) = create_work(State(state.clone()), Json(req))
@@ -2551,6 +2560,7 @@ mod tests_fix_d {
             force: None,
             auto_review_master_on_timeout: None,
             auto_chain_interrupted: None,
+            work_profile: None,
         };
 
         let result = patch_work(State(state.clone()), Path(work_id.clone()), Json(patch)).await;
@@ -2611,6 +2621,7 @@ mod tests_fix_d {
                 client_request_id: None,
                 lineage_from_work_id: None,
                 set_pool_active: None,
+                work_profile: None,
             };
 
             let result = create_work(State(state.clone()), Json(req)).await;
