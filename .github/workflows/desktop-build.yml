@@ -1,0 +1,81 @@
+name: Desktop Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'apps/desktop/**'
+      - 'packages/nexus-contracts/**'
+      - 'crates/nexus42/**'
+      - 'crates/nexus-daemon-runtime/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'apps/desktop/**'
+      - 'packages/nexus-contracts/**'
+      - 'crates/nexus42/**'
+      - 'crates/nexus-daemon-runtime/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/**'
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SQLX_OFFLINE: "true"
+
+jobs:
+  desktop-build:
+    name: Build unsigned macOS desktop app
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build contracts package
+        run: pnpm --filter @42ch/nexus-contracts run build
+
+      - name: Build Tauri desktop bundle (universal macOS target)
+        run: pnpm --filter desktop tauri build -- --target universal-apple-darwin
+
+      - name: Upload unsigned .app + .dmg artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-desktop-macos-universal
+          path: |
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Nexus.app
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 90
