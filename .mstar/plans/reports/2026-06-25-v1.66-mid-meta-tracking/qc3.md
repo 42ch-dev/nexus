@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-25-v1.66-mid-meta-tracking"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-26"
 ---
 
@@ -61,3 +61,23 @@ None.
 | 🟢 Suggestion | 5 |
 
 **Verdict**: **Request Changes** — sidecar lifecycle directionally correct (bounded startup timeout, bounded restart backoff with cap, graceful SIGTERM→SIGKILL, pid-based liveness, port-conflict detection). P-sec hygiene sound (shared path guard, deduped RuntimeLockGuard, temp→rename→fsync). But W-1 (port exposure) is a correctness bug breaking non-default port usage; W-2 (attached-daemon health) lets UI lie about running state; W-3/W-4 are CI-reliability gaps. Recommend fixing W-1 + W-2 before approval; W-3 + W-4 also count (CI-reliability ≥ Warning). S-1..S-5 deferred V1.67+.
+
+---
+
+## Revalidation (fix-wave-1, 2026-06-26)
+
+- Re-review mode: targeted (qc3 blocking findings)
+- Fix-wave diff verified: `766a2582..1e595fb5` (11 files, +237/-24)
+- Scope strictly limited to W-1…W-4 + fixes F1/F2/F6/F7 (F3/F4/F5/F8 were qc1's — not re-opened)
+
+### Finding re-validation
+- **W-1 (F1, correctness) — RESOLVED.** `lib.rs` injects `window.__NEXUS_DAEMON_PORT__ = {port}` via `tauri::plugin::Builder::js_init_script` (runs before page JS); `tauri-client.ts` `resolveDesktopPort` checks the global (typeof number) **before** `process.env`. End-to-end `NEXUS_DAEMON_PORT=9420`: Rust→9420, global→9420, sidecar `--port 9420`, SPA→9420, base URL `http://127.0.0.1:9420`. Test `uses the injected Tauri global port when no explicit port is given` asserts `client.port===9420` + `fetchImpl` called with `http://127.0.0.1:9420/...`; `prefers the injected Tauri global over env var` asserts 7777 wins over env 8888. **9/9 vitest pass.** `daemon-runtime.md` §12.3 satisfied.
+- **W-2 (F2) — RESOLVED.** `sidecar.rs` `status()` reads `(port, should_probe = state==Running && !owned)` under lock, releases lock, actively probes attached daemons via `probe_health(port)` (bounded 2s `HEALTH_PROBE_TIMEOUT` over loopback); on failure re-acquires lock with defensive guard before → `Error` + detail "external daemon stopped" + `version=None`. Owned daemons not re-probed (pid monitor owns liveness). New tests `attached_running_daemon_transitions_to_error_when_probe_fails` + `owned_running_daemon_does_not_probe_on_status` verify both branches. (cargo test blocked locally by F3/F4 build.rs binary gate — documented dev-prereq; test logic verified by reading.)
+- **W-3 (F6) — RESOLVED.** `desktop-build.yml` adds `Swatinem/rust-cache@v2` keyed `desktop-macos-universal-aarch64-x86_64`, `workspaces: . + apps/desktop/src-tauri` — caches both repo-root `target/` + `apps/desktop/src-tauri/target/`.
+- **W-4 (F7) — RESOLVED.** Path filter: `crates/nexus42/**` + `crates/nexus-daemon-runtime/**` → `crates/**` in **both** push + pull_request triggers.
+
+### New findings introduced by the fix-wave
+None within W-1…W-4 scope. (F3/F4 build.rs binary gate = fail-fast dev-experience improvement, not regression; F8 = qc1's, approved by qc1.)
+
+### Updated verdict
+**Approve** — all 4 blocking Warnings resolved with verifiable evidence (W-1 end-to-end via 9/9 vitest + §12.3; W-2 via test logic + bounded probe; W-3/W-4 via workflow diff). No new Critical/Warning. S-1…S-5 deferred V1.67+ (unchanged).

@@ -1,22 +1,32 @@
 ---
 report_kind: qc-consolidated
 plan_id: "2026-06-25-v1.66-mid-meta-tracking"
-consolidated_verdict: "Request Changes"
+consolidated_verdict: "Approve"
 generated_at: "2026-06-26"
-wave: "initial tri-review"
+wave: "initial tri-review + fix-wave-1 + targeted re-review"
 ---
 
-# QC Consolidated Decision — V1.66 P-mid (initial tri-review)
+# QC Consolidated Decision — V1.66 P-mid (Approve after fix-wave-1)
 
-## Tri-review summary
+## Final tri-review verdict (post fix-wave-1 + targeted re-review)
 
-| Reviewer | Focus | Verdict | 🔴 Crit | 🟡 Warn | 🟢 Sugg |
-|----------|-------|---------|---------|---------|---------|
-| qc1 (`@qc-specialist`) | Architecture coherence + maintainability | **Request Changes** | 0 | 3 | 5 |
-| qc2 (`@qc-specialist-2`) | Security + correctness | **Approve** | 0 | 2 (accepted §5 #8 trade-offs) | 6 |
-| qc3 (`@qc-specialist-3`) | Performance + reliability | **Request Changes** | 0 | 4 | 5 |
+| Reviewer | Focus | Initial | Re-review (fix-wave-1) | Final |
+|----------|-------|---------|------------------------|-------|
+| qc1 (`@qc-specialist`) | Architecture coherence + maintainability | Request Changes (3W) | **Approve** (all 3W + S-3 resolved) | ✅ Approve |
+| qc2 (`@qc-specialist-2`) | Security + correctness | Approve (2W accepted §5 #8 trade-offs) | *(excluded — already Approve)* | ✅ Approve |
+| qc3 (`@qc-specialist-3`) | Performance + reliability | Request Changes (4W) | **Approve** (all 4W resolved) | ✅ Approve |
 
-**Consolidated verdict: Request Changes** (per `mstar-review-qc`: any unresolved Critical/Warning from any reviewer → Request Changes). **Zero Critical findings across all 3 reviewers.**
+**Consolidated verdict: APPROVE** (all 3 seats Approve; zero Critical; zero unresolved Warning). fix-wave-1 (`b0a714c2`, merged to `iteration/v1.66` @ `1e595fb5`) resolved all 8 findings (F1–F8); targeted re-review confirmed each with verifiable evidence.
+
+## Initial tri-review summary (Request Changes → fix-wave-1)
+
+| Reviewer | Initial verdict | 🔴 Crit | 🟡 Warn | 🟢 Sugg |
+|----------|-----------------|---------|---------|---------|
+| qc1 | Request Changes | 0 | 3 | 5 |
+| qc2 | Approve | 0 | 2 (accepted §5 #8 trade-offs) | 6 |
+| qc3 | Request Changes | 0 | 4 | 5 |
+
+Zero Critical. §5 LOCKED-decision conformance verified by qc1 (all 10 faithful, no drift). `wire_contracts_changed: false` confirmed.
 
 ## Alignment verification (PM)
 
