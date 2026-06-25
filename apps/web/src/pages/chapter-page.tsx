@@ -354,12 +354,14 @@ function BodyReadOnly({
     function close() {
       setMenuOpen(false);
     }
-    window.addEventListener('click', close, { once: true });
-    window.addEventListener('keydown', (ev) => {
+    function handleKeyDown(ev: KeyboardEvent) {
       if (ev.key === 'Escape') close();
-    });
+    }
+    window.addEventListener('click', close, { once: true });
+    window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('click', close);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [menuOpen]);
 
