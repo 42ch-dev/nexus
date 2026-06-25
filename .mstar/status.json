@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-25T15:00:00Z",
+  "updated_at": "2026-06-25T16:00:00Z",
   "plans": [
     {
       "plan_id": "2026-06-25-v1.65-compass-and-plan-stubs",
@@ -21,7 +21,7 @@
       "title": "V1.65 P0 — Local API Chapter-Content Surface + Track B Backend",
       "iteration": "V1.65",
       "slot": "P0",
-      "status": "Todo",
+      "status": "InReview",
       "effort": "L",
       "owner": "@fullstack-dev",
       "review": "Tri-review + QA",
