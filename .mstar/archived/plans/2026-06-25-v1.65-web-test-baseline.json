@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-25-v1.65-web-test-baseline",
+  "title": "V1.65 P1 — apps/web Test Baseline (R-V164-QC1-S1-P1 closure)",
+  "iteration": "V1.65",
+  "slot": "P1",
+  "status": "Done",
+  "effort": "S",
+  "owner": "@frontend-dev",
+  "review": "Tri-review + QA",
+  "wave": 1,
+  "dependency": "P-1 + P-sec merged (vitest 3.x baseline)",
+  "working_branch": "feature/v1.65-web-test-baseline",
+  "merge_target": "iteration/v1.65"
+}

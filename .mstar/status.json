@@ -1,141 +1,38 @@
 {
   "version": 1,
-  "updated_at": "2026-06-25T18:30:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-25-v1.65-compass-and-plan-stubs",
-      "title": "V1.65 P-1 — Prepare: Compass + Plan Stubs + Status + Index",
-      "iteration": "V1.65",
-      "slot": "P-1",
-      "status": "Done",
-      "effort": "M",
-      "owner": "@project-manager",
-      "review": "PM closeout (no QC)",
-      "wave": 0,
-      "dependency": "—",
-      "working_branch": "(direct commit to iteration/v1.65)",
-      "merge_target": "iteration/v1.65"
-    },
-    {
-      "plan_id": "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
-      "title": "V1.65 P0 — Local API Chapter-Content Surface + Track B Backend",
-      "iteration": "V1.65",
-      "slot": "P0",
-      "status": "InReview",
-      "effort": "L",
-      "owner": "@fullstack-dev",
-      "review": "Tri-review + QA",
-      "wave": 1,
-      "dependency": "P-1",
-      "working_branch": "feature/v1.65-local-api-chapter-surface-and-track-b",
-      "merge_target": "iteration/v1.65"
-    },
-    {
-      "plan_id": "2026-06-25-v1.65-dependency-security-upgrade",
-      "title": "V1.65 P-sec — Dependency Security Upgrade (Dependabot closure)",
-      "iteration": "V1.65",
-      "slot": "P-sec",
-      "status": "InReview",
-      "effort": "S-M",
-      "owner": "@ops-engineer",
-      "review": "Tri-review + QA",
-      "wave": 1,
-      "dependency": "P-1 (blocks P1 — vitest 2->3 must land before test baseline)",
-      "working_branch": "feature/v1.65-dep-security-upgrade",
-      "merge_target": "iteration/v1.65"
-    },
-    {
-      "plan_id": "2026-06-25-v1.65-web-test-baseline",
-      "title": "V1.65 P1 — apps/web Test Baseline (R-V164-QC1-S1-P1 closure)",
-      "iteration": "V1.65",
-      "slot": "P1",
-      "status": "InReview",
-      "effort": "S",
-      "owner": "@frontend-dev",
-      "review": "Tri-review + QA",
-      "wave": 1,
-      "dependency": "P-1 + P-sec merged (vitest 3.x baseline)",
-      "working_branch": "feature/v1.65-web-test-baseline",
-      "merge_target": "iteration/v1.65"
-    },
-    {
-      "plan_id": "2026-06-25-v1.65-outline-and-structure-editor",
-      "title": "V1.65 P2 — Outline & Structure Authoring UI",
-      "iteration": "V1.65",
-      "slot": "P2",
-      "status": "InReview",
-      "effort": "XL",
-      "owner": "@frontend-dev",
-      "review": "Tri-review + QA",
-      "wave": 2,
-      "dependency": "P0 merged + P1 merged + DESIGN.md increment",
-      "working_branch": "feature/v1.65-outline-and-structure-editor",
-      "merge_target": "iteration/v1.65"
-    },
-    {
-      "plan_id": "2026-06-25-v1.65-mid-meta-tracking",
-      "title": "V1.65 P-mid — Meta Tracking",
-      "iteration": "V1.65",
-      "slot": "P-mid",
-      "status": "Todo",
-      "effort": "S",
-      "owner": "@project-manager",
-      "review": "PM closeout (no QC)",
-      "wave": 3,
-      "dependency": "P0 + P1 + P2 merged to iteration/v1.65"
-    },
-    {
-      "plan_id": "2026-06-25-v1.65-residual-convergence-and-closeout",
-      "title": "V1.65 P-last — Residual Convergence + Spec Promotion + Profile B + PR",
-      "iteration": "V1.65",
-      "slot": "P-last",
-      "status": "Todo",
-      "effort": "M",
-      "owner": "@fullstack-dev + @project-manager",
-      "review": "Tri-review + QA (closeout)",
-      "wave": 3,
-      "dependency": "P-mid",
-      "working_branch": "feature/v1.65-residual-convergence-and-closeout",
-      "merge_target": "iteration/v1.65"
-    }
-  ],
+  "updated_at": "2026-06-25T19:00:00Z",
+  "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.65",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.64 (merged via PR #87 @ d8be93a3)",
+    "integration_branch": null,
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.65",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.65",
+    "latest_active_iteration": "V1.66+ (pending)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "pending (V1.65+)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.64",
-      "compass": "v1.64-local-web-ui-kickoff-delivery-compass-v1",
-      "shipped_at": "2026-06-25T02:30:00Z",
+      "iteration": "V1.65",
+      "compass": "v1.65-outline-and-structure-authoring-delivery-compass-v1",
+      "shipped_at": "2026-06-25T19:00:00Z",
       "plan_count": 7,
       "plan_count_done": 7,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.64: @42ch/nexus-contracts 0.4.0->0.5.0. Breaking (pre-1.0): ListWorksResponse {works,total}->{works,pagination:PaginationInfo} + Works query offset->cursor; ListFindingsResponse new ({items,pagination}). Additive: schemas/local-api/common/error-response.schema.json (ErrorResponse F-E1) + findings/list-findings-response.schema.json (F-P2). PaginationInfo +has_more (shared kb/pagination-info). Handler DTO drift closure (R-V163P1-T6). No existing wire shape removed beyond the Works/findings list shape change.",
+      "wire_contracts_note": "V1.65: @42ch/nexus-contracts additive-dominant. New schemas/local-api/works/chapters/* (list/detail/outline/patch/body + content-query) + preset CRUD (get/update response + delete 204) + work_profile additive optional on CreateWorkRequest/PatchWorkRequest. Cursor keyset (v2: opaque) on chapter list. No breaking change to existing shapes. Track D (vitest/vite/wiremock) dev-dep only, no wire change.",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-24-v1.64-compass-and-plan-stubs",
-        "2026-06-24-v1.64-local-api-hardening",
-        "2026-06-24-v1.64-web-app-scaffold",
-        "2026-06-24-v1.64-control-room-and-setup-screens",
-        "2026-06-24-v1.64-daemon-serving-wiring",
-        "2026-06-24-v1.64-mid-meta-tracking",
-        "2026-06-24-v1.64-residual-convergence-and-closeout"
+        "2026-06-25-v1.65-compass-and-plan-stubs",
+        "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
+        "2026-06-25-v1.65-dependency-security-upgrade",
+        "2026-06-25-v1.65-web-test-baseline",
+        "2026-06-25-v1.65-outline-and-structure-editor",
+        "2026-06-25-v1.65-mid-meta-tracking",
+        "2026-06-25-v1.65-residual-convergence-and-closeout"
       ],
-      "highlights": {
-        "Track A": "Local Web UI Kickoff — apps/web React 18/Vite/TS/Tailwind/shadcn/TanStack Query SPA. Control Room (Works dashboard/detail, Sessions, Schedule, Capabilities, Findings) + Setup (Work CRUD, Preset mgmt w/ validate dry-run). DESIGN.md tokens consumed (light+dark). NexusClient/BrowserClient/TauriClient adapter (Tauri-ready). 30 vitest tests. Daemon-served via rust-embed (static_assets.rs) + SPA fallback + cache headers. CLI daemon ui/web convenience.",
-        "Track B": "Local API Data-Layer Hardening — closed 4 prerequisites: Handler DTO drift closure (R-V163P1-T6), F-E1 shared ErrorResponse schema + handler envelope, F-P1 Works cursor pagination (pre-1.0 breaking), F-P2 findings list endpoint.",
-        "QC": "Tri-review both waves. Wave 1: qc1 Request Changes (W-1 error-envelope mismatch) -> fix-wave (errors.ts wrapped-envelope parse + convention §3.1) -> qc1 re-review Approve; qc2/qc3 Approve. Wave 2: qc1/qc2/qc3 Approve (qc3 host-glitch wrote to wrong path, relocated)."
-      },
-      "note": "V1.64 ships Local Web UI Kickoff (CLI-only -> CLI + local Web UI). Writing-profile product line remains complete. Tauri desktop shell + content-authoring UI deferred to V1.65+. Platform paused (PD-05).",
-      "predecessor_merge_commit": "c94a7d70",
-      "merge_commit": "d8be93a3"
+      "predecessor_merge_commit": "644acbc5",
+      "note": "V1.65 ships Outline & Structure Authoring (CLI+Web UI authoring entry surface) + Track B API closure + Track D dependency security. Body editor + Tauri shell + open-with deferred V1.66. Platform paused (PD-05)."
     },
     "tech_debt_summary": {
       "total_open": 0,
@@ -150,7 +47,7 @@
       "by_target_active": {}
     },
     "updated_at": "2026-06-25T03:35:00Z",
-    "spec_integration_branch": "iteration/v1.65"
+    "spec_integration_branch": null
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [

@@ -1,6 +1,6 @@
 # Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.64) Control Room + Setup MVP (7 screen groups + TanStack Query data layer + F-P3/F-F1 adapters + W-1 error-envelope toasts + vitest baseline); daemon-served via rust-embed + SPA fallback (P3); QC tri-review Approve (Wave 2). Evidence: `apps/web/screenshots/`. **V1.65 amendment (Prepare → promote at P-last)** adds the **"Content-Authoring UI" stage** (§13): outline rich-text editor + chapter structure table + structure CRUD + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor → **V1.66** (compass §0 Q5).
+**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass.
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  

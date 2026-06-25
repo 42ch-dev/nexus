@@ -296,7 +296,14 @@
     "2026-06-24-v1.64-control-room-and-setup-screens",
     "2026-06-24-v1.64-daemon-serving-wiring",
     "2026-06-24-v1.64-mid-meta-tracking",
-    "2026-06-24-v1.64-residual-convergence-and-closeout"
+    "2026-06-24-v1.64-residual-convergence-and-closeout",
+    "2026-06-25-v1.65-compass-and-plan-stubs",
+    "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
+    "2026-06-25-v1.65-dependency-security-upgrade",
+    "2026-06-25-v1.65-web-test-baseline",
+    "2026-06-25-v1.65-outline-and-structure-editor",
+    "2026-06-25-v1.65-mid-meta-tracking",
+    "2026-06-25-v1.65-residual-convergence-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -616,6 +623,28 @@
       "summary": "Local Web UI Kickoff: apps/web React/Vite SPA (Control Room + Setup MVP) daemon-served via rust-embed; Track B closed 4 Local API prerequisites; Tauri-ready arch. QC tri-review Approve both waves (qc1 fix-wave W-1). 7 plans / 3 waves.",
       "wire_contracts_changed": true,
       "residuals": "0 open / deferred to V1.65+: R-V164-FE1-ORCH, R-V164-QC1-S1-P0 (PaginationInfo dup), R-V164-QC1-S1-P1 (apps/web tests baseline partially—P2 added 30), R-V164-QC1-S3-P1 (F-P3 adapter—landed in P2), R-V164-QC1-CASING, R-V164-P2-G1/G2/G3 (scope gaps), R-V164-P2-S1 (live smoke—PM QA covered), SURF-003 (F-P3), SURF-005 (F-F1)"
+    },
+    "V1.65": {
+      "title": "Outline & Structure Authoring + Dependency Security",
+      "shipped_at": "2026-06-25",
+      "plan_count": 7,
+      "wire_contracts_changed": true,
+      "plan_ids": [
+        "2026-06-25-v1.65-compass-and-plan-stubs",
+        "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
+        "2026-06-25-v1.65-dependency-security-upgrade",
+        "2026-06-25-v1.65-web-test-baseline",
+        "2026-06-25-v1.65-outline-and-structure-editor",
+        "2026-06-25-v1.65-mid-meta-tracking",
+        "2026-06-25-v1.65-residual-convergence-and-closeout"
+      ],
+      "highlights": {
+        "Track A": "Outline & Structure Authoring UI — chapter structure table + TipTap outline editor (markdown round-trip, soft-concurrency warning banner) + structure CRUD (slug/wc/volume/status, title display-only) + body read-only render + Copy-path context menu. Tauri-ready preserved.",
+        "Track B": "Local API chapter-content surface (6 endpoints, keyset cursor + items + ErrorResponse) + work_profile (additive optional) + preset full CRUD. Closes R-V164-P2-G1/G2 + local F-P3.",
+        "Track D": "Dependency security — vitest 2->3 (critical), vite 5->6 (high/med), wiremock 0.6 eliminates rand 0.7.3 (low). 5 dependabot advisories resolved (dev/test-scope only).",
+        "Test": "apps/web test baseline 30->81 tests (R-V164-QC1-S1-P1 closed); 308 daemon-runtime lib tests; 92.77% web stmt coverage.",
+        "QC": "Tri-review: qc1/qc3 Request Changes -> fix-wave-1 (outline PUT DB-first atomicity, keyset pagination, 10MiB body cap, keydown cleanup) -> targeted re-review Approve; qc2 Approve. QA Pass."
+      }
     }
   },
   "metadata": {
