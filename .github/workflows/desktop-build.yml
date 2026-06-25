@@ -8,8 +8,7 @@ on:
       - 'apps/web/**'
       - 'apps/desktop/**'
       - 'packages/nexus-contracts/**'
-      - 'crates/nexus42/**'
-      - 'crates/nexus-daemon-runtime/**'
+      - 'crates/**'
       - 'pnpm-lock.yaml'
       - 'package.json'
       - 'pnpm-workspace.yaml'
@@ -22,8 +21,7 @@ on:
       - 'apps/web/**'
       - 'apps/desktop/**'
       - 'packages/nexus-contracts/**'
-      - 'crates/nexus42/**'
-      - 'crates/nexus-daemon-runtime/**'
+      - 'crates/**'
       - 'pnpm-lock.yaml'
       - 'package.json'
       - 'pnpm-workspace.yaml'
@@ -61,6 +59,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-macos-universal-aarch64-x86_64
+          workspaces: |
+            .
+            apps/desktop/src-tauri
 
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
