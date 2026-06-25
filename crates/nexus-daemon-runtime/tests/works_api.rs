@@ -228,19 +228,10 @@ async fn list_works_returns_401_without_creator() {
 #[tokio::test]
 async fn get_work_by_id_returns_404_for_unknown() {
     let ctx = test_ctx().await;
-    // Use a simple non-UUID work_id.
-    // NOTE: With the SPA static-asset fallback on the router, axum-test's
-    // mock transport may serve the SPA shell (200) for this route instead
-    // of routing through to the handler's 404. This is an axum-test
-    // limitation — the real HTTP server routes correctly. The handler-level
-    // test (handler_get_work_returns_404_for_unknown) covers the same 404
-    // logic. We accept any non-5xx response from axum-test here.
+    // The SPA static-asset fallback is release-only (cfg-gated out of test
+    // builds), so an unknown work path returns the handler's 404 directly.
     let resp = ctx.server.get("/v1/local/works/wrk_nonexistent").await;
-    let status = resp.status_code();
-    assert!(
-        status.is_success() || status == axum::http::StatusCode::NOT_FOUND,
-        "Expected success (SPA fallback) or 404 (handler) for unknown work, got {status}"
-    );
+    resp.assert_status(axum::http::StatusCode::NOT_FOUND);
 }
 
 // ─── Handler-level: GET / PATCH / Inspiration (covers full status matrix) ───

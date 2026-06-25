@@ -190,6 +190,8 @@ jobs:
         run: pnpm --filter web typecheck
       - name: Build web
         run: pnpm --filter web build
+      - name: Test web
+        run: pnpm --filter web test
 
   verify-no-acp-in-daemon:
     name: Verify nexus-daemon-runtime linkage matrix

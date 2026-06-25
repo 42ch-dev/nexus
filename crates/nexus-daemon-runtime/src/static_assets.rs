@@ -16,11 +16,17 @@
 //! - `/assets/*` (hashed Vite output)   → `Cache-Control: public, max-age=31536000, immutable`
 //! - `index.html` (SPA entry point)     → `Cache-Control: no-cache`
 //!
-//! # Dev mode
+//! # Build cfg
 //!
-//! This module is **release-only**.  During development the Vite dev server
-//! proxies `/v1/local/*` to the daemon; the daemon's embedded-asset service is
-//! never reached in dev mode because the browser loads from the Vite port.
+//! This module and its router fallback are **release-only**
+//! (`#[cfg(not(debug_assertions))]` on the `mod` declaration in `lib.rs` and
+//! the `.fallback(...)` registration in `api/mod.rs`). In debug/test builds
+//! the SPA fallback is not wired, so unmatched paths return the framework 404
+//! (avoids masking API routing bugs in tests). Dev uses the Vite dev server,
+//! which proxies `/v1/local/*` to the daemon; the browser loads from the Vite
+//! port, never the daemon's `/`. Release binaries embed the real Vite dist
+//! (built via `pnpm --filter web build`); `build.rs` creates a stub dist when
+//! absent so this crate compiles even without a prior web build.
 
 use axum::{
     body::Body,
