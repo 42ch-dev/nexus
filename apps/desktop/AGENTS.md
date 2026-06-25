@@ -17,6 +17,24 @@ Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
   `build.frontendDist` (compass §5 #4). It does **not** embed a second SPA or a
   handwritten UI; all screens come from `apps/web`.
 
+## Development prerequisites
+
+`apps/desktop/src-tauri/` is a standalone Tauri crate. Its `bundle.externalBin`
+expects the sidecar binaries to exist at compile time, but the binaries are
+**gitignored** and not present on a fresh clone. Run the workspace script before
+any `cargo` command in `src-tauri/`:
+
+```bash
+pnpm -w run sidecar
+```
+
+This builds `nexus42` for `aarch64-apple-darwin` and `x86_64-apple-darwin` via
+`scripts/fetch-sidecar.sh` and copies the artifacts into
+`apps/desktop/src-tauri/binaries/`. Without this step, `cargo build`/`test`/
+`clippy` fails with an opaque "resource path doesn't exist" error from
+`tauri-build`. A fail-fast guard in `src-tauri/build.rs` prints the same
+remediation if the binaries are missing.
+
 ## SSOT & authority
 
 - **Contract**: [`.mstar/knowledge/specs/desktop-shell.md`](../../.mstar/knowledge/specs/desktop-shell.md)
@@ -55,15 +73,22 @@ root). On rejection the JS layer surfaces plain-language copy
 
 - **In**: `apps/desktop` scaffold; `TauriClient`; capability detection; Q5
   desktop actions (Open with…, Reveal in Finder, Copy Path); path guard;
-  DESIGN.md supplement consumption; tests.
-- **Out (V1.67+)**: bundled sidecar lifecycle (`externalBin` + `Command.sidecar`
-  is P1's job), port discovery handshake, signing/notarization, multi-OS,
-  auto-update, system tray, mobile, body editor.
+  DESIGN.md supplement consumption; bundled sidecar lifecycle
+  (`externalBin` + `Command.sidecar` + `SidecarManager`); tests.
+- **Out (V1.67+)**: in-process `nexus-daemon-runtime` library link (replacing
+  the bundled sidecar process), port discovery handshake, signing/notarization,
+  multi-OS, auto-update, system tray, mobile, body editor.
 
 ## Conventions
 
 - **macOS-only** in V1.66 (`aarch64-apple-darwin` + `x86_64-apple-darwin`).
 - Tauri v2 config keys: `build.frontendDist` (NOT `build.dist`), `app.withGlobalTauri`
-  (set `true` so `window.__TAURI__` is present), `bundle.externalBin` (P1).
+  (set `true` so `window.__TAURI__` is present), `bundle.externalBin`.
 - Capability detection: `@tauri-apps/api/core` `isTauri()` checked once at the
   client factory (§5 #7).
+- **No desktop-owned JS runtime dependencies**: the webview uses the shared
+  `apps/web` bundle and invokes Rust custom commands through
+  `window.__TAURI__.core.invoke`; transport primitives live in the Rust crate.
+  Do not add `@tauri-apps/plugin-shell` or `@tauri-apps/api` to
+  `apps/desktop/package.json` — the shell plugin is a Rust crate dependency
+  (`Cargo.toml`).
