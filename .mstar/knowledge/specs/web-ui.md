@@ -243,11 +243,11 @@ V1.64 made the runtime **legible and configurable** (Control Room + Setup). V1.6
 
 The browser SPA gains an authoring surface layered on the V1.64 Control Room + Setup screens. All new screens route through the same `NexusClient` interface (§5) and consume the new V1.65 chapter-content Local API (Track B / P0 backend; conventions in [local-api-surface-conventions.md](local-api-surface-conventions.md)).
 
-- **Chapter structure table** (per-Work, multi-Work switcher reusing the V1.64 Works dashboard entry): columns — chapter #, title, slug, planned word count, volume, status (`not_started` / `outlined` / `draft` / `finalized` / `published`), actual word count. Sortable by chapter #.
+- **Chapter structure table** (per-Work, multi-Work switcher reusing the V1.64 Works dashboard entry): columns — chapter #, title (**display-only** — derived from outline frontmatter or slug/chapter# fallback; no `title` column exists in `work_chapters` in V1.65), slug, planned word count, volume, status (`not_started` / `outlined` / `draft` / `finalized` / `published`), actual word count. Sortable by chapter #.
 - **Outline rich-text editor**: edit a chapter's `outline_path` markdown in a rich-text editor; save writes the file atomically (reuse the reconcile atomic-write pattern) and updates DB metadata (`outline_path`, `updated_at`) in the same transaction. Restricted to a markdown subset (headings, lists, bold/italic, code, blockquote, links).
-- **Structure CRUD**: edit title / slug / planned word count / volume; advance status `not_started → outlined` (reverse transitions gated). `finalized` / `published` chapters are protected: structural edits require a confirmation dialog; **deletion is hard-blocked**.
+- **Structure CRUD**: edit slug / planned word count / volume; advance status `not_started → outlined` (reverse transitions gated). (`title` is display-only in V1.65 — no DB column; title authoring happens in the outline editor; a `title`-column migration + title CRUD is deferred to V1.66.) `finalized` / `published` chapters are protected: structural edits require a confirmation dialog; **deletion is hard-blocked**.
 - **Body read-only rendering**: render a chapter's `body_path` markdown (frontmatter-aware — surface status/metadata in a read-only header strip, render body prose read-only). Right-click context menu offers **"Copy path"** only (browser clipboard write; path sourced from the API).
-- **Soft concurrency** (compass §0 Q2/Q3): no hard lock. The outline editor warns — non-blocking but unmissable — when editing the outline of a chapter already in `draft` or `finalized` status ("this chapter is already drafted; changing the outline will not auto-redraft; the next orchestration draft will be based on the new outline"). Orchestration reads the outline at draft-time (a natural snapshot of whatever is on disk).
+- **Soft concurrency** (compass §0 Q2/Q3): no hard lock. The outline editor shows a non-blocking but unmissable persistent banner when editing the outline of a chapter already in `draft` or `finalized` status. The banner states plainly: editing the outline will **not** re-draft the body, and guides the author to the explicit next step — reverse-transition the chapter status to `outlined` (then advance to `draft`) via structure-CRUD to trigger a re-draft. Orchestration reads the outline at draft-time (a natural snapshot of whatever is on disk).
 
 ### 13.2 The authoring loop this enables
 
@@ -255,7 +255,7 @@ The UI closes the **plan / review / restructure** loop for an author who is not 
 
 1. **Plan** — draft and revise a chapter's outline in rich text; the outline is the author-facing planning document that orchestration reads to draft body prose.
 2. **Review** — read a chapter's rendered body read-only; copy its file path to open it in the author's own editor.
-3. **Restructure** — fix titles, slugs, volumes, planned word counts; advance a chapter from `not_started` to `outlined` once its outline is ready.
+3. **Restructure** — fix slugs, volumes, planned word counts; advance a chapter from `not_started` to `outlined` once its outline is ready. (Title text is shaped in the outline editor, where the chapter heading naturally lives.)
 
 **The CLI still owns body drafting.** Body prose is written by the orchestration engine through the V1.34 host-tool bridge; V1.65 gives the UI no body write path (see §13.3). The UI is the *planning and structure* surface; the CLI/runtime remains the *drafting* surface until V1.66.
 
@@ -271,10 +271,10 @@ Explicitly deferred with rationale (compass §0 Q2/Q4/Q5, §1.2; satisfies the D
 ### 13.4 User stories (V1.65 slice)
 
 - **Outline editor** — *As an author*, I can open a chapter and edit its outline in a rich-text editor, then save it back as markdown, so I can plan the chapter's shape without dropping into the terminal.
-- **Structure CRUD** — *As an author*, I can fix a chapter's title, slug, planned word count, and volume, and advance its status from `not_started` to `outlined`, so the structure of my Work reflects my plan.
+- **Structure CRUD** — *As an author*, I can fix a chapter's slug, planned word count, and volume, and advance its status from `not_started` to `outlined`, so the structure of my Work reflects my plan.
 - **Protected edits** — *As an author*, when I edit the structure of a `finalized` or `published` chapter the UI asks me to confirm, and it refuses to delete one, so I cannot accidentally destroy settled work.
 - **Body read + copy path** — *As an author*, I can read a chapter's rendered body and copy its file path, so I can open it in my own editor to read or annotate.
-- **Soft-concurrency awareness** — *As an author*, when I edit the outline of a chapter that is already drafted, the UI clearly warns me that my change will not auto-redraft the body, so I am not surprised when the next draft uses my new outline.
+- **Soft-concurrency awareness** — *As an author*, when I edit the outline of a chapter that is already drafted, the UI tells me plainly that my change will not re-draft the body and shows me the explicit next step (reverse the chapter status to `outlined` to trigger a re-draft), so I am not left waiting or surprised.
 - **Multi-Work navigation** — *As an author*, I can switch between my Works while planning, so I can keep several projects in flight from one window.
 
 ### 13.5 Wire contracts (V1.65)

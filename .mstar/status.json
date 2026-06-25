@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "updated_at": "2026-06-25T13:00:00Z",
+  "updated_at": "2026-06-25T14:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-25-v1.65-compass-and-plan-stubs",
       "title": "V1.65 P-1 — Prepare: Compass + Plan Stubs + Status + Index",
       "iteration": "V1.65",
       "slot": "P-1",
-      "status": "InProgress",
+      "status": "Done",
       "effort": "M",
       "owner": "@project-manager",
       "review": "PM closeout (no QC)",

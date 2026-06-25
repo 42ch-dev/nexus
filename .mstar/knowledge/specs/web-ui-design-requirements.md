@@ -63,7 +63,7 @@ The editor is where an author plans a chapter's shape. It must feel like a calm 
 
 - **Toolbar scope (markdown subset)**: headings, lists, bold, italic, code, blockquote, link. This is the **boundary** of the supported markdown subset (compass §5 item #1); the design must make unsupported nodes visibly out-of-scope (e.g. preserved as raw blocks) rather than silently mangling them.
 - **Save-state indicator**: a persistent, glanceable status — `clean` / `dirty` / `saving` / `saved-error`. The author must always know whether their outline is on disk. `saved-error` must surface the parsed `ErrorResponse` one-liner, not a raw failure.
-- **Soft-concurrency warning surface**: when the chapter being edited is in `draft` or `finalized` status, show a warning that editing the outline will **not** auto-redraft the body and the next orchestration draft will use the new outline.
+- **Soft-concurrency warning surface**: when the chapter being edited is in `draft` or `finalized` status, show a persistent banner stating plainly that editing the outline will **not** re-draft the body, and guiding the author to the explicit next step: reverse-transition the chapter status to `outlined` (then advance to `draft`) via the structure table to trigger a re-draft. Suggested copy: *"This chapter already has a draft body. Editing the outline will not re-draft it — the orchestration engine re-drafts only when the chapter transitions to `draft` status. To trigger a re-draft after saving: reverse the chapter status to `outlined` in the structure table, then advance it back to `draft`."*
   - **Product priority: non-blocking but unmissable.** It must not block the save (the model is soft — orchestration takes a fresh snapshot), but it must not be dismissible-to-invisible either. Lean: a persistent banner/strip attached to the editor chrome, not a one-time toast.
 - **A11y**: the editor is a writing surface — full keyboard operability, visible focus, and `prefers-reduced-motion`-respectful transitions (§4) apply at full strength.
 
@@ -71,8 +71,8 @@ The editor is where an author plans a chapter's shape. It must feel like a calm 
 
 A data-dense table (same register as the Control Room dashboards in §1) with an inline-edit affordance layered on top.
 
-- **Columns**: chapter #, title, slug, planned word count, volume, status, actual word count. Status renders as a **meaningful badge** (not decorative color — exposes its text to assistive tech, §4).
-- **Inline edit affordance**: title / slug / planned word count / volume are editable in place; status progression is an explicit action (not free-form typing) so reverse transitions can be gated.
+- **Columns**: chapter #, title (**display-only** — derived from outline frontmatter or slug/chapter# fallback; no `title` DB column in V1.65), slug, planned word count, volume, status, actual word count. Status renders as a **meaningful badge** (not decorative color — exposes its text to assistive tech, §4).
+- **Inline edit affordance**: slug / planned word count / volume are editable in place (`title` is display-only — title text is shaped in the outline editor); status progression is an explicit action (not free-form typing) so reverse transitions can be gated.
 - **Multi-Work switcher reuse**: the per-Work table reuses the V1.64 Works dashboard entry as the Work selector; the design must make "which Work am I editing" unambiguous at all times.
 - **Confirmation-dialog policy (protected chapters)**:
   - Structural edits on `finalized` / `published` chapters → **confirmation dialog** (warn, do not silently apply).
