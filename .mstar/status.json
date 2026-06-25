@@ -3851,11 +3851,17 @@
         "scope": "apps/web/src/lib/nexus/{types,errors,browser-client,tauri-client}.ts + components/{theme-provider,layout}",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "P2",
+        "target": "V1.65 P1 (closed early)",
         "target_date": "V1.64 P2",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-web-app-scaffold/qc1.md S-1",
         "note": "P2 (screens) is the natural place to establish the apps/web test baseline (vitest + testing-library + msw for BrowserClient). Adapter + error-parsing tests should land with the screens that exercise them.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-25",
+        "closure_note": "apps/web architectural-surface test baseline established in V1.65 P1 (feature/v1.65-web-test-baseline): NexusClient adapter-contract guard + transport coverage (T1), ThemeProvider light/dark (T2), toast hook + error-envelope path (T3), msw handlers registry (T4), v8 coverage config (T5). 30 -> 62 vitest tests, all green; 94.57% statement / 96.77% branch coverage on the architectural surface, every file >= 80%. Closed ahead of the original P2 target so the outline editor builds on a tested scaffold.",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.65-web-test-baseline",
+          "commit": "13c5ec3f"
+        }
       },
       {
         "id": "R-V164-QC1-S3-P1",
