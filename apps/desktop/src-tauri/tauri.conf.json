@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Nexus",
+  "version": "0.1.0",
+  "identifier": "io.nexus42.desktop",
+  "build": {
+    "frontendDist": "../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm --filter web dev",
+    "beforeBuildCommand": "pnpm --filter web build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": false,
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "Nexus",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png"
+    ],
+    "copyright": "Copyright © 2026 42ch",
+    "category": "Productivity",
+    "shortDescription": "Nexus — local-first authoring desktop shell.",
+    "longDescription": "Nexus desktop shell: a Tauri v2 wrapper around the Nexus local-first Web UI with a bundled nexus42 daemon.",
+    "macOS": {
+      "signingIdentity": null,
+      "entitlements": null
+    }
+  }
+}
