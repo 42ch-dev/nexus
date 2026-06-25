@@ -35,6 +35,14 @@ toml = "0.8"
 # guard accepts the path — calling it directly avoids coupling to the plugin's
 # Rust extension-trait API surface and is the canonical macOS mechanism.
 opener = "0.7"
+# Async runtime primitives for the sidecar lifecycle monitor (shared state + timers).
+tokio = { version = "1.35", features = ["sync", "time", "net", "rt"] }
+# Lightweight loopback health probe; reuses the same HTTP endpoint as the SPA.
+reqwest = { version = "0.12", features = ["json"] }
+
+[target.'cfg(unix)'.dependencies]
+# Unix signal handling for graceful sidecar shutdown (SIGTERM). V1.66 is macOS-only.
+nix = { version = "0.28", features = ["signal", "process"] }
 
 [dev-dependencies]
 # Path-guard unit tests build temp workspace trees.
