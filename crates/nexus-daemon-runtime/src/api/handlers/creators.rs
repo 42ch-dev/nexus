@@ -9,6 +9,7 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use nexus_contracts::PaginationInfo;
 use nexus_home_layout::validate_creator_id_safe;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -40,16 +41,7 @@ const MAX_LIMIT: usize = 250;
 #[derive(Serialize)]
 pub struct ListCreatorsResponse {
     pub items: Vec<CreatorInfo>,
-    pub pagination: PaginationEnvelope,
-}
-
-/// Cursor-based pagination envelope.
-#[derive(Debug, Serialize)]
-pub struct PaginationEnvelope {
-    pub limit: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
-    pub has_more: bool,
+    pub pagination: PaginationInfo,
 }
 
 // ── Local creator detail types ──────────────────────────────────────
@@ -313,8 +305,8 @@ pub async fn list(
     info!("List creators completed");
     Ok(Json(ListCreatorsResponse {
         items,
-        pagination: PaginationEnvelope {
-            limit,
+        pagination: PaginationInfo {
+            limit: i64::try_from(limit).unwrap_or(i64::MAX),
             has_more: next_cursor.is_some(),
             next_cursor,
         },

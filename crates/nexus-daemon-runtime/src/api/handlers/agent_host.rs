@@ -19,6 +19,7 @@ use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use futures_util::StreamExt;
+use nexus_contracts::PaginationInfo;
 use serde::{Deserialize, Serialize};
 use tokio_stream::Stream;
 use uuid::Uuid;
@@ -80,14 +81,6 @@ pub struct SessionResponse {
 pub struct SessionListResponse {
     pub items: Vec<SessionResponse>,
     pub pagination: PaginationInfo,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PaginationInfo {
-    pub limit: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_cursor: Option<String>,
-    pub has_more: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,7 +308,7 @@ pub async fn list_sessions(
     Ok(Json(SessionListResponse {
         items,
         pagination: PaginationInfo {
-            limit,
+            limit: i64::try_from(limit).unwrap_or(i64::MAX),
             has_more: next_cursor.is_some(),
             next_cursor,
         },
