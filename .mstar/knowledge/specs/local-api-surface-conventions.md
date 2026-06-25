@@ -294,3 +294,28 @@ The V1.63 Local API surface audit identified:
 - F-F1: Sort parameters are not standardized.
 
 V1.64 closes F-P1, F-P2, and F-E1 for the Web UI data-layer baseline, while documenting F-P3 and F-F1 as future conventions with adapter coverage for MVP.
+
+---
+
+## 9. Local daemon port discovery (V1.66 desktop shell)
+
+Local API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint. (Compass: [v1.66 §5 #3 LOCKED](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md).)
+
+V1.66 desktop-shell convention:
+
+1. Default port is `8420` (the `boot.rs` default).
+2. `NEXUS_DAEMON_PORT` may override the default when the client/launcher environment provides it.
+3. The desktop launcher passes the resolved port explicitly to the sidecar:
+   ```text
+   nexus42 daemon start --foreground --port <resolved_port>
+   ```
+   so CLI args and environment cannot diverge.
+4. Readiness is confirmed by:
+   ```text
+   GET http://127.0.0.1:<resolved_port>/v1/local/runtime/health
+   ```
+   (NOT stdout parsing — see [daemon-runtime.md](daemon-runtime.md) §12.2).
+5. Clients MUST treat health-probe failure as transport/lifecycle failure, not as a schema mismatch.
+6. **V1.66 does not introduce a dynamic port handshake endpoint or daemon-lifecycle Local API schema** (`wire_contracts_changed: false`).
+
+If a future iteration introduces dynamic port allocation, it must define a separate launcher-to-app handshake contract **before** adding any Local API schema.

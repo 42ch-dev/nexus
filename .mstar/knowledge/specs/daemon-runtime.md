@@ -477,3 +477,64 @@ The daemon legacy `outbox` table (initial migration `20260417_000001_initial.sql
 ### 11.4 Runtime deps injection
 
 Both capabilities receive the `sqlx::SqlitePool` through the standard `with_pool()` constructor pattern, registered in `CapabilityRegistry::with_builtins_and_pool()` and `CapabilityRegistry::with_runtime_deps()`. No capability requires `nexus-cloud-sync` — all outbox operations are local-only DB queries.
+
+---
+
+## 12. Tauri sidecar mode (V1.66)
+
+The Tauri desktop shell ([desktop-shell.md](desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: [v1.66 §5 #2/#3 LOCKED](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md).)
+
+### 12.1 Launch contract
+
+The desktop app launches the sidecar with:
+
+```text
+nexus42 daemon start --foreground --port <resolved_port>
+```
+
+Optional flags such as `--cdn-url <https-url>` may be passed only when the desktop app has an explicit configuration source for them. **V1.66 does not add a new daemon-lifecycle Local API route** (`wire_contracts_changed: false`).
+
+**Port resolution** (compass §5 #3 LOCKED; conventions in [local-api-surface-conventions.md](local-api-surface-conventions.md) §9):
+
+1. Explicit configured port (if the Tauri bootstrapper provides one).
+2. Else `NEXUS_DAEMON_PORT` when present and valid.
+3. Else `8420` (the `boot.rs` default).
+
+When an override is selected, the app passes it via `--port <resolved_port>` so CLI args and environment cannot diverge.
+
+### 12.2 Readiness contract
+
+The sidecar readiness signal is the existing Local API health probe, **not** stdout parsing:
+
+```text
+GET http://127.0.0.1:<resolved_port>/v1/local/runtime/health
+```
+
+The desktop app treats the daemon as ready only after the health endpoint returns a successful healthy response. Startup logs such as `Local API listening on …` are diagnostic only and MUST NOT be the app's readiness contract.
+
+**Recommended bootstrap behavior**:
+
+1. Spawn sidecar in foreground mode.
+2. Poll health with bounded retry/backoff.
+3. Until healthy, render desktop state `Daemon starting…`.
+4. On timeout, render `Daemon did not start` with `Restart Daemon` and `Copy Diagnostics`.
+5. If the port is already occupied by a healthy Nexus daemon, the app may attach to it after confirming health on the resolved port.
+
+### 12.3 Lifecycle contract
+
+The Tauri app owns the sidecar process while the desktop window/session is alive:
+
+| Event | Behavior |
+| --- | --- |
+| App launch | Start sidecar unless a healthy daemon already responds on the resolved port |
+| App ready | Expose the resolved daemon base URL to the SPA client factory |
+| Sidecar crash after healthy | Restart with bounded exponential backoff |
+| Repeated crash | Stop retrying; show `Daemon stopped` + diagnostics |
+| App quit | Request graceful termination of the owned sidecar; escalate only after bounded timeout |
+| Manual restart | Stop the owned sidecar (if present) → spawn fresh → wait for health |
+
+**Process ownership**: foreground sidecar mode may still write the daemon PID file as part of existing CLI behavior. The desktop app must track the process handle returned by the Tauri sidecar API and prefer that handle for ownership decisions. PID-file or port-based stop paths are CLI-compat mechanisms and must not be used to kill an unrelated daemon without confirming ownership.
+
+### 12.4 Asset serving in desktop mode
+
+In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDist` (compass §5 #4 LOCKED). The daemon's rust-embed static asset route remains normative for the browser-tab flow and standalone `nexus42 daemon ui`, but it is **not** the desktop shell's asset-serving path.
