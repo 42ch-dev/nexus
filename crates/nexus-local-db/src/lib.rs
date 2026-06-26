@@ -263,6 +263,24 @@ pub async fn run_migrations(pool: &sqlx::SqlitePool) -> Result<(), LocalDbError>
         .run(pool)
         .await
         .map_err(LocalDbError::from)?;
+
+    // V1.67 P2 (W-001): SQLite's `PRAGMA foreign_key_check` returns rows for
+    // violations but does not raise an error on its own. Consume the result set
+    // and fail the migration if any violations remain.
+    // SAFETY: PRAGMA diagnostic query — no table schema to validate against.
+    let violations: Vec<(String, i64, String, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
+        .fetch_all(pool)
+        .await?;
+    if !violations.is_empty() {
+        return Err(LocalDbError::ConstraintViolation {
+            table: "database".to_string(),
+            constraint: format!(
+                "PRAGMA foreign_key_check returned {} violation(s): {violations:?}",
+                violations.len()
+            ),
+        });
+    }
+
     Ok(())
 }
 
@@ -413,7 +431,7 @@ mod tests {
         run_migrations(&pool).await.unwrap();
 
         // SAFETY: PRAGMA diagnostic query — no table schema to validate against.
-        let violations: Vec<(i64, i64, String, String)> =
+        let violations: Vec<(String, i64, String, i64)> =
             sqlx::query_as("PRAGMA foreign_key_check")
                 .fetch_all(&pool)
                 .await
@@ -422,6 +440,52 @@ mod tests {
         assert!(
             violations.is_empty(),
             "PRAGMA foreign_key_check returned violations: {violations:?}"
+        );
+    }
+
+    // V1.67 P2 fix-wave 1 (W-001): regression test that `run_migrations` fails
+    // hard when the database contains a foreign-key violation, rather than
+    // leaving `PRAGMA foreign_key_check` as a diagnostic-only result.
+    #[tokio::test]
+    async fn migrations_fail_on_foreign_key_violation() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = open_pool(&db_path).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        // Introduce a dangling FK with foreign-key enforcement temporarily off.
+        // Use a single acquired connection so the PRAGMA setting is respected by
+        // the insert that follows.
+        let mut conn = pool.acquire().await.unwrap();
+        // SAFETY: PRAGMA statement — no table schema to validate against.
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        // SAFETY: test-only direct insert to create a deliberate violation.
+        sqlx::query(
+            "INSERT INTO kb_key_blocks \
+             (key_block_id, world_id, block_type, canonical_name, status, body_json) \
+             VALUES (?, ?, 'character', ?, 'provisional', ?)",
+        )
+        .bind("kb_violator")
+        .bind("nonexistent_world")
+        .bind("violator")
+        .bind("{}")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        drop(conn);
+
+        let err = run_migrations(&pool).await.unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("PRAGMA foreign_key_check returned 1 violation"),
+            "expected FK-check failure, got: {msg}"
         );
     }
 }
