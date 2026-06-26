@@ -242,11 +242,18 @@ pub fn run() {
             start_daemon,
             stop_daemon,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Nexus desktop shell");
-
-    // App is exiting; request graceful termination of any sidecar we own.
-    let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
+        .build(tauri::generate_context!())
+        .expect("error while building Nexus desktop shell")
+        .run(move |_app_handle, event| {
+            // Gracefully stop the owned sidecar *before* the Tauri async runtime
+            // shuts down. Running this cleanup after `run()` returns races with
+            // tokio teardown and can panic with "Cannot start a runtime from
+            // within a runtime" (Greptile P1; qc1 S-5). The SIGTERM → bounded
+            // timeout → SIGKILL path in `SidecarManager::stop()` still fires.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
+            }
+        });
 }
 
 #[cfg(test)]
