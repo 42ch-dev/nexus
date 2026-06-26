@@ -65,7 +65,9 @@ jobs:
           # F1: native aarch64 on macos-14 (Apple Silicon runner). Intel-Mac
           # support is a V1.67+ multi-arch concern; V1.66 ships an unsigned
           # aarch64-native dev build for the developer/contributor audience.
-          targets: aarch64-apple-darwin
+          # wasm32-unknown-unknown is required because nexus42 embeds the
+          # `basic-combat` WASM module via nexus-wasm-host's build script.
+          targets: aarch64-apple-darwin, wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
         with:
