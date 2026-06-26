@@ -4098,6 +4098,127 @@
         "target_iteration": "V1.67+",
         "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs"
       }
+    ],
+    "2026-06-26-v1.67-local-api-surface-convergence": [
+      {
+        "id": "R-V167P0-QC1-S-COMPARE",
+        "title": "Triplicate compare_* sort closures — extract shared comparator",
+        "severity": "low",
+        "source": "qc1 S-1",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-COMPARE]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-S-DOCS",
+        "title": "ACP SDK mirror-type naming doc-comment",
+        "severity": "low",
+        "source": "qc1 S-2",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-DOCS]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-S-CLI",
+        "title": "--sort flag in nexus42 schedule list CLI",
+        "severity": "low",
+        "source": "qc1 S-3",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-CLI]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-S-AGENTS",
+        "title": "Error-envelope single-source rule in nexus-daemon-runtime/AGENTS.md",
+        "severity": "low",
+        "source": "qc1 S-4",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-AGENTS]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-ENVELOPE-E2E",
+        "title": "503/422 IntoResponse->canonical-envelope e2e test",
+        "severity": "low",
+        "source": "qc1 W-3 (deferred)",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-ENVELOPE-E2E]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-26-v1.67-desktop-shell-polish": [
+      {
+        "id": "R-V167PSEC-QC1-S-UNMOUNT",
+        "title": "daemon-status-bar.tsx subscription-cleanup race on unmount during async setup",
+        "severity": "low",
+        "source": "qc1 S-1",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-UNMOUNT]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167PSEC-QC1-S-BLOCKINGLOCK",
+        "title": "set_app_handle blocking_lock() from sync context — fragile vs Tauri timing",
+        "severity": "low",
+        "source": "qc1 S-2",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BLOCKINGLOCK]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167PSEC-QC1-S-BACKOFFOBS",
+        "title": "Backoff jitter choice not logged (observability)",
+        "severity": "low",
+        "source": "qc1 S-3",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BACKOFFOBS]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167PSEC-QC1-S-CI-SETUO",
+        "title": "desktop-build CI fallback block lacks set -euo pipefail",
+        "severity": "low",
+        "source": "qc1 S-4",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-CI-SETUO]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      }
     ]
   }
 }
