@@ -43,9 +43,10 @@ env:
 jobs:
   desktop-build:
     name: Build unsigned macOS desktop app
-    runs-on: macos-13
-    # F1: single-arch native x86_64 build fits the 6h Actions budget; fail fast
-    # if something hangs (previous universal build was cancelled @ 4h35m).
+    runs-on: macos-14
+    # F1: single-arch native aarch64 build fits the 6h Actions budget; fail fast
+    # if something hangs. macos-13 (Intel) is deprecated and no longer provisions,
+    # which caused the previous x86_64 job to hang at "Waiting for a runner...".
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -61,13 +62,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
-          # F1: native x86_64 only on macos-13 (Intel runner). Rosetta runs this
-          # .app on Apple Silicon; universal/aarch64-native deferred to V1.67+.
-          targets: x86_64-apple-darwin
+          # F1: native aarch64 on macos-14 (Apple Silicon runner). Intel-Mac
+          # support is a V1.67+ multi-arch concern; V1.66 ships an unsigned
+          # aarch64-native dev build for the developer/contributor audience.
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
         with:
-          key: desktop-macos-x86_64
+          key: desktop-macos-aarch64
           workspaces: |
             .
             apps/desktop/src-tauri
@@ -78,14 +80,14 @@ jobs:
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
 
-      - name: Build Tauri desktop bundle (x86_64 macOS target)
-        run: pnpm --filter desktop tauri build -- --target x86_64-apple-darwin
+      - name: Build Tauri desktop bundle (aarch64 macOS target)
+        run: pnpm --filter desktop tauri build -- --target aarch64-apple-darwin
 
       - name: Upload unsigned .app + .dmg artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: nexus-desktop-macos-x86_64
+          name: nexus-desktop-macos-aarch64
           path: |
-            apps/desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Nexus.app
-            apps/desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Nexus.app
+            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           retention-days: 90

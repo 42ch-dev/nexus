@@ -21,8 +21,9 @@ pnpm -w run sidecar
 bash scripts/fetch-sidecar.sh
 ```
 
-which builds `cargo build --release -p nexus42` for both macOS architectures and
-copies/renames the artifacts here.
+which builds `cargo build --release -p nexus42` for the configured target(s) and
+copies/renames the artifacts here. By default V1.66 produces `aarch64-apple-darwin`;
+use `SIDECAR_TARGETS=...` to build `x86_64-apple-darwin` or a universal pair.
 
 `tauri.conf.json` declares:
 

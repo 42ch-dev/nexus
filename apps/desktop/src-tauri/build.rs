@@ -3,7 +3,7 @@ use std::path::PathBuf;
 fn main() {
     // The bundled sidecar binary must exist before Tauri's build script runs;
     // `bundle.externalBin` resolves it at compile time using the target-triple
-    // suffix (e.g. `nexus42-x86_64-apple-darwin`). On a fresh clone the
+    // suffix (e.g. `nexus42-aarch64-apple-darwin`). On a fresh clone the
     // `binaries/` directory only contains the README, so fail fast with a clear
     // remediation instead of Tauri's opaque "resource path doesn't exist" error.
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
@@ -29,7 +29,7 @@ fn main() {
 
 /// Reconstruct the target triple Cargo is building for so the build script only
 /// requires the sidecar binary that will actually be bundled. This keeps the
-/// default local/CI flow single-arch (x86_64-apple-darwin in V1.66) while still
+/// default local/CI flow single-arch (aarch64-apple-darwin in V1.66) while still
 /// allowing `SIDECAR_TARGETS=...` local multi-arch builds.
 fn current_target_triple() -> String {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH");
