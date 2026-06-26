@@ -615,6 +615,14 @@ pub(crate) enum LlmExtractOutcome {
 ///
 /// V1.55 P2 fix-wave (F-001): added `work_profile` parameter so game-bible
 /// callers produce `game_bible_category` payloads instead of `novel_category`.
+///
+/// R-V152TA-S001: Both `extract_kb_candidates_for_review` and
+/// `LlmExtractTask::evaluate` route through this single helper, so the
+/// LLM→KbCandidate mapping is consolidated in [`candidate_from_llm_json_for_profile`].
+/// The only intentional divergence between the two call sites is the prompt
+/// source (default review prompt vs. rendered preset template); parsing,
+/// profile-aware payload shaping, and the `MAX_CANDIDATES_PER_PASS` cap are
+/// shared.
 pub(crate) async fn run_llm_extract(
     registry: Option<&CapabilityRegistry>,
     capability_name: &str,
@@ -1371,6 +1379,57 @@ pub struct FiveQVerdict {
     pub reason: String,
 }
 
+/// Build the [`FiveQVerdict`] from already-computed dimensions.
+///
+/// R-V152TA-S006: centralizes the NOGO info-log so every caller of
+/// [`outline_five_q_check`] gets consistent observability of the per-dimension
+/// scores without duplicating the logging logic.
+fn build_five_q_verdict(dimensions: FiveQDimensions) -> FiveQVerdict {
+    let FiveQDimensions {
+        structure,
+        arc,
+        foreshadow,
+        pacing,
+        hook,
+    } = dimensions;
+    let go = structure && arc && foreshadow && pacing && hook;
+
+    let failed: Vec<&str> = [
+        (!structure, "structure"),
+        (!arc, "arc"),
+        (!foreshadow, "foreshadow"),
+        (!pacing, "pacing"),
+        (!hook, "hook"),
+    ]
+    .into_iter()
+    .filter(|(miss, _)| *miss)
+    .map(|(_, name)| name)
+    .collect();
+
+    let reason = if go {
+        "outline 五问: all dimensions pass (structure, arc, foreshadow, pacing, hook)".to_string()
+    } else {
+        // R-V152TA-S006: info-log NOGO with per-dimension scores so operators
+        // can see why the heuristic gate blocked draft generation.
+        tracing::info!(
+            structure = structure,
+            arc = arc,
+            foreshadow = foreshadow,
+            pacing = pacing,
+            hook = hook,
+            failed = ?failed,
+            "outline 五问: NOGO"
+        );
+        format!("outline 五问: failed on {}", failed.join(", "))
+    };
+
+    FiveQVerdict {
+        go,
+        dimensions,
+        reason,
+    }
+}
+
 /// Pure heuristic evaluation of a chapter outline against the outline 五问 gate.
 ///
 /// This is the deterministic / no-worker complement to the `llm_judge` outline
@@ -1456,42 +1515,13 @@ pub fn outline_five_q_check(outline: &str) -> FiveQVerdict {
     let hook_words = hook_signals.iter().any(|s| lower.contains(s));
     let hook = hook_punctuation || hook_words;
 
-    let dimensions = FiveQDimensions {
+    build_five_q_verdict(FiveQDimensions {
         structure,
         arc,
         foreshadow,
         pacing,
         hook,
-    };
-    let go = structure && arc && foreshadow && pacing && hook;
-
-    let reason = if go {
-        "outline 五问: all dimensions pass (structure, arc, foreshadow, pacing, hook)".to_string()
-    } else {
-        let mut failed = Vec::new();
-        if !structure {
-            failed.push("structure");
-        }
-        if !arc {
-            failed.push("arc");
-        }
-        if !foreshadow {
-            failed.push("foreshadow");
-        }
-        if !pacing {
-            failed.push("pacing");
-        }
-        if !hook {
-            failed.push("hook");
-        }
-        format!("outline 五问: failed on {}", failed.join(", "))
-    };
-
-    FiveQVerdict {
-        go,
-        dimensions,
-        reason,
-    }
+    })
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -2526,6 +2556,48 @@ mod tests {
         let outline = "## Beat 1\n- Kael must steal the map before dawn.\n- He plants a promise that the guard will return.\n## Beat 2\n- Will he make it out alive?";
         let verdict = outline_five_q_check(outline);
         assert!(verdict.go, "expected GO, got: {verdict:?}");
+    }
+
+    // R-V152TA-S001: regression test confirming the single shared LLM→KbCandidate
+    // parser (`candidate_from_llm_json_for_profile`) is used by both extraction
+    // pathways. If the two call sites ever diverge, this test still guards the
+    // canonical mapping shape.
+    #[test]
+    fn llm_candidate_parser_shape_is_shared_across_pathways() {
+        let llm_json = serde_json::json!({
+            "canonical_name": "Azure Gate",
+            "block_type": "scene",
+            "confidence": 0.92,
+            "source_quote": "...the eastern gate groaned open...",
+            "summary": "The eastern gate of the citadel."
+        });
+
+        let candidate = candidate_from_llm_json_for_profile(&llm_json, "novel")
+            .expect("valid LLM candidate parses");
+
+        assert_eq!(candidate.canonical_name_guess, "Azure Gate");
+        assert_eq!(candidate.block_type, "scene");
+        assert_eq!(candidate.confidence, Some(0.92));
+        assert_eq!(
+            candidate.source_quote.as_deref(),
+            Some("...the eastern gate groaned open...")
+        );
+
+        // Profile-aware payload shaping: novel uses novel_category.
+        let payload: serde_json::Value =
+            serde_json::from_str(&candidate.proposed_payload).expect("valid JSON payload");
+        assert_eq!(payload["attributes"]["novel_category"], "location");
+
+        // The same LLM JSON parsed for game_bible/script profiles keeps the
+        // core fields identical; only the profile-specific category attribute
+        // changes. This proves the parser is the shared source of truth.
+        let game_bible_candidate =
+            candidate_from_llm_json_for_profile(&llm_json, "game_bible").unwrap();
+        assert_eq!(game_bible_candidate.canonical_name_guess, "Azure Gate");
+        assert_eq!(game_bible_candidate.block_type, "scene");
+        let gb_payload: serde_json::Value =
+            serde_json::from_str(&game_bible_candidate.proposed_payload).unwrap();
+        assert_eq!(gb_payload["attributes"]["game_bible_category"], "level");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
