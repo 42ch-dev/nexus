@@ -210,8 +210,8 @@ async fn list_works_returns_200() {
     let resp = ctx.server.get("/v1/local/works").await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
-    assert!(body["works"].is_array());
-    assert!(!body["works"].as_array().unwrap().is_empty());
+    assert!(body["items"].is_array());
+    assert!(!body["items"].as_array().unwrap().is_empty());
     // F-P1 (V1.64): `total` removed; cursor `pagination` envelope present.
     assert!(body["pagination"].is_object());
     assert_eq!(body["pagination"]["has_more"], false);

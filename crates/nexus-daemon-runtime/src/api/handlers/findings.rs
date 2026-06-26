@@ -300,7 +300,7 @@ pub async fn list_findings_handler(
                     "findings LIST: invalid enum value in query filter"
                 );
                 NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message: format!(
                         "invalid {field} value '{value}'; allowed: {}",
                         allowed.join(", ")
@@ -415,7 +415,7 @@ pub async fn update_finding_handler(
                     "findings PATCH: illegal lifecycle transition"
                 );
                 NexusApiError::BadRequest {
-                    code: "INVALID_TRANSITION".to_string(),
+                    code: "invalid_transition".to_string(),
                     message: format!("invalid status transition '{from}' → '{to}'"),
                 }
             }
@@ -432,7 +432,7 @@ pub async fn update_finding_handler(
                     "findings PATCH: invalid enum value"
                 );
                 NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message: format!(
                         "invalid {field} value '{value}'; allowed: {}",
                         allowed.join(", ")

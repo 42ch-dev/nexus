@@ -1,5 +1,6 @@
 //! Presets listing and reload handlers.
 
+use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::{extract::Path, extract::State, http::StatusCode, Json};
 use nexus_contracts::local::orchestration::http::{ListPresetsResponse, ReloadPresetResponse};
@@ -43,16 +44,11 @@ pub async fn list_presets(
 /// Does not panic; the `write_fmt` call is infallible for `String`.
 pub async fn reload_preset(
     Path(preset_id): Path<String>,
-) -> Result<(StatusCode, Json<ReloadPresetResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<ReloadPresetResponse>), NexusApiError> {
     // Validate the preset exists by attempting to load it.
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
-    let loaded =
-        nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps).map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("preset '{preset_id}' not found: {e}"),
-            )
-        })?;
+    let loaded = nexus_orchestration::preset::load_embedded_preset(&preset_id, &caps)
+        .map_err(|e| NexusApiError::NotFound(format!("preset '{preset_id}' not found: {e}")))?;
 
     // Compute the new source hash (blake3 hex).
     let mut hash_hex = String::with_capacity(64);
@@ -121,8 +117,12 @@ mod tests {
         let path = Path("nonexistent-preset".to_string());
         let result = reload_preset(path).await;
         assert!(result.is_err());
-        let (status, msg) = result.expect_err("reload_preset should fail for nonexistent preset");
-        assert_eq!(status, StatusCode::NOT_FOUND);
-        assert!(msg.contains("not found"), "msg: {msg}");
+        let err = result.expect_err("reload_preset should fail for nonexistent preset");
+        assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
+        assert!(
+            err.error_code().contains("not_found"),
+            "code: {}",
+            err.error_code()
+        );
     }
 }

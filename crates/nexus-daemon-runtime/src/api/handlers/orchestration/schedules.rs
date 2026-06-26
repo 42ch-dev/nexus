@@ -1,5 +1,3 @@
-//! Complex HTTP handlers with orchestration logic exceed line limits.
-#![allow(clippy::too_many_lines)]
 //! Schedule HTTP handlers: 8 endpoints per WS7 §9.
 //!
 //! Endpoints:
@@ -14,17 +12,21 @@
 //!
 //! # Error Documentation
 //!
-//! All handlers return `(StatusCode, String)` errors with consistent patterns:
-//! - `NOT_FOUND` for missing schedules
-//! - `CONFLICT` for state conflicts
-//! - `INTERNAL_SERVER_ERROR` for database failures
-//! - `BAD_REQUEST` for invalid input
+//! All handlers return `NexusApiError` and are mapped to the canonical
+//! `ApiErrorResponse` envelope by `IntoResponse`. Patterns:
+//! - `not_found` for missing schedules
+//! - `conflict` for state conflicts
+//! - `internal` for database failures
+//! - `bad_request` for invalid input
 //!
 //! Due to this consistent pattern across all handlers, `missing_errors_doc`
 //! is suppressed for this module.
 
 #![allow(clippy::missing_errors_doc)]
 
+use crate::api::errors::NexusApiError;
+use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
+use crate::api::sort::parse_sort_terms;
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},
@@ -41,6 +43,7 @@ use nexus_contracts::local::schedule::{
     CoreContextAuthor, CoreContextVersion, EditOp, Schedule, ScheduleConcurrency, ScheduleId,
     ScheduleStatus,
 };
+use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
     GateEvalError, PreviousPresetLookup, PreviousPresetResult,
 };
@@ -52,14 +55,10 @@ use std::sync::Arc;
 
 fn require_supervisor(
     state: &WorkspaceState,
-) -> Result<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>, (StatusCode, String)>
-{
-    state.schedule_supervisor().ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "schedule supervisor not configured".to_string(),
-        )
-    })
+) -> Result<Arc<nexus_orchestration::schedule::supervisor::ScheduleSupervisor>, NexusApiError> {
+    state
+        .schedule_supervisor()
+        .ok_or_else(|| NexusApiError::service_unavailable("schedule supervisor not configured"))
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +102,7 @@ fn sanitize_reason(raw: &str) -> String {
 pub async fn add_schedule(
     state: State<WorkspaceState>,
     Json(body): Json<AddScheduleRequest>,
-) -> Result<(StatusCode, Json<AddScheduleResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<AddScheduleResponse>), NexusApiError> {
     let supervisor = require_supervisor(&state)?;
 
     // W-6: Reject input keys that collide with reserved names.
@@ -111,14 +110,14 @@ pub async fn add_schedule(
         if let Some(obj) = input.as_object() {
             for key in obj.keys() {
                 if RESERVED_INPUT_KEYS.contains(&key.as_str()) {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        format!(
+                    return Err(NexusApiError::BadRequest {
+                        code: "bad_request".into(),
+                        message: format!(
                             "input key '{key}' is reserved; use a different key name \
                              (reserved: {})",
                             RESERVED_INPUT_KEYS.join(", ")
                         ),
-                    ));
+                    });
                 }
             }
         }
@@ -128,27 +127,27 @@ pub async fn add_schedule(
     if body.force_gates {
         let raw_reason = body.reason.as_deref().unwrap_or("");
         if raw_reason.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "--force-gates requires a non-empty --reason (audit-logged)".to_string(),
-            ));
+            return Err(NexusApiError::BadRequest {
+                code: "bad_request".into(),
+                message: "--force-gates requires a non-empty --reason (audit-logged)".to_string(),
+            });
         }
         let sanitized = sanitize_reason(raw_reason);
         if sanitized.len() > MAX_REASON_LEN {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!(
+            return Err(NexusApiError::BadRequest {
+                code: "bad_request".into(),
+                message: format!(
                     "reason exceeds maximum length ({MAX_REASON_LEN} chars); \
                      got {} chars",
                     sanitized.len()
                 ),
-            ));
+            });
         }
         if sanitized != raw_reason {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "reason contains ANSI escape sequences or control characters".to_string(),
-            ));
+            return Err(NexusApiError::BadRequest {
+                code: "bad_request".into(),
+                message: "reason contains ANSI escape sequences or control characters".to_string(),
+            });
         }
     }
 
@@ -180,18 +179,15 @@ pub async fn add_schedule(
         )
         .fetch_one(pool)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("database error checking completed novels: {e}"),
-            )
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error checking completed novels: {e}"),
         })?;
 
         if completed_count > 0 {
             // V1.47 P1: normalize user-facing copy — spec names, not repo paths.
             // V1.46 P1 (spec hygiene): cite specs, not deleted quickstart.
-            return Err((
-                StatusCode::CONFLICT,
+            return Err(NexusApiError::Conflict(
                 NOVEL_COMPLETION_GUARD_MESSAGE.to_string(),
             ));
         }
@@ -229,11 +225,9 @@ pub async fn add_schedule(
         let reason_text = body.reason.as_deref().unwrap_or("");
 
         // C-2: Use transaction for atomicity (audit + schedule insert).
-        let mut tx = pool.begin().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to begin transaction: {e}"),
-            )
+        let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to begin transaction: {e}"),
         })?;
 
         // W-7: Use typed helper instead of duplicated raw SQL.
@@ -248,11 +242,9 @@ pub async fn add_schedule(
         // SAFETY: DML inside transaction — uses the typed helper with query! macro.
         nexus_local_db::insert_force_gates_audit(&mut tx, &audit_params)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("failed to write force-gates audit row: {e}"),
-                )
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to write force-gates audit row: {e}"),
             })?;
 
         // Insert schedule row inside the same transaction.
@@ -274,18 +266,14 @@ pub async fn add_schedule(
         )
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to create schedule: {e}"),
-            )
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to create schedule: {e}"),
         })?;
 
-        tx.commit().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to commit schedule transaction: {e}"),
-            )
+        tx.commit().await.map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to commit schedule transaction: {e}"),
         })?;
 
         tracing::warn!(
@@ -327,33 +315,25 @@ pub async fn add_schedule(
                 // historical "if let Some(work_id)" outer wrapper has been collapsed
                 // since work_id_opt is resolved earlier and gates-required-work_id
                 // is enforced before reaching here.
+                #[allow(clippy::single_match_else)]
                 let work_id: &str = match &work_id_opt {
                     Some(w) => w.as_str(),
                     None => {
-                        return Err((
-                            StatusCode::UNPROCESSABLE_ENTITY,
-                            serde_json::to_string(
-                                &nexus_orchestration::preset_gates::PresetGatesFailed {
-                                    error: "preset_gates_failed".to_string(),
-                                    preset_id: body.preset_id.clone(),
-                                    work_id: String::new(),
-                                    failed_gates: vec![
-                                        nexus_orchestration::preset_gates::FailedGate {
-                                            kind: "work_field".to_string(),
-                                            expected: "work_id must be provided for gated preset"
-                                                .to_string(),
-                                            actual: "omitted".to_string(),
-                                            remediation:
-                                                "Pass work_id via input.work_id or seed.work_id, \
+                        let failure = nexus_orchestration::preset_gates::PresetGatesFailed {
+                            error: "preset_gates_failed".to_string(),
+                            preset_id: body.preset_id.clone(),
+                            work_id: String::new(),
+                            failed_gates: vec![nexus_orchestration::preset_gates::FailedGate {
+                                kind: "work_field".to_string(),
+                                expected: "work_id must be provided for gated preset".to_string(),
+                                actual: "omitted".to_string(),
+                                remediation: "Pass work_id via input.work_id or seed.work_id, \
                                          or use force_gates=true with a reason. \
                                          See the creator-run-preset-entry spec"
-                                                    .to_string(),
-                                        },
-                                    ],
-                                },
-                            )
-                            .unwrap_or_default(),
-                        ));
+                                    .to_string(),
+                            }],
+                        };
+                        return Err(NexusApiError::preset_gates_failed(&failure));
                     }
                 };
 
@@ -361,11 +341,9 @@ pub async fn add_schedule(
                 let pool = state.pool();
 
                 // C-2: begin transaction for atomic gate eval + schedule insert.
-                let mut tx = pool.begin().await.map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("failed to begin transaction: {e}"),
-                    )
+                let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("failed to begin transaction: {e}"),
                 })?;
 
                 let work_row: Option<WorkSnapshotRow> = sqlx::query_as!(
@@ -378,11 +356,9 @@ pub async fn add_schedule(
                 )
                 .fetch_optional(&mut *tx)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("database error loading work for gates: {e}"),
-                    )
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("database error loading work for gates: {e}"),
                 })?;
 
                 // Suppress single_match_else: explicit Some/None branches preserve
@@ -437,11 +413,9 @@ pub async fn add_schedule(
                             &lookup,
                         )
                         .await
-                        .map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("gate evaluation error: {e}"),
-                            )
+                        .map_err(|e| NexusApiError::Internal {
+                            code: "GATE_EVALUATION_ERROR".into(),
+                            message: format!("gate evaluation error: {e}"),
                         })?;
 
                         if let Err(gate_failure) = eval_result {
@@ -453,9 +427,7 @@ pub async fn add_schedule(
                                 failed_count = %gate_failure.failed_gates.len(),
                                 "preset gates failed"
                             );
-                            let error_json =
-                                serde_json::to_string(&gate_failure).unwrap_or_default();
-                            return Err((StatusCode::UNPROCESSABLE_ENTITY, error_json));
+                            return Err(NexusApiError::preset_gates_failed(&gate_failure));
                         }
 
                         // Gates passed — insert schedule inside the same transaction.
@@ -478,18 +450,14 @@ pub async fn add_schedule(
                         )
                         .execute(&mut *tx)
                         .await
-                        .map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("failed to create schedule: {e}"),
-                            )
+                        .map_err(|e| NexusApiError::Internal {
+                            code: "DATABASE_ERROR".into(),
+                            message: format!("failed to create schedule: {e}"),
                         })?;
 
-                        tx.commit().await.map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("failed to commit schedule transaction: {e}"),
-                            )
+                        tx.commit().await.map_err(|e| NexusApiError::Internal {
+                            code: "DATABASE_ERROR".into(),
+                            message: format!("failed to commit schedule transaction: {e}"),
                         })?;
 
                         let core_version =
@@ -513,28 +481,20 @@ pub async fn add_schedule(
                             failed_count = 1,
                             "preset gates failed — work not found"
                         );
-                        return Err((
-                            StatusCode::UNPROCESSABLE_ENTITY,
-                            serde_json::to_string(
-                                &nexus_orchestration::preset_gates::PresetGatesFailed {
-                                    error: "preset_gates_failed".to_string(),
-                                    preset_id: body.preset_id.clone(),
-                                    work_id: work_id.to_string(),
-                                    failed_gates: vec![
-                                        nexus_orchestration::preset_gates::FailedGate {
-                                            kind: "work_field".to_string(),
-                                            expected: "work must exist".to_string(),
-                                            actual: "not found".to_string(),
-                                            remediation:
-                                                "Ensure the work_id refers to an existing Work. \
+                        let failure = nexus_orchestration::preset_gates::PresetGatesFailed {
+                            error: "preset_gates_failed".to_string(),
+                            preset_id: body.preset_id.clone(),
+                            work_id: work_id.to_string(),
+                            failed_gates: vec![nexus_orchestration::preset_gates::FailedGate {
+                                kind: "work_field".to_string(),
+                                expected: "work must exist".to_string(),
+                                actual: "not found".to_string(),
+                                remediation: "Ensure the work_id refers to an existing Work. \
                                          See the creator-run-preset-entry spec"
-                                                    .to_string(),
-                                        },
-                                    ],
-                                },
-                            )
-                            .unwrap_or_default(),
-                        ));
+                                    .to_string(),
+                            }],
+                        };
+                        return Err(NexusApiError::preset_gates_failed(&failure));
                     }
                 } // closes `match work_row`
             } // closes `if !gates.is_empty()`
@@ -590,15 +550,12 @@ pub async fn add_schedule(
             e,
             nexus_orchestration::schedule::supervisor::SupervisorError::DuplicateSchedule { .. }
         ) {
-            (
-                StatusCode::CONFLICT,
-                format!("schedule already exists: {e}"),
-            )
+            NexusApiError::Conflict(format!("schedule already exists: {e}"))
         } else {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to create schedule: {e}"),
-            )
+            NexusApiError::Internal {
+                code: "SCHEDULE_CREATE_ERROR".into(),
+                message: format!("failed to create schedule: {e}"),
+            }
         }
     })?;
 
@@ -620,7 +577,7 @@ async fn seed_core_context(
     schedule_id: &str,
     body: &AddScheduleRequest,
     _state: &WorkspaceState,
-) -> Result<u32, (StatusCode, String)> {
+) -> Result<u32, NexusApiError> {
     if body.seed.is_some() || body.input.is_some() {
         let mgr = supervisor.core_context_manager();
         let sid = ScheduleId(schedule_id.to_string());
@@ -647,11 +604,9 @@ async fn seed_core_context(
                 },
             )
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("failed to seed core context: {e}"),
-                )
+            .map_err(|e| NexusApiError::Internal {
+                code: "CORE_CONTEXT_SEED_ERROR".into(),
+                message: format!("failed to seed core context: {e}"),
             })?;
     }
     Ok(0)
@@ -665,9 +620,15 @@ async fn seed_core_context(
 pub async fn list_schedules(
     state: State<WorkspaceState>,
     Query(query): Query<ListSchedulesQuery>,
-) -> Result<(StatusCode, Json<ListSchedulesResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<ListSchedulesResponse>), NexusApiError> {
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
+
+    let sort_terms = parse_sort_terms(
+        query.sort.as_deref(),
+        &["created_at", "updated_at", "status", "preset_id", "label"],
+        "schedule",
+    )?;
 
     // SAFETY: dynamic WHERE clause — filters are appended conditionally at runtime.
     // Compile-time checked macro cannot express variable SQL structure.
@@ -694,16 +655,65 @@ pub async fn list_schedules(
         q = q.bind(st);
     }
 
-    let rows: Vec<ListRow> = q.fetch_all(&*pool).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("database error: {e}"),
-        )
-    })?;
+    let rows: Vec<ListRow> = q
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
+        })?;
 
-    let schedules = rows.into_iter().map(ListRow::into_summary).collect();
+    let mut items: Vec<ScheduleSummary> = rows.into_iter().map(ListRow::into_summary).collect();
+    items.sort_by(|a, b| compare_schedule_summary(a, b, &sort_terms));
 
-    Ok((StatusCode::OK, Json(ListSchedulesResponse { schedules })))
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = query.limit.unwrap_or(100).min(500);
+    let total = items.len();
+    let start = usize::try_from(offset).unwrap_or(0).min(total);
+    let end = start
+        .saturating_add(usize::try_from(limit).unwrap_or(total))
+        .min(total);
+    let page_items: Vec<ScheduleSummary> = items.drain(start..end).collect();
+    let has_more = end < total;
+    let next_cursor = if has_more {
+        Some(encode_offset_cursor(offset.saturating_add(limit)))
+    } else {
+        None
+    };
+
+    Ok((
+        StatusCode::OK,
+        Json(ListSchedulesResponse {
+            items: page_items,
+            pagination: PaginationInfo {
+                limit: i64::from(limit),
+                next_cursor,
+                has_more,
+            },
+        }),
+    ))
+}
+
+fn compare_schedule_summary(
+    a: &ScheduleSummary,
+    b: &ScheduleSummary,
+    terms: &[(String, bool)],
+) -> std::cmp::Ordering {
+    for (key, ascending) in terms {
+        let ord = match key.as_str() {
+            "created_at" => a.created_at.cmp(&b.created_at),
+            "updated_at" => a.updated_at.cmp(&b.updated_at),
+            "status" => a.status.cmp(&b.status),
+            "preset_id" => a.preset_id.cmp(&b.preset_id),
+            "label" => a.label.cmp(&b.label),
+            _ => std::cmp::Ordering::Equal,
+        };
+        let ord = if *ascending { ord } else { ord.reverse() };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
 }
 
 // ---------------------------------------------------------------------------
@@ -714,7 +724,7 @@ pub async fn list_schedules(
 pub async fn inspect_schedule(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
-) -> Result<Json<InspectScheduleResponse>, (StatusCode, String)> {
+) -> Result<Json<InspectScheduleResponse>, NexusApiError> {
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
@@ -732,19 +742,13 @@ pub async fn inspect_schedule(
     .bind(&schedule_id)
     .fetch_optional(&*pool)
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("database error: {e}"),
-        )
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
     })?;
 
-    let row = row.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("schedule {schedule_id} not found"),
-        )
-    })?;
+    let row =
+        row.ok_or_else(|| NexusApiError::NotFound(format!("schedule {schedule_id} not found")))?;
 
     // Load dependencies
     // SAFETY: runtime `sqlx::query_as` — same pool lifetime constraint as inspect_schedule above.
@@ -754,11 +758,9 @@ pub async fn inspect_schedule(
     .bind(&schedule_id)
     .fetch_all(&*pool)
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("database error: {e}"),
-        )
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
     })?
     .into_iter()
     .map(|(d,)| d)
@@ -782,25 +784,20 @@ pub async fn edit_core_context(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
     Json(body): Json<EditCoreContextRequest>,
-) -> Result<(StatusCode, Json<EditCoreContextResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<EditCoreContextResponse>), NexusApiError> {
     let supervisor = require_supervisor(&state)?;
     let sid = ScheduleId(schedule_id.clone());
 
     // Check schedule exists and is not terminal
-    let status = supervisor.status_of(&schedule_id).await.map_err(|e| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("schedule {schedule_id} not found: {e}"),
-        )
-    })?;
+    let status = supervisor
+        .status_of(&schedule_id)
+        .await
+        .map_err(|e| NexusApiError::NotFound(format!("schedule {schedule_id} not found: {e}")))?;
     match status {
         ScheduleStatus::Completed | ScheduleStatus::Cancelled | ScheduleStatus::Failed => {
-            return Err((
-                StatusCode::CONFLICT,
-                format!(
-                    "schedule {schedule_id} is in terminal status {status:?}; edits not allowed"
-                ),
-            ));
+            return Err(NexusApiError::Conflict(format!(
+                "schedule {schedule_id} is in terminal status {status:?}; edits not allowed"
+            )));
         }
         _ => {}
     }
@@ -808,12 +805,13 @@ pub async fn edit_core_context(
     let mgr = supervisor.core_context_manager();
 
     let op = parse_edit_op(&body)?;
-    let record = mgr.apply_user_edit(&sid, op, None).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("failed to edit core context: {e}"),
-        )
-    })?;
+    let record =
+        mgr.apply_user_edit(&sid, op, None)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "CORE_CONTEXT_EDIT_ERROR".into(),
+                message: format!("failed to edit core context: {e}"),
+            })?;
 
     Ok((
         StatusCode::OK,
@@ -831,22 +829,19 @@ pub async fn edit_core_context(
 pub async fn get_core_context(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
-) -> Result<Json<CoreContextResponse>, (StatusCode, String)> {
+) -> Result<Json<CoreContextResponse>, NexusApiError> {
     let supervisor = require_supervisor(&state)?;
     let mgr = supervisor.core_context_manager();
     let sid = ScheduleId(schedule_id.clone());
 
     let snapshot = mgr.current_snapshot(&sid).await.map_err(|e| {
         if e.to_string().contains("not found") {
-            (
-                StatusCode::NOT_FOUND,
-                format!("schedule {schedule_id} not found"),
-            )
+            NexusApiError::NotFound(format!("schedule {schedule_id} not found"))
         } else {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("database error: {e}"),
-            )
+            NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
+            }
         }
     })?;
 
@@ -886,7 +881,7 @@ pub async fn get_core_context(
 pub async fn get_core_context_history(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
-) -> Result<Json<CoreContextHistoryResponse>, (StatusCode, String)> {
+) -> Result<Json<CoreContextHistoryResponse>, NexusApiError> {
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
@@ -902,18 +897,15 @@ pub async fn get_core_context_history(
     .bind(&schedule_id)
     .fetch_all(&*pool)
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("database error: {e}"),
-        )
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
     })?;
 
     if rows.is_empty() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!("no core context history for schedule {schedule_id}"),
-        ));
+        return Err(NexusApiError::NotFound(format!(
+            "no core context history for schedule {schedule_id}"
+        )));
     }
 
     // By default, only return meta (no content). Content inclusion can be
@@ -939,11 +931,14 @@ pub async fn get_core_context_history(
 // ---------------------------------------------------------------------------
 
 /// `POST /v1/local/orchestration/schedules/{schedule_id}/signal` — pause/resume/cancel/start.
+// Signal handler covers five distinct lifecycle transitions; extraction would fragment
+// the atomic state machine without reducing complexity.
+#[allow(clippy::too_many_lines)]
 pub async fn signal_schedule(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
     Json(body): Json<SignalScheduleRequest>,
-) -> Result<(StatusCode, Json<SignalScheduleResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<SignalScheduleResponse>), NexusApiError> {
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
     let now = chrono::Utc::now().timestamp();
@@ -955,40 +950,28 @@ pub async fn signal_schedule(
     .bind(&schedule_id)
     .fetch_optional(&*pool)
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("database error: {e}"),
-        )
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
     })?;
 
-    let (current_status_str,) = current_status_str.ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("schedule {schedule_id} not found"),
-        )
-    })?;
+    let (current_status_str,) = current_status_str
+        .ok_or_else(|| NexusApiError::NotFound(format!("schedule {schedule_id} not found")))?;
 
     // Reject all signals for failed schedules
     if current_status_str == "failed" {
-        return Err((
-            StatusCode::CONFLICT,
-            format!(
-                "cannot signal failed schedule {schedule_id}: failed schedules require manual intervention"
-            ),
-        ));
+        return Err(NexusApiError::Conflict(format!(
+            "cannot signal failed schedule {schedule_id}: failed schedules require manual intervention"
+        )));
     }
 
     let new_status = match body.signal.as_str() {
         "start" => match current_status_str.as_str() {
             "pending" => "running",
             _ => {
-                return Err((
-                        StatusCode::CONFLICT,
-                        format!(
-                            "cannot start schedule {schedule_id}: current status is {current_status_str}"
-                        ),
-                    ));
+                return Err(NexusApiError::Conflict(format!(
+                    "cannot start schedule {schedule_id}: current status is {current_status_str}"
+                )));
             }
         },
         "pause" => {
@@ -998,24 +981,18 @@ pub async fn signal_schedule(
                     e,
                     nexus_orchestration::schedule::supervisor::SupervisorError::NotFound(_)
                 ) {
-                    (
-                        StatusCode::NOT_FOUND,
-                        format!("schedule {schedule_id} not found"),
-                    )
+                    NexusApiError::NotFound(format!("schedule {schedule_id} not found"))
                 } else {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("database error: {e}"),
-                    )
+                    NexusApiError::Internal {
+                        code: "DATABASE_ERROR".into(),
+                        message: format!("database error: {e}"),
+                    }
                 }
             })?;
             if !paused {
-                return Err((
-                    StatusCode::CONFLICT,
-                    format!(
-                        "cannot pause schedule {schedule_id}: current status is {current_status_str}"
-                    ),
-                ));
+                return Err(NexusApiError::Conflict(format!(
+                    "cannot pause schedule {schedule_id}: current status is {current_status_str}"
+                )));
             }
 
             return Ok((
@@ -1033,14 +1010,19 @@ pub async fn signal_schedule(
                     e,
                     nexus_orchestration::schedule::supervisor::SupervisorError::NotFound(_)
                 ) {
-                    (StatusCode::NOT_FOUND, format!("schedule {schedule_id} not found"))
+                    NexusApiError::NotFound(format!("schedule {schedule_id} not found"))
                 } else if matches!(
                     e,
                     nexus_orchestration::schedule::supervisor::SupervisorError::InvalidTransition(..)
                 ) {
-                    (StatusCode::CONFLICT, format!("cannot resume schedule {schedule_id}: current status is {current_status_str}"))
+                    NexusApiError::Conflict(format!(
+                        "cannot resume schedule {schedule_id}: current status is {current_status_str}"
+                    ))
                 } else {
-                    (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}"))
+                    NexusApiError::Internal {
+                        code: "DATABASE_ERROR".into(),
+                        message: format!("database error: {e}"),
+                    }
                 }
             })?;
 
@@ -1077,7 +1059,10 @@ pub async fn signal_schedule(
                     .bind(&schedule_id)
                     .execute(&*pool)
                     .await
-                    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("database error: {e}")))?;
+                    .map_err(|e| NexusApiError::Internal {
+                        code: "DATABASE_ERROR".into(),
+                        message: format!("database error: {e}"),
+                    })?;
 
                 return Ok((
                     StatusCode::OK,
@@ -1088,12 +1073,9 @@ pub async fn signal_schedule(
                 ));
             }
             _ => {
-                return Err((
-                        StatusCode::CONFLICT,
-                        format!(
-                            "cannot cancel schedule {schedule_id}: current status is {current_status_str}"
-                        ),
-                    ));
+                return Err(NexusApiError::Conflict(format!(
+                    "cannot cancel schedule {schedule_id}: current status is {current_status_str}"
+                )));
             }
         },
         "advance" => {
@@ -1110,23 +1092,20 @@ pub async fn signal_schedule(
                     ));
                 }
                 _ => {
-                    return Err((
-                        StatusCode::CONFLICT,
-                        format!(
-                            "cannot advance schedule {schedule_id}: current status is {current_status_str}"
-                        ),
-                    ));
+                    return Err(NexusApiError::Conflict(format!(
+                        "cannot advance schedule {schedule_id}: current status is {current_status_str}"
+                    )));
                 }
             }
         }
         _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!(
+            return Err(NexusApiError::BadRequest {
+                code: "unknown_signal".into(),
+                message: format!(
                     "unknown signal '{}'; expected start|pause|resume|cancel|advance",
                     body.signal
                 ),
-            ));
+            });
         }
     };
 
@@ -1140,11 +1119,9 @@ pub async fn signal_schedule(
     .bind(&schedule_id)
     .execute(&*pool)
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("database error: {e}"),
-        )
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
     })?;
 
     // After starting or resuming, trigger a supervisor tick to potentially
@@ -1174,17 +1151,15 @@ pub async fn signal_schedule(
 pub async fn delete_schedule(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
-) -> Result<(StatusCode, Json<DeleteScheduleResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<DeleteScheduleResponse>), NexusApiError> {
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
     // Check if the schedule exists
-    let current_status = supervisor.status_of(&schedule_id).await.map_err(|e| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("schedule {schedule_id} not found: {e}"),
-        )
-    })?;
+    let current_status = supervisor
+        .status_of(&schedule_id)
+        .await
+        .map_err(|e| NexusApiError::NotFound(format!("schedule {schedule_id} not found: {e}")))?;
 
     match current_status {
         ScheduleStatus::Completed | ScheduleStatus::Cancelled | ScheduleStatus::Failed => {
@@ -1200,11 +1175,9 @@ pub async fn delete_schedule(
             .bind(&schedule_id)
             .fetch_optional(&*pool)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("database error: {e}"),
-                )
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
             })?;
 
             if let Some((Some(sid),)) = session_row {
@@ -1219,11 +1192,9 @@ pub async fn delete_schedule(
                 .bind(&sid)
                 .execute(&*pool)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("failed to cancel session: {e}"),
-                    )
+                .map_err(|e| NexusApiError::Internal {
+                    code: "SESSION_CANCEL_ERROR".into(),
+                    message: format!("failed to cancel session: {e}"),
                 })?;
             }
 
@@ -1237,11 +1208,9 @@ pub async fn delete_schedule(
             .bind(&schedule_id)
             .execute(&*pool)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("database error: {e}"),
-                )
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
             })?;
 
             // Cancel the schedule
@@ -1256,11 +1225,9 @@ pub async fn delete_schedule(
             .bind(&schedule_id)
             .execute(&*pool)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("database error: {e}"),
-                )
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("database error: {e}"),
             })?;
         }
     }
@@ -1272,11 +1239,9 @@ pub async fn delete_schedule(
         .bind(&schedule_id)
         .execute(&*pool)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("database error: {e}"),
-            )
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
         })?;
 
     Ok((
@@ -1290,50 +1255,56 @@ pub async fn delete_schedule(
 // ---------------------------------------------------------------------------
 
 /// Parse the HTTP `EditCoreContextRequest` into an `EditOp`.
-fn parse_edit_op(body: &EditCoreContextRequest) -> Result<EditOp, (StatusCode, String)> {
+fn parse_edit_op(body: &EditCoreContextRequest) -> Result<EditOp, NexusApiError> {
     match body.op.as_str() {
         "append" => {
-            let text = body.body.as_ref().ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "append requires 'body' field".to_string(),
-                )
-            })?;
+            let text = body
+                .body
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "missing_field".into(),
+                    message: "append requires 'body' field".to_string(),
+                })?;
             Ok(EditOp::Append { body: text.clone() })
         }
         "replace" => {
-            let text = body.body.as_ref().ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "replace requires 'body' field".to_string(),
-                )
-            })?;
+            let text = body
+                .body
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "missing_field".into(),
+                    message: "replace requires 'body' field".to_string(),
+                })?;
             Ok(EditOp::Replace { body: text.clone() })
         }
         "struct_merge" => {
-            let patch = body.patch.as_ref().ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "struct_merge requires 'patch' field".to_string(),
-                )
-            })?;
+            let patch = body
+                .patch
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "missing_field".into(),
+                    message: "struct_merge requires 'patch' field".to_string(),
+                })?;
             Ok(EditOp::StructMerge {
                 patch: patch.clone(),
             })
         }
         "struct_remove" => {
-            let path = body.path.as_ref().ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "struct_remove requires 'path' field".to_string(),
-                )
-            })?;
+            let path = body
+                .path
+                .as_ref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "missing_field".into(),
+                    message: "struct_remove requires 'path' field".to_string(),
+                })?;
             Ok(EditOp::StructRemove { path: path.clone() })
         }
-        other => Err((
-            StatusCode::BAD_REQUEST,
-            format!("unknown op '{other}'; expected append|replace|struct_merge|struct_remove"),
-        )),
+        other => Err(NexusApiError::BadRequest {
+            code: "unknown_op".into(),
+            message: format!(
+                "unknown op '{other}'; expected append|replace|struct_merge|struct_remove"
+            ),
+        }),
     }
 }
 

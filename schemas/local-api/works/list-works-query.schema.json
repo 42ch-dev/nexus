@@ -1,15 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nexus42.invalid/schemas/local-api/works/list-works-query.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "title": "Nexus ListWorksQuery",
-  "description": "Query parameters for GET /v1/local/works (cursor-based pagination, F-P1).",
+  "description": "Query parameters for GET /v1/local/works (cursor-based pagination + sort, F-P1 / F-F1).",
   "type": "object",
   "properties": {
     "status": { "type": "string" },
     "intake_status": { "type": "string" },
     "limit": { "type": "integer" },
-    "cursor": { "type": "string", "description": "Opaque pagination cursor returned by the previous response's `pagination.next_cursor`." }
+    "cursor": { "type": "string", "description": "Opaque pagination cursor returned by the previous response's `pagination.next_cursor`." },
+    "sort": { "type": "string", "description": "Comma-separated sort terms. Allowed keys: `updated_at` (default), `title`, `status`, `intake_status`. Prefix `-` for descending." }
   },
   "additionalProperties": false
 }

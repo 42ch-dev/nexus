@@ -2,6 +2,9 @@
 #![allow(clippy::missing_errors_doc)]
 //! Session handlers: list, get, signal, create.
 
+use crate::api::errors::NexusApiError;
+use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
+use crate::api::sort::parse_sort_terms;
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},
@@ -12,35 +15,34 @@ use nexus_contracts::local::orchestration::http::{
     CreateSessionRequest, CreateSessionResponse, GetSessionResponse, ListSessionsQuery,
     ListSessionsResponse, SessionSummary, SignalSessionRequest,
 };
+use nexus_contracts::PaginationInfo;
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
 
 /// `POST /v1/local/orchestration/sessions` — create a new session from a preset.
 pub async fn create_session(
     State(state): State<WorkspaceState>,
     Json(body): Json<CreateSessionRequest>,
-) -> Result<(StatusCode, Json<CreateSessionResponse>), (StatusCode, String)> {
-    let engine = state.engine().ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "engine not available".into(),
-        )
-    })?;
+) -> Result<(StatusCode, Json<CreateSessionResponse>), NexusApiError> {
+    let engine = state
+        .engine()
+        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
     // Load the preset by ID.
     let caps = nexus_orchestration::CapabilityRegistry::with_builtins();
     let loaded = nexus_orchestration::preset::load_embedded_preset(&body.preset_id, &caps)
-        .map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("failed to load preset '{}': {}", body.preset_id, e),
-            )
+        .map_err(|e| NexusApiError::BadRequest {
+            code: "preset_load_failed".into(),
+            message: format!("failed to load preset '{}': {}", body.preset_id, e),
         })?;
 
     // Start session with the loaded preset.
     let session_id = engine
         .start_session_with_preset_for_creator(&loaded, &body.creator_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| NexusApiError::Internal {
+            code: "ENGINE_ERROR".into(),
+            message: e.to_string(),
+        })?;
 
     Ok((
         StatusCode::CREATED,
@@ -54,31 +56,31 @@ pub async fn create_session(
 pub async fn list_sessions(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListSessionsQuery>,
-) -> (StatusCode, Json<ListSessionsResponse>) {
-    let Some(engine) = state.engine() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ListSessionsResponse {
-                sessions: Vec::new(),
-            }),
-        );
-    };
+) -> Result<Json<ListSessionsResponse>, NexusApiError> {
+    let engine = state
+        .engine()
+        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
+
+    let sort_terms = parse_sort_terms(
+        query.sort.as_deref(),
+        &["session_id", "creator_id", "preset_id", "status"],
+        "session",
+    )?;
 
     let filter = nexus_orchestration::engine::SessionFilter {
         creator_id: query.creator_id,
         preset_id: None,
     };
 
-    let Ok(sessions) = engine.list_active(filter).await else {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ListSessionsResponse {
-                sessions: Vec::new(),
-            }),
-        );
-    };
+    let sessions = engine
+        .list_active(filter)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "ENGINE_ERROR".into(),
+            message: e.to_string(),
+        })?;
 
-    let mapped: Vec<SessionSummary> = sessions
+    let mut mapped: Vec<SessionSummary> = sessions
         .into_iter()
         .map(|s| SessionSummary {
             session_id: s.session_id.0,
@@ -89,34 +91,78 @@ pub async fn list_sessions(
         })
         .collect();
 
-    (
-        StatusCode::OK,
-        Json(ListSessionsResponse { sessions: mapped }),
-    )
+    // F-F1: apply server-side sort (in-memory; active-session lists are small).
+    mapped.sort_by(|a, b| compare_session_summary(a, b, &sort_terms));
+
+    // F-P1/F-P3: cursor pagination.
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = query.limit.unwrap_or(100).min(500);
+    let total = mapped.len();
+    let start = usize::try_from(offset).unwrap_or(0).min(total);
+    let end = start
+        .saturating_add(usize::try_from(limit).unwrap_or(total))
+        .min(total);
+    let page_items: Vec<SessionSummary> = mapped.drain(start..end).collect();
+    let has_more = end < total;
+    let next_cursor = if has_more {
+        Some(encode_offset_cursor(offset.saturating_add(limit)))
+    } else {
+        None
+    };
+
+    Ok(Json(ListSessionsResponse {
+        items: page_items,
+        pagination: PaginationInfo {
+            limit: i64::from(limit),
+            next_cursor,
+            has_more,
+        },
+    }))
+}
+
+fn compare_session_summary(
+    a: &SessionSummary,
+    b: &SessionSummary,
+    terms: &[(String, bool)],
+) -> std::cmp::Ordering {
+    for (key, ascending) in terms {
+        let ord = match key.as_str() {
+            "session_id" => a.session_id.cmp(&b.session_id),
+            "creator_id" => a.creator_id.cmp(&b.creator_id),
+            "preset_id" => a.preset_id.cmp(&b.preset_id),
+            "status" => a.status.cmp(&b.status),
+            _ => std::cmp::Ordering::Equal,
+        };
+        let ord = if *ascending { ord } else { ord.reverse() };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
 }
 
 /// `GET /v1/local/orchestration/sessions/{session_id}`
 pub async fn get_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
-) -> Result<Json<GetSessionResponse>, (StatusCode, String)> {
-    let engine = state.engine().ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "engine not available".into(),
-        )
-    })?;
+) -> Result<Json<GetSessionResponse>, NexusApiError> {
+    let engine = state
+        .engine()
+        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
-    let sid = nexus_orchestration::engine::SessionId(session_id);
+    let sid = nexus_orchestration::engine::SessionId(session_id.clone());
     let sessions = engine
         .list_active(nexus_orchestration::engine::SessionFilter::default())
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| NexusApiError::Internal {
+            code: "ENGINE_ERROR".into(),
+            message: e.to_string(),
+        })?;
 
     let session = sessions
         .into_iter()
         .find(|s| s.session_id == sid)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "session not found".into()))?;
+        .ok_or_else(|| NexusApiError::NotFound(format!("session {session_id}")))?;
 
     Ok(Json(GetSessionResponse {
         session: SessionSummary {
@@ -134,13 +180,10 @@ pub async fn signal_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
     Json(body): Json<SignalSessionRequest>,
-) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, String)> {
-    let engine = state.engine().ok_or_else(|| {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "engine not available".into(),
-        )
-    })?;
+) -> Result<(StatusCode, Json<serde_json::Value>), NexusApiError> {
+    let engine = state
+        .engine()
+        .ok_or_else(|| NexusApiError::service_unavailable("engine not available"))?;
 
     let signal = match body.signal.as_str() {
         "pause" => EngineSignal::Pause,
@@ -148,10 +191,12 @@ pub async fn signal_session(
         "cancel" => EngineSignal::Cancel,
         "advance" => EngineSignal::Advance,
         other => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!("invalid signal: '{other}' — expected pause|resume|cancel|advance"),
-            ));
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_signal".into(),
+                message: format!(
+                    "invalid signal: '{other}' — expected pause|resume|cancel|advance"
+                ),
+            });
         }
     };
 
@@ -159,9 +204,12 @@ pub async fn signal_session(
     engine.signal(&sid, signal).await.map_err(
         |e: nexus_orchestration::engine::EngineError| match e {
             nexus_orchestration::engine::EngineError::SessionNotFound(_) => {
-                (StatusCode::NOT_FOUND, "session not found".into())
+                NexusApiError::NotFound("session not found".into())
             }
-            other => (StatusCode::INTERNAL_SERVER_ERROR, other.to_string()),
+            other => NexusApiError::Internal {
+                code: "ENGINE_ERROR".into(),
+                message: other.to_string(),
+            },
         },
     )?;
 

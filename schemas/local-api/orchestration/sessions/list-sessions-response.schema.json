@@ -1,16 +1,17 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nexus42.invalid/schemas/local-api/orchestration/sessions/list-sessions-response.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "title": "Nexus ListOrchestrationSessionsResponse",
-  "description": "Response for GET /v1/local/orchestration/sessions.",
+  "description": "Response for GET /v1/local/orchestration/sessions (cursor-based pagination, F-P3). The array field is `items`; the legacy `sessions` key was removed in `@42ch/nexus-contracts` 0.6.0.",
   "type": "object",
-  "required": ["sessions"],
+  "required": ["items", "pagination"],
   "properties": {
-    "sessions": {
+    "items": {
       "type": "array",
       "items": { "$ref": "https://nexus42.invalid/schemas/local-api/orchestration/sessions/session-summary.schema.json" }
-    }
+    },
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json" }
   },
   "additionalProperties": false
 }

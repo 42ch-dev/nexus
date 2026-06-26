@@ -391,6 +391,9 @@ async fn list_schedules(
     let query = ListSchedulesQuery {
         creator_id: creator,
         status,
+        cursor: None,
+        limit: None,
+        sort: None,
     };
     // Build query string manually for GET
     let mut path = SCHEDULE_BASE.to_string();
@@ -407,7 +410,7 @@ async fn list_schedules(
 
     let resp: ListSchedulesResponse = client.get(&path).await?;
 
-    if resp.schedules.is_empty() {
+    if resp.items.is_empty() {
         println!("No schedules found.");
         return Ok(());
     }
@@ -417,7 +420,7 @@ async fn list_schedules(
         "SCHEDULE_ID", "CREATOR", "PRESET", "STATUS", "CTX_V", "LABEL"
     );
     println!("{}", "-".repeat(85));
-    for s in &resp.schedules {
+    for s in &resp.items {
         let label = s.label.as_deref().unwrap_or("-");
         println!(
             "{:<25} {:<15} {:<12} {:<10} {:<6} {}",
@@ -429,7 +432,7 @@ async fn list_schedules(
             label,
         );
     }
-    println!("\n{} schedule(s)", resp.schedules.len());
+    println!("\n{} schedule(s)", resp.items.len());
     Ok(())
 }
 
@@ -520,7 +523,7 @@ async fn timeline(client: &crate::api::DaemonClient, creator: &str, days: u32) -
     let path = format!("{SCHEDULE_BASE}?creator_id={creator}");
     let resp: ListSchedulesResponse = client.get(&path).await?;
 
-    if resp.schedules.is_empty() {
+    if resp.items.is_empty() {
         println!("No schedules for creator {creator}.");
         return Ok(());
     }
@@ -530,7 +533,7 @@ async fn timeline(client: &crate::api::DaemonClient, creator: &str, days: u32) -
     println!("Creator: {creator} (last {days} days)\n");
 
     // Sort by created_at desc
-    let mut sorted = resp.schedules;
+    let mut sorted = resp.items;
     sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     for s in &sorted {

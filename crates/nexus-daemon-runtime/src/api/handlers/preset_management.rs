@@ -594,7 +594,7 @@ pub async fn update_preset(
 
     if source != "user" {
         return Err(NexusApiError::BadRequest {
-            code: "PRESET_UPDATE_FORBIDDEN".to_string(),
+            code: "preset_update_forbidden".to_string(),
             message: format!("only user presets can be updated; '{preset_id}' is {source}"),
         });
     }
@@ -631,7 +631,7 @@ pub async fn delete_preset(
 
     if source != "user" {
         return Err(NexusApiError::BadRequest {
-            code: "PRESET_DELETE_FORBIDDEN".to_string(),
+            code: "preset_delete_forbidden".to_string(),
             message: format!("only user presets can be deleted; '{preset_id}' is {source}"),
         });
     }

@@ -306,7 +306,7 @@ async fn patch_chapter_reverse_transition_is_rejected() {
     assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
     assert_eq!(
         bad_request_code(&err),
-        Some("CHAPTER_STATUS_TRANSITION_INVALID")
+        Some("chapter_status_transition_invalid")
     );
 }
 
@@ -341,7 +341,7 @@ async fn patch_published_chapter_structure_is_hard_blocked() {
     assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
     assert_eq!(
         bad_request_code(&err),
-        Some("CHAPTER_STRUCTURE_EDIT_BLOCKED")
+        Some("chapter_structure_edit_blocked")
     );
 }
 
@@ -376,7 +376,7 @@ async fn patch_finalized_chapter_structure_requires_confirmation() {
     assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
     assert_eq!(
         bad_request_code(&err),
-        Some("CHAPTER_STRUCTURE_CONFIRMATION_REQUIRED")
+        Some("chapter_structure_confirmation_required")
     );
 
     let resp = chapters::patch_chapter(
@@ -449,7 +449,7 @@ async fn get_body_rejects_escaped_body_path() {
     assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
     let code = bad_request_code(&err).expect("should be BadRequest");
     assert!(
-        code == "CHAPTER_BODY_PATH_FORBIDDEN" || code == "CHAPTER_PATH_UNRESOLVABLE",
+        code == "chapter_body_path_forbidden" || code == "chapter_path_unresolvable",
         "unexpected code: {code}"
     );
 }

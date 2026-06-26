@@ -200,7 +200,7 @@ async fn work_get_cross_creator_returns_forbidden() {
     let result = HostToolExecutor::execute(&req, &other_ctx.state).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.error_code(), "FORBIDDEN");
+    assert_eq!(err.error_code(), "forbidden");
 }
 
 // ─── nexus.work.patch happy path (append inspiration) ─────────────────────
@@ -248,7 +248,7 @@ async fn work_patch_rejects_current_stage_field() {
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
 }
 
 // ─── TV-3: nexus.context.assemble POLICY_BLOCKED ──────────────────────────
@@ -265,7 +265,7 @@ async fn context_assemble_policy_blocked_when_platform_required() {
     assert!(result.is_err());
     match result {
         Err(nexus_daemon_runtime::api::errors::NexusApiError::BadRequest { code, message }) => {
-            assert_eq!(code, "POLICY_BLOCKED");
+            assert_eq!(code, "policy_blocked");
             assert!(
                 message.contains("PLATFORM_PAUSED"),
                 "Message should contain PLATFORM_PAUSED: {message}"
@@ -329,7 +329,7 @@ async fn error_code_not_supported_for_unknown_tool() {
     let req = make_request("nexus.unknown.tool", json!({}));
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
+    assert_eq!(result.unwrap_err().error_code(), "not_supported");
 }
 
 #[tokio::test]
@@ -338,7 +338,7 @@ async fn error_code_forbidden_for_missing_work() {
     let req = make_request("nexus.work.get", json!({ "work_id": "wrk_nonexistent" }));
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
 }
 
 #[tokio::test]
@@ -347,7 +347,7 @@ async fn error_code_invalid_input_for_missing_params() {
     let req = make_request("nexus.work.get", json!({}));
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -360,8 +360,8 @@ async fn error_code_policy_blocked_surface_in_assemble() {
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    // Wire contract: error_code() returns "POLICY_BLOCKED" (spec §12.4)
-    assert_eq!(err.error_code(), "POLICY_BLOCKED");
+    // Wire contract: error_code() returns "policy_blocked" (spec §12.4)
+    assert_eq!(err.error_code(), "policy_blocked");
 }
 
 #[tokio::test]
@@ -381,7 +381,7 @@ async fn worker_upcall_surfaces_forbidden_error_code() {
     assert!(!result.grant);
     let err = result.error.expect("worker error should be present");
     assert_eq!(
-        err.code, "FORBIDDEN",
+        err.code, "forbidden",
         "Worker error code must surface FORBIDDEN"
     );
 }
@@ -400,7 +400,7 @@ async fn worker_upcall_surfaces_policy_blocked_error_code() {
     assert!(!result.grant);
     let err = result.error.expect("worker error should be present");
     assert_eq!(
-        err.code, "POLICY_BLOCKED",
+        err.code, "policy_blocked",
         "Worker error code must surface POLICY_BLOCKED"
     );
 }
@@ -419,7 +419,7 @@ async fn worker_upcall_surfaces_not_supported_error_code() {
     assert!(!result.grant);
     let err = result.error.expect("worker error should be present");
     assert_eq!(
-        err.code, "NOT_SUPPORTED",
+        err.code, "not_supported",
         "Worker error code must surface NOT_SUPPORTED"
     );
 }
@@ -448,8 +448,8 @@ async fn audit_log_written_on_unknown_tool_denial() {
         "Audit log must record denial, got: {outcome}"
     );
     assert!(
-        outcome.contains("NOT_SUPPORTED"),
-        "Audit log must contain NOT_SUPPORTED, got: {outcome}"
+        outcome.contains("not_supported"),
+        "Audit log must contain not_supported, got: {outcome}"
     );
 }
 
@@ -530,7 +530,7 @@ async fn stage_metadata_rejects_disallowed_sub_key() {
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -550,7 +550,7 @@ async fn stage_metadata_rejects_unknown_sub_key() {
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -568,7 +568,7 @@ async fn stage_metadata_rejects_non_object() {
     let result = HostToolExecutor::execute(&req, &ctx.state).await;
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
 }
 
 // ─── Fix wave 2: Worker upcall path equivalence ─────────────────────────────

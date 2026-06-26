@@ -6,6 +6,7 @@
 //! The daemon exposes these as local-only HTTP; `nexus-platform` never
 //! observes them over any wire channel.
 
+use crate::generated::local_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -14,18 +15,30 @@ use serde::{Deserialize, Serialize};
 
 /// Query parameters for `GET /v1/local/orchestration/sessions`.
 #[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct ListSessionsQuery {
     /// Filter by creator ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creator_id: Option<String>,
+    /// Maximum number of items to return.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Opaque pagination cursor returned by the previous response's
+    /// `pagination.next_cursor`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// Comma-separated sort terms (e.g. `-status`, `preset_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
 }
 
 /// Response body for `GET /v1/local/orchestration/sessions`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ListSessionsResponse {
     /// Active engine sessions.
-    pub sessions: Vec<SessionSummary>,
+    pub items: Vec<SessionSummary>,
+    /// Cursor-based pagination envelope.
+    pub pagination: PaginationInfo,
 }
 
 /// A single session summary item.
@@ -98,12 +111,29 @@ pub struct SignalSessionRequest {
 // Capabilities
 // ---------------------------------------------------------------------------
 
+/// Query parameters for `GET /v1/local/orchestration/capabilities`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ListCapabilitiesQuery {
+    /// Maximum number of items to return.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// Opaque pagination cursor returned by the previous response's
+    /// `pagination.next_cursor`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// Comma-separated sort terms (e.g. `-name`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+}
+
 /// Response body for `GET /v1/local/orchestration/capabilities`.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ListCapabilitiesResponse {
     /// Registered capabilities with their schemas.
-    pub capabilities: Vec<CapabilityInfo>,
+    pub items: Vec<CapabilityInfo>,
+    /// Cursor-based pagination envelope.
+    pub pagination: PaginationInfo,
 }
 
 /// A single capability description.

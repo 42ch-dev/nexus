@@ -554,7 +554,7 @@ mod tests {
         let result = health(State(state)).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.error_code(), "INTERNAL");
+        assert_eq!(err.error_code(), "internal");
     }
 
     #[tokio::test]
@@ -619,7 +619,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
-        assert_eq!(err.error_code(), "INVALID_INPUT");
+        assert_eq!(err.error_code(), "invalid_input");
     }
 
     #[tokio::test]
@@ -629,7 +629,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
-        assert_eq!(err.error_code(), "INVALID_INPUT");
+        assert_eq!(err.error_code(), "invalid_input");
     }
 
     #[tokio::test]

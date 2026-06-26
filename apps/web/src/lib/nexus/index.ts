@@ -20,5 +20,4 @@ export {
   type DaemonStatus,
 } from './desktop-capabilities';
 export { isDesktopBuild } from './detect';
-export { normalizeList, sortByDate, type ListArrayKey, type NormalizedList } from './adapters';
 export type { DaemonHealth, NexusClient } from './types';

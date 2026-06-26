@@ -29,6 +29,7 @@ import type {
   CreateWorkResponse,
   FindingDetailResponse,
   InspectScheduleResponse,
+  ListCapabilitiesQuery,
   ListCapabilitiesResponse,
   ListChaptersQuery,
   ListChaptersResponse,
@@ -77,7 +78,7 @@ export interface NexusClient {
   health(): Promise<DaemonHealth>;
 
   // ── Works (dashboard + Work CRUD) ─────────────────────────────────────────
-  /** `GET /v1/local/works` — cursor list (F-P1; `works` array key, F-P3 deferred). */
+  /** `GET /v1/local/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
   /** `GET /v1/local/works/{work_id}` — full detail. */
   getWork(workId: string): Promise<WorkDetailResponse>;
@@ -87,20 +88,20 @@ export interface NexusClient {
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse>;
 
   // ── Orchestration sessions ────────────────────────────────────────────────
-  /** `GET /v1/local/orchestration/sessions`. */
+  /** `GET /v1/local/orchestration/sessions` — cursor list (F-P3/F-F1; canonical `items` key). */
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse>;
   /** `GET /v1/local/orchestration/sessions/{session_id}`. */
   getSession(sessionId: string): Promise<SessionDetailResponse>;
 
   // ── Schedules / cron ──────────────────────────────────────────────────────
-  /** `GET /v1/local/orchestration/schedules`. */
+  /** `GET /v1/local/orchestration/schedules` — cursor list (F-P3/F-F1; canonical `items` key). */
   listSchedules(query?: ListSchedulesQuery): Promise<ListSchedulesResponse>;
   /** `GET /v1/local/orchestration/schedules/{schedule_id}`. */
   inspectSchedule(scheduleId: string): Promise<InspectScheduleResponse>;
 
   // ── Capabilities ──────────────────────────────────────────────────────────
-  /** `GET /v1/local/orchestration/capabilities`. */
-  listCapabilities(): Promise<ListCapabilitiesResponse>;
+  /** `GET /v1/local/orchestration/capabilities` — cursor list (F-P3/F-F1; canonical `items` key). */
+  listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse>;
 
   // ── Findings ───────────────────────────────────────────────────────────────
   /** `GET /v1/local/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
