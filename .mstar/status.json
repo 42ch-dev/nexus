@@ -3,36 +3,6 @@
   "updated_at": "2026-06-26T00:00:00Z",
   "plans": [
     {
-      "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
-      "title": "V1.67 P0 — Local API Surface Convergence (FE1-ORCH + CASING + F-P3 + F-F1)",
-      "iteration": "V1.67",
-      "slot": "P0",
-      "status": "InReview",
-      "effort": "XL",
-      "owner": "@fullstack-dev + @frontend-dev",
-      "review": "tri-review",
-      "wave": 1,
-      "dependency": "P-1 + Phase 2b (§5 #1-#4 LOCKED)",
-      "working_branch": "feature/v1.67-local-api-surface-convergence",
-      "merge_target": "iteration/v1.67",
-      "file": ".mstar/plans/2026-06-26-v1.67-local-api-surface-convergence.md"
-    },
-    {
-      "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
-      "title": "V1.67 P-sec — Desktop Shell Polish (10 V1.66 QC items)",
-      "iteration": "V1.67",
-      "slot": "P-sec",
-      "status": "InReview",
-      "effort": "S-M",
-      "owner": "@fullstack-dev-2",
-      "review": "tri-review",
-      "wave": 1,
-      "dependency": "P-1",
-      "working_branch": "feature/v1.67-desktop-shell-polish",
-      "merge_target": "iteration/v1.67",
-      "file": ".mstar/plans/2026-06-26-v1.67-desktop-shell-polish.md"
-    },
-    {
       "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
       "title": "V1.67 P1 — Frontend Scope Gaps (G1 work_profile + G2 TS-client; preset mgmt UI -> V1.68 canvas)",
       "iteration": "V1.67",
@@ -143,7 +113,7 @@
       "inaccurate_as_of": "2026-06-26",
       "inaccurate_reason": "total_open=4 but actual open=30; V1.67 P-last AC2 refreshes/retires this rollup"
     },
-    "updated_at": "2026-06-26T... (Wave 1 InReview)",
+    "updated_at": "2026-06-26 (Wave 1 closeout)",
     "spec_integration_branch": "iteration/v1.67",
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
@@ -3734,8 +3704,14 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-P3",
         "note": "Works uses 'works', Schedule uses 'schedules', Sessions uses 'sessions', Capabilities uses 'capabilities'. Cursor-based resources (Creators, KB, Workspaces) use 'items'. Standardize on 'items' for list response arrays. Breaking change requiring handler migration; coordinate with web-ui iteration.",
-        "lifecycle": "deferred",
-        "deferral_note": "V1.64 P0 closed the pagination half (SURF-001) but explicitly deferred the array rename to V1.65+ per compass §5 item #2; the V1.64 Web UI (P2) covers via a thin TanStack Query transformer adapter."
+        "lifecycle": "resolved",
+        "deferral_note": "V1.64 P0 closed the pagination half (SURF-001) but explicitly deferred the array rename to V1.65+ per compass §5 item #2; the V1.64 Web UI (P2) covers via a thin TanStack Query transformer adapter.",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       },
       {
         "id": "R-V163P3-SURF-004",
@@ -3769,8 +3745,14 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-F1",
         "note": "No resource supports sort_by/order/direction query parameters. When sort is added, standardize on sort_by: string + sort_order: 'asc' | 'desc'. Defer to V1.64+.",
-        "lifecycle": "deferred",
-        "deferral_note": "V1.64 Web UI (P2) covers via client-side sort for small lists; structural server-side sort deferred to V1.65+ per compass §5 item #1 (Track C)."
+        "lifecycle": "resolved",
+        "deferral_note": "V1.64 Web UI (P2) covers via client-side sort for small lists; structural server-side sort deferred to V1.65+ per compass §5 item #1 (Track C).",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       },
       {
         "id": "R-V163P1-T6-001",
@@ -3806,7 +3788,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-24-v1.64-local-api-hardening][R-V164-FE1-ORCH]",
         "note": "F-E1 schema-level standardization (ErrorResponse schema + core CRUD handlers) is complete. Migrating orchestration handlers to NexusApiError is an independent refactor (large surface, L-item risk); deferred to V1.65+. Non-blocking for V1.64 Web UI data layer (UI parses the shared ErrorResponse where emitted; orchestration endpoints are READ-only in the MVP). qc1 W-1 corroborated: orchestration handlers (schedules/sessions/presets) ALL return ad-hoc (StatusCode,String); MVP Sessions/Schedule/Capabilities/Presets toasts lose stable code/message until migrated. The client-side envelope fix (Wave-1 fix-wave) parses the wrapped shape where emitted; full migration remains V1.65+.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       },
       {
         "id": "R-V164-QC1-S1-P0",
@@ -3840,7 +3828,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-local-api-hardening/qc1.md (W-1 fix-wave note)",
         "note": "Structural W-1 (envelope layering) fixed in Wave-1 fix-wave; casing drift is a separate latent doc-vs-runtime mismatch. Architect reconciles §3.2 against actual emitted codes at V1.65+ (or aligns runtime to lowercase per convention).",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       }
     ],
     "2026-06-24-v1.64-web-app-scaffold": [
@@ -3876,7 +3870,13 @@
         "target_date": "V1.64 P2",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-web-app-scaffold/qc1.md S-3",
         "note": "P2 data hooks should own the F-P3 normalization adapter (thin TanStack Query transformer). P-last verifies the F-P3 deferral boundary holds against the live UI.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       }
     ],
     "2026-06-24-v1.64-control-room-and-setup-screens": [
@@ -4013,90 +4013,150 @@
         "title": "Event-driven daemon-status (replace Rust 100ms + React 5s dual poll loops with Tauri AppHandle::emit)",
         "severity": "low",
         "source": "qc1.md S-1",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs + apps/web/src/components/layout/daemon-status-bar.tsx"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs + apps/web/src/components/layout/daemon-status-bar.tsx",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S2",
         "title": "sidecar.rs:198 robust unwrap (unwrap_or_else fallback message)",
         "severity": "low",
         "source": "qc1.md S-2",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S4",
         "title": "desktop-build.yml §5 #10 conditional fallback to per-arch artifacts when universal unstable",
         "severity": "low",
         "source": "qc1.md S-4",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": ".github/workflows/desktop-build.yml"
+        "scope": ".github/workflows/desktop-build.yml",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S5",
         "title": "Idiomatic Tauri exit hook (on_window_event/RunEvent::ExitRequested) vs trailing block_on(stop)",
         "severity": "low",
         "source": "qc1.md S-5",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/lib.rs"
+        "scope": "apps/desktop/src-tauri/src/lib.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S1",
         "title": "Reset restart_count on manual startDaemon (currently stays at cap after give-up)",
         "severity": "low",
         "source": "qc3.md S-1",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S2",
         "title": "Reuse single reqwest::Client in probe_health (currently allocates per call)",
         "severity": "low",
         "source": "qc3.md S-2",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S3",
         "title": "Directory fsync after atomic rename (full crash durability)",
         "severity": "low",
         "source": "qc3.md S-3",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{chapters,host_tool_handlers}.rs"
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{chapters,host_tool_handlers}.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S4",
         "title": "RuntimeLockGuard doc comment misleading (says releases-on-drop; actually explicit release())",
         "severity": "low",
         "source": "qc3.md S-4",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "crates/nexus-daemon-runtime/src/api/runtime_lock.rs"
+        "scope": "crates/nexus-daemon-runtime/src/api/runtime_lock.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S5",
         "title": "Restart backoff lacks jitter (pure 500ms×2^n)",
         "severity": "low",
         "source": "qc3.md S-5",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC2-TOCTOU",
         "title": "TOCTOU comment in both path guards (desktop guard_path + daemon resolve_guarded_path) referencing the residual if adversarial local FS in scope",
         "severity": "low",
         "source": "qc2.md Suggestion",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs"
+        "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       }
     ],
     "2026-06-26-v1.67-local-api-surface-convergence": [

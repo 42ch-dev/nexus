@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+  "title": "V1.67 P-sec — Desktop Shell Polish (10 V1.66 QC items)",
+  "iteration": "V1.67",
+  "slot": "P-sec",
+  "status": "Done",
+  "effort": "S-M",
+  "owner": "@fullstack-dev-2",
+  "review": "tri-review",
+  "wave": 1,
+  "dependency": "P-1",
+  "working_branch": "feature/v1.67-desktop-shell-polish",
+  "merge_target": "iteration/v1.67",
+  "file": ".mstar/plans/2026-06-26-v1.67-desktop-shell-polish.md",
+  "completion_summary": "P-sec Done. 10 V1.66 desktop QC items closed: event-driven daemon-status (Tauri emit), sidecar robust unwrap, CI per-arch fallback, idiomatic ExitRequested hook, restart_count reset, reqwest reuse, dir fsync, RuntimeLockGuard doc, backoff jitter, TOCTOU path-guard comments. fix-wave-1: restart_count reset only on manual startDaemon (not crash; preserves MAX_RESTART_ATTEMPTS budget), 10s event-status fallback re-sync. QC qc1+qc2 Approve + qc3 Approve after fix-wave-1; QA Pass. Closes 10x R-V166-QC*. 4 QC Suggestions -> residuals (V1.68+).",
+  "completed_at": "2026-06-26 (Wave 1 closeout)"
+}
