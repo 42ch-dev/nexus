@@ -3,6 +3,12 @@
   "updated_at": "2026-06-26T00:00:00Z",
   "entries": [
     {
+      "at": "2026-06-26T... (Wave 0 close + Execute kickoff)",
+      "message": "V1.67 Wave 0 closed (Profile B): P-1 (compass+stubs) + P-design (Canvas Strategy Surface Exploration) marked Done + archived to .mstar/archived/plans/<id>.json + plans-done.json (312). Both spec/Prepare plans — QC skipped with explicit reason (Prepare coordination / Exploration no-implement); @writing-specialist review/edit pass applied. status.plans[] now 6 implement plans (P0/P-sec/P1/P2/P-mid/P-last). Pre-implement gate pending PM Task Board + user branch-policy confirmation before Wave 1 dispatch (P0 Local API surface convergence || P-sec desktop polish).",
+      "plan_id": "2026-06-26-v1.67-compass-and-plan-stubs"
+    },
+
+    {
       "at": "2026-06-26T00:00:00Z",
       "message": "V1.67 Prepare kickoff (2026-06-26): PM grill-me locked (3 decisions) — Q1 lead = hygiene sweep (consolidation & de-risk, diverging from V1.66 compass's telegraphed 'body editor' lead per explicit user choice); Q2 scope = Balanced (T1 Local API surface sweeps FE1-ORCH+CASING+F-P3+F-F1 + G1/G2 frontend scope gaps + T3 9 overdue V1.52/V1.60 + T4 10 V1.66 desktop QC); Q3 = body-editor lock DESIGN-only Draft spec rides along as de-risk companion (no implement). Compass DRAFT committed: .mstar/iterations/v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md. 8 plan stubs committed (P-1 + P-design + P0 + P-sec + P1 + P2 + P-mid + P-last). status.json preamble: integration_branch=iteration/v1.67 (from main @ b06d0755); latest_active_iteration=V1.67; 8 plans registered (P-1 InProgress, rest Todo). codebase-verified: G1 (work_profile) + G2 (preset CRUD) are frontend-only — schemas + generated Rust DTOs already carry work_profile; daemon already ships GET/PATCH/DELETE /v1/local/presets/{id} + contracts. wire_contracts_changed: pending @architect Phase 2b (F-P3 items rename is pre-1.0 breaking candidate; CASING may touch ErrorResponse.code). tech_debt_summary STALE (reports total_open:4 vs actual 30 open) — flagged for P-last refresh. Data-quality: 30 open residuals (10 V1.66 QC + 9 V1.60 overdue + 8 V1.63/V1.64 surface + VIRT/DX). Awaiting Phase 2b (@architect 6 open design items + spec amends ‖ @product-manager web-ui.md + shipped snapshot) + Phase 2c (@writing-specialist) before PM lock.",
       "plan_id": "2026-06-26-v1.67-compass-and-plan-stubs"

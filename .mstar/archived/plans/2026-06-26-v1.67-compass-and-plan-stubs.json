@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-26-v1.67-compass-and-plan-stubs",
+  "title": "V1.67 P-1 — Compass & Plan Stubs (Prepare)",
+  "iteration": "V1.67",
+  "slot": "P-1",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@project-manager",
+  "review": "N/A (Prepare — spec/plan coordination; Phase 2b @architect+@product-manager + Phase 2c @writing-specialist review applied)",
+  "wave": 0,
+  "dependency": "—",
+  "working_branch": "(direct on iteration/v1.67)",
+  "merge_target": "iteration/v1.67",
+  "file": ".mstar/plans/2026-06-26-v1.67-compass-and-plan-stubs.md",
+  "completed_at": "2026-06-26T... (Wave 0 close)",
+  "completion_summary": "V1.67 Prepare complete + re-discussed: compass Locked (PM grill §0 Q1-Q3 + Phase 2b design items + Phase 2c review + 2026-06-26 re-discussion Q4-Q6 canvas vision); 8 plan stubs on disk; status.json registered; Phase 2b @architect (6 design items LOCKED, wire_contracts_changed TRUE 0.5.0->0.6.0) + @product-manager integrated; Phase 2c @writing-specialist Approve-with-edits; canvas re-shape (body-editor retired -> Canvas Strategy Surface Exploration; G2 split); knowledge-corpus cleanup (3 docs archived). All Prepare artifacts committed to iteration/v1.67 (commits 5a61dcbf, 42b240ad, 87fe2e2e, 72a0a842, b27ac6bd). Pre-implement gate ready to flip GO for Wave 1."
+}
