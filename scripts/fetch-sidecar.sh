@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Build the `nexus42` CLI binary for the macOS universal bundle targets and copy
+# Build the `nexus42` CLI binary for the macOS desktop bundle targets and copy
 # it into `apps/desktop/src-tauri/binaries/` with the target-triple suffix that
 # Tauri `bundle.externalBin` expects.
 #
-# Usage: bash scripts/fetch-sidecar.sh
+# Usage:
+#   bash scripts/fetch-sidecar.sh                    # default: x86_64-apple-darwin
+#   bash scripts/fetch-sidecar.sh <target>...        # explicit targets
+#   SIDECAR_TARGETS="<target>..." bash scripts/fetch-sidecar.sh
+#
 # Called automatically by `beforeBuildCommand` before `tauri build`.
 
 set -euo pipefail
@@ -11,11 +15,18 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${REPO_ROOT}/apps/desktop/src-tauri/binaries"
 
-# V1.66 ships a macOS universal binary only.
-TARGETS=(
-  aarch64-apple-darwin
-  x86_64-apple-darwin
-)
+# V1.66 ships an x86_64 macOS app only (native to the macos-13 CI runner;
+# universal/aarch64-native builds are deferred to V1.67+). Pass targets as
+# command-line args or via SIDECAR_TARGETS to override (e.g. local universal).
+if [ $# -gt 0 ]; then
+  TARGETS=("$@")
+elif [ -n "${SIDECAR_TARGETS:-}" ]; then
+  read -ra TARGETS <<<"${SIDECAR_TARGETS}"
+else
+  TARGETS=(
+    x86_64-apple-darwin
+  )
+fi
 
 mkdir -p "${DEST}"
 

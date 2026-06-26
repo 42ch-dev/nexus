@@ -1,32 +1,38 @@
 use std::path::PathBuf;
 
 fn main() {
-    // The bundled sidecar binaries must exist before Tauri's build script runs;
-    // `bundle.externalBin` resolves them at compile time. On a fresh clone the
+    // The bundled sidecar binary must exist before Tauri's build script runs;
+    // `bundle.externalBin` resolves it at compile time using the target-triple
+    // suffix (e.g. `nexus42-x86_64-apple-darwin`). On a fresh clone the
     // `binaries/` directory only contains the README, so fail fast with a clear
     // remediation instead of Tauri's opaque "resource path doesn't exist" error.
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
-    let targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
-    let missing: Vec<PathBuf> = targets
-        .iter()
-        .map(|t| {
-            PathBuf::from(&manifest_dir)
-                .join("binaries")
-                .join(format!("nexus42-{t}"))
-        })
-        .filter(|p| !p.exists())
-        .collect();
+    let target = current_target_triple();
+    let binary = PathBuf::from(&manifest_dir)
+        .join("binaries")
+        .join(format!("nexus42-{target}"));
 
-    if !missing.is_empty() {
-        let paths: Vec<String> = missing.iter().map(|p| p.display().to_string()).collect();
+    if !binary.exists() {
         panic!(
-            "Missing sidecar binary(s): {}.\n\
-             Run `pnpm -w run sidecar` from the repo root to build the nexus42 \
-             sidecar binaries before compiling the desktop crate.",
-            paths.join(", ")
+            "Missing sidecar binary: {}.\n\
+             Run `pnpm -w run sidecar` from the repo root (or \
+             `SIDECAR_TARGETS='{}' bash scripts/fetch-sidecar.sh`) to build the \
+             nexus42 sidecar binary before compiling the desktop crate.",
+            binary.display(),
+            target,
         );
     }
 
     // Tauri v2 build script — generates the app context from tauri.conf.json.
     tauri_build::build();
+}
+
+/// Reconstruct the target triple Cargo is building for so the build script only
+/// requires the sidecar binary that will actually be bundled. This keeps the
+/// default local/CI flow single-arch (x86_64-apple-darwin in V1.66) while still
+/// allowing `SIDECAR_TARGETS=...` local multi-arch builds.
+fn current_target_triple() -> String {
+    let arch = std::env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH");
+    // V1.66 is macOS-only; the vendor/os segment is always "apple-darwin".
+    format!("{arch}-apple-darwin")
 }
