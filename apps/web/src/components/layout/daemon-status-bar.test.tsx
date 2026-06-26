@@ -154,4 +154,26 @@ describe('DaemonStatusBar lifecycle action', () => {
       expect(screen.getByText(/Daemon running/i)).toBeInTheDocument();
     });
   });
+
+  it('falls back to periodic health re-sync when no event is received', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const getDaemonStatus = vi.fn().mockResolvedValue({ state: 'running' });
+
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'starting' }, { getDaemonStatus }),
+    });
+
+    // Initial fetch on mount.
+    await waitFor(() => expect(getDaemonStatus).toHaveBeenCalledTimes(1));
+
+    // Advance past the fallback interval.
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+
+    expect(getDaemonStatus).toHaveBeenCalledTimes(2);
+
+    // Cleanup.
+    vi.useRealTimers();
+  });
 });

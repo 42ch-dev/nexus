@@ -199,7 +199,7 @@ async fn start_daemon(
     manager: State<'_, sidecar::SidecarManager>,
     app: AppHandle,
 ) -> Result<(), String> {
-    manager.start(&app).await
+    manager.start_daemon(&app).await
 }
 
 /// `stop_daemon` — graceful stop of the owned sidecar.
