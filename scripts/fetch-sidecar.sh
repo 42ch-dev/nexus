@@ -4,7 +4,7 @@
 # Tauri `bundle.externalBin` expects.
 #
 # Usage:
-#   bash scripts/fetch-sidecar.sh                    # default: x86_64-apple-darwin
+#   bash scripts/fetch-sidecar.sh                    # default: aarch64-apple-darwin
 #   bash scripts/fetch-sidecar.sh <target>...        # explicit targets
 #   SIDECAR_TARGETS="<target>..." bash scripts/fetch-sidecar.sh
 #
@@ -15,16 +15,17 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${REPO_ROOT}/apps/desktop/src-tauri/binaries"
 
-# V1.66 ships an x86_64 macOS app only (native to the macos-13 CI runner;
-# universal/aarch64-native builds are deferred to V1.67+). Pass targets as
-# command-line args or via SIDECAR_TARGETS to override (e.g. local universal).
+# V1.66 CI ships an aarch64 (Apple Silicon) native macOS app only (macos-14
+# runner). Intel/universal builds are still available via SIDECAR_TARGETS override
+# for local dev and deferred to V1.67+ for CI. Pass targets as command-line args
+# or via SIDECAR_TARGETS to override (e.g. local universal).
 if [ $# -gt 0 ]; then
   TARGETS=("$@")
 elif [ -n "${SIDECAR_TARGETS:-}" ]; then
   read -ra TARGETS <<<"${SIDECAR_TARGETS}"
 else
   TARGETS=(
-    x86_64-apple-darwin
+    aarch64-apple-darwin
   )
 fi
 
