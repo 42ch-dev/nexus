@@ -44,25 +44,30 @@ jobs:
   desktop-build:
     name: Build unsigned macOS desktop app
     runs-on: macos-13
+    # F1: single-arch native x86_64 build fits the 6h Actions budget; fail fast
+    # if something hangs (previous universal build was cancelled @ 4h35m).
+    timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
         with:
           version: 9
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 22
           cache: 'pnpm'
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          # F1: native x86_64 only on macos-13 (Intel runner). Rosetta runs this
+          # .app on Apple Silicon; universal/aarch64-native deferred to V1.67+.
+          targets: x86_64-apple-darwin
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
         with:
-          key: desktop-macos-universal-aarch64-x86_64
+          key: desktop-macos-x86_64
           workspaces: |
             .
             apps/desktop/src-tauri
@@ -73,14 +78,14 @@ jobs:
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
 
-      - name: Build Tauri desktop bundle (universal macOS target)
-        run: pnpm --filter desktop tauri build -- --target universal-apple-darwin
+      - name: Build Tauri desktop bundle (x86_64 macOS target)
+        run: pnpm --filter desktop tauri build -- --target x86_64-apple-darwin
 
       - name: Upload unsigned .app + .dmg artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: nexus-desktop-macos-universal
+          name: nexus-desktop-macos-x86_64
           path: |
-            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Nexus.app
-            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Nexus.app
+            apps/desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           retention-days: 90

@@ -124,8 +124,8 @@ export function DaemonStatusBar() {
 
   const handleAction = async () => {
     if (!desktop) return;
-    const willStop = state === 'running' || state === 'degraded';
-    if (willStop) {
+    const willRestart = state === 'running' || state === 'degraded';
+    if (willRestart) {
       const confirmed = window.confirm(
         'Restarting the daemon will interrupt any running orchestration. Continue?',
       );
@@ -133,6 +133,12 @@ export function DaemonStatusBar() {
     }
     setIsLoading(true);
     try {
+      if (willRestart) {
+        // A real restart: stop (graceful SIGTERM → timeout → SIGKILL) then
+        // start. Calling startDaemon() while running is a no-op because Rust
+        // manager.start() early-returns when the state is Running/Starting.
+        await desktop.stopDaemon();
+      }
       await desktop.startDaemon();
       await refresh();
     } catch (err) {
