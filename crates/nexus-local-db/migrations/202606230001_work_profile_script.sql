@@ -53,6 +53,12 @@ DROP TABLE works;
 -- Step 4: Rename new table to original name
 ALTER TABLE works_new RENAME TO works;
 
+-- Step 4b: V1.67 P2 (R-V160P1-QC2-W002) belt-and-suspenders integrity check
+-- after table recreation. SQLite foreign keys are off by default during the
+-- migration transaction, but this explicit check ensures no dangling references
+-- were introduced by the SELECT * copy.
+PRAGMA foreign_key_check;
+
 -- Step 5: Recreate all indexes (preserving original names)
 CREATE INDEX IF NOT EXISTS idx_works_creator_status
     ON works (creator_id, workspace_slug, status);
