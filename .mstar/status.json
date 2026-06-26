@@ -18,8 +18,8 @@
       "file": ".mstar/plans/2026-06-26-v1.67-compass-and-plan-stubs.md"
     },
     {
-      "plan_id": "2026-06-26-v1.67-body-editor-lock-design",
-      "title": "V1.67 P-design — Body-Editor Lock Draft Spec (Prepare-only)",
+      "plan_id": "2026-06-26-v1.67-canvas-strategy-exploration",
+      "title": "V1.67 P-design — Canvas Strategy Surface Exploration (Prepare-only; replaces retired body-editor Draft)",
       "iteration": "V1.67",
       "slot": "P-design",
       "status": "Todo",
@@ -28,9 +28,9 @@
       "review": "spec-only (QC decision at dispatch)",
       "wave": 0,
       "dependency": "P-1",
-      "working_branch": "feature/v1.67-body-editor-lock-design",
+      "working_branch": "feature/v1.67-canvas-strategy-exploration",
       "merge_target": "iteration/v1.67",
-      "file": ".mstar/plans/2026-06-26-v1.67-body-editor-lock-design.md"
+      "file": ".mstar/plans/2026-06-26-v1.67-canvas-strategy-exploration.md"
     },
     {
       "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
@@ -64,7 +64,7 @@
     },
     {
       "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
-      "title": "V1.67 P1 — Frontend Scope Gaps (G1 work_profile + G2 preset CRUD)",
+      "title": "V1.67 P1 — Frontend Scope Gaps (G1 work_profile + G2 TS-client; preset mgmt UI -> V1.68 canvas)",
       "iteration": "V1.67",
       "slot": "P1",
       "status": "Todo",

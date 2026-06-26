@@ -75,7 +75,8 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.64 amendment (bundled local Web UI static serving) |
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
-| [body-editor.md](body-editor.md) | Feature line (Draft) | **Draft (V1.67)** — body editor + per-chapter edit lock design (lock protocol, MD round-trip, frontmatter sync, conflict policy vs host-tool co-writer); V1.68 implements |
+| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Exploration | **Exploration (V1.67)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology; V1.68 promotes Draft |
+| [body-editor.md](body-editor.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — body-editor direction rejected; pointer to `canvas-strategy-surface.md`; full text archived at [../../archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 
 ### Compute and WASM
