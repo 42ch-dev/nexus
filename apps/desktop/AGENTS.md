@@ -20,20 +20,25 @@ Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 ## Development prerequisites
 
 `apps/desktop/src-tauri/` is a standalone Tauri crate. Its `bundle.externalBin`
-expects the sidecar binaries to exist at compile time, but the binaries are
-**gitignored** and not present on a fresh clone. Run the workspace script before
-any `cargo` command in `src-tauri/`:
+expects the sidecar binary for the target Cargo is building for to exist at
+compile time, but the binaries are **gitignored** and not present on a fresh
+clone. Run the workspace script before any `cargo` command in `src-tauri/`:
 
 ```bash
 pnpm -w run sidecar
 ```
 
-This builds `nexus42` for `aarch64-apple-darwin` and `x86_64-apple-darwin` via
-`scripts/fetch-sidecar.sh` and copies the artifacts into
-`apps/desktop/src-tauri/binaries/`. Without this step, `cargo build`/`test`/
-`clippy` fails with an opaque "resource path doesn't exist" error from
-`tauri-build`. A fail-fast guard in `src-tauri/build.rs` prints the same
-remediation if the binaries are missing.
+This builds `nexus42` for `x86_64-apple-darwin` (V1.66's single-arch CI target)
+via `scripts/fetch-sidecar.sh` and copies the artifact into
+`apps/desktop/src-tauri/binaries/`. To build a different target locally (e.g.
+`aarch64-apple-darwin` on Apple Silicon), pass targets explicitly:
+
+```bash
+SIDECAR_TARGETS="aarch64-apple-darwin" pnpm -w run sidecar
+```
+
+Without this step, `cargo build`/`test`/`clippy` fails with the fail-fast guard
+in `src-tauri/build.rs` if the sidecar binary for the current target is missing.
 
 ## SSOT & authority
 
@@ -68,6 +73,7 @@ daemon/CLI use. The Tauri opener `scope` in `capabilities/main.json` is
 **defense-in-depth only** (static scopes cannot encode the dynamic workspace
 root). On rejection the JS layer surfaces plain-language copy
 (`Path not opened. The file is outside the active workspace.`).
+
 
 ## V1.66 scope
 
