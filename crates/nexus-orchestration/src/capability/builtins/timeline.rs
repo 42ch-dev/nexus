@@ -101,16 +101,26 @@ impl Capability for TimelineEventAppend {
         // Admission gate: creator must own the world.
         ensure_world_owned(pool, &parsed.creator_id, &parsed.world_id).await?;
 
+        // Atomic append + optional explicit-id rename.
+        // V1.67 P2 (R-V160P0-QC2-W002): wrap append and rename in one
+        // transaction so a rename failure cannot leave the event under the
+        // auto-allocated id.
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| CapabilityError::Internal(format!("begin tx: {e}")))?;
+
         // Canon immutability: if the caller supplied an explicit event_id, reject
-        // if it already exists (no silent rewrite). The append DAO itself
-        // allocates a fresh id when none is supplied.
+        // if it already exists (no silent rewrite). The check runs inside the
+        // same transaction as the append so the collision guard is consistent
+        // with the insert.
         if let Some(ref explicit_id) = parsed.event_id {
             // SAFETY: EXISTS check against known narrative_timeline_events schema.
             let exists: i64 = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM narrative_timeline_events WHERE timeline_event_id = ?)",
             )
             .bind(explicit_id)
-            .fetch_one(&**pool)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|e| CapabilityError::Internal(format!("event_id collision check: {e}")))?;
             if exists != 0 {
@@ -120,8 +130,8 @@ impl Capability for TimelineEventAppend {
             }
         }
 
-        let result = nexus_local_db::narrative_write::append_event(
-            pool,
+        let result = nexus_local_db::narrative_write::append_event_in_tx(
+            &mut tx,
             &parsed.world_id,
             &parsed.branch_id,
             &parsed.event_type,
@@ -147,7 +157,7 @@ impl Capability for TimelineEventAppend {
                 )
                 .bind(explicit_id)
                 .bind(&result.event_id)
-                .execute(&**pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| CapabilityError::Internal(format!("event_id rename: {e}")))?;
             }
@@ -155,6 +165,10 @@ impl Capability for TimelineEventAppend {
         } else {
             result.event_id
         };
+
+        tx.commit()
+            .await
+            .map_err(|e| CapabilityError::TransientExternal(format!("commit: {e}")))?;
 
         Ok(json!({
             "event_id": final_id,
@@ -288,5 +302,58 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CapabilityError::InputInvalid(_)));
+    }
+
+    // V1.67 P2 (R-V160P0-QC2-W002): regression test for append+rename running
+    // inside one transaction. Verifies the explicit id is the one persisted in
+    // the DB (not the transient auto-allocated id) and that no orphan row
+    // remains.
+    #[tokio::test]
+    async fn timeline_event_append_explicit_id_persists_atomically() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        let world_id = seed_world(&pool, "ctr_a").await;
+        let branch = sqlx::query_scalar::<_, String>(
+            "SELECT root_fork_branch_id FROM narrative_worlds WHERE world_id = ?",
+        )
+        .bind(&world_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let cap = TimelineEventAppend::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "world_id": world_id,
+                "creator_id": "ctr_a",
+                "branch_id": branch,
+                "event_type": "story_advance",
+                "event_id": "evt_atomic_1",
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(out["event_id"], "evt_atomic_1");
+        assert_eq!(out["status"], "provisional");
+
+        // The row must be queryable by the explicit id.
+        let row_id: String = sqlx::query_scalar(
+            "SELECT timeline_event_id FROM narrative_timeline_events WHERE timeline_event_id = ?",
+        )
+        .bind("evt_atomic_1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row_id, "evt_atomic_1");
+
+        // Exactly one event exists for this world — no orphan under an
+        // auto-allocated id was left behind.
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM narrative_timeline_events WHERE world_id = ?")
+                .bind(&world_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 1);
     }
 }

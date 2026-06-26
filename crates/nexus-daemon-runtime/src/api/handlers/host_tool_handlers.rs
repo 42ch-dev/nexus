@@ -820,33 +820,26 @@ pub(crate) async fn audit_tool_execution(
 
 /// Verify that `creator_id` owns `world_id` by querying `narrative_worlds`.
 ///
-/// Reuses the pattern from `works.rs:429-435`: `world_id` must exist AND
-/// `owner_creator_id` must match. Returns `Forbidden { resource: "world" }`
-/// on mismatch/missing; `Internal` on DB errors.
+/// V1.67 P2 (R-V160P0-QC2-W001): delegates to the shared
+/// `nexus_local_db::narrative_write::is_world_owned` gate so the ownership
+/// check is no longer duplicated in the orchestration crate. Returns
+/// `Forbidden { resource: "world" }` on mismatch/missing; `Internal` on DB errors.
 async fn ensure_world_accessible_for_creator(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
     world_id: &str,
 ) -> Result<(), NexusApiError> {
-    let exists = sqlx::query_scalar!(
-        r#"SELECT world_id AS "world_id!" FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?"#,
-        world_id,
-        creator_id,
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".to_string(),
-        message: format!("world ownership check: {e}"),
-    })?;
-
-    if exists.is_none() {
-        return Err(NexusApiError::Forbidden {
+    match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(NexusApiError::Forbidden {
             resource: "world".to_string(),
             reason: "world not found or cross-creator access denied".to_string(),
-        });
+        }),
+        Err(e) => Err(NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("world ownership check: {e}"),
+        }),
     }
-    Ok(())
 }
 
 /// `nexus.world.snapshot.get` — consistent read of structured world snapshot.
