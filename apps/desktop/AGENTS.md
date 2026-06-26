@@ -74,6 +74,10 @@ daemon/CLI use. The Tauri opener `scope` in `capabilities/main.json` is
 root). On rejection the JS layer surfaces plain-language copy
 (`Path not opened. The file is outside the active workspace.`).
 
+**V1.66 limitation:** the workspace root is captured once at app startup. If the
+active workspace is changed while the app is running, the context-menu path guard
+continues to use the root from startup until the app is restarted. Live refresh
+is V1.67+ scope.
 
 ## V1.66 scope
 
