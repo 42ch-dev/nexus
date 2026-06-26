@@ -4279,6 +4279,114 @@
         "note": "QC Suggestion, non-blocking; deferred.",
         "lifecycle": "open"
       }
+    ],
+    "2026-06-26-v1.67-frontend-scope-gaps": [
+      {
+        "id": "R-V167P1-QC1-S1",
+        "title": "Narrow useState<string> to work_profile literal union",
+        "severity": "low",
+        "source": "qc1 S1",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P1-QC1-S2",
+        "title": "Extract WORK_PROFILES to a SSOT module",
+        "severity": "low",
+        "source": "qc1 S2",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S2]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P1-QC3-S1",
+        "title": "adapter-contract.test.ts 21->24 + preset-method parity guard",
+        "severity": "low",
+        "source": "qc3 S1",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P1-QC3-S2",
+        "title": "preset query keys + invalidation when V1.68 canvas UI lands",
+        "severity": "low",
+        "source": "qc3 S2",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S2]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-26-v1.67-overdue-debt-closure": [
+      {
+        "id": "R-V167P2-QC1-S1",
+        "title": "outline_five_q NOGO dimension-scores regression test (R-V152TA-S006 promise gap)",
+        "severity": "low",
+        "source": "qc1 S1",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P2-QC1-S2",
+        "title": "Direct unit test for is_world_owned",
+        "severity": "low",
+        "source": "qc1 S2",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S2]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P2-QC1-S4",
+        "title": "Extract frontmatter helpers to frontmatter.rs if 3rd frontmatter-edit capability ships",
+        "severity": "low",
+        "source": "qc1 S4",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S4]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P2-QC3-S1",
+        "title": "script.section_status.update file-level OCC/lock vs concurrent manual edits",
+        "severity": "low",
+        "source": "qc3 S-001",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC3-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      }
     ]
   }
 }
