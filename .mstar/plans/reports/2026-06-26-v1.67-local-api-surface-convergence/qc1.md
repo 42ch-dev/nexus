@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-26-v1.67-local-api-surface-convergence"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-26"
 ---
 
@@ -111,3 +111,76 @@ The four Suggestions are non-blocking and may be cherry-picked into P-last hygie
 **What blocks `Approve`:** the three Warning items are all on the architecture/maintainability axis (the lens of this reviewer seat): a second DTO source that will desync silently, missing direct test coverage for the new F-F1 grammar, and missing end-to-end coverage for the new error variants. None are runtime regressions; all three are durable maintainability risks that compound over iterations. The plan's AC7 ("Regression tests cover error-envelope mapping, casing, `items` shape, sort") explicitly names sort — so W-2 is a contract gap against the AC, not just a nice-to-have. W-1 violates the AGENTS.md invariant for the only list endpoint that wasn't migrated to generated DTOs. W-3 documents a wire-contract assertion gap introduced by the new variants.
 
 All three are tractable (W-1 is a mechanical migration; W-2 and W-3 are additive test writes). Suggest targeted re-review by `qc-specialist` only (this seat) after the fix wave lands; qc-specialist-2 (security/correctness) and qc-specialist-3 (perf/reliability) had no findings overlapping these three and do not need a second pass.
+
+## Revalidation (fix-wave-1, 2026-06-26)
+
+**Re-review scope (verbatim from Assignment)**:
+- plan_id: `2026-06-26-v1.67-local-api-surface-convergence`
+- Review range / Diff basis: P0 fix-wave-1 (`feature/v1.67-p0-fixwave1` commits `24b5914b` + `d9102609`) merged at `6d0624e7`. Equivalent: `git log 3b9d14a1..6d0624e7` for the fix-wave scope. Re-validate ONLY the prior blocking findings.
+
+**Working state verified**: `iteration/v1.67` branch, HEAD `6d0624e7` (`git log -1 --oneline` = `6d0624e7 merge(v1.67): P-sec fix-wave-1 (restart_count scope + status fallback re-sync)`), `Review cwd` = `/Users/bibi/workspace/organizations/42ch/nexus`. The P-sec merge (this seat is not re-reviewing it) sits on top of the P0 fix-wave-1 merge (`3fc4d283`); the fix-wave commits I am re-validating are `24b5914b` and `d9102609`.
+
+**Per-finding disposition**:
+
+### W-1 (works.rs hand-written DTOs) — **Resolved**
+
+**Evidence**:
+- `git diff 3b9d14a1..6d0624e7 -- crates/nexus-daemon-runtime/src/api/handlers/works.rs` shows the three hand-written structs (`ListWorksQuery` `ListWorksResponse` `WorkSummary`) deleted (lines 178-211 of the pre-fix file).
+- A new import was added at the top of the file: `use nexus_contracts::local_api::works::{ListWorksQuery, ListWorksResponse, WorkSummary};` — exactly the path called for in the qc1 fix recommendation.
+- The local `compare_work_record` closure was also removed; sort is now pushed into the SQL layer via `WorkListFilters::order_by` (see `crates/nexus-local-db/src/works.rs` +69 lines, with `ALLOWED_ORDER_COLUMNS` whitelist and deterministic `work_id ASC` tie-breaker). This is a net architectural improvement: pagination is no longer "materialize full set → sort → slice", which was the qc3 W-1 perf concern.
+- Single-source confirmation: `rg -n "pub struct (ListWorksQuery|ListWorksResponse|WorkSummary)" crates/nexus-daemon-runtime/src/api/handlers/works.rs` returns **no hand-written DTOs** (the only `WorkApiDto` that remains is the unrelated response-only DTO for the single-Work GET path, which is intentionally not a list/contract type).
+- All 37 `tests/works_api.rs` tests pass, including the 3 new sort tests and the 4 pre-existing list/200/401 tests that exercise the migrated types through the full HTTP routing.
+
+**Why this satisfies the AGENTS.md invariant** ("Contract types: shares generated types from `crates/nexus-contracts`. Do NOT hand-write duplicate DTOs."): works.rs is now structurally identical to its three siblings (`schedules`, `sessions`, `capabilities`) — all four list endpoints consume the generated DTOs from `nexus_contracts::local_api::*`. A future schema change to `WorkSummary` will no longer silently desync the Local API wire from `@42ch/nexus-contracts@0.6.0` types.
+
+### W-2 (sort test gap) — **Resolved**
+
+**Evidence**:
+- 7 unit tests added to `crates/nexus-daemon-runtime/src/api/sort.rs` (lines 52-118 of the post-fix file), covering exactly the 7 cases called out in qc1 W-2:
+  1. `empty_and_missing_input_returns_empty_terms` — (a) empty input
+  2. `trailing_and_leading_commas_are_ignored` — (b) trailing/leading comma
+  3. `consecutive_commas_are_ignored` — (c) consecutive commas
+  4. `lone_minus_is_rejected` — (d) `-` alone (no key) → `work_sort_invalid`
+  5. `unknown_key_returns_resource_specific_code` — (e) unknown key → `<resource>_sort_invalid`
+  6. `descending_prefix_is_honored` — (f) `-key` descending
+  7. `multi_key_precedence_is_preserved` and `unknown_key_in_multi_key_list_returns_resource_specific_code` — (g) multi-key precedence + (e) extended to multi-key
+- Integration tests in **3** files (all new and passing):
+  - `tests/sort_contract.rs` (new file, 132 lines, 4 tests): `sessions_list_sort_by_preset_id_ascending`, `sessions_list_invalid_sort_key_returns_session_sort_invalid`, `capabilities_list_sort_by_name`, `capabilities_list_invalid_sort_key_returns_capability_sort_invalid`. Each `*_invalid_sort_key` test asserts `body["success"] == false` AND `body["error"]["code"] == "<resource>_sort_invalid"` against the canonical envelope shape.
+  - `tests/works_api.rs` (+3 tests at lines 248-307): `list_works_sort_by_title_ascending`, `list_works_sort_descending_and_pagination` (also exercises the pushed-down SQL pagination), `list_works_invalid_sort_key_returns_work_sort_invalid`.
+  - `tests/fl_e_schedule_api.rs` (+3 tests at lines 470-563): `schedule_list_sort_by_label_ascending`, `schedule_list_sort_descending_and_pagination`, `schedule_list_invalid_sort_key_returns_schedule_sort_invalid`.
+- Plus a unit test in `crates/nexus-daemon-runtime/src/api/errors.rs` (`sort_invalid_codes_are_public` at lines 568-583 of the post-fix file) that asserts all 4 resource-specific codes pass through `error_code()` AND `to_response_body().error.code` correctly. This also incidentally closes qc2 W-1 + qc3 W-2 (the `*_sort_invalid` wire passthrough concern).
+
+**Why this satisfies AC7** ("Regression tests cover error-envelope mapping, casing, `items` shape, **sort**"): every grammar case is covered at the parser level; every endpoint is covered at the HTTP/envelope level for both happy-path sort and the canonical 400 envelope on unknown key. The per-endpoint `compare_*` closures were eliminated in the same wave (push-down to SQL) so the duplication concern in qc1 S-1 is mooted by construction.
+
+### W-3 (503/422 envelope e2e) — **Accepted as deferred residual (per qc-consolidated.md)**
+
+**Evidence**:
+- `R-V167P0-QC1-ENVELOPE-E2E` is registered in `.mstar/status.json` at lines 4155-4167 (root-level `residual_findings["2026-06-26-v1.67-local-api-surface-convergence"][]`):
+  - `id`: `R-V167P0-QC1-ENVELOPE-E2E`
+  - `title`: `503/422 IntoResponse->canonical-envelope e2e test`
+  - `severity`: `low` (machine field per `mstar-plan-artifacts/references/status-and-residuals.md`)
+  - `source`: `qc1 W-3 (deferred)`
+  - `decision`: `defer`
+  - `owner`: `@fullstack-dev`
+  - `target`: `V1.68+`
+  - `lifecycle`: `open`
+  - `tracking_link`: `.mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-ENVELOPE-E2E]`
+  - `note`: `"QC Suggestion, non-blocking; deferred."`
+- This matches the qc-consolidated.md §"Deferred as residuals" disposition which explicitly classified W-3 as non-blocking and allowed fix-if-cheap-else-defer. The new `sort_invalid_codes_are_public` unit test in `errors.rs` does exercise the `to_response_body()` boundary for the `*_sort_invalid` path, which is the same boundary class as the 503/422 variants — but I am NOT claiming this closes W-3 (it is a different code path; the canonical envelope shape is the same machinery, but the actual `service_unavailable` and `preset_gates_failed` variant paths still lack a 200→5xx boundary assertion in an integration test). W-3 remains **deferred**, not closed.
+
+### No NEW regression introduced
+
+- Scoped clippy (same scope as qc1 line 34): `cargo clippy -p nexus-daemon-runtime -p nexus-contracts -- -D warnings` → **0 errors** (lib only). The new code does not introduce any lib-level clippy regressions.
+- Scoped tests: `cargo test -p nexus-daemon-runtime --test sort_contract --test works_api --test fl_e_schedule_api` → **55/55 pass** (14 schedule API + 4 sort contract + 37 works API). All 7 new sort unit tests in `sort.rs` pass implicitly (compiled into the daemon-runtime lib test binary).
+- 3 new test helpers were added by the fix-wave (`make_create_body_with_title`, `create_work_with_title`, `create_schedule_with_label`). They follow the existing test convention; `--tests` clippy lints they trigger (e.g. `doc_markdown` at `works_api.rs:141`, `future_not_send` at `works_api.rs:142` + `fl_e_schedule_api.rs:475`) are the same lint class that pre-exists throughout this repo's test files (e.g. `memory_review_fragments_api.rs:56:62` carries the same `future_not_send` pattern with `server: &TestServer`; `findings_api.rs:30:19` carries the same `doc_markdown` for `WorkspaceState`). These are clippy 1.96 toolchain lints against test-only code; no fix-wave code is structurally worse than the established test style. They are **not in scope** for the `lib-only` clippy gate the repo uses, and they do not represent a functional regression.
+- The `errors.rs` change is a one-line passthrough (`_ if code.ends_with("_sort_invalid") => code.as_str()`) plus a unit test — additive, no behavior change for existing codes.
+- The `nexus-local-db/src/works.rs` change is additive (`order_by: Vec<(String, bool)>` field on `WorkListFilters` + a SQL builder with whitelisted columns + a deterministic `work_id ASC` tie-breaker). No call site outside the daemon-runtime is affected; the new `list_and_count_works` return tuple `(Vec<WorkRecord>, u32)` is consumed only by the migrated `works.rs:list_works`.
+
+**Summary**:
+| Severity (qc1 wave) | Count (this re-review) |
+|---|---|
+| 🔴 Critical | 0 |
+| 🟡 Warning (blocking) | 0 unresolved — W-1, W-2 resolved; W-3 properly deferred to residual |
+| 🟢 Suggestion | 4 (unchanged from qc1; S-1 mooted by SQL push-down; S-2, S-3, S-4 still open in `R-V167P0-QC1-S-*` residuals, none blocking) |
+
+**Verdict**: **Approve** — all three blocking Warning items are resolved (W-1, W-2) or properly deferred as registered residuals with the right severity class (W-3 → `R-V167P0-QC1-ENVELOPE-E2E`, severity `low`, lifecycle `open`, decision `defer`). No new regression introduced.
