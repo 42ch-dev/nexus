@@ -17,8 +17,6 @@ import { useDesktopCapabilities } from '@/lib/client-context';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 import { useToast } from '@/lib/use-toast';
 
-const POLL_MS = 5_000;
-
 interface StateDisplay {
   label: string;
   helper: string;
@@ -102,19 +100,24 @@ export function DaemonStatusBar() {
 
   useEffect(() => {
     mounted.current = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unlisten: (() => void) | undefined;
 
-    const tick = async () => {
+    const setup = async () => {
+      if (!desktop) return;
+      // Fetch initial status immediately, then subscribe to Rust-side events
+      // for live updates (QC1-S1 replaces the 5 s React poll loop).
       await refresh();
-      if (mounted.current) timer = setTimeout(tick, POLL_MS);
+      unlisten = await desktop.onDaemonStatusChanged((next) => {
+        if (mounted.current) setStatus(next);
+      });
     };
 
-    void tick();
+    void setup();
     return () => {
       mounted.current = false;
-      if (timer) clearTimeout(timer);
+      unlisten?.();
     };
-  }, [refresh]);
+  }, [desktop, refresh]);
 
   if (!desktop) return null;
 

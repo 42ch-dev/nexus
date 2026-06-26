@@ -23,6 +23,7 @@ function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabiliti
     openWith: vi.fn().mockResolvedValue(undefined),
     revealInFinder: vi.fn().mockResolvedValue(undefined),
     getDaemonStatus: vi.fn().mockResolvedValue({ state: 'running' }),
+    onDaemonStatusChanged: vi.fn().mockResolvedValue(() => {}),
     startDaemon: vi.fn().mockResolvedValue(undefined),
     stopDaemon: vi.fn().mockResolvedValue(undefined),
     ...impl,

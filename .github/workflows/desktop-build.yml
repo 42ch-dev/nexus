@@ -67,7 +67,9 @@ jobs:
           # aarch64-native dev build for the developer/contributor audience.
           # wasm32-unknown-unknown is required because nexus42 embeds the
           # `basic-combat` WASM module via nexus-wasm-host's build script.
-          targets: aarch64-apple-darwin, wasm32-unknown-unknown
+          # x86_64-apple-darwin is installed so the universal fallback path can
+          # build both architecture sidecars if needed (QC1-S4).
+          targets: aarch64-apple-darwin, x86_64-apple-darwin, wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
         with:
@@ -82,16 +84,33 @@ jobs:
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
 
-      - name: Build Tauri desktop bundle (native aarch64 — macos-14 host)
-        # No explicit `--target`: macos-14 IS aarch64 (Apple Silicon), so a
-        # host-arch build produces the aarch64 .app natively AND lands the
-        # binary at target/release/ where Tauri's bundler expects it. Passing
-        # `--target aarch64-apple-darwin` on the host arch confuses Tauri's
-        # bundler path lookup (binary at target/<triple>/release/ but bundler
-        # looks at target/release/ → "can't open main binary").
-        run: pnpm --filter desktop tauri build
+      - name: Build Tauri desktop bundle (universal, fallback per-arch)
+        id: tauri_build
+        run: |
+          # QC1-S4: attempt a universal build first; if Tauri's bundler or the
+          # cross-arch sidecar build fails, fall back to the proven native
+          # aarch64 path so CI stays green.
+          if SIDECAR_TARGETS="aarch64-apple-darwin x86_64-apple-darwin" \
+             pnpm --filter desktop tauri build --target universal-apple-darwin; then
+            echo "target=universal-apple-darwin" >> "$GITHUB_OUTPUT"
+          else
+            echo "Universal build failed; falling back to per-arch (aarch64 host) artifact."
+            pnpm --filter desktop tauri build
+            echo "target=aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Upload unsigned .app + .dmg artifacts
+      - name: Upload universal artifacts
+        if: steps.tauri_build.outputs.target == 'universal-apple-darwin'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: nexus-desktop-macos-universal
+          path: |
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Nexus.app
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          retention-days: 90
+
+      - name: Upload aarch64 fallback artifacts
+        if: steps.tauri_build.outputs.target == 'aarch64-apple-darwin'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: nexus-desktop-macos-aarch64

@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
+use tauri::Emitter;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 use tokio::net::TcpStream;
@@ -28,6 +29,12 @@ const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(8);
 const MAX_RESTART_ATTEMPTS: u32 = 5;
 const STOP_GRACEFUL_TIMEOUT: Duration = Duration::from_secs(5);
 const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Tauri event emitted whenever the daemon lifecycle state changes. The SPA
+/// subscribes via `window.__TAURI__.event.listen` instead of polling.
+const DAEMON_STATUS_EVENT: &str = "nexus://daemon-status-changed";
+/// Shared health-probe client so `probe_health` does not allocate a new
+/// `reqwest::Client` on every call (QC3-S2).
+static HEALTH_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 
 /// Local API health probe response (`GET /v1/local/runtime/health`).
 #[derive(Debug, serde::Deserialize)]
@@ -78,6 +85,9 @@ struct SidecarInner {
     stop_requested: bool,
     /// Number of consecutive crash-restart attempts since the last healthy run.
     restart_count: u32,
+    /// App handle used to emit lifecycle state events to the SPA. `None` in
+    /// unit tests that do not construct a Tauri app.
+    app_handle: Option<tauri::AppHandle<tauri::Wry>>,
 }
 
 /// Thread-safe handle to the sidecar lifecycle state.
@@ -96,12 +106,31 @@ impl SidecarManager {
             child: None,
             stop_requested: false,
             restart_count: 0,
+            app_handle: None,
         })))
     }
 
     /// Resolved daemon port.
     pub async fn port(&self) -> u16 {
         self.0.lock().await.port
+    }
+
+    /// Store the app handle so the manager can emit lifecycle events to the SPA.
+    /// Synchronous so it can be called from the Tauri `setup` hook before any
+    /// async tasks run.
+    pub fn set_app_handle(&self, app_handle: tauri::AppHandle<tauri::Wry>) {
+        self.0.blocking_lock().app_handle = Some(app_handle);
+    }
+
+    /// Emit the current daemon status to all SPA subscribers. Silently ignores
+    /// emit failures (e.g. no webview listeners) so state-machine logic stays
+    /// decoupled from UI delivery.
+    async fn notify(&self) {
+        let app_handle = { self.0.lock().await.app_handle.clone() };
+        if let Some(app_handle) = app_handle {
+            let status = self.status().await;
+            let _ = app_handle.emit(DAEMON_STATUS_EVENT, &status);
+        }
     }
 
     /// Current status for the SPA indicator. For attached (non-owned) daemons,
@@ -151,6 +180,9 @@ impl SidecarManager {
         inner.state = DaemonState::Starting;
         inner.detail = None;
         inner.stop_requested = false;
+        // Manual start (re)sets the crash budget so a previously give-up manager
+        // can be recovered by the user (QC3-S1).
+        inner.restart_count = 0;
         drop(inner);
 
         let port = self.port().await;
@@ -200,6 +232,7 @@ impl SidecarManager {
                 inner.restart_count = 0;
                 // The child handle stays owned by the manager for stop/restart.
             }
+            self.notify().await;
             self.spawn_monitor(app.clone(), pid);
             Ok(())
         } else {
@@ -209,16 +242,19 @@ impl SidecarManager {
             }
             inner.owned = false;
             let conflict = tcp_reachable(port).await;
-            inner.state = DaemonState::Error;
-            inner.detail = Some(if conflict {
+            let message = if conflict {
                 format!(
                     "Nexus couldn't start its background service — port {port} is already in use. \
                      Quit the other Nexus instance, or set a different port."
                 )
             } else {
                 "Daemon did not start. Check the logs or try restarting.".to_string()
-            });
-            Err(inner.detail.clone().unwrap())
+            };
+            inner.state = DaemonState::Error;
+            inner.detail = Some(message.clone());
+            drop(inner);
+            self.notify().await;
+            Err(message)
         }
     }
 
@@ -260,6 +296,8 @@ impl SidecarManager {
         if inner.state != DaemonState::Error {
             inner.state = DaemonState::Stopped;
         }
+        drop(inner);
+        self.notify().await;
         Ok(())
     }
 
@@ -300,6 +338,8 @@ impl SidecarManager {
                 );
                 inner.owned = false;
                 inner.child = None;
+                drop(inner);
+                self.notify().await;
                 return;
             }
 
@@ -309,6 +349,7 @@ impl SidecarManager {
                 inner.restart_count += 1;
                 inner.child = None;
             }
+            self.notify().await;
 
             let delay = backoff(attempts + 1);
             sleep(delay).await;
@@ -327,6 +368,8 @@ impl SidecarManager {
                 inner.detail = Some("Daemon stopped".to_string());
                 inner.owned = false;
                 inner.child = None;
+                drop(inner);
+                self.notify().await;
                 return;
             }
 
@@ -338,6 +381,8 @@ impl SidecarManager {
             }
             inner.owned = false;
             inner.child = None;
+            drop(inner);
+            self.notify().await;
         }
     }
 }
@@ -357,16 +402,23 @@ pub fn resolve_port() -> u16 {
 }
 
 fn backoff(attempt: u32) -> Duration {
-    let exp = RESTART_BACKOFF_BASE * 2_u32.saturating_pow(attempt.saturating_sub(1));
-    exp.min(RESTART_BACKOFF_MAX)
+    let base = RESTART_BACKOFF_BASE * 2_u32.saturating_pow(attempt.saturating_sub(1));
+    let capped = base.min(RESTART_BACKOFF_MAX);
+    // Add ±25% jitter to avoid synchronized restart storms (QC3-S5).
+    let jitter_percent = fastrand::u32(75..=125);
+    let base_millis = capped.as_millis() as u64;
+    let jittered_millis = base_millis * u64::from(jitter_percent) / 100;
+    Duration::from_millis(jittered_millis).min(RESTART_BACKOFF_MAX)
 }
 
 async fn probe_health(port: u16) -> Option<DaemonHealth> {
     let url = format!("http://127.0.0.1:{port}/v1/local/runtime/health");
-    let client = reqwest::Client::builder()
-        .timeout(HEALTH_PROBE_TIMEOUT)
-        .build()
-        .ok()?;
+    let client = HEALTH_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(HEALTH_PROBE_TIMEOUT)
+            .build()
+            .expect("reqwest health client should build")
+    });
     let response = client.get(&url).send().await.ok()?;
     if response.status().is_success() {
         response.json::<DaemonHealth>().await.ok()
@@ -571,11 +623,23 @@ mod tests {
     }
 
     #[test]
-    fn backoff_grows_then_caps() {
-        assert_eq!(backoff(1), Duration::from_millis(500));
-        assert_eq!(backoff(2), Duration::from_millis(1000));
-        assert_eq!(backoff(3), Duration::from_millis(2000));
-        assert_eq!(backoff(10), Duration::from_secs(8));
+    fn backoff_grows_then_caps_with_jitter() {
+        // Jitter is ±25% around the exponential base, capped at 8 s.
+        let b1 = backoff(1);
+        assert!(
+            b1 >= Duration::from_millis(375) && b1 <= Duration::from_millis(625),
+            "backoff(1) {b1:?} outside ±25% of 500 ms"
+        );
+        let b2 = backoff(2);
+        assert!(
+            b2 >= Duration::from_millis(750) && b2 <= Duration::from_millis(1250),
+            "backoff(2) {b2:?} outside ±25% of 1 s"
+        );
+        let b10 = backoff(10);
+        assert!(
+            b10 >= Duration::from_millis(6000) && b10 <= Duration::from_secs(8),
+            "backoff(10) {b10:?} outside ±25% of 8 s cap"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

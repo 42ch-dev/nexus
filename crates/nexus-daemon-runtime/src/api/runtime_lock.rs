@@ -6,7 +6,13 @@
 use crate::api::errors::NexusApiError;
 use nexus_local_db::SqlitePool;
 
-/// RAII guard that acquires a runtime lock on creation and releases on drop.
+/// RAII guard that acquires a runtime lock on creation.
+///
+/// **Important:** this guard does **not** release the lock on `Drop` — `Drop`
+/// only logs a warning because async release is not possible in a synchronous
+/// `Drop`. Callers must explicitly call [`RuntimeLockGuard::release`] on every
+/// exit path. See the crate `AGENTS.md` "Runtime Lock Acquire / Release Order"
+/// rule for the mandatory pattern.
 ///
 /// Spec: `novel-writing/multi-work-lifecycle.md` §4.2 — CLI holder format
 /// `cli:<caller>:<uuid>`. For HTTP callers, `caller` is `http` since the
@@ -16,7 +22,8 @@ pub struct RuntimeLockGuard {
     creator_id: String,
     work_id: String,
     holder: String,
-    /// Whether the lock was successfully acquired and should be released on drop.
+    /// Whether the lock was successfully acquired and must be explicitly
+    /// released by the caller (Drop only logs a warning).
     armed: bool,
 }
 
