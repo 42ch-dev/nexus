@@ -143,7 +143,7 @@ impl SidecarManager {
     /// * If the resolved port is already healthy, attach without ownership.
     /// * Otherwise spawn the bundled `nexus42` binary in foreground mode and
     ///   poll health until ready or a timeout is reached.
-    pub async fn start(&self, app: &tauri::AppHandle) -> Result<(), String> {
+    pub async fn start<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>) -> Result<(), String> {
         let mut inner = self.0.lock().await;
         if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
             return Ok(());
@@ -265,7 +265,7 @@ impl SidecarManager {
 
     /// Monitor task: waits for the owned sidecar to exit, then restarts it with
     /// bounded exponential backoff unless the stop was requested.
-    fn spawn_monitor(&self, app: tauri::AppHandle, pid: u32) {
+    fn spawn_monitor<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>, pid: u32) {
         let manager = self.clone();
         tauri::async_runtime::spawn(async move {
             // Wait until the process is no longer alive. Polling with signal 0
@@ -275,46 +275,70 @@ impl SidecarManager {
                 sleep(Duration::from_millis(100)).await;
             }
 
-            let (should_restart, attempts) = {
-                let inner = manager.0.lock().await;
-                (
-                    inner.owned && !inner.stop_requested && inner.state == DaemonState::Running,
-                    inner.restart_count,
-                )
-            };
+            manager.handle_crash(&app).await;
+        });
+    }
 
-            if should_restart {
-                if attempts >= MAX_RESTART_ATTEMPTS {
-                    let mut inner = manager.0.lock().await;
-                    inner.state = DaemonState::Stopped;
-                    inner.detail = Some(
-                        "The daemon stopped repeatedly. Restart it manually to try again."
-                            .to_string(),
-                    );
-                    inner.owned = false;
-                    inner.child = None;
-                    return;
-                }
+    /// Handle a sidecar process exit: restart with backoff, or stop if the
+    /// user/app requested stop before/while we waited. This is split out so the
+    /// stop-during-backoff path can be unit-tested without a real child process.
+    async fn handle_crash<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>) {
+        let (should_restart, attempts) = {
+            let inner = self.0.lock().await;
+            (
+                inner.owned && !inner.stop_requested && inner.state == DaemonState::Running,
+                inner.restart_count,
+            )
+        };
 
-                {
-                    let mut inner = manager.0.lock().await;
-                    inner.state = DaemonState::Degraded;
-                    inner.restart_count += 1;
-                    inner.child = None;
-                }
-
-                let delay = backoff(attempts + 1);
-                sleep(delay).await;
-                let _ = manager.start(&app).await;
-            } else {
-                let mut inner = manager.0.lock().await;
-                if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
-                    inner.state = DaemonState::Stopped;
-                }
+        if should_restart {
+            if attempts >= MAX_RESTART_ATTEMPTS {
+                let mut inner = self.0.lock().await;
+                inner.state = DaemonState::Stopped;
+                inner.detail = Some(
+                    "The daemon stopped repeatedly. Restart it manually to try again.".to_string(),
+                );
                 inner.owned = false;
                 inner.child = None;
+                return;
             }
-        });
+
+            {
+                let mut inner = self.0.lock().await;
+                inner.state = DaemonState::Degraded;
+                inner.restart_count += 1;
+                inner.child = None;
+            }
+
+            let delay = backoff(attempts + 1);
+            sleep(delay).await;
+
+            // Re-check stop_requested after the backoff sleep. If the user/app
+            // called stop_daemon() while we were waiting, we must honor that
+            // stop instead of unconditionally restarting (which would reset
+            // stop_requested in start() and spawn a new process).
+            let stop_requested = {
+                let inner = self.0.lock().await;
+                inner.stop_requested
+            };
+            if stop_requested {
+                let mut inner = self.0.lock().await;
+                inner.state = DaemonState::Stopped;
+                inner.detail = Some("Daemon stopped".to_string());
+                inner.owned = false;
+                inner.child = None;
+                return;
+            }
+
+            let _ = self.start(app).await;
+        } else {
+            let mut inner = self.0.lock().await;
+            if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
+                inner.state = DaemonState::Stopped;
+            }
+            inner.owned = false;
+            inner.child = None;
+        }
     }
 }
 
@@ -533,6 +557,45 @@ mod tests {
         assert_eq!(backoff(2), Duration::from_millis(1000));
         assert_eq!(backoff(3), Duration::from_millis(2000));
         assert_eq!(backoff(10), Duration::from_secs(8));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stop_requested_during_backoff_honors_stop() {
+        // Simulate the monitor path after a sidecar crash: the child is gone,
+        // a restart has been scheduled with backoff. While the monitor is
+        // sleeping, the user/app requests stop. The monitor must land in
+        // Stopped, not call start() and spawn a new process.
+        let app = tauri::test::mock_app();
+        let manager = crate::sidecar::SidecarManager::new(63337);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Running;
+            inner.owned = true;
+            inner.restart_count = 0;
+            inner.child = None;
+            inner.stop_requested = false;
+        }
+
+        let manager_for_task = manager.clone();
+        let monitor = tokio::spawn(async move {
+            manager_for_task.handle_crash(app.handle()).await;
+        });
+
+        // Wait until the monitor has entered the backoff window.
+        while manager.0.lock().await.state != DaemonState::Degraded {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // User/app requests stop during the backoff sleep.
+        manager.0.lock().await.stop_requested = true;
+
+        monitor.await.expect("monitor task completed");
+
+        let inner = manager.0.lock().await;
+        assert_eq!(inner.state, DaemonState::Stopped);
+        assert!(!inner.owned);
+        assert!(inner.child.is_none());
+        assert!(inner.detail.as_deref().unwrap_or("").contains("stopped"));
     }
 
     #[test]
