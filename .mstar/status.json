@@ -7,7 +7,7 @@
       "title": "V1.67 P0 — Local API Surface Convergence (FE1-ORCH + CASING + F-P3 + F-F1)",
       "iteration": "V1.67",
       "slot": "P0",
-      "status": "Todo",
+      "status": "InProgress",
       "effort": "XL",
       "owner": "@fullstack-dev + @frontend-dev",
       "review": "tri-review",
@@ -22,7 +22,7 @@
       "title": "V1.67 P-sec — Desktop Shell Polish (10 V1.66 QC items)",
       "iteration": "V1.67",
       "slot": "P-sec",
-      "status": "Todo",
+      "status": "InProgress",
       "effort": "S-M",
       "owner": "@fullstack-dev-2",
       "review": "tri-review",
@@ -101,7 +101,7 @@
     "latest_active_iteration": "V1.67",
     "latest_active_compass": ".mstar/iterations/v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.67)",
+    "pre_implement_gate": "GO (V1.67 Wave 1 dispatched)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -138,10 +138,10 @@
         "V1.66": 1,
         "V1.66+": 1
       },
-    "refreshed_at": "2026-06-25T19:05:28Z",
-    "refreshed_reason": "P-last closeout: post-QC+QA; 10 V1.66 QC Suggestions registered as deferred V1.67+ residuals",
-    "inaccurate_as_of": "2026-06-26",
-    "inaccurate_reason": "total_open=4 but actual open=30; V1.67 P-last AC2 refreshes/retires this rollup"
+      "refreshed_at": "2026-06-25T19:05:28Z",
+      "refreshed_reason": "P-last closeout: post-QC+QA; 10 V1.66 QC Suggestions registered as deferred V1.67+ residuals",
+      "inaccurate_as_of": "2026-06-26",
+      "inaccurate_reason": "total_open=4 but actual open=30; V1.67 P-last AC2 refreshes/retires this rollup"
     },
     "updated_at": "2026-06-26T00:00:00Z",
     "spec_integration_branch": "iteration/v1.67",
