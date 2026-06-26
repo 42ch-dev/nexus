@@ -1602,6 +1602,57 @@ pub async fn is_game_bible_design_complete(
     Ok(true)
 }
 
+/// V1.67 P2 (R-V160P1-QC2-W001): validate `work_ref` and resolve the
+/// canonical script work directory, enforcing that it stays inside
+/// `workspace_dir/Works/`.
+async fn resolve_script_work_dir(
+    workspace_dir: &std::path::Path,
+    work_ref: &str,
+    work_id: &str,
+) -> Result<Option<std::path::PathBuf>, LocalDbError> {
+    if work_ref.is_empty()
+        || work_ref.contains('/')
+        || work_ref.contains('\\')
+        || work_ref == "."
+        || work_ref == ".."
+        || work_ref.contains("..")
+    {
+        tracing::warn!(work_id, work_ref, "is_script_complete: invalid work_ref");
+        return Ok(None);
+    }
+
+    let canonical_workspace = match tokio::fs::canonicalize(workspace_dir).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(
+                work_id,
+                workspace_dir = %workspace_dir.display(),
+                error = %e,
+                "is_script_complete: cannot canonicalize workspace_dir"
+            );
+            return Ok(None);
+        }
+    };
+
+    let work_dir = canonical_workspace.join("Works").join(work_ref);
+    let canonical_work_dir = tokio::fs::canonicalize(&work_dir)
+        .await
+        .unwrap_or_else(|_| work_dir.clone());
+
+    let works_boundary = canonical_workspace.join("Works");
+    if !canonical_work_dir.starts_with(&works_boundary) {
+        tracing::warn!(
+            work_id,
+            work_ref,
+            work_dir = %canonical_work_dir.display(),
+            "is_script_complete: resolved work directory escapes Works/ boundary"
+        );
+        return Ok(None);
+    }
+
+    Ok(Some(canonical_work_dir))
+}
+
 /// V1.60 P1 — Script section completion check.
 ///
 /// Evaluates `section_status` frontmatter across all critical script files
@@ -1616,6 +1667,7 @@ pub async fn is_game_bible_design_complete(
 /// - Any critical section is missing from the filesystem
 /// - Any critical section's `section_status` is not `accepted`
 /// - `intake_status` is not `'complete'`
+/// - The resolved work directory escapes `workspace_dir/Works/`
 ///
 /// This function reads files from the workspace filesystem. It is designed to
 /// be called from the daemon handler layer (which has access to `workspace_dir`)
@@ -1623,7 +1675,8 @@ pub async fn is_game_bible_design_complete(
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError::Io` if a critical file cannot be read.
+/// Returns `LocalDbError::Io` if `workspace_dir` cannot be canonicalized or a
+/// critical file cannot be read.
 pub async fn is_script_complete(
     pool: &SqlitePool,
     work_id: &str,
@@ -1664,8 +1717,29 @@ pub async fn is_script_complete(
         return Ok(false);
     };
 
+    // V1.67 P2 (R-V160P1-QC2-W001): canonicalize workspace boundary and validate
+    // work_ref so section reads cannot escape Works/<work_ref>/.
+    let Some(canonical_work_dir) = resolve_script_work_dir(workspace_dir, work_ref, work_id).await?
+    else {
+        return Ok(false);
+    };
+
     for (rel_path, label, _parent_dir) in CRITICAL_SECTIONS {
-        let path = workspace_dir.join("Works").join(work_ref).join(rel_path);
+        // Defensive: the constants are safe, but reject any parent-dir escapes.
+        if std::path::Path::new(rel_path)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            tracing::warn!(
+                work_id,
+                work_ref,
+                section = label,
+                "is_script_complete: invalid section path"
+            );
+            return Ok(false);
+        }
+
+        let path = canonical_work_dir.join(rel_path);
         let content = match tokio::fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => {
@@ -3364,6 +3438,40 @@ mod tests {
                 .await
                 .unwrap(),
             "intake is pending → script NOT complete"
+        );
+    }
+
+    // V1.67 P2 (R-V160P1-QC2-W001): regression test for path validation.
+    #[tokio::test]
+    async fn test_is_script_complete_rejects_path_traversal_in_work_ref() {
+        let (pool, dir) = fresh_pool().await;
+        insert_test_work(&pool, "wrk_scr_comp_005").await;
+
+        sqlx::query(
+            "UPDATE works SET work_profile = 'script', work_ref = ?, \
+             intake_status = 'complete' WHERE work_id = ?",
+        )
+        .bind("../my-script-escape")
+        .bind("wrk_scr_comp_005")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Even if a file exists outside the intended boundary, the traversal
+        // attempt must be rejected and return false.
+        let escape_dir = dir.path().join("Works").join("my-script-escape").join("Scripts");
+        std::fs::create_dir_all(&escape_dir).unwrap();
+        std::fs::write(
+            escape_dir.join("script.md"),
+            "---\nsection_status: accepted\n---\n# Script\n",
+        )
+        .unwrap();
+
+        assert!(
+            !is_script_complete(&pool, "wrk_scr_comp_005", dir.path())
+                .await
+                .unwrap(),
+            "path traversal in work_ref must be rejected"
         );
     }
 
