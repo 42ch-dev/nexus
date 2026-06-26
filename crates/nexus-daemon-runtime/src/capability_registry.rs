@@ -1151,6 +1151,9 @@ mod tests {
         // V1.60 P0: parse structured rows from the §4 table so the host_tool
         // direction is auto-derived from the `Status` + `Registry row ref`
         // columns rather than a manual match list (closes R-V159P0-002).
+        // V1.67 P2 (R-V160P0-QC1-W002): parse by header name instead of hardcoded
+        // positional indices so future column insertions do not silently shift
+        // the parsed values.
         // Row shape: | `nexus.<id>` | description | status | shipped_in | registry_ref |
         struct CatalogRow {
             id: String,
@@ -1158,19 +1161,59 @@ mod tests {
             registry_ref: String,
         }
 
-        let catalog_rows: Vec<CatalogRow> = catalog_content
-            .lines()
+        let lines: Vec<&str> = catalog_content.lines().collect();
+
+        // First pass: locate the header row and map column names to indices.
+        #[derive(Debug, Default)]
+        struct ColumnIndex {
+            id: Option<usize>,
+            status: Option<usize>,
+            registry_ref: Option<usize>,
+        }
+        let mut header: Option<ColumnIndex> = None;
+        for line in &lines {
+            let trimmed = line.trim();
+            if !trimmed.starts_with('|') {
+                continue;
+            }
+            let cols: Vec<&str> = trimmed.split('|').map(str::trim).collect();
+            if !cols.iter().any(|c| *c == "Capability ID") {
+                continue;
+            }
+            let mut idx = ColumnIndex::default();
+            for (i, col) in cols.iter().enumerate() {
+                match *col {
+                    "Capability ID" => idx.id = Some(i),
+                    "Status" => idx.status = Some(i),
+                    "Registry row ref" => idx.registry_ref = Some(i),
+                    _ => {}
+                }
+            }
+            header = Some(idx);
+            break;
+        }
+        let Some(header) = header else {
+            panic!("acp-capability-set.md §4 table header not found");
+        };
+        let id_col = header.id.expect("Capability ID column missing");
+        let status_col = header.status.expect("Status column missing");
+        let registry_ref_col = header
+            .registry_ref
+            .expect("Registry row ref column missing");
+
+        // Second pass: parse data rows using the mapped column indices.
+        let catalog_rows: Vec<CatalogRow> = lines
+            .iter()
             .filter_map(|line| {
                 let trimmed = line.trim();
                 if !trimmed.starts_with('|') || !trimmed.contains('`') {
                     return None;
                 }
                 let cols: Vec<&str> = trimmed.split('|').map(str::trim).collect();
-                // Need ≥6 columns: "" | id | desc | status | shipped_in | registry_ref
-                if cols.len() < 6 {
+                if cols.len() <= id_col.max(status_col).max(registry_ref_col) {
                     return None;
                 }
-                let id_cell = cols[1];
+                let id_cell = cols[id_col];
                 let start = id_cell.find('`')?;
                 let rest = &id_cell[start + 1..];
                 let end = rest.find('`')?;
@@ -1180,8 +1223,8 @@ mod tests {
                 }
                 Some(CatalogRow {
                     id,
-                    status: cols[3].to_string(),
-                    registry_ref: cols[5].to_string(),
+                    status: cols[status_col].to_string(),
+                    registry_ref: cols[registry_ref_col].to_string(),
                 })
             })
             .collect();
