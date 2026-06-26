@@ -329,7 +329,16 @@ pub async fn append_event(
 
     let sequence_no = max_seq.unwrap_or(-1) + 1;
 
-    append_event_core(pool, world_id, branch_id, event_type, title, summary, sequence_no).await
+    append_event_core(
+        pool,
+        world_id,
+        branch_id,
+        event_type,
+        title,
+        summary,
+        sequence_no,
+    )
+    .await
 }
 
 /// Append a timeline event inside an existing transaction.
@@ -380,7 +389,16 @@ pub async fn append_event_in_tx(
 
     let sequence_no = max_seq.unwrap_or(-1) + 1;
 
-    append_event_core(&mut **tx, world_id, branch_id, event_type, title, summary, sequence_no).await
+    append_event_core(
+        &mut **tx,
+        world_id,
+        branch_id,
+        event_type,
+        title,
+        summary,
+        sequence_no,
+    )
+    .await
 }
 
 /// Shared INSERT logic for [`append_event`] and [`append_event_in_tx`].

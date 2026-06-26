@@ -503,7 +503,11 @@ impl Capability for WorldDeltaApply {
             // SAFETY: column/table names are string literals; key_block_id
             // values are bound as parameters. Dynamic IN-list length is the
             // only non-static aspect.
-            let placeholders = update_kids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let placeholders = update_kids
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ");
             let sql = format!(
                 "SELECT key_block_id, body_json FROM kb_key_blocks WHERE key_block_id IN ({placeholders})"
             );
@@ -1158,22 +1162,20 @@ mod tests {
         assert_eq!(out2["atomic_applied"], false);
 
         // The successful update must have persisted; the conflict must not.
-        let hero_body: Option<String> = sqlx::query_scalar(
-            "SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?",
-        )
-        .bind(hero_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let hero_body: Option<String> =
+            sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(hero_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(hero_body.unwrap().contains("15"));
 
-        let villain_body: Option<String> = sqlx::query_scalar(
-            "SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?",
-        )
-        .bind(villain_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let villain_body: Option<String> =
+            sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(villain_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert!(villain_body.unwrap().contains("20"));
     }
 }

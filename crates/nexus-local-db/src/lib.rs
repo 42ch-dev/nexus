@@ -413,10 +413,11 @@ mod tests {
         run_migrations(&pool).await.unwrap();
 
         // SAFETY: PRAGMA diagnostic query — no table schema to validate against.
-        let violations: Vec<(i64, i64, String, String)> = sqlx::query_as("PRAGMA foreign_key_check")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let violations: Vec<(i64, i64, String, String)> =
+            sqlx::query_as("PRAGMA foreign_key_check")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
 
         assert!(
             violations.is_empty(),
