@@ -194,8 +194,9 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 | --- | --- |
 | **V1.64** | Control Room + Setup MVP (browser SPA), daemon-served via `rust-embed`, `tauri-api` adapter boundary frozen. |
 | **V1.65 (§13 stage)** | **Content-Authoring UI** (lead slice): outline rich-text editor + chapter structure table + structure CRUD + body read-only render + browser "Copy path"; **Track B** API hardening (chapter-content surface, `work_profile`, preset full CRUD, `items`+cursor). Tauri shell deliberately deferred to V1.66 (compass §0 Q1/Q5). |
-| **V1.66** | (a) **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start` first; in-process lib link V1.67+); per-OS webview deps / signing / CI matrix. (b) **"Open with" / "Reveal in file manager"** desktop integration (Tauri `shell.open`/`openWith`). (c) **Body full-text editor + per-chapter edit lock** (coordinates with orchestration's host-tool write path). (d) Drag-to-reorder / bulk chapter ops / outline template library. |
-| **V1.67+** | Mobile (Tauri v2 mobile targets); **F-P3** array-rename structural closure; **F-F1** server-side sort; remaining V1.64 Track-B carry-forwards; `apps/web/DESIGN.md` → **Production** completeness level. |
+| **V1.66** | **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start`); per-OS webview deps / signing / CI matrix. **"Open with" / "Reveal in file manager"** desktop integration (Tauri `shell.open`/`openWith`). Body full-text editor + UI productivity deferred to V1.67 (then V1.68 — see §15). |
+| **V1.67 (§15 stage)** | **Surface Convergence & De-risk**: Local API `items` array-key convergence + error-envelope consolidation (FE1-ORCH) + error-code casing + sort params (all transparent to the author); work_profile selector in Create-Work dialog; preset management UI (view/edit/delete user presets). Body editor + UI productivity + desktop distribution v2 deferred to V1.68. |
+| **V1.68+** | Body full-text editor + per-chapter edit lock; UI productivity wave (drag-reorder / bulk ops / reconcile trigger / outline templates); desktop distribution v2 (Windows + Linux + signing + notarization + auto-update); Mobile (Tauri v2 mobile targets); `apps/web/DESIGN.md` → **Production** completeness level. |
 
 The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite, and keeps the V1.66 body-editor a new screen rather than a re-architecture.
 
@@ -342,3 +343,54 @@ A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plu
 | `copyPath(path)` | browser + desktop | clipboard write (V1.65 reuse) | Unchanged. |
 
 All other `NexusClient` methods = identical HTTP transport to the localhost daemon (reuse of V1.64/V1.65 `BrowserClient` paths). Detail: [desktop-shell.md](desktop-shell.md).
+
+---
+
+## 15. Next stage — Surface Convergence & De-risk (V1.67)
+
+V1.66 shipped the Tauri desktop shell. V1.67 is a **hygiene-lead consolidation & de-risk** iteration: it converges the Local API surface to one error envelope + one array-key convention + casing discipline, closes ~24 residuals, polishes the just-shipped desktop shell, and closes the two frontend scope gaps that are prerequisites for the V1.68 authoring iteration. **No new author-facing features ship** — the only user-visible changes are a work-profile selector in the Create-Work dialog and a preset management surface in the UI. The body editor *implement* is deferred to V1.68; V1.67 authors its *design* only (see §15.3).
+
+> **Scope and roadmap SSOT**: [v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md](../../iterations/v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md) §0 (grill decisions) + §1.1 (Tracks A–F) + §1.2 (V1.68 roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 15.1 What ships in V1.67 (author-visible surface)
+
+Two small but unlocking UI changes, plus a transparent API convergence the author never sees.
+
+- **Work-profile selector in the Create-Work dialog** (G1): when an author creates a new Work, the dialog now includes a profile selector offering `novel`, `essay`, `game-bible`, and `script`. The wire contract already carried `work_profile` since V1.65 (additive optional field); V1.67 surfaces it in the UI. An author who skips the selector gets the default (`novel`) — no behavior change from V1.66. This is a prerequisite for the V1.68 body editor, which will tailor the editing experience per profile.
+- **Preset management UI** (G2): the Preset management screen group gains its missing management surface. An author can now **view** any preset's full manifest (YAML source, read-only code view); **edit** a user-authored preset's YAML directly in the browser (inline editor → `PATCH /v1/local/presets/{id}`); **delete** a user-authored preset (confirmation dialog). **Embedded/system presets are read-only** — they appear with a "System" badge and the edit/delete affordances are omitted (no greyed-out teasing controls).
+- **`items` array-key convergence** (transparent to authors): all schema-backed list responses now use `items` (previously `works`/`schedules`/`sessions`/`capabilities`). Pre-1.0 breaking wire change (see §15.5), but the author experiences nothing — the UI data layer adapts internally.
+
+### 15.2 The de-risk loop this enables
+
+V1.67 does not add an authoring loop; it *unblocks* the V1.68 authoring loop and *cleans* the foundation it builds on:
+
+1. **Profile up-front** — an author starting a Work picks its profile at creation time, so the V1.68 body editor can tailor the surface per profile without a retrofit.
+2. **Preset self-service** — inspect, tweak, remove user presets without the terminal or blind YAML editing; embedded presets stay tamper-proof.
+3. **Consistent API surface** — the V1.68 body editor's write path (per-chapter lock + orchestration co-write) builds on a Local API with one error envelope, one array-key convention, and casing discipline — not the ad-hoc shapes V1.64 left behind.
+
+### 15.3 Non-goals for V1.67 (durable V1.68 roadmap)
+
+Explicitly deferred with rationale (compass §0 Q2/Q3, §1.2; satisfies the Durable Roadmap Gate):
+
+- **Body full-text editor + per-chapter edit lock *implement*** — **V1.68 lead authoring slice**. V1.67 ships the *Draft design* only ([body-editor.md](body-editor.md)). Lock protocol, MD↔rich-text round-trip, frontmatter sync, conflict policy de-risked on paper so V1.68 implement begins with a reviewed design.
+- **UI productivity wave** — **V1.68**. Drag-reorder, bulk ops, reconcile trigger, outline templates.
+- **Desktop distribution v2** — **V1.68 (or its own iteration)**. Windows + Linux + signing + notarization + auto-update + in-process lib link. Decision point at V1.67 P-last.
+- **CapabilityInfo admission-gate UI** (`R-V164-P2-G3`) — V1.68.
+- **Live served-UI smoke** (`R-V164-P2-S1`) — V1.68.
+- **Chapter table virtualization** (`R-V165-QC3-VIRT`) — V1.68.
+- **DX/UX polish grab-bag (UI subset)** (`R-V165-QC-SUGG-DX`) — V1.68.
+
+### 15.4 User stories (V1.67 slice)
+
+- **Work-profile selector** — *As an author*, when I create a new Work I can choose its profile (novel, essay, game-bible, or script) from a selector in the Create-Work dialog, so the runtime and the future editor can tailor the experience to the kind of thing I am writing.
+- **Preset inspection** — *As an author*, I can open any preset and read its full YAML manifest in the UI, so I understand what a preset does before I run it — without opening a terminal or finding the file on disk.
+- **Preset editing** — *As an author*, I can edit my own preset's YAML directly in the browser and save it, so I can adjust a preset's behaviour without hand-editing files blind.
+- **Preset deletion** — *As an author*, I can delete a user preset I no longer want (with a confirmation step), so my preset list stays mine and current. Embedded/system presets are protected from my mistakes.
+
+### 15.5 Wire contracts (V1.67)
+
+**`wire_contracts_changed: TRUE`** (`@42ch/nexus-contracts` 0.5.0 → 0.6.0; compass §1.3 + §5 LOCKED). Two breaking changes: F-P3 array-key rename → `items` (4 schema-backed endpoints) + error-code casing ratification (global UPPER→lower snake_case). F-F1 sort is additive; G1/G2 are frontend-only (wire already carries them). `pnpm run codegen` regenerates TS + Rust.
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement; no V1.67 increment — no new styled surfaces).*

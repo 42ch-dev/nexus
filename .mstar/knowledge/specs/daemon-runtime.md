@@ -158,7 +158,12 @@ All outline/body file routes MUST apply the same W-002-style workspace path
 guard used by host-tool body reads before reading or writing. Outline PUT uses a
 sibling temp file + flush + atomic rename and updates `outline_path`/`updated_at`
 through the same finalization path. The body writer remains the orchestration
-host-tool path until the V1.66 per-chapter body-editor lock design lands.
+host-tool path; the V1.67 [body-editor.md](body-editor.md) Draft lands the
+per-chapter edit-lock *design* (lock protocol, expiry, conflict policy vs the
+host-tool co-writer), and V1.68 implements the Local API body-write route gated
+by that lock. The existing host-tool body write path can be wrapped by the lock
+before temp-file creation and held through rename + DB commit — no runtime
+re-architecture is required.
 
 ---
 

@@ -103,10 +103,13 @@ Inner detail fields:
 | `request_id` | no | Correlation ID; set by middleware, not by handlers. |
 
 > **Implementation note:** transport adapters and consumers MUST read
-> `code`/`message`/`details` from `body.error`, not from the top level. A
-> handful of orchestration handlers still return ad-hoc `(StatusCode, String)`
-> bodies (deferred under `R-V164-FE1-ORCH`); those do not carry a structured
-> code and clients must fall back to `http_<status>`.
+> `code`/`message`/`details` from `body.error`, not from the top level. V1.67
+> P0 (FE1-ORCH) **resolves** the ad-hoc `(StatusCode, String)` bodies that
+> remained in orchestration handlers (`schedules.rs` / `sessions.rs` /
+> `presets.rs`): they are swept onto this canonical envelope via a shared
+> error-mapping helper. After V1.67, ad-hoc tuple bodies are not an allowed
+> Local API surface; clients no longer need the `http_<status>` fallback for
+> orchestration routes.
 
 ### 3.2 Error-code naming
 
@@ -128,38 +131,62 @@ Examples:
 
 Use singular resource nouns (`work`, `preset`, `finding`, `workspace`). For cross-resource failures, use the subsystem noun (`auth`, `runtime`, `schema`, `validation`). Codes are contract surface: change only with a schema/version bump and consumer coordination.
 
+> **V1.67 ratification (`@42ch/nexus-contracts` 0.5.0 → 0.6.0):** the canonical `NexusApiError::error_code()` module is aligned to lowercase `snake_case` **globally** — it previously emitted `UPPER_SNAKE_CASE`, contradicting this section. The ~18 canonical codes (e.g. `UNINITIALIZED`→`uninitialized`, `INVALID_INPUT`→`invalid_input`, `INTERNAL`→`internal`, `AUTH_REQUIRED`→`auth_required`, `NOT_FOUND`→`not_found`) change in the 0.6.0 bump. This is a global error-module change, not an orchestration-handler-local one.
+
 ---
 
 ## 4. List-array naming
 
-`items` is canonical for new list responses.
+`items` is canonical for plain list responses.
 
-Legacy keys remain until coordinated breaking sweeps:
+> **V1.67 ratification (F-P3, `@42ch/nexus-contracts` 0.5.0 → 0.6.0):** the prior legacy allowance for schema-backed plain lists is **removed**. V1.67 P0 renames the four remaining schema-backed per-resource keys to `items`:
 
-| Legacy key | Resource | Status |
+| Key | Resource | V1.67 status |
 | --- | --- | --- |
-| `works` | Works list | Legacy; Works cursor migration in V1.64 does not require array rename unless explicitly coordinated. |
-| `schedules` | Schedule list | Legacy. |
-| `sessions` | Orchestration sessions list | Legacy. |
-| `capabilities` | Capability registry list | Legacy. |
-| `embedded` / `system` / `user` | Preset management grouped response | Intentional grouped response; not a plain list. |
+| `works` | Works list | **Renamed → `items`** (`GET /v1/local/works`). |
+| `schedules` | Schedule list | **Renamed → `items`** (`GET /v1/local/orchestration/schedules`). |
+| `sessions` | Orchestration sessions list | **Renamed → `items`** (`GET /v1/local/orchestration/sessions`). |
+| `capabilities` | Capability registry list | **Renamed → `items`** (`GET /v1/local/orchestration/capabilities`). |
+| `items` | chapters / findings / creators / workspace / KB / pending-review / agent-host | Already canonical; no change. |
+| `embedded` / `system` / `user` | Preset management grouped response | Intentional **grouped** response, not a plain list — retained. |
 
-F-P3 (array-key unification) is deferred because renaming existing response arrays is a multi-handler breaking change. New endpoints, including `list-findings-response`, MUST use `items`.
+Pre-1.0 → no compatibility shim. Hand-written / local-only plain lists not yet schema-backed (`references`, `worlds`, `fragments`, `pool entries`, orchestration `presets` DTO) are **out of the 0.6.0 bump**; they adopt `items` at their next schema-promotion or feature touch.
 
-UI adapters may normalize legacy keys to `items` internally, but handlers and schemas remain the wire SSOT.
+New endpoints MUST use `items`. UI adapters must not carry legacy-key normalization after 0.6.0 for the renamed endpoints.
 
 ---
 
 ## 5. Sort parameters
 
-Sorting is a future convention (F-F1), not a V1.64 implementation requirement. When a list endpoint adds sorting, use:
+> **V1.67 lock (F-F1):** the prior `sort_by` + `sort_order` two-parameter sketch is **superseded** by a single optional `sort` query parameter.
 
-| Parameter | Type | Rule |
-| --- | --- | --- |
-| `sort_by` | string | Resource-defined field name or stable logical sort key. |
-| `sort_order` | `"asc" | "desc"` | Direction; default is resource-specific but must be documented in the query schema. |
+List endpoints MAY expose a single optional `sort` query parameter.
 
-Do not introduce alternate names such as `order`, `direction`, `sort`, or `sortDirection` on Local API query schemas. Unsupported sort keys should return `ErrorResponse { code: "<resource>_sort_invalid", ... }`.
+Grammar:
+
+```text
+sort := term ("," term)*
+term := ["-"] key
+key  := endpoint-defined stable logical key
+```
+
+Examples:
+
+```text
+?sort=-updated_at
+?sort=-updated_at,name
+?sort=volume,chapter
+```
+
+Rules:
+
+1. No `sort_by`, `sort_order`, `order`, `direction`, or camelCase variants on Local API query schemas.
+2. `-key` means descending; `key` means ascending.
+3. Each endpoint MUST publish its allowed keys in its query schema/spec.
+4. Unsupported keys return the canonical error envelope with `code: "<resource>_sort_invalid"`.
+5. Cursor-paginated endpoints MUST document which sort keys are compatible with their cursor. If arbitrary sorting would require a new cursor design, only the default sort is implemented and other keys are deferred in the endpoint spec.
+
+V1.67 implements server-side sort on: works (`updated_at`/`title`/`status`/`intake_status`), schedules (`created_at`/`updated_at`/`status`/`preset_id`/`label`), sessions (`session_id`/`creator_id`/`preset_id`/`status`), capabilities (`name`). Chapters document/accept default `volume,chapter` only (cursor-keyed). Other lists adopt on next schema-promotion.
 
 ---
 
