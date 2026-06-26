@@ -348,13 +348,12 @@ mod tests {
 
         // Exactly one event exists for this world — no orphan under an
         // auto-allocated id was left behind.
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM narrative_timeline_events WHERE world_id = ?",
-        )
-        .bind(&world_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM narrative_timeline_events WHERE world_id = ?")
+                .bind(&world_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(count, 1);
     }
 }

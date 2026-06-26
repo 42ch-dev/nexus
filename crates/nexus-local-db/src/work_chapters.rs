@@ -1719,7 +1719,8 @@ pub async fn is_script_complete(
 
     // V1.67 P2 (R-V160P1-QC2-W001): canonicalize workspace boundary and validate
     // work_ref so section reads cannot escape Works/<work_ref>/.
-    let Some(canonical_work_dir) = resolve_script_work_dir(workspace_dir, work_ref, work_id).await?
+    let Some(canonical_work_dir) =
+        resolve_script_work_dir(workspace_dir, work_ref, work_id).await?
     else {
         return Ok(false);
     };
@@ -3459,7 +3460,11 @@ mod tests {
 
         // Even if a file exists outside the intended boundary, the traversal
         // attempt must be rejected and return false.
-        let escape_dir = dir.path().join("Works").join("my-script-escape").join("Scripts");
+        let escape_dir = dir
+            .path()
+            .join("Works")
+            .join("my-script-escape")
+            .join("Scripts");
         std::fs::create_dir_all(&escape_dir).unwrap();
         std::fs::write(
             escape_dir.join("script.md"),
