@@ -191,6 +191,8 @@ impl CapabilityRegistry {
             Box::new(builtins::ScriptProjectScaffold::new()),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
+            Box::new(builtins::ScriptSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh (pool-less; returns WorkerUnavailable)
             Box::new(builtins::ReferenceRefresh::new()),
             // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities
@@ -258,6 +260,8 @@ impl CapabilityRegistry {
             Box::new(builtins::ScriptProjectScaffold::with_pool(pool.clone())),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
+            Box::new(builtins::ScriptSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh with pool
             Box::new(builtins::ReferenceRefresh::with_pool(pool.clone())),
             // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities.
@@ -480,6 +484,8 @@ impl CapabilityRegistry {
             ),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
+            Box::new(builtins::ScriptSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh with pool from runtime deps
             Box::new(
                 deps.pool
@@ -593,10 +599,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_has_33_builtins() {
-        // 31 V1.60 + 1 narrative.compute (V1.61 P3) + 1 essay.draft_status.finalize (V1.63 P2) = 33.
+    fn registry_has_34_builtins() {
+        // 31 V1.60 + 1 narrative.compute (V1.61 P3) + 1 essay.draft_status.finalize (V1.63 P2)
+        // + 1 script.section_status.update (V1.67 P2 R-V160P1-QC1-W001) = 34.
         let reg = CapabilityRegistry::with_builtins();
-        assert_eq!(reg.len(), 33);
+        assert_eq!(reg.len(), 34);
     }
 
     #[test]
@@ -629,6 +636,7 @@ mod tests {
             "game_bible.project_scaffold",
             "script.project_scaffold",
             "game_bible.section_status.update",
+            "script.section_status.update",
             "nexus.reference.refresh",
             // V1.60 P0: DF-46 orchestration capabilities (full nexus.* names).
             "nexus.world.state.query",
@@ -655,7 +663,9 @@ mod tests {
     async fn registry_iter_returns_all() {
         let reg = CapabilityRegistry::with_builtins();
         let names: Vec<&str> = reg.iter().map(super::Capability::name).collect();
-        assert_eq!(names.len(), 33); // 31 (V1.60) + 1 (V1.61 P3 narrative.compute) + 1 (V1.63 P2 essay.draft_status.finalize)
+        // 31 (V1.60) + 1 (V1.61 P3 narrative.compute) + 1 (V1.63 P2 essay.draft_status.finalize)
+        // + 1 (V1.67 P2 script.section_status.update).
+        assert_eq!(names.len(), 34);
         assert!(names.contains(&"sync.pull"));
         assert!(names.contains(&"judge.rule"));
         assert!(names.contains(&"acp.prompt"));
@@ -673,5 +683,7 @@ mod tests {
         assert!(names.contains(&"narrative.compute"));
         // V1.63 P2 essay.draft_status.finalize.
         assert!(names.contains(&"essay.draft_status.finalize"));
+        // V1.67 P2 script.section_status.update.
+        assert!(names.contains(&"script.section_status.update"));
     }
 }

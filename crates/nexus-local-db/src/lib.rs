@@ -396,3 +396,32 @@ pub async fn init_pool(db_path: &std::path::Path) -> Result<sqlx::SqlitePool, Lo
     seed_versions(&pool).await?;
     Ok(pool)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // V1.67 P2 (R-V160P1-QC2-W002): regression test that migrations leave the
+    // database with no foreign-key violations. The 202606230001 table-recreate
+    // migration now includes an explicit `PRAGMA foreign_key_check`; this test
+    // would fail if any migration (including that one) introduced dangling FKs.
+    #[tokio::test]
+    async fn migrations_leave_no_foreign_key_violations() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let pool = open_pool(&db_path).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        // SAFETY: PRAGMA diagnostic query — no table schema to validate against.
+        let violations: Vec<(i64, i64, String, String)> =
+            sqlx::query_as("PRAGMA foreign_key_check")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+
+        assert!(
+            violations.is_empty(),
+            "PRAGMA foreign_key_check returned violations: {violations:?}"
+        );
+    }
+}

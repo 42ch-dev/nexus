@@ -64,8 +64,8 @@ const VALID_STATUSES: &[&str] = &["draft", "reviewed", "accepted"];
 
 /// Validate that `from → to` is a legal transition.
 ///
-/// Returns the new status string on success.
-fn validate_transition(from: &str, to: &str) -> Result<&'static str, CapabilityError> {
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn validate_transition(from: &str, to: &str) -> Result<&'static str, CapabilityError> {
     // Validate status values are known
     if !VALID_STATUSES.contains(&from) {
         return Err(CapabilityError::InputInvalid(format!(
@@ -103,7 +103,9 @@ fn validate_transition(from: &str, to: &str) -> Result<&'static str, CapabilityE
 /// Parse YAML frontmatter from a file's content.
 ///
 /// Returns the frontmatter lines (between `---` delimiters) and the body content.
-fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), CapabilityError> {
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), CapabilityError> {
     let lines: Vec<&str> = content.lines().collect();
     if lines.is_empty() || lines[0].trim() != "---" {
         return Err(CapabilityError::InputInvalid(
@@ -132,7 +134,9 @@ fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), Capab
 ///
 /// Uses line-based matching: finds `key:` lines and replaces the value.
 /// Preserves all other frontmatter fields and body content.
-fn replace_frontmatter_field(
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn replace_frontmatter_field(
     content: &str,
     key: &str,
     new_value: &str,
@@ -226,7 +230,9 @@ fn replace_frontmatter_field(
 }
 
 /// Write a file atomically using temp+rename.
-fn atomic_write(path: &Path, content: &str) -> Result<(), CapabilityError> {
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn atomic_write(path: &Path, content: &str) -> Result<(), CapabilityError> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content)
         .map_err(|e| CapabilityError::Internal(format!("write tmp {}: {e}", tmp.display())))?;
@@ -359,7 +365,9 @@ impl Capability for GameBibleSectionStatusUpdate {
 }
 
 /// Extract a frontmatter field value from YAML frontmatter content.
-fn extract_frontmatter_field(content: &str, key: &str) -> Result<String, CapabilityError> {
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn extract_frontmatter_field(content: &str, key: &str) -> Result<String, CapabilityError> {
     let parsed = parse_frontmatter(content)?;
     let fm_lines = parsed.0;
 
