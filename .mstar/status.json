@@ -22,7 +22,7 @@
       "title": "V1.67 P-sec — Desktop Shell Polish (10 V1.66 QC items)",
       "iteration": "V1.67",
       "slot": "P-sec",
-      "status": "Todo",
+      "status": "Done",
       "effort": "S-M",
       "owner": "@fullstack-dev-2",
       "review": "tri-review",
@@ -4013,90 +4013,150 @@
         "title": "Event-driven daemon-status (replace Rust 100ms + React 5s dual poll loops with Tauri AppHandle::emit)",
         "severity": "low",
         "source": "qc1.md S-1",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs + apps/web/src/components/layout/daemon-status-bar.tsx"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs + apps/web/src/components/layout/daemon-status-bar.tsx",
+        "closed_at": "2026-06-26",
+        "closure_note": "Implemented Tauri event-driven status: Rust emits nexus://daemon-status-changed with the full DaemonState payload whenever the sidecar state machine transitions; React subscribes via window.__TAURI__.event.listen and re-renders from the payload. Removed the Rust 100ms status polling and React 5s interval poll. Added unit tests for event emission and subscription.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S2",
         "title": "sidecar.rs:198 robust unwrap (unwrap_or_else fallback message)",
         "severity": "low",
         "source": "qc1.md S-2",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Replaced the error-path .unwrap() with unwrap_or_else that clones the error message into a fallback string, eliminating a panic vector when stderr is not valid UTF-8.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S4",
         "title": "desktop-build.yml §5 #10 conditional fallback to per-arch artifacts when universal unstable",
         "severity": "low",
         "source": "qc1.md S-4",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": ".github/workflows/desktop-build.yml"
+        "scope": ".github/workflows/desktop-build.yml",
+        "closed_at": "2026-06-26",
+        "closure_note": "Added a CI step that attempts the universal-apple-darwin build first and, on failure, falls back to aarch64-apple-darwin. The upload-artifact step is conditional on the actual produced artifact path (universal or arch-specific).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "bc8d4bea"
+        }
       },
       {
         "id": "R-V166-QC1-S5",
         "title": "Idiomatic Tauri exit hook (on_window_event/RunEvent::ExitRequested) vs trailing block_on(stop)",
         "severity": "low",
         "source": "qc1.md S-5",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/lib.rs"
+        "scope": "apps/desktop/src-tauri/src/lib.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Verified that Tauri v2's Builder::run only accepts the generated context; the handler closure receives RunEvent::ExitRequested, which is already used to stop the sidecar. Added a clarifying comment explaining why the current .build().expect(...).run(handler) shape is idiomatic and where the exit cleanup happens.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S1",
         "title": "Reset restart_count on manual startDaemon (currently stays at cap after give-up)",
         "severity": "low",
         "source": "qc3.md S-1",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "start_daemon now resets restart_count to 0 before launching the sidecar, so a manual start after give-up resumes from the initial backoff instead of staying capped.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S2",
         "title": "Reuse single reqwest::Client in probe_health (currently allocates per call)",
         "severity": "low",
         "source": "qc3.md S-2",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Introduced a lazily-initialized reqwest::Client via std::sync::OnceLock that is reused across all probe_health calls, removing per-probe allocation and connection setup overhead.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S3",
         "title": "Directory fsync after atomic rename (full crash durability)",
         "severity": "low",
         "source": "qc3.md S-3",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{chapters,host_tool_handlers}.rs"
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{chapters,host_tool_handlers}.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "After atomic write-and-rename, both chapters.rs and host_tool_handlers.rs now open the parent directory and call sync_all() before returning, ensuring the renamed entry is durable on disk even if the daemon crashes immediately after success.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "bc8d4bea"
+        }
       },
       {
         "id": "R-V166-QC3-S4",
         "title": "RuntimeLockGuard doc comment misleading (says releases-on-drop; actually explicit release())",
         "severity": "low",
         "source": "qc3.md S-4",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "crates/nexus-daemon-runtime/src/api/runtime_lock.rs"
+        "scope": "crates/nexus-daemon-runtime/src/api/runtime_lock.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Corrected the RuntimeLockGuard doc comment and added inline documentation explaining that the guard tracks the lock token but the runtime lock must be released explicitly via RuntimeLockGuard::release(); Drop only clears the in-memory token and logs a warning if release() was forgotten.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "bc8d4bea"
+        }
       },
       {
         "id": "R-V166-QC3-S5",
         "title": "Restart backoff lacks jitter (pure 500ms×2^n)",
         "severity": "low",
         "source": "qc3.md S-5",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Added ±25% random jitter to the exponential restart backoff using fastrand, which is already present in the Tauri dependency tree. Updated the backoff unit test to assert jitter bounds and cap behavior.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC2-TOCTOU",
         "title": "TOCTOU comment in both path guards (desktop guard_path + daemon resolve_guarded_path) referencing the residual if adversarial local FS in scope",
         "severity": "low",
         "source": "qc2.md Suggestion",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs"
+        "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Added explicit TOCTOU documentation comments to both the desktop guard_path and daemon resolve_guarded_path functions, describing the canonicalize-then-prefix-check window and the assumption of a non-adversarial local filesystem under the current threat model.",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "bc8d4bea"
+        }
       }
     ]
   }
