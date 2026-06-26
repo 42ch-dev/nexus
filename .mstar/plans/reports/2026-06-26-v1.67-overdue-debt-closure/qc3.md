@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-26-v1.67-overdue-debt-closure"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-27"
 ---
 
@@ -76,3 +76,33 @@ None.
 | 🟢 Suggestion | 2 |
 
 **Verdict**: Request Changes
+
+## Revalidation (fix-wave-1)
+
+### Scope
+- plan_id: 2026-06-26-v1.67-overdue-debt-closure
+- Review range / Diff basis: P2 fix-wave-1 (`feature/v1.67-p2-fixwave1` commits `2174c07e`+`76e9a60b`+`564767ad`) merged at HEAD. Equivalent `git log ebc7d977..HEAD -- crates/`.
+- Working branch (verified): iteration/v1.67 @ c053cdd9
+- Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus
+- Files reviewed: `crates/nexus-local-db/src/lib.rs`; `crates/nexus-orchestration/src/capability/builtins/world.rs`; fix-wave commit log and scoped test/lint output
+- Tools run:
+  - `git rev-parse --show-toplevel && git branch --show-current && git rev-parse --short HEAD && git status --short && git log --oneline -10`
+  - `git log --oneline --reverse ebc7d977..HEAD -- crates/`
+  - `git diff --stat ebc7d977..HEAD -- crates/`, `git diff --name-only ebc7d977..HEAD -- crates/`
+  - `git diff ebc7d977..HEAD -- crates/nexus-local-db/src/lib.rs`
+  - `git diff ebc7d977..HEAD -- crates/nexus-orchestration/src/capability/builtins/world.rs`
+  - `SQLX_OFFLINE=true cargo test -p nexus-orchestration -p nexus-local-db`
+  - `SQLX_OFFLINE=true cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings`
+
+### Per-finding disposition
+- **W-001 — Resolved.** `run_migrations` now executes `PRAGMA foreign_key_check`, consumes all result rows as `Vec<(String, i64, String, i64)>`, and returns `LocalDbError::ConstraintViolation` when any violation remains. This is fail-closed and addresses the prior diagnostic/no-op behavior. Regression coverage exists in `migrations_fail_on_foreign_key_violation`, which introduces a dangling FK and asserts that `run_migrations` fails with the PRAGMA violation message.
+- **W-002 — Resolved.** `world.delta.apply` now deduplicates `kb_key_block` update IDs via `HashSet` and pre-fetches them in bounded chunks with `KB_PREFETCH_CHUNK_SIZE = 500`, merging each chunk's rows into `live_body_map`. The prior unbounded dynamic IN-list is no longer proportional to all caller-supplied update rows in a single SQL statement. Regression coverage exists in `world_delta_apply_batch_kb_updates_prefetch_chunks`, which applies `KB_PREFETCH_CHUNK_SIZE + 5` updates and verifies all results and persisted body updates.
+
+### Validation
+- `SQLX_OFFLINE=true cargo test -p nexus-orchestration -p nexus-local-db` passed. Key targeted tests observed: `tests::migrations_fail_on_foreign_key_violation ... ok`; `capability::builtins::world::tests::world_delta_apply_batch_kb_updates_prefetch_chunks ... ok`. Aggregate observed results included `nexus-local-db` unit tests `274 passed`; `nexus-orchestration` unit tests `958 passed / 3 ignored`; integration and doc tests completed with all non-ignored tests passing.
+- `SQLX_OFFLINE=true cargo clippy -p nexus-orchestration -p nexus-local-db -- -D warnings` passed.
+
+### Revalidation verdict
+No new performance or reliability regression was identified in the scoped fix-wave diff. The two prior Warning findings are resolved.
+
+**Verdict**: Approve
