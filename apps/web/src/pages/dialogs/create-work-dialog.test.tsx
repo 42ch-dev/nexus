@@ -51,8 +51,31 @@ describe('CreateWorkDialog CRUD round-trip', () => {
       title: 'My New Work',
       long_term_goal: 'Finish the first arc',
       initial_idea: 'A heist in a floating city',
+      work_profile: 'novel',
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('sends the selected work_profile when the author changes it (V1.67 G1)', async () => {
+    const user = userEvent.setup();
+    let postedBody: unknown = null;
+    useHandlers(
+      http.post('/v1/local/works', async ({ request }) => {
+        postedBody = await request.json();
+        return HttpResponse.json({ work_id: 'w-essay', status: 'intake' });
+      }),
+    );
+
+    renderDialog();
+
+    await user.type(screen.getByLabelText(/Title/i), 'Essay Work');
+    await user.type(screen.getByLabelText(/Long-term goal/i), 'Publish a collection');
+    await user.type(screen.getByLabelText(/Initial idea/i), 'A meditation on cities');
+    await user.selectOptions(screen.getByLabelText(/Work profile/i), 'essay');
+    await user.click(screen.getByRole('button', { name: /Create Work/i }));
+
+    await waitFor(() => expect(postedBody).not.toBeNull());
+    expect(postedBody).toMatchObject({ work_profile: 'essay' });
   });
 
   it('keeps the dialog open and shows a toast when the daemon returns a 400 envelope (W-1)', async () => {
