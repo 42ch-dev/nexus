@@ -47,6 +47,7 @@ use nexus_contracts::PaginationInfo;
 use nexus_orchestration::preset_gates::{
     GateEvalError, PreviousPresetLookup, PreviousPresetResult,
 };
+use sqlx::Row;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -621,6 +622,15 @@ pub async fn list_schedules(
     state: State<WorkspaceState>,
     Query(query): Query<ListSchedulesQuery>,
 ) -> Result<(StatusCode, Json<ListSchedulesResponse>), NexusApiError> {
+    const ALLOWED_ORDER_COLUMNS: &[&str] = &[
+        "created_at",
+        "updated_at",
+        "status",
+        "preset_id",
+        "label",
+        "schedule_id",
+    ];
+
     let supervisor = require_supervisor(&state)?;
     let pool = supervisor.pool();
 
@@ -630,21 +640,44 @@ pub async fn list_schedules(
         "schedule",
     )?;
 
-    // SAFETY: dynamic WHERE clause — filters are appended conditionally at runtime.
-    // Compile-time checked macro cannot express variable SQL structure.
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = query.limit.unwrap_or(100).min(500);
+
+    // SAFETY: dynamic WHERE clause and ORDER BY — filters/sort are appended
+    // conditionally at runtime. User inputs are bound as parameters; only
+    // whitelisted column identifiers are interpolated into ORDER BY.
     let mut sql = String::from(
         "SELECT schedule_id, creator_id, preset_id, status, label,
                 current_core_context_version, created_at, updated_at
          FROM creator_schedules WHERE 1=1",
     );
+    let mut count_sql = String::from("SELECT COUNT(*) AS cnt FROM creator_schedules WHERE 1=1");
 
     if query.creator_id.is_some() {
         sql.push_str(" AND creator_id = ?");
+        count_sql.push_str(" AND creator_id = ?");
     }
     if query.status.is_some() {
         sql.push_str(" AND status = ?");
+        count_sql.push_str(" AND status = ?");
     }
-    sql.push_str(" ORDER BY created_at DESC");
+
+    let mut order_clauses = Vec::new();
+    for (key, ascending) in &sort_terms {
+        if ALLOWED_ORDER_COLUMNS.contains(&key.as_str()) {
+            let dir = if *ascending { "ASC" } else { "DESC" };
+            order_clauses.push(format!("{key} {dir}"));
+        }
+    }
+    if order_clauses.is_empty() {
+        order_clauses.push("created_at DESC".to_string());
+    }
+    if !order_clauses.iter().any(|c| c.starts_with("schedule_id ")) {
+        order_clauses.push("schedule_id ASC".to_string());
+    }
+    sql.push_str(" ORDER BY ");
+    sql.push_str(&order_clauses.join(", "));
+    sql.push_str(" LIMIT ? OFFSET ?");
 
     // SAFETY: dynamic query — see list_schedules SAFETY comment above.
     let mut q = sqlx::query_as::<_, ListRow>(&sql);
@@ -654,6 +687,7 @@ pub async fn list_schedules(
     if let Some(ref st) = query.status {
         q = q.bind(st);
     }
+    q = q.bind(limit).bind(offset);
 
     let rows: Vec<ListRow> = q
         .fetch_all(&*pool)
@@ -663,18 +697,27 @@ pub async fn list_schedules(
             message: format!("database error: {e}"),
         })?;
 
-    let mut items: Vec<ScheduleSummary> = rows.into_iter().map(ListRow::into_summary).collect();
-    items.sort_by(|a, b| compare_schedule_summary(a, b, &sort_terms));
+    // SAFETY: dynamic COUNT query — same WHERE clause as the list query.
+    let mut count_q = sqlx::query(&count_sql);
+    if let Some(ref cid) = query.creator_id {
+        count_q = count_q.bind(cid);
+    }
+    if let Some(ref st) = query.status {
+        count_q = count_q.bind(st);
+    }
+    let total: i64 = count_q
+        .fetch_one(&*pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
+        })?
+        .get("cnt");
+    let total = u32::try_from(total).unwrap_or(0);
 
-    let offset = decode_offset_cursor(&query.cursor)?;
-    let limit = query.limit.unwrap_or(100).min(500);
-    let total = items.len();
-    let start = usize::try_from(offset).unwrap_or(0).min(total);
-    let end = start
-        .saturating_add(usize::try_from(limit).unwrap_or(total))
-        .min(total);
-    let page_items: Vec<ScheduleSummary> = items.drain(start..end).collect();
-    let has_more = end < total;
+    let items: Vec<ScheduleSummary> = rows.into_iter().map(ListRow::into_summary).collect();
+
+    let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
     let next_cursor = if has_more {
         Some(encode_offset_cursor(offset.saturating_add(limit)))
     } else {
@@ -684,7 +727,7 @@ pub async fn list_schedules(
     Ok((
         StatusCode::OK,
         Json(ListSchedulesResponse {
-            items: page_items,
+            items,
             pagination: PaginationInfo {
                 limit: i64::from(limit),
                 next_cursor,
@@ -692,28 +735,6 @@ pub async fn list_schedules(
             },
         }),
     ))
-}
-
-fn compare_schedule_summary(
-    a: &ScheduleSummary,
-    b: &ScheduleSummary,
-    terms: &[(String, bool)],
-) -> std::cmp::Ordering {
-    for (key, ascending) in terms {
-        let ord = match key.as_str() {
-            "created_at" => a.created_at.cmp(&b.created_at),
-            "updated_at" => a.updated_at.cmp(&b.updated_at),
-            "status" => a.status.cmp(&b.status),
-            "preset_id" => a.preset_id.cmp(&b.preset_id),
-            "label" => a.label.cmp(&b.label),
-            _ => std::cmp::Ordering::Equal,
-        };
-        let ord = if *ascending { ord } else { ord.reverse() };
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
-        }
-    }
-    std::cmp::Ordering::Equal
 }
 
 // ---------------------------------------------------------------------------

@@ -470,6 +470,98 @@ async fn gated_preset_without_work_id_is_rejected() {
     resp.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+// ── F-F1 sort tests ─────────────────────────────────────────────────────────
+
+async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label: &str) {
+    let req = AddScheduleRequest {
+        creator_id: creator_id.to_string(),
+        preset_id: "memory-augmented".to_string(),
+        seed: None,
+        label: Some(label.to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
+    };
+    let resp = server
+        .post("/v1/local/orchestration/schedules")
+        .json(&req)
+        .await;
+    resp.assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn schedule_list_sort_by_label_ascending() {
+    let ctx = test_ctx().await;
+    create_schedule_with_label(&ctx.server, "ctr_sort", "Beta").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort", "Alpha").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort", "Charlie").await;
+
+    let resp = ctx
+        .server
+        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort&sort=label")
+        .await;
+    resp.assert_status(StatusCode::OK);
+    let body: Value = resp.json();
+    let items = body["items"].as_array().unwrap();
+    let labels: Vec<String> = items
+        .iter()
+        .map(|i| i["label"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(labels, vec!["Alpha", "Beta", "Charlie"]);
+}
+
+#[tokio::test]
+async fn schedule_list_sort_descending_and_pagination() {
+    let ctx = test_ctx().await;
+    create_schedule_with_label(&ctx.server, "ctr_sort2", "Alpha").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort2", "Beta").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort2", "Charlie").await;
+
+    let resp = ctx
+        .server
+        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2")
+        .await;
+    resp.assert_status(StatusCode::OK);
+    let body: Value = resp.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["label"], "Charlie");
+    assert_eq!(items[1]["label"], "Beta");
+    assert_eq!(body["pagination"]["has_more"], true);
+
+    let next_cursor = body["pagination"]["next_cursor"].as_str().unwrap();
+    let resp2 = ctx
+        .server
+        .get(&format!(
+            "/v1/local/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2&cursor={next_cursor}"
+        ))
+        .await;
+    resp2.assert_status(StatusCode::OK);
+    let body2: Value = resp2.json();
+    let items2 = body2["items"].as_array().unwrap();
+    assert_eq!(items2.len(), 1);
+    assert_eq!(items2[0]["label"], "Alpha");
+    assert_eq!(body2["pagination"]["has_more"], false);
+}
+
+#[tokio::test]
+async fn schedule_list_invalid_sort_key_returns_schedule_sort_invalid() {
+    let ctx = test_ctx().await;
+    create_schedule_with_label(&ctx.server, "ctr_sort3", "Alpha").await;
+
+    let resp = ctx
+        .server
+        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort3&sort=unknown_key")
+        .await;
+    resp.assert_status(StatusCode::BAD_REQUEST);
+    let body: Value = resp.json();
+    assert_eq!(body["success"], false);
+    assert_eq!(body["error"]["code"], "schedule_sort_invalid");
+}
+
 // ── Test 6: Force-gates audit row is written and queryable (V1.37 T5/T6) ──
 
 #[tokio::test]

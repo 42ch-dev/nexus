@@ -220,6 +220,7 @@ impl NexusApiError {
             Self::BadRequest { code, .. } => {
                 // Surface canonical tool-bridge codes (spec §12.4), plus
                 // V1.40 world-binding and V1.49 F6 lifecycle codes, as-is.
+                // V1.67 F-F1: resource-specific sort-invalid codes are also public.
                 match code.as_str() {
                     "policy_blocked"
                     | "not_supported"
@@ -228,6 +229,7 @@ impl NexusApiError {
                     | "world_id_required"
                     | "invalid_world_id"
                     | "world_clear_forbidden" => code.as_str(),
+                    _ if code.ends_with("_sort_invalid") => code.as_str(),
                     _ => "bad_request",
                 }
             }
@@ -561,6 +563,24 @@ mod tests {
         assert_eq!(err.error_code(), "preset_gates_failed");
         let body = err.to_response_body();
         assert_eq!(body.error.details.unwrap()["preset_id"], "novel-writing");
+    }
+
+    #[test]
+    fn sort_invalid_codes_are_public() {
+        for code in [
+            "work_sort_invalid",
+            "schedule_sort_invalid",
+            "session_sort_invalid",
+            "capability_sort_invalid",
+        ] {
+            let err = NexusApiError::BadRequest {
+                code: code.into(),
+                message: "bad sort".into(),
+            };
+            assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(err.error_code(), code);
+            assert_eq!(err.to_response_body().error.code, code);
+        }
     }
 
     #[test]
