@@ -229,3 +229,48 @@ describe('BrowserClient chapter content routes (V1.65)', () => {
     expect(res.read_only).toBe(true);
   });
 });
+
+describe('BrowserClient preset CRUD (V1.67 G2 promotion)', () => {
+  it('fetches a preset manifest as raw YAML via getPreset', async () => {
+    useHandlers(
+      http.get('/v1/local/presets/:id', ({ params }) =>
+        HttpResponse.json({
+          id: params.id,
+          source: 'user',
+          path: 'presets/my-strategy/preset.yaml',
+          yaml: 'name: my-strategy\n',
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getPreset('my-strategy');
+    expect(res.id).toBe('my-strategy');
+    expect(res.source).toBe('user');
+    expect(res.yaml).toContain('name: my-strategy');
+  });
+
+  it('replaces user preset YAML via updatePreset and echoes { id, updated }', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.patch('/v1/local/presets/:id', async ({ request, params }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({ id: params.id, updated: true });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.updatePreset('my-strategy', { yaml: 'name: edited\n' });
+    expect(receivedBody).toEqual({ yaml: 'name: edited\n' });
+    expect(res).toEqual({ id: 'my-strategy', updated: true });
+  });
+
+  it('resolves void when deletePreset returns 204 No Content', async () => {
+    useHandlers(
+      http.delete('/v1/local/presets/:id', () => new HttpResponse(null, { status: 204 })),
+    );
+
+    const client = new BrowserClient();
+    await expect(client.deletePreset('my-strategy')).resolves.toBeUndefined();
+  });
+});

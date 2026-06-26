@@ -16,6 +16,7 @@ import type {
   ChapterOutline,
   CreateWorkRequest,
   CreateWorkResponse,
+  GetPresetResponse,
   InspectScheduleResponse,
   ListCapabilitiesQuery,
   ListCapabilitiesResponse,
@@ -37,6 +38,8 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SessionDetailResponse,
+  UpdatePresetRequest,
+  UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
   WorkDetailResponse,
@@ -153,6 +156,18 @@ export class BrowserClient implements NexusClient {
       `/v1/local/presets/${encodeURIComponent(presetId)}:reload`,
     );
   }
+  getPreset(presetId: string): Promise<GetPresetResponse> {
+    return this.get<GetPresetResponse>(`/v1/local/presets/${encodeURIComponent(presetId)}`);
+  }
+  updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse> {
+    return this.patch<UpdatePresetResponse>(
+      `/v1/local/presets/${encodeURIComponent(presetId)}`,
+      request,
+    );
+  }
+  deletePreset(presetId: string): Promise<void> {
+    return this.delete<void>(`/v1/local/presets/${encodeURIComponent(presetId)}`);
+  }
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
   listChapters(workId: string, query?: ListChaptersQuery): Promise<ListChaptersResponse> {
@@ -228,6 +243,10 @@ export class BrowserClient implements NexusClient {
 
   private put<T>(path: string, body: unknown, query?: object): Promise<T> {
     return this.request<T>('PUT', `${path}${toQueryString(query)}`, body);
+  }
+
+  private delete<T>(path: string): Promise<T> {
+    return this.request<T>('DELETE', path);
   }
 
   private async request<T>(
