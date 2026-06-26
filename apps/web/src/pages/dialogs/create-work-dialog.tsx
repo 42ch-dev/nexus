@@ -1,21 +1,28 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Input, Label, Textarea } from '@/components/ui';
+import { Input, Label, Select, Textarea } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/lib/use-toast';
 import { useCreateWork } from '@/api/queries';
+
+/** Work-profile options for the selector (wire identifiers; compass §1.3 G1). */
+const WORK_PROFILES = [
+  { value: 'novel', label: 'Novel' },
+  { value: 'essay', label: 'Essay' },
+  { value: 'game-bible', label: 'Game Bible' },
+  { value: 'script', label: 'Script' },
+] as const;
 
 /**
  * Create Work dialog — POST /v1/local/works.
  *
  * The contract `CreateWorkRequest` requires title + long_term_goal +
- * initial_idea. Note: the Local API does not accept `work_profile` at creation
- * (the daemon assigns profiles internally), so the UI offers the foundational
- * fields only. Tracked as a residual for a future profile-aware create.
- *
- * DESIGN.md §Voice & Content: Verb + Noun action ("Create Work"); loading
- * state uses present participle.
+ * initial_idea and accepts an optional `work_profile` (V1.67 G1; the wire
+ * field already existed — the daemon assigned profiles internally before).
+ * The selector defaults to `novel`, so an untouched form yields the same
+ * outcome as V1.66 (a novel-profile Work). DESIGN.md §Voice & Content:
+ * Verb + Noun action ("Create Work"); loading state uses present participle.
  */
 export function CreateWorkDialog({
   open,
@@ -31,6 +38,7 @@ export function CreateWorkDialog({
   const [title, setTitle] = useState('');
   const [longTermGoal, setLongTermGoal] = useState('');
   const [initialIdea, setInitialIdea] = useState('');
+  const [workProfile, setWorkProfile] = useState<string>(WORK_PROFILES[0].value);
   const [error, setError] = useState<string | null>(null);
 
   // Reset the form whenever the dialog opens.
@@ -39,6 +47,7 @@ export function CreateWorkDialog({
       setTitle('');
       setLongTermGoal('');
       setInitialIdea('');
+      setWorkProfile(WORK_PROFILES[0].value);
       setError(null);
     }
   }, [open]);
@@ -56,6 +65,7 @@ export function CreateWorkDialog({
         title: title.trim(),
         long_term_goal: longTermGoal.trim(),
         initial_idea: initialIdea.trim(),
+        work_profile: workProfile,
       });
       toast({ variant: 'success', title: 'Work created', description: res.work_id });
       onOpenChange(false);
@@ -102,6 +112,20 @@ export function CreateWorkDialog({
               placeholder="The seed the runtime will build on"
               invalid={Boolean(error) && initialIdea.trim().length === 0}
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="work-profile">Work profile</Label>
+            <Select
+              id="work-profile"
+              value={workProfile}
+              onChange={(e) => setWorkProfile(e.target.value)}
+            >
+              {WORK_PROFILES.map((profile) => (
+                <option key={profile.value} value={profile.value}>
+                  {profile.label}
+                </option>
+              ))}
+            </Select>
           </div>
           {error && <p className="text-copy-13 text-red-700">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
