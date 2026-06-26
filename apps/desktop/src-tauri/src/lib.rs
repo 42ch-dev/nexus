@@ -202,6 +202,12 @@ async fn stop_daemon(manager: State<'_, sidecar::SidecarManager>) -> Result<(), 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The workspace root is captured once at startup and stored as managed
+    // state for the lifetime of the app. If the user changes the active
+    // workspace while the app is running (e.g. `nexus42 config set
+    // workspace_path ...`), the new root does not take effect in the desktop
+    // context-menu path guard until the app is restarted. This is intentional
+    // for V1.66; live refresh of the workspace root is V1.67+ scope.
     let workspace_root = WorkspaceRoot(resolve_workspace_root());
     let port = sidecar::resolve_port();
     let sidecar_manager = sidecar::SidecarManager::new(port);
