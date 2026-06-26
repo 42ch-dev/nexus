@@ -38,7 +38,7 @@ and consumed by the screens. Remaining gaps the UI adapts around:
 | List arrays not unified to `items` (F-P3) | `normalizeList` adapter at the query boundary (`src/lib/nexus/adapters.ts`) maps `works`/`sessions`/`schedules`/`capabilities` → `items`. Findings already uses `items`. | V1.66+ structural closure |
 | No `sort_by`/`sort_order` (F-F1) | Client-side `sortByDate` for small un-paginated lists; cursor-paginated lists keep server order. | V1.66+ server-side sort |
 | `CreateWorkRequest` has no `work_profile` field | Create/Update Work forms offer foundational fields only; profile is assigned by the daemon internally. | Future profile-aware create contract |
-| Preset get/update/delete (no routes/contracts) | Presets page offers list/scaffold/validate/reload only (the daemon surface that exists). | Future preset-CRUD plan |
+| Preset get/update/delete (no routes/contracts) | **Resolved (V1.67 G2)** — `getPreset`/`updatePreset`/`deletePreset` promoted onto `NexusClient` (21 → 24); daemon routes + contracts already shipped. A form-based management UI is deferred to the V1.68 canvas. | V1.68 canvas UI |
 | Capability admission gates not in list response | Capabilities page shows name + I/O schemas only; admission-gate logic is daemon-side. | Future capability-detail endpoint |
 
 ## Build / typecheck contract

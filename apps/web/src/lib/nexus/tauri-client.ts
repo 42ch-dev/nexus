@@ -3,7 +3,7 @@
  *
  * Spec: [desktop-shell.md](../../../../../.mstar/knowledge/specs/desktop-shell.md)
  * §5; compass §5 #1 LOCKED. Architecture: **thin desktop-augmentation over
- * `BrowserClient`** — the 21 `NexusClient` data methods reuse the identical HTTP
+ * `BrowserClient`** — the 24 `NexusClient` data methods reuse the identical HTTP
  * transport to the localhost daemon (`http://127.0.0.1:<resolvedPort>/v1/local/*`),
  * exactly as `BrowserClient` does in the browser-tab flow. The Tauri webview can
  * `fetch` loopback directly (compass §5 #4 — no `http` plugin), so no Tauri
@@ -64,7 +64,7 @@ export interface TauriClientOptions {
 }
 
 /**
- * Desktop `NexusClient`. Inherits all 21 data methods from `BrowserClient`
+ * Desktop `NexusClient`. Inherits all 24 data methods from `BrowserClient`
  * unchanged; only the constructor fixes the transport origin to the resolved
  * desktop loopback port. This is the thinnest possible impl — zero method
  * duplication, the entire V1.64/V1.65 HTTP surface reused wholesale.

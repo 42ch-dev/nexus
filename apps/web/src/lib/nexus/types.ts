@@ -13,11 +13,13 @@
  * no handwritten wire shapes are introduced (web-ui.md §12.6).
  *
  * Still-pending daemon surface (not in this interface; tracked as residuals):
- *  - Preset full CRUD (get/update/delete) → no daemon routes / request types
- *    exist yet; only list/scaffold/validate/reload are wired (P2 surfaces the
- *    gap; show/update/delete land in a future plan with their contracts).
  *  - Capability admission gates → CapabilityInfo carries name + I/O schemas
  *    only; admission-gate logic is not exposed in the list response.
+ *
+ * V1.67 G2 (R-V164-P2-G2): preset get/update/delete promoted onto this
+ * interface (21 → 24 methods). The daemon routes + generated TS types already
+ * existed; only the TS client surface was missing. A form-based management UI
+ * is deferred to the V1.68 canvas (compass §0 Q6).
  */
 import type {
   CapabilityInfo,
@@ -28,6 +30,7 @@ import type {
   CreateWorkRequest,
   CreateWorkResponse,
   FindingDetailResponse,
+  GetPresetResponse,
   InspectScheduleResponse,
   ListCapabilitiesQuery,
   ListCapabilitiesResponse,
@@ -49,6 +52,8 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SessionDetailResponse,
+  UpdatePresetRequest,
+  UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
   WorkDetailResponse,
@@ -116,6 +121,12 @@ export interface NexusClient {
   validatePreset(request: ValidatePresetRequest): Promise<ValidatePresetResponse>;
   /** `POST /v1/local/presets/{id}:reload`. */
   reloadPreset(presetId: string): Promise<ReloadPresetResponse>;
+  /** `GET /v1/local/presets/{id}` — fetch preset manifest YAML (V1.67 G2 promotion). */
+  getPreset(presetId: string): Promise<GetPresetResponse>;
+  /** `PATCH /v1/local/presets/{id}` — update user preset YAML after validation (V1.67 G2 promotion). */
+  updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse>;
+  /** `DELETE /v1/local/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
+  deletePreset(presetId: string): Promise<void>;
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
   /** `GET /v1/local/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */
