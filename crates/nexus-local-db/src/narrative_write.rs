@@ -252,6 +252,33 @@ pub async fn create_world(
     })
 }
 
+/// Shared admission gate: verify that `creator_id` owns `world_id`.
+///
+/// V1.67 P2 (R-V160P0-QC2-W001): deduplicates the ownership check that was
+/// previously inlined in both `nexus-orchestration` capabilities and the daemon
+/// host-tool handlers. Returns `true` only when `world_id` exists in
+/// `narrative_worlds` and its `owner_creator_id` matches the caller.
+///
+/// # Errors
+///
+/// Returns `NarrativeWriteError::Database` on SQL errors.
+pub async fn is_world_owned(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+) -> Result<bool, NarrativeWriteError> {
+    // SAFETY: simple EXISTS-style SELECT against known narrative_worlds schema.
+    let owned: Option<String> = sqlx::query_scalar(
+        "SELECT world_id FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
+    )
+    .bind(world_id)
+    .bind(creator_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(owned.is_some())
+}
+
 /// Append a timeline event to a world's branch.
 ///
 /// Allocates the next `sequence_no` for `(world_id, branch_id)` automatically

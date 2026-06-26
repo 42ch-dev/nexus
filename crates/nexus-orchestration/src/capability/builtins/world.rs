@@ -30,10 +30,11 @@ use std::sync::Arc;
 
 /// Verify that `creator_id` owns `world_id`.
 ///
-/// Mirrors `ensure_world_accessible_for_creator` from the daemon host-tool
-/// layer (`host_tool_handlers.rs:825`). The orchestration crate cannot depend
-/// on `nexus-daemon-runtime`, so the one-line ownership check is duplicated
-/// here. `world_id` must exist AND `owner_creator_id` must match the caller.
+/// V1.67 P2 (R-V160P0-QC2-W001): delegates to the shared
+/// [`nexus_local_db::narrative_write::is_world_owned`] gate so the ownership
+/// check is no longer duplicated between the orchestration capabilities and the
+/// daemon host-tool layer. `world_id` must exist AND `owner_creator_id` must
+/// match the caller.
 ///
 /// # Errors
 ///
@@ -44,22 +45,15 @@ pub async fn ensure_world_owned(
     creator_id: &str,
     world_id: &str,
 ) -> Result<(), CapabilityError> {
-    // SAFETY: simple EXISTS-style SELECT against known narrative_worlds schema.
-    let owned: Option<String> = sqlx::query_scalar(
-        "SELECT world_id FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
-    )
-    .bind(world_id)
-    .bind(creator_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("world ownership check: {e}")))?;
-
-    if owned.is_none() {
-        return Err(CapabilityError::Forbidden(
+    match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(CapabilityError::Forbidden(
             "world not found or not owned by creator".into(),
-        ));
+        )),
+        Err(e) => Err(CapabilityError::Internal(format!(
+            "world ownership check: {e}"
+        ))),
     }
-    Ok(())
 }
 
 /// Resolve the workspace slug for a world (diagnostics / audit context).
