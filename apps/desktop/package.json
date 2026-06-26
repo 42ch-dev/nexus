@@ -1,0 +1,22 @@
+{
+  "name": "desktop",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Nexus Tauri v2 desktop shell — wraps the apps/web dist (macOS-first, unsigned dev build).",
+  "author": "42ch",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "_p1_runtime_deps_note": "V1.66 has no desktop-owned JS runtime dependencies. The Tauri webview loads apps/web/dist, which detects desktop mode at runtime via window.__TAURI_INTERNALS__ and invokes custom commands through window.__TAURI__.core.invoke. Transport primitives (opener, shell sidecar) live in the Rust crate, not in npm packages. apps/web remains a shared browser+desktop bundle with no Tauri npm deps."
+}

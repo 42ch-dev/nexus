@@ -284,3 +284,61 @@ The authoring surface consumes new chapter-content schemas (additive, owned by T
 ---
 
 *Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup); V1.65 §13 Content-Authoring stage amendment promotes at V1.65 P-last. Design tokens: `apps/web/DESIGN.md` (V1.64 Standard + V1.65 Standard+ editor/table/context-menu increment); design intent input: [web-ui-design-requirements.md](web-ui-design-requirements.md).*
+
+---
+
+## 14. Next stage — Desktop Shell (V1.66 lead slice)
+
+V1.65 made the UI an **authoring entry surface** in the browser. V1.66 takes Nexus from **"open a browser tab to `localhost:8420`"** to a **double-clickable macOS desktop application**. The browser SPA transport stays **unchanged** (screen data access remains transport-agnostic); a new `apps/desktop` Tauri v2 wrapper loads the `apps/web` dist, the `TauriClient` impl of `NexusClient` swaps in, and the bundled `nexus42` daemon comes up transparently on launch. This is the gating prerequisite for everything desktop-native in the roadmap (signing, multi-OS, auto-update, mobile).
+
+> **Scope and roadmap SSOT**: [v1.66-tauri-desktop-shell-delivery-compass-v1.md](../../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) §0 (grill decisions Q1/Q2) + §1.1 (Track A) + §1.2 (V1.67+ roadmap) + §5 (locked design items). Contract detail: [desktop-shell.md](desktop-shell.md). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 14.1 What ships in V1.66 (Track A lead slice)
+
+A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plus the desktop-only `NexusClient` surface the browser sandbox cannot provide.
+
+- **`apps/desktop` Tauri v2 app** (new pnpm workspace member under `apps/*`): `tauri.conf.json` (productName, macOS bundle id, window config, `build.frontendDist` = bundled `apps/web` dist); Rust `src-tauri/` (Tauri app entry, plugin registration — `opener`, `shell`; NO `http` plugin — webview fetches loopback directly). **macOS-only target in V1.66** (`aarch64-apple-darwin` + `x86_64-apple-darwin`, universal). Windows/Linux deferred (V1.67+).
+- **`TauriClient` impl** (replaces the V1.65 stub at `apps/web/src/lib/nexus/tauri-client.ts`): implements the full **21-method** `NexusClient` interface as **thin desktop-augmentation over `BrowserClient`** (compass §5 #1 LOCKED) — data methods reuse the identical HTTP transport to the localhost daemon; `TauriClient` adds only the desktop-only methods below. V1.64/V1.65 HTTP work reused wholesale.
+- **Desktop-only `NexusClient` extensions** (the new surface): `openWith(path)` / `revealInFinder(path)` (Tauri custom commands → `plugin-opener`; runtime workspace-root path guard, §14.6), plus **daemon lifecycle** (`getDaemonStatus` / `startDaemon` / `stopDaemon`). Exposed via the interface **only in desktop mode** (capability detection: `NEXUS_DESKTOP` flag + `isTauri`, checked once at the client factory).
+- **Q5 desktop actions — right-click context menu**: on the chapter body read-only view + outline editor surfaces (V1.65), wire "Copy path" (browser + desktop) + **"Open with…"** (system MD-editor picker; desktop only) + **"Reveal in Finder"** (desktop only). Browser build keeps "Copy path" only — **no greyed-out teasing** entries.
+- **Bundled `nexus42` sidecar** (transparent daemon autostart): Tauri `externalBin` + `plugin-shell` Sidecar (compass §5 #2 LOCKED); auto-start on launch, stop on quit, health probe + restart-on-crash. The user double-clicks the `.app` and the daemon comes up — **no terminal**. In-process lib link deferred V1.67+.
+- **macOS CI unsigned `.app` build leg**: `desktop-build` workflow job (unsigned `.app` + `.dmg` artifacts uploaded). **No signing/notarization/auto-update/GitHub Releases** in V1.66.
+
+**Stage status**: **Shipped (V1.66)** — QC tri-review Approve (after fix-wave-1: port-exposure-to-SPA + attached-daemon-probe + dev-prereq docs + CI cache/path-filter + error-label split) + QA Pass.
+
+### 14.2 The desktop loop this enables
+
+1. **Launch** — double-click the `.app`; the window opens to the Control Room and the daemon starts transparently (no terminal, no port to remember).
+2. **Work** — use the full V1.65 surface (Control Room + Setup + Outline/Structure Authoring) exactly as in the browser — same screens, same transport contracts.
+3. **Reach the file** — right-click a chapter body or outline path → "Open with…" to pick a system markdown editor, or "Reveal in Finder" to jump to the file. Transparent daemon autostart is the larger *invisible* win; open-with/reveal is the one new *visible* capability.
+
+### 14.3 Non-goals for V1.66 (durable V1.67+ roadmap)
+
+- **Body full-text editor + per-chapter edit lock** — **V1.67 lead authoring slice**. Lock design + MD round-trip + frontmatter sync + conflict policy. V1.66 renders body read-only.
+- **UI productivity wave** — **V1.67**. Drag-reorder, bulk ops, reconcile trigger, outline templates.
+- **Windows + Linux + signing + notarization + GitHub Releases + auto-update** — **V1.67+**. The unsigned `.app` is the V1.66 deliverable. (Until signing lands, the no-Gatekeeper-friction author win is not realized — V1.66's user is the developer/contributor; see §14.4.)
+- **In-process `nexus-daemon-runtime` lib link; system tray / menu-bar / hotkeys / notifications; mobile** — **V1.67+ / post-V1.67**.
+
+### 14.4 User stories (V1.66 slice)
+
+- **One-click launch** — *As an author*, I double-click the Nexus app and the Control Room opens with the daemon already running, so I never open a terminal or remember a port.
+- **Native file actions** — *As an author*, I right-click a chapter and choose "Open with…" to edit in my own editor, or "Reveal in Finder" to see the file.
+- **Daemon visibility** — *As an author*, I see at a glance whether the daemon is healthy (and am told plainly, with a next step, if it could not start — e.g., port in use).
+- **Browser parity** — *As an author*, everything from the browser tab works identically in the desktop app — strict superset, not a different product.
+- **Contributor install (V1.66 reality)** — *As a developer/contributor*, I pull the unsigned `.app`/`.dmg` from CI and run it locally (bypassing Gatekeeper once) to exercise the full desktop stack before signing lands in V1.67+.
+
+### 14.5 Wire contracts (V1.66)
+
+**No new wire schemas** (`wire_contracts_changed: false`, confirmed Phase 2b). The shell is a packaging/delivery layer: `TauriClient` reuses the identical HTTP transport; desktop-only methods are Tauri IPC; the 3 residuals are test/refactor/hardening. `@42ch/nexus-contracts` version unaffected.
+
+### 14.6 Capability table delta (desktop-only `NexusClient` extensions)
+
+| Method | Mode | Transport | Notes |
+| --- | --- | --- | --- |
+| `openWith(path)` | desktop only | Tauri custom command → `plugin-opener.openPath()` | Runtime path-guarded to active workspace root (W-002-equivalent; Tauri scope = defense-in-depth only). |
+| `revealInFinder(path)` | desktop only | Tauri custom command → `plugin-opener.revealItemInDir()` | Same runtime path guard. |
+| `getDaemonStatus()` | desktop only | Tauri `plugin-shell` / sidecar IPC | Health + port; drives the status indicator. |
+| `startDaemon()` / `stopDaemon()` | desktop only | Tauri `plugin-shell` Sidecar | Lifecycle control; autostart on launch is default. |
+| `copyPath(path)` | browser + desktop | clipboard write (V1.65 reuse) | Unchanged. |
+
+All other `NexusClient` methods = identical HTTP transport to the localhost daemon (reuse of V1.64/V1.65 `BrowserClient` paths). Detail: [desktop-shell.md](desktop-shell.md).

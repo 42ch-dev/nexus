@@ -108,3 +108,63 @@ All three V1.65 component classes — editor, table, context menu — must ship 
 ---
 
 *Input brief only. The authoritative design system is `apps/web/DESIGN.md`, owned by `@architect`. This brief exists so the design system is derived from product intent rather than aesthetics-in-a-vacuum.*
+
+---
+
+## 6. V1.66 desktop shell surface — component design requirements
+
+V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md) §14; contract: [desktop-shell.md](desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in `apps/web/DESIGN.md` (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
+
+### 6.1 Window chrome
+
+- **Native macOS chrome by default**: standard traffic-light region — do not invent custom window controls in V1.66 (custom title bar is V1.67+ Production polish).
+- **Window title**: "Nexus" + active Work title when one is open.
+- **Minimum/resizable size**: comfortable for both data-dense Control Room tables AND the authoring editor.
+- **Light + dark parity**: chrome follows system appearance; matches SPA theme tokens in both.
+
+### 6.2 App menu structure
+
+Standard macOS app menu bar (not a hamburger). Minimal; aligned with V1.64/V1.65 screen groups. Disable unavailable items rather than hiding roadmap commands.
+
+- **Nexus**: About Nexus (version/build/daemon status), Quit Nexus (also stops the sidecar).
+- **File**: New Work… / New Preset… (disabled when not in an owning screen), Close Window.
+- **Edit**: standard Cut/Copy/Paste/Select All (routed to focused surface, incl. outline editor).
+- **View**: theme toggle (Light/Dark/System), reload, entry points to Control Room + Setup + Authoring groups.
+- **Window**: standard macOS Window menu.
+- **Help**: Nexus Help (docs link), Copy Diagnostics. No protocol jargon in labels.
+
+### 6.3 Native dialogs (open / save / about)
+
+- Native `NSOpenPanel`/`NSSavePanel` via Tauri's dialog plugin where the OS provides them — restricted by the same workspace-root scope whitelist as `openWith`.
+- Native about panel (version + daemon status + port + docs link).
+- Reuse V1.64/V1.65 destructive-action visual language so confirmations are recognisable across browser and desktop.
+
+### 6.4 Desktop context menu (right-click actions)
+
+- **Entries**: "Copy Path" (browser + desktop) → **"Open With…"** (desktop only, system MD-editor picker) → **"Reveal in Finder"** (desktop only). Order: Copy Path first, then desktop-only native actions.
+- **Browser build does not tease**: when not in desktop mode, "Copy Path" only — **no greyed-out "Open With…"** advertising an unavailable action (carries V1.65 §5.3 rule forward).
+- **Path-guard affordance**: if a path is outside the workspace-root scope, desktop entries are disabled with a plain-language reason (not a silent no-op).
+- **A11y**: fully keyboard-operable; entries expose meaning textually, not icon-only.
+
+### 6.5 Daemon-status indicator (highest product priority in V1.66)
+
+The make-or-break affordance for the non-terminal author: the desktop app's whole promise is "the daemon comes up transparently." When it *doesn't*, the author must not stare at a frozen window.
+
+- **States** (glanceable, persistent — not a toast): `starting` / `running` / `degraded` (restart-on-crash fired) / `stopped` / `error` (e.g., **port already in use** — the most likely real-world failure).
+- **Error copy gives a one-line next step**: e.g., *"Nexus couldn't start its background service — port 8420 is already in use. Quit the other Nexus instance, or set a different port."* Never just a code.
+- **Non-blocking but unmissable** — same product-priority class as the V1.65 outline-editor soft-concurrency banner (§5.1): persistent indicator (menu-bar icon + window-footer strip), not a vanishing notification.
+- **Manual control**: from the indicator, restart/stop the daemon — mapped to `startDaemon` / `stopDaemon` — with confirmation on stop (interrupts running orchestration).
+
+### 6.6 Light + dark theme parity
+
+All V1.66 surface classes — window chrome, app menu, native dialogs, desktop context menu, daemon-status indicator — ship with **light + dark** token parity from day one (shared token names, different values). The daemon-status indicator especially must hold up in dark mode over long sessions.
+
+---
+
+### Open inputs `@architect` resolves in `apps/web/DESIGN.md` (V1.66 desktop supplement)
+
+1. Window-chrome tokens (title bar, traffic-light safe-area, min/default window size) — light + dark.
+2. App-menu typography + daemon-status indicator visual treatment (the non-blocking-but-unmissable error/degraded treatment is the highest product-priority design decision in the V1.66 increment).
+3. Native-dialog mapping + destructive-dialog parity with V1.64/V1.65.
+4. Desktop context-menu tokens (entry order, disabled/scope-violation state) — light + dark.
+5. Daemon-status indicator state tokens (starting/running/degraded/stopped/error) — meaningful color, not decorative; exposing state textually.

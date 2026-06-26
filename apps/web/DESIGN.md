@@ -402,4 +402,115 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 - Tailwind should reference CSS variables, not hard-coded hex values inside components.
 - Shadcn component defaults should read from the component primitive tables above.
 - `data-theme="dark"` or a root class may swap values; token names must remain identical.
-- Production-level split into `DESIGN.dark.md`, richer component specs, native desktop menu actions, and rendered visual QA are deferred to V1.66.
+- Production-level split into `DESIGN.dark.md`, richer component specs, and rendered visual QA are deferred to V1.67+.
+
+---
+
+## Desktop Shell Supplement (V1.66 Standard+)
+
+The V1.66 Tauri desktop shell ([desktop-shell.md](../.mstar/knowledge/specs/desktop-shell.md)) uses the same token names and voice rules as the local Web UI. Desktop shell surfaces should feel native enough to be trustworthy on macOS, but not custom-chromed or distribution-polished yet. Production polish — custom title bars, system tray/menu bar app, global shortcuts, native notifications, signing/notarization copy, animation refinements — is deferred to V1.67+.
+
+### Desktop Scope
+
+| Surface | V1.66 decision |
+| --- | --- |
+| Window chrome | Standard OS window chrome; no custom title bar |
+| App menu | Native menu structure only; minimal commands |
+| Native dialogs | Use for open/reveal errors, restart confirmation, about/system info |
+| Desktop context menu | Enables `Open With…` and `Reveal in Finder` only in desktop mode |
+| System tray / menu bar | None in V1.66 |
+| Daemon status | Visible lightweight indicator with restart affordance |
+
+### Desktop Window Chrome
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `desktop-window-bg` | `background-100` | `background-100` | Main desktop window content background |
+| `desktop-window-border` | `gray-alpha-400` | `gray-alpha-400` | Internal separators below OS chrome |
+| `desktop-titlebar-safe-area` | `28px` | `28px` | Minimum vertical reserve when content approaches the native traffic-light region |
+| `desktop-window-radius` | `radius-card` | `radius-card` | In-app panels only; do not override native window corner radius |
+| `desktop-window-drag-region-height` | `0px` | `0px` | V1.66 uses native OS chrome; custom drag regions deferred |
+
+Rules:
+- Do not implement a custom title bar in V1.66.
+- Keep primary navigation below the native title bar / traffic-light area.
+- Never place destructive or high-frequency actions where they may conflict with native window controls.
+
+### App Menu
+
+| Menu | Required items | Notes |
+| --- | --- | --- |
+| `Nexus` | About Nexus, Quit Nexus | About may show version/build/daemon status |
+| `File` | Open Workspace… (disabled unless implemented), Reveal Workspace in Finder, Close Window | Disable unavailable items instead of hiding roadmap commands |
+| `Edit` | Undo/Redo, Cut/Copy/Paste/Select All | Use native defaults where possible |
+| `View` | Reload, Toggle Developer Tools (dev only), Reset Zoom | Dev-only items must not imply production support |
+| `Window` | Minimize, Zoom, Bring All to Front | Native defaults |
+| `Help` | Open Logs Folder, Copy Diagnostics | Keep author-facing copy; avoid protocol jargon |
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `desktop-menu-label` | `gray-1000` | `gray-1000` | Menu item text |
+| `desktop-menu-secondary` | `gray-700` | `gray-700` | Shortcut/help text |
+| `desktop-menu-disabled` | `gray-700` | `gray-700` | Disabled roadmap items |
+| `desktop-menu-danger` | `red-700` | `red-700` | Destructive menu items, if any |
+
+### Native Dialogs
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `native-dialog-title` | `heading-20` | `heading-20` | Dialog title |
+| `native-dialog-body` | `copy-14` | `copy-14` | Dialog body copy |
+| `native-dialog-secondary` | `gray-900` | `gray-900` | Recovery/help text |
+| `native-dialog-danger` | `red-700` | `red-700` | Irreversible action emphasis |
+| `native-dialog-warning` | `amber-700` | `amber-700` | Daemon degraded/restart warnings |
+
+Copy rules:
+- Sentence case in dialog bodies.
+- State the object and recovery action: `Daemon did not start. Restart Nexus or run diagnostics from the Help menu.`
+- Do not expose stack traces in dialogs; offer `Copy Diagnostics`.
+
+### Desktop Context Menu
+
+Desktop mode extends the V1.65 context-menu tokens with native file actions.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `context-menu-native-action` | `gray-1000` | `gray-1000` | `Open With…`, `Reveal in Finder` |
+| `context-menu-native-icon` | `gray-900` | `gray-900` | Leading native-action icon |
+| `context-menu-native-disabled` | `gray-700` | `gray-700` | Native action unavailable or path outside workspace |
+| `context-menu-native-danger` | `red-700` | `red-700` | Reserved for future destructive file actions |
+
+Behavior rules:
+- Browser mode shows `Copy Path` only.
+- Desktop mode shows `Copy Path`, `Open With…`, and `Reveal in Finder`.
+- `Open With…` uses an ellipsis (opens a system chooser).
+- `Reveal in Finder` is macOS wording for V1.66. Future Windows/Linux builds map to `Reveal in File Explorer` / `Reveal in Files`.
+- If the path guard rejects a path: `Path not opened. The file is outside the active workspace.`
+
+### Daemon Status Indicator
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `daemon-status-healthy-bg` | `rgba(31,143,77,0.10)` | `rgba(84,213,138,0.14)` | Healthy daemon pill background |
+| `daemon-status-healthy-text` | `green-1000` | `green-1000` | Healthy daemon text |
+| `daemon-status-starting-bg` | `rgba(0,133,119,0.10)` | `rgba(76,216,200,0.14)` | Starting/probing background |
+| `daemon-status-starting-text` | `teal-1000` | `teal-1000` | Starting/probing text |
+| `daemon-status-degraded-bg` | `rgba(183,110,0,0.12)` | `rgba(255,192,67,0.16)` | Degraded/retrying background |
+| `daemon-status-degraded-text` | `amber-1000` | `amber-1000` | Degraded/retrying text |
+| `daemon-status-stopped-bg` | `rgba(229,72,77,0.12)` | `rgba(255,107,107,0.16)` | Stopped/error background |
+| `daemon-status-stopped-text` | `red-1000` | `red-1000` | Stopped/error text |
+
+Status labels:
+
+| State | Label | Helper copy |
+| --- | --- | --- |
+| Starting | `Daemon starting…` | `Nexus is starting the local daemon.` |
+| Healthy | `Daemon running` | `Local API is reachable on the configured port.` |
+| Degraded | `Daemon reconnecting` | `Nexus is retrying the local daemon connection.` |
+| Stopped | `Daemon stopped` | `Restart the daemon to use local workspace features.` |
+| Port conflict | `Port unavailable` | `Another process is using the configured Nexus port.` |
+
+Interaction rules:
+- The status indicator must include text, not color alone.
+- The primary recovery action is `Restart Daemon`.
+- Do not show daemon internals by default; detailed diagnostics belong behind `Copy Diagnostics` or a Help menu item.

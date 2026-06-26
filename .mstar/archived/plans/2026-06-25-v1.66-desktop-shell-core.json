@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-06-25-v1.66-desktop-shell-core",
+  "title": "V1.66 P0 — Tauri Desktop Shell Core (TauriClient + Q5 open-with/reveal + DESIGN.md increment)",
+  "iteration": "V1.66",
+  "slot": "P0",
+  "status": "Done",
+  "effort": "L-XL",
+  "owner": "@frontend-dev",
+  "review": "Tri-review + QA",
+  "wave": 1,
+  "dependency": "P-1 locked + Phase 2b (TauriClient arch + DESIGN.md increment + open-with scope)",
+  "working_branch": "feature/v1.66-desktop-shell-core",
+  "merge_target": "iteration/v1.66",
+  "inreview_at": "2026-06-25T15:49:19Z",
+  "merge_commit": "pending-integration-merge",
+  "completed_at": "2026-06-25T19:05:28Z",
+  "done_reason": "QC tri-review Approve (after fix-wave-1) + QA Pass",
+  "archived_at": "2026-06-25T19:08:40Z"
+}

@@ -6,7 +6,7 @@
  * react-markdown + remark-gfm with frontmatter header strip; right-click
  * context menu offering "Copy path" only.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -29,6 +29,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { ChapterStatusBadge } from '@/components/status-badge';
+import { PathContextMenu, useContextMenu } from '@/components/path-context-menu';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorState, LoadingState } from '@/components/ui/states';
@@ -66,6 +67,10 @@ export function ChapterPage() {
   const [saveState, setSaveState] = useState<SaveState>('clean');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  // V1.66 desktop right-click menu on the outline editor surface
+  // (web-ui-design-requirements §6.4). Shares the same component as the body
+  // view; acts on the chapter's outline_path.
+  const outlineMenu = useContextMenu();
 
   const editor = useEditor({
     extensions: [StarterKit, Markdown],
@@ -172,7 +177,12 @@ export function ChapterPage() {
               {showSoftConcurrency && <SoftConcurrencyBanner />}
               <div className="mt-2 overflow-hidden rounded-card border border-gray-alpha-400 bg-background-100 focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-700/20">
                 <EditorToolbar editor={editor} />
-                <div className="min-h-[360px] p-6">
+                <div
+                  onContextMenu={outlineMenu.openMenu}
+                  className="min-h-[360px] p-6"
+                  role="region"
+                  aria-label="Chapter outline editor"
+                >
                   <EditorContent editor={editor} className="prose prose-sm max-w-none text-copy-16 text-gray-1000" />
                 </div>
                 <div className="flex items-center justify-between border-t border-gray-alpha-400 bg-background-200 px-3 py-2">
@@ -202,6 +212,16 @@ export function ChapterPage() {
               </div>
             </CardContent>
           </Card>
+
+          {outlineMenu.open && (
+            <PathContextMenu
+              path={outline.data?.outline_path ?? ch.outline_path ?? ''}
+              pathLabel="Outline"
+              position={outlineMenu.position}
+              onClose={outlineMenu.close}
+              regionLabel="Outline context menu"
+            />
+          )}
         </TabsContent>
 
         <TabsContent value="body" className="mt-4">
@@ -323,9 +343,7 @@ function BodyReadOnly({
   onRetry: () => void;
 }) {
   const { toast } = useToast();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
+  const menu = useContextMenu();
 
   const bodyContent = useMemo(() => {
     if (!body) return '';
@@ -352,30 +370,7 @@ function BodyReadOnly({
         description: 'Copy it manually from the details panel.',
       });
     }
-    setMenuOpen(false);
   }
-
-  function handleContextMenu(e: React.MouseEvent) {
-    e.preventDefault();
-    setMenuPos({ x: e.clientX, y: e.clientY });
-    setMenuOpen(true);
-  }
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    function close() {
-      setMenuOpen(false);
-    }
-    function handleKeyDown(ev: KeyboardEvent) {
-      if (ev.key === 'Escape') close();
-    }
-    window.addEventListener('click', close, { once: true });
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [menuOpen]);
 
   if (isLoading) return <LoadingState label="Loading body…" />;
   if (isError || !body) {
@@ -388,7 +383,7 @@ function BodyReadOnly({
   }
 
   return (
-    <Card className="shadow-card" ref={containerRef}>
+    <Card className="shadow-card">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -416,7 +411,7 @@ function BodyReadOnly({
       </CardHeader>
       <CardContent>
         <div
-          onContextMenu={handleContextMenu}
+          onContextMenu={menu.openMenu}
           className="rounded-card border border-gray-alpha-400 bg-background-100 p-6"
           role="region"
           aria-label="Chapter body"
@@ -427,29 +422,14 @@ function BodyReadOnly({
         </div>
       </CardContent>
 
-      {menuOpen && (
-        <div
-          role="menu"
-          aria-label="Body context menu"
-          style={{ left: menuPos.x, top: menuPos.y }}
-          className="fixed z-50 min-w-[180px] rounded-popover border border-gray-alpha-400 bg-background-100 p-1 shadow-popover"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={copyPath}
-            className="flex h-9 w-full items-center gap-2 rounded-control px-3 text-copy-14 text-gray-1000 hover:bg-gray-alpha-100"
-          >
-            <Copy className="h-4 w-4" aria-hidden />Copy Path
-          </button>
-          {path && (
-            <div className="px-3 py-2">
-              <span className="block max-w-[320px] truncate text-copy-13-mono text-gray-900" title={path}>
-                {path}
-              </span>
-            </div>
-          )}
-        </div>
+      {menu.open && (
+        <PathContextMenu
+          path={path}
+          pathLabel="Body"
+          position={menu.position}
+          onClose={menu.close}
+          regionLabel="Body context menu"
+        />
       )}
     </Card>
   );

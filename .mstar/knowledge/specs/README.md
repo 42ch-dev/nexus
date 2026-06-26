@@ -111,7 +111,8 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
 | **[novel-writing/](novel-writing/README.md)** | Feature subtree | **`work_profile: novel`** — see [novel-writing/README.md](novel-writing/README.md) for per-file index (workflow-profile, quality-loop, author-experience, overlays, …) |
 | [essay-profile.md](essay-profile.md) | Feature line | Draft (V1.52) — `work_profile: essay` first non-novel profile |
-| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.64)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup MVP delivered |
+| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13); Desktop Shell stage (V1.66 §14, Draft) |
+| [desktop-shell.md](desktop-shell.md) | Feature line | Draft (V1.66) — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

@@ -5,49 +5,54 @@
   "metadata": {
     "integration_branch": null,
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.65",
+    "last_integration_branch": "iteration/v1.66",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.66+ (pending)",
+    "latest_active_iteration": "V1.67+ (pending)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.65+)",
+    "pre_implement_gate": "pending (V1.67+)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.65",
-      "compass": "v1.65-outline-and-structure-authoring-delivery-compass-v1",
-      "shipped_at": "2026-06-25T19:00:00Z",
-      "plan_count": 7,
-      "plan_count_done": 7,
-      "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.65: @42ch/nexus-contracts additive-dominant. New schemas/local-api/works/chapters/* (list/detail/outline/patch/body + content-query) + preset CRUD (get/update response + delete 204) + work_profile additive optional on CreateWorkRequest/PatchWorkRequest. Cursor keyset (v2: opaque) on chapter list. No breaking change to existing shapes. Track D (vitest/vite/wiremock) dev-dep only, no wire change.",
+      "iteration": "V1.66",
+      "compass": "v1.66-tauri-desktop-shell-delivery-compass-v1",
+      "shipped_at": "2026-06-25T19:08:40Z",
+      "plan_count": 6,
+      "plan_count_done": 6,
+      "wire_contracts_changed": false,
+      "wire_contracts_note": "V1.66: wire_contracts_changed: false. Tauri shell is a packaging/delivery layer — TauriClient reuses V1.64/V1.65 HTTP transport; desktop-only methods (openWith/revealInFinder/daemon-lifecycle) are Tauri IPC, not Local API; the 3 P-sec residuals are test/refactor/hardening (PaginationInfo dedup serialized-form identical). @42ch/nexus-contracts version unaffected.",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-25-v1.65-compass-and-plan-stubs",
-        "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
-        "2026-06-25-v1.65-dependency-security-upgrade",
-        "2026-06-25-v1.65-web-test-baseline",
-        "2026-06-25-v1.65-outline-and-structure-editor",
-        "2026-06-25-v1.65-mid-meta-tracking",
-        "2026-06-25-v1.65-residual-convergence-and-closeout"
+        "2026-06-25-v1.66-compass-and-plan-stubs",
+        "2026-06-25-v1.66-desktop-shell-core",
+        "2026-06-25-v1.66-hygiene-residuals",
+        "2026-06-25-v1.66-sidecar-lifecycle-and-ci",
+        "2026-06-25-v1.66-mid-meta-tracking",
+        "2026-06-25-v1.66-residual-convergence-and-closeout"
       ],
-      "predecessor_merge_commit": "644acbc5",
-      "note": "V1.65 ships Outline & Structure Authoring (CLI+Web UI authoring entry surface) + Track B API closure + Track D dependency security. Body editor + Tauri shell + open-with deferred V1.66. Platform paused (PD-05)."
+      "predecessor_merge_commit": "6e1f18e0",
+      "note": "V1.66 ships Tauri Desktop Shell (apps/desktop wrapper + TauriClient + Q5 open-with/reveal + bundled sidecar + macOS CI) + Track B 3-residual hygiene. Body editor + UI productivity + signing/tri-OS/auto-update deferred V1.67. Platform paused (PD-05). QC tri-review Approve after fix-wave-1 (F1 port-exposure correctness + 7 more); QA Pass."
     },
     "tech_debt_summary": {
-      "total_open": 0,
-      "total_deferred": 20,
-      "total_resolved": 179,
-      "total_archived": 5,
+      "total_open": 4,
+      "total_deferred": 46,
+      "total_resolved": 368,
+      "total_archived": 0,
       "by_severity_active": {
-        "low": 0,
+        "high": 0,
         "medium": 0,
-        "high": 0
+        "low": 4
       },
-      "by_target_active": {}
+      "by_target_active": {
+        "V1.66": 1,
+        "V1.66+": 1
+      },
+      "refreshed_at": "2026-06-25T19:05:28Z",
+      "refreshed_reason": "P-last closeout: post-QC+QA; 10 V1.66 QC Suggestions registered as deferred V1.67+ residuals"
     },
-    "updated_at": "2026-06-25T03:35:00Z",
-    "spec_integration_branch": null
+    "updated_at": "2026-06-25T19:08:40Z",
+    "spec_integration_branch": null,
+    "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
   "residual_findings": {
     "2026-06-23-v1.61-compute-capability-and-preset": [
@@ -3722,7 +3727,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-local-api-hardening/qc1.md S-1",
         "note": "Drift risk; compounds when F-P3 (items rename) sweeps every list endpoint. Align the shared canonical PaginationInfo construction with the F-P3 sweep in V1.65+.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-25",
+        "closure_note": "Closed in V1.66 P-sec hygiene residuals (689ddce3).",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+          "commit": "689ddce3"
+        }
       },
       {
         "id": "R-V164-QC1-CASING",
@@ -3852,23 +3863,35 @@
         "id": "R-V165-QC1-W2",
         "title": "Missing HTTP-level integration tests for chapter endpoints",
         "severity": "medium",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "qc1.md",
         "scope": "chapter API integration tests",
         "decision": "defer",
         "owner": "@qa-engineer/@fullstack-dev",
         "target_iteration": "V1.66",
-        "tracking": "test-depth gap, not correctness"
+        "tracking": "test-depth gap, not correctness",
+        "closed_at": "2026-06-25",
+        "closure_note": "Closed in V1.66 P-sec hygiene residuals (699ac872).",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+          "commit": "699ac872"
+        }
       },
       {
         "id": "R-V165-QC-SUGG-DEFENSE",
         "title": "Write-path guard parity + RuntimeLockGuard dedup + post-rename fsync (qc1 S-1/S-4, qc2 S-001, qc3 S-3)",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "qc1/qc2/qc3",
         "scope": "defense-in-depth + dedup",
         "decision": "defer",
-        "target_iteration": "V1.66+"
+        "target_iteration": "V1.66+",
+        "closed_at": "2026-06-25",
+        "closure_note": "Closed in V1.66 P-sec hygiene residuals (e7a1fd05).",
+        "resolution": {
+          "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+          "commit": "e7a1fd05"
+        }
       },
       {
         "id": "R-V165-QC3-VIRT",
@@ -3889,6 +3912,98 @@
         "scope": "cross-cutting DX",
         "decision": "defer",
         "target_iteration": "V1.66+"
+      }
+    ],
+    "2026-06-25-v1.66-mid-meta-tracking": [
+      {
+        "id": "R-V166-QC1-S1",
+        "title": "Event-driven daemon-status (replace Rust 100ms + React 5s dual poll loops with Tauri AppHandle::emit)",
+        "severity": "low",
+        "source": "qc1.md S-1",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs + apps/web/src/components/layout/daemon-status-bar.tsx"
+      },
+      {
+        "id": "R-V166-QC1-S2",
+        "title": "sidecar.rs:198 robust unwrap (unwrap_or_else fallback message)",
+        "severity": "low",
+        "source": "qc1.md S-2",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+      },
+      {
+        "id": "R-V166-QC1-S4",
+        "title": "desktop-build.yml §5 #10 conditional fallback to per-arch artifacts when universal unstable",
+        "severity": "low",
+        "source": "qc1.md S-4",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": ".github/workflows/desktop-build.yml"
+      },
+      {
+        "id": "R-V166-QC1-S5",
+        "title": "Idiomatic Tauri exit hook (on_window_event/RunEvent::ExitRequested) vs trailing block_on(stop)",
+        "severity": "low",
+        "source": "qc1.md S-5",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "apps/desktop/src-tauri/src/lib.rs"
+      },
+      {
+        "id": "R-V166-QC3-S1",
+        "title": "Reset restart_count on manual startDaemon (currently stays at cap after give-up)",
+        "severity": "low",
+        "source": "qc3.md S-1",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+      },
+      {
+        "id": "R-V166-QC3-S2",
+        "title": "Reuse single reqwest::Client in probe_health (currently allocates per call)",
+        "severity": "low",
+        "source": "qc3.md S-2",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+      },
+      {
+        "id": "R-V166-QC3-S3",
+        "title": "Directory fsync after atomic rename (full crash durability)",
+        "severity": "low",
+        "source": "qc3.md S-3",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{chapters,host_tool_handlers}.rs"
+      },
+      {
+        "id": "R-V166-QC3-S4",
+        "title": "RuntimeLockGuard doc comment misleading (says releases-on-drop; actually explicit release())",
+        "severity": "low",
+        "source": "qc3.md S-4",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "crates/nexus-daemon-runtime/src/api/runtime_lock.rs"
+      },
+      {
+        "id": "R-V166-QC3-S5",
+        "title": "Restart backoff lacks jitter (pure 500ms×2^n)",
+        "severity": "low",
+        "source": "qc3.md S-5",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+      },
+      {
+        "id": "R-V166-QC2-TOCTOU",
+        "title": "TOCTOU comment in both path guards (desktop guard_path + daemon resolve_guarded_path) referencing the residual if adversarial local FS in scope",
+        "severity": "low",
+        "source": "qc2.md Suggestion",
+        "lifecycle": "deferred",
+        "target_iteration": "V1.67+",
+        "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs"
       }
     ]
   }

@@ -12,6 +12,7 @@ import { MemoryRouter } from 'react-router-dom';
 
 import { ClientProvider } from '@/lib/client-context';
 import type { NexusClient } from '@/lib/nexus';
+import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { ToastProvider, Toaster } from '@/lib/use-toast';
 
 /**
@@ -34,13 +35,19 @@ export const noopClient = {
 
 interface RenderInAppOptions extends Omit<RenderOptions, 'wrapper'> {
   client?: NexusClient;
+  /**
+   * Desktop capabilities to inject (V1.66 desktop-mode tests). Omit (or `null`)
+   * to simulate the browser build — `useDesktopCapabilities()` returns `null`
+   * and native affordances hide.
+   */
+  desktop?: DesktopCapabilities | null;
   queryClient?: QueryClient;
   initialRouterEntries?: string[];
 }
 
 export function renderInApp(
   ui: ReactElement,
-  { client, queryClient, initialRouterEntries = ['/'], ...rest }: RenderInAppOptions = {},
+  { client, desktop, queryClient, initialRouterEntries = ['/'], ...rest }: RenderInAppOptions = {},
 ) {
   const qc = queryClient ?? makeQueryClient();
   const activeClient = client ?? noopClient;
@@ -48,7 +55,7 @@ export function renderInApp(
   function Wrapper({ children }: { children: ReactNode }): ReactElement {
     return (
       <QueryClientProvider client={qc}>
-        <ClientProvider client={activeClient}>
+        <ClientProvider client={activeClient} desktop={desktop ?? null}>
           <ToastProvider>
             <MemoryRouter initialEntries={initialRouterEntries}>{children}</MemoryRouter>
             <Toaster />

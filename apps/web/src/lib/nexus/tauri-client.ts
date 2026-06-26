@@ -1,89 +1,84 @@
 /**
- * `TauriClient` — V1.65 desktop shell NexusClient implementation (STUB).
+ * `TauriClient` — V1.66 desktop shell `NexusClient` implementation.
  *
- * Spec: web-ui.md §5 + §9 roadmap. In V1.64 the desktop shell does not ship;
- * this class freezes the boundary so P2 screens are transport-agnostic. When
- * `apps/desktop` lands in V1.65, each method will delegate to Tauri's
- * `invoke('plugin:nexus|<op>', { ... })` (or a sidecar IPC contract TBD) and
- * the SPA code stays unchanged — only the active client impl swaps.
+ * Spec: [desktop-shell.md](../../../../../.mstar/knowledge/specs/desktop-shell.md)
+ * §5; compass §5 #1 LOCKED. Architecture: **thin desktop-augmentation over
+ * `BrowserClient`** — the 21 `NexusClient` data methods reuse the identical HTTP
+ * transport to the localhost daemon (`http://127.0.0.1:<resolvedPort>/v1/local/*`),
+ * exactly as `BrowserClient` does in the browser-tab flow. The Tauri webview can
+ * `fetch` loopback directly (compass §5 #4 — no `http` plugin), so no Tauri
+ * `invoke` is needed for data access.
  *
- * In the browser build every method throws `not_implemented_in_browser_build`
- * so any accidental selection surfaces immediately rather than silently
- * no-op'ing.
+ * Selection: the client factory ({@link ../client-context.tsx}) picks
+ * `TauriClient` when {@link isDesktopBuild} is `true`, else `BrowserClient`.
+ * `TauriClient` itself does not self-guard against browser instantiation — it is
+ * a real HTTP client that works wherever `fetch` does; the factory is the single
+ * selection point (§5 #7).
+ *
+ * Desktop-only capability extensions (`openWith`, `revealInFinder`, daemon
+ * lifecycle) live on a separate `DesktopCapabilities` object
+ * (`desktop-capabilities.ts`), not on this class — per the spec's "equivalent
+ * capability object" wording (keeps `NexusClient` pure transport).
  */
-import { NexusClientError } from './errors';
-import type { DaemonHealth, NexusClient } from './types';
+import { BrowserClient, type BrowserClientOptions } from './browser-client';
 
-const NOT_IMPLEMENTED = (): never => {
-  throw new NexusClientError(
-    0,
-    'not_implemented_in_browser_build',
-    'TauriClient is not available in the browser build. The desktop shell ships in V1.65 (see apps/web/README.md §Roadmap).',
-  );
-};
+declare global {
+  interface Window {
+    /** Injected by the Tauri desktop shell before the SPA loads (authoritative). */
+    __NEXUS_DAEMON_PORT__?: number;
+  }
+}
 
-export class TauriClient implements NexusClient {
-  health(): Promise<DaemonHealth> {
-    return NOT_IMPLEMENTED();
+/**
+ * Resolve the desktop daemon port (compass §5 #3 LOCKED).
+ *
+ * Order: explicit `port` argument → `window.__NEXUS_DAEMON_PORT__` (injected by
+ * the Tauri shell from the Rust-resolved value) → `NEXUS_DAEMON_PORT` env var
+ * (dev/browser fallback) → `8420`. The injected global is authoritative because
+ * `process.env` is unavailable inside the Tauri webview; the Rust launcher and
+ * SPA must agree on the same port when `NEXUS_DAEMON_PORT` is overridden
+ * (daemon-runtime.md §12.3).
+ */
+export function resolveDesktopPort(explicit?: number | string): number {
+  if (explicit !== undefined && explicit !== '') {
+    const n = Number(explicit);
+    if (Number.isInteger(n) && n > 0 && n < 65536) return n;
   }
-  listWorks(): never {
-    return NOT_IMPLEMENTED();
+  if (typeof window !== 'undefined' && typeof window.__NEXUS_DAEMON_PORT__ === 'number') {
+    return window.__NEXUS_DAEMON_PORT__;
   }
-  getWork(): never {
-    return NOT_IMPLEMENTED();
+  const fromEnv =
+    typeof process !== 'undefined' ? process.env?.NEXUS_DAEMON_PORT : undefined;
+  if (fromEnv) {
+    const n = Number(fromEnv);
+    if (Number.isInteger(n) && n > 0 && n < 65536) return n;
   }
-  createWork(): never {
-    return NOT_IMPLEMENTED();
-  }
-  patchWork(): never {
-    return NOT_IMPLEMENTED();
-  }
-  listSessions(): never {
-    return NOT_IMPLEMENTED();
-  }
-  getSession(): never {
-    return NOT_IMPLEMENTED();
-  }
-  listSchedules(): never {
-    return NOT_IMPLEMENTED();
-  }
-  inspectSchedule(): never {
-    return NOT_IMPLEMENTED();
-  }
-  listCapabilities(): never {
-    return NOT_IMPLEMENTED();
-  }
-  listFindings(): never {
-    return NOT_IMPLEMENTED();
-  }
-  listPresets(): never {
-    return NOT_IMPLEMENTED();
-  }
-  scaffoldPreset(): never {
-    return NOT_IMPLEMENTED();
-  }
-  validatePreset(): never {
-    return NOT_IMPLEMENTED();
-  }
-  reloadPreset(): never {
-    return NOT_IMPLEMENTED();
-  }
-  listChapters(): never {
-    return NOT_IMPLEMENTED();
-  }
-  getChapter(): never {
-    return NOT_IMPLEMENTED();
-  }
-  getChapterOutline(): never {
-    return NOT_IMPLEMENTED();
-  }
-  putChapterOutline(): never {
-    return NOT_IMPLEMENTED();
-  }
-  patchChapter(): never {
-    return NOT_IMPLEMENTED();
-  }
-  getChapterBody(): never {
-    return NOT_IMPLEMENTED();
+  return 8420;
+}
+
+export interface TauriClientOptions {
+  /** Override the daemon port (defaults to resolved port per §5 #3). */
+  port?: number;
+  /** Optional fetch implementation (testing injection, mirroring BrowserClient). */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Desktop `NexusClient`. Inherits all 21 data methods from `BrowserClient`
+ * unchanged; only the constructor fixes the transport origin to the resolved
+ * desktop loopback port. This is the thinnest possible impl — zero method
+ * duplication, the entire V1.64/V1.65 HTTP surface reused wholesale.
+ */
+export class TauriClient extends BrowserClient {
+  readonly port: number;
+
+  constructor(options: TauriClientOptions = {}) {
+    const port = resolveDesktopPort(options.port);
+    const browserOptions: BrowserClientOptions = {
+      baseUrl: `http://127.0.0.1:${port}`,
+    };
+    if (options.fetchImpl) browserOptions.fetchImpl = options.fetchImpl;
+    super(browserOptions);
+    this.port = port;
   }
 }
