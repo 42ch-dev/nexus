@@ -59,6 +59,8 @@ export interface DesktopCapabilities {
    * from the Tauri sidecar manager.
    */
   getDaemonStatus(): Promise<DaemonStatus>;
+  /** Subscribe to daemon status changes emitted by the Rust sidecar manager. */
+  onDaemonStatusChanged(callback: (status: DaemonStatus) => void): Promise<() => void>;
   /** Start/restart the owned sidecar. */
   startDaemon(): Promise<void>;
   /** Stop the owned sidecar. */
@@ -67,14 +69,20 @@ export interface DesktopCapabilities {
 
 /**
  * The global Tauri namespace shape this adapter calls into. Only `core.invoke`
- * is used (custom commands); the opener plugin's JS API is not called directly
- * because the custom commands own the path guard (§5 #8).
+ * and `event.listen` are used (custom commands + lifecycle events); the opener
+ * plugin's JS API is not called directly because the custom commands own the
+ * path guard (§5 #8).
  */
 interface TauriGlobal {
   core: {
     invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
   };
+  event: {
+    listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void>;
+  };
 }
+
+const DAEMON_STATUS_EVENT = 'nexus://daemon-status-changed';
 
 function tauriInvoke(): TauriGlobal {
   // `withGlobalTauri: true` (tauri.conf.json) guarantees `window.__TAURI__` in
@@ -126,6 +134,18 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async getDaemonStatus(): Promise<DaemonStatus> {
     try {
       return await tauriInvoke().core.invoke<DaemonStatus>('get_daemon_status');
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async onDaemonStatusChanged(
+    callback: (status: DaemonStatus) => void,
+  ): Promise<() => void> {
+    try {
+      return await tauriInvoke().event.listen<DaemonStatus>(DAEMON_STATUS_EVENT, (event) => {
+        callback(event.payload);
+      });
     } catch (err) {
       throw asDesktopError(err);
     }
