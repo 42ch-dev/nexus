@@ -3,36 +3,6 @@
   "updated_at": "2026-06-26T00:00:00Z",
   "plans": [
     {
-      "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
-      "title": "V1.67 P1 — Frontend Scope Gaps (G1 work_profile + G2 TS-client; preset mgmt UI -> V1.68 canvas)",
-      "iteration": "V1.67",
-      "slot": "P1",
-      "status": "InReview",
-      "effort": "M",
-      "owner": "@frontend-dev",
-      "review": "tri-review",
-      "wave": 2,
-      "dependency": "P0 merged",
-      "working_branch": "feature/v1.67-frontend-scope-gaps",
-      "merge_target": "iteration/v1.67",
-      "file": ".mstar/plans/2026-06-26-v1.67-frontend-scope-gaps.md"
-    },
-    {
-      "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
-      "title": "V1.67 P2 — Overdue Debt Closure (9 V1.52/V1.60 residuals)",
-      "iteration": "V1.67",
-      "slot": "P2",
-      "status": "InReview",
-      "effort": "M",
-      "owner": "@fullstack-dev",
-      "review": "tri-review",
-      "wave": 2,
-      "dependency": "P-1",
-      "working_branch": "feature/v1.67-overdue-debt-closure",
-      "merge_target": "iteration/v1.67",
-      "file": ".mstar/plans/2026-06-26-v1.67-overdue-debt-closure.md"
-    },
-    {
       "plan_id": "2026-06-26-v1.67-mid-meta-tracking",
       "title": "V1.67 P-mid — Meta Tracking",
       "iteration": "V1.67",
@@ -113,7 +83,7 @@
       "inaccurate_as_of": "2026-06-26",
       "inaccurate_reason": "total_open=4 but actual open=30; V1.67 P-last AC2 refreshes/retires this rollup"
     },
-    "updated_at": "2026-06-26 (Wave 1 closeout)",
+    "updated_at": "2026-06-26 (Wave 2 closeout)",
     "spec_integration_branch": "iteration/v1.67",
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
@@ -1724,11 +1694,17 @@
         "owner": "@fullstack-dev",
         "target": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
         "deferral_note": "T-A P0 tri-review verdict Approve; 11 Suggestions carry-forward to V1.52 P-last WL-A.",
         "target_date": "V1.61+",
-        "_v1_60_plast_defer_note": "Pathway unified in V1.55 P2 F-001 (both extract paths share run_llm_extract). True cross-invocation drift detection requires stateful tracking beyond surgical scope. Defer to V1.61+."
+        "_v1_60_plast_defer_note": "Pathway unified in V1.55 P2 F-001 (both extract paths share run_llm_extract). True cross-invocation drift detection requires stateful tracking beyond surgical scope. Defer to V1.61+.",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V152TA-S002",
@@ -1820,10 +1796,16 @@
         "owner": "@fullstack-dev",
         "target": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
         "target_date": "V1.61+",
-        "_v1_60_plast_defer_note": "outline_five_q_check is pub but only invoked from #[cfg(test)]. No production NOGO log to enhance — the 五问 gate is enforced via YAML preset llm_judge, not the Rust heuristic. Defer until heuristic is wired into production or removed."
+        "_v1_60_plast_defer_note": "outline_five_q_check is pub but only invoked from #[cfg(test)]. No production NOGO log to enhance — the 五问 gate is enforced via YAML preset llm_judge, not the Rust heuristic. Defer until heuristic is wired into production or removed.",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V152TA-S007",
@@ -3555,8 +3537,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc1.md §W-002",
         "note": "WL-A. Pre-1.0 acceptable; future schema-column insertion risk. Consider named-column parsing instead of positional.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P0-QC2-W001",
@@ -3570,8 +3558,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc2.md §W-001",
         "note": "WL-A. Architectural constraint (orchestration crate cannot depend on daemon crate). Future: extract shared admission-gate utility into a lower crate.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P0-QC2-W002",
@@ -3585,8 +3579,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc2.md §W-002",
         "note": "WL-A. Edge case: rename failure (e.g., ID collision) leaves orphan event under auto-id. Low practical risk (local single-writer). Future: wrap append+rename in single transaction.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P0-QC3-W001",
@@ -3600,8 +3600,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc3.md §F3",
         "note": "WL-A. Acceptable for V1.60 local-first use case with small delta sizes. Future minor release: batched optimization for large deltas.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       }
     ],
     "2026-06-22-v1.60-script-depth-35": [
@@ -3617,8 +3623,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc1.md §W-001",
         "note": "Cross-track drift. The capability is not used in any preset state (P1 implementer correctly omitted from requires_capabilities). Spec references are aspirational. V1.61+: implement the handler (mirrors game_bible.section_status.update 727-line pattern) + register in CapabilityRegistry + spec cleanup.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P1-QC2-W001",
@@ -3632,8 +3644,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc2.md §W-001",
         "note": "WL-A. Same pattern as game-bible V1.55 P2. Pre-1.0 local-first acceptable. Future: canonicalize at the boundary (caller responsibility is already established).",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P1-QC2-W002",
@@ -3647,8 +3665,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc2.md §W-002",
         "note": "WL-A. Migration is widening-only (CHECK constraint adds 'script'); data copy is SELECT *. Low risk. Future: add PRAGMA foreign_key_check as belt-and-suspenders for all table-recreate migrations.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       }
     ],
     "2026-06-24-v1.63-local-api-orchestration-and-preset-dtos": [
@@ -3892,7 +3916,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
         "note": "Profile-aware create contract needed for full Work-CRUD parity with CLI. V1.64 MVP creates with daemon-default profile; patch status/stage works.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P1 (frontend scope gaps).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+          "commit": "963fa1ed"
+        }
       },
       {
         "id": "R-V164-P2-G2",
@@ -3906,7 +3936,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
         "note": "Preset management MVP = list/scaffold/validate/reload (validate dry-run is the high-trust affordance shipped). Full CRUD (get/update/delete routes) deferred to a future preset-CRUD plan.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P1 (frontend scope gaps).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+          "commit": "963fa1ed"
+        }
       },
       {
         "id": "R-V164-P2-G3",

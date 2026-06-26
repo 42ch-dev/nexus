@@ -313,7 +313,9 @@
     "2026-06-26-v1.67-compass-and-plan-stubs",
     "2026-06-26-v1.67-canvas-strategy-exploration",
     "2026-06-26-v1.67-local-api-surface-convergence",
-    "2026-06-26-v1.67-desktop-shell-polish"
+    "2026-06-26-v1.67-desktop-shell-polish",
+    "2026-06-26-v1.67-frontend-scope-gaps",
+    "2026-06-26-v1.67-overdue-debt-closure"
   ],
   "iteration_summaries": {
     "v1.45": {
