@@ -256,6 +256,20 @@ pub fn run() {
             // tokio teardown and can panic with "Cannot start a runtime from
             // within a runtime" (Greptile P1; qc1 S-5). The SIGTERM → bounded
             // timeout → SIGKILL path in `SidecarManager::stop()` still fires.
+            //
+            // Concurrency-verification note (Greptile "ExitRequested during
+            // active restart"): `stop()` sets `stop_requested = true` even when
+            // the sidecar child is already `None` (e.g. mid-restart in the
+            // Degraded/backoff window), so an in-flight `handle_crash` re-checks
+            // `stop_requested` after its backoff sleep and lands in `Stopped`
+            // instead of spawning a new process. This path is covered by the
+            // regression test `sidecar::tests::stop_requested_during_backoff_honors_stop`.
+            // The remaining live-concurrent transitions (e.g. ExitRequested
+            // arriving in the narrow window between backoff-sleep and `start()`)
+            // are intentionally deferred to interactive QA — they cannot be
+            // deterministically reproduced in a unit test, and the state machine
+            // is fail-closed (`stop_requested` is re-checked, never cleared by
+            // the monitor).
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
             }

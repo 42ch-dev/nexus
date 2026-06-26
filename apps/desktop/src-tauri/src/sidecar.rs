@@ -439,6 +439,25 @@ mod tests {
     // (qc3 W-2).
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    // Concurrency-verification coverage map (Greptile: "concurrent sidecar
+    // state transitions hard to statically verify"). The unit-tested paths:
+    //   - attach to external daemon that later fails health probe → Error
+    //     (`attached_running_daemon_transitions_to_error_when_probe_fails`)
+    //   - owned sidecar status does not re-probe (pid monitor owns liveness)
+    //     (`owned_running_daemon_does_not_probe_on_status`)
+    //   - stop() is a no-op for unowned (`stop_is_noop_for_unowned_manager`)
+    //   - stop() sets stop_requested for owned-no-child — the precondition the
+    //     ExitRequested hook relies on (`stop_requests_stop_for_owned_manager_without_child`)
+    //   - stop requested DURING the backoff window is honored → Stopped, no
+    //     restart (`stop_requested_during_backoff_honors_stop` — the
+    //     "ExitRequested during active restart" regression)
+    // Port resolution + backoff caps are also pinned. Live-concurrent paths
+    // that cannot be deterministically unit-tested (e.g. ExitRequested in the
+    // narrow window between backoff-sleep and `start()`) are fail-closed by
+    // construction (`stop_requested` is re-checked, never cleared by the
+    // monitor) and deferred to interactive QA — see the ExitRequested doc
+    // note in `lib.rs`.
+
     fn clear_port_env() {
         // SAFETY: called under ENV_LOCK.
         unsafe { std::env::remove_var("NEXUS_DAEMON_PORT") };
