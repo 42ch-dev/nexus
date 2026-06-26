@@ -82,14 +82,20 @@ jobs:
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
 
-      - name: Build Tauri desktop bundle (aarch64 macOS target)
-        run: pnpm --filter desktop tauri build -- --target aarch64-apple-darwin
+      - name: Build Tauri desktop bundle (native aarch64 — macos-14 host)
+        # No explicit `--target`: macos-14 IS aarch64 (Apple Silicon), so a
+        # host-arch build produces the aarch64 .app natively AND lands the
+        # binary at target/release/ where Tauri's bundler expects it. Passing
+        # `--target aarch64-apple-darwin` on the host arch confuses Tauri's
+        # bundler path lookup (binary at target/<triple>/release/ but bundler
+        # looks at target/release/ → "can't open main binary").
+        run: pnpm --filter desktop tauri build
 
       - name: Upload unsigned .app + .dmg artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: nexus-desktop-macos-aarch64
           path: |
-            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Nexus.app
-            apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
           retention-days: 90
