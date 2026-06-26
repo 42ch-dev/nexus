@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.66 Shipped (2026-06-26)** — Tauri Desktop Shell: `apps/desktop` Tauri v2 macOS wrapper + `TauriClient` (thin-over-`BrowserClient`, port injected to SPA) + Q5 desktop right-click actions (open-with/reveal-in-finder + runtime workspace-root path guard) + bundled `nexus42` sidecar (externalBin + plugin-shell Sidecar, autostart/stop/restart, attached-daemon health-probe) + 5-state daemon-status indicator + macOS CI unsigned `.app` build leg. Light hygiene closed 3 V1.65/V1.64 residuals (R-V165-QC1-W2 medium chapter HTTP tests + R-V165-QC-SUGG-DEFENSE write-path hardening + R-V164-QC1-S1-P0 PaginationInfo dedup). QC tri-review Approve after fix-wave-1 (F1 port-exposure correctness + 7 more); QA Pass. `wire_contracts_changed: false`. Next: V1.67 (body full-text editor + per-chapter lock + UI productivity + signing/tri-OS/auto-update). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.67 Active prepare (2026-06-26)** — Local API Surface Convergence & De-risk: **hygiene-lead** consolidation (FE1-ORCH orchestration error-envelope + CASING + F-P3 `items` array rename + F-F1 sort) + frontend scope-gap closures that de-risk V1.68 (G1 work_profile selector + G2 preset CRUD TS-client) + 9 overdue V1.52/V1.60 residuals + 10 V1.66 desktop-shell QC items + body-editor lock **Draft** spec (design-only, de-risk V1.68). V1.66 (Tauri Desktop Shell) shipped 2026-06-26 via PR #90. Deferred to V1.68: body editor + per-chapter lock *implement*, UI productivity wave, desktop distribution v2 (signing/tri-OS/auto-update). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
@@ -86,7 +86,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.66 shipped (2026-06-26) — next: V1.67 (body full-text editor + per-chapter lock + UI productivity + desktop distribution v2)
+**Active iteration**: V1.67 Active prepare (2026-06-26) — Local API Surface Convergence & De-risk (hygiene-lead); next: V1.68 (body full-text editor + per-chapter lock implement + UI productivity + desktop distribution v2)
 
 **Latest shipped**: [V1.63](../iterations/v1.63-essay-profile-and-local-api-foundation-delivery-compass-v1.md) (Essay Profile Closure & Local API Foundation, PR #86)
 
