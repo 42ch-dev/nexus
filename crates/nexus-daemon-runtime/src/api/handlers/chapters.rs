@@ -281,6 +281,12 @@ async fn atomic_write_outline(
         // after rename() returns does not leave the rename unflushed.
         let final_file = tokio::fs::File::open(&target).await?;
         final_file.sync_all().await?;
+        // Durability: fsync the parent directory so the renamed entry is
+        // committed to disk (QC3-S3).
+        if let Some(parent) = target.parent() {
+            let dir = tokio::fs::File::open(parent).await?;
+            dir.sync_all().await?;
+        }
         Ok::<(), std::io::Error>(())
     }
     .await;
