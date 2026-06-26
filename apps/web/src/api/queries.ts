@@ -1,11 +1,10 @@
 /**
  * TanStack Query hooks for the Control Room + Setup screens.
  *
- * Each hook reads via the `NexusClient` interface (transport-agnostic) and
- * applies the F-P3 adapter (normalizeList) so screen components consume one
- * `{ items, pagination? }` shape regardless of the daemon's array key. Small
- * un-paginated lists are sorted client-side (F-F1); cursor-paginated lists
- * (Works, Findings) keep server order so pagination stays consistent.
+ * Each hook reads via the `NexusClient` interface (transport-agnostic). List
+ * endpoints now return the canonical `{ items, pagination }` shape (F-P3) and
+ * accept a single `sort` query parameter (F-F1). Cursor-paginated lists (Works,
+ * Findings, Sessions, Schedules, Capabilities) use server order.
  *
  * Findings + Works use cursor pagination; the hook exposes TanStack's
  * `fetchNextPage`/`hasNextPage` for "Load more".
@@ -17,13 +16,15 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import type {
-  CapabilityInfo,
   ChapterContentQuery,
   ChapterSummary,
   CreateWorkRequest,
   FindingDetailResponse,
+  ListCapabilitiesQuery,
   ListChaptersQuery,
   ListFindingsQuery,
+  ListSchedulesQuery,
+  ListSessionsQuery,
   ListWorksQuery,
   PaginationInfo,
   PatchChapterRequest,
@@ -31,15 +32,13 @@ import type {
   PresetSummary,
   PutChapterOutlineRequest,
   ScaffoldPresetRequest,
-  ScheduleSummary,
-  SessionSummary,
   ValidatePresetRequest,
   WorkSummary,
 } from '@42ch/nexus-contracts';
 
 import { useToast } from '@/lib/use-toast';
 import { useNexusClient } from '@/lib/client-context';
-import { NexusClientError, normalizeList, sortByDate } from '@/lib/nexus';
+import { NexusClientError } from '@/lib/nexus';
 import { queryKeys } from '@/lib/nexus/query-keys';
 
 /** Default page size for cursor-paginated lists. */
@@ -50,15 +49,6 @@ interface CursorPage<T> {
   pagination: PaginationInfo;
 }
 
-/** Narrow a list response of unknown shape to `{ items, pagination }`. */
-function toPage<T>(res: unknown, key: 'works' | 'sessions' | 'schedules' | 'capabilities' | 'items'): CursorPage<T> {
-  const normalized = normalizeList<T>(res as Record<string, unknown>, key);
-  return {
-    items: normalized.items,
-    pagination: normalized.pagination ?? { limit: DEFAULT_PAGE_SIZE, has_more: false },
-  };
-}
-
 /** Cursor token type for infinite queries (undefined on the first page). */
 type Cursor = string | undefined;
 
@@ -66,7 +56,7 @@ const FIRST_PAGE: Cursor = undefined;
 
 // ── Works (cursor-paginated dashboard) ───────────────────────────────────────
 
-/** Cursor-paginated Works list (F-P1). F-P3 adapter maps `works` → `items`. */
+/** Cursor-paginated Works list (F-P1/F-P3/F-F1). */
 export function useWorks(query?: ListWorksQuery) {
   const client = useNexusClient();
   const limit = query?.limit ?? DEFAULT_PAGE_SIZE;
@@ -75,7 +65,10 @@ export function useWorks(query?: ListWorksQuery) {
     initialPageParam: FIRST_PAGE,
     queryFn: async ({ pageParam }): Promise<CursorPage<WorkSummary>> => {
       const res = await client.listWorks({ ...query, limit, cursor: pageParam });
-      return toPage<WorkSummary>(res, 'works');
+      return {
+        items: res.items,
+        pagination: res.pagination,
+      };
     },
     getNextPageParam: (lastPage: CursorPage<WorkSummary>): Cursor =>
       lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
@@ -91,45 +84,41 @@ export function useWork(workId: string | undefined) {
   });
 }
 
-// ── Sessions (un-paginated; no date field → stable order) ────────────────────
+// ── Sessions (cursor-paginated) ──────────────────────────────────────────────
 
-export function useSessions() {
+export function useSessions(query?: ListSessionsQuery) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.sessions.list(),
+    queryKey: queryKeys.sessions.list(query),
     queryFn: async () => {
-      const res = await client.listSessions();
-      const { items } = normalizeList<SessionSummary>(res as unknown as Record<string, unknown>, 'sessions');
-      // SessionSummary carries no timestamp; keep daemon order (F-F1 not applicable).
-      return items;
+      const res = await client.listSessions(query);
+      return res.items;
     },
   });
 }
 
-// ── Schedules (un-paginated; F-F1 client-side sort by updated_at) ────────────
+// ── Schedules (cursor-paginated) ─────────────────────────────────────────────
 
-export function useSchedules() {
+export function useSchedules(query?: ListSchedulesQuery) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.schedules.list(),
+    queryKey: queryKeys.schedules.list(query),
     queryFn: async () => {
-      const res = await client.listSchedules();
-      const { items } = normalizeList<ScheduleSummary>(res as unknown as Record<string, unknown>, 'schedules');
-      return sortByDate(items, (s) => s.updated_at);
+      const res = await client.listSchedules(query);
+      return res.items;
     },
   });
 }
 
-// ── Capabilities (un-paginated; alphabetical) ────────────────────────────────
+// ── Capabilities (cursor-paginated; default server order is by name) ─────────
 
-export function useCapabilities() {
+export function useCapabilities(query?: ListCapabilitiesQuery) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.capabilities.list(),
+    queryKey: queryKeys.capabilities.list(query),
     queryFn: async () => {
-      const res = await client.listCapabilities();
-      const { items } = normalizeList<CapabilityInfo>(res as unknown as Record<string, unknown>, 'capabilities');
-      return [...items].sort((a, b) => a.name.localeCompare(b.name));
+      const res = await client.listCapabilities(query);
+      return res.items;
     },
   });
 }
@@ -144,7 +133,10 @@ export function useFindings(workId: string | undefined, query?: ListFindingsQuer
     initialPageParam: FIRST_PAGE,
     queryFn: async ({ pageParam }): Promise<CursorPage<FindingDetailResponse>> => {
       const res = await client.listFindings(workId!, { ...query, limit, cursor: pageParam });
-      return toPage<FindingDetailResponse>(res, 'items');
+      return {
+        items: res.items,
+        pagination: res.pagination,
+      };
     },
     enabled: Boolean(workId),
     getNextPageParam: (lastPage: CursorPage<FindingDetailResponse>): Cursor =>
@@ -268,7 +260,10 @@ export function useChapters(workId: string | undefined, query?: ListChaptersQuer
     initialPageParam: FIRST_PAGE,
     queryFn: async ({ pageParam }): Promise<CursorPage<ChapterSummary>> => {
       const res = await client.listChapters(workId!, { ...query, limit, cursor: pageParam });
-      return toPage<ChapterSummary>(res, 'items');
+      return {
+        items: res.items,
+        pagination: res.pagination,
+      };
     },
     enabled: Boolean(workId),
     getNextPageParam: (lastPage: CursorPage<ChapterSummary>): Cursor =>

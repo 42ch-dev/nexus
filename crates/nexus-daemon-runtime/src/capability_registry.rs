@@ -230,7 +230,7 @@ impl CapabilityRegistry {
     ///
     /// # Errors
     ///
-    /// Returns `NexusApiError::BadRequest` with code `NOT_SUPPORTED`
+    /// Returns `NexusApiError::BadRequest` with code `not_supported`
     /// if the tool is not registered. Individual handlers may return
     /// other error variants (e.g. `Forbidden`, `InvalidInput`).
     pub async fn dispatch(
@@ -242,7 +242,7 @@ impl CapabilityRegistry {
         let row = self
             .lookup(&req.tool_name)
             .ok_or_else(|| NexusApiError::BadRequest {
-                code: "NOT_SUPPORTED".to_string(),
+                code: "not_supported".to_string(),
                 message: format!("unsupported tool: {}", req.tool_name),
             })?;
 
@@ -370,7 +370,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: "{}",
             response_schema_ref: r#"{"creator_id":"string","workspace_slug":"string"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|POLICY_BLOCKED|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|policy_blocked|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -388,7 +388,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: "{}",
             response_schema_ref: r#"{"creator_id":"string","workspace_slug":"string","workspace_path":"string","runtime_mode":"string","initialized":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|POLICY_BLOCKED|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|policy_blocked|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -406,7 +406,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string"}"#,
             response_schema_ref: "WorkApiDto",
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -424,7 +424,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","title?":"string","inspiration_log?":"array","stage_metadata?":"object"}"#,
             response_schema_ref: "WorkApiDto",
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|POLICY_BLOCKED|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|policy_blocked|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -442,7 +442,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string"}"#,
             response_schema_ref: r#"{"work_id":"string","schedule_ids":"array","count":"int"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -460,11 +460,11 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id?":"string","requires_platform?":"bool"}"#,
             response_schema_ref: r#"{"mode":"string","creator_id":"string","assembled_at":"string"}"#,
-            error_schema_ref: r#"{"code":"POLICY_BLOCKED|FORBIDDEN|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"policy_blocked|forbidden|not_supported"}"#,
         },
         failure_mode: FailureMode::PolicyBlocked,
         handler_test_vector: TestVector {
-            description: "context assemble returns POLICY_BLOCKED in local-only mode with requires_platform",
+            description: "context assemble returns policy_blocked in local-only mode with requires_platform",
             expected_outcome: "failure:policy_blocked",
             test_fn_name: "context_assemble_policy_blocked_when_local_only",
         },
@@ -479,7 +479,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string"}"#,
             response_schema_ref: "WorldState",
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -497,7 +497,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string","limit?":"int"}"#,
             response_schema_ref: "[TimelineEvent]",
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -515,7 +515,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string"}"#,
             response_schema_ref: "[KeyBlock]",
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -533,7 +533,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int"}"#,
             response_schema_ref: "WorkChapterRecord",
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -552,7 +552,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: "{}",
             response_schema_ref: r#"{"uptime_seconds":"int","started_at":"string","runtime_mode":"string","lifecycle_state":"string","registry_size":"int","registry_ids":"[string]","pool_healthy":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -571,7 +571,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string","blocks":"[KeyBlock]"}"#,
             response_schema_ref: r#"{"written":"int","world_id":"string"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -589,7 +589,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","content?":"string","block_overrides?":"object"}"#,
             response_schema_ref: "WorkChapterRecord",
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -607,7 +607,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"world_id":"string","title?":"string","visibility?":"string","time_policy?":"string"}"#,
             response_schema_ref: r#"{"world_id":"string","updated":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -625,7 +625,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","schedule_ids":"[string]"}"#,
             response_schema_ref: r#"{"work_id":"string","schedule_ids":"[string]"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -643,7 +643,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"finding_id":"string","resolution?":"string"}"#,
             response_schema_ref: r#"{"finding_id":"string","resolved":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -661,7 +661,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","action":"string","priority?":"int"}"#,
             response_schema_ref: r#"{"work_id":"string","action":"string","success":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -680,7 +680,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"force?":"bool"}"#,
             response_schema_ref: r#"{"cacheAgeMs":"int","capabilityCount":"int","source":"string","snapshotVersion":"string","generatedAt":"string","fetchTimeoutMs":"int","maxRetries":"int","retryCount":"int","fallbackReason":"string"}"#,
-            error_schema_ref: r#"{"code":"NOT_SUPPORTED|INTERNAL"}"#,
+            error_schema_ref: r#"{"code":"not_supported|internal"}"#,
         },
         failure_mode: FailureMode::NotSupported,
         handler_test_vector: TestVector {
@@ -699,7 +699,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"reference_source_id":"string","url?":"string"}"#,
             response_schema_ref: r#"{"reference_source_id":"string","refreshed":"bool","content_changed":"bool","status":"string"}"#,
-            error_schema_ref: r#"{"code":"NOT_SUPPORTED|INVALID_INPUT|INTERNAL"}"#,
+            error_schema_ref: r#"{"code":"not_supported|invalid_input|internal"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -719,7 +719,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: "{}",
             response_schema_ref: r#"{"manuscripts":"[{work_id,title,work_ref,work_profile,current_stage,stage_status,total_planned_chapters,current_chapter}]","count":"int"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -737,7 +737,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","start_line?":"int","end_line?":"int"}"#,
             response_schema_ref: r#"{"work_id":"string","chapter":"int","volume":"int","content":"string","range":{"start_line":"int","end_line":"int"},"total_lines":"int","truncated":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -755,7 +755,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","chapter":"int","volume?":"int","content":"string"}"#,
             response_schema_ref: r#"{"written":"bool","work_id":"string","chapter":"int","volume":"int","word_count":"int","bytes_written":"int"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -773,7 +773,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string"}"#,
             response_schema_ref: r#"{"work_id":"string","phase":"string","stage_status":"string"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -791,7 +791,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"work_id":"string","phase":"string","force?":"bool"}"#,
             response_schema_ref: r#"{"work_id":"string","previous_phase":"string","current_phase":"string","stage_status":"string","transitioned":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|INVALID_INPUT|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|invalid_input|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -809,7 +809,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: "{}",
             response_schema_ref: r#"{"workspace_root":"string","allowed_roots":"[string]","preset_id":"string"}"#,
-            error_schema_ref: r#"{"code":"INVALID_INPUT|FORBIDDEN|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"invalid_input|forbidden|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -827,7 +827,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"reference_source_id?":"string","tags?":"string","limit?":"int"}"#,
             response_schema_ref: r#"{"results":"[{reference_source_id,title,uri,source_type,tags,scan_status}]","count":"int"}"#,
-            error_schema_ref: r#"{"code":"INVALID_INPUT|NOT_FOUND|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"invalid_input|not_found|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -845,7 +845,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: "{}",
             response_schema_ref: r#"{"runtime_mode":"string","registry_reachable":"bool","registry_size":"int","sync_state":"string","cloud_enabled":"bool","pool_healthy":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -863,7 +863,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"correlation_id?":"string","session_id?":"string"}"#,
             response_schema_ref: r#"{"correlation_id":"string","session_id?":"string","parent_request_id?":"string","trace_timestamp":"string","propagated":"bool"}"#,
-            error_schema_ref: r#"{"code":"FORBIDDEN|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"forbidden|not_supported"}"#,
         },
         failure_mode: FailureMode::Forbidden,
         handler_test_vector: TestVector {
@@ -882,7 +882,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"path":"string"}"#,
             response_schema_ref: r#"{"content":"string"}"#,
-            error_schema_ref: r#"{"code":"INVALID_INPUT|FORBIDDEN|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"invalid_input|forbidden|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -900,7 +900,7 @@ pub fn build_registry() -> CapabilityRegistry {
         acp_wire: AcpWire {
             request_schema_ref: r#"{"path":"string","content":"string"}"#,
             response_schema_ref: r#"{"written":"bool"}"#,
-            error_schema_ref: r#"{"code":"INVALID_INPUT|FORBIDDEN|NOT_SUPPORTED"}"#,
+            error_schema_ref: r#"{"code":"invalid_input|forbidden|not_supported"}"#,
         },
         failure_mode: FailureMode::InvalidInput,
         handler_test_vector: TestVector {
@@ -1100,9 +1100,9 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(NexusApiError::BadRequest { code, .. }) => {
-                assert_eq!(code, "NOT_SUPPORTED");
+                assert_eq!(code, "not_supported");
             }
-            other => panic!("Expected BadRequest(NOT_SUPPORTED), got: {other:?}"),
+            other => panic!("Expected BadRequest(not_supported), got: {other:?}"),
         }
     }
 

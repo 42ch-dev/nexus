@@ -44,7 +44,7 @@ pub(crate) fn admission_pipeline(
     let reg = host_tool_registry();
     if reg.lookup(&req.tool_name).is_none() {
         return Err(NexusApiError::BadRequest {
-            code: "NOT_SUPPORTED".to_string(),
+            code: "not_supported".to_string(),
             message: format!("unsupported tool: {}", req.tool_name),
         });
     }
@@ -126,7 +126,7 @@ fn check_nexus_tool_permission(
     };
 
     Err(NexusApiError::BadRequest {
-        code: "POLICY_BLOCKED".to_string(),
+        code: "policy_blocked".to_string(),
         message: format!("tool '{tool_name}' denied by permissions.toml policy ({reason})"),
     })
 }
@@ -147,7 +147,7 @@ fn check_fs_tool_permission(
     }
 
     Err(NexusApiError::BadRequest {
-        code: "POLICY_BLOCKED".to_string(),
+        code: "policy_blocked".to_string(),
         message: format!(
             "tool '{tool_name}' denied by permissions.toml policy (missing '{category}' grant)"
         ),
@@ -264,13 +264,13 @@ async fn execute_work_patch(
         }
         if PATCH_REJECTED_FIELDS.contains(&key.as_str()) {
             return Err(NexusApiError::BadRequest {
-                code: "INVALID_INPUT".to_string(),
+                code: "invalid_input".to_string(),
                 message: format!("field '{key}' is not allowed in nexus.work.patch (spec §4.4)"),
             });
         }
         if !PATCH_ALLOWED_FIELDS.contains(&key.as_str()) {
             return Err(NexusApiError::BadRequest {
-                code: "INVALID_INPUT".to_string(),
+                code: "invalid_input".to_string(),
                 message: format!("unknown patch field '{key}'"),
             });
         }
@@ -388,7 +388,7 @@ async fn execute_work_patch(
         for key in metadata_obj.keys() {
             if PATCH_REJECTED_FIELDS.contains(&key.as_str()) {
                 return Err(NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message: format!(
                         "stage_metadata key '{key}' is not allowed (spec §4.4: stage control fields must use stage-advance path)"
                     ),
@@ -396,7 +396,7 @@ async fn execute_work_patch(
             }
             if !STAGE_METADATA_ALLOWED_KEYS.contains(&key.as_str()) {
                 return Err(NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message: format!(
                         "stage_metadata key '{key}' is not in the allowed list (spec §4.4: {})",
                         STAGE_METADATA_ALLOWED_KEYS.join(", ")
@@ -500,7 +500,7 @@ async fn execute_context_assemble(
         )
     {
         return Err(NexusApiError::BadRequest {
-            code: "POLICY_BLOCKED".to_string(),
+            code: "policy_blocked".to_string(),
             message: "PLATFORM_PAUSED: platform-only assembly not available in local-only mode"
                 .to_string(),
         });
@@ -1384,7 +1384,7 @@ async fn execute_manuscript_chapter_update(
         // PUT handler's resolve_guarded_path behavior.
         let body_file = resolve_guarded_path(Path::new(&workspace_root), &canonical_path, false)
             .map_err(|e| match e {
-                NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
+                NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
                     NexusApiError::InvalidInput {
                         field: "body_path".into(),
                         reason: "body path outside workspace root".into(),
@@ -1450,7 +1450,7 @@ async fn execute_manuscript_chapter_update(
             })?;
         let abs_body =
             resolve_guarded_path(Path::new(&workspace_root), bp, false).map_err(|e| match e {
-                NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
+                NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
                     NexusApiError::InvalidInput {
                         field: "body_path".into(),
                         reason: "body path outside workspace root".into(),
@@ -1769,7 +1769,7 @@ async fn execute_finding_resolve(
             reason: "finding not found or cross-creator".into(),
         },
         nexus_local_db::LocalDbError::IllegalTransition { .. } => NexusApiError::BadRequest {
-            code: "INVALID_TRANSITION".to_string(),
+            code: "invalid_transition".to_string(),
             message: e.to_string(),
         },
         nexus_local_db::LocalDbError::InvalidEnum { .. } => NexusApiError::InvalidInput {
@@ -2234,7 +2234,7 @@ async fn execute_manuscript_write(
     // component-wise prefix-check helper as the chapter PUT handler.
     let abs_body =
         resolve_guarded_path(workspace_root_path, &body_path, false).map_err(|e| match e {
-            NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
+            NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
                 NexusApiError::InvalidInput {
                     field: "body_path".into(),
                     reason: "body path outside workspace root".into(),

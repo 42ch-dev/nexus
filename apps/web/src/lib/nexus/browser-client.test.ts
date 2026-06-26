@@ -14,7 +14,7 @@ import { BrowserClient, NexusClientError } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
 
 describe('BrowserClient cursor list', () => {
-  it('returns { works, pagination } and threads the cursor into the next request', async () => {
+  it('returns { items, pagination } and threads the cursor into the next request', async () => {
     let firstCalled = false;
     let secondCalledWithCursor: string | null = null;
     useHandlers(
@@ -24,13 +24,13 @@ describe('BrowserClient cursor list', () => {
         if (!cursor) {
           firstCalled = true;
           return HttpResponse.json({
-            works: [{ work_id: 'w1', title: 'A' }],
+            items: [{ work_id: 'w1', title: 'A' }],
             pagination: { limit: 1, has_more: true, next_cursor: 'cur-2' },
           });
         }
         secondCalledWithCursor = cursor;
         return HttpResponse.json({
-          works: [{ work_id: 'w2', title: 'B' }],
+          items: [{ work_id: 'w2', title: 'B' }],
           pagination: { limit: 1, has_more: false },
         });
       }),
@@ -39,7 +39,7 @@ describe('BrowserClient cursor list', () => {
     const client = new BrowserClient();
     const page1 = await client.listWorks({ limit: 1 });
     expect(firstCalled).toBe(true);
-    expect(page1.works).toEqual([{ work_id: 'w1', title: 'A' }]);
+    expect(page1.items).toEqual([{ work_id: 'w1', title: 'A' }]);
     expect(page1.pagination.next_cursor).toBe('cur-2');
     expect(page1.pagination.has_more).toBe(true);
 

@@ -12,8 +12,9 @@
 #![allow(clippy::missing_errors_doc)]
 
 use crate::api::errors::NexusApiError;
-use crate::api::pagination::{decode_offset_cursor, offset_page_meta};
+use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
 use crate::api::runtime_lock::RuntimeLockGuard;
+use crate::api::sort::parse_sort_terms;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -185,11 +186,13 @@ pub struct ListWorksQuery {
     /// F-P1 (V1.64): opaque cursor returned by the previous response's
     /// `pagination.next_cursor`. Replaces the legacy `offset` query param.
     pub cursor: Option<String>,
+    /// F-F1 (V1.67): comma-separated sort terms (e.g. `-updated_at`, `title`).
+    pub sort: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ListWorksResponse {
-    pub works: Vec<WorkSummary>,
+    pub items: Vec<WorkSummary>,
     /// F-P1 (V1.64): cursor-based pagination envelope (replaces `total`).
     pub pagination: PaginationInfo,
 }
@@ -326,7 +329,7 @@ pub async fn create_work(
     if req.world_id.is_none() {
         tracing::info!(creator_id = %creator_id, "create_work rejected: missing world_id binding");
         return Err(NexusApiError::BadRequest {
-            code: "WORLD_ID_REQUIRED".to_string(),
+            code: "world_id_required".to_string(),
             message: "World binding is required for new Works (V1.40+).\n  \
                        ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
                        ↳ List existing Worlds: nexus42 creator world list"
@@ -350,7 +353,7 @@ pub async fn create_work(
         })?;
         if exists.is_none() {
             return Err(NexusApiError::BadRequest {
-                code: "INVALID_WORLD_ID".to_string(),
+                code: "invalid_world_id".to_string(),
                 message: format!(
                     "world_id '{wid}' does not exist or is not owned by this creator.\n  \
                      ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
@@ -366,7 +369,7 @@ pub async fn create_work(
     if let Some(ref lineage_id) = req.lineage_from_work_id {
         if lineage_id.is_empty() {
             return Err(NexusApiError::BadRequest {
-                code: "INVALID_LINEAGE".to_string(),
+                code: "invalid_lineage".to_string(),
                 message: "lineage_from_work_id must not be empty; omit the field if no lineage is intended.".to_string(),
             });
         }
@@ -378,7 +381,7 @@ pub async fn create_work(
             })?;
         if lineage_work.is_none() {
             return Err(NexusApiError::BadRequest {
-                code: "INVALID_LINEAGE".to_string(),
+                code: "invalid_lineage".to_string(),
                 message: format!(
                     "lineage_from_work_id '{lineage_id}' does not exist or is not owned by this creator."
                 ),
@@ -478,19 +481,22 @@ pub async fn list_works(
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
         .ok_or(NexusApiError::AuthRequired)?;
 
-    // F-P1 (V1.64): cursor-based pagination (convention §2). The opaque cursor
-    // encodes the underlying row offset; clients MUST NOT parse it. We fetch
-    // `limit + 1` rows so a single overflow row detects `has_more` without a
-    // separate count query (the legacy `total` field is removed).
-    let offset = decode_offset_cursor(&query.cursor)?;
-    let limit = query.limit.unwrap_or(100).min(500);
-    let fetch_limit = limit.saturating_add(1);
+    // F-F1 (V1.67): parse requested sort; default is `-updated_at` to match
+    // the legacy ordering.
+    let sort_terms = parse_sort_terms(
+        query.sort.as_deref(),
+        &["updated_at", "title", "status", "intake_status"],
+        "work",
+    )?;
 
+    // F-P1 (V1.64): cursor-based pagination (convention §2). For F-F1 we fetch
+    // the full filtered set (local-first; works lists are bounded), sort
+    // server-side, then slice the page.
     let filters = WorkListFilters {
         status: query.status,
         intake_status: query.intake_status,
-        limit: Some(fetch_limit),
-        offset: Some(offset),
+        limit: Some(1_000_000),
+        offset: Some(0),
     };
 
     let mut records = works::list_works(state.pool(), &creator_id, &workspace_slug, &filters)
@@ -506,11 +512,25 @@ pub async fn list_works(
             }
         })?;
 
-    let (next_cursor, has_more) = offset_page_meta(records.len(), limit, offset);
-    records.truncate(usize::try_from(limit).unwrap_or(records.len()));
+    // F-F1: apply server-side sort.
+    records.sort_by(|a, b| compare_work_record(a, b, &sort_terms));
 
-    let works_list: Vec<WorkSummary> = records
-        .into_iter()
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = query.limit.unwrap_or(100).min(500);
+    let total = records.len();
+    let start = usize::try_from(offset).unwrap_or(0).min(total);
+    let end = start
+        .saturating_add(usize::try_from(limit).unwrap_or(total))
+        .min(total);
+    let has_more = end < total;
+    let next_cursor = if has_more {
+        Some(encode_offset_cursor(offset.saturating_add(limit)))
+    } else {
+        None
+    };
+
+    let items: Vec<WorkSummary> = records
+        .drain(start..end)
         .map(|r| WorkSummary {
             work_id: r.work_id,
             title: r.title,
@@ -523,13 +543,34 @@ pub async fn list_works(
         .collect();
 
     Ok(Json(ListWorksResponse {
-        works: works_list,
+        items,
         pagination: PaginationInfo {
             limit: i64::from(limit),
             next_cursor,
             has_more,
         },
     }))
+}
+
+fn compare_work_record(
+    a: &WorkRecord,
+    b: &WorkRecord,
+    terms: &[(String, bool)],
+) -> std::cmp::Ordering {
+    for (key, ascending) in terms {
+        let ord = match key.as_str() {
+            "updated_at" => a.updated_at.cmp(&b.updated_at),
+            "title" => a.title.cmp(&b.title),
+            "status" => a.status.cmp(&b.status),
+            "intake_status" => a.intake_status.cmp(&b.intake_status),
+            _ => std::cmp::Ordering::Equal,
+        };
+        let ord = if *ascending { ord } else { ord.reverse() };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
 }
 
 /// `GET /v1/local/works/{id}` — fetch a single Work by id.
@@ -943,7 +984,7 @@ async fn apply_non_stage_fields(
         if current.world_id.is_some() {
             tracing::info!(work_id = %work_id, "patch_work: rejected world_id clear (non-stage path)");
             return Err(NexusApiError::BadRequest {
-                code: "WORLD_CLEAR_FORBIDDEN".to_string(),
+                code: "world_clear_forbidden".to_string(),
                 message: format!(
                     "Cannot clear world_id on Work '{work_id}' — V1.40 Works require a World binding.\n  \
                      ↳ To rebind to a different World: PATCH with world_id set to the new World ID\n  \
@@ -968,7 +1009,7 @@ async fn apply_non_stage_fields(
         })?;
         if exists.is_none() {
             return Err(NexusApiError::BadRequest {
-                code: "INVALID_WORLD_ID".to_string(),
+                code: "invalid_world_id".to_string(),
                 message: format!(
                     "world_id '{wid}' does not exist or is not owned by this creator.\n  \
                      ↳ Create a new World:  nexus42 creator world create --title \"...\"\n  \
@@ -1024,7 +1065,7 @@ async fn patch_work_stage(
         };
         nexus_orchestration::stage_gates::check_stage_advance(&work_state, target_stage, force)
             .map_err(|e| NexusApiError::BadRequest {
-                code: "INVALID_STAGE".to_string(),
+                code: "invalid_stage".to_string(),
                 message: e.message,
             })?;
     }
@@ -1171,7 +1212,7 @@ pub async fn patch_work(
             // V1.42.1 (R-V142-MERGE-CI-001): release before early Err return.
             lock.release().await;
             return Err(NexusApiError::BadRequest {
-                code: "WORLD_CLEAR_FORBIDDEN".to_string(),
+                code: "world_clear_forbidden".to_string(),
                 message: format!(
                     "Cannot clear world_id on Work '{work_id}' — V1.40 Works require a World binding.\n  \
                      ↳ To rebind to a different World: PATCH with world_id set to the new World ID\n  \
@@ -1369,7 +1410,7 @@ pub async fn set_pool_active(
 
     if req.action != "set_pool_active" {
         return Err(NexusApiError::BadRequest {
-            code: "INVALID_ACTION".to_string(),
+            code: "invalid_action".to_string(),
             message: format!(
                 "unsupported action '{}'; expected 'set_pool_active'",
                 req.action
@@ -1423,7 +1464,7 @@ pub async fn release_completion_lock_handler(
     // Verify the work is actually completion-locked
     if work.completion_locked_at.is_none() {
         return Err(NexusApiError::BadRequest {
-            code: "NOT_LOCKED".to_string(),
+            code: "not_locked".to_string(),
             message: format!("work {work_id} is not completion-locked"),
         });
     }
@@ -1502,7 +1543,7 @@ fn check_stage_status_transition(
 
     if TERMINAL_STATUSES.contains(&target_status) && !TERMINAL_STATUSES.contains(&current_status) {
         return Err(NexusApiError::BadRequest {
-            code: "INVALID_STATUS_TRANSITION".to_string(),
+            code: "invalid_status_transition".to_string(),
             message: format!(
                 "Cannot set stage_status to '{target_status}' without an explicit stage advance. \
                  Use PATCH with current_stage to advance through FL-E gates, or set force=true to override."
@@ -1598,7 +1639,7 @@ pub async fn reconcile_chapters(
         .story_ref
         .as_deref()
         .ok_or_else(|| NexusApiError::BadRequest {
-            code: "PRECONDITION_FAILED".to_string(),
+            code: "precondition_failed".to_string(),
             message: "`story_ref` (work_ref) not set on Work; run novel-project-init first"
                 .to_string(),
         })?;
@@ -1608,7 +1649,7 @@ pub async fn reconcile_chapters(
     // `nexus-orchestration::capability::builtins::novel_scaffold_sanitize::validate_work_ref`.
     if !is_valid_work_ref(work_ref) {
         return Err(NexusApiError::BadRequest {
-            code: "INVALID_WORK_REF".to_string(),
+            code: "invalid_work_ref".to_string(),
             message: format!(
                 "work_ref '{work_ref}' is not a valid slug (expected [a-z0-9][a-z0-9-]{{0,63}})"
             ),
@@ -1966,7 +2007,7 @@ pub async fn promote_inspiration_handler(
 
     if item.status != "idea" {
         return Err(NexusApiError::BadRequest {
-            code: "INVALID_STATUS".to_string(),
+            code: "invalid_status".to_string(),
             message: format!(
                 "inspiration item {} has status '{}' — only 'idea' items can be promoted",
                 req.item_id, item.status
@@ -2302,8 +2343,8 @@ mod tests_fix_d {
         let err = result.unwrap_err();
         let msg = format!("{err:?}");
         assert!(
-            msg.contains("WORLD_ID_REQUIRED"),
-            "error code should be WORLD_ID_REQUIRED, got: {msg}"
+            msg.contains("world_id_required"),
+            "error code should be world_id_required, got: {msg}"
         );
         assert!(
             msg.contains("creator world create") || msg.contains("creator world list"),
@@ -2314,7 +2355,7 @@ mod tests_fix_d {
         assert_eq!(
             err.status_code(),
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "WORLD_ID_REQUIRED should return 422 (preset_gates_failed-style), got {}",
+            "world_id_required should return 422 (preset_gates_failed-style), got {}",
             err.status_code()
         );
     }
@@ -2347,13 +2388,13 @@ mod tests_fix_d {
         let err = result.unwrap_err();
         let msg = format!("{err:?}");
         assert!(
-            msg.contains("INVALID_WORLD_ID"),
-            "error code should be INVALID_WORLD_ID, got: {msg}"
+            msg.contains("invalid_world_id"),
+            "error code should be invalid_world_id, got: {msg}"
         );
         assert_eq!(
             err.status_code(),
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "INVALID_WORLD_ID should return 422"
+            "invalid_world_id should return 422"
         );
     }
 
@@ -2468,13 +2509,13 @@ mod tests_fix_d {
         let err = result.unwrap_err();
         let msg = format!("{err:?}");
         assert!(
-            msg.contains("WORLD_CLEAR_FORBIDDEN"),
-            "error code should be WORLD_CLEAR_FORBIDDEN, got: {msg}"
+            msg.contains("world_clear_forbidden"),
+            "error code should be world_clear_forbidden, got: {msg}"
         );
         assert_eq!(
             err.status_code(),
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "WORLD_CLEAR_FORBIDDEN should return 422"
+            "world_clear_forbidden should return 422"
         );
 
         // Verify world_id is still set
@@ -2538,8 +2579,8 @@ mod tests_fix_d {
             // Verify no panic, clear remediation
             let msg = format!("{err:?}");
             assert!(
-                msg.contains("INVALID_WORLD_ID"),
-                "adversarial world_id '{bad_id}' should produce INVALID_WORLD_ID, got: {msg}"
+                msg.contains("invalid_world_id"),
+                "adversarial world_id '{bad_id}' should produce invalid_world_id, got: {msg}"
             );
         }
     }

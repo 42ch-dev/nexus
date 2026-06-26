@@ -197,7 +197,7 @@ async fn work_patch_rejects_stage_field() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     // Should be INVALID_INPUT — stable tool error code (spec §12.4)
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -217,7 +217,7 @@ async fn context_assemble_policy_blocked_when_local_only() {
     // Should be POLICY_BLOCKED
     match &result {
         Err(NexusApiError::BadRequest { code, message }) => {
-            assert_eq!(code, "POLICY_BLOCKED");
+            assert_eq!(code, "policy_blocked");
             assert!(message.contains("PLATFORM_PAUSED"));
         }
         Err(e) => panic!("Expected BadRequest(POLICY_BLOCKED), got: {e:?}"),
@@ -350,9 +350,9 @@ async fn cutover_unknown_tool_rejected_by_registry() {
     assert!(result.is_err());
     match result {
         Err(NexusApiError::BadRequest { code, .. }) => {
-            assert_eq!(code, "NOT_SUPPORTED");
+            assert_eq!(code, "not_supported");
         }
-        other => panic!("Expected BadRequest(NOT_SUPPORTED) via registry, got: {other:?}"),
+        other => panic!("Expected BadRequest(not_supported) via registry, got: {other:?}"),
     }
 }
 
@@ -456,7 +456,7 @@ async fn world_snapshot_get_rejects_missing_world_id() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 /// E2E test: `nexus.timeline.recent.get` returns events for a seeded world.
@@ -871,8 +871,8 @@ async fn world_snapshot_get_cross_creator_denied() {
     assert!(result.is_err(), "cross-creator should be denied");
     assert_eq!(
         result.unwrap_err().error_code(),
-        "FORBIDDEN",
-        "should return FORBIDDEN for cross-creator access"
+        "forbidden",
+        "should return forbidden for cross-creator access"
     );
     drop(tmp);
 }
@@ -902,7 +902,7 @@ async fn timeline_recent_get_cross_creator_denied() {
     };
     let result = HostToolExecutor::execute(&req, &other_state).await;
     assert!(result.is_err(), "cross-creator should be denied");
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
 
@@ -930,7 +930,7 @@ async fn kb_snapshot_read_cross_creator_denied() {
     };
     let result = HostToolExecutor::execute(&req, &other_state).await;
     assert!(result.is_err(), "cross-creator should be denied");
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
 
@@ -950,7 +950,7 @@ async fn timeline_recent_get_rejects_missing_world_id() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -967,7 +967,7 @@ async fn kb_snapshot_read_rejects_missing_world_id() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -984,7 +984,7 @@ async fn manuscript_chapter_get_rejects_missing_chapter_id() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
 }
 
 #[tokio::test]
@@ -1007,7 +1007,7 @@ async fn daemon_health_rejects_without_active_creator() {
         result.is_err(),
         "daemon.health should require active creator"
     );
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
 
@@ -1153,7 +1153,7 @@ async fn kb_snapshot_write_rejects_missing_world_id() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -1170,7 +1170,7 @@ async fn kb_snapshot_write_rejects_unknown_tool_variant() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
+    assert_eq!(result.unwrap_err().error_code(), "not_supported");
 }
 
 /// C-001 regression: same-creator, block with wrong world_id → rejection.
@@ -1216,7 +1216,7 @@ async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
         result.is_err(),
         "cross-world block should be rejected: {result:?}"
     );
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
 
@@ -1270,7 +1270,7 @@ async fn kb_snapshot_write_rejects_cross_creator_world_block() {
         result.is_err(),
         "cross-creator block should be rejected: {result:?}"
     );
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
 
@@ -1399,7 +1399,7 @@ async fn manuscript_chapter_update_rejects_missing_chapter() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -1416,7 +1416,7 @@ async fn manuscript_chapter_update_rejects_unknown_tool_variant() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "NOT_SUPPORTED");
+    assert_eq!(result.unwrap_err().error_code(), "not_supported");
 }
 
 // --- nexus.world.configure (3 tests) ---
@@ -1464,7 +1464,7 @@ async fn world_configure_rejects_invalid_visibility() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
     drop(tmp);
 }
 
@@ -1482,7 +1482,7 @@ async fn world_configure_rejects_missing_world_id() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 // --- nexus.work.schedule.set (3 tests) ---
@@ -1571,7 +1571,7 @@ async fn work_schedule_set_rejects_non_string_ids() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -1588,7 +1588,7 @@ async fn work_schedule_set_rejects_missing_schedule_ids() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 // --- nexus.finding.resolve (3 tests) ---
@@ -1692,7 +1692,7 @@ async fn finding_resolve_nonexistent_returns_not_found() {
         result.is_err(),
         "finding.resolve should reject nonexistent finding: {result:?}"
     );
-    assert_eq!(result.unwrap_err().error_code(), "NOT_FOUND");
+    assert_eq!(result.unwrap_err().error_code(), "not_found");
 }
 
 // --- nexus.pool.entry.manage (3 tests) ---
@@ -1822,7 +1822,7 @@ async fn pool_entry_manage_rejects_invalid_action() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 #[tokio::test]
@@ -1839,7 +1839,7 @@ async fn pool_entry_manage_rejects_missing_action() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 // ─── Cross-cutting tests (R-V153P0QC2-003/004) ──
@@ -2237,7 +2237,7 @@ async fn test_worker_dispatches_all_registered_nexus_tools() {
         // not admission failures.
         if let Some(err) = &result.error {
             assert_ne!(
-                err.code, "NOT_SUPPORTED",
+                err.code, "not_supported",
                 "Worker rejected registered tool '{tool_id}' as NOT_SUPPORTED"
             );
         }
@@ -2266,7 +2266,7 @@ async fn test_worker_rejects_unknown_tool() {
 
     assert!(!result.grant, "Unknown tool should not be granted");
     let err = result.error.expect("Unknown tool must produce error");
-    assert_eq!(err.code, "NOT_SUPPORTED");
+    assert_eq!(err.code, "not_supported");
 }
 
 // ─── V1.59 P0: DF-47 manuscript & misc capability parity batch ────────────
@@ -2384,7 +2384,7 @@ async fn manuscript_list_rejects_without_active_creator() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
 
@@ -2455,7 +2455,7 @@ async fn manuscript_read_range_rejects_missing_chapter() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 /// T3 success: `nexus.manuscript.write` writes body content within quota.
@@ -2540,7 +2540,7 @@ async fn manuscript_write_rolls_back_word_count_on_rename_failure() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     let err = result.expect_err("rename onto a non-empty dir must fail");
-    assert_eq!(err.error_code(), "INTERNAL");
+    assert_eq!(err.error_code(), "internal");
 
     // W-001: the word-count UPDATE inside the tx must have rolled back.
     let ch_after = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
@@ -2594,7 +2594,7 @@ async fn manuscript_write_rejects_body_path_outside_workspace() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     let err = result.expect_err("write must be rejected for an escaping body_path");
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
     // And the outside target was never created.
     assert!(
         !outside.exists(),
@@ -2626,7 +2626,7 @@ async fn manuscript_write_rejects_oversized_content() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 /// T4 success: `nexus.manuscript.phase.get` returns current phase.
@@ -2670,7 +2670,7 @@ async fn manuscript_phase_get_rejects_cross_creator() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
 }
 
 /// T5 success: `nexus.manuscript.phase.set` advances phase forward.
@@ -2721,7 +2721,7 @@ async fn manuscript_phase_set_rejects_invalid_phase() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "INVALID_INPUT");
+    assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
 /// T6 success: `nexus.workspace.paths` returns allowed roots.
@@ -2775,7 +2775,7 @@ async fn workspace_paths_rejects_without_workspace() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     let err = result.expect_err("workspace.paths must fail without an initialized workspace");
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
 }
 
 /// T7 success: `nexus.research.query` returns reference sources (empty is OK).
@@ -2813,7 +2813,7 @@ async fn research_query_rejects_unknown_reference_id() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "NOT_FOUND");
+    assert_eq!(result.unwrap_err().error_code(), "not_found");
 }
 
 /// T8 success: `nexus.runtime.health` returns agent-visible status.
@@ -2859,7 +2859,7 @@ async fn runtime_health_rejects_without_active_creator() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
 
@@ -2909,6 +2909,6 @@ async fn trace_correlation_rejects_without_active_creator() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().error_code(), "FORBIDDEN");
+    assert_eq!(result.unwrap_err().error_code(), "forbidden");
     drop(tmp);
 }
