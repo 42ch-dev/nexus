@@ -3,6 +3,11 @@
   "updated_at": "2026-06-26T00:00:00Z",
   "entries": [
     {
+      "at": "2026-06-26 (V1.67 SHIP)",
+      "message": "V1.67 SHIPPED to integration (PR to main next). Hygiene-lead: Local API surface convergence (FE1-ORCH orchestration error-envelope + CASING global lowercase + F-P3 items rename + F-F1 sort; @42ch/nexus-contracts 0.5.0->0.6.0 breaking) + 10 V1.66 desktop QC + work_profile selector + preset TS-client 21->24 + 9 overdue V1.52/V1.60 residuals + Canvas Strategy Surface Exploration (de-risk V1.68; body-editor rejected per user vision). 8 plans Done (Profile B). 26 residuals closed; 21 V1.67 QC-suggestion residuals open (V1.68+, all low). QC tri-review both waves Approve after fix-waves (P0 works dedup/sort push-down/sort_invalid; P-sec restart_count/status fallback; P1 work_profile canonical game_bible; P2 PRAGMA enforce/world.delta chunk); QA Pass (cargo test --all + clippy --all + drift + web 118 + desktop green). wire_contracts_changed: true. Platform paused. iteration/v1.67 retired post-PR-prep.",
+      "plan_id": "2026-06-26-v1.67-residual-convergence-and-closeout"
+    },
+    {
       "at": "2026-06-26 (Wave 1 QC consolidated APPROVE)",
       "message": "V1.67 Wave 1 QC tri-review consolidated APPROVE. P0 (local API surface): qc1/qc2/qc3 all Approve after fix-wave-1 (works.rs DTO dedup, <resource>_sort_invalid wire code, works/schedules sort push-down to SQL, sort tests; CASING conformant — internal codes never wire-visible). P-sec (desktop polish): qc1/qc2 Approve + qc3 Approve after fix-wave-1 (restart_count reset only on manual start, 10s status fallback re-sync). Both fix-waves merged to iteration/v1.67 @ 22ef99f0; integrated HEAD green. QA next.",
       "plan_id": "2026-06-26-v1.67-local-api-surface-convergence"
