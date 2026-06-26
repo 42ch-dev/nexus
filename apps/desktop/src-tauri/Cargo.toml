@@ -47,3 +47,7 @@ nix = { version = "0.28", features = ["signal", "process"] }
 [dev-dependencies]
 # Path-guard unit tests build temp workspace trees.
 tempfile = "3"
+# Enable Tauri test utilities (mock_app / mock_runtime) for sidecar lifecycle
+# unit tests. Features unify with the normal dependency, so this only exposes
+# the `tauri::test` module; it does not change runtime behavior.
+tauri = { version = "2", features = ["test"] }
