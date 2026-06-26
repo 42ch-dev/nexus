@@ -167,12 +167,36 @@ impl SidecarManager {
         }
     }
 
-    /// Start (or attach to) the sidecar.
+    /// Start (or attach to) the sidecar from a manual user/command request.
+    ///
+    /// Resets the crash-restart budget so a previously exhausted manager can be
+    /// recovered by the user (QC3-S1 / qc3 W-2).
+    pub async fn start_daemon<R: tauri::Runtime>(
+        &self,
+        app: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        self.start_with_budget(app, true).await
+    }
+
+    /// Start (or attach to) the sidecar for automatic starts.
+    ///
+    /// Used for app-launch auto-start and monitor-driven crash restarts. The
+    /// crash-restart budget is **not** reset, so repeated crashes still exhaust
+    /// `MAX_RESTART_ATTEMPTS` (qc3 W-2).
+    pub async fn start<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>) -> Result<(), String> {
+        self.start_with_budget(app, false).await
+    }
+
+    /// Shared implementation of `start` / `start_daemon`.
     ///
     /// * If the resolved port is already healthy, attach without ownership.
     /// * Otherwise spawn the bundled `nexus42` binary in foreground mode and
     ///   poll health until ready or a timeout is reached.
-    pub async fn start<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>) -> Result<(), String> {
+    async fn start_with_budget<R: tauri::Runtime>(
+        &self,
+        app: &tauri::AppHandle<R>,
+        reset_budget: bool,
+    ) -> Result<(), String> {
         let mut inner = self.0.lock().await;
         if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
             return Ok(());
@@ -180,9 +204,9 @@ impl SidecarManager {
         inner.state = DaemonState::Starting;
         inner.detail = None;
         inner.stop_requested = false;
-        // Manual start (re)sets the crash budget so a previously give-up manager
-        // can be recovered by the user (QC3-S1).
-        inner.restart_count = 0;
+        if reset_budget {
+            inner.restart_count = 0;
+        }
         drop(inner);
 
         let port = self.port().await;
@@ -229,6 +253,8 @@ impl SidecarManager {
                 let mut inner = self.0.lock().await;
                 inner.state = DaemonState::Running;
                 inner.version = Some(health.version);
+                // A healthy run clears the crash budget so later crashes start
+                // counting from zero.
                 inner.restart_count = 0;
                 // The child handle stays owned by the manager for stop/restart.
             }
@@ -482,7 +508,7 @@ fn process_alive(_pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{backoff, resolve_port, DaemonState};
+    use super::{backoff, resolve_port, DaemonState, MAX_RESTART_ATTEMPTS};
     use std::time::Duration;
 
     // `resolve_port` reads `NEXUS_DAEMON_PORT`, which is process-global. These
@@ -692,5 +718,88 @@ mod tests {
             serde_json::to_value(DaemonState::Error).unwrap(),
             serde_json::json!("error")
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn start_daemon_resets_crash_budget() {
+        // A manual start must clear a non-zero crash budget. We spin up a tiny
+        // loopback health server so the manager attaches without calling
+        // `app.shell()` (the mock app does not initialize the shell plugin).
+        let app = tauri::test::mock_app();
+        let port = 63338;
+        let manager = crate::sidecar::SidecarManager::new(port);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Stopped;
+            inner.restart_count = 3;
+        }
+
+        let server = spawn_health_server(port).await;
+        manager
+            .start_daemon(app.handle())
+            .await
+            .expect("attach should succeed");
+        let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
+
+        let inner = manager.0.lock().await;
+        assert_eq!(inner.restart_count, 0);
+        assert_eq!(inner.state, DaemonState::Running);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn crash_restart_stops_when_budget_exhausted() {
+        // When the crash budget is already exhausted, handle_crash must not try
+        // to restart and must land in Stopped (qc3 W-2).
+        let app = tauri::test::mock_app();
+        let manager = crate::sidecar::SidecarManager::new(63339);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Running;
+            inner.owned = true;
+            inner.restart_count = MAX_RESTART_ATTEMPTS;
+            inner.child = None;
+        }
+
+        manager.handle_crash(app.handle()).await;
+
+        let inner = manager.0.lock().await;
+        assert_eq!(inner.state, DaemonState::Stopped);
+        assert!(!inner.owned);
+        assert!(inner.child.is_none());
+        assert_eq!(inner.restart_count, MAX_RESTART_ATTEMPTS);
+        assert!(inner
+            .detail
+            .as_deref()
+            .unwrap_or("")
+            .contains("stopped repeatedly"));
+    }
+
+    /// One-shot loopback HTTP server for tests that need a healthy daemon probe.
+    ///
+    /// The mock Tauri app does not initialize `tauri_plugin_shell`, so any test
+    /// that reaches `app.shell()` panics. By serving the health endpoint we let
+    /// `start()` / `start_daemon()` take the attach-without-spawn path.
+    async fn spawn_health_server(port: u16) -> tokio::task::JoinHandle<()> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .expect("health server should bind");
+        tokio::spawn(async move {
+            let (mut socket, _) = listener
+                .accept()
+                .await
+                .expect("health server should accept one connection");
+            let mut buf = [0u8; 512];
+            // Drain the request so the client sees a complete HTTP exchange.
+            let _ = socket.read(&mut buf).await;
+            let body = br#"{"status":"ok","version":"1.0.0"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.write_all(body).await;
+        })
     }
 }
