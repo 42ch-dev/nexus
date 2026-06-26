@@ -134,7 +134,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | Document | Class | Status |
 | --- | --- | --- |
 | [canonical-hash.md](canonical-hash.md) | Companion | Normative (OSS notes; platform ADR-006 authoritative) |
-| [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) | Exploration | V1.52 roadmap for game-bible + script profiles (V1.53+) |
+| [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — all 3 targets shipped (game-bible/script/essay); pointer to archive; normative content in the 3 Feature line specs |
 
 *Novel-writing sync module contract: [novel-writing/sync-contract.md](novel-writing/sync-contract.md).*
 
@@ -213,6 +213,10 @@ Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and archite
 | `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
 | [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
 | [archived/knowledge/novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
+| [archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) | [canvas-strategy-surface.md](canvas-strategy-surface.md) (2026-06-26 — body-editor direction rejected) |
+| [archived/knowledge/non-novel-profiles-roadmap.md](../../archived/knowledge/non-novel-profiles-roadmap.md) | [game-bible-profile.md](game-bible-profile.md) + [script-profile.md](script-profile.md) + [essay-profile.md](essay-profile.md) (all targets shipped) |
+| [archived/knowledge/novel-writing/findings-lifecycle.md](../../archived/knowledge/novel-writing/findings-lifecycle.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 |
+| [archived/knowledge/novel-writing/narrative-indexes.md](../../archived/knowledge/novel-writing/narrative-indexes.md) | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) §4.6 |
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 

@@ -7,7 +7,7 @@
 **Coordinates with**:
 
 - [novel-writing/multi-work-lifecycle.md](novel-writing/multi-work-lifecycle.md) — §4-§5 DB-level `runtime_lock_holder`
-- [novel-writing/cron-staggering.md](novel-writing/cron-staggering.md) — §4 daemon cron evaluator
+- [novel-writing/cron-staggering.md](../../archived/knowledge/novel-writing/cron-staggering.md) — §4 daemon cron evaluator (archived; folded into workflow-profile.md §11)
 - [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) — completion locking
 - [cli-spec.md](cli-spec.md) — `creator works cron set`, `creator run`, `creator world kb adopt`
 - [daemon-runtime.md](daemon-runtime.md) — daemon tick / cron supervisor

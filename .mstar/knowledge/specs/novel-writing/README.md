@@ -24,8 +24,8 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 
 | Overlay | Merge target | Status |
 | --- | --- | --- |
-| [findings-lifecycle.md](findings-lifecycle.md) | `quality-loop.md` §2 | **Superseded** (V1.49 P-last) |
-| [narrative-indexes.md](narrative-indexes.md) | `workflow-profile.md` §4.6 | **Superseded** (V1.49 P-last) |
+| [findings-lifecycle.md](../../archived/knowledge/novel-writing/findings-lifecycle.md) | `quality-loop.md` §2 | **Superseded** (V1.49 P-last) |
+| [narrative-indexes.md](../../archived/knowledge/novel-writing/narrative-indexes.md) | `workflow-profile.md` §4.6 | **Superseded** (V1.49 P-last) |
 | [cron-staggering.md](../../archived/knowledge/novel-writing/cron-staggering.md) | `workflow-profile.md` §11 | **Superseded** (V1.50 P-last) |
 | [auto-chronology.md](../../archived/knowledge/novel-writing/auto-chronology.md) | `workflow-profile.md` §11.5 | **Superseded** (V1.50 P-last) |
 
@@ -42,10 +42,8 @@ manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
 | [multi-work-lifecycle.md](multi-work-lifecycle.md) | Feature line | Shipped V1.41 → V1.42 |
 | [work-pool.md](work-pool.md) | Feature line | Shipped V1.41 |
 | [sync-contract.md](sync-contract.md) | Companion | Normative (module contract) |
-| [findings-lifecycle.md](findings-lifecycle.md) | Draft overlay (archived) | Superseded (V1.49 P-last) |
-| [narrative-indexes.md](narrative-indexes.md) | Draft overlay (archived) | Superseded (V1.49 P-last) |
 
-**Archived**: [novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) — superseded; folded into `quality-loop.md` §9.
+**Also archived**: [novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) — superseded; folded into `quality-loop.md` §9. (The four folded Draft overlays above — findings-lifecycle, narrative-indexes, cron-staggering, auto-chronology — live under [`../../archived/knowledge/novel-writing/`](../../archived/knowledge/novel-writing/).)
 
 ---
 
