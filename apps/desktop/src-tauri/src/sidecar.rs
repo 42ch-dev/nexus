@@ -490,6 +490,43 @@ mod tests {
         unsafe { std::env::remove_var("NEXUS_DAEMON_PORT") };
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn stop_is_noop_for_unowned_manager() {
+        let manager = crate::sidecar::SidecarManager::new(63335);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Running;
+            inner.owned = false;
+        }
+
+        manager.stop().await.expect("stop should succeed");
+
+        let inner = manager.0.lock().await;
+        assert!(!inner.stop_requested);
+        assert!(!inner.owned);
+        assert_eq!(inner.state, DaemonState::Running);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stop_requests_stop_for_owned_manager_without_child() {
+        let manager = crate::sidecar::SidecarManager::new(63336);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Running;
+            inner.owned = true;
+            // No real child handle in this unit test; the stop path still sets
+            // stop_requested so crash monitors do not restart, which is what the
+            // Tauri `ExitRequested` hook relies on for cleanup.
+        }
+
+        manager.stop().await.expect("stop should succeed");
+
+        let inner = manager.0.lock().await;
+        assert!(inner.stop_requested);
+        assert!(inner.owned);
+        assert_eq!(inner.state, DaemonState::Running);
+    }
+
     #[test]
     fn backoff_grows_then_caps() {
         assert_eq!(backoff(1), Duration::from_millis(500));

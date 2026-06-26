@@ -202,6 +202,12 @@ async fn stop_daemon(manager: State<'_, sidecar::SidecarManager>) -> Result<(), 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The workspace root is captured once at startup and stored as managed
+    // state for the lifetime of the app. If the user changes the active
+    // workspace while the app is running (e.g. `nexus42 config set
+    // workspace_path ...`), the new root does not take effect in the desktop
+    // context-menu path guard until the app is restarted. This is intentional
+    // for V1.66; live refresh of the workspace root is V1.67+ scope.
     let workspace_root = WorkspaceRoot(resolve_workspace_root());
     let port = sidecar::resolve_port();
     let sidecar_manager = sidecar::SidecarManager::new(port);
@@ -242,11 +248,18 @@ pub fn run() {
             start_daemon,
             stop_daemon,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Nexus desktop shell");
-
-    // App is exiting; request graceful termination of any sidecar we own.
-    let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
+        .build(tauri::generate_context!())
+        .expect("error while building Nexus desktop shell")
+        .run(move |_app_handle, event| {
+            // Gracefully stop the owned sidecar *before* the Tauri async runtime
+            // shuts down. Running this cleanup after `run()` returns races with
+            // tokio teardown and can panic with "Cannot start a runtime from
+            // within a runtime" (Greptile P1; qc1 S-5). The SIGTERM → bounded
+            // timeout → SIGKILL path in `SidecarManager::stop()` still fires.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
+            }
+        });
 }
 
 #[cfg(test)]
