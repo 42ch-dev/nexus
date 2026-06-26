@@ -19,6 +19,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use nexus_contracts::local_api::works::{ListWorksQuery, ListWorksResponse, WorkSummary};
 use nexus_contracts::PaginationInfo;
 use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
 use serde::{Deserialize, Serialize};
@@ -176,38 +177,6 @@ pub struct CreateWorkRequest {
 pub struct CreateWorkResponse {
     pub work_id: String,
     pub status: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ListWorksQuery {
-    pub status: Option<String>,
-    pub intake_status: Option<String>,
-    pub limit: Option<u32>,
-    /// F-P1 (V1.64): opaque cursor returned by the previous response's
-    /// `pagination.next_cursor`. Replaces the legacy `offset` query param.
-    pub cursor: Option<String>,
-    /// F-F1 (V1.67): comma-separated sort terms (e.g. `-updated_at`, `title`).
-    pub sort: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ListWorksResponse {
-    pub items: Vec<WorkSummary>,
-    /// F-P1 (V1.64): cursor-based pagination envelope (replaces `total`).
-    pub pagination: PaginationInfo,
-}
-
-#[derive(Debug, Serialize)]
-pub struct WorkSummary {
-    pub work_id: String,
-    pub title: String,
-    pub status: String,
-    pub intake_status: String,
-    pub primary_preset_id: String,
-    pub updated_at: String,
-    /// V1.42 P-last (R-V141P0-11): lock state at a glance.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub completion_locked_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -481,48 +450,42 @@ pub async fn list_works(
     let workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
         .ok_or(NexusApiError::AuthRequired)?;
 
-    // F-F1 (V1.67): parse requested sort; default is `-updated_at` to match
-    // the legacy ordering.
+    // F-F1 (V1.67): parse requested sort; default is empty (DB layer falls back
+    // to `updated_at DESC`).
     let sort_terms = parse_sort_terms(
         query.sort.as_deref(),
         &["updated_at", "title", "status", "intake_status"],
         "work",
     )?;
 
-    // F-P1 (V1.64): cursor-based pagination (convention §2). For F-F1 we fetch
-    // the full filtered set (local-first; works lists are bounded), sort
-    // server-side, then slice the page.
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = u32::try_from(query.limit.unwrap_or(100))
+        .unwrap_or(100)
+        .min(500);
+
     let filters = WorkListFilters {
         status: query.status,
         intake_status: query.intake_status,
-        limit: Some(1_000_000),
-        offset: Some(0),
+        limit: Some(limit),
+        offset: Some(offset),
+        order_by: sort_terms,
     };
 
-    let mut records = works::list_works(state.pool(), &creator_id, &workspace_slug, &filters)
-        .await
-        .map_err(|e| {
-            tracing::warn!(
-                error = %e,
-                "list_works failed for creator {creator_id} — pagination unavailable"
-            );
-            NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            }
-        })?;
+    let (records, total) =
+        works::list_and_count_works(state.pool(), &creator_id, &workspace_slug, &filters)
+            .await
+            .map_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    "list_works failed for creator {creator_id} — pagination unavailable"
+                );
+                NexusApiError::Internal {
+                    code: "DATABASE_ERROR".to_string(),
+                    message: e.to_string(),
+                }
+            })?;
 
-    // F-F1: apply server-side sort.
-    records.sort_by(|a, b| compare_work_record(a, b, &sort_terms));
-
-    let offset = decode_offset_cursor(&query.cursor)?;
-    let limit = query.limit.unwrap_or(100).min(500);
-    let total = records.len();
-    let start = usize::try_from(offset).unwrap_or(0).min(total);
-    let end = start
-        .saturating_add(usize::try_from(limit).unwrap_or(total))
-        .min(total);
-    let has_more = end < total;
+    let has_more = u64::from(total) > u64::from(offset).saturating_add(u64::from(limit));
     let next_cursor = if has_more {
         Some(encode_offset_cursor(offset.saturating_add(limit)))
     } else {
@@ -530,7 +493,7 @@ pub async fn list_works(
     };
 
     let items: Vec<WorkSummary> = records
-        .drain(start..end)
+        .into_iter()
         .map(|r| WorkSummary {
             work_id: r.work_id,
             title: r.title,
@@ -550,27 +513,6 @@ pub async fn list_works(
             has_more,
         },
     }))
-}
-
-fn compare_work_record(
-    a: &WorkRecord,
-    b: &WorkRecord,
-    terms: &[(String, bool)],
-) -> std::cmp::Ordering {
-    for (key, ascending) in terms {
-        let ord = match key.as_str() {
-            "updated_at" => a.updated_at.cmp(&b.updated_at),
-            "title" => a.title.cmp(&b.title),
-            "status" => a.status.cmp(&b.status),
-            "intake_status" => a.intake_status.cmp(&b.intake_status),
-            _ => std::cmp::Ordering::Equal,
-        };
-        let ord = if *ascending { ord } else { ord.reverse() };
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
-        }
-    }
-    std::cmp::Ordering::Equal
 }
 
 /// `GET /v1/local/works/{id}` — fetch a single Work by id.
