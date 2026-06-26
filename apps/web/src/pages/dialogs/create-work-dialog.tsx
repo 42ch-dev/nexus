@@ -6,11 +6,21 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/lib/use-toast';
 import { useCreateWork } from '@/api/queries';
 
-/** Work-profile options for the selector (wire identifiers; compass §1.3 G1). */
-const WORK_PROFILES = [
+/**
+ * Work-profile options for the selector. The `value` is the wire identifier
+ * sent to the daemon and MUST match the backend canonical set — the daemon
+ * HTTP handler stores `work_profile` verbatim (no normalization; see
+ * `crates/nexus-daemon-runtime/src/api/handlers/works.rs` create_work). The
+ * authoritative set is the DB CHECK constraint in
+ * `crates/nexus-local-db/migrations/202606230001_work_profile_script.sql`
+ * and the Rust helpers in `crates/nexus-local-db/src/works.rs` —
+ * `game_bible` uses an underscore. Exported for the wire-contract test.
+ * Extraction to a SSOT module is tracked as R-V167P1-QC1-S2.
+ */
+export const WORK_PROFILES = [
   { value: 'novel', label: 'Novel' },
   { value: 'essay', label: 'Essay' },
-  { value: 'game-bible', label: 'Game Bible' },
+  { value: 'game_bible', label: 'Game Bible' },
   { value: 'script', label: 'Script' },
 ] as const;
 
@@ -20,9 +30,11 @@ const WORK_PROFILES = [
  * The contract `CreateWorkRequest` requires title + long_term_goal +
  * initial_idea and accepts an optional `work_profile` (V1.67 G1; the wire
  * field already existed — the daemon assigned profiles internally before).
- * The selector defaults to `novel`, so an untouched form yields the same
- * outcome as V1.66 (a novel-profile Work). DESIGN.md §Voice & Content:
- * Verb + Noun action ("Create Work"); loading state uses present participle.
+ * The selector defaults to `novel` for display, but `work_profile` is only
+ * sent when the author explicitly chooses a profile — an untouched form
+ * omits the field (daemon stores NULL), preserving the V1.66 wire shape
+ * (qc1 W1). DESIGN.md §Voice & Content: Verb + Noun action ("Create Work");
+ * loading state uses present participle.
  */
 export function CreateWorkDialog({
   open,
@@ -39,6 +51,9 @@ export function CreateWorkDialog({
   const [longTermGoal, setLongTermGoal] = useState('');
   const [initialIdea, setInitialIdea] = useState('');
   const [workProfile, setWorkProfile] = useState<string>(WORK_PROFILES[0].value);
+  // W1: track whether the author explicitly touched the selector. Untouched
+  // forms omit `work_profile` so the daemon stores NULL (V1.66 semantics).
+  const [workProfileTouched, setWorkProfileTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reset the form whenever the dialog opens.
@@ -48,6 +63,7 @@ export function CreateWorkDialog({
       setLongTermGoal('');
       setInitialIdea('');
       setWorkProfile(WORK_PROFILES[0].value);
+      setWorkProfileTouched(false);
       setError(null);
     }
   }, [open]);
@@ -65,7 +81,7 @@ export function CreateWorkDialog({
         title: title.trim(),
         long_term_goal: longTermGoal.trim(),
         initial_idea: initialIdea.trim(),
-        work_profile: workProfile,
+        ...(workProfileTouched ? { work_profile: workProfile } : {}),
       });
       toast({ variant: 'success', title: 'Work created', description: res.work_id });
       onOpenChange(false);
@@ -118,7 +134,10 @@ export function CreateWorkDialog({
             <Select
               id="work-profile"
               value={workProfile}
-              onChange={(e) => setWorkProfile(e.target.value)}
+              onChange={(e) => {
+                setWorkProfile(e.target.value);
+                setWorkProfileTouched(true);
+              }}
             >
               {WORK_PROFILES.map((profile) => (
                 <option key={profile.value} value={profile.value}>
