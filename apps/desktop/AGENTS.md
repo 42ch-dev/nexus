@@ -28,13 +28,14 @@ clone. Run the workspace script before any `cargo` command in `src-tauri/`:
 pnpm -w run sidecar
 ```
 
-This builds `nexus42` for `x86_64-apple-darwin` (V1.66's single-arch CI target)
-via `scripts/fetch-sidecar.sh` and copies the artifact into
+This builds `nexus42` for `aarch64-apple-darwin` (V1.66's single-arch CI target
+and the native arch of current Apple Silicon Macs) via
+`scripts/fetch-sidecar.sh` and copies the artifact into
 `apps/desktop/src-tauri/binaries/`. To build a different target locally (e.g.
-`aarch64-apple-darwin` on Apple Silicon), pass targets explicitly:
+`x86_64-apple-darwin` on an Intel Mac), pass targets explicitly:
 
 ```bash
-SIDECAR_TARGETS="aarch64-apple-darwin" pnpm -w run sidecar
+SIDECAR_TARGETS="x86_64-apple-darwin" pnpm -w run sidecar
 ```
 
 Without this step, `cargo build`/`test`/`clippy` fails with the fail-fast guard
