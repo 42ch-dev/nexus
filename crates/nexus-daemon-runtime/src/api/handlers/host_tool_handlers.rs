@@ -1513,6 +1513,20 @@ async fn execute_manuscript_chapter_update(
                 code: "FILE_SYNC_FAILED".into(),
                 message: format!("failed to fsync final file: {e}"),
             })?;
+        // Durability: fsync the parent directory so the renamed entry is
+        // committed to disk (QC3-S3).
+        if let Some(parent) = abs_body.parent() {
+            let dir = tokio::fs::File::open(parent)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DIR_SYNC_FAILED".into(),
+                    message: format!("failed to open parent dir for fsync: {e}"),
+                })?;
+            dir.sync_all().await.map_err(|e| NexusApiError::Internal {
+                code: "DIR_SYNC_FAILED".into(),
+                message: format!("failed to fsync parent dir: {e}"),
+            })?;
+        }
         tx.commit().await.map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: format!("chapter update tx commit: {e}"),
@@ -2335,6 +2349,20 @@ async fn execute_manuscript_write(
             code: "FILE_SYNC_FAILED".into(),
             message: format!("failed to fsync final file: {e}"),
         })?;
+    // Durability: fsync the parent directory so the renamed entry is committed
+    // to disk (QC3-S3).
+    if let Some(parent) = abs_body.parent() {
+        let dir = tokio::fs::File::open(parent)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DIR_SYNC_FAILED".into(),
+                message: format!("failed to open parent dir for fsync: {e}"),
+            })?;
+        dir.sync_all().await.map_err(|e| NexusApiError::Internal {
+            code: "DIR_SYNC_FAILED".into(),
+            message: format!("failed to fsync parent dir: {e}"),
+        })?;
+    }
     tx.commit().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".to_string(),
         message: format!("manuscript.write tx commit: {e}"),

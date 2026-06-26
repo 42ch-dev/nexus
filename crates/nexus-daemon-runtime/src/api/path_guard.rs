@@ -19,6 +19,14 @@ use std::path::{Path, PathBuf};
 /// intermediate directories are accepted as long as they would be created
 /// inside the root.
 ///
+/// # TOCTOU note
+///
+/// There is a small race window between canonicalizing the workspace root and
+/// canonicalizing the requested path: a local attacker with filesystem access
+/// could replace either path during that window. This guard is authoritative
+/// for the single-user local daemon context; adversarial multi-user FS access
+/// is out of V1.66/V1.67 scope and tracked by `R-V166-QC2-TOCTOU`.
+///
 /// # Errors
 ///
 /// Returns `NexusApiError::BadRequest` with `CHAPTER_PATH_*` codes when the
